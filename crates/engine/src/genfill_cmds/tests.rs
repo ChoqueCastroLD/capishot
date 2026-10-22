@@ -118,3 +118,12 @@ fn ultra_background_fill_uses_the_cleaner_alone() {
     assert_eq!(r["variants"], 1);
     assert!(fake.last.lock().unwrap().is_none(), "no diffusion run for a plain background on the light tier");
 }
+
+#[test]
+fn fast_tier_defaults_to_one_variant() {
+    let (mut s, fake) = with_fake(page(), FakeGenFill::default());
+    let r = s.execute(ID, json!({"quality": "fast", "prompt": "a star"})).unwrap();
+    assert_eq!((r["tier"].as_str(), r["variants"].as_u64()), (Some("fast"), Some(1)));
+    let req = fake.last.lock().unwrap().clone().unwrap();
+    assert_eq!(req.width.max(req.height), 448);
+}

@@ -1,12 +1,14 @@
 //! Window › AI Models…: the AI Model Manager.
 //!
-//! Every model of the platform catalog (`photocraft_ai::catalog`), one row per weight file,
-//! grouped Cleaning / Upscaling: its name and size, the tools that use it, where it runs well,
-//! its licence and author (a link to the original release), its status (Not downloaded, Queued,
-//! Downloading 42 % with speed and time left, Downloaded, Failed and why, Update available) and
-//! Download / Cancel / Delete. The header shows the storage the models take and the browser's
-//! quota, and offers Download recommended for this device (full models with a usable GPU, lite
-//! ones otherwise), Download all and Delete all.
+//! One card per model or Generative Fill tier (`photocraft_ai::cards`), in sections by what they
+//! do (Clean, Upscale, Generative Fill): a small before/after picture, the size, quality and speed
+//! (1–5), whether it needs a GPU, "Recommended for this device" (the same routing as Auto), one
+//! sentence, a coloured state (Not downloaded, Downloading with MB, speed and time left, Paused,
+//! Ready, Failed with Retry) and one button for all its files (Download, Pause / Resume, Cancel,
+//! Delete). Details: licence, precision, memory, the files with their sha256. Shared files (TAESD)
+//! download once and stay while another card uses them. The header shows the storage and the
+//! browser's quota, Download recommended and Delete all. A full-screen sheet on phones; docks
+//! like the other panels.
 //!
 //! The window is thin: every action is an `ai.models.*` engine command (so agents and automation
 //! manage models the same way), and the rows are what the injected
@@ -18,8 +20,10 @@
 //! Using a tool never downloads (`ai_model_gate`): a tool whose model is missing opens this
 //! window on that model's row.
 
+use photocraft_ai::cards::{self, Card, CardState, Section};
 use photocraft_ai::catalog::ModelInfo;
-use photocraft_ai::models::{self, Group, Runs, Status};
+use photocraft_ai::models::{self, Status};
+use photocraft_ai_sd::service::Tier;
 use photocraft_engine::ai_models_cmds;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -42,6 +46,9 @@ pub struct ModelsUi {
     /// The highlighted row was scrolled into view.
     #[serde(skip)]
     pub scrolled: bool,
+    /// The cards' buttons last frame (card, action, screen rect), for `ui.inspect` and tests.
+    #[serde(skip)]
+    pub buttons: Vec<(String, String, [f32; 4])>,
 }
 
 /// Opens the window, pointing at `model`'s row when given.
@@ -88,13 +95,6 @@ pub fn tools_text(model: &ModelInfo) -> String {
     models::tools(model).iter().map(|id| crate::ai_model_gate::tool_name(id)).collect::<Vec<_>>().join(", ")
 }
 
-fn runs_text(model: &ModelInfo) -> &'static str {
-    match models::runs(model) {
-        Runs::BestOnGpu => tl!("GPU or CPU (best on a GPU)"),
-        Runs::Both => tl!("GPU or CPU (lite: fine on either)"),
-    }
-}
-
 /// The status, as the row shows it.
 pub fn status_text(status: &Status) -> String {
     match status {
@@ -112,6 +112,7 @@ pub fn status_text(status: &Status) -> String {
             }
             s
         }
+        Status::Paused { done, total } => format!("{} · {}", tl!("Paused"), progress_text(*done, *total, 0.0)),
         Status::Downloaded => tl!("Downloaded").to_string(),
         Status::UpdateAvailable => tl!("Update available").to_string(),
         Status::Failed(why) => crate::i18n::fmt(tl!("Failed: {reason}"), &[("reason", why)]),
@@ -131,16 +132,284 @@ fn act(app: &mut PhotocraftApp, cmd: &str, params: Value) {
 /// What a click asked for (applied after drawing).
 enum Action {
     Download(&'static str),
-    Cancel(Option<&'static str>),
+    Pause(&'static str),
+    Cancel(&'static str),
     Delete(&'static str),
+    PauseAll,
+    CancelAll,
     Recommended,
-    All,
     DeleteAll,
-    /// Every missing file of a group (Generative Fill's parts).
-    Group(Vec<&'static str>),
 }
 
-/// Draws the window when it is open.
+/// A Generative Fill tier's name in the UI language.
+pub fn tier_name(tier: Tier) -> &'static str {
+    match tier {
+        Tier::Ultra => tl!("Ultra-light"),
+        Tier::Fast => tl!("Fast"),
+        Tier::Standard => tl!("Standard"),
+        Tier::High => tl!("High"),
+    }
+}
+
+/// A card's name as shown.
+fn card_title(c: &Card) -> &'static str {
+    match c.id {
+        cards::GENFILL_ULTRA_CARD => tier_name(Tier::Ultra),
+        cards::GENFILL_FAST_CARD => tier_name(Tier::Fast),
+        cards::GENFILL_STANDARD_CARD => tier_name(Tier::Standard),
+        _ => c.title,
+    }
+}
+
+/// A card's one sentence, in the UI language.
+fn card_text(c: &Card) -> &'static str {
+    match c.id {
+        "manga-lama" => tl!("Erases text and SFX and redraws screentone and lines."),
+        "migan" => tl!("A small cleaner for phones and computers without a GPU."),
+        "mangajanai" => tl!("Sharp 2× and 4× upscaling of black-and-white manga pages."),
+        "illustrationjanai" => tl!("2× and 4× upscaling of colour pages and covers."),
+        "realesr-compact" => tl!("Fast upscaling that runs well on any device."),
+        cards::GENFILL_ULTRA_CARD => tl!("Rough fills on any device, even without a GPU."),
+        cards::GENFILL_FAST_CARD => tl!("Good fills with a smaller download."),
+        cards::GENFILL_STANDARD_CARD => tl!("Detailed fills from a prompt, three variants in seconds on a GPU."),
+        _ => c.description,
+    }
+}
+
+fn section_text(s: Section) -> (&'static str, &'static str) {
+    match s {
+        Section::Clean => (tl!("Clean"), tl!("Erase text and objects.")),
+        Section::Upscale => (tl!("Upscale"), tl!("Enlarge pages without blur.")),
+        Section::Generative => (tl!("Generative Fill"), tl!("Draw new content from a prompt.")),
+    }
+}
+
+const GREEN: egui::Color32 = egui::Color32::from_rgb(46, 160, 90);
+
+/// A section's icon, drawn (no font glyphs: the web build has no emoji font).
+fn section_icon(ui: &mut egui::Ui, s: Section, color: egui::Color32) {
+    let (r, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+    let p = ui.painter();
+    let c = r.center();
+    let st = egui::Stroke::new(1.6, color);
+    match s {
+        // An eraser.
+        Section::Clean => {
+            let pts = [c + egui::vec2(-7.0, 2.0), c + egui::vec2(-1.0, -6.0), c + egui::vec2(7.0, 0.0), c + egui::vec2(1.0, 7.0)];
+            p.add(egui::Shape::closed_line(pts.to_vec(), st));
+            p.line_segment([c + egui::vec2(-4.0, -2.0), c + egui::vec2(4.0, 4.0)], st);
+        }
+        // Arrows out of a corner.
+        Section::Upscale => {
+            p.rect_stroke(egui::Rect::from_center_size(c + egui::vec2(-3.0, 3.0), egui::vec2(7.0, 7.0)), 1.0, st, egui::StrokeKind::Middle);
+            p.line_segment([c + egui::vec2(0.0, 0.0), c + egui::vec2(7.0, -7.0)], st);
+            p.line_segment([c + egui::vec2(2.0, -7.0), c + egui::vec2(7.0, -7.0)], st);
+            p.line_segment([c + egui::vec2(7.0, -2.0), c + egui::vec2(7.0, -7.0)], st);
+        }
+        // A four-point sparkle.
+        Section::Generative => star(p, c, 8.0, color),
+    }
+}
+
+fn star(p: &egui::Painter, c: egui::Pos2, r: f32, color: egui::Color32) {
+    let k = r * 0.28;
+    let pts = vec![c + egui::vec2(0.0, -r), c + egui::vec2(k, -k), c + egui::vec2(r, 0.0), c + egui::vec2(k, k), c + egui::vec2(0.0, r), c + egui::vec2(-k, k), c + egui::vec2(-r, 0.0), c + egui::vec2(-k, -k)];
+    p.add(egui::Shape::convex_polygon(pts, color, egui::Stroke::NONE));
+}
+
+/// A tiny before | after picture of what a section does, drawn procedurally.
+fn thumbnail(ui: &mut egui::Ui, s: Section, t: &Tokens) {
+    let (r, _) = ui.allocate_exact_size(egui::vec2(76.0, 46.0), egui::Sense::hover());
+    let p = ui.painter_at(r);
+    p.rect_filled(r, 4.0, egui::Color32::from_gray(238));
+    let (l, rt) = r.split_left_right_at_fraction(0.5);
+    let ink = egui::Color32::from_gray(40);
+    match s {
+        Section::Clean => {
+            for half in [l, rt] {
+                for i in 0..6 {
+                    for j in 0..4 {
+                        p.circle_filled(half.min + egui::vec2(4.0 + i as f32 * 6.0, 6.0 + j as f32 * 10.0), 1.4, egui::Color32::from_gray(150));
+                    }
+                }
+            }
+            // "Text" on the left only.
+            for y in [16.0, 24.0] {
+                p.rect_filled(egui::Rect::from_min_size(l.min + egui::vec2(8.0, y), egui::vec2(22.0, 4.0)), 1.0, ink);
+            }
+        }
+        Section::Upscale => {
+            for i in 0..5 {
+                for j in 0..5 {
+                    let g = if (i + j) % 2 == 0 { 70 } else { 200 };
+                    p.rect_filled(egui::Rect::from_min_size(l.min + egui::vec2(4.0 + i as f32 * 6.5, 6.0 + j as f32 * 6.5), egui::vec2(6.5, 6.5)), 0.0, egui::Color32::from_gray(g));
+                }
+            }
+            p.circle_filled(rt.center(), 14.0, egui::Color32::from_gray(70));
+            p.circle_filled(rt.center() + egui::vec2(-4.0, -4.0), 6.0, egui::Color32::from_gray(200));
+        }
+        Section::Generative => {
+            for half in [l, rt] {
+                p.rect_filled(half.shrink(1.0), 3.0, egui::Color32::from_rgb(170, 200, 240));
+            }
+            let sel = egui::Rect::from_center_size(l.center(), egui::vec2(18.0, 18.0));
+            p.rect_stroke(sel, 0.0, egui::Stroke::new(1.0, ink), egui::StrokeKind::Middle);
+            star(&p, rt.center(), 10.0, egui::Color32::from_rgb(240, 190, 40));
+        }
+    }
+    p.line_segment([egui::pos2(r.center().x, r.top()), egui::pos2(r.center().x, r.bottom())], egui::Stroke::new(1.0, t.card_border));
+}
+
+/// Five small bars, `n` of them lit.
+fn meter(ui: &mut egui::Ui, label: &str, n: u8, t: &Tokens) {
+    ui.label(egui::RichText::new(label).color(t.text_dim).size(11.0));
+    let (r, _) = ui.allocate_exact_size(egui::vec2(34.0, 10.0), egui::Sense::hover());
+    for i in 0..5u8 {
+        let b = egui::Rect::from_min_size(r.min + egui::vec2(f32::from(i) * 7.0, 2.0), egui::vec2(5.0, 7.0));
+        ui.painter().rect_filled(b, 1.0, if i < n { t.accent } else { t.field_border });
+    }
+}
+
+/// A small rounded label.
+fn chip(ui: &mut egui::Ui, text: &str, color: egui::Color32) {
+    egui::Frame::NONE.inner_margin(egui::Margin::symmetric(6, 1)).corner_radius(8.0).stroke(egui::Stroke::new(1.0, color)).show(ui, |ui| {
+        ui.label(egui::RichText::new(text).color(color).size(11.0));
+    });
+}
+
+/// "120 MB of 277 MB · 3.1 MB/s · 40 s left".
+fn progress_text(done: u64, total: u64, speed: f64) -> String {
+    let mut s = format!("{} / {}", size(done), size(total));
+    if speed > 1.0 {
+        s.push_str(&format!(" · {}/s", size(speed as u64)));
+        let left = total.saturating_sub(done) as f64 / speed;
+        s.push_str(" · ");
+        s.push_str(&crate::i18n::fmt(tl!("{time} left"), &[("time", &duration(left))]));
+    }
+    s
+}
+
+/// One card.
+#[allow(clippy::too_many_arguments)]
+fn card_ui(
+    ui: &mut egui::Ui,
+    t: &Tokens,
+    c: &'static Card,
+    rows: &[(&'static ModelInfo, Status)],
+    recommended: bool,
+    lit: bool,
+    action: &mut Option<Action>,
+    buttons: &mut Vec<(String, String, [f32; 4])>,
+) -> egui::Response {
+    let mut rec = |name: &str, r: &egui::Response| buttons.push((c.id.to_string(), name.to_string(), [r.rect.min.x, r.rect.min.y, r.rect.max.x, r.rect.max.y]));
+    let files = c.models();
+    let status_of = |m: &ModelInfo| rows.iter().find(|(r, _)| r.file == m.file).map(|(_, s)| s.clone()).unwrap_or(Status::NotDownloaded);
+    let st: Vec<(&'static ModelInfo, Status)> = files.iter().map(|m| (*m, status_of(m))).collect();
+    let state = CardState::of(&st.iter().map(|(m, s)| (m.bytes, s.clone())).collect::<Vec<_>>());
+    let (label, color) = match &state {
+        CardState::NotDownloaded => (tl!("Not downloaded").to_string(), t.text_dim),
+        CardState::Downloading { .. } => (tl!("Downloading").to_string(), t.accent),
+        CardState::Paused { .. } => (tl!("Paused").to_string(), t.warning),
+        CardState::Ready => (tl!("Ready").to_string(), GREEN),
+        CardState::Error(e) => (crate::i18n::fmt(tl!("Failed: {reason}"), &[("reason", e)]), t.danger),
+        CardState::Checking => (tl!("Checking…").to_string(), t.text_dim),
+        CardState::Unavailable(why) => (why.clone(), t.warning),
+    };
+    let border = if lit { t.accent } else { t.card_border };
+    egui::Frame::NONE
+        .fill(t.card)
+        .stroke(egui::Stroke::new(if lit { 2.0 } else { 1.0 }, border))
+        .corner_radius(t.radius)
+        .inner_margin(egui::Margin::same(10))
+        .show(ui, |ui| {
+            let w = (ui.max_rect().width()).max(200.0);
+            ui.set_width(w);
+            ui.set_max_width(w);
+            ui.horizontal(|ui| {
+                thumbnail(ui, c.section, t);
+                ui.vertical(|ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(egui::RichText::new(card_title(c)).strong());
+                        ui.label(egui::RichText::new(size(c.bytes())).color(t.text_dim));
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        meter(ui, tl!("Quality"), c.quality, t);
+                        meter(ui, tl!("Speed"), c.speed, t);
+                        if c.gpu { chip(ui, tl!("Needs a GPU"), t.text_dim) } else { chip(ui, tl!("No GPU needed"), GREEN) }
+                    });
+                    if recommended {
+                        chip(ui, tl!("Recommended for this device"), t.accent);
+                    }
+                });
+            });
+            ui.label(egui::RichText::new(card_text(c)).size(12.5));
+            ui.add_space(2.0);
+            match &state {
+                CardState::Downloading { done, total, .. } | CardState::Paused { done, total } if *total > 0 => {
+                    let speed = if let CardState::Downloading { bytes_per_sec, .. } = state { bytes_per_sec } else { 0.0 };
+                    let (r, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 6.0), egui::Sense::hover());
+                    crate::jobs_ui::bar(ui, r, Some(*done as f32 / (*total).max(1) as f32), t);
+                    ui.label(egui::RichText::new(progress_text(*done, *total, speed)).color(t.text_dim).size(11.5));
+                }
+                _ => {}
+            }
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(&label).color(color).size(12.0));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| match &state {
+                    CardState::NotDownloaded => {
+                        if { let r = crate::widgets::primary_button(ui, tl!("Download"), 84.0); rec("download", &r); r }.clicked() {
+                            *action = Some(Action::Download(c.id));
+                        }
+                    }
+                    CardState::Error(_) => {
+                        if { let r = crate::widgets::primary_button(ui, tl!("Retry"), 84.0); rec("retry", &r); r }.clicked() {
+                            *action = Some(Action::Download(c.id));
+                        }
+                    }
+                    CardState::Downloading { .. } => {
+                        if { let r = crate::widgets::secondary_button(ui, tl!("Cancel"), 70.0); rec("cancel", &r); r }.clicked() {
+                            *action = Some(Action::Cancel(c.id));
+                        }
+                        if { let r = crate::widgets::secondary_button(ui, tl!("Pause"), 70.0); rec("pause", &r); r }.clicked() {
+                            *action = Some(Action::Pause(c.id));
+                        }
+                    }
+                    CardState::Paused { .. } => {
+                        if { let r = crate::widgets::secondary_button(ui, tl!("Cancel"), 70.0); rec("cancel", &r); r }.clicked() {
+                            *action = Some(Action::Cancel(c.id));
+                        }
+                        if { let r = crate::widgets::primary_button(ui, tl!("Resume"), 70.0); rec("resume", &r); r }.clicked() {
+                            *action = Some(Action::Download(c.id));
+                        }
+                    }
+                    CardState::Ready => {
+                        if { let r = crate::widgets::secondary_button(ui, tl!("Delete"), 70.0); rec("delete", &r); r }.clicked() {
+                            *action = Some(Action::Delete(c.id));
+                        }
+                    }
+                    CardState::Checking | CardState::Unavailable(_) => {}
+                });
+            });
+            egui::CollapsingHeader::new(egui::RichText::new(tl!("Details")).size(12.0)).id_salt(("ai-card-details", c.id)).default_open(false).show(ui, |ui| {
+                let dim = |s: String| egui::RichText::new(s).color(t.text_dim).size(11.5);
+                if let Some(m) = files.first() {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(dim(tl!("Licence:").to_string()));
+                        ui.hyperlink_to(egui::RichText::new(format!("{} · {}", m.license, m.author)).size(11.5), m.source);
+                    });
+                }
+                let mem = if c.gpu { tl!("GPU memory") } else { tl!("Memory") };
+                ui.label(dim(format!("{}: {} · {mem}: {}", tl!("Precision"), c.precision, size(u64::from(c.memory_mb) * 1_000_000))));
+                ui.label(dim(crate::i18n::fmt(tl!("Used by: {tools}"), &[("tools", &files.first().map(|m| tools_text(m)).unwrap_or_default())])));
+                for (m, s) in &st {
+                    ui.label(dim(format!("{} · {} · {} · sha256 {}…", m.file, size(m.bytes), status_text(s), m.sha256.get(..12).unwrap_or(""))));
+                }
+            });
+        })
+        .response
+}
+
+/// Draws the window (or the docked panel) when it is open.
 pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if !app.ui.ai_models.open {
         return;
@@ -153,61 +422,53 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     };
     let storage = store.as_ref().map(|s| s.storage()).unwrap_or_default();
     let available = store.as_ref().map_or_else(|| Err(ai_models_cmds::UNAVAILABLE.to_string()), |s| s.available());
-    let recommended = ai_models_cmds::recommended(&app.session);
-    let lite = recommended.first().is_some_and(|m| m.lite);
-    let missing = |list: &[&'static ModelInfo]| -> u64 {
-        list.iter().filter(|m| rows.iter().any(|(r, s)| r.file == m.file && !s.is_downloaded() && !s.is_pending())).map(|m| m.bytes).sum()
-    };
-    // "Download all" means the tools' models; Generative Fill (2 GB) has its own button.
-    let tool_files: Vec<&'static ModelInfo> = models::files().into_iter().filter(|m| models::group(m) != Group::Generative).collect();
-    let gen_files: Vec<&'static ModelInfo> = models::files().into_iter().filter(|m| models::group(m) == Group::Generative).collect();
-    let (rec_missing, all_missing, gen_missing) = (missing(&recommended), missing(&tool_files), missing(&gen_files));
+    let rec_cards = ai_models_cmds::recommended_cards(&app.session);
+    let rec_missing: u64 = rec_cards
+        .iter()
+        .filter_map(|id| cards::card(id))
+        .flat_map(|c| c.models())
+        .filter(|m| rows.iter().any(|(r, s)| r.file == m.file && !s.is_downloaded() && !s.is_pending()))
+        .map(|m| m.bytes)
+        .sum();
     let any_downloaded = rows.iter().any(|(_, s)| matches!(s, Status::Downloaded | Status::UpdateAvailable));
     let busy = rows.iter().any(|(_, s)| s.is_pending());
+    let checking = rows.iter().any(|(_, s)| matches!(s, Status::Checking));
     let highlight = app.ui.ai_models.highlight.clone();
     let mut scrolled = app.ui.ai_models.scrolled;
     let mut confirm_all = app.ui.ai_models.confirm_delete_all;
     let mut open = true;
     let mut action: Option<Action> = None;
+    let mut buttons: Vec<(String, String, [f32; 4])> = Vec::new();
     let canvas = app.last_canvas_rect;
-    // Its own window, or docked (`crate::floaters`).
+    let screen = ctx.content_rect();
+    // Phones: a full-screen sheet.
+    let phone = screen.width() < 600.0;
     let host = crate::floaters::Host::of(app, ctx, crate::dock::Group::AiModels);
-    let window = egui::Window::new(tl!("AI Models"))
-        .id(egui::Id::new("ai-models-window"))
-        .open(&mut open)
-        .collapsible(false)
-        .resizable(true)
-        .default_width(600.0)
-        .default_height(560.0)
-        .default_pos(egui::pos2((canvas.center().x - 300.0).max(canvas.left() + 8.0), canvas.top() + 40.0));
+    let mut window = egui::Window::new(tl!("AI Models")).id(egui::Id::new("ai-models-window")).open(&mut open).collapsible(false);
+    window = if phone {
+        window.fixed_rect(screen).resizable(false).title_bar(true)
+    } else {
+        window.resizable(true).default_width(820.0).default_height(640.0).default_pos(egui::pos2((canvas.center().x - 410.0).max(canvas.left() + 8.0), canvas.top() + 24.0))
+    };
     host.show(ctx, egui::Id::new("ai-models-window"), window, |ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| host.header_button(ui));
         if let Err(why) = &available {
             ui.colored_label(t.warning, why.as_str());
             ui.add_space(4.0);
         }
-        // Storage.
+        // Header: storage, Download recommended, Delete all.
         let mut line = crate::i18n::fmt(tl!("Models on this device: {size}"), &[("size", &size(storage.models.unwrap_or(0)))]);
         if let (Some(used), Some(quota)) = (storage.used, storage.quota) {
             line.push_str(" · ");
             line.push_str(&crate::i18n::fmt(tl!("site storage {used} of {quota}"), &[("used", &size(used)), ("quota", &size(quota))]));
         }
         ui.label(egui::RichText::new(line).color(t.text_dim));
-        ui.add_space(6.0);
+        ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
             let ok = available.is_ok();
             let rec_label = crate::i18n::fmt(tl!("Download recommended for this device ({size})"), &[("size", &size(rec_missing))]);
-            let hint = if lite {
-                tl!("No usable GPU here: the lite models (MI-GAN, Real-ESRGAN Compact).")
-            } else {
-                tl!("A GPU is available: the full models (Manga LaMa, MangaJaNai for your open pages, IllustrationJaNai).")
-            };
-            if ui.add_enabled_ui(ok && rec_missing > 0, |ui| crate::widgets::primary_button(ui, &rec_label, 0.0)).inner.on_hover_text(hint).clicked() {
+            if ui.add_enabled_ui(ok && rec_missing > 0, |ui| crate::widgets::primary_button(ui, &rec_label, 0.0)).inner.clicked() {
                 action = Some(Action::Recommended);
-            }
-            let all_label = crate::i18n::fmt(tl!("Download all ({size})"), &[("size", &size(all_missing))]);
-            if ui.add_enabled_ui(ok && all_missing > 0, |ui| crate::widgets::secondary_button(ui, &all_label, 0.0)).inner.clicked() {
-                action = Some(Action::All);
             }
             if confirm_all {
                 ui.label(tl!("Delete every downloaded model?"));
@@ -223,49 +484,53 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
             }
         });
         if busy {
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
+            ui.add_space(2.0);
+            ui.horizontal_wrapped(|ui| {
                 ui.label(egui::RichText::new(queue_text(&rows)).color(t.text_dim));
+                if crate::widgets::secondary_button(ui, tl!("Pause all"), 0.0).clicked() {
+                    action = Some(Action::PauseAll);
+                }
                 if crate::widgets::secondary_button(ui, tl!("Cancel all"), 0.0).clicked() {
-                    action = Some(Action::Cancel(None));
+                    action = Some(Action::CancelAll);
                 }
             });
         }
         ui.add_space(6.0);
-        crate::widgets::hairline(ui);
-        egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
-            for (group, title) in [(Group::Cleaning, tl!("Cleaning")), (Group::Upscaling, tl!("Upscaling")), (Group::Generative, tl!("Generative Fill"))] {
-                ui.add_space(8.0);
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            let width = ui.available_width().min(ui.clip_rect().width());
+            // Cards side by side when there is room.
+            let cols = if width >= 760.0 { 3 } else if width >= 500.0 { 2 } else { 1 };
+            let card_w = (width - 10.0 * (cols as f32 - 1.0)) / cols as f32;
+            for section in [Section::Clean, Section::Upscale, Section::Generative] {
+                crate::widgets::hairline(ui);
+                ui.add_space(6.0);
+                let (title, purpose) = section_text(section);
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(title).font(crate::theme::semibold(13.0)));
-                    if group == Group::Generative && gen_missing > 0 && available.is_ok() {
-                        let label = format!("{} ({})", tl!("Download"), size(gen_missing));
-                        if crate::widgets::secondary_button(ui, &label, 0.0).clicked() {
-                            let ids = gen_files
-                                .iter()
-                                .filter(|m| rows.iter().any(|(r, s)| r.file == m.file && !s.is_downloaded() && !s.is_pending()))
-                                .map(|m| m.id)
-                                .collect();
-                            action = Some(Action::Group(ids));
-                        }
-                    }
+                    section_icon(ui, section, t.accent);
+                    ui.label(egui::RichText::new(title).font(crate::theme::semibold(14.0)));
+                    ui.label(egui::RichText::new(purpose).color(t.text_dim).size(12.0));
                 });
-                ui.add_space(2.0);
-                for (m, status) in rows.iter().filter(|(m, _)| models::group(m) == group) {
-                    let lit = highlight.as_deref() == Some(m.file);
-                    let frame = egui::Frame::NONE.inner_margin(egui::Margin::symmetric(8, 6)).corner_radius(t.radius_sm).fill(if lit {
-                        t.accent.gamma_multiply(0.18)
-                    } else {
-                        egui::Color32::TRANSPARENT
+                ui.add_space(4.0);
+                let list: Vec<&'static Card> = cards::CARDS.iter().filter(|c| c.section == section).collect();
+                for chunk in list.chunks(cols) {
+                    ui.horizontal_top(|ui| {
+                        for c in chunk {
+                            let lit = highlight.as_deref().is_some_and(|h| c.models().iter().any(|m| m.file == h));
+                            let r = ui
+                                .allocate_ui_with_layout(egui::vec2(card_w, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                                    ui.set_max_width(card_w);
+                                    card_ui(ui, &t, c, &rows, rec_cards.contains(&c.id), lit, &mut action, &mut buttons)
+                                })
+                                .inner;
+                            if lit && !scrolled {
+                                r.scroll_to_me(Some(egui::Align::Center));
+                                scrolled = true;
+                            }
+                        }
                     });
-                    let r = frame.show(ui, |ui| row(ui, &t, m, status, &mut action)).response;
-                    if lit && !scrolled {
-                        r.scroll_to_me(Some(egui::Align::Center));
-                        scrolled = true;
-                    }
+                    ui.add_space(8.0);
                 }
             }
-            ui.add_space(6.0);
             let note = if cfg!(target_arch = "wasm32") {
                 tl!("Models are kept in this browser and run on this device: your images are not uploaded.")
             } else {
@@ -278,21 +543,29 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     m.open = open;
     m.scrolled = scrolled;
     m.confirm_delete_all = confirm_all;
+    m.buttons = buttons;
     match action {
-        Some(Action::Download(id)) => act(app, ai_models_cmds::DOWNLOAD, json!({"id": id})),
-        Some(Action::Cancel(id)) => act(app, ai_models_cmds::CANCEL, json!({"id": id})),
-        Some(Action::Delete(id)) => act(app, ai_models_cmds::DELETE, json!({"id": id})),
-        Some(Action::Recommended) => act(app, ai_models_cmds::DOWNLOAD, json!({"recommended": true})),
-        Some(Action::All) => {
-            let ids: Vec<&str> = models::files().into_iter().filter(|m| models::group(m) != Group::Generative).map(|m| m.id).collect();
-            act(app, ai_models_cmds::DOWNLOAD, json!({"ids": ids}))
+        Some(Action::Download(id)) => act(app, ai_models_cmds::DOWNLOAD, json!({"card": id})),
+        Some(Action::Pause(id)) => act(app, ai_models_cmds::PAUSE, json!({"card": id})),
+        Some(Action::Cancel(id)) => act(app, ai_models_cmds::CANCEL, json!({"card": id})),
+        Some(Action::Delete(id)) => act(app, ai_models_cmds::DELETE, json!({"card": id})),
+        Some(Action::PauseAll) => act(app, ai_models_cmds::PAUSE, json!({})),
+        Some(Action::CancelAll) => act(app, ai_models_cmds::CANCEL, json!({})),
+        Some(Action::Recommended) => {
+            for id in rec_cards {
+                act(app, ai_models_cmds::DOWNLOAD, json!({"card": id}));
+            }
         }
-        Some(Action::Group(ids)) => act(app, ai_models_cmds::DOWNLOAD, json!({"ids": ids})),
         Some(Action::DeleteAll) => act(app, ai_models_cmds::DELETE, json!({"all": true})),
         None => {}
     }
-    // Progress and the browser's answers arrive in the background.
-    ctx.request_repaint_after(std::time::Duration::from_millis(if busy { 150 } else { 1000 }));
+    // Progress arrives in the background: ~10 Hz while downloading, nothing when idle (the
+    // browser's cache answers once at start).
+    if busy {
+        ctx.request_repaint_after(std::time::Duration::from_millis(100));
+    } else if checking {
+        ctx.request_repaint_after(std::time::Duration::from_millis(500));
+    }
 }
 
 /// "Downloading Manga LaMa 42% · 2 more queued".
@@ -310,58 +583,6 @@ fn queue_text(rows: &[(&'static ModelInfo, Status)]) -> String {
         s.push_str(&crate::i18n::trn(crate::i18n::current(), queued as u64, "{n} more queued", "{n} more queued"));
     }
     s
-}
-
-/// One model's row.
-fn row(ui: &mut egui::Ui, t: &Tokens, m: &'static ModelInfo, status: &Status, action: &mut Option<Action>) {
-    ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(models::file_title(m)).strong());
-        ui.label(egui::RichText::new(size(m.bytes)).color(t.text_dim));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| match status {
-            Status::NotDownloaded | Status::Failed(_) => {
-                let label = if matches!(status, Status::Failed(_)) { tl!("Retry") } else { tl!("Download") };
-                if crate::widgets::secondary_button(ui, label, 84.0).clicked() {
-                    *action = Some(Action::Download(m.id));
-                }
-            }
-            Status::Queued | Status::Downloading { .. } => {
-                if crate::widgets::secondary_button(ui, tl!("Cancel"), 84.0).clicked() {
-                    *action = Some(Action::Cancel(Some(m.id)));
-                }
-            }
-            Status::Downloaded => {
-                if crate::widgets::secondary_button(ui, tl!("Delete"), 84.0).clicked() {
-                    *action = Some(Action::Delete(m.id));
-                }
-            }
-            Status::UpdateAvailable => {
-                if crate::widgets::secondary_button(ui, tl!("Delete"), 70.0).clicked() {
-                    *action = Some(Action::Delete(m.id));
-                }
-                if crate::widgets::secondary_button(ui, tl!("Update"), 70.0).clicked() {
-                    *action = Some(Action::Download(m.id));
-                }
-            }
-            Status::Checking | Status::Unavailable(_) => {}
-        });
-    });
-    let dim = |s: String| egui::RichText::new(s).color(t.text_dim).size(12.0);
-    ui.label(dim(crate::i18n::fmt(tl!("Used by: {tools}"), &[("tools", &tools_text(m))])));
-    ui.label(dim(crate::i18n::fmt(tl!("Runs on: {where}"), &[("where", runs_text(m))])));
-    ui.horizontal(|ui| {
-        ui.label(dim(tl!("Licence:").to_string()));
-        ui.hyperlink_to(egui::RichText::new(format!("{} · {}", m.license, m.author)).size(12.0), m.source);
-    });
-    let color = match status {
-        Status::Failed(_) | Status::Unavailable(_) => t.warning,
-        Status::Downloaded => t.text,
-        _ => t.text_dim,
-    };
-    if let Status::Downloading { done, total, .. } = status {
-        let (r, _) = ui.allocate_exact_size(egui::vec2(ui.available_width().min(360.0), 6.0), egui::Sense::hover());
-        crate::jobs_ui::bar(ui, r, Some(*done as f32 / (*total).max(1) as f32), t);
-    }
-    ui.label(egui::RichText::new(status_text(status)).color(color).size(12.0));
 }
 
 /// The status bar's download indicator ("↓ Manga LaMa 42% (+2)"); a click opens the window.
@@ -391,7 +612,8 @@ pub fn status_indicator(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 
 /// What `ui.inspect` reports about the window.
 pub fn inspect(app: &PhotocraftApp) -> Value {
-    json!({"open": app.ui.ai_models.open, "highlight": app.ui.ai_models.highlight})
+    let buttons: Vec<Value> = app.ui.ai_models.buttons.iter().map(|(c, a, r)| json!({"card": c, "action": a, "rect": r})).collect();
+    json!({"open": app.ui.ai_models.open, "highlight": app.ui.ai_models.highlight, "buttons": buttons})
 }
 
 #[cfg(test)]

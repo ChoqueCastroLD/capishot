@@ -97,13 +97,20 @@ pub fn tier_for(s: &Session, p: &Value) -> Result<Tier> {
         return Err(EngineError::Other(LOW_MEMORY.into()));
     }
     let tier = match q {
+        // A real GPU: Standard, or Fast (1 GB download) with less memory. No GPU: Fast on a
+        // desktop with CPU threads and memory, else Ultra-light.
         "auto" => {
             let gpu = device != "cpu" && !matches!(profile.gpu, GpuClass::None | GpuClass::Software);
-            if gpu && !small { Tier::Standard } else { Tier::Ultra }
+            match (gpu, small, profile.mobile) {
+                (true, false, _) => Tier::Standard,
+                (true, true, false) if mem.is_none_or(|m| m >= 3.5) => Tier::Fast,
+                (false, false, false) if profile.cpu_threads => Tier::Fast,
+                _ => Tier::Ultra,
+            }
         }
         q => Tier::from_id(q).ok_or_else(|| bad("`quality` must be auto, ultra, fast, standard or high"))?,
     };
-    if small && tier != Tier::Ultra {
+    if small && !matches!(tier, Tier::Ultra | Tier::Fast) || profile.mobile && tier == Tier::Fast {
         return Err(EngineError::Other(LOW_MEMORY_STANDARD.into()));
     }
     Ok(tier)
@@ -112,7 +119,13 @@ pub fn tier_for(s: &Session, p: &Value) -> Result<Tier> {
 /// The working size: the tier's, smaller on phones and devices with little memory.
 fn default_side(s: &Session, tier: Tier) -> usize {
     let p = s.ai_profile();
-    if tier == Tier::Ultra && (p.mobile || p.memory_gb.is_some_and(|m| m <= 4.0)) { 256 } else { tier.side() }
+    let gpu = !matches!(p.gpu, GpuClass::None | GpuClass::Software);
+    match tier {
+        Tier::Ultra if p.mobile || p.memory_gb.is_some_and(|m| m <= 4.0) => 256,
+        // Fast on the CPU: 384 px.
+        Tier::Fast if !gpu => 384,
+        t => t.side(),
+    }
 }
 
 /// The tier these params choose and whether it can run now (the UI's download prompt).
@@ -179,7 +192,7 @@ fn plan(s: &mut Session, p: &Value) -> Result<Plan> {
     prompt::check(&typed).map_err(|e| EngineError::Other(e.into()))?;
     prompt::check(&negative).map_err(|e| EngineError::Other(e.into()))?;
     let tier = tier_for(s, p)?;
-    let variants = crate::ai_cmds::uint_param(p, "variants", 1, 4, ID)?.unwrap_or(3) as usize;
+    let variants = crate::ai_cmds::uint_param(p, "variants", 1, 4, ID)?.unwrap_or(tier.variants() as u64) as usize;
     let steps = crate::ai_cmds::uint_param(p, "steps", 1, 50, ID)?.unwrap_or(0) as usize;
     let user_strength = match p.get("strength") {
         None | Some(Value::Null) => None,
