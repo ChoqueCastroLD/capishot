@@ -3,7 +3,7 @@
 //! `sd_fill <weights dir> <image> <x,y,w,h> <prompt> <out prefix> [key=value…]`
 //! keys: `variants` (2), `seed` (1), `steps` (4), `sampler` (tcd|lcm, tcd), `lora` (tcd|lcm|none,
 //! = sampler), `device` (cpu|gpu), `f16` (0|1), `tiny` (0|1: TAESD), `side` (512), `gamma` (0.3),
-//! `guidance` (1), `unet` (ds8|sdxs: the Ultra prototype, LCM sampling, TAESD), `prefill` (0|1: pull–push fill of the hole first), `strength` (1).
+//! `guidance` (1), `unet` (ds8|ds8tcd: TCD fused offline|sdxs: the Ultra prototype), `quant` (f16|q8|q4 files), `prefill` (0|1: pull–push fill of the hole first), `strength` (1).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, deprecated, clippy::chunks_exact_to_as_chunks)]
 
 use std::time::Instant;
@@ -52,16 +52,20 @@ fn main() {
     let dtype = if get("f16", "0") == "1" { DType::F16 } else { DType::F32 };
     let t0 = Instant::now();
     let mut loader = Loader::new(&device, dtype).unwrap();
-    let sdxs = get("unet", "ds8") == "sdxs";
-    let mut files = vec!["sd15-text-ds8-f16.safetensors".to_string(), "taesd-f16.safetensors".into()];
-    if sdxs {
-        files.push("sdxs-ds-unet-f16.safetensors".into());
-    } else {
-        files.extend(["sd15-vae-enc-ds8-f16.safetensors".to_string(), "sd15-vae-dec-ds8-f16.safetensors".into()]);
-        files.extend((0..4).map(|i| format!("ds8-inpaint-unet-f16.part{i}of4.safetensors")));
-    }
-    if lora != "none" && !sdxs {
-        files.push(format!("{lora}-sd15-lora-f16.safetensors"));
+    let unet = get("unet", "ds8");
+    let q = get("quant", "f16");
+    let mut files = vec![format!("sd15-text-ds8-{q}.safetensors"), "taesd-f16.safetensors".into()];
+    match unet.as_str() {
+        "sdxs" => files.push(format!("sdxs-ds-unet-{q}.safetensors")),
+        // DreamShaper with TCD fused offline (the quantized tiers), TAESD only.
+        "ds8tcd" => files.push(format!("ds8-inpaint-tcd-unet-{q}.safetensors")),
+        _ => {
+            files.extend(["sd15-vae-enc-ds8-f16.safetensors".to_string(), "sd15-vae-dec-ds8-f16.safetensors".into()]);
+            files.extend((0..4).map(|i| format!("ds8-inpaint-unet-f16.part{i}of4.safetensors")));
+            if lora != "none" {
+                files.push(format!("{lora}-sd15-lora-f16.safetensors"));
+            }
+        }
     }
     for f in &files {
         let bytes = std::fs::read(dir.join(f)).unwrap_or_else(|e| panic!("{f}: {e}"));

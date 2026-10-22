@@ -28,7 +28,22 @@ pub struct Store {
     map: HashMap<String, (Vec<usize>, Tensor<1>)>,
     metadata: HashMap<String, String>,
     bytes: u64,
+    /// Parts of block-quantized tensors still waiting for their companions.
+    pending: HashMap<String, QuantParts>,
 }
+
+/// A block-quantized tensor as the quantizer writes it: `name.q4` (two signed 4-bit values per
+/// byte, low nibble first) or `name.q8` (int8), `name.qs` (one f16 scale per [`QUANT_BLOCK`]
+/// values), `name.qshape` (i32 shape).
+#[derive(Debug, Default)]
+struct QuantParts {
+    values: Option<(u8, Vec<u8>)>,
+    scales: Option<Vec<f32>>,
+    shape: Option<Vec<usize>>,
+}
+
+/// Values per quantization scale.
+pub const QUANT_BLOCK: usize = 32;
 
 impl Store {
     /// An empty store computing in `dtype` (`F16` or `F32`).
@@ -36,7 +51,7 @@ impl Store {
         if !matches!(dtype, DType::F16 | DType::F32) {
             return Err(SdError::Input(format!("unsupported compute precision {dtype:?}")));
         }
-        Ok(Self { device: device.clone(), dtype, map: HashMap::new(), metadata: HashMap::new(), bytes: 0 })
+        Ok(Self { device: device.clone(), dtype, map: HashMap::new(), metadata: HashMap::new(), bytes: 0, pending: HashMap::new() })
     }
 
     pub fn device(&self) -> &Device {
@@ -71,20 +86,85 @@ impl Store {
                 Dtype::F16 => "F16",
                 Dtype::BF16 => "BF16",
                 Dtype::F32 => "F32",
+                Dtype::I8 => "I8",
+                Dtype::U8 => "U8",
+                Dtype::I32 => "I32",
                 _ => continue,
             };
-            self.upload(name, dtype, view.shape().to_vec(), view.data())?;
+            self.ingest(name, dtype, view.shape().to_vec(), view.data())?;
         }
+        self.check_complete()
+    }
+
+    /// Fails when a quantized tensor is missing a part (a truncated or foreign file).
+    pub fn check_complete(&self) -> Result<()> {
+        match self.pending.keys().next() {
+            Some(name) => Err(SdError::Weights(format!("quantized tensor `{name}` is incomplete"))),
+            None => Ok(()),
+        }
+    }
+
+    fn ingest(&mut self, name: String, dtype: &str, shape: Vec<usize>, data: &[u8]) -> Result<()> {
+        let quant = [(".q4", 4u8), (".q8", 8), (".qs", 0), (".qshape", 1)].into_iter().find_map(|(suf, k)| name.strip_suffix(suf).map(|b| (b.to_string(), k)));
+        let Some((base, kind)) = quant else {
+            if matches!(dtype, "F16" | "BF16" | "F32") {
+                return self.upload(name, dtype, shape, data);
+            }
+            return Ok(());
+        };
+        let part = self.pending.entry(base.clone()).or_default();
+        match (kind, dtype) {
+            (4, "U8") | (8, "I8") => part.values = Some((kind, data.to_vec())),
+            (0, "F16") => part.scales = Some(data.as_chunks::<2>().0.iter().map(|b| half::f16::from_le_bytes(*b).to_f32()).collect()),
+            (1, "I32") => part.shape = Some(data.as_chunks::<4>().0.iter().map(|b| usize::try_from(i32::from_le_bytes(*b)).unwrap_or(0)).collect()),
+            _ => return Err(SdError::Weights(format!("`{name}`: unexpected dtype {dtype}"))),
+        }
+        if part.values.is_some() && part.scales.is_some() && part.shape.is_some()
+            && let Some(p) = self.pending.remove(&base)
+        {
+            self.upload_quantized(base, p)?;
+        }
+        Ok(())
+    }
+
+    fn upload_quantized(&mut self, name: String, p: QuantParts) -> Result<()> {
+        use burn::tensor::quantization::{QuantScheme, QuantStore, QuantValue};
+        let (Some((bits, raw)), Some(scales), Some(shape)) = (p.values, p.scales, p.shape) else {
+            return Err(SdError::Weights(format!("quantized tensor `{name}` is incomplete")));
+        };
+        let n = shape.iter().try_fold(1usize, |a, &d| a.checked_mul(d)).filter(|&n| n > 0 && n <= MAX_TENSOR && n.is_multiple_of(QUANT_BLOCK));
+        let Some(n) = n else {
+            return Err(SdError::Weights(format!("`{name}` has unsupported shape {shape:?}")));
+        };
+        let values: Vec<i8> = if bits == 4 {
+            if raw.len() * 2 != n {
+                return Err(SdError::Weights(format!("`{name}`: {} packed bytes for {n} values", raw.len())));
+            }
+            raw.iter().flat_map(|b| [((b & 0x0F) << 4) as i8 >> 4, (b & 0xF0) as i8 >> 4]).collect()
+        } else {
+            if raw.len() != n {
+                return Err(SdError::Weights(format!("`{name}`: {} bytes for {n} values", raw.len())));
+            }
+            raw.iter().map(|&b| b as i8).collect()
+        };
+        if scales.len() * QUANT_BLOCK != n || scales.iter().any(|s| !s.is_finite()) {
+            return Err(SdError::Weights(format!("`{name}`: {} scales for {n} values", scales.len())));
+        }
+        // The CPU keeps one int8 per value; GPUs pack them in u32 words.
+        let store = if is_cpu(&self.device) { QuantStore::Native } else { QuantStore::PackedU32(0) };
+        let value = if bits == 4 { QuantValue::Q4S } else { QuantValue::Q8S };
+        let scheme = QuantScheme::default().with_value(value).with_store(store).per_block([QUANT_BLOCK as u8], burn::tensor::quantization::ScaleDtype::F32);
+        let td = TensorData::quantized(values, [n], scheme, &scales, None);
+        let t = Tensor::<1>::from_data(td, &self.device);
+        self.bytes = self.bytes.saturating_add((n * usize::from(bits) / 8 + scales.len() * 4) as u64);
+        self.map.insert(name, (shape, t));
         Ok(())
     }
 
     /// Uploads one tensor streamed by [`crate::stream::StreamParser`] (non-float tensors are
     /// skipped).
     pub fn add_raw(&mut self, t: &crate::stream::RawTensor) -> Result<()> {
-        if !matches!(t.dtype.as_str(), "F16" | "BF16" | "F32") {
-            return Ok(());
-        }
-        self.upload(t.name.clone(), &t.dtype, t.shape.clone(), &t.data)
+        self.ingest(t.name.clone(), &t.dtype, t.shape.clone(), &t.data)
     }
 
     /// Merges `__metadata__` entries (from a streamed header).
@@ -218,6 +298,11 @@ impl Store {
         let td = if self.dtype == DType::F16 { td.convert_dtype(DType::F16) } else { td };
         Ok(Tensor::from_data(td, TensorCreationOptions::new(self.device.clone()).with_dtype(self.dtype)))
     }
+}
+
+/// Whether `device` is the CPU backend.
+fn is_cpu(device: &Device) -> bool {
+    format!("{device:?}").to_ascii_lowercase().contains("flex")
 }
 
 /// The raw bytes of a non-float tensor (e.g. `tokenizer.merges`, U8) in a shard.
