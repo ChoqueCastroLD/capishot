@@ -977,10 +977,15 @@ fn content_aware_scale(s: &mut Session, p: &Value) -> Result<Value> {
                 let surf = writable_surface(doc, id)?;
                 // Clear what the result doesn't cover (the result overwrites the rest): the strip
                 // right of it and the one below it.
-                let right = Rect::new(dst.x1, region.y0, region.x1, region.y1);
-                let below = Rect::new(region.x0, dst.y1, dst.x1.min(region.x1), region.y1);
-                for strip in [right, below].into_iter().filter(|r| !r.is_empty()) {
-                    crate::pixels::try_clear_surface(surf, strip, None)?;
+                // A result moved off the region's corner (`x`/`y`) leaves more: clear it all.
+                if dst.x0 != region.x0 || dst.y0 != region.y0 {
+                    crate::pixels::try_clear_surface(surf, region, None)?;
+                } else {
+                    let right = Rect::new(dst.x1, region.y0, region.x1, region.y1);
+                    let below = Rect::new(region.x0, dst.y1, dst.x1.min(region.x1), region.y1);
+                    for strip in [right, below].into_iter().filter(|r| !r.is_empty()) {
+                        crate::pixels::try_clear_surface(surf, strip, None)?;
+                    }
                 }
                 surf.write_region(dst, &out);
                 surf.prune();

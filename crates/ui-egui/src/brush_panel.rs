@@ -541,6 +541,10 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
                         open = false;
                         ui.close();
                     }
+                    if ui.button(tl!("Close Tab Group")).clicked() {
+                        open = false;
+                        ui.close();
+                    }
                 });
                 host.header_button(ui);
             });

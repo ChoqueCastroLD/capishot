@@ -287,12 +287,15 @@ impl History {
     }
 
     pub fn can_undo(&self) -> bool {
-        !self.undo.is_empty()
+        !self.undo.is_empty() || self.cleared.is_some()
     }
     pub fn can_redo(&self) -> bool {
         !self.redo.is_empty()
     }
     pub fn undo_label(&self) -> Option<&str> {
+        if self.cleared.is_some() {
+            return Some(CLEAR_HISTORY_LABEL);
+        }
         self.can_undo().then_some(self.current_label.as_str())
     }
     pub fn redo_label(&self) -> Option<&str> {

@@ -3779,21 +3779,6 @@ curves	Smooth	Wygładź
 	Functions	Funkcje
 	Print Resolution:	Rozdzielczość druku:
 # Edit › Content-Aware Fill workspace
-	Sampling Brush Tool	Narzędzie Pędzel próbkowania
-	Sampling Area Overlay	Nakładka obszaru próbkowania
-	Show Sampling Area	Pokaż obszar próbkowania
-	Indicates	Wskazuje
-	Sampling Area	Obszar próbkowania
-	Excluded Area	Obszar wykluczony
-	Sampling Area Options	Opcje obszaru próbkowania
-	Rectangular	Prostokątny
-	Fill Settings	Ustawienia wypełnienia
-	Rotation Adaptation	Dopasowanie obrotu
-	Very High	Bardzo wysoka
-	Full	Pełna
-	Mirror	Odbicie lustrzane
-	Output Settings	Ustawienia wyjścia
-	Output To	Wyjście do
 
 # Google Fonts
 	Allow online fonts	Zezwalaj na czcionki online
@@ -4227,3 +4212,6 @@ curves	Smooth	Wygładź
 	Detailed fills from a prompt, three variants in seconds on a GPU.	Szczegółowe wypełnienia z opisu, trzy warianty w kilka sekund na GPU.
 	Needs a GPU	Wymaga GPU
 	The most detail: many steps with guidance, slow, for a strong GPU.	Najwięcej szczegółów: wiele kroków z prowadzeniem, wolno, dla mocnego GPU.
+	1×	1×
+	1.5×	1.5×
+	2×	2×

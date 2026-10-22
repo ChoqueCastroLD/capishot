@@ -3836,7 +3836,6 @@ cameraData	Lens	Lens
 	Search settings…	Instellingen zoeken…
 	No matching settings	Geen overeenkomende instellingen
 	Capishot — Screen Color Picker	Capishot — Schermkleurkiezer
-	Capishot — Screen Color Picker	Capishot — Schermkleurkiezer
 # Edit › Content-Aware Fill workspace
 	Sampling Brush Tool	Gereedschap Monsterpenseel
 	Sampling Area Overlay	Overlay van monstergebied
@@ -3927,21 +3926,6 @@ curves	Smooth	Vloeiend maken
 	Functions	Functies
 	Print Resolution:	Afdrukresolutie:
 # Edit › Content-Aware Fill workspace
-	Sampling Brush Tool	Gereedschap Monsterpenseel
-	Sampling Area Overlay	Overlay van monstergebied
-	Show Sampling Area	Monstergebied tonen
-	Indicates	Geeft aan
-	Sampling Area	Monstergebied
-	Excluded Area	Uitgesloten gebied
-	Sampling Area Options	Opties voor monstergebied
-	Rectangular	Rechthoekig
-	Fill Settings	Vulinstellingen
-	Rotation Adaptation	Rotatieaanpassing
-	Very High	Zeer hoog
-	Full	Volledig
-	Mirror	Spiegelen
-	Output Settings	Uitvoerinstellingen
-	Output To	Uitvoer naar
 # Google Fonts
 	Allow online fonts	Online lettertypen toestaan
 	Fonts	Lettertypen
@@ -4380,3 +4364,6 @@ curves	Smooth	Vloeiend maken
 	Detailed fills from a prompt, three variants in seconds on a GPU.	Gedetailleerde vullingen vanuit een prompt, drie varianten in seconden op een GPU.
 	Needs a GPU	GPU nodig
 	The most detail: many steps with guidance, slow, for a strong GPU.	Het meeste detail: veel stappen met sturing, traag, voor een sterke GPU.
+	1×	1×
+	1.5×	1.5×
+	2×	2×

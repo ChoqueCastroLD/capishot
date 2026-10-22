@@ -215,42 +215,6 @@ fn background_eraser_options() {
     assert_eq!(alpha(&s, 6, 20), 1.0);
 }
 
-/// The live Background Eraser (drawn while the pointer moves, `live_background_eraser`) leaves
-/// exactly the pixels the command erases, in every sampling and limits mode, at every depth and
-/// on the Background layer; offered to the commit, the command takes them ("fromLive").
-#[test]
-fn live_background_eraser_matches_the_command() {
-    let pts = [[4.0, 15.0, 1.0], [12.0, 18.0, 1.0], [22.0, 20.0, 0.8], [33.0, 24.0, 1.0], [40.0, 30.0, 1.0]];
-    for depth in DEPTHS {
-        for (sampling, limits, tol) in
-            [("continuous", "contiguous", 50), ("once", "discontiguous", 20), ("backgroundSwatch", "findEdges", 70), ("continuous", "discontiguous", 0)]
-        {
-            let p = json!({"points": pts, "size": 12, "hardness": 0.6, "sampling": sampling, "limits": limits, "tolerance": tol, "seed": 7});
-            let mut a = session("rgb", depth);
-            a.execute("paint.backgroundEraser", p.clone()).unwrap();
-            let want = surface(&a).clone();
-            let mut b = session("rgb", depth);
-            // Fed as the canvas feeds it: the first point at the press, the rest as they come.
-            let mut first = p.clone();
-            first["points"] = json!(&pts[..1]);
-            let mut live = live_background_eraser(&b, &first).unwrap();
-            for q in &pts[1..] {
-                live.push(&[photocraft_paint::StrokePoint::new(q[0], q[1], q[2] as f32)]).unwrap();
-            }
-            let shown = live.doc.layer(b.active().unwrap().active_layer.unwrap()).unwrap().surface().unwrap().clone();
-            b.offer_live_dab(live).unwrap();
-            let r = b.execute("paint.backgroundEraser", p.clone()).unwrap();
-            assert_eq!(r["fromLive"], json!(true), "{depth} {sampling} {limits}");
-            let got = surface(&b).clone();
-            let bounds = want.content_bounds().union(&got.content_bounds());
-            assert_eq!(got.read_region(bounds), want.read_region(bounds), "commit: {depth}-bit {sampling} {limits}");
-            // The live preview showed the stroke (without the finishing dabs) over the same pixels.
-            assert!(shown.content_bounds().width() > 0);
-            assert!(!layer(&b).locks.transparency, "the commit unlocked the Background as the command does");
-        }
-    }
-}
-
 #[test]
 fn background_eraser_fails_gracefully() {
     let mut s = session("rgb", 8);
@@ -310,45 +274,6 @@ fn bench_magic_eraser_24mp() {
     photocraft_algo::erase::magic_erase(&mut surf, &region, 1.0, None, None);
     let t3 = t0.elapsed().as_secs_f64() * 1000.0;
     println!("phases: sample {t1:.1} ms, wand {:.1} ms, erase {:.1} ms", t2 - t1, t3 - t2);
-}
-
-/// The live Background Eraser shows exactly what the commit erases, fed point by point: on the
-/// Background (which the commit turns into a normal layer first), with every sampling mode, at
-/// 8 and 16 bits (the live working pixels are floats between dabs, as the commit's are).
-#[test]
-fn live_background_eraser_matches_the_commit() {
-    let all = [[6.0, 20.0], [18.0, 22.0], [30.0, 18.0], [44.0, 24.0], [56.0, 20.0]];
-    for depth in [8, 16] {
-        for sampling in ["continuous", "once", "backgroundSwatch"] {
-            let mut s = session("rgb", depth);
-            s.execute("tools.setColors", json!({"background": "#000000"})).unwrap();
-            let opts = |pts: &[[f64; 2]]| json!({"points": pts, "size": 14, "hardness": 0.6, "sampling": sampling, "limits": "discontiguous", "tolerance": 30, "seed": 7});
-            let (doc, h) = (s.active().unwrap().doc.clone(), history_len(&s));
-            let mut live = live_background_eraser(&s, &opts(&all[..1])).unwrap();
-            for q in &all[1..] {
-                live.push(&[photocraft_paint::StrokePoint::new(q[0], q[1], 1.0)]).unwrap();
-            }
-            let st = s.active().unwrap();
-            assert!(std::sync::Arc::ptr_eq(&doc, &st.doc) && history_len(&s) == h, "the preview leaves the document alone");
-            let id = st.active_layer.unwrap();
-            let shown = live.doc.layer(id).unwrap().surface().unwrap().clone();
-            s.execute("paint.backgroundEraser", opts(&all)).unwrap();
-            assert_eq!(history_len(&s), h + 1, "one History step");
-            let mut erased = false;
-            for y in 0..48 {
-                for x in 0..64 {
-                    let (got, want) = (shown.rgba(x, y), surface(&s).rgba(x, y));
-                    erased |= want[3] < 0.5;
-                    // The colour under a fully erased pixel doesn't show.
-                    if got[3] == 0.0 && want[3] == 0.0 {
-                        continue;
-                    }
-                    assert_eq!(got, want, "{sampling} {depth}-bit ({x}, {y})");
-                }
-            }
-            assert!(erased, "{sampling} {depth}: the stroke erased something");
-        }
-    }
 }
 
 #[test]

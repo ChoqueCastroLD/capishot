@@ -203,7 +203,7 @@ fn an_imported_row_keeps_its_second_key() {
     let f = &app.ui.dialog_mut(id).unwrap().fields;
     assert!(f["overrides"].get("edit.copy").is_none(), "Copy keeps ⌘C: {}", f["overrides"]);
     assert!(f["alternates"].get("edit.copy").is_none(), "F3 is Copy's default alternate");
-    assert_eq!(f["alternates"]["edit.cut"], json!([]), "the set gives Cut no F2");
+    assert!(f["alternates"].get("edit.cut").is_none_or(|v| *v == json!([])), "the set gives Cut no second key");
     assert_eq!(f["alternates"]["edit.undo"], json!(["F1"]));
     crate::dialogs::confirm(&mut app, id).unwrap();
     assert_eq!(crate::shortcuts::effective_shortcut(&app, "edit.copy", Some("Cmd+C")).as_deref(), Some("Cmd+C"));

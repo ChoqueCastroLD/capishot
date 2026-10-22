@@ -19,8 +19,6 @@ fn requested_languages_resolve_regional_preferences() {
         ("uk-UA", "uk"),
         ("fr-CA", "fr"),
         ("id-ID", "id"),
-        ("vi-VN", "vi"),
-        ("sr-RS", "sr"),
     ] {
         assert_eq!(Lang::from_pref(tag), lang(code), "{tag}");
     }
@@ -406,42 +404,6 @@ fn drawn_text(h: &egui_kittest::Harness<'_, PhotocraftApp>) -> Vec<String> {
         collect(&shape.shape, &mut text);
     }
     text
-}
-
-#[test]
-fn czech_status_notices_and_navigator_draw_translated_text() {
-    with_language(Lang::EN, || {
-        let mut h = harness();
-        h.state_mut().run("prefs.set", json!({"path": "interface.language", "value": "cs"})).expect("language");
-        h.state_mut().ui.panels.navigator = true;
-        h.run_steps(4);
-        with_language(lang("cs"), || {
-            h.state_mut().open_failed("English file.psd", "disk full");
-            crate::notices::post(
-                h.state_mut(),
-                "Preferences can't be saved",
-                vec!["Capishot keeps retrying; until a save succeeds, preference changes are lost when it closes.".into()],
-                true,
-                None,
-            );
-            let info = crate::gpu_canvas::GpuInfo { driver: "Mesa 25.0".into(), ..Default::default() };
-            assert!(info.lines().iter().any(|line| line == "Ovladač: Mesa 25.0"));
-        });
-        h.run_steps(4);
-        let text = drawn_text(&h);
-        // The Navigator's own text is its tab title now: its zoom row has no label (#4840).
-        for want in ["Navigátor", "Soubor English file.psd se nepodařilo otevřít: disk full", "Předvolby nelze uložit"] {
-            assert!(text.iter().any(|text| text == want), "missing {want}: {text:?}");
-        }
-        // Czech text must be drawable by the bundled fonts, including the new notices.
-        let chars: std::collections::BTreeSet<_> = text.iter().flat_map(|s| s.chars()).filter(|c| !c.is_whitespace()).collect();
-        h.ctx.fonts_mut(|fonts| {
-            let font = egui::FontId::proportional(12.0);
-            for c in chars {
-                assert!(fonts.has_glyph(&font, c), "missing glyph {c}");
-            }
-        });
-    });
 }
 
 #[test]

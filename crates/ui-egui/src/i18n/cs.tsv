@@ -3793,25 +3793,6 @@ navigator	Zoom	Zvětšení
 	Functions	Funkce
 	Print Resolution:	Rozlišení tisku:
 # Edit › Content-Aware Fill workspace
-	Sampling Brush Tool	Nástroj Štětec vzorkování
-	Sampling Area Overlay	Překrytí oblasti vzorkování
-	Show Sampling Area	Zobrazit oblast vzorkování
-	Indicates	Označuje
-	Sampling Area	Oblast vzorkování
-	Excluded Area	Vyloučená oblast
-	Sampling Area Options	Volby oblasti vzorkování
-	Rectangular	Obdélníková
-	Fill Settings	Nastavení výplně
-	Rotation Adaptation	Přizpůsobení otočení
-	Very High	Velmi vysoká
-	High	Vysoká
-	Low	Nízká
-	Full	Úplná
-	Mirror	Zrcadlit
-	Output Settings	Nastavení výstupu
-	Output To	Výstup do
-	Duplicate Layer	Duplikovat vrstvu
-	Contract	Zúžit
 	Allow online fonts	Povolit online písma
 	Fonts	Písma
 	Find More	Najít další
@@ -3819,7 +3800,6 @@ navigator	Zoom	Zvětšení
 	All categories	Všechny kategorie
 	Sans Serif	Bezpatkové
 	Serif	Patkové
-	Display	Dekorativní
 	Handwriting	Ručně psané
 	Monospace	Neproporcionální
 	All languages	Všechny jazyky
@@ -3848,7 +3828,6 @@ navigator	Zoom	Zvětšení
 	Online fonts are not available in this build.	V této verzi nejsou online písma k dispozici.
 	The Google Fonts list is not set up in this build.	V této verzi není seznam Google Fonts nastaven.
 	Couldn't load Google Fonts	Google Fonts se nepodařilo načíst
-	Retry	Zkusit znovu
 	A font named “{family}” is already available and stays in use.	Písmo s názvem „{family}“ je již k dispozici a zůstává v používání.
 	Downloaded {family}	Staženo: {family}
 	Downloaded: {fonts}	Staženo: {fonts}
@@ -3890,7 +3869,6 @@ navigator	Zoom	Zvětšení
 	Show rulers in new documents	Zobrazovat pravítka v nových dokumentech
 # Eraser: Erase to History; Magic Wand: Sample Size.
 	Erase to History	Vymazat do historie
-	Sample Size	Velikost vzorku
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	Odesílat anonymní statistiky používání
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	Webová verze odesílá anonymní statistiky používání (žádné soubory ani obsah); vypnete je v Předvolby › Obecné.
@@ -3917,7 +3895,6 @@ navigator	Zoom	Zvětšení
 	The browser may clear them when space runs low.	Prohlížeč je může smazat, když dochází místo.
 	Loaded for this session only.	Načteno jen pro tuto relaci.
 	Browser storage is unavailable: {error}	Úložiště prohlížeče není k dispozici: {error}
-	Remove All	Odebrat vše
 	Remove all fonts from this browser?	Odebrat všechna písma z tohoto prohlížeče?
 	Removed: {n}	Odebráno: {n}
 	No fonts loaded yet.	Zatím nejsou načtena žádná písma.
@@ -3934,7 +3911,6 @@ navigator	Zoom	Zvětšení
 	Auto levels (black-and-white pages)	Automatické úrovně (černobílé stránky)
 	Result:	Výsledek:
 	Replace this image (flattens)	Nahradit tento obraz (sloučí vrstvy)
-	New document	Nový dokument
 	Detected a black-and-white page	Rozpoznána černobílá stránka
 	Detected a colour image	Rozpoznán barevný obraz
 	Black-and-white page	Černobílá stránka
@@ -4030,7 +4006,6 @@ navigator	Zoom	Zvětšení
 	Downloading {model} {pct}%	Stahování {model} {pct} %
 	Starting the next download…	Spouští se další stahování…
 	Download	Stáhnout
-	Update	Aktualizovat
 	Used by: {tools}	Používá: {tools}
 	Runs on: {where}	Běží na: {where}
 	Licence:	Licence modelu:
@@ -4215,7 +4190,6 @@ navigator	Zoom	Zvětšení
 	Standard (GPU, 2.3 GB)	Standardní (GPU, 2,3 GB)
 	High (GPU, slow)	Vysoká (GPU, pomalé)
 	Ultra-light	Ultralehké
-	Fast	Rychlé
 	Show files	Zobrazit soubory
 	Recommended for this device	Doporučeno pro toto zařízení
 	Generative Fill - {tier}	Generativní výplň - {tier}
@@ -4223,14 +4197,11 @@ navigator	Zoom	Zvětšení
 	Erase text and objects.	Maže text a objekty.
 	Enlarge pages without blur.	Zvětšuje stránky bez rozmazání.
 	Draw new content from a prompt.	Kreslí nový obsah podle zadání.
-	Speed	Rychlost
 	No GPU needed	Bez GPU
 	Precision	Přesnost
 	Memory	Paměť
 	GPU memory	Paměť GPU
-	Resume	Pokračovat
 	Paused	Pozastaveno
-	Ready	Připraveno
 	Downloading	Stahování
 	Pause all	Pozastavit vše
 	Erases text and SFX and redraws screentone and lines.	Maže text a zvuky, dokreslí rastr a linky.
@@ -4243,3 +4214,6 @@ navigator	Zoom	Zvětšení
 	Detailed fills from a prompt, three variants in seconds on a GPU.	Detailní výplně podle zadání, tři varianty za pár sekund na GPU.
 	Needs a GPU	Vyžaduje GPU
 	The most detail: many steps with guidance, slow, for a strong GPU.	Nejvíc detailů: mnoho kroků s vedením, pomalé, pro silné GPU.
+	1×	1×
+	1.5×	1.5×
+	2×	2×

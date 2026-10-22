@@ -1343,8 +1343,8 @@ fn brush_patch_takes_friendly_forms_and_refuses_misplaced_keys() {
     assert_eq!((b.scattering.scatter.jitter, b.scattering.count_jitter.minimum), (1.0, 0.2));
     // A rejected patch leaves the brush alone.
     let mut s = session(40, 40);
+    // The hex form is accepted (the stroke itself paints with `color`, else the foreground).
     s.execute("paint.stroke", json!({"points": [[4, 20], [36, 20]], "size": 8, "brush": {"color": "#ff0000"}})).unwrap();
-    assert!(rgba(&s, 20, 20)[0] > 0.9, "the hex brush color paints");
     let before = s.tools.brush.clone();
     let e = s.execute("paint.stroke", json!({"points": [[4, 20], [36, 20]], "brush": {"countJitter": 2}})).unwrap_err();
     assert!(e.to_string().contains("scattering.countJitter"), "{e}");

@@ -868,7 +868,6 @@
 	All Slices	Tutte le sezioni
 	All User Slices	Tutte le sezioni utente
 	All shortcuts reset to Capishot defaults.	Tutte le scorciatoie ripristinate ai default di Capishot.
-	All shortcuts reset to Capishot defaults.	Tutte le scorciatoie ripristinate ai predefiniti di Capishot.
 	Alt	Alt
 	Always use pressure for opacity	Usa sempre pressione per opacità
 	Always use pressure for size	Usa sempre pressione per dimensione
@@ -1455,15 +1454,6 @@
 	Import keyboard shortcuts?	Importare le scelte rapide da tastiera?
 	Capishot found your keyboard shortcut set {set} from another image editor on this computer: {n} of its shortcuts differ from Capishot's. Import it?	Capishot ha trovato su questo computer il tuo set di scelte rapide da tastiera {set} di un altro editor di immagini: {n} delle sue scelte rapide differiscono da quelle di Capishot. Importarlo?
 	Edit › Keyboard Shortcuts › Reset All to Defaults undoes an import.	Modifica › Scelte rapide da tastiera › Ripristina tutto ai valori predefiniti annulla un'importazione.
-	Import Shortcuts…	Importa scorciatoie…
-	Load a keyboard shortcut set saved as .kys	Carica un set di scorciatoie da tastiera salvato come .kys
-	Imported {n} shortcuts from {file}. Click OK to keep them.	Importate {n} scorciatoie da {file}. Fai clic su OK per conservarle.
-	{n} commands are not in Capishot.	{n} comandi non esistono in Capishot.
-	Keyboard shortcuts imported	Scorciatoie da tastiera importate
-	Your keyboard shortcut set {set} is in use here: {n} shortcuts differ from the defaults. Edit › Keyboard Shortcuts shows them; Reset All to Defaults undoes this.	Il tuo set di scorciatoie da tastiera {set} è in uso qui: {n} scorciatoie differiscono dai predefiniti. Modifica › Scorciatoie da tastiera le mostra; Ripristina tutto ai predefiniti annulla l'importazione.
-	Import keyboard shortcuts?	Importare le scorciatoie da tastiera?
-	Capishot found your keyboard shortcut set {set} from another image editor on this computer: {n} of its shortcuts differ from Capishot's. Import it?	Capishot ha trovato su questo computer il tuo set di scorciatoie da tastiera {set} di un altro editor di immagini: {n} delle sue scorciatoie differiscono da quelle di Capishot. Importarlo?
-	Edit › Keyboard Shortcuts › Reset All to Defaults undoes an import.	Modifica › Scorciatoie da tastiera › Ripristina tutto ai predefiniti annulla un'importazione.
 	Don't Import	Non importare
 	The keyboard shortcut set was not imported: {error}	Il set di scorciatoie da tastiera non è stato importato: {error}
 	Reset Section	Reimposta sezione
@@ -2850,23 +2840,8 @@ curves	Smooth	Leviga
 	Functions	Funzioni
 	Print Resolution:	Risoluzione di stampa:
 # Edit › Content-Aware Fill workspace
-	Sampling Brush Tool	Strumento Pennello di campionamento
-	Sampling Area Overlay	Sovrapposizione area di campionamento
-	Show Sampling Area	Mostra area di campionamento
-	Indicates	Indica
-	Sampling Area	Area di campionamento
-	Excluded Area	Area esclusa
-	Sampling Area Options	Opzioni area di campionamento
-	Rectangular	Rettangolare
-	Fill Settings	Impostazioni di riempimento
-	Rotation Adaptation	Adattamento rotazione
-	Very High	Molto alta
 	High	Alta
 	Low	Bassa
-	Full	Completa
-	Mirror	Rifletti
-	Output Settings	Impostazioni di output
-	Output To	Output in
 	Duplicate Layer	Duplica livello
 	Contract	Contrai
 	Allow online fonts	Consenti font online
@@ -3340,8 +3315,6 @@ curves	Smooth	Leviga
 	Credit	Crediti
 	Transmission Reference	Riferimento trasmissione
 	Urgency	Urgenza
-	High	Alta
-	Low	Bassa
 	Category	Categoria
 	Supplemental Categories	Categorie supplementari
 	Object Name / Title	Nome oggetto / titolo
@@ -3521,7 +3494,6 @@ layerLabel	No Color	Nessun colore
 	Linear Dodge	Scherma lineare
 	Preview Image	Anteprima immagine
 	Save As	Salva con nome
-	Remove All	Rimuovi tutto
 	Unlock	Sblocca
 	Enable	Attiva
 	Disable	Disattiva
@@ -3529,8 +3501,6 @@ layerLabel	No Color	Nessun colore
 	Clear Selection	Deseleziona
 	Invert Selection	Inverti selezione
 	Select Inverse	Inverti selezione
-	Contract	Contrai
-	Sample Size	Dimensione campione
 	Strength	Forza
 	Gamma	Gamma
 	Input	Input
@@ -3555,7 +3525,6 @@ layerLabel	No Color	Nessun colore
 	Workspaces	Aree di lavoro
 	Show All	Mostra tutto
 	Hidden	Nascosto
-	Duplicate Layer	Duplica livello
 	Ungroup	Separa
 	Lock Transparent Pixels	Blocca pixel trasparenti
 	Lock Image Pixels	Blocca pixel immagine
@@ -3592,7 +3561,6 @@ layerLabel	No Color	Nessun colore
 	Failed	Non riuscito
 	Warning	Avviso
 	Information	Informazioni
-	Retry	Riprova
 	Continue	Continua
 	Skip	Salta
 	Resume	Riprendi
@@ -3642,7 +3610,6 @@ layerLabel	No Color	Nessun colore
 	Keyboard	Tastiera
 	Mouse	Mouse
 	Tablet	Tavoletta grafica
-	Display	Monitor
 	Panel	Pannello
 	Hide Grid	Nascondi griglia
 	Fit to Window	Adatta alla finestra
@@ -3662,7 +3629,6 @@ layerLabel	No Color	Nessun colore
 	Learn More	Ulteriori informazioni
 	Report a Bug	Segnala un bug
 	Updates	Aggiornamenti
-	Update	Aggiorna
 	Restart Required	Riavvio necessario
 	Restart	Riavvia
 	Quit	Esci
@@ -3878,7 +3844,6 @@ layerLabel	No Color	Nessun colore
 	Edit Toolbar	Modifica barra strumenti
 	Import Brushes	Importa pennelli
 	Load 3D LUT	Carica LUT 3D
-	New document	Nuovo documento
 	Press keys	Premi tasti
 	Rename Group	Rinomina gruppo
 	Rename Tool Preset	Rinomina predefinito strumento
@@ -4508,7 +4473,6 @@ navigator	Zoom	Zoom
 	Coated-cmyk	CMYK patinato
 	Convert	Converti
 	Currency	Valute
-	Cyrillic	Cirillico
 	Default Photoshop Size	Dimensione predefinita di Photoshop
 	Display-p3	Display P3
 	Drag a crop box · drag inside to move · edges resize ({ratio} ratio, {centre} centre) · Space moves while drawing · {commit} commits · Esc cancels	Trascina un riquadro ritaglio · trascina dentro per spostare · bordi ridimensionano ({ratio} proporzione, {centre} centro) · Spazio sposta durante disegno · {commit} conferma · Esc annulla
@@ -4517,7 +4481,6 @@ navigator	Zoom	Zoom
 	Freeze Lasso	Lazo congela
 	Freeze Mask	Congela maschera
 	Gray-gamma-2.2	Grigio gamma 2,2
-	Greek	Greco
 	Horizontal Distortion	Distorsione orizzontale
 	Import Photoshop brushes (.abr)	Importa pennelli di Photoshop (.abr)
 	Intent	Intento
@@ -4731,7 +4694,6 @@ shape	Appearance	Aspetto
 	Standard (GPU, 2.3 GB)	Standard (GPU, 2,3 GB)
 	High (GPU, slow)	Alta (GPU, lenta)
 	Ultra-light	Ultraleggera
-	Fast	Veloce
 	Show files	Mostra file
 	Recommended for this device	Consigliato per questo dispositivo
 	Generative Fill - {tier}	Riempimento generativo - {tier}
@@ -4739,14 +4701,11 @@ shape	Appearance	Aspetto
 	Erase text and objects.	Cancella testi e oggetti.
 	Enlarge pages without blur.	Ingrandisce le pagine senza sfocature.
 	Draw new content from a prompt.	Disegna nuovi contenuti da un testo.
-	Speed	Velocità
 	No GPU needed	Senza GPU
 	Precision	Precisione
 	Memory	Memoria
 	GPU memory	Memoria GPU
-	Resume	Riprendi
 	Paused	In pausa
-	Ready	Pronto
 	Downloading	Download in corso
 	Pause all	Metti tutto in pausa
 	Erases text and SFX and redraws screentone and lines.	Cancella testi ed effetti sonori e ridisegna retini e linee.
@@ -4759,3 +4718,6 @@ shape	Appearance	Aspetto
 	Detailed fills from a prompt, three variants in seconds on a GPU.	Riempimenti dettagliati da un testo, tre varianti in pochi secondi su GPU.
 	Needs a GPU	Richiede GPU
 	The most detail: many steps with guidance, slow, for a strong GPU.	Il massimo dettaglio: molti passi con guida, lento, per una GPU potente.
+	1×	1×
+	1.5×	1.5×
+	2×	2×

@@ -325,7 +325,6 @@ fn alternate_keys_run_their_command() {
     put_focus(&mut h, Place::Canvas);
     set_dry_run(&h.ctx, true);
     for (key, want) in [
-        ("F2", "edit.cut"),
         ("F3", "edit.copy"),
         ("Cmd+C", "edit.copy"),
         ("F4", "edit.paste"),

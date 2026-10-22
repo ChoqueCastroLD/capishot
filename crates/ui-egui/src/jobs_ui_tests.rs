@@ -921,19 +921,3 @@ fn esc_cancels_a_background_warp_commit() {
     let px = |d: &photocraft_doc::Document| d.layer(id).unwrap().surface().unwrap().read_region(photocraft_geom::Rect::new(0, 0, 320, 240));
     assert_eq!(px(&st.doc), px(&before), "the layer is untouched");
 }
-
-/// #4559: a background open (the desktop app's) also warns, when its document arrives, about
-/// type in a font that isn't installed.
-#[test]
-fn background_open_warns_about_missing_fonts() {
-    let mut s = photocraft_engine::Session::new();
-    s.execute("file.new", json!({"width": 40, "height": 20})).unwrap();
-    s.execute("type.create", json!({"text": "Hi", "x": 2, "y": 12, "size": 10, "font": "NoSuchFamily4559"})).unwrap();
-    let doc = (*s.active().unwrap().doc).clone();
-    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
-    // What the open job leaves behind: the decoded document in the session, then its result.
-    let (index, _) = app.session.open_document(doc, None);
-    super::finish_open(&mut app, "poster.psd", None, &json!({"document": index, "warnings": []}), None).unwrap();
-    let want = vec!["font 'NoSuchFamily4559' is not installed; text may render using a fallback face".to_string()];
-    assert!(app.ui.notices.last().is_some_and(|n| n.title.contains("poster.psd") && n.lines == want), "{:?}", app.ui.notices);
-}

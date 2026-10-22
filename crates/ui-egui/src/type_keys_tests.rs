@@ -212,22 +212,19 @@ fn alt_arrows_kern_track_lead_and_shift() {
     press(&mut h, Key::ArrowLeft, ALT);
     assert_eq!(style(h.state(), id, 8).tracking, 100.0);
     assert_eq!(style(h.state(), id, 3).tracking, 0.0, "outside the selection");
-    // Leading: auto (36 pt for 30 pt type) + 2, then -10.
+    // Leading, as Photoshop: ⌥↑ tightens it by 2 (auto is 36 pt for 30 pt type), ⌘⌥↓ loosens 10.
     press(&mut h, Key::ArrowUp, ALT);
-    assert_eq!(style(h.state(), id, 8).leading_pt, Some(38.0));
+    assert_eq!(style(h.state(), id, 8).leading_pt, Some(34.0));
     press(&mut h, Key::ArrowDown, ALT | Modifiers::COMMAND);
-    assert_eq!(style(h.state(), id, 8).leading_pt, Some(28.0));
+    assert_eq!(style(h.state(), id, 8).leading_pt, Some(44.0));
     assert_eq!(style(h.state(), id, 3).leading_pt, None);
     // Baseline shift.
     press(&mut h, Key::ArrowUp, ALT | Modifiers::SHIFT);
     press(&mut h, Key::ArrowUp, ALT | Modifiers::SHIFT);
     press(&mut h, Key::ArrowDown, ALT | Modifiers::SHIFT | Modifiers::COMMAND);
     assert_eq!(style(h.state(), id, 8).baseline_shift_pt, -6.0);
-    // The selection and the session survive; Cancel reverts the session's formatting.
+    // The selection survives (each press is its own history step, as in Photoshop).
     assert_eq!(selection(&h), (7, 11));
-    crate::type_tool::cancel(h.state_mut());
-    let st = style(h.state(), id, 8);
-    assert_eq!((st.tracking, st.leading_pt, st.baseline_shift_pt), (0.0, None, 0.0));
 }
 
 /// The ⇧⌘ formatting keys of Photoshop's default shortcut list.

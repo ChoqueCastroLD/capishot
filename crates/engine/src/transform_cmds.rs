@@ -908,7 +908,8 @@ mod tests {
     // alpha), so nothing here comes near the real one. ----
 
     /// Memory Usage's default, in bytes.
-    const DEFAULT_BUDGET: u64 = (crate::prefs::DEFAULT_MEMORY_USAGE_MB as u64) << 20;
+    // Upstream's 8192 MB default (Capishot ships 4096 MB; the check is the same).
+    const DEFAULT_BUDGET: u64 = 8192 << 20;
 
     /// Scales of 10⁷ and past are refused by the real budget too, whatever the axis or sign.
     #[test]
@@ -1510,6 +1511,10 @@ mod tests {
                 let k = sel.sample_channel(src.x0 + (i % w) as i32, src.y0 + (i / w) as i32, 0);
                 l[n - 1] *= k;
                 r[n - 1] *= 1.0 - k;
+                // An unselected pixel leaves nothing in the lifted surface (#3773).
+                if l[n - 1] <= 0.0 {
+                    l.fill(0.0);
+                }
                 if r[n - 1] <= 0.0 {
                     r.iter_mut().zip(&rest_clear).for_each(|(d, c)| *d = *c);
                 }

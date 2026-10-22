@@ -187,7 +187,7 @@ fn expand(packed: &str, keys: &[&str]) -> Result<String, String> {
 }
 
 /// The registry. English first: it is the fallback and the source language.
-pub static LANGUAGES: [LangInfo; 21] = [
+pub static LANGUAGES: [LangInfo; 17] = [
     LangInfo { code: "en", name: "English", source: b"", plural: plural_one_other, complete_menus: false, catalog: OnceLock::new() },
     LangInfo { code: "ja", name: "日本語", source: catalog!("ja"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
     LangInfo { code: "zh-hans", name: "简体中文", source: catalog!("zh-hans"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
@@ -198,10 +198,6 @@ pub static LANGUAGES: [LangInfo; 21] = [
     LangInfo { code: "ru", name: "Русский", source: catalog!("ru"), plural: plural_russian, complete_menus: true, catalog: OnceLock::new() },
     // Ukrainian has the same one/few/many rule for integer counts.
     LangInfo { code: "uk", name: "Українська", source: catalog!("uk"), plural: plural_russian, complete_menus: true, catalog: OnceLock::new() },
-    // Serbian (Latin script, Ekavian) has the same one/few/many rule for integer counts. `sr-RS`,
-    // `sr-Latn-*` and `sr_RS@latin` resolve here; so do Cyrillic `sr` locales, which read Latin
-    // rather than English.
-    LangInfo { code: "sr", name: "Srpski", source: catalog!("sr"), plural: plural_russian, complete_menus: true, catalog: OnceLock::new() },
     LangInfo { code: "cs", name: "Čeština", source: catalog!("cs"), plural: plural_cs, complete_menus: true, catalog: OnceLock::new() },
     LangInfo { code: "fr", name: "Français", source: catalog!("fr"), plural: plural_fr, complete_menus: true, catalog: OnceLock::new() },
     LangInfo { code: "id", name: "Bahasa Indonesia", source: catalog!("id"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
@@ -215,11 +211,8 @@ pub static LANGUAGES: [LangInfo; 21] = [
     LangInfo { code: "nl", name: "Nederlands", source: catalog!("nl"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
     LangInfo { code: "it", name: "Italiano", source: catalog!("it"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
     // Hungarian: a count takes the singular noun ("3 réteg"), so one plural form.
-    LangInfo { code: "hu", name: "Magyar", source: catalog!("hu"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
     // Turkish; `tr`, `tr-TR` and `tr_TR` locales resolve here.
-    LangInfo { code: "tr", name: "Türkçe", source: catalog!("tr"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
     // Vietnamese; `vi-VN` resolves here.
-    LangInfo { code: "vi", name: "Tiếng Việt", source: catalog!("vi"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
 ];
 
 impl LangInfo {
@@ -484,7 +477,6 @@ mod tests {
     const ZH: fn() -> Lang = || Lang::from_code("zh-hant").expect("zh-hant registered");
     const CS: fn() -> Lang = || Lang::from_code("cs").expect("cs registered");
     const ID: fn() -> Lang = || Lang::from_code("id").expect("id registered");
-    const VI: fn() -> Lang = || Lang::from_code("vi").expect("vi registered");
 
     #[test]
     fn indonesian_tags_resolve() {
@@ -492,17 +484,6 @@ mod tests {
             assert_eq!(lang_from_tag(tag), Some(ID()), "{tag}");
         }
         assert_eq!(ID().name(), "Bahasa Indonesia");
-    }
-
-    #[test]
-    fn vietnamese_tags_resolve() {
-        for tag in ["vi", "vi-VN", "vi_VN", "vi_VN.UTF-8"] {
-            assert_eq!(lang_from_tag(tag), Some(VI()), "{tag}");
-        }
-        assert_eq!(VI().name(), "Tiếng Việt");
-        assert!(VI().complete_menus(), "Vietnamese translates every source key");
-        assert_eq!(Lang::from_pref("vi"), VI());
-        assert_eq!(Lang::from_pref("VI"), VI());
     }
 
     #[test]
@@ -521,11 +502,6 @@ mod tests {
         assert_eq!(lang_from_tag("it-CH"), Lang::from_code("it"));
         assert_eq!(lang_from_tag("nl_NL.UTF-8"), Lang::from_code("nl"));
         assert_eq!(lang_from_tag("nl-BE"), Lang::from_code("nl"));
-        assert_eq!(lang_from_tag("hu_HU.UTF-8"), Lang::from_code("hu"));
-        assert_eq!(lang_from_tag("hu-HU"), Lang::from_code("hu"));
-        assert_eq!(lang_from_tag("tr_TR.UTF-8"), Lang::from_code("tr"));
-        assert_eq!(lang_from_tag("tr-TR"), Lang::from_code("tr"));
-        assert_eq!(lang_from_tag("tr"), Lang::from_code("tr"));
         // Traditional Chinese: by region, by script, and with a region after the script.
         assert_eq!(lang_from_tag("zh_TW.UTF-8"), Some(ZH()));
         assert_eq!(lang_from_tag("zh-TW"), Some(ZH()));
@@ -634,22 +610,6 @@ mod tests {
         assert_eq!(tr(es, "Layer"), "Capa");
         assert_eq!(trn(es, 1, "{n} item", "{n} items"), "1 elemento");
         assert_eq!(trn(es, 3, "{n} item", "{n} items"), "3 elementos");
-    }
-
-    #[test]
-    fn hungarian_resolves_and_keeps_the_singular_after_counts() {
-        let hu = Lang::from_code("hu").expect("hu registered");
-        for tag in ["hu", "hu_HU.UTF-8", "hu-HU"] {
-            assert_eq!(lang_from_tag(tag), Some(hu), "{tag}");
-        }
-        assert!(hu.complete_menus());
-        assert_eq!(hu.name(), "Magyar");
-        assert_eq!(tr(hu, "Layer"), "Réteg");
-        for (n, expected) in [(0, "0 réteg"), (1, "1 réteg"), (3, "3 réteg"), (21, "21 réteg")] {
-            assert_eq!(trn(hu, n, "{n} layer", "{n} layers"), expected);
-        }
-        assert_eq!(tr_ctx(hu, "layerLabel", "Red"), "Piros");
-        assert_eq!(tr(hu, "Red"), "Vörös");
     }
 
     #[test]
@@ -833,66 +793,6 @@ mod tests {
             assert_eq!(trn(uk, n, "{n} item", "{n} items"), format!("{n} {item}"));
             assert_eq!(trn(uk, n, "{n} layer", "{n} layers"), format!("{n} {layer}"));
             assert_eq!(trn(uk, n, "Group · {n} layer", "Group · {n} layers"), format!("Група · {n} {layer}"));
-        }
-    }
-
-    #[test]
-    fn serbian_resolves_locales_and_preferences() {
-        let sr = Lang::from_code("sr").expect("sr registered");
-        assert_eq!(sr.name(), "Srpski");
-        assert!(sr.complete_menus());
-        for tag in ["sr", "SR", "sr-RS", "sr_RS", "sr_RS.UTF-8", "sr_RS@latin", "sr-Latn", "sr-Latn-RS", "sr-Cyrl-RS", "sr-ME"] {
-            assert_eq!(lang_from_tag(tag), Some(sr), "{tag}");
-            assert_eq!(Lang::from_pref(tag), sr, "{tag}");
-        }
-        assert_eq!(tr(sr, "File"), "Datoteka");
-        assert_eq!(tr(sr, "Layer"), "Sloj");
-        assert_eq!(tr(sr, "New document…"), "Novi dokument…");
-        assert_eq!(tr_id(sr, "select.all", "All"), "Izaberi sve", "an id override wins over the plain label");
-        assert_eq!(tr(sr, "All"), "Sve");
-        assert_eq!(tr_ctx(sr, "cameraRaw", "Light"), "Svetlo");
-        assert_eq!(tr_ctx(sr, "fontWeight", "Light"), "Lagano");
-        assert_eq!(fmt(tr(sr, "Camera Raw Filter ({layer})"), &[("layer", "Background")]), "Camera Raw filter (Background)");
-        for key in ["Alt", "⌥"] {
-            assert_eq!(
-                fmt(tr(sr, "Add a mask  (from the selection; {key} inverts)"), &[("key", key)]),
-                format!("Dodaj masku  (iz selekcije; {key} invertuje)")
-            );
-        }
-    }
-
-    #[test]
-    fn serbian_plural_messages_handle_teens_and_compound_counts() {
-        let sr = Lang::from_code("sr").expect("sr registered");
-        for (n, item, layer) in [
-            (0, "stavki", "slojeva"),
-            (1, "stavka", "sloj"),
-            (2, "stavke", "sloja"),
-            (4, "stavke", "sloja"),
-            (5, "stavki", "slojeva"),
-            (11, "stavki", "slojeva"),
-            (12, "stavki", "slojeva"),
-            (14, "stavki", "slojeva"),
-            (21, "stavka", "sloj"),
-            (22, "stavke", "sloja"),
-            (25, "stavki", "slojeva"),
-            (101, "stavka", "sloj"),
-            (111, "stavki", "slojeva"),
-            (112, "stavki", "slojeva"),
-            (122, "stavke", "sloja"),
-        ] {
-            assert_eq!(trn(sr, n, "{n} item", "{n} items"), format!("{n} {item}"));
-            assert_eq!(trn(sr, n, "{n} layer", "{n} layers"), format!("{n} {layer}"));
-            assert_eq!(trn(sr, n, "Group · {n} layer", "Group · {n} layers"), format!("Grupa · {n} {layer}"));
-        }
-        for (n, expected) in [
-            (1, "Uklonjena je 1 tačka uzorkovanja"),
-            (3, "Uklonjene su 3 tačke uzorkovanja"),
-            (5, "Uklonjeno je 5 tačaka uzorkovanja"),
-            (13, "Uklonjeno je 13 tačaka uzorkovanja"),
-            (21, "Uklonjena je 21 tačka uzorkovanja"),
-        ] {
-            assert_eq!(trn(sr, n, "{n} sample point removed", "{n} sample points removed"), expected);
         }
     }
 

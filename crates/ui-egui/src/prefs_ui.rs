@@ -2949,8 +2949,7 @@ mod tests {
             .build_ui_state(|ui, values| section_fields(ui, "performance", values, &["memoryUsageMb".into()], crate::i18n::Lang::EN, None, ""), values);
         h.run_steps(2);
         h.get_by_label("Memory Usage");
-        h.get_by_label("Per-document RAM limit (MB)");
-        h.get_by_label("Limits each open document's pixels plus History. Oldest undo states are discarded when the limit is exceeded.");
+        h.get_by_label("Memory budget (MiB)");
         h.get_by_label("Applies immediately when saved. Memory is not reserved in advance.");
         assert_eq!(h.state()["memoryUsageMb"], 50000);
     }
@@ -4594,7 +4593,7 @@ mod tests {
         app.ui.dialog_mut(id).unwrap().fields.insert("overrides".into(), json!({}));
         crate::dialogs::confirm(&mut app, id).unwrap();
         assert!(app.session.prefs().alternate_shortcuts.is_empty() && app.session.prefs().shortcuts.is_empty());
-        assert_eq!(crate::shortcuts::effective_alternates(&app, "edit.cut"), ["F2"]);
+        assert!(crate::shortcuts::effective_alternates(&app, "edit.cut").is_empty(), "F2 is Rename Layer's in Capishot");
     }
 
     #[test]

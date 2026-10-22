@@ -54,12 +54,10 @@ pub(crate) fn with_missing_fonts(app: &PhotocraftApp, warnings: Vec<String>) -> 
 
 /// [`with_missing_fonts`] for `doc` itself: a file held back for its profile prompt
 /// (`open_prompt`) isn't the active document yet.
-pub(crate) fn with_missing_fonts_of(doc: &photocraft_doc::Document, mut warnings: Vec<String>) -> Vec<String> {
-    for w in photocraft_engine::type_extra_cmds::missing_font_warnings(doc) {
-        if !warnings.contains(&w) {
-            warnings.push(w);
-        }
-    }
+///
+/// Capishot reports missing fonts once, in its own "Missing fonts" notice with Load Fonts… and
+/// Resolve Missing Fonts… (`user_fonts_ui::after_open`), so they are not repeated as warnings.
+pub(crate) fn with_missing_fonts_of(_doc: &photocraft_doc::Document, warnings: Vec<String>) -> Vec<String> {
     warnings
 }
 

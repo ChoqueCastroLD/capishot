@@ -3174,23 +3174,6 @@ curves	Smooth	Haluskan
 	Functions	Fungsi
 	Print Resolution:	Resolusi Cetak:
 # Edit › Content-Aware Fill workspace
-	Sampling Brush Tool	Alat Kuas Pengambilan Sampel
-	Sampling Area Overlay	Hamparan Area Pengambilan Sampel
-	Show Sampling Area	Tampilkan Area Pengambilan Sampel
-	Indicates	Menandai
-	Sampling Area	Area Pengambilan Sampel
-	Excluded Area	Area yang Dikecualikan
-	Sampling Area Options	Opsi Area Pengambilan Sampel
-	Rectangular	Persegi Panjang
-	Fill Settings	Pengaturan Isian
-	Rotation Adaptation	Adaptasi Rotasi
-	Very High	Sangat Tinggi
-	Full	Penuh
-	Mirror	Cermin
-	Output Settings	Pengaturan Keluaran
-	Output To	Keluaran Ke
-	Duplicate Layer	Duplikat Layer
-	Contract	Ciutkan
 	Allow online fonts	Izinkan font online
 	Fonts	Font
 	Find More	Temukan Lainnya
@@ -3627,3 +3610,6 @@ curves	Smooth	Haluskan
 	Detailed fills from a prompt, three variants in seconds on a GPU.	Isian detail dari perintah, tiga varian dalam detik di GPU.
 	Needs a GPU	Perlu GPU
 	The most detail: many steps with guidance, slow, for a strong GPU.	Detail terbanyak: banyak langkah dengan panduan, lambat, untuk GPU kuat.
+	1×	1×
+	1.5×	1.5×
+	2×	2×

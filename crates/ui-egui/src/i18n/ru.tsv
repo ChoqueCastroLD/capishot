@@ -132,7 +132,6 @@
 	Clean Selection with AI	Очистить выделение с ИИ
 	Fill strokes with Manga LaMa instead of nearby patches: better on screentone and line art. The first use downloads the model (about 100 MB).	Заполнять мазки с помощью Manga LaMa вместо соседних фрагментов: лучше для скринтона и контуров. При первом использовании загружается модель (около 100 МБ).
 	Erase the selected text or SFX and redraw the background with Manga LaMa, on a new layer. The first use downloads the model (about 100 MB).	Стереть выделенный текст или звукоподражания и перерисовать фон с помощью Manga LaMa на новом слое. При первом использовании загружается модель (около 100 МБ).
-	Delete and Fill Selection	Удалить и заполнить выделение
 	Delete and Fill Selection	Удалить и залить выделение
 	Define Brush Preset…	Определить кисть…
 	Define Pattern…	Определить паттерн…
@@ -1730,7 +1729,6 @@
 	These settings aren't available in Capishot yet.	Эти параметры пока недоступны в Capishot.
 	Shortcut removed.	Комбинация клавиш удалена.
 	All shortcuts reset to Capishot defaults.	Все комбинации клавиш сброшены к стандартным Capishot.
-	All shortcuts reset to Capishot defaults.	Все комбинации клавиш сброшены к стандартным Capishot.
 	Add Shortcut	Добавить комбинацию
 	Delete Shortcut	Удалить комбинацию
 	Press keys…	Нажмите клавиши…
@@ -3119,23 +3117,6 @@ curves	Smooth	Сгладить
 	Functions	Функции
 	Print Resolution:	Разрешение печати:
 # Edit › Content-Aware Fill workspace
-	Sampling Brush Tool	Кисть области выборки
-	Sampling Area Overlay	Наложение области выборки
-	Show Sampling Area	Показать область выборки
-	Indicates	Обозначает
-	Sampling Area	Область выборки
-	Excluded Area	Исключённая область
-	Sampling Area Options	Параметры области выборки
-	Rectangular	Прямоугольная
-	Fill Settings	Параметры заливки
-	Rotation Adaptation	Адаптация поворота
-	Very High	Очень высокая
-	Full	Полная
-	Mirror	Отражение
-	Output Settings	Параметры вывода
-	Output To	Вывод в
-	Duplicate Layer	Дубликат слоя
-	Contract	Сжать
 	Allow online fonts	Разрешить онлайн-шрифты
 	Fonts	Шрифты
 	Find More	Найти ещё
@@ -3609,3 +3590,6 @@ curves	Smooth	Сгладить
 	Detailed fills from a prompt, three variants in seconds on a GPU.	Детальные заливки по запросу: три варианта за секунды на GPU.
 	Needs a GPU	Нужен GPU
 	The most detail: many steps with guidance, slow, for a strong GPU.	Максимум деталей: много шагов с подсказкой, медленно, для мощного GPU.
+	1×	1×
+	1.5×	1.5×
+	2×	2×
