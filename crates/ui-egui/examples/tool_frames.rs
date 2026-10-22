@@ -634,6 +634,7 @@ fn main() {
     let moves: usize = arg(&args, "--moves").and_then(|v| v.parse().ok()).unwrap_or(120);
     let per_frame: usize = arg(&args, "--per-frame").and_then(|v| v.parse().ok()).unwrap_or(2);
     let cpu = args.iter().any(|a| a == "--cpu");
+    let reps: usize = arg(&args, "--reps").and_then(|v| v.parse().ok()).unwrap_or(1).max(1);
     let only: Vec<String> = arg(&args, "--only").map(|s| s.split(',').map(str::to_string).collect()).unwrap_or_default();
     let t = Instant::now();
     let pg = page(w, hh, n);
@@ -674,6 +675,11 @@ fn main() {
     let mut rows = Vec::new();
     for name in ALL.iter().filter(|s| only.is_empty() || only.iter().any(|o| s.starts_with(o.as_str()))) {
         settle(&mut h, 3);
+        // `--reps N`: run the scenario N times and keep the last (warm) run.
+        for _ in 1..reps {
+            scenario(&mut h, &pg, name, moves, per_frame);
+            settle(&mut h, 3);
+        }
         let before = counters(&h);
         let frames = scenario(&mut h, &pg, name, moves, per_frame);
         let row = Row { name: name.to_string(), frames, counters: diff(&before, &counters(&h)) };
