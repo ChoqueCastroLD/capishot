@@ -124,6 +124,7 @@ pub mod menu_nav;
 pub mod menus;
 pub mod monitor_status;
 pub mod move_box;
+pub(crate) mod move_cpu;
 pub mod move_hover;
 pub mod move_lock;
 pub mod move_mods;
@@ -729,6 +730,9 @@ pub struct PhotocraftApp {
     pub perf_counters: perf_counters::PerfCounters,
     /// The chrome's last shapes, repainted during canvas gestures (`chrome_freeze`).
     pub(crate) chrome_freeze: chrome_freeze::State,
+    /// The CPU canvas drew this Move drag (document, revision) from its split composites on this
+    /// frame (`move_cpu`): the next frames' preview needn't shift the full-resolution layers.
+    pub(crate) cpu_move_split: Option<(DocId, u64, u64)>,
     /// Preferences, autosave and snapping runtime state (see `prefs_ui`, `snap_ui`).
     pub(crate) prefs_rt: prefs_ui::Runtime,
     /// Close, Revert or Exit parked behind the unsaved-changes prompt (see `discard_ui`).
@@ -863,6 +867,7 @@ impl PhotocraftApp {
             perf: Default::default(),
             perf_counters: Default::default(),
             chrome_freeze: Default::default(),
+            cpu_move_split: None,
             prefs_rt: Default::default(),
             discard: None,
             file_dialog: None,

@@ -310,6 +310,169 @@ pub fn render_rects(doc: &Document, rects: &[Rect]) -> Vec<Buffer> {
     rects.iter().map(run).collect()
 }
 
+/// [`render_rects`], but compositing `doc`'s layers over the given backdrops (one per rectangle,
+/// their own rects) instead of the document's empty backdrop: the layers above a cached composite
+/// of the layers below them (a Move drag on the CPU canvas re-blends only the moving layers).
+pub fn render_rects_over(doc: &Document, backdrops: Vec<Buffer>) -> Vec<Buffer> {
+    let patterns = pattern::PreparedPatterns::new(&doc.patterns, pattern::PREPARED_PATTERN_BYTES).in_mode(doc.pixel_format().mode);
+    let cx = Ctx::for_doc(doc, &patterns);
+    let union = backdrops.iter().map(|b| b.rect).filter(|r| !r.is_empty()).fold(Rect::EMPTY, |u, r| if u.is_empty() { r } else { u.union(&r) });
+    if union.is_empty() || doc.layers.is_empty() {
+        return backdrops;
+    }
+    let lab = doc.mode == photocraft_color::ColorMode::Lab;
+    let hdr = doc.depth == photocraft_color::SampleType::F32;
+    let cmyk = cmyk_space(doc);
+    let cmyk = cmyk.as_ref();
+    cx.set_fx_clip(union);
+    prepare_effects(&doc.layers, union, &cx, |f| {
+        photocraft_color::convert::with_cmyk_space(cmyk, || in_blend_space(lab, hdr, f));
+    });
+    let run = |mut b: Buffer| {
+        if b.rect.is_empty() {
+            return b;
+        }
+        photocraft_color::convert::with_cmyk_space(cmyk, || {
+            in_blend_space(lab, hdr, || composite_stack_at(&doc.layers, &mut b, &cx, advanced::Scope::ROOT));
+        });
+        b
+    };
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
+    if backdrops.len() > 1 {
+        use rayon::prelude::*;
+        return backdrops.into_par_iter().map(run).collect();
+    }
+    backdrops.into_iter().map(run).collect()
+}
+
+/// `top` laid over `bottom` (Normal, straight alpha), where their rects overlap. A run of layers
+/// that all [`composite_as_over`] composites to the same pixels (up to float rounding) as their
+/// own composite over transparency laid over the backdrop with this.
+pub fn over(bottom: &mut Buffer, top: &Buffer) {
+    let r = bottom.rect.intersect(&top.rect);
+    if r.is_empty() {
+        return;
+    }
+    let (bw, tw) = (bottom.rect.width() as usize, top.rect.width() as usize);
+    for y in r.y0..r.y1 {
+        let bo = (y - bottom.rect.y0) as usize * bw + (r.x0 - bottom.rect.x0) as usize;
+        let to = (y - top.rect.y0) as usize * tw + (r.x0 - top.rect.x0) as usize;
+        let n = r.width() as usize;
+        for (b, t) in bottom.px[bo..bo + n].iter_mut().zip(&top.px[to..to + n]) {
+            let ta = t[3];
+            if ta <= 0.0 {
+                continue;
+            }
+            if ta >= 1.0 {
+                *b = *t;
+                continue;
+            }
+            let ba = b[3] * (1.0 - ta);
+            let a = ta + ba;
+            *b = if a > 0.0 { [(t[0] * ta + b[0] * ba) / a, (t[1] * ta + b[1] * ba) / a, (t[2] * ta + b[2] * ba) / a, a] } else { [0.0; 4] };
+        }
+    }
+}
+
+/// Whether `layer` composites as its own image over the backdrop (Normal blend, no text gamma,
+/// effects, Blend If, channel restrictions, knockout or other advanced blending, not clipped and
+/// not an adjustment; a pass-through group when all its children do), so that a run of such
+/// layers can be flattened once and laid [`over`] whatever is below it. Hidden layers do.
+pub fn composites_as_over(layer: &Layer, mode: photocraft_color::ColorMode) -> bool {
+    if !layer.visible {
+        return true;
+    }
+    if layer.clipped
+        || matches!(layer.content, LayerContent::Adjustment(_))
+        || effects::has_effects(layer)
+        || blend_if_active(layer, mode)
+        || channel_weights(layer, mode).is_some()
+        || advanced::advanced_active(layer, &[])
+        || !layer.advanced.is_default()
+        || text_gamma(layer) != 1.0
+    {
+        return false;
+    }
+    match (&layer.content, layer.blend) {
+        (LayerContent::Group(g), BlendMode::PassThrough) => {
+            layer.fill_opacity >= 1.0 && g.artboard.is_none() && g.children.iter().all(|c| composites_as_over(c, mode))
+        }
+        (LayerContent::Group(g), BlendMode::Normal) => g.artboard.is_none() && no_knockout(&g.children),
+        (_, BlendMode::Normal) => true,
+        _ => false,
+    }
+}
+
+/// Whether `layer` changes an opaque backdrop's colour affinely, `c -> m·c + n` per pixel and
+/// channel (Normal, Multiply and Screen blending; isolated groups in those modes; pass-through
+/// groups of such layers; effects in those modes; clipped layers in those modes), so that a run of
+/// such layers is captured exactly by its composite over black and over white ([`apply_affine`]).
+/// Type layers blend in a gamma space: affine where their glyphs are opaque, approximated on the
+/// anti-aliased edges (`approx_text`).
+pub fn composites_affinely(layer: &Layer, mode: photocraft_color::ColorMode, approx_text: bool) -> bool {
+    use photocraft_doc::Effect;
+    if !layer.visible {
+        return true;
+    }
+    let affine_mode = |m: BlendMode| matches!(m, BlendMode::Normal | BlendMode::Multiply | BlendMode::Screen);
+    if matches!(layer.content, LayerContent::Adjustment(_))
+        || blend_if_active(layer, mode)
+        || channel_weights(layer, mode).is_some()
+        || !layer.advanced.is_default()
+        || (text_gamma(layer) != 1.0 && !approx_text)
+    {
+        return false;
+    }
+    let fx_ok = layer.effects.items.iter().filter(|e| e.enabled()).all(|e| match e {
+        Effect::DropShadow(s) | Effect::InnerShadow(s) => affine_mode(s.common.blend),
+        Effect::OuterGlow(g) | Effect::InnerGlow(g) => affine_mode(g.common.blend),
+        Effect::Stroke(st) => affine_mode(st.common.blend),
+        Effect::ColorOverlay { common, .. } | Effect::GradientOverlay { common, .. } | Effect::PatternOverlay { common, .. } => affine_mode(common.blend),
+        Effect::Satin(s) => affine_mode(s.common.blend),
+        Effect::BevelEmboss(_) => false,
+    });
+    if !fx_ok {
+        return false;
+    }
+    match (&layer.content, layer.blend) {
+        (LayerContent::Group(g), BlendMode::PassThrough) => {
+            g.artboard.is_none() && !effects::has_effects(layer) && g.children.iter().all(|c| composites_affinely(c, mode, approx_text))
+        }
+        (LayerContent::Group(g), m) => g.artboard.is_none() && affine_mode(m) && no_knockout(&g.children),
+        (_, m) => affine_mode(m),
+    }
+}
+
+/// Lay a cached affine map over `buf`: `black` and `white` are the same layers composited over
+/// opaque black and opaque white, so each colour becomes `black + (white − black)·c`. Pixels of
+/// `buf` that aren't opaque are left alone; returns whether every pixel was opaque (else the
+/// caller composites those layers itself).
+pub fn apply_affine(buf: &mut Buffer, black: &Buffer, white: &Buffer) -> bool {
+    let r = buf.rect.intersect(&black.rect).intersect(&white.rect);
+    if r != buf.rect {
+        return false;
+    }
+    if buf.px.iter().any(|p| p[3] < 1.0) {
+        return false;
+    }
+    let (bw, kw) = (buf.rect.width() as usize, black.rect.width() as usize);
+    for y in r.y0..r.y1 {
+        let bo = (y - buf.rect.y0) as usize * bw;
+        let ko = (y - black.rect.y0) as usize * kw + (r.x0 - black.rect.x0) as usize;
+        let n = r.width() as usize;
+        for ((p, k), w) in buf.px[bo..bo + n].iter_mut().zip(&black.px[ko..ko + n]).zip(&white.px[ko..ko + n]) {
+            for c in 0..3 {
+                p[c] = (k[c] + (w[c] - k[c]) * p[c]).clamp(0.0, 1.0);
+            }
+        }
+    }
+    true
+}
+
+fn no_knockout(layers: &[Layer]) -> bool {
+    layers.iter().all(|l| l.advanced.knockout == photocraft_doc::Knockout::None && l.children().is_none_or(no_knockout))
+}
+
 /// Runs `f` with this thread's document blend flags set ([`psblend::LAB_MIX`], [`psblend::HDR`]),
 /// then restores the values they had (also on unwind): a nested rayon job can run another tile
 /// on this thread mid-composite, and clearing the flags there broke the outer tile (#1112).

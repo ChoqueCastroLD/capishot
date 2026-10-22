@@ -25,6 +25,8 @@ pub struct PerfCounters {
     pub move_preview_reused: u64,
     /// Snap target sets built from the document (drag starts on a changed document).
     pub snap_builds: u64,
+    /// CPU canvas frames of a Move drag that re-blended only the moving layers (`move_cpu`).
+    pub move_split: u64,
     /// Crop tool composites past the canvas sent off the UI thread.
     pub crop_beyond_async: u64,
     /// Frames that repainted the chrome from its last shapes during a canvas gesture.
@@ -46,6 +48,7 @@ impl PerfCounters {
             ("histogram", self.histogram),
             ("move_preview_reused", self.move_preview_reused),
             ("snap_builds", self.snap_builds),
+            ("move_split", self.move_split),
             ("crop_beyond_async", self.crop_beyond_async),
             ("chrome_reused", self.chrome_reused),
             ("frames", self.frames),

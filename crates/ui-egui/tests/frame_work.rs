@@ -66,6 +66,19 @@ fn repaint_asked(h: &H) -> bool {
     h.output().viewport_output.get(&ViewportId::ROOT).is_some_and(|v| v.repaint_delay < std::time::Duration::from_secs(1))
 }
 
+/// Run until the app asks for no more frames (the CPU canvas builds its tiles on worker threads,
+/// polling until they land; on a busy machine that can take a while), at most 20 s.
+fn settle(h: &mut H) {
+    let t = std::time::Instant::now();
+    while t.elapsed().as_secs() < 20 {
+        let _ = h.try_run_realtime();
+        h.step();
+        if !repaint_asked(h) {
+            break;
+        }
+    }
+}
+
 fn counter(h: &H, name: &str) -> u64 {
     h.state().perf_counters.snapshot().iter().find(|c| c.0 == name).map_or(0, |c| c.1)
 }
@@ -73,8 +86,9 @@ fn counter(h: &H, name: &str) -> u64 {
 #[test]
 fn an_idle_app_asks_for_no_frames() {
     let (mut h, _) = app(60);
-    // Real time: the CPU canvas builds its tiles on worker threads, polling until they land.
-    let _ = h.try_run_realtime();
+    // Real time: the CPU canvas builds its tiles on worker threads, polling until they land (on a
+    // busy machine that can take a while).
+    settle(&mut h);
     for _ in 0..20 {
         h.step();
         assert!(!repaint_asked(&h), "idle frame asked for another: {:?}", h.ctx.repaint_causes());
@@ -274,7 +288,7 @@ fn a_move_drag_reuses_its_preview_document() {
     h.state_mut().ui.tool = Tool::Move;
     h.state_mut().ui.tool_options.move_auto_select = false;
     h.state_mut().ui.extras.snap = false;
-    let _ = h.try_run();
+    settle(&mut h);
     let bounds =
         |h: &H| photocraft_engine::layer_multi_cmds::layer_bounds(h.state().session.active().expect("doc").doc.layer(mid).expect("layer")).expect("bounds");
     let before = bounds(&h);
@@ -285,12 +299,15 @@ fn a_move_drag_reuses_its_preview_document() {
     h.step();
     h.event(Event::PointerButton { pos: p0, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
     h.step();
-    let reused = counter(&h, "move_preview_reused");
+    let (reused, split) = (counter(&h, "move_preview_reused"), counter(&h, "move_split"));
     for i in 1..=20 {
         h.event(Event::PointerMoved(screen(&h, from[0] + f64::from(i) * 3.0 / zoom.max(0.01), from[1])));
         h.step();
     }
-    assert!(counter(&h, "move_preview_reused") - reused >= 15, "preview reused on {} of 20 frames", counter(&h, "move_preview_reused") - reused);
+    // The CPU canvas draws the drag from its split composites (`move_cpu`), the preview then
+    // copying nothing; else the preview reuses its document.
+    let (reused, split) = (counter(&h, "move_preview_reused") - reused, counter(&h, "move_split") - split);
+    assert!(split >= 15, "split composites on {split} of 20 frames (preview reused on {reused})");
     let p1 = screen(&h, from[0] + 60.0 / zoom.max(0.01), from[1]);
     h.event(Event::PointerButton { pos: p1, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
     h.run_steps(3);

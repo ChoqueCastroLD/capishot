@@ -213,7 +213,16 @@ fn section_icon(ui: &mut egui::Ui, s: Section, color: egui::Color32) {
 
 fn star(p: &egui::Painter, c: egui::Pos2, r: f32, color: egui::Color32) {
     let k = r * 0.28;
-    let pts = vec![c + egui::vec2(0.0, -r), c + egui::vec2(k, -k), c + egui::vec2(r, 0.0), c + egui::vec2(k, k), c + egui::vec2(0.0, r), c + egui::vec2(-k, k), c + egui::vec2(-r, 0.0), c + egui::vec2(-k, -k)];
+    let pts = vec![
+        c + egui::vec2(0.0, -r),
+        c + egui::vec2(k, -k),
+        c + egui::vec2(r, 0.0),
+        c + egui::vec2(k, k),
+        c + egui::vec2(0.0, r),
+        c + egui::vec2(-k, k),
+        c + egui::vec2(-r, 0.0),
+        c + egui::vec2(-k, -k),
+    ];
     p.add(egui::Shape::convex_polygon(pts, color, egui::Stroke::NONE));
 }
 
@@ -242,7 +251,11 @@ fn thumbnail(ui: &mut egui::Ui, s: Section, t: &Tokens) {
             for i in 0..5 {
                 for j in 0..5 {
                     let g = if (i + j) % 2 == 0 { 70 } else { 200 };
-                    p.rect_filled(egui::Rect::from_min_size(l.min + egui::vec2(4.0 + i as f32 * 6.5, 6.0 + j as f32 * 6.5), egui::vec2(6.5, 6.5)), 0.0, egui::Color32::from_gray(g));
+                    p.rect_filled(
+                        egui::Rect::from_min_size(l.min + egui::vec2(4.0 + i as f32 * 6.5, 6.0 + j as f32 * 6.5), egui::vec2(6.5, 6.5)),
+                        0.0,
+                        egui::Color32::from_gray(g),
+                    );
                 }
             }
             p.circle_filled(rt.center(), 14.0, egui::Color32::from_gray(70));
@@ -317,7 +330,8 @@ fn card_ui(
     let st: Vec<(&'static ModelInfo, Status)> = files.iter().map(|m| (*m, status_of(m))).collect();
     // A shared file (TAESD) downloading or paused for another card doesn't make this one
     // "downloading" or "paused": only its own files do.
-    let own: Vec<&str> = files.iter().filter(|m| !cards::CARDS.iter().any(|o| o.id != c.id && o.models().iter().any(|x| x.file == m.file))).map(|m| m.file).collect();
+    let own: Vec<&str> =
+        files.iter().filter(|m| !cards::CARDS.iter().any(|o| o.id != c.id && o.models().iter().any(|x| x.file == m.file))).map(|m| m.file).collect();
     let active = |s: &Status| s.is_pending() || matches!(s, Status::Paused { .. });
     let started = own.is_empty() || st.iter().any(|(m, s)| own.contains(&m.file) && active(s));
     let state = CardState::of(&st.iter().map(|(m, s)| (m.bytes, if !started && active(s) { Status::NotDownloaded } else { s.clone() })).collect::<Vec<_>>());
@@ -373,33 +387,75 @@ fn card_ui(
                 ui.label(egui::RichText::new(&label).color(color).size(12.0));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| match &state {
                     CardState::NotDownloaded => {
-                        if { let r = crate::widgets::primary_button(ui, tl!("Download"), 84.0); rec("download", &r); r }.clicked() {
+                        if {
+                            let r = crate::widgets::primary_button(ui, tl!("Download"), 84.0);
+                            rec("download", &r);
+                            r
+                        }
+                        .clicked()
+                        {
                             *action = Some(Action::Download(c.id));
                         }
                     }
                     CardState::Error(_) => {
-                        if { let r = crate::widgets::primary_button(ui, tl!("Retry"), 84.0); rec("retry", &r); r }.clicked() {
+                        if {
+                            let r = crate::widgets::primary_button(ui, tl!("Retry"), 84.0);
+                            rec("retry", &r);
+                            r
+                        }
+                        .clicked()
+                        {
                             *action = Some(Action::Download(c.id));
                         }
                     }
                     CardState::Downloading { .. } => {
-                        if { let r = crate::widgets::secondary_button(ui, tl!("Cancel"), 70.0); rec("cancel", &r); r }.clicked() {
+                        if {
+                            let r = crate::widgets::secondary_button(ui, tl!("Cancel"), 70.0);
+                            rec("cancel", &r);
+                            r
+                        }
+                        .clicked()
+                        {
                             *action = Some(Action::Cancel(c.id));
                         }
-                        if { let r = crate::widgets::secondary_button(ui, tl!("Pause"), 70.0); rec("pause", &r); r }.clicked() {
+                        if {
+                            let r = crate::widgets::secondary_button(ui, tl!("Pause"), 70.0);
+                            rec("pause", &r);
+                            r
+                        }
+                        .clicked()
+                        {
                             *action = Some(Action::Pause(c.id));
                         }
                     }
                     CardState::Paused { .. } => {
-                        if { let r = crate::widgets::secondary_button(ui, tl!("Cancel"), 70.0); rec("cancel", &r); r }.clicked() {
+                        if {
+                            let r = crate::widgets::secondary_button(ui, tl!("Cancel"), 70.0);
+                            rec("cancel", &r);
+                            r
+                        }
+                        .clicked()
+                        {
                             *action = Some(Action::Cancel(c.id));
                         }
-                        if { let r = crate::widgets::primary_button(ui, tl!("Resume"), 70.0); rec("resume", &r); r }.clicked() {
+                        if {
+                            let r = crate::widgets::primary_button(ui, tl!("Resume"), 70.0);
+                            rec("resume", &r);
+                            r
+                        }
+                        .clicked()
+                        {
                             *action = Some(Action::Download(c.id));
                         }
                     }
                     CardState::Ready => {
-                        if { let r = crate::widgets::secondary_button(ui, tl!("Delete"), 70.0); rec("delete", &r); r }.clicked() {
+                        if {
+                            let r = crate::widgets::secondary_button(ui, tl!("Delete"), 70.0);
+                            rec("delete", &r);
+                            r
+                        }
+                        .clicked()
+                        {
                             *action = Some(Action::Delete(c.id));
                         }
                     }
@@ -467,7 +523,11 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
         // Big by default: three cards a row on a laptop.
         let w = (screen.width() * 0.8).clamp(560.0, 1120.0);
         let h = (screen.height() * 0.84).clamp(420.0, 900.0);
-        window.resizable(true).default_width(w).default_height(h).default_pos(egui::pos2((canvas.center().x - w / 2.0).max(screen.left() + 8.0), (screen.top() + 40.0).max(canvas.top() - 30.0)))
+        window
+            .resizable(true)
+            .default_width(w)
+            .default_height(h)
+            .default_pos(egui::pos2((canvas.center().x - w / 2.0).max(screen.left() + 8.0), (screen.top() + 40.0).max(canvas.top() - 30.0)))
     };
     host.show(ctx, egui::Id::new("ai-models-window"), window, |ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| host.header_button(ui));
@@ -521,7 +581,13 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             let width = ui.available_width().min(ui.clip_rect().width());
             // Cards side by side when there is room.
-            let cols = if width >= 760.0 { 3 } else if width >= 500.0 { 2 } else { 1 };
+            let cols = if width >= 760.0 {
+                3
+            } else if width >= 500.0 {
+                2
+            } else {
+                1
+            };
             let card_w = (width - 10.0 * (cols as f32 - 1.0)) / cols as f32;
             for section in [Section::Clean, Section::Upscale, Section::Generative] {
                 crate::widgets::hairline(ui);

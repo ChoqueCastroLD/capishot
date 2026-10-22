@@ -132,7 +132,14 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Do
     if offset == (0, 0) && p.offsets.is_empty() {
         return None;
     }
-    if p.offsets.last() != Some(&offset) {
+    // The CPU canvas drew the last frame of this drag from its own split composites (`move_cpu`):
+    // it shifts the moving layers itself, at the zoom's level, so the preview is the document as
+    // it is (no full-resolution copy of the moving layers per frame).
+    let lazy = app.cpu_move_split.is_some_and(|(d, r, frame)| d == doc_id && r == revision && frame + 1 >= app.frame);
+    if lazy && p.offsets.last() != Some(&offset) {
+        p.shown = Some(doc.clone());
+        p.offsets.push(offset);
+    } else if p.offsets.last() != Some(&offset) {
         let t0 = crate::gpu_canvas::now_ms();
         // The last frame's preview, when nothing else holds it, is reused: only the moving layers
         // are copied again (`moved_into`), not the whole stack. Duotone previews are converted
@@ -206,6 +213,16 @@ pub(crate) fn gpu_translations(app: &PhotocraftApp, idx: usize) -> Vec<photocraf
         }
     }
     out
+}
+
+/// What the CPU canvas needs to re-blend only the moving layers of document `idx`'s Move preview
+/// (`move_cpu`), when `shown` is that preview.
+pub(crate) fn cpu_plan(app: &PhotocraftApp, idx: usize, shown: &Arc<Document>) -> Option<crate::move_cpu::Plan> {
+    let st = app.session.documents().get(idx)?;
+    let p = app.move_preview.as_ref().filter(|p| p.doc == st.doc.id && p.revision == st.revision && !p.floating)?;
+    p.shown.as_ref().filter(|s| Arc::ptr_eq(s, shown))?;
+    let offset = p.offsets.last().copied()?;
+    Some(crate::move_cpu::Plan { base: st.doc.clone(), ids: p.ids.clone(), doc: st.doc.id, revision: st.revision, offset })
 }
 
 /// `ids` and every layer inside them (groups move their contents).
