@@ -1306,3 +1306,47 @@ fn brush_and_pencil_paint_a_cmyk_pick_with_the_picked_inks() {
         assert!(got.iter().zip(cyan).all(|(a, b)| (a - b).abs() < 0.02), "{cmd}: {got:?}");
     }
 }
+
+/// The brush object's schema traps are honest: `color` takes the top-level command's hex string, a
+/// scalar is accepted where a dynamic (jitter) is wanted, and a misplaced or unknown key is refused
+/// naming where it belongs instead of being merged away silently.
+#[test]
+fn brush_patch_takes_friendly_forms_and_refuses_misplaced_keys() {
+    let base = BrushSettings::default();
+    let cmd = "paint.stroke";
+    // A hex color, as the top-level `color` takes it.
+    let b = merge_brush(&base, &json!({"color": "#ff0000"}), cmd).unwrap();
+    assert_eq!(b.color, [1.0, 0.0, 0.0, 1.0]);
+    let b = merge_brush(&base, &json!({"color": "#80c0ff00"}), cmd).unwrap();
+    assert!((b.color[0] - 128.0 / 255.0).abs() < 1e-6 && (b.color[2] - 1.0).abs() < 1e-6 && b.color[3] == 0.0);
+    let e = merge_brush(&base, &json!({"color": "red"}), cmd).unwrap_err();
+    assert!(e.to_string().contains("#rrggbb"), "{e}");
+    // A scalar where a dynamic is wanted.
+    let b = merge_brush(&base, &json!({"scattering": {"enabled": true, "count": 3, "countJitter": 2}}), cmd).unwrap();
+    assert_eq!((b.scattering.count, b.scattering.count_jitter.jitter), (3, 2.0));
+    assert_eq!(b.scattering.count_jitter.control, photocraft_paint::Control::Off);
+    let e = merge_brush(&base, &json!({"scattering": {"countJitter": true}}), cmd).unwrap_err();
+    assert!(e.to_string().contains("jitter"), "{e}");
+    // A misplaced key names the right path; an unknown key is refused.
+    let e = merge_brush(&base, &json!({"countJitter": 2}), cmd).unwrap_err();
+    assert!(e.to_string().contains("scattering.countJitter"), "{e}");
+    assert!(merge_brush(&base, &json!({"colour": "#ff0000"}), cmd).is_err());
+    assert!(merge_brush(&base, &json!({"scattering": {"count": 3, "unknownKey": 1}}), cmd).is_err());
+    // The documented object forms still work, and a legacy alias stays accepted.
+    let b = merge_brush(
+        &base,
+        &json!({"pressure_size": true, "square": true, "scattering": {"scatter": {"jitter": 1.0}, "countJitter": {"jitter": 0.5, "minimum": 0.2}}}),
+        cmd,
+    )
+    .unwrap();
+    assert!(b.pressure_size && b.square);
+    assert_eq!((b.scattering.scatter.jitter, b.scattering.count_jitter.minimum), (1.0, 0.2));
+    // A rejected patch leaves the brush alone.
+    let mut s = session(40, 40);
+    s.execute("paint.stroke", json!({"points": [[4, 20], [36, 20]], "size": 8, "brush": {"color": "#ff0000"}})).unwrap();
+    assert!(rgba(&s, 20, 20)[0] > 0.9, "the hex brush color paints");
+    let before = s.tools.brush.clone();
+    let e = s.execute("paint.stroke", json!({"points": [[4, 20], [36, 20]], "brush": {"countJitter": 2}})).unwrap_err();
+    assert!(e.to_string().contains("scattering.countJitter"), "{e}");
+    assert_eq!(s.tools.brush, before);
+}

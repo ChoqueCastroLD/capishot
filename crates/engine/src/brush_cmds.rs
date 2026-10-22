@@ -3,8 +3,10 @@
 //!
 //! Brushes are [`BrushSettings`] serialised as camelCase JSON; any command taking a `"brush"`
 //! object deep-merges it onto the session brush, so partial objects work
-//! (`{"scattering": {"enabled": true}}`). Strokes are deterministic: the jitter seed is the `seed`
-//! param or a hash of the points, so a journaled command replays to identical pixels.
+//! (`{"scattering": {"enabled": true}}`). The merge accepts the friendly forms the schema itself
+//! rejects (`color` as hex, a dynamic's jitter as a bare number) and refuses a key that names no
+//! setting. Strokes are deterministic: the jitter seed is the `seed` param or a hash of the points,
+//! so a journaled command replays to identical pixels.
 
 use photocraft_doc::LayerContent;
 use photocraft_geom::Rect;
@@ -112,7 +114,75 @@ fn merge(base: &mut Value, patch: &Value) {
     }
 }
 
-/// Apply a JSON brush patch onto a brush.
+/// Keys a brush patch may use that a serialised brush does not carry: serde aliases of renamed
+/// fields, and `square`, which serialises only while it is on.
+const IMPLICIT_BRUSH_KEYS: &[&str] = &["pressure_size", "pressure_opacity", "square"];
+
+/// Settings that live in a section but are easy to try at the brush's top level: where they
+/// belong, named by the refusal (they used to be dropped silently).
+const MOVED_BRUSH_KEYS: &[(&str, &str)] = &[("countJitter", "scattering.countJitter")];
+
+/// Rewrite the friendly forms the schema itself rejects onto it, walking `patch` against `schema`
+/// (a serialised brush): `color` also takes the top-level command's hex string, a scalar where a
+/// [`photocraft_paint::Dynamic`] is wanted becomes its `{"jitter":…}` form, and a key that names no
+/// brush setting is refused naming where it belongs, instead of being merged away silently.
+fn normalize_brush_patch(patch: &Value, schema: &Value, cmd: &str, path: &str) -> Result<Value> {
+    let Some(keys) = patch.as_object() else { return Ok(patch.clone()) };
+    let mut out = serde_json::Map::new();
+    for (k, v) in keys {
+        let here = if path.is_empty() { k.clone() } else { format!("{path}.{k}") };
+        let want = schema.get(k);
+        // A scalar where the schema holds a dynamic parameter (its jitter + control keys).
+        let dynamic = match want {
+            Some(Value::Object(d)) => d.contains_key("jitter") && d.contains_key("control"),
+            _ => false,
+        };
+        if dynamic && !v.is_object() {
+            let number = v.as_f64().filter(|n| n.is_finite());
+            let Some(jitter) = number else {
+                return Err(bad(cmd, format!("`{here}` takes a number or a {{\"jitter\":number,…}} object")));
+            };
+            out.insert(k.clone(), json!({ "jitter": jitter }));
+            continue;
+        }
+        if want.is_none() && !IMPLICIT_BRUSH_KEYS.contains(&k.as_str()) {
+            return match MOVED_BRUSH_KEYS.iter().find(|(moved, _)| *moved == k) {
+                Some((_, right)) => Err(bad(cmd, format!("`{here}` is not a brush setting: it belongs in `{right}`"))),
+                None => Err(bad(cmd, format!("unknown brush setting `{here}`"))),
+            };
+        }
+        // The command's friendly color forms, as the top-level `color` takes them.
+        if here == "color" {
+            match v {
+                Value::String(h) => {
+                    let c = crate::commands::parse_hex(h).ok_or_else(|| bad(cmd, format!("`color` must be \"#rrggbb\" or [r, g, b, a] floats in 0..1")))?;
+                    out.insert(k.clone(), json!(c));
+                    continue;
+                }
+                _ => {
+                    out.insert(k.clone(), v.clone());
+                    continue;
+                }
+            }
+        }
+        // An object merges key by key; another variant of an externally tagged enum replaces the
+        // old one wholesale.
+        if let Some(sv) = want {
+            match (sv, v) {
+                (Value::Object(s), Value::Object(p)) if s.len() != 1 || p.len() != 1 || s.keys().next() == p.keys().next() => {
+                    out.insert(k.clone(), normalize_brush_patch(v, sv, cmd, &here)?);
+                }
+                _ => out.insert(k.clone(), v.clone()),
+            }
+        } else {
+            out.insert(k.clone(), v.clone());
+        }
+    }
+    Ok(Value::Object(out))
+}
+
+/// Apply a JSON brush patch onto a brush: the patch is normalised onto the brush schema first
+/// (friendly forms rewritten, a misplaced or unknown key refused), then deep-merged.
 pub fn merge_brush(base: &BrushSettings, patch: &Value, cmd: &str) -> Result<BrushSettings> {
     // Bitmaps the patch doesn't touch (sampled tips, pattern tiles: up to megabytes of base64) skip
     // the JSON round trip, so a Brush Settings slider on an imported tip stays cheap.
@@ -132,7 +202,8 @@ pub fn merge_brush(base: &BrushSettings, patch: &Value, cmd: &str) -> Result<Bru
     let dual_tip = (!touches(&["dualBrush", "tip"])).then(|| std::mem::take(&mut light.dual_brush.tip));
     let pattern = (!touches(&["texture", "pattern"])).then(|| std::mem::take(&mut light.texture.pattern));
     let mut v = serde_json::to_value(&light).map_err(|e| bad(cmd, e.to_string()))?;
-    merge(&mut v, patch);
+    let patch = normalize_brush_patch(patch, &v, cmd, "")?;
+    merge(&mut v, &patch);
     let mut out: BrushSettings = serde_json::from_value(v).map_err(|e| bad(cmd, format!("invalid brush: {e}")))?;
     if let Some(t) = tip {
         out.tip = t;
@@ -1261,7 +1332,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!("brush.presets.setCurrent", "Set Current Brush Preset", r##"{"name":string}"##, always, presets_set_current, true),
         spec!("brush.defineFromSelection", "Define Brush Preset…", r##"{"name":string}"##, has_selection_and_pixels, define_from_selection, true),
         spec!("brush.get", "Get Brush", "{}", always, |s, _| Ok(brush_json(&s.tools.brush)), false),
-        spec!("tools.setBrush", "Set Brush", r##"{"preset":name?,"reset":bool?,…BrushSettings fields (camelCase, deep-merged)}"##, always, set_brush, true),
+        spec!("tools.setBrush", "Set Brush", r##"{"preset":name?,"reset":bool?,…BrushSettings fields (camelCase, deep-merged; `color` also "#rrggbb", a dynamic field also its jitter number, an unknown key refused)}"##, always, set_brush, true),
     ]
 }
 
