@@ -556,6 +556,7 @@ impl photocraft_ai_sd::service::GenFill for WebGenFill {
             ("steps", (req.steps as f64).into()),
             ("strength", req.strength.into()),
             ("guidance", f64::from(req.guidance).into()),
+            ("f32", req.f32.into()),
             ("mask", mask.into()),
         ] {
             let _ = Reflect::set(&o, &k.into(), &v);
@@ -570,6 +571,7 @@ impl photocraft_ai_sd::service::GenFill for WebGenFill {
             cancelled: Box::new(move || h3.cancelled()),
             shared: self.up.shared.clone(),
             started_gpu: false,
+            gpu: true,
         };
         if let Err(e) = start(&target, (o, buffer), run) {
             log::error!("AI worker: {e}");
@@ -616,6 +618,8 @@ fn sd_err(e: AiError) -> photocraft_ai_sd::SdError {
     match e {
         AiError::Cancelled => SdError::Cancelled,
         AiError::Inference(m) if m.contains("isn't downloaded") => SdError::Unavailable(m),
+        // Generative Fill has no CPU fallback in the browser (minutes per image): say so.
+        AiError::Gpu(m) => SdError::Device(format!("the GPU failed ({m}); try fewer variants or a smaller selection, or use Clean with AI")),
         other => SdError::Device(other.to_string()),
     }
 }

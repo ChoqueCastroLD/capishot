@@ -75,7 +75,7 @@ impl NativeGenFill {
         Err(SdError::Unavailable("no GPU found and this build has no CPU backend".into()))
     }
 
-    fn models(&self, tier: Tier, cpu: bool, hooks: &dyn Hooks) -> Result<Arc<Models>> {
+    fn models(&self, tier: Tier, cpu: bool, f32: bool, hooks: &dyn Hooks) -> Result<Arc<Models>> {
         let mut slot = self.loaded.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some((t, c, m)) = slot.as_ref()
             && *t == tier
@@ -86,7 +86,7 @@ impl NativeGenFill {
         *slot = None;
         let list = files::tier(tier).ok_or_else(|| SdError::Unavailable(format!("the {} tier isn't available yet", tier.id())))?;
         let (device, name) = Self::pick_device(cpu)?;
-        let dtype = if name == "CPU" { DType::F32 } else { precision(&device, false) };
+        let dtype = if name == "CPU" || f32 { DType::F32 } else { precision(&device, false) };
         let mut loader = Loader::new(&device, dtype)?;
         let n = list.files.len().max(1);
         for (i, f) in list.files.iter().enumerate() {
@@ -129,7 +129,7 @@ impl GenFill for NativeGenFill {
             return done(Err(SdError::Cancelled));
         }
         let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<Vec<Vec<f32>>> {
-            let m = self.models(req.tier, req.cpu, hooks.as_ref())?;
+            let m = self.models(req.tier, req.cpu, req.f32, hooks.as_ref())?;
             let p = params(&req, &m);
             let total = p.steps.max(1) as f32;
             let h = hooks.clone();
