@@ -1433,8 +1433,6 @@
 	Import keyboard shortcuts?	Importar atalhos de teclado?
 	Capishot found your keyboard shortcut set {set} from another image editor on this computer: {n} of its shortcuts differ from Capishot's. Import it?	O Capishot encontrou neste computador seu conjunto de atalhos de teclado {set} de outro editor de imagens: {n} de seus atalhos diferem dos do Capishot. Importá-lo?
 	Edit › Keyboard Shortcuts › Reset All to Defaults undoes an import.	Editar › Atalhos de teclado › Redefinir tudo para o padrão desfaz uma importação.
-	Capishot found your keyboard shortcut set {set} from another image editor on this computer: {n} of its shortcuts differ from Capishot's. Import it?	O Capishot encontrou neste computador seu conjunto de atalhos de teclado {set} de outro editor de imagens: {n} de seus atalhos diferem dos do Capishot. Importá-lo?
-	Edit › Keyboard Shortcuts › Reset All to Defaults undoes an import.	Editar › Atalhos de teclado › Redefinir tudo para os padrões desfaz uma importação.
 	Don't Import	Não importar
 	The keyboard shortcut set was not imported: {error}	O conjunto de atalhos de teclado não foi importado: {error}
 	Reset Section	Redefinir seção
@@ -3958,21 +3956,6 @@ layerLabel	No Color	Sem cor
 	Functions	Funções
 	Print Resolution:	Resolução de impressão:
 # Edit › Content-Aware Fill workspace
-	Sampling Brush Tool	Ferramenta Pincel de amostragem
-	Sampling Area Overlay	Sobreposição da área de amostragem
-	Show Sampling Area	Mostrar área de amostragem
-	Indicates	Indica
-	Sampling Area	Área de amostragem
-	Excluded Area	Área excluída
-	Sampling Area Options	Opções da área de amostragem
-	Rectangular	Retangular
-	Fill Settings	Configurações de preenchimento
-	Rotation Adaptation	Adaptação de rotação
-	Very High	Muito alta
-	Full	Completa
-	Mirror	Espelhar
-	Output Settings	Configurações de saída
-	Output To	Saída para
 	Allow online fonts	Permitir fontes online
 	Fonts	Fontes
 	Find More	Encontrar mais
@@ -4611,3 +4594,6 @@ layerLabel	No Color	Sem cor
 	Detailed fills from a prompt, three variants in seconds on a GPU.	Preenchimentos detalhados a partir de um texto, três variações em segundos na GPU.
 	Needs a GPU	Requer GPU
 	The most detail: many steps with guidance, slow, for a strong GPU.	O máximo de detalhe: muitos passos com orientação, lento, para uma GPU potente.
+	1×	1×
+	1.5×	1.5×
+	2×	2×

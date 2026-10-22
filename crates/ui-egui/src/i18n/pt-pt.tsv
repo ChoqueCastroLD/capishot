@@ -3219,3 +3219,6 @@ fontWeight	Italic	Itálico
 	Detailed fills from a prompt, three variants in seconds on a GPU.	Preenchimentos detalhados a partir de um texto, três variações em segundos na GPU.
 	Needs a GPU	Requer GPU
 	The most detail: many steps with guidance, slow, for a strong GPU.	O máximo de detalhe: muitos passos com orientação, lento, para uma GPU potente.
+	1×	1×
+	1.5×	1.5×
+	2×	2×

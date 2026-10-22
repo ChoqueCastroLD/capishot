@@ -1429,10 +1429,6 @@
 	Import keyboard shortcuts?	키보드 단축키를 가져올까요?
 	Capishot found your keyboard shortcut set {set} from another image editor on this computer: {n} of its shortcuts differ from Capishot's. Import it?	Capishot가 이 컴퓨터에서 다른 이미지 편집기의 키보드 단축키 세트 {set}을(를) 찾았습니다. 단축키 {n}개가 Capishot와 다릅니다. 가져올까요?
 	Edit › Keyboard Shortcuts › Reset All to Defaults undoes an import.	편집 › 키보드 단축키 › 모두 기본값으로 재설정으로 가져오기를 되돌릴 수 있습니다.
-	Your keyboard shortcut set {set} is in use here: {n} shortcuts differ from the defaults. Edit › Keyboard Shortcuts shows them; Reset All to Defaults undoes this.	키보드 단축키 세트 {set}을(를) 여기서 사용합니다. 단축키 {n}개가 기본값과 다릅니다. 편집 › 키보드 단축키에서 확인할 수 있고, 모두 기본값으로 초기화로 되돌릴 수 있습니다.
-	Import keyboard shortcuts?	키보드 단축키를 가져오시겠습니까?
-	Capishot found your keyboard shortcut set {set} from another image editor on this computer: {n} of its shortcuts differ from Capishot's. Import it?	Capishot가 이 컴퓨터에서 다른 이미지 편집기의 키보드 단축키 세트 {set}을(를) 찾았습니다. 단축키 {n}개가 Capishot와 다릅니다. 가져오시겠습니까?
-	Edit › Keyboard Shortcuts › Reset All to Defaults undoes an import.	편집 › 키보드 단축키 › 모두 기본값으로 초기화를 누르면 가져오기를 되돌릴 수 있습니다.
 	Don't Import	가져오지 않음
 	The keyboard shortcut set was not imported: {error}	키보드 단축키 세트를 가져오지 못했습니다: {error}
 	Reset Section	섹션 초기화
@@ -3191,7 +3187,6 @@ fontWeight	Italic	기울임
 	Memory budget (MiB)	메모리 한도 (MiB)
 	Undo disk budget (MiB)	실행 취소 디스크 한도 (MiB)
 	No subject found — try Object Selection or the Lasso	피사체를 찾을 수 없습니다 — 개체 선택 또는 올가미를 사용해 보세요
-	No subject found — try Object Selection or the Lasso	피사체를 찾을 수 없습니다 — 오브젝트 선택 또는 올가미를 사용해 보세요
 	Quick Selection found nothing there	빠른 선택으로 해당 위치에서 아무것도 찾지 못했습니다
 	Object Selection found nothing there — try a tighter rectangle	오브젝트 선택으로 해당 위치에서 아무것도 찾지 못했습니다 — 더 좁은 사각형을 사용해 보세요
 	No subject found — try a rectangle around the object	피사체를 찾을 수 없습니다 — 개체 주위에 사각형을 그려 보세요
@@ -3369,21 +3364,6 @@ curves	Smooth	매끄럽게
 	Functions	기능
 	Print Resolution:	인쇄 해상도:
 # Edit › Content-Aware Fill workspace
-	Sampling Brush Tool	샘플링 브러시 도구
-	Sampling Area Overlay	샘플링 영역 오버레이
-	Show Sampling Area	샘플링 영역 표시
-	Indicates	표시 대상
-	Sampling Area	샘플링 영역
-	Excluded Area	제외 영역
-	Sampling Area Options	샘플링 영역 옵션
-	Rectangular	사각형
-	Fill Settings	채우기 설정
-	Rotation Adaptation	회전 적응
-	Very High	매우 높음
-	Full	전체
-	Mirror	미러
-	Output Settings	출력 설정
-	Output To	출력 위치
 	Allow online fonts	온라인 글꼴 허용
 	Fonts	글꼴
 	Find More	더 찾기
@@ -3821,3 +3801,6 @@ curves	Smooth	매끄럽게
 	Detailed fills from a prompt, three variants in seconds on a GPU.	프롬프트로 정밀하게 채우기, GPU에서 몇 초 만에 3가지.
 	Needs a GPU	GPU 필요
 	The most detail: many steps with guidance, slow, for a strong GPU.	가장 정밀함: 가이던스와 많은 단계, 느림, 강력한 GPU용.
+	1×	1×
+	1.5×	1.5×
+	2×	2×

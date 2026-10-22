@@ -781,7 +781,7 @@ fn commands_have_photoshops_alternate_keys() {
     let p = Preferences::default();
     let main = |id: &str| crate::commands::find(id).and_then(|c| c.shortcut);
     assert_eq!(main("edit.cut"), Some("Cmd+X"));
-    assert_eq!(p.alternates("edit.cut", main("edit.cut")), ["F2"]);
+    assert_eq!(p.alternates("edit.paste", main("edit.paste")), ["F4"]);
     assert_eq!(p.alternates("edit.copy", main("edit.copy")), ["F3"]);
     assert_eq!(p.alternates("edit.paste", main("edit.paste")), ["F4"]);
     assert_eq!(main("select.inverse"), Some("Cmd+Shift+I"));
@@ -835,10 +835,10 @@ fn alternate_shortcuts_set_reset_and_reject_bad_input() {
     s.execute("edit.keyboardShortcuts", json!({"alternates": {"edit.copy": null}})).unwrap();
     assert_eq!(s.prefs().alternates("edit.copy", Some("Cmd+C")), ["F3"]);
     // Through prefs.set / prefs.reset by path.
-    s.execute("prefs.set", json!({"path": "alternateShortcuts.edit.cut", "value": "F10"})).unwrap();
-    assert_eq!(s.prefs().alternates("edit.cut", Some("Cmd+X")), ["F10"]);
-    s.execute("prefs.reset", json!({"path": "alternateShortcuts.edit.cut"})).unwrap();
-    assert_eq!(s.prefs().alternates("edit.cut", Some("Cmd+X")), ["F2"]);
+    s.execute("prefs.set", json!({"path": "alternateShortcuts.edit.paste", "value": "F10"})).unwrap();
+    assert_eq!(s.prefs().alternates("edit.paste", Some("Cmd+V")), ["F10"]);
+    s.execute("prefs.reset", json!({"path": "alternateShortcuts.edit.paste"})).unwrap();
+    assert_eq!(s.prefs().alternates("edit.paste", Some("Cmd+V")), ["F4"]);
     // Reset all clears alternates too.
     s.execute("edit.keyboardShortcuts", json!({"alternates": {"edit.paste": []}})).unwrap();
     s.execute("edit.keyboardShortcuts", json!({"reset": true})).unwrap();
@@ -868,14 +868,14 @@ fn alternate_shortcuts_set_reset_and_reject_bad_input() {
 #[test]
 fn moving_an_alternate_key_takes_it_from_its_holder() {
     let mut s = session();
-    // F2 is Cut's alternate; Rename Layer may take it (#2405).
-    let r = s.execute("edit.keyboardShortcuts", json!({"set": {"layer.renameLayer": "F2"}, "removeConflicts": false})).unwrap();
-    assert!(r["conflicts"].as_array().unwrap().iter().any(|c| c["shortcut"] == "F2"), "{r}");
+    // F4 is Paste's alternate (Capishot gives F2 to Rename Layer); Rename Layer may take it (#2405).
+    let r = s.execute("edit.keyboardShortcuts", json!({"set": {"layer.renameLayer": "F4"}, "removeConflicts": false})).unwrap();
+    assert!(r["conflicts"].as_array().unwrap().iter().any(|c| c["shortcut"] == "F4"), "{r}");
     s.execute("edit.keyboardShortcuts", json!({"reset": true})).unwrap();
-    let r = s.execute("edit.keyboardShortcuts", json!({"set": {"layer.renameLayer": "F2"}})).unwrap();
+    let r = s.execute("edit.keyboardShortcuts", json!({"set": {"layer.renameLayer": "F4"}})).unwrap();
     assert!(r["conflicts"].as_array().unwrap().is_empty(), "{r}");
-    assert!(s.prefs().alternates("edit.cut", Some("Cmd+X")).is_empty());
-    assert_eq!(s.prefs().shortcut("edit.cut", Some("Cmd+X")), Some("Cmd+X"), "Cut keeps its main key");
+    assert!(s.prefs().alternates("edit.paste", Some("Cmd+V")).is_empty());
+    assert_eq!(s.prefs().shortcut("edit.paste", Some("Cmd+V")), Some("Cmd+V"), "Paste keeps its main key");
     // An alternate assigned to another command takes a main key too.
     s.execute("edit.keyboardShortcuts", json!({"alternates": {"edit.copy": ["Cmd+Z"]}})).unwrap();
     assert_eq!(s.prefs().shortcut("edit.undo", Some("Cmd+Z")), None);

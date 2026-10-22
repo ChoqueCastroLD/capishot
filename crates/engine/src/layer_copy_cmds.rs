@@ -266,7 +266,12 @@ fn copy_to_document(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let from = &s.documents()[src];
     let ids = layer_ids(&from.doc, p, from.selected_layers(), CMD)?;
-    let clip = snapshot(&from.doc, &ids)?;
+    let mut clip = snapshot(&from.doc, &ids)?;
+    // One layer: `name` names its copy, in the same step (Duplicate Layer… › As).
+    if let ([one], Some(name)) = (clip.copies.layers.as_mut_slice(), p.get("name").and_then(Value::as_str).filter(|n| !n.is_empty())) {
+        one.name = name.to_string();
+        clip.backgrounds.clear();
+    }
     let label = if ids.len() == 1 { "Duplicate Layer" } else { "Duplicate Layers" };
     land(s, clip, dest, src, &Placement::parse(p)?, label)
 }
@@ -381,7 +386,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Copy Layers to Document",
             menu: &[],
             shortcut: None,
-            params: r##"{"document":index (destination),"layers":[id,…]?=the source's selected layers,"source":index?=active,"center":bool=false (centre on the destination's canvas),"at":[x,y]? (centre the copies on this point),"offset":[dx,dy]?=[0,0] (from their place in the source)}"##,
+            params: r##"{"document":index (destination),"layers":[id,…]?=the source's selected layers,"source":index?=active,"center":bool=false (centre on the destination's canvas),"at":[x,y]? (centre the copies on this point),"offset":[dx,dy]?=[0,0] (from their place in the source),"name":str? (one layer: the copy's name)}"##,
             enabled,
             run: copy_to_document,
             journal: true,

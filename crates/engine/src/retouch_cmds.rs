@@ -1502,6 +1502,11 @@ pub struct DabCommit {
 }
 
 impl DabCommit {
+    /// The stroke's pixels for the target and the area they changed.
+    pub(crate) fn into_parts(self) -> (Surface, Rect) {
+        (self.surface, self.bounds)
+    }
+
     /// The params that decide the pixels, without the points (compared as parsed).
     fn settings(p: &Value) -> Value {
         let mut p = p.clone();

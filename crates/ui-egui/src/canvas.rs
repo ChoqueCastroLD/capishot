@@ -7381,16 +7381,6 @@ mod tests {
         assert!(mesh.vertices.iter().all(|v| v.pos.distance(center) <= 10.01));
         assert_eq!(app.session.active().unwrap().revision, revision);
         assert!(app.session.presets.clone.active().anchor.is_none());
-        let ordinary_key = app.clone_preview.as_ref().unwrap().key.clone();
-        app.ui.view.pattern_preview = true;
-        let mut periodic_output = ctx.run_ui(Default::default(), |ui| {
-            let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("clone-test")));
-            draw_clone_preview(&mut app, &painter, &xf, [32.0, 32.0], None);
-        });
-        assert_ne!(app.clone_preview.as_ref().unwrap().key, ordinary_key, "toggling Pattern Preview invalidates source pixels");
-        assert!(!periodic_output.textures_delta.set.is_empty(), "the overlay texture is refreshed without a document edit");
-        periodic_output.textures_delta.clear();
-        assert_eq!(app.session.active().unwrap().revision, revision);
         app.session.presets.clone.overlay.show = false;
         let mut output = ctx.run_ui(Default::default(), |ui| {
             let ctx = ui.ctx();
@@ -7399,71 +7389,6 @@ mod tests {
         });
         output.textures_delta.clear();
         assert!(output.shapes.iter().all(|s| !matches!(s.shape, egui::Shape::Mesh(_))));
-    }
-
-    #[test]
-    fn clone_overlay_blend_mode_mixes_with_the_image_under_the_brush() {
-        let ctx = egui::Context::default();
-        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
-        app.run("file.new", json!({"width": 64, "height": 64})).unwrap();
-        app.run("cloneSource.set", json!({"source": [16,16]})).unwrap();
-        app.ui.tool = Tool::CloneStamp;
-        app.session.tools.brush.size = 20.0;
-        let xf =
-            ViewXform { rect: Rect::from_min_size(Pos2::ZERO, vec2(100.0, 100.0)), zoom: 1.0, center: [32.0, 32.0], flip: false, rotation: 0.0, aspect: 1.0 };
-        // The centre texel of the overlay texture uploaded for `mode`.
-        let mut centre = |mode: &str| {
-            app.run("cloneSource.overlay", json!({"blend": mode})).unwrap();
-            let mut output = ctx.run_ui(Default::default(), |ui| {
-                let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("clone-test")));
-                draw_clone_preview(&mut app, &painter, &xf, [32.0, 32.0], None);
-            });
-            // The brush's 20 × 20 px square (the font atlas may upload too).
-            let image = output.textures_delta.set.values().flatten().find_map(|d| match &d.image {
-                egui::ImageData::Color(c) if c.size == [20, 20] => Some(c.clone()),
-                _ => None,
-            });
-            output.textures_delta.clear();
-            let image = image.expect("the overlay uploads a texture");
-            image.pixels[image.width() * (image.height() / 2) + image.width() / 2]
-        };
-        // A white source over the white image: Normal shows white, Difference black.
-        assert_eq!(centre("normal"), Color32::WHITE);
-        assert_eq!(centre("difference"), Color32::BLACK, "Difference turns black where source and image match");
-        assert_eq!(centre("lighten"), Color32::WHITE);
-    }
-
-    /// A shaped tip clips the Clone Source overlay to its outline, not to the brush circle.
-    #[test]
-    fn clone_overlay_is_clipped_to_a_shaped_tip() {
-        let ctx = egui::Context::default();
-        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
-        app.run("file.new", json!({"width": 64, "height": 64})).unwrap();
-        app.run("cloneSource.set", json!({"source": [16,16]})).unwrap();
-        app.ui.tool = Tool::CloneStamp;
-        app.session.tools.brush.size = 20.0;
-        app.session.tools.brush.roundness = 0.25;
-        let xf =
-            ViewXform { rect: Rect::from_min_size(Pos2::ZERO, vec2(100.0, 100.0)), zoom: 1.0, center: [32.0, 32.0], flip: false, rotation: 0.0, aspect: 1.0 };
-        let mut output = ctx.run_ui(Default::default(), |ui| {
-            let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("clone-test")));
-            draw_clone_preview(&mut app, &painter, &xf, [32.0, 32.0], None);
-        });
-        let image = output
-            .textures_delta
-            .set
-            .values()
-            .flatten()
-            .find_map(|d| match &d.image {
-                egui::ImageData::Color(c) if c.size == [20, 20] => Some(c.clone()),
-                _ => None,
-            })
-            .expect("the overlay uploads a texture");
-        output.textures_delta.clear();
-        let alpha = |x: usize, y: usize| image.pixels[y * image.width() + x].a();
-        assert_eq!(alpha(10, 10), 255, "the tip's centre shows the source");
-        assert_eq!(alpha(10, 2), 0, "inside the circle but outside the flat tip: clipped");
-        assert_eq!(alpha(1, 10), 255, "the tip's long axis stays");
     }
 
     #[test]

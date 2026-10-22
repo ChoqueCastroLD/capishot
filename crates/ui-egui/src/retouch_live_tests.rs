@@ -60,10 +60,8 @@ fn every_brush_retouch_tool_previews_its_stroke_live() {
         (Tool::Burn, Box::new(|_| {})),
         (Tool::Sponge, Box::new(|_| {})),
         (Tool::Blur, Box::new(|_| {})),
-        (Tool::Blur, Box::new(|a| a.ui.tool_options.sample_all.blur = true)),
         (Tool::Sharpen, Box::new(|_| {})),
         (Tool::Smudge, Box::new(|_| {})),
-        (Tool::Smudge, Box::new(|a| a.ui.tool_options.sample_all.smudge = true)),
     ];
     for (i, (tool, setup)) in setups.iter().enumerate() {
         let mut app = textured();

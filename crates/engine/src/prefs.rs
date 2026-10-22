@@ -1110,6 +1110,8 @@ pub const HIDDEN_UNTIL_IMPLEMENTED: &[&str] = &[
     "workspace.enableFloatingDocumentWindowDocking",
     "performance.cacheLevels",
     "performance.effectCacheMb",
+    // Upstream's GPU layer budget; Capishot's compositor pages layers through its own.
+    "performance.gpuMemoryMb",
     "performance.legacyCompositing",
     "unitsAndRulers.columnWidth",
     "unitsAndRulers.gutter",
@@ -1600,7 +1602,6 @@ pub const TEMPORARY_TOOLS: &[(&str, &str, &str)] = &[
 /// (Shift+Delete on a Mac) for Fill; ⌘+ beside ⌘= for Zoom In; and off the Mac, Ctrl+F4 beside
 /// Ctrl+W for Close (Windows' close-document key; macOS keeps Ctrl+F4 for window focus).
 pub const ALTERNATE_SHORTCUTS: &[(&str, &str)] = &[
-    ("edit.cut", "F2"),
     ("edit.copy", "F3"),
     ("edit.paste", "F4"),
     ("edit.fill", "Shift+Backspace"),

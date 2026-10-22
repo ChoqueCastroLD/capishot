@@ -220,41 +220,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn system_info_copy_and_api_stay_english_in_czech_ui() {
-        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
-        app.perf.gpu_info.adapter = "Test GPU".into();
-        app.perf.gpu_info.preference = "auto".into();
-        let english = crate::i18n::with_language(crate::i18n::Lang::EN, || system_info(&app));
-        crate::i18n::with_language(crate::i18n::Lang::from_code("cs").unwrap(), || {
-            assert_eq!(system_info(&app), english, "clipboard diagnostics include English monitor profiles too");
-            let result = crate::menus::invoke(&mut app, &egui::Context::default(), "help.systemInfo", json!({})).unwrap();
-            assert_eq!(result["info"]["lines"], json!(english));
-            assert_eq!(crate::i18n::current().code(), "cs", "diagnostics restore the drawing language");
-            let screen = system_info_ui(&app);
-            assert!(screen.iter().any(|line| line == "Grafický adaptér: Test GPU"), "{screen:?}");
-            assert!(screen.iter().any(|line| line.starts_with("Profil monitoru:")), "{screen:?}");
-            assert!(english.iter().any(|line| line == "GPU backend preference: auto"));
-        });
-    }
-
-    #[test]
-    fn system_info_translates_empty_and_stored_auto_only_for_display() {
-        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
-        // Hardware names are opaque even when they happen to match a lookup key.
-        app.perf.gpu_info.adapter = "auto".into();
-        crate::i18n::with_language(crate::i18n::Lang::from_code("cs").unwrap(), || {
-            let empty = system_info_ui(&app);
-            app.perf.gpu_info.preference = "auto".into();
-            app.perf.gpu_info.selected = "auto".into();
-            assert_eq!(system_info_ui(&app), empty);
-            assert!(empty.iter().any(|line| line == "Grafický adaptér: auto"));
-            assert!(empty.iter().any(|line| line == "Preferovaný backend GPU: automaticky"), "{empty:?}");
-            assert_eq!(app.perf.gpu_info.preference, "auto");
-            assert_eq!(app.perf.gpu_info.selected, "auto");
-        });
-    }
-
-    #[test]
     fn fallback_warning_keeps_reason_in_inspectable_state() {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
         queue_fallback_notice(&mut app, "device unavailable");

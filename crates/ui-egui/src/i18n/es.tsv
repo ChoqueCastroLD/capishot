@@ -2855,23 +2855,8 @@ curves	Smooth	Suavizar
 	Functions	Funciones
 	Print Resolution:	Resolución de impresión:
 # Edit › Content-Aware Fill workspace
-	Sampling Brush Tool	Herramienta Pincel de muestreo
-	Sampling Area Overlay	Superposición del área de muestreo
-	Show Sampling Area	Mostrar área de muestreo
-	Indicates	Indica
-	Sampling Area	Área de muestreo
-	Excluded Area	Área excluida
-	Sampling Area Options	Opciones del área de muestreo
-	Rectangular	Rectangular
-	Fill Settings	Ajustes de relleno
-	Rotation Adaptation	Adaptación de rotación
-	Very High	Muy alta
 	High	Alta
 	Low	Baja
-	Full	Completa
-	Mirror	Reflejar
-	Output Settings	Ajustes de salida
-	Output To	Salida a
 	Duplicate Layer	Duplicar capa
 	Contract	Contraer
 	Allow online fonts	Permitir fuentes en línea
@@ -3017,7 +3002,6 @@ curves	Smooth	Suavizar
 	Export folder…	Exportar carpeta…
 	Faux bold	Negrita falsa
 	Faux italic	Cursiva falsa
-	Folder	Carpeta
 	Folder name	Nombre de la carpeta
 	Font family	Familia tipográfica
 	Font style	Estilo de fuente
@@ -3459,8 +3443,6 @@ curves	Smooth	Suavizar
 	Mac Crisp	Definido de Mac
 	Mac Strong	Fuerte de Mac
 	Mac Smooth	Suavizado de Mac
-	Superscript	Superíndice
-	Subscript	Subíndice
 	Ligature	Ligadura
 	Alternative	Alternativa
 	Ultra Light	Ultrafina
@@ -3550,8 +3532,6 @@ curves	Smooth	Suavizar
 	Credit	Crédito
 	Transmission Reference	Referencia de transmisión
 	Urgency	Urgencia
-	High	Alta
-	Low	Baja
 	Category	Categoría
 	Supplemental Categories	Categorías suplementarias
 	Object Name / Title	Nombre del objeto / título
@@ -3638,7 +3618,6 @@ curves	Smooth	Suavizar
 	Preset Name:	Nombre del ajuste preestablecido:
 	Width and Height	Anchura y altura
 	Color Profile	Perfil de color
-	Units	Unidades
 	Create new count group	Crear nuevo grupo de recuento
 	Adjustment Layer	Capa de ajuste
 	Drag to move the layer	Arrastre para mover la capa
@@ -3660,7 +3639,6 @@ curves	Smooth	Suavizar
 	Brush Size	Tamaño del pincel
 	Heal Color	Color de corrección
 	Result	Resultado
-	Duplicate	Duplicar
 	Fast	Rápida
 	Accurate	Precisa
 	Add to	Añadir a
@@ -3728,7 +3706,6 @@ layerLabel	No Color	Sin color
 	Linear Dodge	Sobreexposición lineal
 	Preview Image	Previsualizar imagen
 	Save As	Guardar como
-	Remove All	Eliminar todo
 	Unlock	Desbloquear
 	Enable	Activar
 	Disable	Desactivar
@@ -3736,8 +3713,6 @@ layerLabel	No Color	Sin color
 	Clear Selection	Borrar selección
 	Invert Selection	Invertir selección
 	Select Inverse	Seleccionar inverso
-	Contract	Contraer
-	Sample Size	Tamaño de muestra
 	Gamma	Gamma
 	Input	Entrada
 	Input Levels	Niveles de entrada
@@ -3759,7 +3734,6 @@ layerLabel	No Color	Sin color
 	Workspaces	Espacios de trabajo
 	Show All	Mostrar todo
 	Hidden	Oculto
-	Duplicate Layer	Duplicar capa
 	Ungroup	Desagrupar
 	Guide Layout…	Composición de guías…
 	Page Setup…	Configurar página…
@@ -3790,7 +3764,6 @@ layerLabel	No Color	Sin color
 	Failed	Error
 	Warning	Advertencia
 	Information	Información
-	Retry	Reintentar
 	Continue	Continuar
 	Skip	Omitir
 	Resume	Reanudar
@@ -3804,11 +3777,9 @@ layerLabel	No Color	Sin color
 	Previous	Anterior
 	More	Más
 	Less	Menos
-	Manual	Manual
 	Disabled	Desactivado
 	Locked	Bloqueado
 	Unlocked	Desbloqueado
-	Delete…	Eliminar…
 	Create…	Crear…
 	Edit…	Editar…
 	Change…	Cambiar…
@@ -3835,11 +3806,9 @@ layerLabel	No Color	Sin color
 	Apply Mask	Aplicar máscara
 	Import Settings	Importar ajustes
 	Export Settings	Exportar ajustes
-	Shortcuts	Métodos abreviados
 	Keyboard	Teclado
 	Mouse	Ratón
 	Tablet	Tableta
-	Display	Pantalla
 	Panel	Panel
 	Hide Grid	Ocultar cuadrícula
 	Fit to Window	Ajustar a ventana
@@ -3853,12 +3822,10 @@ layerLabel	No Color	Sin color
 	Choose Folder	Elegir carpeta
 	Browse	Examinar
 	Find	Buscar
-	Replace	Reemplazar
 	Date	Fecha
 	Learn More	Más información
 	Report a Bug	Informar de un error
 	Updates	Actualizaciones
-	Update	Actualizar
 	Restart Required	Es necesario reiniciar
 	Restart	Reiniciar
 	Quit	Salir
@@ -4302,7 +4269,6 @@ layerLabel	No Color	Sin color
 	Convert to Linked	Convertir en vinculado
 	Convert to Profile	Convertir a perfil
 	Crystallize	Cristalizar
-	Data	Datos
 	Data Sets as Files	Conjuntos de datos en archivos
 	De-Interlace	Desentrelazar
 	Define Brush Preset	Definir ajuste preestablecido de pincel
@@ -4614,7 +4580,6 @@ navigator	Zoom	Zoom
 	Lock Transparent Pixels	Bloquear píxeles transparentes
 	manual	manual
 	Medium Gray	Gris medio
-	New document	Documento nuevo
 	New Selection	Selección nueva
 	No Document	Sin documento
 	Note tool	Herramienta Nota
@@ -4777,7 +4742,6 @@ navigator	Zoom	Zoom
 	Standard (GPU, 2.3 GB)	Estándar (GPU, 2,3 GB)
 	High (GPU, slow)	Alta (GPU, lenta)
 	Ultra-light	Ultraligera
-	Fast	Rápida
 	Show files	Mostrar archivos
 	Recommended for this device	Recomendado para este dispositivo
 	Generative Fill - {tier}	Relleno generativo - {tier}
@@ -4785,14 +4749,11 @@ navigator	Zoom	Zoom
 	Erase text and objects.	Borra textos y objetos.
 	Enlarge pages without blur.	Amplía páginas sin desenfocar.
 	Draw new content from a prompt.	Dibuja contenido nuevo a partir de un texto.
-	Speed	Velocidad
 	No GPU needed	Sin GPU
 	Precision	Precisión
 	Memory	Memoria
 	GPU memory	Memoria de GPU
-	Resume	Reanudar
 	Paused	En pausa
-	Ready	Lista
 	Downloading	Descargando
 	Pause all	Pausar todo
 	Erases text and SFX and redraws screentone and lines.	Borra textos y onomatopeyas y redibuja trama y líneas.
@@ -4805,3 +4766,6 @@ navigator	Zoom	Zoom
 	Detailed fills from a prompt, three variants in seconds on a GPU.	Rellenos detallados a partir de un texto: tres variantes en segundos con GPU.
 	Needs a GPU	Requiere GPU
 	The most detail: many steps with guidance, slow, for a strong GPU.	El máximo detalle: muchos pasos con guía, lento, para una GPU potente.
+	1×	1×
+	1.5×	1.5×
+	2×	2×

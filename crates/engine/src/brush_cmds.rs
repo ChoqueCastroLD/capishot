@@ -130,6 +130,14 @@ fn normalize_brush_patch(patch: &Value, schema: &Value, cmd: &str, path: &str) -
     let Some(keys) = patch.as_object() else { return Ok(patch.clone()) };
     let mut out = serde_json::Map::new();
     for (k, v) in keys {
+        // A serde alias of a renamed field goes in under the name the brush serialises with, or
+        // the merged object would hold the setting twice ("duplicate field").
+        let canonical = match k.as_str() {
+            "pressure_size" if schema.get("pressureSize").is_some() => Some("pressureSize".to_string()),
+            "pressure_opacity" if schema.get("pressureOpacity").is_some() => Some("pressureOpacity".to_string()),
+            _ => None,
+        };
+        let k = canonical.as_ref().unwrap_or(k);
         let here = if path.is_empty() { k.clone() } else { format!("{path}.{k}") };
         let want = schema.get(k);
         // A scalar where the schema holds a dynamic parameter (its jitter + control keys).

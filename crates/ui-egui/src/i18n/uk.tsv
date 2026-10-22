@@ -1707,7 +1707,6 @@
 	These settings aren't available in Capishot yet.	Ці параметри ще недоступні у Capishot.
 	Shortcut removed.	Клавіатурне скорочення вилучено.
 	All shortcuts reset to Capishot defaults.	Усі клавіатурні скорочення скинуто до типових значень Capishot.
-	All shortcuts reset to Capishot defaults.	Усі клавіатурні скорочення скинуто до типових значень Capishot.
 	Add Shortcut	Додати клавіатурне скорочення
 	Delete Shortcut	Видалити клавіатурне скорочення
 	Press keys…	Натисніть клавіші…
@@ -3769,7 +3768,6 @@ cameraData	Lens	Об'єктив
 	Search settings…	Пошук налаштувань…
 	No matching settings	Немає відповідних налаштувань
 	Capishot — Screen Color Picker	Capishot — Піпетка кольору екрана
-	Capishot — Screen Color Picker	Capishot — Піпетка кольору екрана
 # Edit › Content-Aware Fill workspace
 	Sampling Brush Tool	Пензель області вибірки
 	Sampling Area Overlay	Накладання області вибірки
@@ -3867,21 +3865,6 @@ curves	Smooth	Згладити
 	Functions	Функції
 	Print Resolution:	Роздільна здатність друку:
 # Edit › Content-Aware Fill workspace
-	Sampling Brush Tool	Пензель області вибірки
-	Sampling Area Overlay	Накладання області вибірки
-	Show Sampling Area	Показати область вибірки
-	Indicates	Позначає
-	Sampling Area	Область вибірки
-	Excluded Area	Виключена область
-	Sampling Area Options	Параметри області вибірки
-	Rectangular	Прямокутна
-	Fill Settings	Параметри заливки
-	Rotation Adaptation	Адаптація повороту
-	Very High	Дуже висока
-	Full	Повна
-	Mirror	Віддзеркалення
-	Output Settings	Параметри виводу
-	Output To	Вивести в
 
 # Google Fonts
 	Allow online fonts	Дозволити онлайн-шрифти
@@ -4338,3 +4321,6 @@ curves	Smooth	Згладити
 	Detailed fills from a prompt, three variants in seconds on a GPU.	Детальні заливки за запитом: три варіанти за секунди на GPU.
 	Needs a GPU	Потрібен GPU
 	The most detail: many steps with guidance, slow, for a strong GPU.	Максимум деталей: багато кроків із підказкою, повільно, для потужного GPU.
+	1×	1×
+	1.5×	1.5×
+	2×	2×

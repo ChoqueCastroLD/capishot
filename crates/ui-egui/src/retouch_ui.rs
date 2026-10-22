@@ -93,6 +93,9 @@ pub(crate) fn pattern_stamp_params(app: &PhotocraftApp, points: &[[f64; 3]]) -> 
         "scale": o.pattern_stamp_scale,
         "angle": o.pattern_stamp_angle,
         "seed": stroke_seed(points),
+        "opacity": app.session.tools.brush.opacity * 100.0,
+        "flow": app.session.tools.brush.flow * 100.0,
+        "mode": o.pattern_stamp_mode,
     });
     if o.pattern_stamp_aligned
         && let Some(ph) = app.ui.pattern_stamp_phase

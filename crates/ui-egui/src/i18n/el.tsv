@@ -3864,21 +3864,6 @@ curves	Smooth	Εξομάλυνση
 	Functions	Λειτουργίες
 	Print Resolution:	Ανάλυση εκτύπωσης:
 # Edit › Content-Aware Fill workspace
-	Sampling Brush Tool	Εργαλείο πινέλου δειγματοληψίας
-	Sampling Area Overlay	Επικάλυψη περιοχής δειγματοληψίας
-	Show Sampling Area	Εμφάνιση περιοχής δειγματοληψίας
-	Indicates	Υποδεικνύει
-	Sampling Area	Περιοχή δειγματοληψίας
-	Excluded Area	Εξαιρούμενη περιοχή
-	Sampling Area Options	Επιλογές περιοχής δειγματοληψίας
-	Rectangular	Ορθογώνια
-	Fill Settings	Ρυθμίσεις γεμίσματος
-	Rotation Adaptation	Προσαρμογή περιστροφής
-	Very High	Πολύ υψηλή
-	Full	Πλήρης
-	Mirror	Κατοπτρισμός
-	Output Settings	Ρυθμίσεις εξόδου
-	Output To	Έξοδος σε
 
 # Google Fonts
 	Allow online fonts	Να επιτρέπονται οι γραμματοσειρές online
@@ -4320,3 +4305,6 @@ curves	Smooth	Εξομάλυνση
 	Detailed fills from a prompt, three variants in seconds on a GPU.	Λεπτομερείς πληρώσεις από περιγραφή, τρεις παραλλαγές σε δευτερόλεπτα σε GPU.
 	Needs a GPU	Χρειάζεται GPU
 	The most detail: many steps with guidance, slow, for a strong GPU.	Η μέγιστη λεπτομέρεια: πολλά βήματα με καθοδήγηση, αργό, για ισχυρή GPU.
+	1×	1×
+	1.5×	1.5×
+	2×	2×

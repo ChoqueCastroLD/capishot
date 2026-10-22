@@ -323,7 +323,7 @@ fn undo_changes_puts_the_command_back() {
     // An alternate added with Add Shortcut is undone the same way.
     h.state_mut().ui.dialog_mut(id).unwrap().fields.insert("captureAlt".into(), json!(true));
     capture_key(&mut h, id, Key::C, Modifiers::COMMAND);
-    assert_eq!(field(&h, id, "alternates")["edit.cut"], json!(["F2", "Cmd+C"]), "beside Photoshop's F2");
+    assert_eq!(field(&h, id, "alternates")["edit.cut"], json!(["Cmd+C"]), "an added alternate (Capishot gives F2 to Rename Layer)");
     click(&mut h, "Undo Changes");
     assert!(field(&h, id, "alternates").get("edit.cut").is_none(), "{}", field(&h, id, "alternates"));
     crate::dialogs::confirm(h.state_mut(), id).unwrap();

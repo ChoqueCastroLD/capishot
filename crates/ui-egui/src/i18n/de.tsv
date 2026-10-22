@@ -2818,25 +2818,8 @@ curves	Smooth	Glätten
 	Functions	Funktionen
 	Print Resolution:	Druckauflösung:
 # Edit › Content-Aware Fill workspace
-	Sampling Brush Tool	Aufnahmepinsel-Werkzeug
-	Sampling Area Overlay	Überlagerung des Aufnahmebereichs
-	Show Sampling Area	Aufnahmebereich einblenden
-	Indicates	Kennzeichnet
-	Sampling Area	Aufnahmebereich
-	Excluded Area	Ausgeschlossener Bereich
-	Sampling Area Options	Optionen für Aufnahmebereich
-	Rectangular	Rechteckig
-	Fill Settings	Füllungseinstellungen
-	Rotation Adaptation	Drehungsanpassung
-	Very High	Sehr hoch
 	High	Hoch
 	Low	Niedrig
-	Full	Voll
-	Mirror	Spiegeln
-	Output Settings	Ausgabeeinstellungen
-	Output To	Ausgabe in
-	Duplicate Layer	Ebene duplizieren
-	Contract	Verkleinern
 	Allow online fonts	Online-Schriften zulassen
 	Fonts	Schriften
 	Find More	Mehr finden
@@ -3272,8 +3255,6 @@ curves	Smooth	Glätten
 	Circle	Kreis
 	Star	Stern
 	Cross	Kreuz
-	High	Hoch
-	Low	Niedrig
 	Edge Only	Nur Kanten
 	Overlay Edge	Kante überlagern
 	Focus	Fokus
@@ -3621,7 +3602,6 @@ curves	Smooth	Glätten
 	Erase text and objects.	Entfernt Text und Objekte.
 	Enlarge pages without blur.	Vergrößert Seiten ohne Unschärfe.
 	Draw new content from a prompt.	Zeichnet neue Inhalte nach einer Beschreibung.
-	Speed	Tempo
 	No GPU needed	Ohne GPU
 	Precision	Genauigkeit
 	Memory	Speicher
@@ -3641,3 +3621,6 @@ curves	Smooth	Glätten
 	Detailed fills from a prompt, three variants in seconds on a GPU.	Detaillierte Füllungen nach Beschreibung, drei Varianten in Sekunden auf der GPU.
 	Needs a GPU	Braucht GPU
 	The most detail: many steps with guidance, slow, for a strong GPU.	Die meisten Details: viele Schritte mit Führung, langsam, für eine starke GPU.
+	1×	1×
+	1.5×	1.5×
+	2×	2×

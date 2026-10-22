@@ -3187,23 +3187,6 @@ curves	Smooth	Lisser
 	Functions	Fonctions
 	Print Resolution:	Résolution d’impression :
 # Edit › Content-Aware Fill workspace
-	Sampling Brush Tool	Outil Pinceau d’échantillonnage
-	Sampling Area Overlay	Incrustation de la zone d’échantillonnage
-	Show Sampling Area	Afficher la zone d’échantillonnage
-	Indicates	Indique
-	Sampling Area	Zone d’échantillonnage
-	Excluded Area	Zone exclue
-	Sampling Area Options	Options de la zone d’échantillonnage
-	Rectangular	Rectangulaire
-	Fill Settings	Paramètres de remplissage
-	Rotation Adaptation	Adaptation de la rotation
-	Very High	Très élevée
-	Full	Totale
-	Mirror	Miroir
-	Output Settings	Paramètres de sortie
-	Output To	Sortie vers
-	Duplicate Layer	Dupliquer le calque
-	Contract	Contracter
 	Allow online fonts	Autoriser les polices en ligne
 	Fonts	Polices
 	Find More	Trouver plus
@@ -3640,3 +3623,6 @@ curves	Smooth	Lisser
 	Detailed fills from a prompt, three variants in seconds on a GPU.	Remplissages détaillés à partir d’un texte, trois variantes en secondes sur GPU.
 	Needs a GPU	GPU requis
 	The most detail: many steps with guidance, slow, for a strong GPU.	Le plus de détails : beaucoup d’étapes guidées, lent, pour un GPU puissant.
+	1×	1×
+	1.5×	1.5×
+	2×	2×

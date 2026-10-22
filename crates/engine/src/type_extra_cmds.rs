@@ -565,11 +565,17 @@ pub fn missing_font_names(doc: &Document) -> Vec<(String, Vec<String>)> {
     for t in type_layers(doc) {
         {
             for r in t.char_runs() {
-                if r.style.font_family.is_empty() || !style_font_missing(&mut eng.fonts, &r.style) {
+                // Missing unless the family is installed or the PostScript name is an exact face:
+                // a family only guessed from the PostScript name is still listed, so the user's
+                // own fonts (TypeR, Manage Fonts) can be searched for that face.
+                let f = r.style.font_family;
+                if f.is_empty() || eng.fonts.has_family(&f) {
                     continue;
                 }
-                let f = r.style.font_family;
                 let ps = r.style.postscript_name.filter(|ps| !ps.is_empty());
+                if ps.as_deref().is_some_and(|ps| eng.fonts.resolve_postscript(ps).exact) {
+                    continue;
+                }
                 let i = match out.iter().position(|(m, _)| *m == f) {
                     Some(i) => i,
                     None => {

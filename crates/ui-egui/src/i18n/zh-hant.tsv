@@ -2779,25 +2779,6 @@ curves	Smooth	平滑
 	Functions	功能
 	Print Resolution:	列印解析度：
 # Edit › Content-Aware Fill workspace
-	Sampling Brush Tool	取樣筆刷工具
-	Sampling Area Overlay	取樣區域覆蓋
-	Show Sampling Area	顯示取樣區域
-	Indicates	指示
-	Sampling Area	取樣區域
-	Excluded Area	排除區域
-	Sampling Area Options	取樣區域選項
-	Rectangular	矩形
-	Fill Settings	填色設定
-	Rotation Adaptation	旋轉調整
-	Very High	非常高
-	High	高
-	Low	低
-	Full	完全
-	Mirror	鏡像
-	Output Settings	輸出設定
-	Output To	輸出至
-	Duplicate Layer	複製圖層
-	Contract	縮減
 	Allow online fonts	允許線上字型
 	Fonts	字型
 	Find More	尋找更多
@@ -3256,3 +3237,6 @@ curves	Smooth	平滑
 	Detailed fills from a prompt, three variants in seconds on a GPU.	依提示精細填色，GPU 上數秒產生三個變體。
 	Needs a GPU	需要 GPU
 	The most detail: many steps with guidance, slow, for a strong GPU.	細節最豐富：多步並帶引導，較慢，適合強勁 GPU。
+	1×	1×
+	1.5×	1.5×
+	2×	2×
