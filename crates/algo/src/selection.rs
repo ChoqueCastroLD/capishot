@@ -812,12 +812,13 @@ pub fn feather(m: &[f32], w: usize, h: usize, radius: f32) -> Vec<f32> {
 pub fn polygon(points: &[(f32, f32)], area: Rect, anti_alias: bool) -> Vec<f32> {
     let (w, h) = (area.width() as usize, area.height() as usize);
     let mut m = vec![0.0f32; w * h];
-    if points.len() < 3 {
+    if points.len() < 3 || w == 0 {
         return m;
     }
     let sub = if anti_alias { 4 } else { 1 };
-    let mut xs: Vec<f32> = Vec::new();
-    for py in 0..h {
+    // Each pixel row is independent: rows in parallel where threads exist (a lasso's release).
+    let fill_row = |py: usize, row: &mut [f32]| {
+        let mut xs: Vec<f32> = Vec::new();
         for s in 0..sub {
             let y = area.y0 as f32 + py as f32 + (s as f32 + 0.5) / sub as f32;
             xs.clear();
@@ -841,14 +842,24 @@ pub fn polygon(points: &[(f32, f32)], area: Rect, anti_alias: bool) -> Vec<f32> 
                         let c = cx as f32 + 0.5;
                         if c >= x0 && c < x1 { 1.0 } else { 0.0 }
                     };
-                    m[py * w + cx] += cov.max(0.0) / sub as f32;
+                    if let Some(v) = row.get_mut(cx) {
+                        *v += cov.max(0.0) / sub as f32;
+                    }
                 }
             }
         }
+        for v in row.iter_mut() {
+            *v = v.min(1.0);
+        }
+    };
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
+    {
+        use rayon::prelude::*;
+        m.par_chunks_mut(w).enumerate().for_each(|(py, row)| fill_row(py, row));
     }
-    for v in &mut m {
-        *v = v.min(1.0);
-    }
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
+    m.chunks_mut(w).enumerate().for_each(|(py, row)| fill_row(py, row));
+    let _ = h;
     m
 }
 
