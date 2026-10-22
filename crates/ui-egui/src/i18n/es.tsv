@@ -3184,3 +3184,35 @@ cameraData	Lens	Objetivo
 	Collapse to Icons	Contraer a iconos
 	Expand Panels	Expandir paneles
 	Dock to the Panels	Acoplar a los paneles
+	Ultra-light (any device, 280 MB)	Ultraligera (cualquier dispositivo, 280 MB)
+	Fast (1 GB)	Rápida (1 GB)
+	Standard (GPU, 2.3 GB)	Estándar (GPU, 2,3 GB)
+	High (GPU, slow)	Alta (GPU, lenta)
+	Ultra-light	Ultraligera
+	Fast	Rápida
+	Show files	Mostrar archivos
+	Recommended for this device	Recomendado para este dispositivo
+	Generative Fill - {tier}	Relleno generativo - {tier}
+	Clean	Limpiar
+	Erase text and objects.	Borra textos y objetos.
+	Enlarge pages without blur.	Amplía páginas sin desenfocar.
+	Draw new content from a prompt.	Dibuja contenido nuevo a partir de un texto.
+	Speed	Velocidad
+	No GPU needed	Sin GPU
+	Precision	Precisión
+	Memory	Memoria
+	GPU memory	Memoria de GPU
+	Resume	Reanudar
+	Paused	En pausa
+	Ready	Lista
+	Downloading	Descargando
+	Pause all	Pausar todo
+	Erases text and SFX and redraws screentone and lines.	Borra textos y onomatopeyas y redibuja trama y líneas.
+	A small cleaner for phones and computers without a GPU.	Un limpiador pequeño para móviles y equipos sin GPU.
+	Sharp 2× and 4× upscaling of black-and-white manga pages.	Amplía 2× y 4× páginas de manga en blanco y negro con nitidez.
+	2× and 4× upscaling of colour pages and covers.	Amplía 2× y 4× páginas a color y portadas.
+	Fast upscaling that runs well on any device.	Ampliación rápida que va bien en cualquier dispositivo.
+	Rough fills on any device, even without a GPU.	Rellenos sencillos en cualquier dispositivo, incluso sin GPU.
+	Good fills with a smaller download.	Buenos rellenos con una descarga menor.
+	Detailed fills from a prompt, three variants in seconds on a GPU.	Rellenos detallados a partir de un texto: tres variantes en segundos con GPU.
+	Needs a GPU	Requiere GPU
