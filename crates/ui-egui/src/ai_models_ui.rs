@@ -262,12 +262,16 @@ fn thumbnail(ui: &mut egui::Ui, s: Section, t: &Tokens) {
 
 /// Five small bars, `n` of them lit.
 fn meter(ui: &mut egui::Ui, label: &str, n: u8, t: &Tokens) {
-    ui.label(egui::RichText::new(label).color(t.text_dim).size(11.0));
-    let (r, _) = ui.allocate_exact_size(egui::vec2(34.0, 10.0), egui::Sense::hover());
-    for i in 0..5u8 {
-        let b = egui::Rect::from_min_size(r.min + egui::vec2(f32::from(i) * 7.0, 2.0), egui::vec2(5.0, 7.0));
-        ui.painter().rect_filled(b, 1.0, if i < n { t.accent } else { t.field_border });
-    }
+    // One unit, so a wrapping row never splits the label from its bars.
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        ui.label(egui::RichText::new(label).color(t.text_dim).size(11.0));
+        let (r, _) = ui.allocate_exact_size(egui::vec2(34.0, 10.0), egui::Sense::hover());
+        for i in 0..5u8 {
+            let b = egui::Rect::from_min_size(r.min + egui::vec2(f32::from(i) * 7.0, 2.0), egui::vec2(5.0, 7.0));
+            ui.painter().rect_filled(b, 1.0, if i < n { t.accent } else { t.field_border });
+        }
+    });
 }
 
 /// A small rounded label.
@@ -301,11 +305,22 @@ fn card_ui(
     action: &mut Option<Action>,
     buttons: &mut Vec<(String, String, [f32; 4])>,
 ) -> egui::Response {
-    let mut rec = |name: &str, r: &egui::Response| buttons.push((c.id.to_string(), name.to_string(), [r.rect.min.x, r.rect.min.y, r.rect.max.x, r.rect.max.y]));
+    // Only buttons a click can reach (inside the scroll area's visible part).
+    let mut rec = |name: &str, r: &egui::Response| {
+        let v = r.rect.intersect(r.interact_rect);
+        if r.interact_rect.is_positive() && v.is_positive() {
+            buttons.push((c.id.to_string(), name.to_string(), [v.min.x, v.min.y, v.max.x, v.max.y]));
+        }
+    };
     let files = c.models();
     let status_of = |m: &ModelInfo| rows.iter().find(|(r, _)| r.file == m.file).map(|(_, s)| s.clone()).unwrap_or(Status::NotDownloaded);
     let st: Vec<(&'static ModelInfo, Status)> = files.iter().map(|m| (*m, status_of(m))).collect();
-    let state = CardState::of(&st.iter().map(|(m, s)| (m.bytes, s.clone())).collect::<Vec<_>>());
+    // A shared file (TAESD) downloading or paused for another card doesn't make this one
+    // "downloading" or "paused": only its own files do.
+    let own: Vec<&str> = files.iter().filter(|m| !cards::CARDS.iter().any(|o| o.id != c.id && o.models().iter().any(|x| x.file == m.file))).map(|m| m.file).collect();
+    let active = |s: &Status| s.is_pending() || matches!(s, Status::Paused { .. });
+    let started = own.is_empty() || st.iter().any(|(m, s)| own.contains(&m.file) && active(s));
+    let state = CardState::of(&st.iter().map(|(m, s)| (m.bytes, if !started && active(s) { Status::NotDownloaded } else { s.clone() })).collect::<Vec<_>>());
     let (label, color) = match &state {
         CardState::NotDownloaded => (tl!("Not downloaded").to_string(), t.text_dim),
         CardState::Downloading { .. } => (tl!("Downloading").to_string(), t.accent),
@@ -322,7 +337,8 @@ fn card_ui(
         .corner_radius(t.radius)
         .inner_margin(egui::Margin::same(10))
         .show(ui, |ui| {
-            let w = (ui.max_rect().width()).max(200.0);
+            // The frame's margins and border sit outside this width.
+            let w = (ui.max_rect().width() - 22.0).max(180.0);
             ui.set_width(w);
             ui.set_max_width(w);
             ui.horizontal(|ui| {
@@ -448,7 +464,10 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     window = if phone {
         window.fixed_rect(screen).resizable(false).title_bar(true)
     } else {
-        window.resizable(true).default_width(820.0).default_height(640.0).default_pos(egui::pos2((canvas.center().x - 410.0).max(canvas.left() + 8.0), canvas.top() + 24.0))
+        // Big by default: three cards a row on a laptop.
+        let w = (screen.width() * 0.8).clamp(560.0, 1120.0);
+        let h = (screen.height() * 0.84).clamp(420.0, 900.0);
+        window.resizable(true).default_width(w).default_height(h).default_pos(egui::pos2((canvas.center().x - w / 2.0).max(screen.left() + 8.0), (screen.top() + 40.0).max(canvas.top() - 30.0)))
     };
     host.show(ctx, egui::Id::new("ai-models-window"), window, |ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| host.header_button(ui));
@@ -469,6 +488,9 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
             let rec_label = crate::i18n::fmt(tl!("Download recommended for this device ({size})"), &[("size", &size(rec_missing))]);
             if ui.add_enabled_ui(ok && rec_missing > 0, |ui| crate::widgets::primary_button(ui, &rec_label, 0.0)).inner.clicked() {
                 action = Some(Action::Recommended);
+            }
+            if phone {
+                ui.end_row();
             }
             if confirm_all {
                 ui.label(tl!("Delete every downloaded model?"));
@@ -568,13 +590,24 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
 }
 
+/// The name of the card a file belongs to (the one that owns it alone, else the first), for
+/// progress lines: "Ultra-light", not "text encoder, 4-bit".
+fn file_card_title(m: &ModelInfo) -> String {
+    let with: Vec<&Card> = cards::CARDS.iter().filter(|c| c.models().iter().any(|x| x.file == m.file)).collect();
+    match with.first() {
+        Some(c) if c.section == Section::Generative => crate::i18n::fmt(tl!("Generative Fill - {tier}"), &[("tier", card_title(c))]),
+        Some(c) if with.len() == 1 => card_title(c).to_string(),
+        _ => models::file_title(m),
+    }
+}
+
 /// "Downloading Manga LaMa 42% · 2 more queued".
 fn queue_text(rows: &[(&'static ModelInfo, Status)]) -> String {
     let queued = rows.iter().filter(|(_, s)| *s == Status::Queued).count();
     let mut s = match rows.iter().find(|(_, s)| matches!(s, Status::Downloading { .. })) {
         Some((m, Status::Downloading { done, total, .. })) => {
             let pct = format!("{:.0}", *done as f64 * 100.0 / (*total).max(1) as f64);
-            crate::i18n::fmt(tl!("Downloading {model} {pct}%"), &[("model", &models::file_title(m)), ("pct", &pct)])
+            crate::i18n::fmt(tl!("Downloading {model} {pct}%"), &[("model", &file_card_title(m)), ("pct", &pct)])
         }
         _ => tl!("Starting the next download…").to_string(),
     };
@@ -596,7 +629,7 @@ pub fn status_indicator(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let more = rows.iter().filter(|(_, s)| *s == Status::Queued).count();
     let text = match rows.iter().find(|(_, s)| matches!(s, Status::Downloading { .. })) {
-        Some((m, Status::Downloading { done, total, .. })) => format!("↓ {} {:.0}%", models::file_title(m), *done as f64 * 100.0 / (*total).max(1) as f64),
+        Some((m, Status::Downloading { done, total, .. })) => format!("↓ {} {:.0}%", file_card_title(m), *done as f64 * 100.0 / (*total).max(1) as f64),
         _ => "↓ …".to_string(),
     };
     let text = if more > 0 { format!("{text} (+{more})") } else { text };
