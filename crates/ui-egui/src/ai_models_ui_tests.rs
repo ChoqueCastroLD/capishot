@@ -45,46 +45,51 @@ fn the_window_menu_item_opens_and_closes_it() {
 }
 
 #[test]
-fn it_lists_every_model_with_tools_device_licence_and_status() {
+fn it_shows_one_card_per_model_or_tier_in_sections() {
     let _lang = crate::i18n::language_scope(crate::i18n::Lang::EN);
     let store = Arc::new(FakeStore::default());
     store.put(model(MIGAN_ID).unwrap());
     let mut h = harness(&store);
     open(h.state_mut(), None);
     h.run_steps(4);
-    for f in photocraft_ai::models::files() {
-        assert!(h.query_all_by_label_contains(&photocraft_ai::models::file_title(f)).next().is_some(), "{}", f.title);
-    }
     for want in [
-        "Cleaning",
-        "Upscaling",
-        "Used by: Clean with AI, Remove Tool",
-        "Used by: Upscale with AI",
-        "Runs on: GPU or CPU (best on a GPU)",
-        "Runs on: GPU or CPU (lite: fine on either)",
-        "MIT · dreMaz (AnimeMangaInpainting)",
-        "Downloaded",
+        "Clean",
+        "Upscale",
+        "Generative Fill",
+        "Manga LaMa",
+        "MI-GAN (lite)",
+        "MangaJaNai",
+        "IllustrationJaNai",
+        "Ultra-light",
+        "Standard",
+        "Ready",
         "Not downloaded",
+        "Recommended for this device",
+        "No GPU needed",
         "Models on this device: 13 MB",
         "Download recommended for this device",
-        "Download all",
     ] {
         assert!(h.query_all_by_label_contains(want).next().is_some(), "{want}");
     }
+    // Parts never show as their own rows.
+    assert!(h.query_all_by_label_contains("part 1 of 4").next().is_none());
 }
 
 #[test]
-fn download_cancel_and_delete_go_through_the_commands() {
+fn download_pause_resume_cancel_and_delete_a_card() {
     let _lang = crate::i18n::language_scope(crate::i18n::Lang::EN);
     let store = Arc::new(FakeStore::default());
     let mut h = harness(&store);
     open(h.state_mut(), None);
     h.run_steps(4);
-    // The first row is Manga LaMa.
+    // The first card is Manga LaMa.
+    // Every card fits in the window.
+    let screen = 1400.0;
+    assert!(h.state().ui.ai_models.buttons.iter().all(|(_, _, r)| r[2] <= screen), "{:?}", h.state().ui.ai_models.buttons);
     h.query_all_by_label("Download").next().expect("a Download button").click();
     h.run_steps(4);
-    assert!(matches!(status(&store, LAMA_ID), Status::Downloading { .. }));
-    assert!(h.query_by_label_contains("Downloading 0%").is_some());
+    let st: Vec<_> = photocraft_ai::models::files().into_iter().map(|m| (m.id, store.status(m))).filter(|(_, s)| *s != Status::NotDownloaded).collect();
+    assert!(matches!(status(&store, LAMA_ID), Status::Downloading { .. }), "{st:?} {:?}", h.state().ui.status);
     // The status bar shows the queue while the window is closed.
     h.state_mut().ui.ai_models.open = false;
     h.run_steps(4);
@@ -92,10 +97,16 @@ fn download_cancel_and_delete_go_through_the_commands() {
     h.get_by_label_contains("↓ Manga LaMa").click();
     h.run_steps(4);
     assert!(h.state().ui.ai_models.open, "the indicator opens the window");
+    h.get_by_label("Pause").click();
+    h.run_steps(4);
+    assert!(matches!(status(&store, LAMA_ID), Status::Paused { .. }));
+    assert!(h.query_all_by_label("Paused").next().is_some());
+    h.get_by_label("Resume").click();
+    h.run_steps(4);
+    assert!(matches!(status(&store, LAMA_ID), Status::Downloading { .. }));
     h.query_all_by_label("Cancel").next().expect("Cancel").click();
     h.run_steps(4);
     assert_eq!(status(&store, LAMA_ID), Status::NotDownloaded);
-    // Download again and let it finish: Delete removes it.
     h.query_all_by_label("Download").next().unwrap().click();
     h.run_steps(2);
     store.step();
@@ -107,17 +118,16 @@ fn download_cancel_and_delete_go_through_the_commands() {
 }
 
 #[test]
-fn download_all_queues_everything_one_at_a_time_and_delete_all_asks_first() {
+fn a_tier_downloads_all_its_parts_and_delete_all_asks_first() {
     let _lang = crate::i18n::language_scope(crate::i18n::Lang::EN);
     let store = Arc::new(FakeStore::default());
     let mut h = harness(&store);
     open(h.state_mut(), None);
     h.run_steps(4);
-    h.get_by_label_contains("Download all").click();
+    let card = photocraft_ai::cards::card(photocraft_ai::cards::GENFILL_STANDARD_CARD).unwrap();
+    h.state_mut().run(ai_models_cmds::DOWNLOAD, json!({"card": card.id})).unwrap();
     h.run_steps(4);
-    // "Download all" is every tool's model; Generative Fill (2 GB) has its own button.
-    let files: Vec<_> =
-        photocraft_ai::models::files().into_iter().filter(|m| photocraft_ai::models::group(m) != photocraft_ai::models::Group::Generative).collect();
+    let files = card.models();
     let downloading = files.iter().filter(|m| matches!(store.status(m), Status::Downloading { .. })).count();
     let queued = files.iter().filter(|m| store.status(m) == Status::Queued).count();
     assert_eq!((downloading, queued), (1, files.len() - 1), "one at a time");
@@ -174,8 +184,6 @@ fn texts() {
 const STRINGS: &[&str] = &[
     "AI Models",
     "AI Models…",
-    "GPU or CPU (best on a GPU)",
-    "GPU or CPU (lite: fine on either)",
     "Not downloaded",
     "Queued",
     "Downloading {pct}%",
@@ -187,25 +195,44 @@ const STRINGS: &[&str] = &[
     "Models on this device: {size}",
     "site storage {used} of {quota}",
     "Download recommended for this device ({size})",
-    "No usable GPU here: the lite models (MI-GAN, Real-ESRGAN Compact).",
-    "A GPU is available: the full models (Manga LaMa, MangaJaNai for your open pages, IllustrationJaNai).",
-    "Download all ({size})",
     "Delete every downloaded model?",
     "Delete all",
     "Keep",
     "Cancel all",
-    "Cleaning",
-    "Upscaling",
+    "Pause all",
     "Downloading {model} {pct}%",
     "Starting the next download…",
     "Retry",
     "Download",
-    "Update",
     "Used by: {tools}",
-    "Runs on: {where}",
     "Licence:",
     "AI model downloads: click to open the AI Model Manager",
-    "{model} ({mb} MB) isn't downloaded. Download it in the AI Model Manager first.",
+    "Clean",
+    "Upscale",
+    "Erase text and objects.",
+    "Enlarge pages without blur.",
+    "Draw new content from a prompt.",
+    "Quality",
+    "Speed",
+    "Needs a GPU",
+    "No GPU needed",
+    "Recommended for this device",
+    "Precision",
+    "Memory",
+    "GPU memory",
+    "Resume",
+    "Paused",
+    "Ready",
+    "Downloading",
+    "Ultra-light",
+    "Erases text and SFX and redraws screentone and lines.",
+    "A small cleaner for phones and computers without a GPU.",
+    "Sharp 2× and 4× upscaling of black-and-white manga pages.",
+    "2× and 4× upscaling of colour pages and covers.",
+    "Fast upscaling that runs well on any device.",
+    "Rough fills on any device, even without a GPU.",
+    "Good fills with a smaller download.",
+    "Detailed fills from a prompt, three variants in seconds on a GPU.",
 ];
 
 #[test]

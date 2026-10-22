@@ -2912,3 +2912,35 @@ cameraData	Lens	镜头
 	Collapse to Icons	折叠为图标
 	Expand Panels	展开面板
 	Dock to the Panels	停靠到面板
+	Ultra-light (any device, 280 MB)	超轻量（任何设备，280 MB）
+	Fast (1 GB)	快速（1 GB）
+	Standard (GPU, 2.3 GB)	标准（GPU，2.3 GB）
+	High (GPU, slow)	高（GPU，较慢）
+	Ultra-light	超轻量
+	Fast	快速
+	Show files	显示文件
+	Recommended for this device	推荐用于此设备
+	Generative Fill - {tier}	创成式填充 - {tier}
+	Clean	清理
+	Erase text and objects.	擦除文字和物体。
+	Enlarge pages without blur.	放大页面而不模糊。
+	Draw new content from a prompt.	根据提示绘制新内容。
+	Speed	速度
+	No GPU needed	无需 GPU
+	Precision	精度
+	Memory	内存
+	GPU memory	显存
+	Resume	继续
+	Paused	已暂停
+	Ready	就绪
+	Downloading	正在下载
+	Pause all	全部暂停
+	Erases text and SFX and redraws screentone and lines.	擦除文字和音效字，并重绘网点与线条。
+	A small cleaner for phones and computers without a GPU.	适合手机和无 GPU 电脑的小型清理模型。
+	Sharp 2× and 4× upscaling of black-and-white manga pages.	黑白漫画页面清晰放大 2 倍和 4 倍。
+	2× and 4× upscaling of colour pages and covers.	彩色页面和封面放大 2 倍和 4 倍。
+	Fast upscaling that runs well on any device.	在任何设备上都流畅的快速放大。
+	Rough fills on any device, even without a GPU.	任何设备都能进行粗略填充，无需 GPU。
+	Good fills with a smaller download.	下载更小，填充效果良好。
+	Detailed fills from a prompt, three variants in seconds on a GPU.	根据提示精细填充，GPU 上数秒生成三个变体。
+	Needs a GPU	需要 GPU

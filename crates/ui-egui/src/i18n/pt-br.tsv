@@ -4277,3 +4277,31 @@ layerLabel	No Color	Sem cor
 	Collapse to Icons	Recolher em ícones
 	Expand Panels	Expandir painéis
 	Dock to the Panels	Encaixar nos painéis
+	Ultra-light (any device, 280 MB)	Ultraleve (qualquer dispositivo, 280 MB)
+	Fast (1 GB)	Rápida (1 GB)
+	Standard (GPU, 2.3 GB)	Padrão (GPU, 2,3 GB)
+	High (GPU, slow)	Alta (GPU, lenta)
+	Ultra-light	Ultraleve
+	Show files	Mostrar arquivos
+	Recommended for this device	Recomendado para este dispositivo
+	Generative Fill - {tier}	Preenchimento generativo - {tier}
+	Clean	Limpar
+	Erase text and objects.	Apaga textos e objetos.
+	Enlarge pages without blur.	Amplia páginas sem desfocar.
+	Draw new content from a prompt.	Desenha conteúdo novo a partir de um texto.
+	No GPU needed	Sem GPU
+	Precision	Precisão
+	Memory	Memória
+	GPU memory	Memória da GPU
+	Paused	Pausado
+	Downloading	Baixando
+	Pause all	Pausar tudo
+	Erases text and SFX and redraws screentone and lines.	Apaga textos e onomatopeias e redesenha retícula e linhas.
+	A small cleaner for phones and computers without a GPU.	Um limpador pequeno para celulares e PCs sem GPU.
+	Sharp 2× and 4× upscaling of black-and-white manga pages.	Amplia 2× e 4× páginas de mangá em preto e branco com nitidez.
+	2× and 4× upscaling of colour pages and covers.	Amplia 2× e 4× páginas coloridas e capas.
+	Fast upscaling that runs well on any device.	Ampliação rápida que roda bem em qualquer dispositivo.
+	Rough fills on any device, even without a GPU.	Preenchimentos simples em qualquer dispositivo, mesmo sem GPU.
+	Good fills with a smaller download.	Bons preenchimentos com download menor.
+	Detailed fills from a prompt, three variants in seconds on a GPU.	Preenchimentos detalhados a partir de um texto, três variações em segundos na GPU.
+	Needs a GPU	Requer GPU

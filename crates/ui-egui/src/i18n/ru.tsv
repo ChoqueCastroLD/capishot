@@ -3237,3 +3237,34 @@ cameraData	Lens	Объектив
 	Collapse to Icons	Свернуть в значки
 	Expand Panels	Развернуть панели
 	Dock to the Panels	Закрепить на панелях
+	Ultra-light (any device, 280 MB)	Сверхлёгкое (любое устройство, 280 МБ)
+	Fast (1 GB)	Быстрое (1 ГБ)
+	Standard (GPU, 2.3 GB)	Стандартное (GPU, 2,3 ГБ)
+	High (GPU, slow)	Высокое (GPU, медленно)
+	Ultra-light	Сверхлёгкое
+	Show files	Показать файлы
+	Recommended for this device	Рекомендуется для этого устройства
+	Generative Fill - {tier}	Генеративная заливка - {tier}
+	Clean	Очистка
+	Erase text and objects.	Стирает текст и объекты.
+	Enlarge pages without blur.	Увеличивает страницы без размытия.
+	Draw new content from a prompt.	Рисует новое по текстовому запросу.
+	Speed	Скорость
+	No GPU needed	Без GPU
+	Precision	Точность
+	Memory	Память
+	GPU memory	Видеопамять
+	Resume	Продолжить
+	Paused	Приостановлено
+	Ready	Готово
+	Downloading	Загрузка
+	Pause all	Приостановить все
+	Erases text and SFX and redraws screentone and lines.	Стирает текст и звуки, дорисовывает скринтон и линии.
+	A small cleaner for phones and computers without a GPU.	Небольшая очистка для телефонов и ПК без GPU.
+	Sharp 2× and 4× upscaling of black-and-white manga pages.	Чёткое увеличение ч/б страниц манги в 2× и 4×.
+	2× and 4× upscaling of colour pages and covers.	Увеличение цветных страниц и обложек в 2× и 4×.
+	Fast upscaling that runs well on any device.	Быстрое увеличение для любого устройства.
+	Rough fills on any device, even without a GPU.	Простые заливки на любом устройстве, даже без GPU.
+	Good fills with a smaller download.	Хорошие заливки при меньшей загрузке.
+	Detailed fills from a prompt, three variants in seconds on a GPU.	Детальные заливки по запросу: три варианта за секунды на GPU.
+	Needs a GPU	Нужен GPU
