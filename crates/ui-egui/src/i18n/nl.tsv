@@ -4040,3 +4040,10 @@ cameraData	Lens	Lens
 	Variants:	Varianten:
 	Describe what to add (optional)	Beschrijf wat er bij moet (optioneel)
 	English, Spanish or Portuguese; empty fills with background. It runs on this device, and generating means you accept the Terms of Use.	Engels, Spaans of Portugees; leeg vult met achtergrond. Draait op dit apparaat; door te genereren aanvaardt u de Gebruiksvoorwaarden.
+	GPU couldn't run this model; used the CPU instead	De GPU kon dit model niet uitvoeren; in plaats daarvan is de CPU gebruikt
+	Menu	Menu
+	Max pixel density	Maximale pixeldichtheid
+	Display's own	Die van het scherm
+	Collapse to Icons	Samenvouwen tot pictogrammen
+	Expand Panels	Panelen uitvouwen
+	Dock to the Panels	Aan de panelen koppelen

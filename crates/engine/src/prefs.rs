@@ -70,6 +70,25 @@ choice!(
     GpuBackend { Auto = "auto", Vulkan = "vulkan", Dx12 = "dx12", Metal = "metal", Gl = "gl", Cpu = "cpu" } default Auto
 );
 choice!(
+    /// Most device pixels per CSS pixel the web app draws at (Preferences › Performance, applies
+    /// at next launch). Phones are 3× and more: each step down is fewer pixels to draw per frame
+    /// and less memory, for a slightly softer picture. `auto` draws at up to 2×.
+    PixelDensity { Auto = "auto", Native = "native", X2 = "2", X15 = "1.5", X1 = "1" } default Auto
+);
+
+impl PixelDensity {
+    /// The cap on the device pixel ratio (`None`: the display's own).
+    pub fn cap(self) -> Option<f64> {
+        match self {
+            Self::Auto | Self::X2 => Some(2.0),
+            Self::Native => None,
+            Self::X15 => Some(1.5),
+            Self::X1 => Some(1.0),
+        }
+    }
+}
+
+choice!(
     /// Rendering policy, independent of the advanced graphics backend selection.
     /// CPU disables image acceleration; the native window may still need hardware graphics.
     RenderingMode { Auto = "auto", Gpu = "gpu", Cpu = "cpu" } default Auto
@@ -566,6 +585,8 @@ pub struct Performance {
     /// Memory budget of the layer-effect cache, in MB.
     pub effect_cache_mb: u32,
     pub legacy_compositing: bool,
+    /// Web: the most device pixels per CSS pixel to draw at (applies at next launch).
+    pub max_pixel_density: PixelDensity,
 }
 
 impl Performance {
@@ -574,10 +595,30 @@ impl Performance {
         self.rendering_mode.unwrap_or_else(|| if !self.use_gpu || self.gpu_backend == GpuBackend::Cpu { RenderingMode::Cpu } else { RenderingMode::Auto })
     }
 
-    /// Shared managed-pixel RAM target (Memory Usage), in bytes.
+    /// Shared managed-pixel RAM target (Memory Usage), in bytes, within the platform's cap
+    /// ([`set_memory_cap`]).
     pub fn history_budget_bytes(&self) -> usize {
-        (self.memory_usage_mb as usize).saturating_mul(1 << 20)
+        capped_budget((self.memory_usage_mb as usize).saturating_mul(1 << 20), memory_cap())
     }
+}
+
+/// The platform's cap on Memory Usage (bytes; `u64::MAX`: none).
+static MEMORY_CAP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX);
+
+/// Cap Memory Usage for this process, whatever the preference says: a browser tab (above all on a
+/// phone) is killed long before the desktop default of 4 GB of undo history, so the web shell sets
+/// a cap from the device's memory at start-up. The preference keeps its value.
+pub fn set_memory_cap(bytes: u64) {
+    MEMORY_CAP.store(bytes.max(256 << 20), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The cap [`set_memory_cap`] set (`u64::MAX` when none).
+pub fn memory_cap() -> u64 {
+    MEMORY_CAP.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+fn capped_budget(pref: usize, cap: u64) -> usize {
+    pref.min(usize::try_from(cap).unwrap_or(usize::MAX))
 }
 
 impl Default for Performance {
@@ -594,6 +635,7 @@ impl Default for Performance {
             linux_display_server: LinuxDisplayServer::Auto,
             effect_cache_mb: 768,
             legacy_compositing: false,
+            max_pixel_density: PixelDensity::Auto,
         }
     }
 }
@@ -1030,7 +1072,6 @@ pub const HIDDEN_UNTIL_IMPLEMENTED: &[&str] = &[
     "type.textEngine",
     "type.recentFonts",
     "enhancedControls.scrubbySliderAcceleration",
-    "enhancedControls.touchGestures",
     "rawDefaults.colorSpace",
     "rawDefaults.bitDepth",
     "rawDefaults.resolution",
@@ -1052,7 +1093,7 @@ pub fn is_hidden(path: &str) -> bool {
 
 /// Preferences that only do something in the web build; other builds don't show them. They
 /// still load, save and round-trip everywhere.
-pub const WEB_ONLY: &[&str] = &["general.sendAnonymousUsageStatistics"];
+pub const WEB_ONLY: &[&str] = &["general.sendAnonymousUsageStatistics", "performance.maxPixelDensity"];
 
 /// Preferences that only do something on Linux; the dialog doesn't show them elsewhere. They
 /// still load, save and round-trip on every platform.
@@ -1094,6 +1135,7 @@ pub fn choices(path: &str) -> Option<&'static [&'static str]> {
         "performance.gpuBackend" => GpuBackend::NAMES,
         "performance.linuxDisplayServer" => LinuxDisplayServer::NAMES,
         "performance.renderingMode" => RenderingMode::NAMES,
+        "performance.maxPixelDensity" => PixelDensity::NAMES,
         _ => return None,
     })
 }
@@ -1961,3 +2003,13 @@ pub fn specs() -> Vec<CommandSpec> {
 #[cfg(test)]
 #[path = "prefs/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod memory_cap_tests {
+    #[test]
+    fn the_platform_cap_bounds_the_history_budget() {
+        assert_eq!(super::capped_budget(4096 << 20, u64::MAX), 4096 << 20);
+        assert_eq!(super::capped_budget(4096 << 20, 768 << 20), 768 << 20);
+        assert_eq!(super::capped_budget(512 << 20, 768 << 20), 512 << 20);
+    }
+}

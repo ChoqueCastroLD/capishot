@@ -612,13 +612,13 @@ pub fn editor_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let mut show_panel = false;
     // Resolved before the closure so `app` is borrowed only once inside it.
     let layer = selected_gradient(app);
-    egui::Window::new(tl!("Gradient Editor"))
-        .id(egui::Id::new("gradient-editor"))
-        .open(&mut open)
-        .collapsible(false)
-        .resizable(true)
-        .default_width(330.0)
-        .show(ctx, |ui| match &layer {
+    // Its own window, or docked (`crate::floaters`).
+    let host = crate::floaters::Host::of(app, ctx, crate::dock::Group::GradientEditor);
+    let window =
+        egui::Window::new(tl!("Gradient Editor")).id(egui::Id::new("gradient-editor")).open(&mut open).collapsible(false).resizable(true).default_width(330.0);
+    host.show(ctx, egui::Id::new("gradient-editor"), window, |ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| host.header_button(ui));
+        match &layer {
             Some(l) => properties_panel::editor(app, ui, l),
             None => {
                 // Photoshop's editor edits the gradient the tool paints with, so with no gradient
@@ -638,7 +638,8 @@ pub fn editor_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     show_panel = widgets::secondary_button(ui, tl!("Gradients"), 0.0).clicked();
                 });
             }
-        });
+        }
+    });
     if show_panel {
         let _ = crate::preset_panels::menu(app, "window.panel.gradients", &Value::Null);
     }

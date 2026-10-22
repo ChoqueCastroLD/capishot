@@ -4270,3 +4270,10 @@ layerLabel	No Color	Sem cor
 	Variants:	Variações:
 	Describe what to add (optional)	Descreva o que adicionar (opcional)
 	English, Spanish or Portuguese; empty fills with background. It runs on this device, and generating means you accept the Terms of Use.	Inglês, espanhol ou português; vazio preenche com o fundo. Roda neste dispositivo, e ao gerar você aceita os Termos de uso.
+	GPU couldn't run this model; used the CPU instead	A GPU não conseguiu executar este modelo; a CPU foi usada no lugar
+	Menu	Menu
+	Max pixel density	Densidade máxima de pixels
+	Display's own	A da tela
+	Collapse to Icons	Recolher em ícones
+	Expand Panels	Expandir painéis
+	Dock to the Panels	Encaixar nos painéis

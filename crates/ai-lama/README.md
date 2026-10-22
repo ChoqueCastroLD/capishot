@@ -45,8 +45,13 @@ LaMa's spectral transform needs `rfft2`/`irfft2` (orthonormal) on 192-channel bo
 (and panics otherwise), so the Fourier unit is four dense matrix products instead
 (`dft.rs`): rows `X·[C_W | −S_W]`, then the transposed columns `·[[C_H, −S_H], [S_H, C_H]]`, the
 1×1 conv + ReLU on `[re, im]` channels, and the inverse pair (half-spectrum weights 1/2/…/2/1,
-imaginary DC/Nyquist dropped like `irfft`). Any size, any backend (just matmul), built in f64.
-Cost at 512²: about 22 GFLOP of the model's ~400 GFLOP (≈ 6 %).
+imaginary DC/Nyquist dropped like `irfft`). Any size, built in f64. Each product runs as a 1×1
+convolution with the contracted axis moved to the channels, not as a burn matmul: burn 0.22 sizes
+its matmul tiles from the GPU's subgroup width alone and can ask for more workgroup memory than
+WebGPU grants (35840 of 32768 bytes on 64-wide GPUs), which it turns into a panic. The direct
+convolution needs no workgroup memory. Same output on the CPU (identical at 512², about 4 %
+slower there); the `runs_on_a_gpu_with_little_workgroup_memory` tests check every model on a GPU
+capped at 4, 16 and 32 KiB. Cost at 512²: about 22 GFLOP of the model's ~400 GFLOP (≈ 6 %).
 
 ## Verification
 

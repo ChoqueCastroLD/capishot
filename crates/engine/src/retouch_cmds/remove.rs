@@ -219,7 +219,7 @@ pub(super) fn remove(s: &mut Session, p: &Value) -> Result<Value> {
                     w,
                     h,
                     opts,
-                    Box::new(move |r| done.finish(r.and_then(|generated| encode_ai(prep, win, &generated)).map(Some))),
+                    Box::new(move |r| done.finish(r.and_then(|(generated, _)| encode_ai(prep, win, &generated)).map(Some))),
                 );
             },
             move |s, filled| apply_fill(s, id, &p, filled),

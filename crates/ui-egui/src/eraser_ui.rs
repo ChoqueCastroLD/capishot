@@ -54,17 +54,28 @@ pub fn finish_stroke(app: &mut PhotocraftApp, tool: Tool, points: &[[f64; 3]]) -
     if tool != Tool::BackgroundEraser {
         return false;
     }
+    let p = background_params(app, points);
+    let r = app.run("paint.backgroundEraser", p);
+    report(app, r);
+    true
+}
+
+/// The `paint.backgroundEraser` params of a stroke through `points` with the options bar's
+/// settings: what the release commits, and what the live stroke drawn meanwhile is begun with
+/// (the commit takes the live pixels only when they match).
+pub(crate) fn background_params(app: &PhotocraftApp, points: &[[f64; 3]]) -> Value {
     let o = &app.ui.tool_options;
-    let p = json!({
+    // The brush's jitter seed, the same for the live stroke and its commit: from where the
+    // stroke started.
+    let seed = points.first().map_or(0, |q| (q[0].to_bits().rotate_left(21) ^ q[1].to_bits()).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+    json!({
+        "seed": seed,
         "points": points,
         "sampling": o.bg_sampling,
         "limits": o.bg_limits,
         "tolerance": o.bg_tolerance,
         "protectForegroundColor": o.bg_protect_fg,
-    });
-    let r = app.run("paint.backgroundEraser", p);
-    report(app, r);
-    true
+    })
 }
 
 /// Whether `tool` is the Eraser in Pencil mode: it erases hard, aliased pixels through

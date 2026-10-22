@@ -2894,3 +2894,10 @@ cameraData	Lens	Objektiv
 	Variants:	Varianty:
 	Describe what to add (optional)	Popište, co přidat (nepovinné)
 	English, Spanish or Portuguese; empty fills with background. It runs on this device, and generating means you accept the Terms of Use.	Angličtina, španělština nebo portugalština; prázdné vyplní pozadím. Běží v tomto zařízení a generováním přijímáte Podmínky použití.
+	GPU couldn't run this model; used the CPU instead	GPU tento model nedokázala spustit; použil se procesor
+	Menu	Nabídka
+	Max pixel density	Maximální hustota pixelů
+	Display's own	Vlastní hodnota displeje
+	Collapse to Icons	Sbalit na ikony
+	Expand Panels	Rozbalit panely
+	Dock to the Panels	Ukotvit do panelů

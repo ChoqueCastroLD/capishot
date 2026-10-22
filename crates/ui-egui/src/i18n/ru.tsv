@@ -3230,3 +3230,10 @@ cameraData	Lens	Объектив
 	Variants:	Варианты:
 	Describe what to add (optional)	Опишите, что добавить (необязательно)
 	English, Spanish or Portuguese; empty fills with background. It runs on this device, and generating means you accept the Terms of Use.	Английский, испанский или португальский; пустой запрос заполняет фоном. Работает на этом устройстве; генерируя, вы принимаете Условия использования.
+	GPU couldn't run this model; used the CPU instead	GPU не смог запустить эту модель; вместо него использован CPU
+	Menu	Меню
+	Max pixel density	Максимальная плотность пикселей
+	Display's own	Как у экрана
+	Collapse to Icons	Свернуть в значки
+	Expand Panels	Развернуть панели
+	Dock to the Panels	Закрепить на панелях

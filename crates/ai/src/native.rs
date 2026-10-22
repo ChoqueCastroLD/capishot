@@ -243,8 +243,15 @@ impl Upscaler for NativeUpscaler {
     }
 
     fn run(&self, req: Request, hooks: Arc<dyn Hooks>, done: Done) {
+        let cpu = req.opts.cpu || self.choice == DeviceChoice::Cpu;
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.run_sync(req, hooks.as_ref())))
             .unwrap_or_else(|_| Err(AiError::Inference("the AI runtime failed with an internal error".into())));
+        // A failure running the model on the GPU: the caller runs it again on the CPU.
+        let on_gpu = !cpu && self.inner.lock().unwrap_or_else(PoisonError::into_inner).rt.as_ref().is_some_and(|rt| rt.accel() == crate::runtime::Accel::Gpu);
+        let r = match r {
+            Err(AiError::Inference(e)) if on_gpu => Err(AiError::Gpu(e)),
+            r => r,
+        };
         if r.is_err() {
             // A failed GPU may be lost: start from a fresh model next time.
             self.inner.lock().unwrap_or_else(PoisonError::into_inner).loaded = None;

@@ -3463,3 +3463,10 @@ cameraData	Lens	렌즈
 	Variants:	변형:
 	Describe what to add (optional)	추가할 내용을 설명하세요(선택 사항)
 	English, Spanish or Portuguese; empty fills with background. It runs on this device, and generating means you accept the Terms of Use.	영어, 스페인어, 포르투갈어를 지원합니다. 비워 두면 배경으로 채웁니다. 이 기기에서 실행되며, 생성하면 이용 약관에 동의하는 것입니다.
+	GPU couldn't run this model; used the CPU instead	GPU에서 이 모델을 실행할 수 없어 CPU를 사용했습니다
+	Menu	메뉴
+	Max pixel density	최대 픽셀 밀도
+	Display's own	디스플레이 기본값
+	Collapse to Icons	아이콘으로 축소
+	Expand Panels	패널 확장
+	Dock to the Panels	패널에 도킹

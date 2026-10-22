@@ -174,7 +174,8 @@ fn multi_clicks_select_word_line_paragraph_and_all() {
 
 /// Edit layer `id` with `range` selected (caret at its end).
 fn editing(app: &mut PhotocraftApp, id: LayerId, (anchor, caret): (usize, usize)) {
-    app.ui.text_edit = Some(TextEdit { layer: id.0, caret, anchor, session: "keys-test".into(), created: false, dragging: false, resize: None, preedit: None, mask: false });
+    app.ui.text_edit =
+        Some(TextEdit { layer: id.0, caret, anchor, session: "keys-test".into(), created: false, dragging: false, resize: None, preedit: None, mask: false });
 }
 
 fn press(h: &mut Harness<'static, PhotocraftApp>, key: Key, modifiers: Modifiers) {
@@ -299,7 +300,8 @@ fn command_shift_keys_format_the_selection() {
 fn alt_and_command_backspace_fill_the_selected_type() {
     let mut app = new_app();
     app.run("tools.setColors", json!({"foreground": "#ff0000", "background": "#0000ff"})).unwrap();
-    let id = LayerId(app.run("type.create", json!({"text": "red blue", "size": 30, "x": 300, "y": 400, "color": "#000000"})).unwrap()["layer"].as_u64().unwrap());
+    let id =
+        LayerId(app.run("type.create", json!({"text": "red blue", "size": 30, "x": 300, "y": 400, "color": "#000000"})).unwrap()["layer"].as_u64().unwrap());
     editing(&mut app, id, (0, 3));
     let mut h = harness(app);
     press(&mut h, Key::Backspace, ALT);

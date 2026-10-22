@@ -64,6 +64,31 @@ impl Runtime {
         Ok(Self { device, accel: Accel::Gpu })
     }
 
+    /// A GPU device (the first adapter wgpu finds, software ones included) whose workgroup
+    /// memory is capped at `workgroup_bytes`, as on a browser's WebGPU (16 KiB guaranteed, 32 KiB
+    /// on most GPUs): for tests that every model runs within such limits. `Ok(None)` when there
+    /// is no adapter. Native only.
+    #[cfg(all(feature = "gpu", not(target_family = "wasm")))]
+    pub fn gpu_limited_blocking(workgroup_bytes: u32) -> Result<Option<Self>> {
+        use burn::tensor::wgpu::{WgpuSetup, wgpu};
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else { return Ok(None) };
+        let mut limits = adapter.limits();
+        limits.max_compute_workgroup_storage_size = limits.max_compute_workgroup_storage_size.min(workgroup_bytes);
+        let desc = wgpu::DeviceDescriptor {
+            label: None,
+            required_features: adapter.features().difference(wgpu::Features::MAPPABLE_PRIMARY_BUFFERS | wgpu::Features::all_experimental_mask()),
+            required_limits: limits,
+            memory_hints: wgpu::MemoryHints::MemoryUsage,
+            ..Default::default()
+        };
+        let (device, queue) = pollster::block_on(adapter.request_device(&desc)).map_err(|e| AiError::Device(e.to_string()))?;
+        let backend = adapter.get_info().backend;
+        let setup = WgpuSetup { instance, adapter, device, queue, backend };
+        let device = Device::wgpu_options().setup(setup).init().map_err(|e| AiError::Device(e.to_string()))?;
+        Ok(Some(Self { device, accel: Accel::Gpu }))
+    }
+
     pub fn accel(&self) -> Accel {
         self.accel
     }
