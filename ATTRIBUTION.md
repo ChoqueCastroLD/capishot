@@ -90,6 +90,7 @@ restrictions bind every user (Help › Terms of Use…, with the licence text).
 | Stable Diffusion 1.5 inpainting (the base DreamShaper 8 inpainting is fine-tuned from) | as above | CompVis, Runway, Stability AI | <https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-inpainting> | CreativeML OpenRAIL-M |
 | CLIP ViT-L/14 text encoder and BPE vocabulary (inside the above) | as above | OpenAI | <https://github.com/openai/CLIP> | MIT |
 | TCD-SD15-LoRA (few-step sampling, fused at load time) | as above | Jianbin Zheng et al. | <https://huggingface.co/h1t/TCD-SD15-LoRA> | MIT |
+| SDXS-512-DreamShaper (Ultra-light tier, 4-bit) | Edit › Generative Fill, Quality Ultra-light | IDKiro (Song et al.) | <https://huggingface.co/IDKiro/sdxs-512-dreamshaper> | CreativeML OpenRAIL++-M (same use restrictions) |
 | TAESD (tiny autoencoder: previews, light tiers) | as above | madebyollin | <https://github.com/madebyollin/taesd> | MIT |
 | burn (inference runtime, compiled in) | both | Tracel AI and the burn contributors | <https://github.com/tracel-ai/burn> | MIT/Apache-2.0 |
 

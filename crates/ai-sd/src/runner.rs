@@ -262,7 +262,11 @@ async fn sync(t: Tensor<4>) -> Result<()> {
 
 /// The runner's parameters for a request on loaded models (tier defaults filled in).
 pub fn params(req: &crate::service::Request, m: &Models) -> Params {
-    let steps = if req.steps == 0 { req.tier.steps() } else { req.steps };
+    let mut steps = if req.steps == 0 { req.tier.steps() } else { req.steps };
+    // A partial re-draw needs at least one step left after the strength cut.
+    if req.strength < 1.0 && req.strength > 0.0 && (steps as f64 * req.strength).floor() < 1.0 {
+        steps = ((1.0 / req.strength).ceil() as usize).min(crate::scheduler::MAX_STEPS);
+    }
     let guidance = if req.guidance > 0.0 {
         req.guidance
     } else if m.lora {
@@ -282,7 +286,7 @@ pub fn params(req: &crate::service::Request, m: &Models) -> Params {
         steps,
         strength: req.strength,
         guidance,
-        sampler: crate::files::SAMPLER,
+        sampler: crate::files::sampler(req.tier),
         tiny_vae: matches!(req.tier, crate::service::Tier::Ultra | crate::service::Tier::Fast),
     }
 }

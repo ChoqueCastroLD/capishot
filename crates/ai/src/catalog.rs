@@ -418,6 +418,26 @@ pub const MODELS: &[ModelInfo] = &[
         DS8_SRC
     ),
     genfill_file!(
+        "genfill-text-q4",
+        "Generative Fill (light): text encoder, 4-bit",
+        "sd15-text-ds8-q4.safetensors",
+        89_018_851,
+        "bd15fb3365e1af74b91187da1c89709428f2df9d24c760807920f063b952c233",
+        OPENRAIL,
+        DS8_AUTHOR,
+        DS8_SRC
+    ),
+    genfill_file!(
+        "genfill-ultra-unet",
+        "Generative Fill (light): SDXS model, 4-bit",
+        "sdxs-ds-unet-q4.safetensors",
+        183_409_040,
+        "2aa0f05df7d1ae0adf54af3f116e540668a118863a497122be887b9b779bb1ed",
+        "CreativeML-OpenRAIL++-M",
+        "IDKiro (SDXS-512-DreamShaper)",
+        "https://huggingface.co/IDKiro/sdxs-512-dreamshaper"
+    ),
+    genfill_file!(
         GENFILL_FAST_LORA_ID,
         "Generative Fill: few-step sampler (TCD)",
         "tcd-sd15-lora-f16.safetensors",
@@ -451,6 +471,9 @@ pub const GENFILL_STANDARD: &[&str] = &[
     "genfill-unet-4",
     GENFILL_FAST_LORA_ID,
 ];
+
+/// The files of Generative Fill's Ultra-light tier (CPUs, phones): 277 MB.
+pub const GENFILL_ULTRA: &[&str] = &["genfill-text-q4", "genfill-taesd", "genfill-ultra-unet"];
 
 /// The id of the Manga LaMa inpainting model.
 pub const LAMA_ID: &str = "manga-lama";

@@ -99,3 +99,22 @@ fn grayscale_pages_get_a_monochrome_prompt() {
     assert_eq!(r["english"], "monochrome, greyscale");
     assert!(fake.last.lock().unwrap().as_ref().unwrap().prompt.contains("monochrome"));
 }
+
+#[test]
+fn ultra_tier_runs_at_its_size_and_empty_prompts_redraw_partly() {
+    let (mut s, fake) = with_fake(page(), FakeGenFill::default());
+    let r = s.execute(ID, json!({"quality": "ultra", "variants": 1})).unwrap();
+    assert_eq!(r["tier"], "ultra");
+    let req = fake.last.lock().unwrap().clone().unwrap();
+    assert_eq!(req.width.max(req.height), 384);
+    assert!(req.strength < 1.0, "background fill re-draws a pre-fill");
+}
+
+#[test]
+fn ultra_background_fill_uses_the_cleaner_alone() {
+    let (mut s, fake) = with_fake(page(), FakeGenFill::default());
+    s.set_inpainter(Some(Arc::new(photocraft_ai_lama::service::FakeInpainter::default())));
+    let r = s.execute(ID, json!({"quality": "ultra"})).unwrap();
+    assert_eq!(r["variants"], 1);
+    assert!(fake.last.lock().unwrap().is_none(), "no diffusion run for a plain background on the light tier");
+}

@@ -4,7 +4,7 @@
 use burn::tensor::activation::sigmoid;
 use burn::tensor::{Int, Tensor, TensorCreationOptions, TensorData};
 
-use crate::nn::{Linear, Norm, Store, attention, merge_heads, split_heads};
+use crate::nn::{Linear, Norm, Store, Weight, attention, merge_heads, split_heads};
 use crate::tokenizer::CONTEXT;
 use crate::{Result, SdError};
 
@@ -30,7 +30,7 @@ struct Layer {
 /// The text encoder.
 #[derive(Debug, Clone)]
 pub struct TextEncoder {
-    token: Tensor<2>,
+    token: Weight<2>,
     position: Tensor<2>,
     layers: Vec<Layer>,
     final_ln: Norm,
@@ -40,7 +40,7 @@ impl TextEncoder {
     /// Takes the `text_model.*` tensors of `store`.
     pub fn from_store(s: &Store) -> Result<Self> {
         let p = "text_model";
-        let token = s.get(&format!("{p}.embeddings.token_embedding.weight"), [VOCAB, WIDTH])?;
+        let token = s.weight(&format!("{p}.embeddings.token_embedding.weight"), [VOCAB, WIDTH])?;
         let position = s.get(&format!("{p}.embeddings.position_embedding.weight"), [CONTEXT, WIDTH])?;
         let mut layers = Vec::with_capacity(LAYERS);
         for i in 0..LAYERS {
@@ -68,9 +68,14 @@ impl TextEncoder {
             return Err(SdError::Input("no prompts".into()));
         }
         let flat: Vec<i32> = ids.iter().flat_map(|r| r.iter().map(|&t| i32::try_from(t).unwrap_or(0).clamp(0, VOCAB as i32 - 1))).collect();
-        let device = self.token.device();
+        let device = self.position.device();
         let idx = Tensor::<1, Int>::from_data(TensorData::new(flat, [b * CONTEXT]), TensorCreationOptions::new(device));
-        let x = self.token.clone().select(0, idx).reshape([b, CONTEXT, WIDTH]);
+        // A quantized table stays quantized: only the prompt's rows are dequantized.
+        let rows = match &self.token {
+            Weight::Dense(t) => t.clone().select(0, idx),
+            Weight::Quant(q, _, dt) => q.clone().select(0, idx).dequantize().cast(*dt),
+        };
+        let x = rows.reshape([b, CONTEXT, WIDTH]);
         let mut x = x + self.position.clone().reshape([1, CONTEXT, WIDTH]);
         for l in &self.layers {
             let h = l.ln1.layer(x.clone(), EPS);
