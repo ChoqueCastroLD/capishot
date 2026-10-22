@@ -4034,6 +4034,12 @@ cameraData	Lens	Lens
 	Download and delete AI models	AI-modellen downloaden en verwijderen
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Wist de geselecteerde tekst of geluidseffecten en tekent de achtergrond opnieuw met AI, op een nieuwe laag. Gebruikt een gedownload model (Venster › AI-modellen…).
 @plural	{n} more queued|{n} more queued	nog {n} in wachtrij|nog {n} in wachtrij
+	Generative Fill	Generatieve opvulling
+	Generative Fill…	Generatieve opvulling…
+	Terms of Use…	Gebruiksvoorwaarden…
+	Variants:	Varianten:
+	Describe what to add (optional)	Beschrijf wat er bij moet (optioneel)
+	English, Spanish or Portuguese; empty fills with background. It runs on this device, and generating means you accept the Terms of Use.	Engels, Spaans of Portugees; leeg vult met achtergrond. Draait op dit apparaat; door te genereren aanvaardt u de Gebruiksvoorwaarden.
 	GPU couldn't run this model; used the CPU instead	De GPU kon dit model niet uitvoeren; in plaats daarvan is de CPU gebruikt
 	Menu	Menu
 	Max pixel density	Maximale pixeldichtheid
