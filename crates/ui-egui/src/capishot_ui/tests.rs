@@ -75,10 +75,8 @@ fn web_compile_psd_with_a_path_downloads_without_a_dialog() {
 fn web_compile_folder_zips_the_picked_files() {
     let (mut app, asked, written) = app(vec![]);
     let page = psd(&app);
-    let (dialog, asked2) = crate::file_dialog::fake(vec![Some(FileDialogAnswer::ContentsMany(vec![
-        ("02.psd".into(), page.clone()),
-        ("01.psd".into(), page.clone()),
-    ]))]);
+    let (dialog, asked2) =
+        crate::file_dialog::fake(vec![Some(FileDialogAnswer::ContentsMany(vec![("02.psd".into(), page.clone()), ("01.psd".into(), page.clone())]))]);
     app.services.file_dialog = Some(dialog);
     let r = compile_folder(&mut app, &json!({}), true).unwrap().unwrap();
     assert_eq!(r["fileDialog"], "open");

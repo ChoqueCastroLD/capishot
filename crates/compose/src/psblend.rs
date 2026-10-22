@@ -228,6 +228,7 @@ pub fn composite(mode: BlendMode, backdrop: [f32; 4], source: [f32; 4], opacity:
 
 /// Normal mixing outside Lab, for callers that select the blend space once per buffer.
 #[inline]
+#[cfg(test)]
 pub(crate) fn composite_normal_rgb(backdrop: [f32; 4], source: [f32; 4], opacity: f32) -> [f32; 4] {
     let ab = backdrop[3];
     let as_ = source[3] * opacity;

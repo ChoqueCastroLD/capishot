@@ -106,18 +106,12 @@ impl Dflt {
 /// The saved settings (only non-default values).
 pub fn saved(app: &PhotocraftApp, kind: Kind) -> Map<String, Value> {
     let stored = app.session.prefs().dialogs.get(kind.pref()).and_then(Value::as_object).cloned().unwrap_or_default();
-    kind.defaults()
-        .iter()
-        .filter_map(|(k, d)| stored.get(*k).filter(|v| d.accepts(v) && **v != d.json()).map(|v| ((*k).to_string(), v.clone())))
-        .collect()
+    kind.defaults().iter().filter_map(|(k, d)| stored.get(*k).filter(|v| d.accepts(v) && **v != d.json()).map(|v| ((*k).to_string(), v.clone()))).collect()
 }
 
 /// The settings in dialog fields `f`, without the defaults.
 fn settings_of(kind: Kind, f: &Map<String, Value>) -> Map<String, Value> {
-    kind.defaults()
-        .iter()
-        .filter_map(|(k, d)| f.get(*k).filter(|v| d.accepts(v) && **v != d.json()).map(|v| ((*k).to_string(), v.clone())))
-        .collect()
+    kind.defaults().iter().filter_map(|(k, d)| f.get(*k).filter(|v| d.accepts(v) && **v != d.json()).map(|v| ((*k).to_string(), v.clone()))).collect()
 }
 
 /// Remembers the settings in dialog fields `f` (and saves the preferences when they changed).
@@ -249,7 +243,8 @@ pub fn advanced(app: &mut PhotocraftApp, ui: &mut egui::Ui, kind: Kind, f: &mut 
                 let mut tile = num_field(f, "tile", 0);
                 let mut overlap = num_field(f, "overlap", 16);
                 ui.label(tl!("Tile size:"));
-                crate::widgets::value_field(ui, &mut tile, 0.0..=1024.0, "px", 70.0).on_hover_text(tl!("Input pixels per tile; 0 = automatic. Larger tiles are faster but need more memory."));
+                crate::widgets::value_field(ui, &mut tile, 0.0..=1024.0, "px", 70.0)
+                    .on_hover_text(tl!("Input pixels per tile; 0 = automatic. Larger tiles are faster but need more memory."));
                 ui.end_row();
                 ui.label(tl!("Overlap:"));
                 crate::widgets::value_field(ui, &mut overlap, 0.0..=128.0, "px", 70.0);

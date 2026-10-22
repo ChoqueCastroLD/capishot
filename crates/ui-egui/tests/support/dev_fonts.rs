@@ -92,7 +92,9 @@ pub fn index_json(fams: &[Fam]) -> Vec<u8> {
                    "license_path": format!("ofl/{}/OFL.txt", f.dir), "files": files})
         })
         .collect();
-    json!({"schema": 1, "source": "google/fonts", "commit": "abc123", "base_url": BASE, "fallback_base_url": FALLBACK, "families": families}).to_string().into_bytes()
+    json!({"schema": 1, "source": "google/fonts", "commit": "abc123", "base_url": BASE, "fallback_base_url": FALLBACK, "families": families})
+        .to_string()
+        .into_bytes()
 }
 
 #[derive(Clone)]

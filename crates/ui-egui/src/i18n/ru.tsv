@@ -3225,3 +3225,9 @@ cameraData	Lens	Объектив
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Стирает выделенный текст или звукоподражания и перерисовывает фон с помощью ИИ на новом слое. Использует загруженную модель (Окно › Модели ИИ…).
 @plural	{n} more queued|{n} more queued	ещё {n} в очереди|ещё {n} в очереди|ещё {n} в очереди
 	GPU couldn't run this model; used the CPU instead	GPU не смог запустить эту модель; вместо него использован CPU
+	Menu	Меню
+	Max pixel density	Максимальная плотность пикселей
+	Display's own	Как у экрана
+	Collapse to Icons	Свернуть в значки
+	Expand Panels	Развернуть панели
+	Dock to the Panels	Закрепить на панелях

@@ -22,6 +22,7 @@ fn draw_clone_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &Vie
     crate::clone_overlay::draw(app, painter, xf, at, output);
 }
 
+#[derive(Default)]
 pub struct CanvasCache {
     pub revision: u64,
     pub texture: Option<egui::TextureHandle>,
@@ -37,6 +38,8 @@ pub struct CanvasCache {
     pub tex_preview_key: u64,
     /// The CPU path's pixel grid for the part of the document in view (pixel_grid.rs).
     pub grid: Option<crate::pixel_grid::GridLines>,
+    /// The CPU canvas's tiles at display resolution (cpu_canvas.rs).
+    pub(crate) tiles: Option<crate::cpu_canvas::TileCanvas>,
 }
 
 /// An in-progress pointer gesture on the canvas.
@@ -1052,13 +1055,10 @@ fn navigator_waits_for_drag(app: &PhotocraftApp, idx: usize) -> bool {
     crate::move_ui::showing(app) || crate::patch_preview::showing(app) || live_stroke(app, idx).is_some()
 }
 
-/// The Navigator panel's image of document `idx`. With the CPU canvas that is the canvas texture
-/// itself; with the GPU canvas a thumbnail cached per revision, so an edit to a huge document
-/// doesn't also pay a full-resolution CPU composite for the navigator.
+/// The Navigator panel's image of document `idx`: a thumbnail cached per document state, so an
+/// edit to a huge document doesn't also pay a full-resolution CPU composite for the navigator
+/// (the CPU canvas composites only the tiles in view, `cpu_canvas`).
 pub fn navigator_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize) -> Option<egui::TextureId> {
-    if app.gpu.is_none() {
-        return ensure_texture(app, ctx, idx, app.session.color.main_display).map(|(t, _)| t);
-    }
     // Keyed by the document snapshot, not its revision: selecting a layer changes no pixels.
     let (snapshot, id) = app.session.documents().get(idx).map(|st| (std::sync::Arc::downgrade(&st.doc), st.doc.id))?;
     let (doc, preview_key) = display_doc(app, idx);
@@ -1100,6 +1100,40 @@ pub fn navigator_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usiz
     Some(tex.id())
 }
 
+/// What the CPU canvas of document `idx` on `output` draws this frame (see [`cpu_target`]).
+pub(crate) struct CpuTarget {
+    pub doc: std::sync::Arc<Document>,
+    pub revision: u64,
+    /// The preview key ([`display_doc`]), without the display's.
+    pub preview_key: u64,
+    pub display: Option<std::sync::Arc<photocraft_engine::display_color::CanvasDisplay>>,
+    pub display_key: u64,
+    /// What changed since the tiles were drawn, when only a rectangle did (document pixels).
+    pub damage: Option<DRect>,
+    pub id: photocraft_doc::DocId,
+}
+
+/// The document state the CPU canvas (`cpu_canvas`) shows for document `idx` on `output`, and
+/// what changed since its tiles were drawn.
+pub(crate) fn cpu_target(app: &mut PhotocraftApp, idx: usize, output: Option<u32>) -> Option<CpuTarget> {
+    let (revision, last_damage, id) = {
+        let st = app.session.documents().get(idx)?;
+        (st.revision, st.last_damage.map(|r| if r.is_empty() { r } else { r.inflate(effect_reach(&st.doc.layers)) }), st.doc.id)
+    };
+    let (mut doc, mut preview_key) = display_doc(app, idx);
+    // As in `ensure_texture`: a large document's adjustment preview is drawn by the proxy path.
+    if crate::adjust_preview::shown_key(app) == Some(preview_key)
+        && let Some(st) = app.session.documents().get(idx)
+        && crate::proxy::preview_factor(&st.doc, crate::proxy::reduced_previews(app)) > 1
+    {
+        (doc, preview_key) = (st.doc.clone(), 0);
+    }
+    let (display, display_key) = canvas_display(app, &doc, output);
+    let seen = app.canvases.get(&cache_key(id, output)).and_then(|c| c.tiles.as_ref()).and_then(crate::cpu_canvas::TileCanvas::shown);
+    let damage = seen.and_then(|seen| damage_since(app, idx, seen, (revision, preview_key), display_key, last_damage));
+    Some(CpuTarget { doc, revision, preview_key, display, display_key, damage, id })
+}
+
 /// Make sure the canvas texture for document `idx` on `display` is current; returns (texture
 /// id, scale).
 pub fn ensure_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize, display: Option<u32>) -> Option<(egui::TextureId, f32)> {
@@ -1121,16 +1155,7 @@ pub fn ensure_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize, 
     let seen = app.canvases.get(&cache_key(id, output)).map(|c| (c.tex_revision, c.tex_preview_key));
     let damage = seen.and_then(|seen| damage_since(app, idx, seen, (revision, preview_key), display_key, last_damage));
     let preview_key = preview_key ^ display_key;
-    let cache = app.canvases.entry(cache_key(id, output)).or_insert(CanvasCache {
-        revision: 0,
-        texture: None,
-        scale: 1.0,
-        preview_key: 0,
-        on_gpu: false,
-        tex_revision: 0,
-        tex_preview_key: 0,
-        grid: None,
-    });
+    let cache = app.canvases.entry(cache_key(id, output)).or_insert(CanvasCache { scale: 1.0, ..Default::default() });
     if cache.tex_revision != revision || cache.texture.is_none() || cache.tex_preview_key != preview_key {
         let t0 = crate::gpu_canvas::now_ms();
         let longest = doc.size.width.max(doc.size.height);
@@ -1252,6 +1277,9 @@ pub(crate) fn shown_as_document(app: &mut PhotocraftApp, doc: photocraft_doc::Do
         if was_preview(c.tex_preview_key ^ key) {
             c.tex_preview_key = key;
         }
+        if let Some(t) = c.tiles.as_mut() {
+            t.shown_as_document(|k| was_preview(k ^ key), key);
+        }
     }
 }
 
@@ -1305,16 +1333,7 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, level: u32, c
     }
     let preview_key = raw_key ^ display_key;
     let size = [doc.size.width, doc.size.height];
-    let cache = app.canvases.entry((id, GPU_OUTPUT)).or_insert(CanvasCache {
-        revision: 0,
-        texture: None,
-        scale: 1.0,
-        preview_key: 0,
-        on_gpu: false,
-        tex_revision: 0,
-        tex_preview_key: 0,
-        grid: None,
-    });
+    let cache = app.canvases.entry((id, GPU_OUTPUT)).or_insert(CanvasCache { scale: 1.0, ..Default::default() });
     let present = cache.on_gpu && gpu.has(id.0, size);
     let need = crate::gpu_canvas::ViewNeed { visible, level };
     if present && cache.revision == revision && cache.preview_key == preview_key {
@@ -1388,7 +1407,8 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, level: u32, c
 /// a live preview) and whenever the preference changes.
 fn gpu_budget(app: &mut PhotocraftApp, gpu: &crate::gpu_canvas::GpuCanvas, idx: usize, partial: bool, visible: DRect) {
     gpu.set_focus(Some(visible));
-    let allowance = u64::from(app.session.prefs().performance.memory_usage_mb).saturating_mul(1 << 20);
+    // Memory Usage within the platform's cap (a browser tab's, `prefs::set_memory_cap`).
+    let allowance = app.session.prefs().performance.history_budget_bytes() as u64;
     let Some(st) = app.session.documents().get(idx) else { return };
     let state = Some((st.doc.id.0, st.revision));
     if app.perf.gpu_budget_allowance == allowance && gpu.memory_budget().is_some() && (partial || app.perf.gpu_budget_state == state) {
@@ -2650,10 +2670,13 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             }
             let rotated = view.rotation.abs() > 0.05;
             let checkerboard = app.session.prefs().transparency_and_gamut.square().map(|square| (checker(app, &ctx), square));
-            let tex = ensure_texture(app, &ctx, idx, output).map(|(tex, _scale)| tex);
-            paint_cpu_document(&painter, &xf, doc.bounds(), rotated, checkerboard, tex);
+            // The checkerboard, then the document's tiles at display resolution (cpu_canvas.rs).
+            paint_cpu_document(&painter, &xf, doc.bounds(), rotated, checkerboard, None);
+            crate::cpu_canvas::paint(app, &ctx, &painter, &xf, idx, output, view.zoom, visible_doc_rect(&xf));
             for &c in &pattern {
-                paint_cpu_document(&painter, &pattern_xf(&xf, c, size), doc.bounds(), rotated, checkerboard, tex);
+                let pxf = pattern_xf(&xf, c, size);
+                paint_cpu_document(&painter, &pxf, doc.bounds(), rotated, checkerboard, None);
+                crate::cpu_canvas::paint(app, &ctx, &painter, &pxf, idx, output, view.zoom, visible_doc_rect(&pxf));
             }
         }
         // Channels panel: alpha / Quick Mask overlays and single-channel views (channel_view.rs).
@@ -2941,7 +2964,27 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             ctx.data_mut(|m| m.get_temp_mut_or_default::<crate::flick_pan::Flick>(flick_id).stop());
         }
     }
-    if hand_pan && response.dragged() && !stroke_dismissal {
+    // Two fingers on a touch screen navigate (touch_nav.rs): the tools sit the gesture out.
+    let touch_gestures = app.session.prefs().enhanced_controls.touch_gestures;
+    let nav_id = egui::Id::new(("pc-touch-nav", idx, primary, ctx.viewport_id()));
+    let touch = crate::touch_nav::frame(&ctx, nav_id, rect, touch_gestures);
+    // A finger held still is a right-click (context menus), for tools a press doesn't paint with.
+    let long_press = (primary && touch_gestures && touch.is_none() && !strokes_live(tool)).then(|| crate::touch_nav::long_press(&ctx, nav_id, rect)).flatten();
+    if long_press.is_some() {
+        app.drag = None;
+    }
+    if let Some(t) = touch {
+        if t.started && primary {
+            // What the first finger started is dropped, uncommitted (as Escape drops a drag).
+            app.drag = None;
+            app.live_stroke = None;
+        }
+        let d = xf.unmap_vec(t.pan) / (view.zoom / ppp);
+        if d.is_finite() {
+            view.center[0] -= d.x;
+            view.center[1] -= d.y;
+        }
+    } else if hand_pan && response.dragged() && !stroke_dismissal {
         let d = xf.unmap_vec(response.drag_delta()) / (view.zoom / ppp);
         view.center[0] -= d.x;
         view.center[1] -= d.y;
@@ -2983,16 +3026,18 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                 tool_event(app, ToolEvent::Down { x: d[0], y: d[1], pressure: app.stylus.pressure() }, press_mods);
             }
         }
+        let secondary_click = response.secondary_clicked() || long_press.is_some();
+        let menu_at = long_press.or_else(|| response.interact_pointer_pos());
         // Right-click while transforming: switch the box's mode (Free Transform, Scale, Rotate,
         // Skew, Distort, Perspective, Warp), or rotate or flip the box.
         let transforming = app.ui.transform.as_ref().is_some_and(|t| t.warp.is_none());
-        if response.secondary_clicked()
+        if secondary_click
             && transforming
-            && let Some(p) = response.interact_pointer_pos()
+            && let Some(p) = menu_at
         {
             crate::canvas_tool_menu::open_transform(app, &ctx, [p.x, p.y]);
         }
-        let lasso_retracted = response.secondary_clicked()
+        let lasso_retracted = secondary_click
             && match tool {
                 Tool::Lasso => crate::lasso_ui::undo_last_vertex(app),
                 Tool::PolygonLasso => polygon_retract(app),
@@ -3005,11 +3050,11 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             (buttons.started, buttons.dragged, buttons.stopped, buttons.clicked) = (false, false, false, false);
         }
         // Right-click with the Move tool, or ⌘/Ctrl+right-click: the layers under the pointer.
-        if response.secondary_clicked()
+        if secondary_click
             && !lasso_retracted
             && !transforming
             && crate::layer_pick_ui::is_gesture(tool, mods)
-            && let Some(p) = response.interact_pointer_pos()
+            && let Some(p) = menu_at
         {
             let d = xf.to_doc(p);
             app.ui.canvas_tool_menu = None;
@@ -3018,11 +3063,11 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                 crate::canvas_tool_menu::open_pasteboard(app, &ctx, tool, [p.x, p.y]);
             }
         }
-        if response.secondary_clicked()
+        if secondary_click
             && !lasso_retracted
             && !transforming
             && !crate::layer_pick_ui::is_gesture(tool, mods)
-            && let Some(p) = response.interact_pointer_pos()
+            && let Some(p) = menu_at
         {
             // Outside the image: the pasteboard colour menu (#2462), else the tool's own. The view
             // menu belongs to the selected Zoom or Hand, not to Space or a held zoom key.
