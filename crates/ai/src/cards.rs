@@ -63,6 +63,7 @@ const MJ: &[&str] = &[
 pub const GENFILL_ULTRA_CARD: &str = "genfill-ultra";
 pub const GENFILL_FAST_CARD: &str = "genfill-fast";
 pub const GENFILL_STANDARD_CARD: &str = "genfill-standard";
+pub const GENFILL_HIGH_CARD: &str = "genfill-high";
 
 /// Every card, in display order.
 pub const CARDS: &[Card] = &[
@@ -161,6 +162,18 @@ pub const CARDS: &[Card] = &[
         gpu: true,
         precision: "f16",
         memory_mb: 3500,
+    },
+    Card {
+        id: GENFILL_HIGH_CARD,
+        section: Section::Generative,
+        title: "High",
+        description: "The most detail: many steps with guidance, slow, for a strong GPU.",
+        files: catalog::GENFILL_HIGH,
+        quality: 5,
+        speed: 1,
+        gpu: true,
+        precision: "f16",
+        memory_mb: 5000,
     },
 ];
 

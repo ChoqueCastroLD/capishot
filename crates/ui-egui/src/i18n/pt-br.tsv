@@ -4305,3 +4305,4 @@ layerLabel	No Color	Sem cor
 	Good fills with a smaller download.	Bons preenchimentos com download menor.
 	Detailed fills from a prompt, three variants in seconds on a GPU.	Preenchimentos detalhados a partir de um texto, três variações em segundos na GPU.
 	Needs a GPU	Requer GPU
+	The most detail: many steps with guidance, slow, for a strong GPU.	O máximo de detalhe: muitos passos com orientação, lento, para uma GPU potente.

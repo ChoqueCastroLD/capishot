@@ -2944,3 +2944,4 @@ cameraData	Lens	镜头
 	Good fills with a smaller download.	下载更小，填充效果良好。
 	Detailed fills from a prompt, three variants in seconds on a GPU.	根据提示精细填充，GPU 上数秒生成三个变体。
 	Needs a GPU	需要 GPU
+	The most detail: many steps with guidance, slow, for a strong GPU.	细节最丰富：多步并带引导，较慢，适合强劲 GPU。
