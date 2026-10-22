@@ -56,6 +56,9 @@ pub const TABLE: &[(&str, Class)] = &[
     ("ops", Class::Layer(2)),
     ("paint", Class::Layer(2)),
     ("algo", Class::Layer(2)),
+    // Generative Fill: SD 1.5 inpainting (prompt, crop, schedulers always; networks on burn behind
+    // `model`). Uses the AI catalog and LaMa's service seam (both standalone).
+    ("ai-sd", Class::Layer(2)),
     ("text", Class::Layer(2)),
     // TypeR typesetting workflow (script, style library, TypeR JSON); pure logic, no UI.
     ("typer", Class::Layer(2)),

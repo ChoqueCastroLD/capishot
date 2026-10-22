@@ -42,4 +42,13 @@ Manga LaMa (AnimeMangaInpainting) by dreMaz — MIT — https://huggingface.co/d
 LaMa by Suvorov et al. (Samsung AI) — Apache-2.0
 MI-GAN by Picsart AI Research — MIT — https://github.com/Picsart-AI-Research/MI-GAN
 Real-ESRGAN Compact (realesr-animevideov3) by Xintao Wang et al. — BSD-3-Clause — https://github.com/xinntao/Real-ESRGAN
+DreamShaper 8 inpainting by Lykon — CreativeML OpenRAIL-M — https://huggingface.co/Lykon/dreamshaper-8-inpainting
+Stable Diffusion 1.5 inpainting by CompVis, Runway and Stability AI — CreativeML OpenRAIL-M — https://huggingface.co/spaces/CompVis/stable-diffusion-license
+  (modified by Capishot: float16 conversion, file splitting, LoRA fusion at load time; use
+  restrictions in Help › Terms of Use…)
+CLIP ViT-L/14 text encoder by OpenAI — MIT — https://github.com/openai/CLIP
+TCD-SD15-LoRA by Jianbin Zheng et al. — MIT — https://huggingface.co/h1t/TCD-SD15-LoRA
+SDXS-512-DreamShaper by IDKiro — CreativeML OpenRAIL++-M — https://huggingface.co/IDKiro/sdxs-512-dreamshaper
+  (modified by Capishot: 4-bit block quantization)
+TAESD by madebyollin — MIT — https://github.com/madebyollin/taesd
 burn — MIT/Apache-2.0

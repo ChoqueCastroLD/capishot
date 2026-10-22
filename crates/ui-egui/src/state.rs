@@ -1395,6 +1395,9 @@ pub struct UiState {
     /// Window › AI Models… (see `ai_models_ui`).
     #[serde(default)]
     pub ai_models: crate::ai_models_ui::ModelsUi,
+    /// Generative Fill's prompt bar (see `genfill_ui`).
+    #[serde(skip)]
+    pub genfill: crate::genfill_ui::BarState,
     pub timeline: crate::timeline_ui::TimelineUi,
     /// Slice and Slice Select tools (see `slice_ui`).
     #[serde(default)]
@@ -1547,6 +1550,7 @@ impl Default for UiState {
             fonts: Default::default(),
             analysis: Default::default(),
             ai_models: Default::default(),
+            genfill: Default::default(),
             timeline: Default::default(),
             slices: Default::default(),
             frame_tool: Default::default(),

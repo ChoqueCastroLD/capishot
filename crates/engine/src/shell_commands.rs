@@ -101,6 +101,7 @@ pub const SHELL_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("help.reportIssue", "Report an Issue…", &["Help"], None),
     ("help.psdCompiler", "psd-compiler on GitHub", &["Help"], None),
     ("help.upstream", "Based on PhotoCraft", &["Help"], None),
+    ("help.terms", "Terms of Use…", &["Help"], None),
     ("help.systemInfo", "System Info…", &["Help"], None),
     ("help.about", "About Capishot", &["Help"], None),
 ];

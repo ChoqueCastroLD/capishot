@@ -4024,6 +4024,12 @@ curves	Smooth	スムーズ
 	Download and delete AI models	AI モデルのダウンロードと削除
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	選択したテキストや効果音を消し、AI で背景を描き直して新しいレイヤーに配置します。ダウンロード済みのモデルを使います（ウィンドウ › AI モデル…）。
 @plural	{n} more queued|{n} more queued	ほか {n} 件待機中
+	Generative Fill	生成塗りつぶし
+	Generative Fill…	生成塗りつぶし…
+	Terms of Use…	利用規約…
+	Variants:	バリエーション:
+	Describe what to add (optional)	追加する内容を入力（省略可）
+	English, Spanish or Portuguese; empty fills with background. It runs on this device, and generating means you accept the Terms of Use.	英語・スペイン語・ポルトガル語に対応。空欄なら背景で塗りつぶします。この端末上で動作し、生成すると利用規約に同意したものとみなされます。
 	GPU couldn't run this model; used the CPU instead	GPU でこのモデルを実行できなかったため、CPU を使用しました
 	Menu	メニュー
 	Max pixel density	最大ピクセル密度

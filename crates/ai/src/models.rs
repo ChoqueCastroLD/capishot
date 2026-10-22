@@ -139,11 +139,16 @@ pub fn file_title(model: &ModelInfo) -> String {
 pub enum Group {
     Cleaning,
     Upscaling,
+    Generative,
 }
 
 /// Which group `model` belongs to.
 pub fn group(model: &ModelInfo) -> Group {
-    if model.content == Content::Inpaint { Group::Cleaning } else { Group::Upscaling }
+    match model.content {
+        Content::Inpaint => Group::Cleaning,
+        Content::Generative => Group::Generative,
+        _ => Group::Upscaling,
+    }
 }
 
 /// The tools (command ids) that use `model`.
@@ -151,6 +156,7 @@ pub fn tools(model: &ModelInfo) -> &'static [&'static str] {
     match model.arch {
         Arch::Lama | Arch::Migan => &["edit.inpaintAi", "paint.remove"],
         Arch::Esrgan | Arch::Compact => &["image.upscaleAi"],
+        Arch::Generative => &["edit.generativeFill"],
     }
 }
 

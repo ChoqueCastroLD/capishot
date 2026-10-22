@@ -113,6 +113,7 @@ mod font_preview;
 pub mod fonts_ui;
 pub mod frame_tool;
 pub mod gallery_ui;
+pub mod genfill_ui;
 pub mod gpu_canvas;
 pub mod gpu_status;
 pub mod gradient_ui;
