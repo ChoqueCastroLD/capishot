@@ -495,6 +495,17 @@ pub const AI_MODELS: &[(&str, &str, &str, &str)] = &[
     ("LaMa", "Suvorov et al. (Samsung AI)", "Apache-2.0", ""),
     ("MI-GAN (lite inpainting)", "Picsart AI Research", "MIT", "https://github.com/Picsart-AI-Research/MI-GAN"),
     ("Real-ESRGAN Compact, realesr-animevideov3 (lite upscaling)", "Xintao Wang et al.", "BSD-3-Clause", "https://github.com/xinntao/Real-ESRGAN"),
+    ("DreamShaper 8 inpainting (Generative Fill)", "Lykon", "CreativeML OpenRAIL-M", "https://huggingface.co/Lykon/dreamshaper-8-inpainting"),
+    (
+        "Stable Diffusion 1.5 inpainting",
+        "CompVis, Runway, Stability AI",
+        "CreativeML OpenRAIL-M",
+        "https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-inpainting",
+    ),
+    ("TCD-SD15-LoRA (few-step sampling)", "Jianbin Zheng et al.", "MIT", "https://huggingface.co/h1t/TCD-SD15-LoRA"),
+    ("SDXS-512-DreamShaper (Generative Fill, Ultra-light)", "IDKiro", "CreativeML OpenRAIL++-M", "https://huggingface.co/IDKiro/sdxs-512-dreamshaper"),
+    ("TAESD (tiny autoencoder)", "madebyollin", "MIT", "https://github.com/madebyollin/taesd"),
+    ("CLIP ViT-L/14 text encoder", "OpenAI", "MIT", "https://github.com/openai/CLIP"),
     ("burn", "", "MIT/Apache-2.0", ""),
 ];
 

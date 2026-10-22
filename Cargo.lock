@@ -6877,6 +6877,7 @@ dependencies = [
  "open",
  "photocraft-ai",
  "photocraft-ai-lama",
+ "photocraft-ai-sd",
  "photocraft-automation",
  "photocraft-codecs",
  "photocraft-color",
@@ -6949,6 +6950,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "photocraft-ai-sd"
+version = "0.7.0"
+dependencies = [
+ "burn",
+ "half",
+ "image",
+ "photocraft-ai",
+ "photocraft-ai-lama",
+ "pollster 1.0.1",
+ "safetensors 0.8.0",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "photocraft-ai-worker"
 version = "0.7.0"
 dependencies = [
@@ -6956,6 +6972,7 @@ dependencies = [
  "js-sys",
  "photocraft-ai",
  "photocraft-ai-lama",
+ "photocraft-ai-sd",
  "rayon",
  "sha2",
  "wasm-bindgen",
@@ -7005,6 +7022,7 @@ version = "0.7.0"
 dependencies = [
  "photocraft-ai",
  "photocraft-ai-lama",
+ "photocraft-ai-sd",
  "photocraft-automation",
  "photocraft-codecs",
  "photocraft-engine",
@@ -7089,6 +7107,7 @@ dependencies = [
  "photocraft-affinity",
  "photocraft-ai",
  "photocraft-ai-lama",
+ "photocraft-ai-sd",
  "photocraft-algo",
  "photocraft-cms",
  "photocraft-codecs",
@@ -7353,6 +7372,7 @@ dependencies = [
  "log",
  "photocraft-ai",
  "photocraft-ai-lama",
+ "photocraft-ai-sd",
  "photocraft-algo",
  "photocraft-cms",
  "photocraft-codecs",
@@ -7404,6 +7424,7 @@ dependencies = [
  "log",
  "photocraft-ai",
  "photocraft-ai-lama",
+ "photocraft-ai-sd",
  "photocraft-codecs",
  "photocraft-compose",
  "photocraft-doc",

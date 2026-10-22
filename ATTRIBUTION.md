@@ -74,6 +74,11 @@ site's models folder (`capishot-ai-models`), and the desktop build from its conf
 the first time a feature needs them and only after the user agrees; they are then kept in the
 browser's Cache Storage (or on disk). Help › About › Models lists the same lines.
 
+Generative Fill's files are modified copies: converted to 16-bit floats, renamed and split
+(the VAE into encoder and decoder, the UNet into four parts), the LoRA's `alpha / rank` folded
+into its up-projection; each file says so in its `modified` metadata. The OpenRAIL-M use
+restrictions bind every user (Help › Terms of Use…, with the licence text).
+
 | Model | Used by | Author | Source | License |
 |---|---|---|---|---|
 | MangaJaNai and IllustrationJaNai | Image › Upscale with AI (`image.upscaleAi`) | the-database | <https://github.com/the-database/MangaJaNai> | CC BY-NC 4.0 |
@@ -81,6 +86,12 @@ browser's Cache Storage (or on disk). Help › About › Models lists the same l
 | LaMa (the architecture Manga LaMa is trained on) | as above | Suvorov et al. (Samsung AI) | <https://github.com/advimman/lama> | Apache-2.0 |
 | MI-GAN 512 Places2 (lite inpainting: Quality Fast, or Auto without a capable GPU) | as Manga LaMa | Picsart AI Research (Sargsyan et al.) | <https://github.com/Picsart-AI-Research/MI-GAN> | MIT (code and weights) |
 | Real-ESRGAN Compact `realesr-animevideov3` (lite upscaling) | Image › Upscale with AI | Xintao Wang et al. (Real-ESRGAN) | <https://github.com/xinntao/Real-ESRGAN> | BSD-3-Clause |
+| DreamShaper 8 inpainting (UNet, text encoder, VAE) | Edit › Generative Fill (`edit.generativeFill`) | Lykon | <https://huggingface.co/Lykon/dreamshaper-8-inpainting> | CreativeML OpenRAIL-M (use restrictions: Help › Terms of Use…) |
+| Stable Diffusion 1.5 inpainting (the base DreamShaper 8 inpainting is fine-tuned from) | as above | CompVis, Runway, Stability AI | <https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-inpainting> | CreativeML OpenRAIL-M |
+| CLIP ViT-L/14 text encoder and BPE vocabulary (inside the above) | as above | OpenAI | <https://github.com/openai/CLIP> | MIT |
+| TCD-SD15-LoRA (few-step sampling, fused at load time) | as above | Jianbin Zheng et al. | <https://huggingface.co/h1t/TCD-SD15-LoRA> | MIT |
+| SDXS-512-DreamShaper (Ultra-light tier, 4-bit) | Edit › Generative Fill, Quality Ultra-light | IDKiro (Song et al.) | <https://huggingface.co/IDKiro/sdxs-512-dreamshaper> | CreativeML OpenRAIL++-M (same use restrictions) |
+| TAESD (tiny autoencoder: previews, light tiers) | as above | madebyollin | <https://github.com/madebyollin/taesd> | MIT |
 | burn (inference runtime, compiled in) | both | Tracel AI and the burn contributors | <https://github.com/tracel-ai/burn> | MIT/Apache-2.0 |
 
 ## Documentation and README

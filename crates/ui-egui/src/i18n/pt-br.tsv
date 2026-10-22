@@ -4264,6 +4264,12 @@ layerLabel	No Color	Sem cor
 	Download and delete AI models	Baixar e excluir modelos de IA
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Apaga o texto ou as onomatopeias selecionados e redesenha o fundo com IA, em uma nova camada. Usa um modelo baixado (Janela › Modelos de IA…).
 @plural	{n} more queued|{n} more queued	mais {n} na fila|mais {n} na fila
+	Generative Fill	Preenchimento generativo
+	Generative Fill…	Preenchimento generativo…
+	Terms of Use…	Termos de uso…
+	Variants:	Variações:
+	Describe what to add (optional)	Descreva o que adicionar (opcional)
+	English, Spanish or Portuguese; empty fills with background. It runs on this device, and generating means you accept the Terms of Use.	Inglês, espanhol ou português; vazio preenche com o fundo. Roda neste dispositivo, e ao gerar você aceita os Termos de uso.
 	GPU couldn't run this model; used the CPU instead	A GPU não conseguiu executar este modelo; a CPU foi usada no lugar
 	Menu	Menu
 	Max pixel density	Densidade máxima de pixels

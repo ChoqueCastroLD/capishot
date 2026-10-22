@@ -3970,6 +3970,12 @@ cameraData	Lens	Φακός
 	Download and delete AI models	Λήψη και διαγραφή μοντέλων AI
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Σβήνει το επιλεγμένο κείμενο ή τα ηχητικά εφέ και ξανασχεδιάζει το φόντο με AI σε νέο επίπεδο. Χρησιμοποιεί ένα μοντέλο που έχει ληφθεί (Παράθυρο › Μοντέλα AI…).
 @plural	{n} more queued|{n} more queued	ακόμη {n} σε αναμονή|ακόμη {n} σε αναμονή
+	Generative Fill	Παραγωγική πλήρωση
+	Generative Fill…	Παραγωγική πλήρωση…
+	Terms of Use…	Όροι χρήσης…
+	Variants:	Παραλλαγές:
+	Describe what to add (optional)	Περιγράψτε τι να προστεθεί (προαιρετικά)
+	English, Spanish or Portuguese; empty fills with background. It runs on this device, and generating means you accept the Terms of Use.	Αγγλικά, ισπανικά ή πορτογαλικά· κενό γεμίζει με φόντο. Εκτελείται σε αυτή τη συσκευή και με τη δημιουργία αποδέχεστε τους Όρους χρήσης.
 	GPU couldn't run this model; used the CPU instead	Η GPU δεν μπόρεσε να εκτελέσει αυτό το μοντέλο· χρησιμοποιήθηκε η CPU
 	Menu	Μενού
 	Max pixel density	Μέγιστη πυκνότητα pixel

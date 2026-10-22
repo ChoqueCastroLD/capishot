@@ -417,6 +417,9 @@ fn main() -> eframe::Result {
             if let Some(i) = photocraft_ai_lama::native::NativeInpainter::locate(services::config_dir().as_deref()) {
                 app.session.set_inpainter(Some(std::sync::Arc::new(i)));
             }
+            // Edit › Generative Fill: Stable Diffusion inpainting on this machine (feature `ai`).
+            #[cfg(feature = "ai")]
+            app.session.set_genfill(Some(std::sync::Arc::new(photocraft_ai_sd::native::NativeGenFill::locate(services::config_dir().as_deref()))));
             app.integrated_titlebar = cfg!(target_os = "macos");
             app.custom_titlebar = custom_titlebar;
             // Only the title bar's free gap drags the window, never the menus (mac_window.rs).

@@ -49,6 +49,7 @@ mod frame_cmds;
 pub mod fx_view_cmds;
 pub mod fx_visibility_cmds;
 pub mod gallery_cmds;
+pub mod genfill_cmds;
 pub mod gradient_fill_cmds;
 pub mod group_view_cmds;
 pub mod guide_layout;
@@ -442,6 +443,13 @@ pub struct Session {
     /// Downloads and deletes AI model weights (`ai.models.*`, the AI Model Manager), injected by
     /// the shell; `None` where downloads are unavailable (see `ai_models_cmds`).
     ai_models: Option<Arc<dyn photocraft_ai::models::ModelStore>>,
+    /// Runs Generative Fill (`edit.generativeFill`), injected by the shell; `None` where it is
+    /// unavailable (see `genfill_cmds`).
+    genfill: Option<Arc<dyn photocraft_ai_sd::service::GenFill>>,
+    /// The variants of Generative Fill layers, by document and layer (session only).
+    pub(crate) genfill_layers: std::collections::HashMap<(photocraft_doc::DocId, photocraft_doc::LayerId), genfill_cmds::Variants>,
+    /// Runs so far (the default seed changes every run).
+    pub(crate) genfill_runs: u64,
 }
 
 /// Move item `i` of `v` to position `to`, clamped to the end. Returns where it went; `None` when

@@ -2888,6 +2888,12 @@ cameraData	Lens	Objektiv
 	Download and delete AI models	Stahovat a mazat modely AI
 	Erase the selected text or SFX and redraw the background with AI, on a new layer. It uses a downloaded model (Window › AI Models…).	Smaže vybraný text nebo zvukové efekty a překreslí pozadí pomocí AI na nové vrstvě. Používá stažený model (Okno › Modely AI…).
 @plural	{n} more queued|{n} more queued	další {n} ve frontě|další {n} ve frontě|dalších {n} ve frontě
+	Generative Fill	Generativní výplň
+	Generative Fill…	Generativní výplň…
+	Terms of Use…	Podmínky použití…
+	Variants:	Varianty:
+	Describe what to add (optional)	Popište, co přidat (nepovinné)
+	English, Spanish or Portuguese; empty fills with background. It runs on this device, and generating means you accept the Terms of Use.	Angličtina, španělština nebo portugalština; prázdné vyplní pozadím. Běží v tomto zařízení a generováním přijímáte Podmínky použití.
 	GPU couldn't run this model; used the CPU instead	GPU tento model nedokázala spustit; použil se procesor
 	Menu	Nabídka
 	Max pixel density	Maximální hustota pixelů

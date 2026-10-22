@@ -62,7 +62,7 @@ impl Loaded {
         let net = match model.arch {
             Arch::Esrgan => Net::Esrgan(Esrgan::load(rt, &w, grayscale)?),
             Arch::Compact => Net::Compact(Compact::load(rt, &w, model.scale as usize, grayscale)?),
-            Arch::Lama | Arch::Migan => return Err(crate::AiError::UnknownModel(format!("{} is not an upscaler", model.id))),
+            Arch::Lama | Arch::Migan | Arch::Generative => return Err(crate::AiError::UnknownModel(format!("{} is not an upscaler", model.id))),
         };
         Ok(Self { id: model.id, grayscale, net })
     }
