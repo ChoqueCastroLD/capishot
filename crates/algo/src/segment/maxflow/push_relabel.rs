@@ -5,20 +5,20 @@
 //! The existing SoA residual graph is reused. Terminal source arcs are saturated
 //! into a preflow; `back` keeps their reverse capacity, `excess` uses f64 so local
 //! f32 capacity updates do not accumulate excess-rounding drift.
-use super::{EPS, Graph, NONE, STOP_EVERY, TERMINAL};
+use super::{CANCEL_EVERY, EPS, Graph, NONE, TERMINAL};
 use std::collections::VecDeque;
 
 impl Graph {
     #[cfg(test)]
     pub(super) fn maxflow_push_relabel(&mut self) -> f64 {
-        self.push_relabel(&|| false).unwrap_or(self.flow)
+        self.push_relabel(&super::never).unwrap_or(self.flow)
     }
 
-    /// FIFO push/relabel; `None` if `stop` ended it early.
-    pub(super) fn push_relabel(&mut self, stop: &dyn Fn() -> bool) -> Option<f64> {
+    /// Push/relabel; `None` when `cancel` stopped it.
+    pub(super) fn push_relabel(&mut self, cancel: &dyn Fn() -> bool) -> Option<f64> {
         let n = self.node_count();
         let Some(source_height) = u32::try_from(n).ok().filter(|&n| n < u32::MAX / 2).map(|n| n + 2) else {
-            return self.bk(stop);
+            return self.bk(cancel);
         };
         let mut back = vec![0.0f32; n];
         let mut excess = vec![0.0f64; n];
@@ -40,10 +40,10 @@ impl Graph {
         }
         let mut work = 0usize;
         let frequency = self.r_cap.len().saturating_mul(2).saturating_add(n);
-        let mut steps = 0usize;
+        let mut steps = 0u32;
         while let Some(i) = queue.pop_front() {
-            steps += 1;
-            if steps.is_multiple_of(STOP_EVERY) && stop() {
+            steps = steps.wrapping_add(1);
+            if steps.is_multiple_of(CANCEL_EVERY) && cancel() {
                 return None;
             }
             self.active[i] = false;
@@ -71,7 +71,10 @@ impl Graph {
                     let ai = a as usize;
                     let j = self.head[ai] as usize;
                     work += 1;
-                    if self.r_cap[ai] > EPS && self.dist[i] == self.dist[j].saturating_add(1) {
+                    // `checked_add`: two nodes a global relabel left unreachable (`u32::MAX`) must
+                    // not count as admissible for each other, or float-stranded excess ping-pongs
+                    // between them forever.
+                    if self.r_cap[ai] > EPS && self.dist[j].checked_add(1) == Some(self.dist[i]) {
                         let delta = (excess[i] as f32).min(self.r_cap[ai]);
                         self.r_cap[ai] -= delta;
                         self.r_cap[ai ^ 1] += delta;

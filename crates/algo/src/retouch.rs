@@ -117,22 +117,25 @@ pub fn sponge(c: [f32; 3], amount: f32, saturate: bool, vibrance: bool) -> [f32;
 pub fn local_blur(data: &[f32], w: usize, h: usize, ch: usize, alpha: Option<usize>, win: (usize, usize, usize, usize), sigma: f32) -> Vec<f32> {
     let (x0, y0, x1, y1) = win;
     let (ow, oh) = (x1 - x0, y1 - y0);
+    if ow == 0 || oh == 0 || ch == 0 {
+        return Vec::new();
+    }
     let r = (sigma * 3.0).ceil().max(1.0) as i32;
     let k: Vec<f32> = (-r..=r).map(|i| (-((i * i) as f32) / (2.0 * sigma * sigma).max(1e-6)).exp()).collect();
     let ks: f32 = k.iter().sum();
     let k: Vec<f32> = k.into_iter().map(|v| v / ks).collect();
-    // Horizontal pass over the window rows extended vertically by r. Each source row is clamped
-    // to the image and premultiplied once into `row` (ow + 2r pixels), then convolved: the same
-    // products summed in the same order as reading (and premultiplying) every tap on its own.
+    // Horizontal pass over the window rows extended vertically by r. Rows are independent, so
+    // both passes run them in parallel: a 2500 px Blur dab is ~10⁹ multiply-adds (#5426).
     let th = oh + 2 * r as usize;
-    let mut tmp = vec![0.0f32; ow * th * ch];
-    let rw = ow + 2 * r as usize;
-    let mut row = vec![0.0f32; rw * ch];
-    for ty in 0..th {
-        let yy = (y0 as i32 + ty as i32 - r).clamp(0, h as i32 - 1) as usize;
-        for (j, px) in row.chunks_exact_mut(ch).enumerate() {
-            let xx = (x0 as i32 + j as i32 - r).clamp(0, w as i32 - 1) as usize;
-            let i = (yy * w + xx) * ch;
+    let stride = ow * ch;
+    let mut tmp = vec![0.0f32; stride * th];
+    let scratch = || vec![0.0f32; (ow + 2 * r as usize) * ch];
+    let horizontal = |row: &mut Vec<f32>, (ty, dst): (usize, &mut [f32])| {
+        let y = (y0 as i32 + ty as i32 - r).clamp(0, h as i32 - 1) as usize;
+        // Clamp and premultiply each source pixel once, rather than once for every kernel tap.
+        for (rx, px) in row.chunks_exact_mut(ch).enumerate() {
+            let x = (x0 as i32 + rx as i32 - r).clamp(0, w as i32 - 1) as usize;
+            let i = (y * w + x) * ch;
             px.copy_from_slice(&data[i..i + ch]);
             if let Some(a) = alpha {
                 let av = px[a];
@@ -143,35 +146,50 @@ pub fn local_blur(data: &[f32], w: usize, h: usize, ch: usize, alpha: Option<usi
                 }
             }
         }
-        let out = &mut tmp[ty * ow * ch..(ty + 1) * ow * ch];
-        for (ox, o) in out.chunks_exact_mut(ch).enumerate() {
-            for (i, kv) in k.iter().enumerate() {
-                let px = &row[(ox + i) * ch..(ox + i + 1) * ch];
-                for c in 0..ch {
-                    o[c] += px[c] * kv;
-                }
+        // Contiguous accumulation can be vectorized for any channel layout. Each output still
+        // sums the same products in the same kernel order as the scalar convolution.
+        for (i, kv) in k.iter().enumerate() {
+            for (d, s) in dst.iter_mut().zip(&row[i * ch..i * ch + stride]) {
+                *d += s * kv;
             }
         }
+    };
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
+    {
+        use rayon::prelude::*;
+        tmp.par_chunks_mut(stride).enumerate().for_each_init(scratch, horizontal);
+    }
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
+    {
+        let mut row = scratch();
+        tmp.chunks_mut(stride).enumerate().for_each(|item| horizontal(&mut row, item));
     }
     let mut out = vec![0.0f32; ow * oh * ch];
-    for oy in 0..oh {
-        for ox in 0..ow {
-            let o = (oy * ow + ox) * ch;
-            for (i, kv) in k.iter().enumerate() {
-                let s = ((oy + i) * ow + ox) * ch;
-                for c in 0..ch {
-                    out[o + c] += tmp[s + c] * kv;
-                }
+    let vertical = |(oy, dst): (usize, &mut [f32])| {
+        for (i, kv) in k.iter().enumerate() {
+            for (d, s) in dst.iter_mut().zip(&tmp[(oy + i) * stride..(oy + i + 1) * stride]) {
+                *d += s * kv;
             }
-            if let Some(a) = alpha {
-                let av = out[o + a];
-                for c in 0..ch {
+        }
+        if let Some(a) = alpha {
+            for (ox, px) in dst.chunks_exact_mut(ch).enumerate() {
+                let av = px[a];
+                for (c, v) in px.iter_mut().enumerate() {
                     if c != a {
-                        out[o + c] = if av > 1e-6 { out[o + c] / av } else { data[((y0 + oy) * w + x0 + ox) * ch + c] };
+                        *v = if av > 1e-6 { *v / av } else { data[((y0 + oy) * w + x0 + ox) * ch + c] };
                     }
                 }
             }
         }
+    };
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
+    {
+        use rayon::prelude::*;
+        out.par_chunks_mut(stride).enumerate().for_each(vertical);
+    }
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
+    {
+        out.chunks_mut(stride).enumerate().for_each(vertical);
     }
     out
 }

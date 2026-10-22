@@ -114,7 +114,7 @@ pub fn pick(app: &mut PhotocraftApp) {
             FileDialogAnswer::Paths(paths) => (paths, Vec::new()),
             FileDialogAnswer::Contents(name, bytes) => (vec![name.clone()], vec![(name, bytes)]),
             FileDialogAnswer::ContentsMany(files) => (files.iter().map(|(n, _)| n.clone()).collect(), files),
-            FileDialogAnswer::SaveTo(_) | FileDialogAnswer::Unavailable(_) => return Err("the file dialog gave an unexpected answer".into()),
+            FileDialogAnswer::SaveTo(_) | FileDialogAnswer::FolderTo(_) | FileDialogAnswer::Unavailable(_) => return Err("the file dialog gave an unexpected answer".into()),
         };
         set_files(app, names, files)
     });

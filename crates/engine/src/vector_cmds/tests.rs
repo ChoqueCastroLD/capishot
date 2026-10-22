@@ -336,6 +336,63 @@ fn path_to_selection_matches_analytic_shape() {
 }
 
 #[test]
+fn path_make_selection_rejects_invalid_options_without_changing_history() {
+    let mut s = session(80, 80, 8);
+    s.execute("path.set", json!({"path": {"subpaths": [{"knots": [[12, 12], [60, 12], [60, 60], [12, 60]]}]}})).unwrap();
+    s.execute("select.rect", json!({"x": 20, "y": 20, "width": 12, "height": 12})).unwrap();
+    let before = doc(&s).clone();
+    let history = s.active().unwrap().history.past_len();
+    for opts in [
+        json!({"feather": -1}),
+        json!({"feather": 1001}),
+        json!({"feather": 1e100}),
+        json!({"feather": "4"}),
+        json!({"feather": true}),
+        json!({"antiAlias": "false"}),
+        json!({"antiAlias": 1}),
+        json!({"mode": "union"}),
+        json!({"mode": 42}),
+    ] {
+        assert!(s.execute("path.toSelection", opts.clone()).is_err(), "accepted invalid Make Selection options: {opts}");
+        assert_eq!(*doc(&s), before, "invalid Make Selection modified the document: {opts}");
+        assert_eq!(s.active().unwrap().history.past_len(), history, "invalid Make Selection changed history: {opts}");
+    }
+}
+
+#[test]
+fn open_pen_paths_make_the_same_selection_as_closed_paths() {
+    // The pen's unfinished work path should be implicitly closed when rasterized into a selection.
+    let mut s = session(80, 80, 8);
+    let knots = json!([[12, 12], [52, 12], [52, 52], [12, 52]]);
+    for (aa, feather) in [(false, 0.0), (true, 0.0), (false, 3.0), (true, 3.0)] {
+        let mut masks = Vec::new();
+        for closed in [false, true] {
+            s.execute("path.set", json!({"path": {"subpaths": [{"closed": closed, "knots": knots}]}})).unwrap();
+            s.execute("path.toSelection", json!({"antiAlias": aa, "feather": feather, "mode": "replace"})).unwrap();
+            masks.push(selection_mask(&s));
+        }
+        assert_eq!(masks[0], masks[1], "open and closed paths differ (antiAlias={aa}, feather={feather})");
+        assert!(masks[0][32 * 80 + 32] > 0.99);
+        assert_eq!(masks[0][4 * 80 + 4], 0.0);
+        if feather > 0.0 {
+            assert!(masks[0].iter().any(|v| *v > 0.0 && *v < 1.0), "feather did not soften the selection");
+        }
+    }
+
+    // All boolean operations should use the same selection semantics for an open Pen path.
+    for mode in ["replace", "add", "subtract", "intersect"] {
+        s.execute("select.rect", json!({"x": 30, "y": 30, "width": 34, "height": 25})).unwrap();
+        s.execute("path.set", json!({"path": {"subpaths": [{"closed": false, "knots": knots}]}})).unwrap();
+        s.execute("path.toSelection", json!({"mode": mode, "antiAlias": false})).unwrap();
+        let mask = selection_mask(&s);
+        let at = |x: usize, y: usize| mask[y * 80 + x];
+        assert_eq!(at(20, 20), if matches!(mode, "replace" | "add") { 1.0 } else { 0.0 }, "{mode}: path-only");
+        assert_eq!(at(60, 40), if matches!(mode, "add" | "subtract") { 1.0 } else { 0.0 }, "{mode}: previous-only");
+        assert_eq!(at(40, 40), if mode == "subtract" { 0.0 } else { 1.0 }, "{mode}: overlap");
+    }
+}
+
+#[test]
 fn selection_to_work_path_roundtrip_iou() {
     let mut s = session(240, 180, 8);
     // An anti-aliased donut plus a rectangle, from a path, as the selection.
@@ -363,6 +420,30 @@ fn selection_to_work_path_roundtrip_iou() {
     let r = s.execute("select.convertToShape", json!({"fill": "#00ff00"})).unwrap();
     assert_eq!(r["fill"], "#00ff00");
     assert_eq!(r["path"]["subpaths"].as_array().unwrap().len(), 3);
+
+    // tolerance and simplifyTolerance parameter
+    s.execute("path.toSelection", json!({"name": "src"})).unwrap();
+    let r_fine = s.execute("select.convertToShape", json!({"tolerance": 0.5, "name": "Fine Shape"})).unwrap();
+    assert_eq!(r_fine["name"], "Fine Shape");
+    let knots = |r: &Value| r["path"]["subpaths"].as_array().unwrap().iter().map(|sp| sp["knots"].as_array().unwrap().len()).sum::<usize>();
+    let fine_knots = knots(&r_fine);
+
+    s.execute("path.toSelection", json!({"name": "src"})).unwrap();
+    let r_coarse = s.execute("select.convertToShape", json!({"simplifyTolerance": 5.0, "name": "Coarse Shape"})).unwrap();
+    assert_eq!(r_coarse["name"], "Coarse Shape");
+    let coarse_knots = knots(&r_coarse);
+    assert!(fine_knots > coarse_knots, "fine tolerance {fine_knots} must have more knots than coarse {coarse_knots}");
+
+    // Undo restores state
+    assert!(s.undo());
+    assert_eq!(s.active().unwrap().doc.layers.last().unwrap().name, "Fine Shape");
+}
+
+#[test]
+fn convert_to_shape_requires_selection() {
+    let mut s = session(100, 100, 8);
+    assert!(!s.is_enabled("select.convertToShape"));
+    assert!(s.execute("select.convertToShape", json!({})).is_err());
 }
 
 #[test]
@@ -387,6 +468,55 @@ fn fill_and_stroke_path_on_pixel_layer() {
     // Filling needs a pixel layer.
     s.execute("shape.create", json!({"kind": "rect", "rect": [0, 0, 5, 5]})).unwrap();
     assert!(s.execute("path.fill", json!({})).is_err());
+}
+
+/// #2978: Simulate Pressure tapers the stroke at both ends (the brush's size follows pen
+/// pressure); without it the stroke is as wide near its ends as in the middle.
+#[test]
+fn stroke_path_simulate_pressure_tapers_both_ends() {
+    let coverage = |simulate: bool, x: i32| -> usize {
+        let mut s = session(200, 60, 8);
+        s.execute("layer.new.layer", json!({})).unwrap();
+        s.execute("path.set", json!({"path": {"subpaths": [{"closed": false, "knots": [[20, 30], [180, 30]]}]}})).unwrap();
+        let p = json!({"tool": "brush", "size": 20, "hardness": 1.0, "color": "#000000", "opacity": 100, "simulatePressure": simulate});
+        s.execute("path.stroke", p).unwrap();
+        let d = doc(&s);
+        let surf = d.layer(s.active().unwrap().active_layer.unwrap()).unwrap().surface().unwrap();
+        (0..60).filter(|&y| surf.rgba(x, y)[3] > 0.5).count()
+    };
+    let (end, middle) = (coverage(true, 26), coverage(true, 100));
+    assert!(middle >= 18 && end * 3 < middle, "simulated: {end} px near the start, {middle} px in the middle");
+    let (end, middle) = (coverage(false, 26), coverage(false, 100));
+    assert!(middle >= 18 && end + 2 >= middle, "plain: {end} px near the start, {middle} px in the middle");
+}
+
+/// #2978: Stroke Path runs the other brush-based tools along the path (here the Blur tool) as one
+/// history step, and only the path.stroke call is journalled, so an action replays it once.
+#[test]
+fn stroke_path_with_the_blur_tool_is_one_step() {
+    let mut s = session(100, 60, 8);
+    s.execute("layer.new.layer", json!({})).unwrap();
+    let id = s.active().unwrap().active_layer.unwrap();
+    s.execute("path.set", json!({"path": {"subpaths": [{"knots": [[0, 0], [100, 0], [100, 60], [0, 60]]}]}})).unwrap();
+    s.execute("path.fill", json!({"color": "#ffffff"})).unwrap();
+    s.execute("path.set", json!({"path": {"subpaths": [{"knots": [[0, 0], [50, 0], [50, 60], [0, 60]]}]}})).unwrap();
+    s.execute("path.fill", json!({"color": "#000000"})).unwrap();
+    let px = |s: &Session, x: i32| doc(s).layer(id).unwrap().surface().unwrap().rgba(x, 30)[0];
+    assert!(px(&s, 49) < 0.01 && px(&s, 50) > 0.99);
+    // Two subpaths along the edge: still one step.
+    let edge = json!({"subpaths": [{"closed": false, "knots": [[50, 5], [50, 28]]}, {"closed": false, "knots": [[50, 28], [50, 55]]}]});
+    s.execute("path.set", json!({"path": edge})).unwrap();
+    let steps = s.active().unwrap().history.past_len();
+    let journal = s.journal.len();
+    s.execute("path.stroke", json!({"tool": "blur", "size": 10, "strength": 100})).unwrap();
+    assert!(px(&s, 49) > 0.02 && px(&s, 50) < 0.98, "the edge is blurred: {} {}", px(&s, 49), px(&s, 50));
+    assert_eq!(s.active().unwrap().history.past_len(), steps + 1);
+    let ids: Vec<&str> = s.journal[journal..].iter().map(|(c, _)| c.as_str()).collect();
+    assert_eq!(ids, ["path.stroke"]);
+    s.execute("edit.undo", json!({})).unwrap();
+    assert!(px(&s, 49) < 0.01 && px(&s, 50) > 0.99);
+    assert!(s.execute("path.stroke", json!({"tool": "blur", "simulatePressure": "yes"})).is_err());
+    assert!(s.execute("path.stroke", json!({"tool": "airbrush"})).is_err());
 }
 
 #[test]
@@ -573,7 +703,6 @@ fn rasterizing_a_vector_mask_keeps_what_the_masks_show() {
             if let Some((feather, density)) = pm {
                 s.execute("select.rect", json!({"x": 0, "y": 0, "width": 40, "height": 64})).unwrap();
                 s.execute("layer.layerMask.revealSelection", json!({})).unwrap();
-                s.execute("select.deselect", json!({})).unwrap();
                 s.edit("mask settings", |doc, _| {
                     let m = doc.layer_mut(id).unwrap().mask.as_mut().unwrap();
                     (m.feather, m.density) = (feather, density);
@@ -589,8 +718,7 @@ fn rasterizing_a_vector_mask_keeps_what_the_masks_show() {
             s.execute("layer.rasterize.vectorMask", json!({})).unwrap();
             let l = doc(&s).layer(id).unwrap();
             assert!(l.vector_mask.is_none() && l.mask.is_some(), "{what}");
-            // An integer mask stores the soft values rounded to its depth (a mask made from a
-            // selection is 8-bit at every document depth).
+            // An integer mask stores the soft values rounded to its depth.
             let tol = match l.mask.as_ref().unwrap().surface.format().sample {
                 photocraft_color::SampleType::U8 => 1.5 / 255.0,
                 _ => 1e-3,
@@ -651,6 +779,93 @@ fn vector_mask_commands_and_compositing() {
     // Shape layers cannot take a separate vector mask.
     s.execute("shape.create", json!({"kind": "rect", "rect": [0, 0, 10, 10]})).unwrap();
     assert!(s.execute("layer.vectorMask.revealAll", json!({})).is_err());
+}
+
+/// #4201: the vector mask's feather takes the pixel mask's range (finite 0..=1000 px); anything
+/// else is refused before the edit, so no infinite feather can block a .pcraft save.
+#[test]
+fn vector_mask_edit_rejects_out_of_range_feather() {
+    let mut s = session(32, 32, 8);
+    s.execute("layer.new.layer", json!({})).unwrap();
+    let id = s.active().unwrap().active_layer.unwrap();
+    s.execute("layer.vectorMask.revealAll", json!({})).unwrap();
+    let feather = |s: &Session| doc(s).layer(id).unwrap().vector_mask.as_ref().unwrap().feather;
+    let steps = s.active().unwrap().history.past_len();
+    for bad in [json!(1e39), json!(-1), json!(1001), json!("x"), json!(null)] {
+        assert!(s.execute("layer.vectorMask.edit", json!({"feather": bad})).is_err(), "feather {bad}");
+        assert_eq!(feather(&s), 0.0, "feather {bad}");
+        assert_eq!(s.active().unwrap().history.past_len(), steps, "feather {bad}");
+    }
+    let r = s.execute("layer.vectorMask.edit", json!({"feather": 12.5})).unwrap();
+    assert_eq!(r["feather"], 12.5);
+    assert_eq!(feather(&s), 12.5);
+    s.execute("layer.vectorMask.edit", json!({"feather": 1000})).unwrap();
+    assert_eq!(feather(&s), 1000.0);
+}
+
+/// #5846: a shape layer's path is its vector mask; `layer.vectorMask.edit` sets its Density and
+/// Feather in one undoable step, re-rendering the fill, which shows beyond the path at 100 −
+/// density %. Hostile values are refused before any edit.
+#[test]
+fn shape_density_and_feather_through_vector_mask_edit() {
+    for depth in [8, 16, 32] {
+        let mut s = session(200, 200, depth);
+        let id = s.execute("shape.create", json!({"kind": "rect", "rect": [50, 50, 100, 100], "fill": "#000000"})).unwrap()["layer"].as_u64().unwrap();
+        let info = s.execute("layer.vectorMask.info", json!({})).unwrap();
+        assert_eq!((info["shape"].clone(), info["density"].clone(), info["feather"].clone()), (json!(true), json!(100.0), json!(0.0)), "{depth}");
+        let steps = s.active().unwrap().history.past_len();
+        let r = s.execute("layer.vectorMask.edit", json!({"density": 50})).unwrap();
+        assert_eq!(r["density"], 50.0);
+        assert_eq!(s.active().unwrap().history.past_len(), steps + 1, "one history step");
+        let sh = shape(&s, id);
+        assert_eq!((sh.density, sh.feather), (0.5, 0.0));
+        // The shape's own pixels carry the soft fill (half-transparent black beyond the path).
+        let cache = sh.cache.as_ref().unwrap();
+        assert!((cache.rgba(10, 10)[3] - 0.5).abs() < 0.01, "{depth}: {:?}", cache.rgba(10, 10));
+        assert!(cache.rgba(100, 100)[3] > 0.99);
+        s.execute("layer.vectorMask.edit", json!({"feather": 10, "density": 100})).unwrap();
+        let sh = shape(&s, id);
+        assert_eq!((sh.density, sh.feather), (1.0, 10.0));
+        let a = |x| sh.cache.as_ref().unwrap().rgba(x, 100)[3];
+        assert!(a(30) > 0.0 && a(30) < 0.05 && (a(49) + a(50) - 1.0).abs() < 0.02 && a(70) > 0.95, "{depth}: {} {} {} {}", a(30), a(49), a(50), a(70));
+        // Fill and stroke stay editable: the shape is still a shape.
+        s.execute("shape.edit", json!({"fill": "#ff0000"})).unwrap();
+        assert_eq!(shape(&s, id).feather, 10.0, "shape.edit keeps the feather");
+        s.undo();
+        s.undo();
+        assert_eq!((shape(&s, id).density, shape(&s, id).feather), (0.5, 0.0), "{depth}: undo restores");
+    }
+}
+
+#[test]
+fn shape_vector_mask_edit_fails_gracefully() {
+    let mut s = session(64, 64, 8);
+    let id = s.execute("shape.create", json!({"kind": "rect", "rect": [8, 8, 30, 30]})).unwrap()["layer"].as_u64().unwrap();
+    let before = doc(&s).clone();
+    let steps = s.active().unwrap().history.past_len();
+    let bad = [
+        json!({"density": -1}),
+        json!({"density": 100.5}),
+        json!({"density": 1e39}),
+        json!({"density": "50"}),
+        json!({"density": null}),
+        json!({"feather": -0.5}),
+        json!({"feather": 1001}),
+        json!({"feather": [1]}),
+        json!({"feather": 5, "path": {"subpaths": []}}),
+        json!({"density": 50, "enabled": false}),
+        json!({"invert": true}),
+        json!({"layer": u64::MAX, "density": 50}),
+    ];
+    for p in bad {
+        assert!(s.execute("layer.vectorMask.edit", p.clone()).is_err(), "{p}");
+        assert_eq!(*doc(&s), before, "{p}");
+        assert_eq!(s.active().unwrap().history.past_len(), steps, "{p}");
+    }
+    // A locked shape refuses it too.
+    s.execute("layer.lockLayers", json!({"all": true})).unwrap();
+    assert!(s.execute("layer.vectorMask.edit", json!({"layer": id, "density": 50})).is_err());
+    assert_eq!(shape(&s, id).density, 1.0);
 }
 
 #[test]
@@ -722,6 +937,31 @@ fn shape_info_bounds_of_curved_shapes_are_exact() {
             let id = s.execute("shape.create", params.clone()).unwrap()["layer"].as_u64().unwrap();
             let info = s.execute("shape.info", json!({"layer": id})).unwrap();
             assert_eq!(info["bounds"], want, "{params} at {depth}-bit");
+        }
+    }
+}
+
+#[test]
+fn shape_create_negative_size_rect_covers_the_ellipse_box() {
+    // Issue #4203: a rectangle with a negative width spanned x 50..70 while the ellipse and
+    // polygon with the same `rect` spanned 30..50.
+    for depth in [8, 16, 32] {
+        let mut s = session(100, 60, depth);
+        let ell = s.execute("shape.create", json!({"kind": "ellipse", "rect": [50, 10, -20, 30], "fill": "#0000ff"})).unwrap()["bounds"].clone();
+        assert_eq!(ell, json!([30, 10, 20, 30]), "{depth}-bit");
+        for params in [
+            json!({"kind": "rect", "rect": [50, 10, -20, 30], "fill": "#0000ff"}),
+            json!({"kind": "roundedRect", "rect": [50, 10, -20, 30], "radii": 5, "fill": "#0000ff"}),
+            json!({"kind": "rect", "rect": [50, 40, -20, -30], "fill": "#0000ff"}),
+        ] {
+            let r = s.execute("shape.create", params.clone()).unwrap();
+            assert_eq!(r["bounds"], ell, "{params} at {depth}-bit");
+            let sh = shape(&s, r["layer"].as_u64().unwrap());
+            let c = sh.cache.as_ref().unwrap();
+            let fmt = c.format();
+            let alpha = |x: i32, y: i32| photocraft_raster::to_rgba(&fmt, &c.read_region(photocraft_doc::Rect::from_xywh(x, y, 1, 1)))[3];
+            assert!(alpha(40, 25) > 0.99, "{params} at {depth}-bit");
+            assert!(alpha(60, 25) < 0.01, "{params} at {depth}-bit");
         }
     }
 }
@@ -806,7 +1046,7 @@ fn combine_shapes_fails_gracefully() {
     let (mut s, a, _) = two_selected_rects(8);
     let before = doc(&s).clone();
     let history = s.active().unwrap().history.past_len();
-    let bad_params = [json!({"layer": 999_999}), json!({"layer": a, "subpath": 99}), json!({"subpath": 99}), json!({"tolerance": "x", "layer": 999_999})];
+    let bad_params = [json!({"layer": u64::MAX}), json!({"layer": a, "subpath": 99}), json!({"subpath": 99}), json!({"tolerance": "x", "layer": u64::MAX})];
     for cmd in [
         "layer.combineShapes.unite",
         "layer.combineShapes.subtractFrontShape",

@@ -37,7 +37,7 @@ fn toggle_lock_transparency(s: &mut Session, p: &Value) -> Result<Value> {
     object(p, "layer.toggleLockTransparency")?;
     let sel = crate::layer_multi_cmds::selected(s);
     let st = s.active().ok_or(EngineError::NoDocument)?;
-    let bg = st.doc.layers.first().filter(|l| crate::extra_cmds::is_background(l)).map(|l| l.id);
+    let bg = st.doc.layers.first().filter(|l| st.doc.is_background(l.id)).map(|l| l.id);
     let ids: Vec<_> = sel.into_iter().filter(|id| Some(*id) != bg && st.doc.layer(*id).is_some()).collect();
     if ids.is_empty() {
         return Err(EngineError::Other("the Background's transparency can't be locked".into()));

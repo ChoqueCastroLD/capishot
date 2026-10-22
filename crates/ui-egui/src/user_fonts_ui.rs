@@ -172,7 +172,7 @@ fn load(app: &mut PhotocraftApp, folder: bool) -> Result<Value, String> {
         return Ok(json!({"picker": if folder { "folder" } else { "files" }}));
     }
     if folder {
-        app.pick_folder(move |app, dir| {
+        app.ask_folder(move |app, dir| {
             #[cfg(not(target_arch = "wasm32"))]
             let files = {
                 let mut files = Vec::new();

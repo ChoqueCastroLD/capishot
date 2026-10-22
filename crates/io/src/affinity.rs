@@ -151,6 +151,7 @@ impl Builder {
             bg.prune();
             let mut l = Layer::new("Background", LayerContent::Raster(bg));
             l.locks.transparency = true;
+            l.locks.position = true;
             layers.insert(0, l);
         }
         self.doc.layers = layers;
@@ -423,7 +424,7 @@ impl Builder {
                 dash_offset: s.dash.as_ref().map_or(0.0, |(_, o)| (o / s.width.max(1e-9)) as f32),
             })
         });
-        let mut sh = ShapeLayer { path, fill, stroke, live: None, cache: None, psd_raw: None };
+        let mut sh = ShapeLayer { path, fill, stroke, ..ShapeLayer::default() };
         sh.cache = Some(photocraft_vector::render_shape(&sh, self.format, self.canvas));
         sh
     }

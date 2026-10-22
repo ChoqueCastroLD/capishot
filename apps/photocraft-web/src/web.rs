@@ -1,6 +1,8 @@
 //! The browser shell: web `Services`, drag-and-drop, and the eframe web runner.
 
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -15,6 +17,13 @@ use wasm_bindgen::JsCast as _;
 
 type Inbox = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
 
+/// Everything File › Open reads: Capishot, Photoshop, OpenRaster, Krita and Affinity documents, flat images, and
+/// Photoshop brushes (.abr), gradients (.grd) and swatches (.aco, .act, .ase), which go to the preset libraries.
+const OPEN_EXTS: &[&str] = &[
+    "pcraft", "pdn", "ora", "xcf", "xcfgz", "gz", "kra", "krz", "psd", "psb", "psdt", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "tga", "ico",
+    "qoi", "exr", "hdr", "pbm", "pgm", "ppm", "pam", "pfm", "dds", "fits", "fit", "fts", "dpx", "cin", "heic", "heif", "hif", "dng", "cr2", "cr3", "nef",
+    "nrw", "arw", "pef", "orf", "rw2", "raf", "abr", "grd", "svg", "svgz", "aco", "act", "ase", "af", "afdesign", "afphoto", "afpub",
+];
 const SVG_EXTS: &[&str] = &["svg", "svgz"];
 const CANVAS_ID: &str = "photocraft_canvas";
 
@@ -684,9 +693,10 @@ async fn fetch_bytes(url: &str, integrity: Option<&str>) -> Result<Vec<u8>, Stri
 }
 
 /// Wraps the app to read dropped files asynchronously (browsers can't read them synchronously,
-/// so the app's own drop path can't handle them) and feed them through the inbox.
+/// so the app's own drop path can't handle them) and feed them through the inboxes.
 struct WebShell {
     app: PhotocraftApp,
+    /// Dropped files to open as documents.
     inbox: Inbox,
     /// Files dropped on the canvas, read: placed as layers, like the desktop's canvas drops.
     places: Inbox,
@@ -830,6 +840,9 @@ impl WebShell {
 
 impl eframe::App for WebShell {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        // A tap reaches eframe as Pointer Events and Touch Events: keep one press per tap, or the
+        // twin press closes the menu the first one opened (#2095).
+        photocraft_ui_egui::touch_twins::drop_twins(ctx, raw_input);
         crate::wheel_guard::restore(raw_input);
         // The app's own hook (clipboard keys, synthetic automation input), around the browser's
         // clipboard (clipboard.rs).
@@ -887,27 +900,27 @@ impl eframe::App for WebShell {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        let error = self.presets.error();
-        if error.is_some() || self.presets.unsaved() {
+        // Only while a preset change is unsaved. Storage the browser denies from the start (a
+        // sandboxed iframe, blocked site data) loses nothing until the first change, and that
+        // change brings the banner with the reason.
+        if self.presets.unsaved()
+            && let Some(error) = self.presets.error()
+        {
             egui::Panel::top("browser_preset_storage").show(ui, |ui| {
-                if let Some(error) = error {
-                    let tokens = photocraft_ui_egui::theme::Tokens::for_kind(self.app.ui.theme);
-                    // Put retry first so floating brush windows cannot cover the control.
-                    ui.horizontal_wrapped(|ui| {
-                        if self.database.is_some() && ui.button(i18n::t("Retry saving presets")).clicked() {
-                            self.presets.retry();
-                            ui.ctx().request_repaint();
-                        }
-                        ui.colored_label(tokens.warning, i18n::fmt(i18n::t("Brush preset changes are not saved: {error}"), &[("error", &error)]));
-                    });
-                    ui.label(if self.database.is_some() {
-                        i18n::t("Keep this tab open to retain your brushes.")
-                    } else {
-                        i18n::t("Browser storage is unavailable; brushes are session-only. Keep this tab open to retain them.")
-                    });
+                let tokens = photocraft_ui_egui::theme::Tokens::for_kind(self.app.ui.theme);
+                // Put retry first so floating brush windows cannot cover the control.
+                ui.horizontal_wrapped(|ui| {
+                    if self.database.is_some() && ui.button(i18n::t("Retry saving presets")).clicked() {
+                        self.presets.retry();
+                        ui.ctx().request_repaint();
+                    }
+                    ui.colored_label(tokens.warning, i18n::fmt(i18n::t("Brush preset changes are not saved: {error}"), &[("error", &error)]));
+                });
+                ui.label(if self.database.is_some() {
+                    i18n::t("Keep this tab open to retain your brushes.")
                 } else {
-                    ui.label(i18n::t("Saving brush presets… Keep this tab open until saving finishes."));
-                }
+                    i18n::t("Browser storage is unavailable; brushes are session-only. Keep this tab open to retain them.")
+                });
             });
         }
         self.app.ui(ui, frame);
@@ -960,26 +973,28 @@ fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig
                 };
                 reply.send(answer);
             }),
+            // Browser folder handles cannot be represented as filesystem paths for engine commands.
+            FileDialogRequest::Folder { .. } => reply.send(None),
             // No save dialog on the web: the suggested name becomes the download name.
             FileDialogRequest::Save { suggested } => {
                 let name = std::path::Path::new(&suggested).file_name().map_or_else(|| suggested.clone(), |n| n.to_string_lossy().to_string());
                 reply.send(Some(FileDialogAnswer::SaveTo(name)));
             }
-            // A page can't pick a folder (and the web build has no LUT library).
-            FileDialogRequest::Folder => reply.send(None),
         })),
         // Embedded in Photopea's way with a save server: documents in its formats go there.
         write: Some(Box::new(move |path: &str, bytes: &[u8]| match &photopea {
             Some(config) if config.saves(path) => crate::embed::upload(config, path, bytes),
             _ => download(path, bytes),
         })),
+        // A download may be cancelled and never reports back: it doesn't save the document.
+        write_unconfirmed: true,
         encode_png: Some(Box::new(|w, h, rgba| {
             let img = Image::from_u8(w, h, ChannelLayout::Rgba, rgba.to_vec()).map_err(|e| e.to_string())?;
             photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &EncodeOptions::default()).map_err(|e| e.to_string())
         })),
         inbox: Some(inbox),
         clipboard_set_image: Some(Box::new(crate::clipboard::set)),
-        clipboard_get_image: Some(Box::new(crate::clipboard::get)),
+        clipboard_get_image: Some(Box::new(|| Ok(crate::clipboard::get()))),
         clipboard_refresh: Some(Box::new(crate::clipboard::refresh)),
         // Preferences live in the browser's localStorage.
         // Type › Load Fonts…: the page's own pickers (files, or a whole folder).
@@ -1039,6 +1054,7 @@ fn mime_for(name: &str) -> &'static str {
         Some("gif") => "image/gif",
         Some("psd" | "psb") => "image/vnd.adobe.photoshop",
         Some("ora") => "image/openraster",
+        Some("kra" | "krz") => "application/x-krita",
         _ => "application/octet-stream",
     }
 }

@@ -58,6 +58,38 @@ fn fade_with_blend_mode_and_invalidation() {
 }
 
 #[test]
+fn fade_uniform_layer_mask_invert_at_all_depths() {
+    for depth in [8, 16, 32] {
+        for (opacity, expected) in [(0, 1.0), (50, 0.5), (100, 0.0)] {
+            let mut s = session(depth);
+            s.execute("layer.layerMask.revealAll", json!({})).unwrap();
+            s.execute("channel.target", json!({"channel": "mask"})).unwrap();
+            let mask_pixel = |s: &Session| {
+                let layer = active(s);
+                let mask = &layer.mask.as_ref().unwrap().surface;
+                mask.pixel(5, 5)[0]
+            };
+            assert!((mask_pixel(&s) - 1.0).abs() < 0.01);
+            s.execute("image.adjustments.invert", json!({})).unwrap();
+            assert!(mask_pixel(&s) < 0.01, "depth {depth}: invert changed the mask");
+            assert!(s.edit_state.fade.as_ref().is_some_and(|f| f.mask), "depth {depth}: Fade must target the mask");
+            let history_before_fade = s.active().unwrap().history.past_len();
+
+            s.execute("edit.fade", json!({"opacity": opacity})).unwrap();
+            for (x, y) in [(0, 0), (5, 5), (63, 47)] {
+                let pixel = active(&s).mask.as_ref().unwrap().surface.pixel(x, y)[0];
+                assert!((pixel - expected).abs() < 0.02, "depth {depth}, opacity {opacity}, ({x}, {y}): {pixel}");
+            }
+            assert_eq!(s.active().unwrap().history.past_len(), history_before_fade + 1);
+            assert!(s.undo());
+            assert!(mask_pixel(&s) < 0.01, "undo restores inverted mask");
+            assert!(s.redo());
+            assert!((mask_pixel(&s) - expected).abs() < 0.02, "redo restores faded mask");
+        }
+    }
+}
+
+#[test]
 fn purge_commands() {
     let mut s = session(8);
     assert!(!s.is_enabled("edit.purge.undo"));
@@ -105,10 +137,15 @@ fn blob_session(depth: u32) -> Session {
 fn content_aware_fill_huge_area_neither_panics_nor_wraps() {
     let mut s = blob_session(8);
     // `[1e30, 0, 1e30, 10]` overflowed the i32 additions in the area parser (a debug-build
-    // panic, a garbage sampling window in release); the additions saturate now, so this is
-    // simply a whole-canvas window.
-    let r = s.execute("edit.contentAwareFill", json!({"sampling": "custom", "area": [1e30, 0.0, 1e30, 10.0], "colorAdaptation": "none"})).unwrap();
-    assert!(r["filled"].as_u64().unwrap() > 100);
+    // panic, a garbage sampling window in release); the additions saturate now, so the area lies
+    // wholly right of the canvas: nothing to sample, which is an error, not a black fill (#6532).
+    let before = s.active().unwrap().doc.clone();
+    let past = s.active().unwrap().history.past_len();
+    let err = s.execute("edit.contentAwareFill", json!({"sampling": "custom", "area": [1e30, 0.0, 1e30, 10.0], "colorAdaptation": "none"})).unwrap_err();
+    assert!(err.to_string().contains("nothing to sample from"), "{err}");
+    let st = s.active().unwrap();
+    assert!(std::sync::Arc::ptr_eq(&before, &st.doc), "the document changed");
+    assert_eq!(st.history.past_len(), past, "a history step was recorded");
     // A malformed area names the problem instead of silently falling back.
     for area in [json!([0.0, 0.0, null, 10.0]), json!([0.0, 0.0, 10.0]), json!("nope")] {
         let err = s.execute("edit.contentAwareFill", json!({"sampling": "custom", "area": area})).unwrap_err();
@@ -219,6 +256,38 @@ fn delete_and_fill_selection_removes_the_object_in_one_step() {
 }
 
 #[test]
+fn content_aware_fill_on_an_empty_layer_samples_the_composite() {
+    let mut s = blob_session(8);
+    s.execute("layer.new.layer", json!({})).unwrap();
+    let empty = s.active().unwrap().active_layer.unwrap();
+    assert_eq!(px(&s, 30, 20)[3], 0.0, "the new layer has no paint");
+    let r = s.execute("edit.contentAwareFill", json!({"colorAdaptation": "none"})).unwrap();
+    assert!(r["filled"].as_u64().unwrap() > 0);
+    assert_eq!(s.active().unwrap().active_layer, Some(empty));
+    assert!(px(&s, 30, 20)[3] > 0.5, "the hole is filled from the layers underneath");
+    s.undo();
+    let missed = s.execute("edit.contentAwareFill", json!({"sampleAllLayers": false, "colorAdaptation": "none"})).unwrap();
+    assert!(missed["filled"].as_u64().unwrap() > 0);
+    assert!(px(&s, 30, 20)[3] < 0.05, "sampling only the empty layer leaves it empty");
+}
+
+#[test]
+fn content_aware_fill_on_an_empty_cmyk_layer_uses_the_layer_format() {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 48, "height": 36, "mode": "cmyk", "background": "white"})).unwrap();
+    s.execute("select.rect", json!({"x": 16, "y": 12, "width": 12, "height": 10})).unwrap();
+    s.execute("layer.new.layer", json!({})).unwrap();
+    let before = px(&s, 20, 16);
+    assert!(before.iter().all(|c| *c < 0.05), "the new CMYK layer is empty: {before:?}");
+    s.execute("edit.contentAwareFill", json!({"colorAdaptation": "none"})).unwrap();
+    let v = px(&s, 20, 16);
+    assert_eq!(v.len(), before.len());
+    // White in the layer's CMYK is near zero ink with a covered alpha, not the compositor's RGBA.
+    assert!(v[..4].iter().all(|c| *c < 0.15), "CMYK ink stayed low: {v:?}");
+    assert!(v.last().copied().unwrap_or(0.0) > 0.5, "the hole is covered: {v:?}");
+}
+
+#[test]
 fn content_aware_fill_samples_photoshops_window() {
     // A 50 px selection samples the 200 px square centred on it (Photoshop 25.4's overlay);
     // at the canvas edge the square slides inwards. Edit › Fill uses the same window.
@@ -278,6 +347,23 @@ fn content_aware_fill_takes_the_workspace_edits() {
     // The command fills with the same plan; `layer` names the layer even when another is active.
     let r = s.execute("edit.contentAwareFill", json!({"sampling": "rectangular", "fillEdits": [{"op": "expand", "by": 2}], "layer": id.0})).unwrap();
     assert!(r["filled"].as_u64().unwrap() > 2800);
+}
+
+/// #6532: a sampling area with no pixels outside the fill area is refused instead of filling it
+/// black, and leaves the document untouched; any margin past the selection fills.
+#[test]
+fn content_aware_fill_with_nothing_to_sample_is_refused() {
+    let mut s = blob_session(8);
+    let before = px(&s, 30, 22);
+    let revision = s.active().unwrap().revision;
+    for p in [json!({"sampling": "rectangular", "margin": 0}), json!({"sampling": "custom", "area": [28, 18, 4, 4]})] {
+        let e = s.execute("edit.contentAwareFill", p.clone()).unwrap_err().to_string();
+        assert!(e.contains("nothing to sample from"), "{p}: {e}");
+        assert_eq!(px(&s, 30, 22), before, "{p}: nothing was filled");
+        assert_eq!(s.active().unwrap().revision, revision, "{p}: no history step");
+    }
+    s.execute("edit.contentAwareFill", json!({"sampling": "rectangular", "margin": 1})).unwrap();
+    assert_ne!(px(&s, 30, 22), before, "the red blob is filled from around the selection");
 }
 
 #[test]
@@ -370,6 +456,34 @@ fn content_aware_scale_params() {
 }
 
 #[test]
+fn content_aware_scale_places_the_result_and_previews_it_reduced() {
+    // The transform box (#3096) moves the result with `x`/`y` and previews it on a reduced copy.
+    for depth in [8, 16, 32] {
+        let mut s = session(depth);
+        s.execute("layer.new.layer", json!({})).unwrap();
+        s.edit("paint", |doc, active| {
+            doc.layer_mut(active.unwrap()).unwrap().surface_mut().unwrap().fill_rect(Rect::new(4, 4, 36, 28), &[0.2, 0.4, 0.6, 1.0]);
+            Ok(())
+        })
+        .unwrap();
+        let p = json!({"width": 16, "height": 40, "x": 10, "y": 2});
+        let preview = super::ContentAwareScalePreview::new(&s, &p, 10).unwrap();
+        assert_eq!(preview.region(), Rect::new(4, 4, 36, 28));
+        let small = preview.run(&crate::jobs::JobCtx::new()).unwrap();
+        assert_eq!(small.content_bounds(), Rect::new(0, 0, 4, 10), "depth {depth}: the longest side, 40 px, previews at 10");
+        let past = s.active().unwrap().history.past_len();
+        let r = s.execute("edit.contentAwareScale", p).unwrap();
+        assert_eq!(r["bounds"], json!([10, 2, 16, 40]));
+        assert_eq!(active(&s).surface().unwrap().content_bounds(), Rect::from_xywh(10, 2, 16, 40), "depth {depth}");
+        assert_eq!(s.active().unwrap().history.past_len(), past + 1, "depth {depth}: one step");
+        for bad in [json!({"x": "left"}), json!({"y": 1e9})] {
+            assert!(s.execute("edit.contentAwareScale", bad.clone()).is_err(), "{bad}");
+            assert!(super::ContentAwareScalePreview::new(&s, &bad, 64).is_err(), "{bad}");
+        }
+    }
+}
+
+#[test]
 fn content_aware_scale_enlarges_a_one_pixel_line() {
     // A 1 px wide (or tall) layer has no seam to spare, so enlarging it used to return the line
     // unchanged and crash or write a short buffer. The line's single column (row) is repeated.
@@ -439,6 +553,35 @@ fn define_custom_shape_and_preset_manager() {
 }
 
 #[test]
+fn preset_manager_brush_rename_follows_current_preset() {
+    let mut s = Session::new();
+    s.execute("brush.presets.setCurrent", json!({"name": "Chalk"})).unwrap();
+    s.execute("edit.presets.presetManager", json!({"action": "rename", "kind": "brushes", "name": "Chalk", "newName": "Chalky"})).unwrap();
+    assert_eq!(s.tools.current_preset.as_deref(), Some("Chalky"));
+    s.execute("brush.presets.update", json!({})).unwrap();
+}
+
+#[test]
+fn preset_manager_brush_rename_refuses_duplicate_name() {
+    let mut s = Session::new();
+    let before: Vec<String> = s.tools.presets.iter().map(|b| b.name.clone()).collect();
+    let r = s.execute("edit.presets.presetManager", json!({"action": "rename", "kind": "brushes", "name": "Soft Round", "newName": "hard round"}));
+    assert!(r.is_err(), "a case-insensitive duplicate name must be refused");
+    assert_eq!(s.tools.presets.iter().map(|b| b.name.clone()).collect::<Vec<_>>(), before);
+    // Renaming to a different case of its own name is fine.
+    s.execute("edit.presets.presetManager", json!({"action": "rename", "kind": "brushes", "name": "Soft Round", "newName": "soft round"})).unwrap();
+}
+
+#[test]
+fn preset_manager_brush_delete_clears_current_preset() {
+    let mut s = Session::new();
+    s.execute("brush.presets.setCurrent", json!({"name": "Chalk"})).unwrap();
+    s.execute("edit.presets.presetManager", json!({"action": "delete", "kind": "brushes", "name": "Chalk"})).unwrap();
+    assert!(!s.tools.presets.iter().any(|b| b.name == "Chalk"));
+    assert_eq!(s.tools.current_preset, None);
+}
+
+#[test]
 fn define_brush_preset_wraps_define_from_selection() {
     let mut s = session(8);
     assert!(!s.is_enabled("edit.defineBrushPreset"));
@@ -487,6 +630,27 @@ fn find_and_replace_across_type_layers() {
     assert_eq!(f2["found"]["text"], "world");
     assert_ne!(f2["found"]["layer"], f2["changed"]["layer"]);
     assert!(s.execute("edit.findAndReplaceText", json!({"find": ""})).is_err());
+}
+
+#[test]
+fn find_and_replace_change_rejects_a_layer_locked_after_the_find() {
+    // #4188: the found match's layer gets Lock All before Change; the text must stay.
+    let mut s = session(8);
+    let id = s.execute("type.create", json!({"text": "abc", "x": 2, "y": 12})).unwrap()["layer"].as_u64().unwrap();
+    // A second, unlocked type layer keeps the command enabled.
+    s.execute("type.create", json!({"text": "zzz", "x": 2, "y": 40})).unwrap();
+    let found = s.execute("edit.findAndReplaceText", json!({"find": "abc", "action": "find"})).unwrap();
+    assert_eq!(found["found"]["layer"].as_u64(), Some(id));
+    s.execute("layer.setProps", json!({"layer": id, "locked": true})).unwrap();
+    let history = s.active().unwrap().history.past_len();
+    let result = s.execute("edit.findAndReplaceText", json!({"find": "abc", "replace": "x", "action": "change"}));
+    assert!(matches!(&result, Err(EngineError::Other(message)) if message.contains("locked")), "{result:?}");
+    let text = match &s.active().unwrap().doc.layer(LayerId(id)).unwrap().content {
+        LayerContent::Text(t) => t.text.clone(),
+        _ => String::new(),
+    };
+    assert_eq!(text, "abc");
+    assert_eq!(s.active().unwrap().history.past_len(), history);
 }
 
 #[test]
@@ -573,3 +737,91 @@ const CAF_PINNED: [u64; 12] = [
     0x1ef9_0fc3_294d_b100,
     0x73ce_ceae_c4c0_8381,
 ];
+#[test]
+fn backward_change_find_moves_past_the_replaced_text() {
+    // A backward Change/Find whose replacement still matches ("cat" -> "Cat", case-insensitive)
+    // must move on to the previous match, not find the replaced text again.
+    let mut s = session(8);
+    s.execute("type.create", json!({"text": "cat dog cat", "x": 2, "y": 12})).unwrap();
+    let p = |action: &str, forward: bool| json!({"find": "cat", "replace": "Cat", "action": action, "forward": forward, "allLayers": false});
+    let f = s.execute("edit.findAndReplaceText", p("find", false)).unwrap();
+    assert_eq!((f["found"]["start"].as_u64(), f["found"]["end"].as_u64()), (Some(8), Some(11)), "{f}");
+    let r = s.execute("edit.findAndReplaceText", p("changeFind", false)).unwrap();
+    assert_eq!((r["changed"]["start"].as_u64(), r["changed"]["end"].as_u64()), (Some(8), Some(11)), "{r}");
+    assert_eq!((r["found"]["start"].as_u64(), r["found"]["end"].as_u64()), (Some(0), Some(3)), "{r}");
+
+    // Forward is unchanged: replace the first match, then find the next one.
+    let mut s = session(8);
+    s.execute("type.create", json!({"text": "cat dog cat", "x": 2, "y": 12})).unwrap();
+    let f = s.execute("edit.findAndReplaceText", p("find", true)).unwrap();
+    assert_eq!(f["found"]["start"].as_u64(), Some(0), "{f}");
+    let r = s.execute("edit.findAndReplaceText", p("changeFind", true)).unwrap();
+    assert_eq!((r["changed"]["start"].as_u64(), r["changed"]["end"].as_u64()), (Some(0), Some(3)), "{r}");
+    assert_eq!((r["found"]["start"].as_u64(), r["found"]["end"].as_u64()), (Some(8), Some(11)), "{r}");
+}
+
+#[test]
+fn fade_allocation_failure_keeps_document_and_history() {
+    for depth in [8, 16, 32] {
+        let mut s = session(depth);
+        s.execute("edit.fill", json!({"color": "#000000"})).unwrap();
+        let before = s.active().unwrap().doc.clone();
+        let history = s.active().unwrap().history.entries();
+        crate::allocation::fail_next_for_test();
+        let result = s.execute("edit.fade", json!({"opacity": 25}));
+        let _ = crate::allocation::capacity::<u8>(0, "reset failpoint");
+        assert!(result.is_err());
+        assert_eq!(*s.active().unwrap().doc, *before);
+        assert_eq!(s.active().unwrap().history.entries(), history);
+        assert!(s.is_enabled("edit.fade"));
+        s.execute("edit.fade", json!({"opacity": 25})).unwrap();
+        assert!(s.undo());
+        assert_eq!(*s.active().unwrap().doc, *before);
+    }
+}
+
+#[test]
+fn tool_presets_round_trip_through_export_import() {
+    let mut source = Session::new();
+    source.execute("tool.presets.new", json!({"name":"2 : 3", "tool":"crop", "options":{"toolOptions":{"crop_ratio":"2:3"}}})).unwrap();
+    let exported = source.execute("edit.presets.exportImportPresets", json!({"action":"export"})).unwrap();
+    assert_eq!(exported["tools"], 1);
+    assert_eq!(exported["data"]["toolPresets"][0]["name"], "2 : 3");
+    let mut target = Session::new();
+    target.execute("tool.presets.new", json!({"name":"2 : 3", "tool":"crop", "options":{"toolOptions":{"crop_ratio":"1:1"}}})).unwrap();
+    for _ in 0..2 {
+        let result = target.execute("edit.presets.exportImportPresets", json!({"action":"import", "data":exported["data"]})).unwrap();
+        assert_eq!(result["tools"], 1);
+    }
+    let selected = target.execute("tool.presets.select", json!({"preset":"2 : 3"})).unwrap();
+    assert_eq!(selected["options"]["toolOptions"]["crop_ratio"], "2:3");
+    assert_eq!(target.presets.tool_presets.iter().filter(|p| p.name == "2 : 3").count(), 1);
+    let only_brushes = source.execute("edit.presets.exportImportPresets", json!({"kinds":["brushes"]})).unwrap();
+    assert_eq!(only_brushes["tools"], 0);
+    let with_builtins = source.execute("edit.presets.exportImportPresets", json!({"kinds":["tools"], "includeBuiltins":true})).unwrap();
+    assert_eq!(with_builtins["tools"].as_u64().unwrap() as usize, source.presets.tool_presets.len());
+}
+
+#[test]
+fn tool_preset_import_is_validated_before_mutation_and_accepts_old_files() {
+    let mut s = Session::new();
+    let before = s.presets.tool_presets.clone();
+    for preset in [
+        json!({"name":"", "tool":"crop", "options":{}}),
+        json!({"name":"x".repeat(256), "tool":"crop", "options":{}}),
+        json!({"name":"Crop", "tool":" ", "options":{}}),
+        json!({"name":"Crop", "tool":"crop", "options":[]}),
+    ] {
+        let result = s.execute(
+            "edit.presets.exportImportPresets",
+            json!({"action":"import", "data":{"format":PRESET_FORMAT, "toolPresets":[{"name":"Valid", "tool":"crop", "options":{}}, preset]}}),
+        );
+        assert!(result.is_err());
+        assert_eq!(s.presets.tool_presets, before);
+    }
+    let too_many: Vec<_> = (0..crate::presets::tools::MAX_PRESETS + 1).map(|i| json!({"name":format!("Crop {i}"), "tool":"crop", "options":{}})).collect();
+    assert!(s.execute("edit.presets.exportImportPresets", json!({"action":"import", "data":{"format":PRESET_FORMAT, "toolPresets":too_many}})).is_err());
+    assert_eq!(s.presets.tool_presets, before);
+    let result = s.execute("edit.presets.exportImportPresets", json!({"action":"import", "data":{"format":PRESET_FORMAT, "version":1}})).unwrap();
+    assert_eq!(result["tools"], 0);
+}

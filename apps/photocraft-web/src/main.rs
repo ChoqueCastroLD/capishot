@@ -1,4 +1,4 @@
-//! Photocraft in the browser.
+//! Capishot in the browser.
 //!
 //! Runs the same [`photocraft_ui_egui::PhotocraftApp`] as the desktop app through eframe's web
 //! runner (wgpu: WebGPU where available, WebGL2 otherwise). Build with `trunk build --release`
@@ -6,8 +6,8 @@
 //!
 //! Differences from the desktop app:
 //! - no TCP control server (browsers can't listen on sockets);
-//! - File → Open uses the browser file picker; bytes arrive asynchronously through
-//!   `Services::inbox`;
+//! - file pickers return browser file contents asynchronously through `Services::file_dialog`;
+//!   this includes File → Open and commands such as Place Embedded;
 //! - saving/exporting triggers a browser download;
 //! - dropped files are read asynchronously by `web::WebShell` and delivered through the inbox
 //!   (opened), or placed as layers when dropped on an open document's canvas;

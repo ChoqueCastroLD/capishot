@@ -4,15 +4,7 @@ use egui_kittest::{Harness, kittest::Queryable};
 use photocraft_ui_egui::{PhotocraftApp, camera_raw_ui, control, theme::ThemeKind};
 use serde_json::{Value, json};
 
-/// Concurrent wgpu instances in one process crash on some drivers (see `canvas_16f.rs`). With the
-/// NVIDIA and lavapipe Vulkan drivers both installed, `wgpu::Instance::new` on several test
-/// threads segfaults inside libvulkan, so every test that builds a GPU harness holds this lock for
-/// its whole run, harness included.
-static GPU_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-fn gpu_lock() -> std::sync::MutexGuard<'static, ()> {
-    GPU_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
-}
+use photocraft_testkit::gpu_lock;
 
 fn menu(app: &mut PhotocraftApp, ctx: &egui::Context, p: Value) -> Result<Value, String> {
     camera_raw_ui::menu(app, ctx, "filter.cameraRaw", &p).ok_or("missing handler")?
@@ -47,7 +39,23 @@ fn fixture_render(theme: ThemeKind, gpu: bool) -> Harness<'static, PhotocraftApp
     h.state_mut().set_theme(&ctx, theme);
     h.run_steps(3);
     assert_eq!(h.state().ui.theme, theme);
+    settle(&mut h);
     h
+}
+/// Waits for the proxy develop that the dialog's own controls start on a worker (#5964), so its
+/// frame can't land, and bump `previewRevision`, after a test has recorded the revision.
+fn settle(h: &mut Harness<'_, PhotocraftApp>) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while inspect(h)["previewPending"] == true {
+        assert!(std::time::Instant::now() < deadline, "the Camera Raw preview worker never finished");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        h.run_steps(1);
+    }
+    // A failed worker develop also clears `previewPending`, without a new frame.
+    let app = control::inspect(h.state(), &h.ctx);
+    assert_ne!(app["statusError"], true, "the Camera Raw preview worker failed: {}", app["status"]);
+    // The frame that picked up the result also rebuilt the scope; let it go quiet.
+    h.run_steps(2);
 }
 fn press(h: &mut Harness<'_, PhotocraftApp>, p: Pos2, pressed: bool, modifiers: Modifiers) {
     h.event(Event::ModifiersChanged(modifiers));
@@ -226,6 +234,8 @@ fn real_drag_hover_warnings_sampler_motion_and_floating_scope_across_themes() {
         let ctx = h.ctx.clone();
         menu(h.state_mut(), &ctx, json!({"ui":{"scope":{"samplerTool":true,"vectorscope":true,"shadows":true,"highlights":true}}})).unwrap();
         h.run_steps(3);
+        // The tone drags above developed on the worker; the last frame may still be on its way.
+        settle(&mut h);
         let revision = inspect(&h)["previewRevision"].clone();
         let scope_revision = inspect(&h)["scopeRevision"].clone();
         let preview = rect(&h, "previewRect");
