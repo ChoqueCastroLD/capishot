@@ -119,6 +119,7 @@ impl Loader {
     /// Finishes a file: builds its network (or keeps the UNet shard / LoRA for [`Loader::finish`]).
     pub fn close(&mut self, f: FileSink) -> Result<Part> {
         let FileSink { part, store, merges } = f;
+        store.check_complete()?;
         match part {
             Part::Text => {
                 let merges = merges.ok_or_else(|| SdError::Weights("the text encoder file has no tokenizer".into()))?;
