@@ -540,6 +540,8 @@ pub struct PhotocraftApp {
     pub(crate) menu_cache: Option<menus::ItemCache>,
     /// Move tool drag shown live (`move_ui`).
     pub(crate) move_preview: Option<move_ui::MovePreview>,
+    /// The GPU canvas fell back while drawing a Move preview in place: draw moved copies.
+    pub(crate) move_in_place_off: bool,
     /// Move tool › Show Highlight on Rollover: the last hover answer (`move_hover`).
     pub(crate) move_hover: Option<move_hover::Hover>,
     /// A blend mode hovered in the Layers panel, shown live (`blend_preview`).
@@ -773,6 +775,7 @@ impl PhotocraftApp {
             trail: None,
             menu_cache: None,
             move_preview: None,
+            move_in_place_off: false,
             move_hover: None,
             blend_preview: None,
             patch_preview: None,
