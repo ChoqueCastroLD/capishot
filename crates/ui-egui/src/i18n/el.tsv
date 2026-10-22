@@ -3976,3 +3976,10 @@ cameraData	Lens	Φακός
 	Variants:	Παραλλαγές:
 	Describe what to add (optional)	Περιγράψτε τι να προστεθεί (προαιρετικά)
 	English, Spanish or Portuguese; empty fills with background. It runs on this device, and generating means you accept the Terms of Use.	Αγγλικά, ισπανικά ή πορτογαλικά· κενό γεμίζει με φόντο. Εκτελείται σε αυτή τη συσκευή και με τη δημιουργία αποδέχεστε τους Όρους χρήσης.
+	GPU couldn't run this model; used the CPU instead	Η GPU δεν μπόρεσε να εκτελέσει αυτό το μοντέλο· χρησιμοποιήθηκε η CPU
+	Menu	Μενού
+	Max pixel density	Μέγιστη πυκνότητα pixel
+	Display's own	Της οθόνης
+	Collapse to Icons	Σύμπτυξη σε εικονίδια
+	Expand Panels	Ανάπτυξη πλαισίων
+	Dock to the Panels	Αγκύρωση στα πλαίσια

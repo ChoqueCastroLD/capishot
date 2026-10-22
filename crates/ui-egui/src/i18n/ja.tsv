@@ -3894,3 +3894,10 @@ cameraData	Lens	レンズ
 	Variants:	バリエーション:
 	Describe what to add (optional)	追加する内容を入力（省略可）
 	English, Spanish or Portuguese; empty fills with background. It runs on this device, and generating means you accept the Terms of Use.	英語・スペイン語・ポルトガル語に対応。空欄なら背景で塗りつぶします。この端末上で動作し、生成すると利用規約に同意したものとみなされます。
+	GPU couldn't run this model; used the CPU instead	GPU でこのモデルを実行できなかったため、CPU を使用しました
+	Menu	メニュー
+	Max pixel density	最大ピクセル密度
+	Display's own	ディスプレイに合わせる
+	Collapse to Icons	アイコンパネルに折りたたむ
+	Expand Panels	パネルを展開
+	Dock to the Panels	パネルにドッキング

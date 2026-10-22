@@ -6944,6 +6944,7 @@ dependencies = [
  "burn",
  "half",
  "image",
+ "pollster 1.0.1",
  "safetensors 0.8.0",
  "thiserror 2.0.21",
 ]

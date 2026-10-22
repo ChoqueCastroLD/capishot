@@ -47,6 +47,8 @@ struct Shared {
     /// `fetch_max` keeps progress monotonic even with several reporting threads.
     progress: AtomicU32,
     message: Mutex<String>,
+    /// [`JobCtx::notice`]s, added to the result as `notices`.
+    notices: Mutex<Vec<Value>>,
 }
 
 impl std::fmt::Debug for JobCtx {
@@ -97,6 +99,26 @@ impl JobCtx {
     /// The latest status message.
     pub fn message(&self) -> String {
         self.shared.message.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
+    /// Something the user should know about a job that succeeded anyway ("the GPU couldn't run
+    /// this model; used the CPU instead"): `class` is a stable id (`ai.gpuFallback`), `text` the
+    /// message to show, `cause` the underlying error (for agents and the error's telemetry
+    /// class, never sent as text). The result gets `"notices": [{"class", "text", "cause"}]`.
+    pub fn notice(&self, class: &str, text: &str, cause: &str) {
+        let n = serde_json::json!({"class": class, "text": text, "cause": cause});
+        self.shared.notices.lock().unwrap_or_else(PoisonError::into_inner).push(n);
+    }
+
+    /// `result` with this job's notices (an object result only; anything else as is).
+    fn with_notices(&self, mut result: Value) -> Value {
+        let notices = std::mem::take(&mut *self.shared.notices.lock().unwrap_or_else(PoisonError::into_inner));
+        if !notices.is_empty()
+            && let Some(o) = result.as_object_mut()
+        {
+            o.insert("notices".into(), Value::Array(notices));
+        }
+        result
     }
 
     /// Run `f` with an algorithm-level [`Interrupt`] whose progress maps onto `lo..hi` of this
@@ -389,10 +411,11 @@ pub fn run_async<T: Send + 'static>(
     let done = Completion { tx, _t: std::marker::PhantomData };
     #[cfg(not(target_arch = "wasm32"))]
     if !s.jobs.spawn {
-        work(&s.jobs.inline.clone().unwrap_or_default(), done);
+        let ctx = s.jobs.inline.clone().unwrap_or_default();
+        work(&ctx, done);
         let r = rx.recv().unwrap_or_else(|_| Err(EngineError::Other(format!("`{label}` stopped unexpectedly"))))?;
         let t = r.downcast::<T>().map_err(|_| EngineError::Other("internal error: job result type mismatch".into()))?;
-        return apply(s, *t);
+        return apply(s, *t).map(|v| ctx.with_notices(v));
     }
     if s.jobs.pending.is_some() {
         return Err(EngineError::Other(format!("`{label}` started a second background job in one command")));
@@ -829,7 +852,7 @@ impl Session {
             Err(e) => JobOutcome::Failed(e.to_string()),
             Ok(_) if job.ctx.cancelled() => JobOutcome::Cancelled,
             Ok(payload) => match self.apply_job(&job, apply, payload) {
-                Ok(v) => JobOutcome::Done(v),
+                Ok(v) => JobOutcome::Done(job.ctx.with_notices(v)),
                 Err(EngineError::Cancelled) => JobOutcome::Cancelled,
                 Err(e) => JobOutcome::Failed(e.to_string()),
             },

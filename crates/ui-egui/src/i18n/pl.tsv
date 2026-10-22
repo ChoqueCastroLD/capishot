@@ -3898,3 +3898,10 @@ cameraData	Lens	Obiektyw
 	Variants:	Warianty:
 	Describe what to add (optional)	Opisz, co dodać (opcjonalnie)
 	English, Spanish or Portuguese; empty fills with background. It runs on this device, and generating means you accept the Terms of Use.	Angielski, hiszpański lub portugalski; puste wypełnia tłem. Działa na tym urządzeniu, a generując, akceptujesz Warunki korzystania.
+	GPU couldn't run this model; used the CPU instead	GPU nie mógł uruchomić tego modelu; użyto procesora
+	Menu	Menu
+	Max pixel density	Maksymalna gęstość pikseli
+	Display's own	Gęstość ekranu
+	Collapse to Icons	Zwiń do ikon
+	Expand Panels	Rozwiń panele
+	Dock to the Panels	Zadokuj w panelach

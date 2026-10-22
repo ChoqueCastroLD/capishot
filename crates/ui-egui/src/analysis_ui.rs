@@ -632,6 +632,10 @@ pub(crate) fn title_row(ui: &mut egui::Ui, title: &str) -> bool {
             if crate::icons::button(ui, "x", 20.0, false, tl!("Close")).clicked() {
                 close = true;
             }
+            // A panel that docks: its dock / float button (`crate::floaters`).
+            if let Some(host) = crate::floaters::current(ui.ctx()) {
+                host.header_button(ui);
+            }
         });
     });
     crate::widgets::hairline(ui);
@@ -643,7 +647,15 @@ pub(crate) fn title_row(ui: &mut egui::Ui, title: &str) -> bool {
 pub(crate) fn panel_window(app: &PhotocraftApp, ctx: &egui::Context, id: &str, title: &str, offset: egui::Vec2, width: f32, body: impl FnOnce(&mut egui::Ui)) {
     let t = Tokens::get(ctx);
     let canvas = app.last_canvas_rect;
-    egui::Window::new(title)
+    // The panels that dock have their own window, or draw docked (`crate::floaters`).
+    let group = match id {
+        "measurement-log" => Some(crate::dock::Group::MeasurementLog),
+        "notes-panel" => Some(crate::dock::Group::Notes),
+        "modifier-keys" => Some(crate::dock::Group::ModifierKeys),
+        _ => None,
+    };
+    let host = group.map(|g| crate::floaters::Host::of(app, ctx, g));
+    let window = egui::Window::new(title)
         .id(egui::Id::new(id))
         .title_bar(false)
         .resizable(false)
@@ -651,12 +663,21 @@ pub(crate) fn panel_window(app: &PhotocraftApp, ctx: &egui::Context, id: &str, t
         .min_width(width)
         .max_width(width)
         .frame(float_frame(&t))
-        .default_pos(pos2((canvas.right() - width - 16.0 + offset.x).max(canvas.left() + 8.0), canvas.top() + offset.y))
-        .show(ctx, |ui| {
-            ui.set_width(width);
-            ui.set_max_width(width);
-            body(ui);
-        });
+        .default_pos(pos2((canvas.right() - width - 16.0 + offset.x).max(canvas.left() + 8.0), canvas.top() + offset.y));
+    let width = host.map_or(width, |h| h.width(width));
+    let add = |ui: &mut egui::Ui| {
+        ui.set_width(width);
+        ui.set_max_width(width);
+        body(ui);
+    };
+    match host {
+        Some(host) => {
+            crate::floaters::with_current(ctx, host, || host.show(ctx, egui::Id::new(id), window, add));
+        }
+        None => {
+            window.show(ctx, add);
+        }
+    }
 }
 
 /// Draws the open panels and dialogs.

@@ -68,7 +68,8 @@ struct Shared {
     cached: HashMap<&'static str, bool>,
     checking: HashSet<&'static str>,
     device: String,
-    /// The worker crashed while starting WebGPU: run on the CPU from now on.
+    /// WebGPU failed a run (or crashed the worker): run on the CPU from now on, and on this
+    /// adapter in later sessions too ([`GPU_FAILED_KEY`]).
     cpu_only: bool,
     /// Files in Cache Storage with another checksum than the catalog's (an older release).
     outdated: HashSet<&'static str>,
@@ -209,9 +210,43 @@ fn probe(shared: Arc<Mutex<Shared>>, cpu_threads: bool) {
         .unwrap_or((GpuClass::None, String::new()));
         let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
         s.gpu.get_or_insert(found.0.usable());
+        // WebGPU failed on this adapter before: the CPU, until the adapter changes.
+        if found.0.usable() {
+            match local_storage().and_then(|l| l.get_item(GPU_FAILED_KEY).ok().flatten()) {
+                Some(name) if name == found.1 => s.cpu_only = true,
+                Some(_) => forget_gpu_failure(),
+                None => {}
+            }
+        }
         s.profile.gpu = found.0;
         s.profile.gpu_name = found.1;
     });
+}
+
+/// `localStorage` key: the name of the WebGPU adapter that failed a run (see [`gpu_failed`]).
+const GPU_FAILED_KEY: &str = "capishot.ai.gpuFailed";
+
+fn local_storage() -> Option<web_sys::Storage> {
+    web_sys::window()?.local_storage().ok().flatten()
+}
+
+fn forget_gpu_failure() {
+    if let Some(l) = local_storage() {
+        let _ = l.remove_item(GPU_FAILED_KEY);
+    }
+}
+
+/// WebGPU failed a run: CPU from now on, remembered for this adapter (a new GPU or browser
+/// that names it differently tries WebGPU again).
+fn gpu_failed(shared: &Arc<Mutex<Shared>>) {
+    let name = {
+        let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
+        s.cpu_only = true;
+        s.profile.gpu_name.clone()
+    };
+    if let Some(l) = local_storage() {
+        let _ = l.set_item(GPU_FAILED_KEY, &name);
+    }
 }
 
 /// Refreshes the Cache Storage size (`navigator.storage.estimate()` covers the whole origin, so
@@ -296,7 +331,14 @@ impl Upscaler for WebUpscaler {
     }
 
     fn profile(&self) -> DeviceProfile {
-        self.lock().profile.clone()
+        let s = self.lock();
+        let mut p = s.profile.clone();
+        // WebGPU failed here: choose as for a machine without a usable GPU (the lite model on
+        // Quality Auto).
+        if s.cpu_only {
+            p.gpu = GpuClass::None;
+        }
+        p
     }
 
     fn storage_used(&self) -> Option<u64> {
@@ -356,6 +398,7 @@ impl Upscaler for WebUpscaler {
             cancelled: Box::new(move || h3.cancelled()),
             shared: self.shared.clone(),
             started_gpu: false,
+            gpu: !t.cpu && !t.threads,
         };
         if let Err(e) = start(&t, msg, run) {
             log::error!("AI worker: {e}");
@@ -420,7 +463,7 @@ impl photocraft_ai_lama::service::Inpainter for WebInpainter {
         use photocraft_ai_lama::LamaError;
         let Some(model) = photocraft_ai::catalog::model(req.model) else { return done(Err(LamaError::Unavailable(format!("{} isn't in the catalog", req.model)))) };
         let Some(target) = self.up.target(req.cpu, req.threads) else { return done(Err(LamaError::Unavailable(NO_WORKER.into()))) };
-        let (base, cpu) = (target.base.clone(), target.cpu);
+        let (base, cpu, gpu) = (target.base.clone(), target.cpu, !target.cpu && !target.threads);
         let t = &req.tile;
         let rgb = Float32Array::from(t.rgb.as_slice());
         let mask = Float32Array::from(t.mask.as_slice());
@@ -449,6 +492,7 @@ impl photocraft_ai_lama::service::Inpainter for WebInpainter {
             cancelled: Box::new(move || h3.cancelled()),
             shared: self.up.shared.clone(),
             started_gpu: false,
+            gpu,
         };
         if let Err(e) = start(&target, (o, buffer), run) {
             log::error!("AI worker: {e}");
@@ -588,6 +632,9 @@ struct Run {
     shared: Arc<Mutex<Shared>>,
     /// The worker reported it was starting the device (a crash after this is a GPU problem).
     started_gpu: bool,
+    /// It may run on WebGPU (the plain worker, not asked for the CPU): a crash or a GPU error
+    /// then ends it with [`AiError::Gpu`], which the engine runs again on the CPU.
+    gpu: bool,
 }
 
 impl Run {
@@ -598,6 +645,7 @@ impl Run {
             Some(Reply::Inpaint(done)) => done(match r {
                 Ok(p) => Ok(p.data),
                 Err(AiError::Cancelled) => Err(LamaError::Cancelled),
+                Err(AiError::Gpu(e)) => Err(LamaError::Gpu(e)),
                 Err(e) => Err(LamaError::Device(e.to_string())),
             }),
             Some(Reply::GenFill(done)) => done(match r {
@@ -800,6 +848,18 @@ fn on_message(data: JsValue) {
         }
         "error" => {
             let message = get(&data, "message").as_string().unwrap_or_else(|| "the AI worker failed".into());
+            let on_gpu = get(&data, "gpu").as_bool().unwrap_or(false) && LIVE.with(|l| l.borrow().as_ref().and_then(|l| l.run.as_ref()).is_some_and(|r| r.gpu));
+            if on_gpu {
+                // The GPU failed: CPU from now on. This worker (and its GPU state) goes first, so
+                // the engine's retry on the CPU (started from `finish`) gets a fresh one.
+                let run = take_run();
+                kill(AiError::Cancelled);
+                if let Some(mut run) = run {
+                    gpu_failed(&run.shared);
+                    run.finish(Err(AiError::Gpu(message)));
+                }
+                return;
+            }
             end_run(|run| {
                 // The model wasn't in Cache Storage after all (cleared since the startup scan).
                 if message.contains("isn't downloaded")
@@ -828,17 +888,21 @@ fn with_run(f: impl FnOnce(&mut Run)) {
 
 /// Ends the run in flight (the worker stays for the next one).
 fn end_run(f: impl FnOnce(&mut Run)) {
-    let run = LIVE.with(|l| {
+    if let Some(mut run) = take_run() {
+        f(&mut run);
+    }
+}
+
+/// Takes the run in flight off the live worker (and stops its cancel timer).
+fn take_run() -> Option<Run> {
+    LIVE.with(|l| {
         let mut l = l.borrow_mut();
         let live = l.as_mut()?;
         if let (Some(t), Some(w)) = (live.timer.take(), web_sys::window()) {
             w.clear_interval_with_handle(t);
         }
         live.run.take()
-    });
-    if let Some(mut run) = run {
-        f(&mut run);
-    }
+    })
 }
 
 /// Drops the worker (cancelled, crashed) and ends its run with `why`.
@@ -870,13 +934,17 @@ fn crashed(message: &str) {
             }
         });
     }
+    // Crashed on WebGPU (bringing it up, or a GPU runtime panic in a run): the CPU from now on,
+    // and the engine runs the request again there.
+    let mut on_gpu = false;
     with_run(|run| {
-        // Crashed while bringing up WebGPU: use the CPU from now on.
-        if run.started_gpu && run.shared.lock().unwrap_or_else(PoisonError::into_inner).device.is_empty() {
-            run.shared.lock().unwrap_or_else(PoisonError::into_inner).cpu_only = true;
+        let device = run.shared.lock().unwrap_or_else(PoisonError::into_inner).device.clone();
+        on_gpu = run.gpu && ((run.started_gpu && device.is_empty()) || device == "WebGPU");
+        if on_gpu {
+            gpu_failed(&run.shared);
         }
     });
-    kill(AiError::Inference(message.to_string()));
+    kill(if on_gpu { AiError::Gpu(message.to_string()) } else { AiError::Inference(message.to_string()) });
 }
 
 fn poll_cancel() {

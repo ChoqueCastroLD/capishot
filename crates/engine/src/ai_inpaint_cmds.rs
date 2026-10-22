@@ -69,6 +69,8 @@ pub(crate) struct AiOptions {
     pub run: crate::ai_cmds::RunChoice,
     pub threads: usize,
     pub unload: bool,
+    /// The params named the model (no automatic switch to the lite one after a GPU failure).
+    pub pinned: bool,
 }
 
 impl AiOptions {
@@ -122,7 +124,8 @@ pub(crate) fn ai_options(s: &Session, p: &Value, cmd: &str) -> Result<AiOptions>
     };
     let threads = uint("threads", 0, 0, 64)? as usize;
     let unload = !crate::ai_cmds::keep_loaded(p, cmd)?;
-    Ok(AiOptions { tiles: TileOptions { max_side: max_side as usize, margin: margin as usize }, allow_download, model, run, threads, unload })
+    let pinned = !matches!(p.get("model").and_then(Value::as_str).unwrap_or("auto"), "auto" | "");
+    Ok(AiOptions { tiles: TileOptions { max_side: max_side as usize, margin: margin as usize }, allow_download, model, run, threads, unload, pinned })
 }
 
 /// The service, if it can run `opts.model` now (else the reason, for the user).
@@ -165,9 +168,13 @@ impl Hooks for JobHooks {
     }
 }
 
+/// Receives the generated RGB and the model that made it.
+pub(crate) type FillDone = Box<dyn FnOnce(Result<(Vec<f32>, &'static ModelInfo)>) + Send>;
+
 /// The AI fill of a `w×h` region (`rgb` interleaved RGB 0..=1, `cover` the hole's coverage),
 /// without blocking: each tile's request starts from the previous one's `done`, and `finish`
-/// gets the generated RGB for every pixel (equal to `rgb` outside the hole). Works with an
+/// gets the generated RGB for every pixel (equal to `rgb` outside the hole) and the model that
+/// made it (another than `opts.model` after a GPU failure, see [`gpu_fallback`]). Works with an
 /// inpainter that answers later (the browser's AI worker, which no thread of the page may wait
 /// for), so `edit.inpaintAi` and the Remove tool's AI mode run everywhere through
 /// `jobs::run_async`.
@@ -180,7 +187,7 @@ pub(crate) fn ai_fill_rgb_async(
     w: usize,
     h: usize,
     opts: AiOptions,
-    finish: Box<dyn FnOnce(Result<Vec<f32>>) + Send>,
+    finish: FillDone,
 ) {
     let plan = match tiles::plan(&cover, w, h, &opts.tiles) {
         Ok(p) if !p.is_empty() => p,
@@ -205,13 +212,13 @@ struct FillState {
     opts: AiOptions,
     plan: Vec<tiles::Tile>,
     next: usize,
-    finish: Box<dyn FnOnce(Result<Vec<f32>>) + Send>,
+    finish: FillDone,
 }
 
 fn fill_step(mut st: FillState) {
     let Some(t) = st.plan.get(st.next).cloned() else {
-        let FillState { generated, finish, .. } = st;
-        return finish(Ok(generated));
+        let FillState { generated, finish, opts, .. } = st;
+        return finish(Ok((generated, opts.model)));
     };
     if let Err(e) = st.ctx.check() {
         return (st.finish)(Err(e));
@@ -233,6 +240,7 @@ fn fill_step(mut st: FillState) {
         Box::new(move |r| {
             let out = match r {
                 Ok(out) => out,
+                Err(LamaError::Gpu(why)) if !st.opts.run.choice.cpu => return gpu_fallback(st, &why),
                 Err(e) => return (st.finish)(Err(lama_err(e))),
             };
             if let Err(e) = tiles::paste(&mut st.generated, &st.binary, st.w, st.h, &t, &out) {
@@ -243,6 +251,38 @@ fn fill_step(mut st: FillState) {
             fill_step(st);
         }),
     );
+}
+
+/// The GPU couldn't run the model: the rest of the job runs on the CPU, with the model the
+/// user's Quality picks there (Auto: MI-GAN, when it is here or may be downloaded; else the same
+/// model). A model change starts the tiles over, so one result never mixes two models.
+fn gpu_fallback(mut st: FillState, why: &str) {
+    let run = crate::ai_cmds::on_cpu(&st.opts.run);
+    let mut model = st.opts.model;
+    if !st.opts.pinned {
+        let id = if run.choice.lite { catalog::MIGAN_ID } else { catalog::LAMA_ID };
+        if let Some(m) = catalog::model(id)
+            && (st.opts.allow_download || st.svc.model_state_of(m.id) == ModelState::Ready)
+        {
+            model = m;
+        }
+    }
+    st.opts.run = run;
+    st.ctx.notice(crate::ai_cmds::GPU_FALLBACK_CLASS, crate::ai_cmds::GPU_FALLBACK_NOTICE, why);
+    if model.id != st.opts.model.id {
+        st.opts.model = model;
+        if model.arch == catalog::Arch::Migan {
+            st.opts.tiles.max_side = st.opts.tiles.max_side.min(512);
+        }
+        st.plan = match tiles::plan(&st.cover, st.w, st.h, &st.opts.tiles) {
+            Ok(p) if !p.is_empty() => p,
+            Ok(_) => return (st.finish)(Err(bad("nothing to clean: the area is empty"))),
+            Err(e) => return (st.finish)(Err(bad(e.to_string()))),
+        };
+        st.next = 0;
+        st.generated.clone_from(&st.rgb);
+    }
+    fill_step(st);
 }
 
 /// Interleaved RGB (0..=1) of pixels in `fmt`.
@@ -340,7 +380,6 @@ fn plan(s: &Session, p: &Value) -> Result<Plan> {
 fn inpaint_ai(s: &mut Session, p: &Value) -> Result<Value> {
     let plan = plan(s, p)?;
     let svc = ready_inpainter(s, &plan.opts)?;
-    let model = plan.opts.model;
     let device = svc.device();
     crate::jobs::run_async(
         s,
@@ -359,10 +398,10 @@ fn inpaint_ai(s: &mut Session, p: &Value) -> Result<Value> {
                 w,
                 h,
                 opts,
-                Box::new(move |r| done.finish(r.map(|generated| (plan, generated, svc2.device())))),
+                Box::new(move |r| done.finish(r.map(|(generated, model)| (plan, generated, svc2.device(), model)))),
             );
         },
-        move |s, (plan, generated, dev)| apply(s, plan, &generated, if dev.is_empty() { device } else { dev }, model),
+        move |s, (plan, generated, dev, model)| apply(s, plan, &generated, if dev.is_empty() { device } else { dev }, model),
     )
 }
 

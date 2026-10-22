@@ -3301,3 +3301,10 @@ cameraData	Lens	Objectif
 	Variants:	Variantes :
 	Describe what to add (optional)	Décrivez ce qu’il faut ajouter (facultatif)
 	English, Spanish or Portuguese; empty fills with background. It runs on this device, and generating means you accept the Terms of Use.	Anglais, espagnol ou portugais ; vide remplit avec l’arrière-plan. Fonctionne sur cet appareil ; générer vaut acceptation des Conditions d’utilisation.
+	GPU couldn't run this model; used the CPU instead	Le GPU n'a pas pu exécuter ce modèle ; le CPU a été utilisé à la place
+	Menu	Menu
+	Max pixel density	Densité de pixels maximale
+	Display's own	Celle de l’écran
+	Collapse to Icons	Réduire en icônes
+	Expand Panels	Développer les panneaux
+	Dock to the Panels	Ancrer aux panneaux
