@@ -442,7 +442,15 @@ fn paste_into(s: &mut Session, p: &Value, outside: bool) -> Result<Value> {
 /// The canvas grown to every layer's pixels: Image › Reveal All's new canvas, and what the Crop
 /// tool shows while a frame is edited.
 pub fn reveal_all_bounds(doc: &Document) -> Rect {
-    doc.walk().into_iter().filter_map(|(_, _, l)| l.surface().map(|s| s.content_bounds())).fold(doc.bounds(), |a, b| a.union(&b))
+    let canvas = doc.bounds();
+    doc.walk()
+        .into_iter()
+        .filter_map(|(_, _, l)| l.surface())
+        // A layer whose tiles all lie inside the canvas can't reach past it: no pixel scan (the Crop
+        // tool asks this on its first press; scanning every layer of a big page took ~0.4 s).
+        .filter(|s| s.tiles().any(|(c, _)| !canvas.contains_rect(&c.rect())))
+        .map(photocraft_compose::bounds::content_bounds)
+        .fold(canvas, |a, b| a.union(&b))
 }
 
 // ---------- layers ----------

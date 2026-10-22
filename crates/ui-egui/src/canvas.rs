@@ -3832,6 +3832,54 @@ struct BeyondCanvas {
     bands: Vec<(DRect, DRect, egui::TextureHandle)>,
 }
 
+/// Bands past the canvas being composited off the UI thread: each band, the area its pixels
+/// cover, the pixels.
+type BeyondBands = Vec<(DRect, DRect, photocraft_compose::Buffer)>;
+
+/// A [`BeyondCanvas`] composite under way ([`draw_beyond_canvas`]).
+#[derive(Clone)]
+struct BeyondJob {
+    snapshot: std::sync::Weak<Document>,
+    key: u64,
+    extent: DRect,
+    rx: std::sync::Arc<std::sync::Mutex<std::sync::mpsc::Receiver<BeyondBands>>>,
+}
+
+/// Composite the Crop tool's bands past the canvas (`beyond`, document px) of `doc` reduced by
+/// `k` (see [`draw_beyond_canvas`]).
+fn beyond_bands(doc: &Document, k: u32, beyond: Vec<DRect>) -> BeyondBands {
+    let proxy = beyond_proxy(doc, k, &beyond);
+    let src = proxy.as_ref().unwrap_or(doc);
+    let k = k as i32;
+    beyond
+        .into_iter()
+        .map(|b| {
+            // The proxy pixels over `b`: document pixels / k, rounded outwards.
+            let up = |v: i32| v.div_euclid(k) + i32::from(v.rem_euclid(k) != 0);
+            let p = DRect::new(b.x0.div_euclid(k), b.y0.div_euclid(k), up(b.x1), up(b.y1));
+            let buf = photocraft_compose::render_reduced_rect(src, p, p.width(), p.height());
+            (b, DRect::new(p.x0.saturating_mul(k), p.y0.saturating_mul(k), p.x1.saturating_mul(k), p.y1.saturating_mul(k)), buf)
+        })
+        .collect()
+}
+
+/// Pixels past the canvas × layers the Crop tool composites on the UI thread
+/// ([`draw_beyond_canvas`]); more is composited off it (about 10 ms of work).
+const BEYOND_INLINE_WORK: u64 = 4_000_000;
+
+/// Run `f` off the UI thread where there is one (a thread on the desktop, the rayon pool in the
+/// browser threads build); inline in the single-threaded browser build.
+fn off_ui_thread(f: impl FnOnce() + Send + 'static) {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Err(e) = std::thread::Builder::new().name("crop-beyond".into()).spawn(f) {
+        log::warn!("crop preview thread: {e}");
+    }
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+    rayon::spawn(f);
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
+    f();
+}
+
 /// Band `r` around the canvas `c` (on screen) pushed a point under the canvas's edge, so that the
 /// edge's anti-aliased pixels blend with the band rather than with the pasteboard.
 fn under_canvas(mut r: Rect, c: Rect) -> Rect {
@@ -3900,33 +3948,67 @@ fn draw_beyond_canvas(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &Vie
     let (display, display_key) = canvas_display(app, &doc, output);
     let doc_key = preview_key ^ display_key;
     let cached: Option<BeyondCanvas> = ctx.data(|d| d.get_temp(key));
+    // The bands are composited off the UI thread (100 layers with effects took ~0.5 s on the
+    // first press of the Crop tool): until they land, the frame shows the checkerboard past the
+    // canvas, then the pixels.
     let c = match cached.filter(|c| c.snapshot.ptr_eq(&snapshot) && c.key == doc_key) {
         Some(c) => c,
         None => {
-            let t0 = crate::gpu_canvas::now_ms();
-            let extent = photocraft_engine::extra_cmds::reveal_all_bounds(&doc);
-            // One texel per `k` document pixels keeps every texture within MAX_TEXTURE.
-            let k = extent.width().max(extent.height()).div_ceil(MAX_TEXTURE).max(1);
-            let beyond = ring(extent, doc.bounds());
-            let proxy = beyond_proxy(&doc, k, &beyond);
-            let src = proxy.as_ref().unwrap_or(&*doc);
-            let k = k as i32;
-            let opts = TextureOptions { magnification: egui::TextureFilter::Nearest, ..TextureOptions::LINEAR };
-            let bands = beyond
-                .into_iter()
-                .map(|b| {
-                    // The proxy pixels over `b`: document pixels / k, rounded outwards.
-                    let up = |v: i32| v.div_euclid(k) + i32::from(v.rem_euclid(k) != 0);
-                    let p = DRect::new(b.x0.div_euclid(k), b.y0.div_euclid(k), up(b.x1), up(b.y1));
-                    let buf = photocraft_compose::render_reduced_rect(src, p, p.width(), p.height());
-                    let tex = ctx.load_texture("crop-beyond-canvas", display_image(display.as_deref(), &buf), opts);
-                    (b, DRect::new(p.x0.saturating_mul(k), p.y0.saturating_mul(k), p.x1.saturating_mul(k), p.y1.saturating_mul(k)), tex)
-                })
-                .collect();
-            app.perf.span("crop-beyond-canvas", crate::gpu_canvas::now_ms() - t0);
-            let c = BeyondCanvas { snapshot, key: doc_key, extent, bands };
-            ctx.data_mut(|d| d.insert_temp(key, c.clone()));
-            c
+            let job_key = key.with("job");
+            let job: Option<BeyondJob> = ctx.data(|d| d.get_temp(job_key)).filter(|j: &BeyondJob| j.snapshot.ptr_eq(&snapshot) && j.key == doc_key);
+            let job = match job {
+                Some(j) => j,
+                None => {
+                    let t0 = crate::gpu_canvas::now_ms();
+                    let extent = photocraft_engine::extra_cmds::reveal_all_bounds(&doc);
+                    // One texel per `k` document pixels keeps every texture within MAX_TEXTURE.
+                    let k = extent.width().max(extent.height()).div_ceil(MAX_TEXTURE).max(1);
+                    let beyond = ring(extent, doc.bounds());
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    // Small work (pixels past the canvas × layers) composites at once, so the
+                    // first frame of the edit shows it; more goes off the UI thread.
+                    let px: u64 = beyond.iter().map(|b| u64::from(b.width()) * u64::from(b.height()) / u64::from(k * k)).sum();
+                    let work = px.saturating_mul(doc.walk().len() as u64);
+                    if work <= BEYOND_INLINE_WORK {
+                        let _ = tx.send(beyond_bands(&doc, k, beyond));
+                    } else {
+                        app.perf_counters.crop_beyond_async += 1;
+                        let src = doc.clone();
+                        off_ui_thread(move || {
+                            let _ = tx.send(beyond_bands(&src, k, beyond));
+                        });
+                    }
+                    app.perf.span("crop-beyond-canvas", crate::gpu_canvas::now_ms() - t0);
+                    let j = BeyondJob { snapshot: snapshot.clone(), key: doc_key, extent, rx: std::sync::Arc::new(std::sync::Mutex::new(rx)) };
+                    ctx.data_mut(|d| d.insert_temp(job_key, j.clone()));
+                    j
+                }
+            };
+            let landed = job.rx.lock().unwrap_or_else(std::sync::PoisonError::into_inner).try_recv();
+            match landed {
+                Ok(bufs) => {
+                    let opts = TextureOptions { magnification: egui::TextureFilter::Nearest, ..TextureOptions::LINEAR };
+                    let bands = bufs
+                        .into_iter()
+                        .map(|(b, t, buf)| (b, t, ctx.load_texture("crop-beyond-canvas", display_image(display.as_deref(), &buf), opts)))
+                        .collect();
+                    let c = BeyondCanvas { snapshot, key: doc_key, extent: job.extent, bands };
+                    ctx.data_mut(|d| {
+                        d.remove::<BeyondJob>(job_key);
+                        d.insert_temp(key, c.clone());
+                    });
+                    c
+                }
+                Err(e) => {
+                    if e == std::sync::mpsc::TryRecvError::Disconnected {
+                        ctx.data_mut(|d| d.remove::<BeyondJob>(job_key));
+                    } else {
+                        // A worker can't wake the UI in the browser: look again shortly.
+                        ctx.request_repaint_after(std::time::Duration::from_millis(30));
+                    }
+                    BeyondCanvas { snapshot, key: doc_key, extent: job.extent, bands: Vec::new() }
+                }
+            }
         }
     };
     // Transparency out to the frame, in phase with the canvas's own checkerboard.

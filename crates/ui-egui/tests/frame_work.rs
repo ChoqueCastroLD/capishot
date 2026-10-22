@@ -73,7 +73,8 @@ fn counter(h: &H, name: &str) -> u64 {
 #[test]
 fn an_idle_app_asks_for_no_frames() {
     let (mut h, _) = app(60);
-    let _ = h.try_run();
+    // Real time: the CPU canvas builds its tiles on worker threads, polling until they land.
+    let _ = h.try_run_realtime();
     for _ in 0..20 {
         h.step();
         assert!(!repaint_asked(&h), "idle frame asked for another: {:?}", h.ctx.repaint_causes());
@@ -81,7 +82,7 @@ fn an_idle_app_asks_for_no_frames() {
     // A pointer resting on the canvas (Move tool, rollover highlight on) costs no frames either.
     h.state_mut().ui.tool = Tool::Move;
     h.event(Event::PointerMoved(screen(&h, 300.0, 200.0)));
-    let _ = h.try_run();
+    let _ = h.try_run_realtime();
     for _ in 0..5 {
         h.step();
         assert!(!repaint_asked(&h), "resting pointer asked for frames: {:?}", h.ctx.repaint_causes());
@@ -368,4 +369,42 @@ fn a_jittery_click_on_the_chrome_still_clicks() {
     human_click(&mut h, file);
     assert!(h.query_all_by_label_contains("Open").next().is_some(), "the File menu opened without a document");
     assert_eq!(counter(&h, "chrome_reused"), reused);
+}
+
+/// The Crop tool's first press on a big stack with pixels past the canvas doesn't composite them
+/// on the UI thread (they land a few frames later; ~0.5 s on a 100-layer page before), and the
+/// app settles afterwards (no frames asked for once they landed).
+#[test]
+fn crop_press_composites_past_the_canvas_off_the_ui_thread() {
+    let (mut d, _) = doc(60);
+    for l in d.layers.iter_mut().filter(|l| !l.is_group()).skip(1) {
+        if let Some(s) = l.surface_mut() {
+            s.fill_rect(Rect::new(560, 0, 1400, 400), &[0.9, 0.2, 0.1, 1.0]);
+        }
+    }
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 860.0)).with_pixels_per_point(1.0).with_max_steps(400).with_step_dt(1.0 / 60.0).build_eframe(
+        move |cc| {
+            PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Services::default());
+            app.session.open_document(d, None);
+            app.sync_views();
+            app
+        },
+    );
+    h.run_steps(8);
+    h.state_mut().ui.tool = Tool::Crop;
+    let _ = h.try_run();
+    let p = screen(&h, 300.0, 200.0);
+    h.event(Event::PointerMoved(p));
+    h.step();
+    h.event(Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    h.step();
+    assert!(h.state().perf.spans.contains_key("crop-beyond-canvas"), "the press started the composite");
+    assert_eq!(counter(&h, "crop_beyond_async"), 1, "off the UI thread");
+    // It lands, and then nothing more is asked for.
+    let _ = h.try_run_realtime();
+    h.event(Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    let _ = h.try_run_realtime();
+    h.step();
+    assert!(!repaint_asked(&h), "settled: {:?}", h.ctx.repaint_causes());
 }
