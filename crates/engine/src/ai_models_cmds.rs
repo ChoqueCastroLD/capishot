@@ -244,7 +244,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "List AI Models",
             menu: &[],
             shortcut: None,
-            params: r#"{} -> {"available", "reason"?, "storage": {"models", "used", "quota"}, "queue": {"active", "queued", "done", "total", "busy"}, "recommended": [id], "models": [{"id", "ids", "file", "title", "group": "cleaning"|"upscaling", "tools": [command id], "runs": "bestOnGpu"|"both", "lite", "bytes", "license", "author", "source", "status": "notDownloaded"|"queued"|"downloading"|"downloaded"|"updateAvailable"|"failed"|"checking"|"unavailable", "done"?, "total"?, "bytesPerSec"?, "etaSecs"?, "error"?}]} (one row per weight file)"#,
+            params: r#"{} -> {"available", "reason"?, "storage": {"models", "used", "quota"}, "queue": {"active", "queued", "done", "total", "busy"}, "recommended": [id], "models": [{"id", "ids", "file", "title", "group": "cleaning"|"upscaling"|"generative", "tools": [command id], "runs": "bestOnGpu"|"both", "lite", "bytes", "license", "author", "source", "status": "notDownloaded"|"queued"|"downloading"|"downloaded"|"updateAvailable"|"failed"|"checking"|"unavailable", "done"?, "total"?, "bytesPerSec"?, "etaSecs"?, "error"?}]} (one row per weight file)"#,
             enabled,
             run: list,
             journal: false,
