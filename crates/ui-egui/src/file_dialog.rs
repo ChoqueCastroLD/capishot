@@ -247,7 +247,6 @@ impl PhotocraftApp {
                 }
                 FileDialogAnswer::Contents(name, bytes) => app.open_contents(vec![(name, bytes)]),
                 FileDialogAnswer::ContentsMany(files) => app.open_contents(files),
-                FileDialogAnswer::FolderTo(_) => return Err(UNEXPECTED.into()),
                 FileDialogAnswer::SaveTo(_) | FileDialogAnswer::FolderTo(_) | FileDialogAnswer::Unavailable(_) => return Err(UNEXPECTED.into()),
             }
             Ok(Value::Null)
@@ -373,7 +372,6 @@ fn read_picked(answer: FileDialogAnswer) -> Result<(String, Vec<u8>), String> {
             let bytes = photocraft_format::read_file(std::path::Path::new(&path)).map_err(|e| format!("{}: {e}", display_name(&path)))?;
             Ok((path, bytes))
         }
-        FileDialogAnswer::FolderTo(_) => Err(UNEXPECTED.into()),
         FileDialogAnswer::SaveTo(_) | FileDialogAnswer::FolderTo(_) | FileDialogAnswer::Unavailable(_) => Err(UNEXPECTED.into()),
     }
 }

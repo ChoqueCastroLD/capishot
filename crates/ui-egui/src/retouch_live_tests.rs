@@ -60,10 +60,10 @@ fn every_brush_retouch_tool_previews_its_stroke_live() {
         (Tool::Burn, Box::new(|_| {})),
         (Tool::Sponge, Box::new(|_| {})),
         (Tool::Blur, Box::new(|_| {})),
-        (Tool::Blur, Box::new(|a| a.ui.tool_options.sample_all_layers = true)),
+        (Tool::Blur, Box::new(|a| a.ui.tool_options.sample_all.blur = true)),
         (Tool::Sharpen, Box::new(|_| {})),
         (Tool::Smudge, Box::new(|_| {})),
-        (Tool::Smudge, Box::new(|a| a.ui.tool_options.sample_all_layers = true)),
+        (Tool::Smudge, Box::new(|a| a.ui.tool_options.sample_all.smudge = true)),
     ];
     for (i, (tool, setup)) in setups.iter().enumerate() {
         let mut app = textured();
@@ -124,13 +124,13 @@ fn stamp_and_healing_modes_reach_their_commands() {
     app.ui.tool = Tool::PatternStamp;
     app.ui.tool_options.pattern_stamp_mode = "multiply".into();
     app.run("tools.setBrush", json!({"brush": {"opacity": 0.5, "flow": 0.7}})).unwrap();
-    let p = crate::retouch_ui::pattern_stamp_params(&app, [10.0, 10.0, 1.0]);
+    let p = crate::retouch_ui::pattern_stamp_params(&app, &[[10.0, 10.0, 1.0]]);
     assert_eq!((p["mode"].clone(), p["opacity"].as_f64().map(f64::round), p["flow"].as_f64().map(f64::round)), (json!("multiply"), Some(50.0), Some(70.0)));
     // Impressionist's seed follows the stroke's first point, for the preview and the commit.
     app.ui.tool_options.pattern_stamp_impressionist = true;
-    let a = crate::retouch_ui::pattern_stamp_params(&app, [10.0, 10.0, 1.0]);
-    assert_eq!(a["seed"], crate::retouch_ui::pattern_stamp_params(&app, [10.0, 10.0, 0.5])["seed"]);
-    assert_ne!(a["seed"], crate::retouch_ui::pattern_stamp_params(&app, [11.0, 10.0, 1.0])["seed"]);
+    let a = crate::retouch_ui::pattern_stamp_params(&app, &[[10.0, 10.0, 1.0]]);
+    assert_eq!(a["seed"], crate::retouch_ui::pattern_stamp_params(&app, &[[10.0, 10.0, 0.5]])["seed"]);
+    assert_ne!(a["seed"], crate::retouch_ui::pattern_stamp_params(&app, &[[11.0, 10.0, 1.0]])["seed"]);
 }
 
 #[test]

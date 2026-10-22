@@ -918,6 +918,8 @@ impl Session {
         }
         // Pixel commands follow the Channels panel target unless the caller names one.
         let run_params = self.admit(id, spec, &params)?;
+        // Color Lookup's `lut` may name an installed LUT; its text is read here, where the library is.
+        let run_params = crate::lut_id_params::resolve(self, id, run_params)?;
         // This UI-only disclosure preference applies to both `execute` and `start`:
         // desktop UI normally calls `start`, even for synchronous Layer Style commands.
         // The layer the command will change, named as the command accepts it (id or name), else the

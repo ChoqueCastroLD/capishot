@@ -115,7 +115,7 @@ fn shrink_layer(l: &mut Layer, k: u32, fmt: photocraft_color::PixelFormat, shrin
         }
         LayerContent::Text(t) => t.cache = t.cache.as_ref().map(&mut *shrink),
         LayerContent::Shape(sh) => sh.cache = sh.cache.as_ref().map(&mut *shrink),
-        LayerContent::Smart(so) => so.cache = so.cache.as_ref().map(&mut *shrink),
+        LayerContent::Smart(so) => shrink_smart(so, k, shrink),
         // Deep data does not scale: the proxy flattens it once and downsamples that.
         LayerContent::Deep(d) => {
             // A model the deep flattener cannot target (CMYK, Lab): keep the deep layer as is.
@@ -124,9 +124,6 @@ fn shrink_layer(l: &mut Layer, k: u32, fmt: photocraft_color::PixelFormat, shrin
                 l.content = LayerContent::Raster(shrink(&flat));
             }
         }
-        LayerContent::Text(t) => t.cache = t.cache.as_ref().map(|s| downsample(s, k)),
-        LayerContent::Shape(sh) => sh.cache = sh.cache.as_ref().map(|s| downsample(s, k)),
-        LayerContent::Smart(so) => shrink_smart(so, k),
         LayerContent::Adjustment(_) | LayerContent::Fill(_) => {}
     }
 }
@@ -135,10 +132,10 @@ fn shrink_layer(l: &mut Layer, k: u32, fmt: photocraft_color::PixelFormat, shrin
 /// placement too. A preview that adds a smart filter re-renders the source through the placement;
 /// left in full-size document coordinates, that render came out `k` times too large on the proxy
 /// canvas, so the Curves preview on a smart object zoomed in (#5766).
-fn shrink_smart(so: &mut SmartObject, k: u32) {
-    so.cache = so.cache.as_ref().map(|s| downsample(s, k));
+fn shrink_smart(so: &mut SmartObject, k: u32, shrink: &mut dyn FnMut(&Surface) -> Surface) {
+    so.cache = so.cache.as_ref().map(&mut *shrink);
     if let Some(m) = &mut so.filter_mask {
-        m.surface = downsample(&m.surface, k);
+        m.surface = shrink(&m.surface);
     }
     let s = 1.0 / f64::from(k);
     so.transform = Affine::scale(s).mul(&so.transform);
@@ -173,7 +170,7 @@ pub fn proxy_document_with(doc: &Document, k: u32, shrink: &mut dyn FnMut(&Surfa
     for c in &mut p.channels {
         c.surface = shrink(&c.surface);
     }
-    p.selection = p.selection.as_ref().map(|s| shrink(s));
+    p.selection = p.selection.as_ref().map(&mut *shrink);
     if let Some(mask) = &mut p.quick_mask {
         mask.surface = shrink(&mask.surface);
     }

@@ -322,6 +322,7 @@ fn missing_fonts_know_postscript_names_and_auto_map_loose_names() {
     assert_eq!(s.execute("type.resolveMissingFonts", json!({"auto": true})).unwrap()["replaced"], 0);
 }
 
+#[test]
 fn type_attaches_to_a_path_and_releases_it() {
     let mut s = session(8);
     let id = text_layer(&mut s, "Hello path");

@@ -851,33 +851,6 @@ mod parallel_tests {
         assert_eq!(out, vec![0; 17]);
     }
 
-    #[ignore = "manual 24 MP release benchmark"]
-    fn benchmark_filter_selection() {
-        use std::{hint::black_box, time::Instant};
-        for pattern in ["zero", "identical", "varied"] {
-            let row: Vec<u8> = (0..6000 * 4).map(|i| if pattern == "zero" { 0 } else { (i * 17 + i / 13) as u8 }).collect();
-            let prev: Vec<_> = row.iter().map(|v| if pattern == "identical" { *v } else { v.wrapping_add(3) }).collect();
-            let mut scratch = vec![0; row.len()];
-            let mut out = Vec::with_capacity(row.len() + 1);
-            for trial in 0..6 {
-                type Filter = fn(&[u8], Option<&[u8]>, usize, &mut [u8], &mut Vec<u8>);
-                let mut paths: [(&str, Filter); 2] = [("main", previous_filter_row), ("split", filter_row)];
-                if trial % 2 == 1 {
-                    paths.reverse();
-                }
-                for (name, path) in paths {
-                    let t = Instant::now();
-                    for _ in 0..4000 {
-                        out.clear();
-                        black_box(path)(black_box(&row), Some(black_box(&prev)), 4, &mut scratch, &mut out);
-                        black_box(&out);
-                    }
-                    println!("filter,{pattern},{trial},{name},{:.6}", t.elapsed().as_secs_f64() * 1000.0);
-                }
-            }
-        }
-    }
-
     // The main-branch implementation before this refactor.
     fn previous_filter_row(row: &[u8], prev: Option<&[u8]>, bpp: usize, scratch: &mut [u8], out: &mut Vec<u8>) {
         let n = row.len();
@@ -930,28 +903,35 @@ mod parallel_tests {
     }
 
     #[test]
-    fn adaptive_filter_preserves_minimum_cost_and_ties() {
-        for bpp in [1, 2, 3, 4, 6, 8] {
-            for seed in 0..32usize {
-                let row: Vec<u8> = (0..137).map(|i| (i * seed + i / 5) as u8).collect();
-                let shifted: Vec<_> = row.iter().map(|v| v.wrapping_add(seed as u8)).collect();
-                for prev in [None, Some(row.as_slice()), Some(shifted.as_slice())] {
-                    let mut expected = vec![99];
-                    let mut actual = expected.clone();
-                    let mut scratch = vec![0; row.len()];
-                    previous_filter_row(&row, prev, bpp, &mut scratch, &mut expected);
-                    filter_row(&row, prev, bpp, &mut scratch, &mut actual);
-                    assert_eq!(actual, expected, "bpp={bpp}, seed={seed}");
+    #[ignore = "manual 24 MP release benchmark"]
+    fn benchmark_filter_selection() {
+        use std::{hint::black_box, time::Instant};
+        for pattern in ["zero", "identical", "varied"] {
+            let row: Vec<u8> = (0..6000 * 4).map(|i| if pattern == "zero" { 0 } else { (i * 17 + i / 13) as u8 }).collect();
+            let prev: Vec<_> = row.iter().map(|v| if pattern == "identical" { *v } else { v.wrapping_add(3) }).collect();
+            let mut scratch = vec![0; row.len()];
+            let mut out = Vec::with_capacity(row.len() + 1);
+            for trial in 0..6 {
+                type Filter = fn(&[u8], Option<&[u8]>, usize, &mut [u8], &mut Vec<u8>);
+                let mut paths: [(&str, Filter); 2] = [("main", previous_filter_row), ("split", filter_row)];
+                if trial % 2 == 1 {
+                    paths.reverse();
+                }
+                for (name, path) in paths {
+                    let t = Instant::now();
+                    for _ in 0..4000 {
+                        out.clear();
+                        black_box(path)(black_box(&row), Some(black_box(&prev)), 4, &mut scratch, &mut out);
+                        black_box(&out);
+                    }
+                    println!("filter,{pattern},{trial},{name},{:.6}", t.elapsed().as_secs_f64() * 1000.0);
                 }
             }
         }
-        let mut out = Vec::new();
-        filter_row(&[0; 16], None, 4, &mut [0; 16], &mut out);
-        assert_eq!(out, vec![0; 17]);
-        out.clear();
-        filter_row(&[1; 16], Some(&[0; 16]), 1, &mut [0; 16], &mut out);
-        assert_eq!(out, [vec![1, 1], vec![0; 15]].concat());
     }
+
+    // The main-branch implementation before this refactor.
+
 
     #[test]
     fn adler_combine_matches_one_pass() {

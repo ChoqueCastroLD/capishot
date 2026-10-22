@@ -25,7 +25,7 @@ use crate::state::Tool;
 const UNCLIPPED_SIDE: f64 = 1024.0;
 
 pub(crate) struct ClonePreviewCache {
-    key: String,
+    pub(crate) key: String,
     texture: egui::TextureHandle,
 }
 

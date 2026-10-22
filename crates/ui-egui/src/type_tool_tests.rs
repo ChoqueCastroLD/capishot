@@ -2029,56 +2029,6 @@ fn type_mask_escape_leaves_the_selection_unchanged() {
     assert_eq!(h.state().session.active().unwrap().doc.layers.len(), layers);
 }
 
-/// A harness with short frames, so a run of clicks stays inside egui's double-click delay.
-fn quick_harness(app: PhotocraftApp) -> Harness<'static, PhotocraftApp> {
-    let mut h = Harness::builder().with_size(vec2(1200.0, 800.0)).with_step_dt(0.02).build_ui_state(
-        |ui, app: &mut PhotocraftApp| {
-            let ctx = ui.ctx().clone();
-            if !ctx.fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
-                return;
-            }
-            crate::shortcuts::handle(app, &ctx);
-            egui::CentralPanel::default().show(ui, |ui| crate::canvas::document_area(app, ui));
-        },
-        app,
-    );
-    PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ALL[0]);
-    h.run_steps(4);
-    h
-}
-
-/// `n` quick clicks at `p`, then a pause long enough that the next click starts a new run.
-fn clicks(h: &mut Harness<'static, PhotocraftApp>, p: Pos2, n: usize) -> (usize, usize) {
-    h.hover_at(p);
-    h.run_steps(1);
-    for _ in 0..n {
-        press(h, p, true);
-        press(h, p, false);
-    }
-    let sel = selection(h);
-    h.run_steps(40);
-    sel
-}
-
-/// Centre the view on layer `id` at 50 % zoom.
-fn centre_on(h: &mut Harness<'static, PhotocraftApp>, id: LayerId) {
-    let (l, aff, _) = layout(h.state_mut(), id).unwrap();
-    let b = l.bounds().unwrap();
-    let m = aff.apply(Point::new(f64::from(b[0] + b[2]) / 2.0, f64::from(b[1] + b[3]) / 2.0));
-    let v = &mut h.state_mut().ui.views[0];
-    (v.zoom, v.center, v.fit_pending) = (0.5, [m.x as f32, m.y as f32], false);
-    h.run_steps(2);
-}
-
-/// Laid-out line (character range) holding character `i`.
-fn line_chars(h: &mut Harness<'static, PhotocraftApp>, id: LayerId, i: usize) -> (usize, usize) {
-    let (l, _, text) = layout(h.state_mut(), id).unwrap();
-    let b = text.char_indices().nth(i).unwrap().0;
-    let c = l.clusters.iter().find(|c| c.range.start == b).unwrap();
-    let ln = &l.lines[c.line];
-    (photocraft_text::char_index(&text, ln.range.start), photocraft_text::char_index(&text, ln.range.end))
-}
-
 /// #6819: all eight paragraph-box handles resize the box while editing, with View › Snap on (the
 /// default), at 25–200 % zoom, 1× and 2× HiDPI, for a plain, a scaled and a rotated layer. A press
 /// on a handle (anywhere in its grab area) never moves the caret, and the edited text's own glyph
@@ -2148,32 +2098,6 @@ fn every_paragraph_box_handle_resizes_the_box_with_snapping_on() {
             }
         }
     }
-}
-
-#[test]
-fn click_selection_without_layout_and_on_hostile_input() {
-    use super::click_selection as sel;
-    let text = "ab cd\nef gh\r\nij";
-    // Without a layout a line falls back to its paragraph.
-    assert_eq!(sel(None, text, 7, None, 2), (6, 8));
-    assert_eq!(sel(None, text, 7, None, 3), (6, 11));
-    assert_eq!(sel(None, text, 7, None, 4), (6, 11), "the CR LF is not selected");
-    assert_eq!(sel(None, text, 13, None, 4), (13, 15));
-    assert_eq!(sel(None, text, 7, None, 5), (0, 15));
-    // Empty layer, caret past the end, absurd counts and line indices: no panic, clamped.
-    for count in [0, 1, 2, 3, 4, 5, 6, u32::MAX] {
-        assert_eq!(sel(None, "", 99, Some(usize::MAX), count), (0, 0), "empty text, count {count}");
-        let (a, b) = sel(None, text, usize::MAX, Some(usize::MAX), count);
-        assert!(a <= b && b <= 15, "caret past the end, count {count}: {a}..{b}");
-        let empty = photocraft_text::TextLayout::default();
-        let (a, b) = sel(Some(&empty), text, usize::MAX, Some(usize::MAX), count);
-        assert!(a <= b && b <= 15, "empty layout, count {count}: {a}..{b}");
-    }
-    // A trailing return ends in an empty paragraph: four clicks there select nothing.
-    assert_eq!(sel(None, "ab\n", 3, None, 4), (3, 3));
-    // Multi-byte text keeps character offsets.
-    assert_eq!(sel(None, "é ü\nñø", 4, None, 2), (4, 6));
-    assert_eq!(sel(None, "é ü\nñø", 1, None, 4), (0, 3));
 }
 
 /// #3036: ⇧ on the click that commits a Type Mask adds the glyphs to the selection and ⌥

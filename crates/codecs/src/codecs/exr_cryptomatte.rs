@@ -15,8 +15,6 @@ use std::io::Cursor;
 use exr::meta::MetaData;
 #[cfg(feature = "exr")]
 use exr::meta::attribute::AttributeValue;
-#[cfg(feature = "exr")]
-use exr::prelude::{ReadChannels, ReadLayers, read};
 
 use crate::Format;
 use crate::error::CodecError;

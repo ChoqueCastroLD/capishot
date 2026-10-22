@@ -30,8 +30,6 @@ struct Lazy {
 enum Source {
     /// The composite of `pre` that `which` sees, encoded in the target's format `fmt`.
     Composite { pre: Arc<Document>, id: Option<LayerId>, which: SampleLayers, fmt: PixelFormat },
-    /// The target surface itself.
-    Surface(Surface),
 }
 
 impl Scratch {
@@ -48,15 +46,6 @@ impl Scratch {
         Self { surf: Surface::new(work), lazy: Some(Lazy { source: Source::Composite { pre, id, which, fmt }, done: HashSet::new() }) }
     }
 
-    /// The target surface `surf` as 32-bit floats, copied tile by tile the first time a dab
-    /// reaches it: the working pixels of a sequential-dab stroke, unquantised between dabs like
-    /// the commit's in-memory region (an 8- or 16-bit copy rounded every dab, so the live stroke
-    /// drifted from the commit by a level wherever a selection or opacity mixed it back).
-    pub(super) fn float_copy(surf: &Surface) -> Self {
-        let work = PixelFormat { sample: SampleType::F32, ..surf.format() };
-        Self { surf: Surface::new(work), lazy: Some(Lazy { source: Source::Surface(surf.clone()), done: HashSet::new() }) }
-    }
-
     /// Render the tiles of `r` not rendered yet.
     fn ensure(&mut self, r: Rect) {
         let Some(l) = self.lazy.as_mut() else { return };
@@ -68,7 +57,6 @@ impl Scratch {
                 let tr = t.rect();
                 let reg = match &l.source {
                     Source::Composite { pre, id, which, fmt } => composite_region(pre, *id, *which, tr, *fmt),
-                    Source::Surface(s) => Region::read(s, tr),
                 };
                 self.surf.write_region(tr, &reg.data);
             }
@@ -81,42 +69,10 @@ impl Scratch {
         Region::read(&self.surf, r)
     }
 
-    /// The working pixels of `r` as [`Self::read`] gives them, without rendering (and keeping)
-    /// the tiles no dab has reached: those are read straight from the source. A commit reads
-    /// the stroke's whole bounding box this way, most of which the dabs never touched.
-    pub(super) fn peek(&self, r: Rect) -> Region {
-        let mut out = Region::read(&self.surf, r);
-        let Some(l) = self.lazy.as_ref() else { return out };
-        let (w, n) = (r.width() as usize, out.ch);
-        for t in r.tiles() {
-            if l.done.contains(&t) {
-                continue;
-            }
-            let part = t.rect().intersect(&r);
-            let reg = match &l.source {
-                Source::Composite { pre, id, which, fmt } => composite_region(pre, *id, *which, part, *fmt),
-                Source::Surface(s) => Region::read(s, part),
-            };
-            let pw = part.width() as usize * n;
-            for (k, y) in (part.y0..part.y1).enumerate() {
-                let o = ((y - r.y0) as usize * w + (part.x0 - r.x0) as usize) * n;
-                if let (Some(dst), Some(src)) = (out.data.get_mut(o..o + pw), reg.data.get(k * pw..(k + 1) * pw)) {
-                    dst.copy_from_slice(src);
-                }
-            }
-        }
-        out
-    }
-
     /// Store `reg` (its tiles are rendered first, so pixels around it stay the composite's).
     pub(super) fn write(&mut self, reg: &Region) {
         self.ensure(reg.rect);
         reg.write(&mut self.surf);
     }
 
-    /// Tiles composited so far (tests: a live stroke must stay local).
-    #[cfg(test)]
-    pub(super) fn rendered_tiles(&self) -> usize {
-        self.lazy.as_ref().map_or(0, |l| l.done.len())
-    }
 }
