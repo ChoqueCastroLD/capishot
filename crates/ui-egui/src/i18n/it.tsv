@@ -4726,3 +4726,35 @@ shape	Appearance	Aspetto
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	Adattatore GPU
+	Ultra-light (any device, 280 MB)	Ultraleggera (qualsiasi dispositivo, 280 MB)
+	Fast (1 GB)	Veloce (1 GB)
+	Standard (GPU, 2.3 GB)	Standard (GPU, 2,3 GB)
+	High (GPU, slow)	Alta (GPU, lenta)
+	Ultra-light	Ultraleggera
+	Fast	Veloce
+	Show files	Mostra file
+	Recommended for this device	Consigliato per questo dispositivo
+	Generative Fill - {tier}	Riempimento generativo - {tier}
+	Clean	Pulizia
+	Erase text and objects.	Cancella testi e oggetti.
+	Enlarge pages without blur.	Ingrandisce le pagine senza sfocature.
+	Draw new content from a prompt.	Disegna nuovi contenuti da un testo.
+	Speed	Velocità
+	No GPU needed	Senza GPU
+	Precision	Precisione
+	Memory	Memoria
+	GPU memory	Memoria GPU
+	Resume	Riprendi
+	Paused	In pausa
+	Ready	Pronto
+	Downloading	Download in corso
+	Pause all	Metti tutto in pausa
+	Erases text and SFX and redraws screentone and lines.	Cancella testi ed effetti sonori e ridisegna retini e linee.
+	A small cleaner for phones and computers without a GPU.	Un piccolo pulitore per telefoni e PC senza GPU.
+	Sharp 2× and 4× upscaling of black-and-white manga pages.	Ingrandimento nitido 2× e 4× di pagine manga in bianco e nero.
+	2× and 4× upscaling of colour pages and covers.	Ingrandimento 2× e 4× di pagine a colori e copertine.
+	Fast upscaling that runs well on any device.	Ingrandimento veloce che va bene su ogni dispositivo.
+	Rough fills on any device, even without a GPU.	Riempimenti semplici su ogni dispositivo, anche senza GPU.
+	Good fills with a smaller download.	Buoni riempimenti con un download più piccolo.
+	Detailed fills from a prompt, three variants in seconds on a GPU.	Riempimenti dettagliati da un testo, tre varianti in pochi secondi su GPU.
+	Needs a GPU	Richiede GPU

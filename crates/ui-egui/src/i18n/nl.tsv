@@ -4351,3 +4351,31 @@ curves	Smooth	Vloeiend maken
 
 # Graphics Adapter preference (#1885)
 	GPU adapter	GPU-adapter
+	Ultra-light (any device, 280 MB)	Ultralicht (elk apparaat, 280 MB)
+	Fast (1 GB)	Snel (1 GB)
+	Standard (GPU, 2.3 GB)	Standaard (GPU, 2,3 GB)
+	High (GPU, slow)	Hoog (GPU, traag)
+	Ultra-light	Ultralicht
+	Show files	Bestanden tonen
+	Recommended for this device	Aanbevolen voor dit apparaat
+	Generative Fill - {tier}	Generatieve opvulling - {tier}
+	Clean	Opschonen
+	Erase text and objects.	Wist tekst en objecten.
+	Enlarge pages without blur.	Vergroot pagina’s zonder vervaging.
+	Draw new content from a prompt.	Tekent nieuwe inhoud vanuit een prompt.
+	No GPU needed	Geen GPU nodig
+	Precision	Precisie
+	Memory	Geheugen
+	GPU memory	GPU-geheugen
+	Paused	Gepauzeerd
+	Downloading	Downloaden
+	Pause all	Alles pauzeren
+	Erases text and SFX and redraws screentone and lines.	Wist tekst en SFX en tekent raster en lijnen opnieuw.
+	A small cleaner for phones and computers without a GPU.	Een kleine opschoner voor telefoons en pc’s zonder GPU.
+	Sharp 2× and 4× upscaling of black-and-white manga pages.	Scherp 2× en 4× opschalen van zwart-witte mangapagina’s.
+	2× and 4× upscaling of colour pages and covers.	2× en 4× opschalen van kleurenpagina’s en covers.
+	Fast upscaling that runs well on any device.	Snel opschalen dat op elk apparaat goed werkt.
+	Rough fills on any device, even without a GPU.	Eenvoudige vullingen op elk apparaat, ook zonder GPU.
+	Good fills with a smaller download.	Goede vullingen met een kleinere download.
+	Detailed fills from a prompt, three variants in seconds on a GPU.	Gedetailleerde vullingen vanuit een prompt, drie varianten in seconden op een GPU.
+	Needs a GPU	GPU nodig

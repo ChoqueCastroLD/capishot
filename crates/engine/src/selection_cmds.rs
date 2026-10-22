@@ -5,7 +5,6 @@
 use photocraft_algo::selection::{self as sel, SelectionMode};
 use photocraft_doc::Document;
 use photocraft_geom::Rect;
-use photocraft_raster::Surface;
 use serde_json::{Value, json};
 
 use crate::commands::CommandSpec;
@@ -606,52 +605,35 @@ pub(crate) fn polygon_selection(s: &mut Session, cmd: &str, label: &str, pts: &[
     if !(0.0..=1000.0).contains(&feather) {
         return Err(EngineError::BadParams { cmd: cmd.into(), msg: "feather must be a number in 0..1000".into() });
     }
-    let area = s.active().ok_or(EngineError::NoDocument)?.doc.bounds();
+    let canvas = s.active().ok_or(EngineError::NoDocument)?.doc.bounds();
+    // Only the polygon's bounds (grown by the feather's reach) are rasterized and combined: a
+    // lasso costs its own size, not the canvas's (~25 ms on 2000 x 3000 before).
+    let area = shape_bounds(pts, feather).intersect(&canvas);
+    let mut mask = sel::polygon(pts, area, b(p, "antiAlias", true));
     if feather > 0.0 {
-        // The blur spreads past the polygon and isn't bit-identical over a smaller window.
-        let mut mask = sel::polygon(pts, area, b(p, "antiAlias", true));
         mask = sel::feather(&mask, area.width() as usize, area.height() as usize, feather);
-        return set_selection(s, label, area, mask, mode(p));
     }
-    // Only the rows the polygon spans (#4532): rows outside it are empty, and full-width rows
-    // keep `polygon`'s coverage bit-identical (its x arithmetic is relative to the area's left
-    // edge; its y samples are whole rows plus the same sub-row fractions).
-    let band = polygon_rows(pts, area);
-    let mask = sel::polygon(pts, band, b(p, "antiAlias", true));
     let m = mode(p);
     let selected = s.edit(label, |doc, _| {
-        doc.selection = combine_band(doc.selection.as_ref(), &mask, band, m);
+        doc.selection = sel::combine_bounded(doc.selection.as_ref(), &mask, area, m);
         Ok(doc.selection.is_some())
     })?;
     Ok(json!({ "selected": selected }))
 }
 
-/// The full-width rows of `area` that points `pts` span (empty when none are finite).
-fn polygon_rows(pts: &[(f32, f32)], area: Rect) -> Rect {
-    let ys = pts.iter().map(|p| p.1).filter(|y| y.is_finite());
-    let (lo, hi) = ys.fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), y| (lo.min(y), hi.max(y)));
-    if lo > hi {
+/// The pixels a polygon through `pts` can cover, grown by the reach of a Gaussian feather of
+/// `radius` (3 sigma, as `selection_blur::feather` truncates it), plus a pixel for rounding.
+pub(crate) fn shape_bounds(pts: &[(f32, f32)], radius: f32) -> Rect {
+    let (mut x0, mut y0, mut x1, mut y1) = (f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
+    for &(x, y) in pts.iter().filter(|(x, y)| x.is_finite() && y.is_finite()) {
+        (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+    }
+    if x0 > x1 {
         return Rect::EMPTY;
     }
-    let clamp = |v: f32| v.clamp(area.y0 as f32, area.y1 as f32) as i32;
-    let (y0, y1) = (clamp(lo.floor()), clamp(hi.ceil() + 1.0));
-    if y0 >= y1 { Rect::EMPTY } else { Rect::new(area.x0, y0, area.x1, y1) }
-}
-
-/// [`sel::combine`] of a mask covering only `band` (zero elsewhere), giving exactly what the
-/// whole-canvas combine gives: Replace and Intersect are empty outside the band, and Add and
-/// Subtract keep the old selection there.
-fn combine_band(old: Option<&Surface>, mask: &[f32], band: Rect, m: SelectionMode) -> Option<Surface> {
-    let inside = sel::combine(old, mask, band, m);
-    let Some(old) = old.filter(|_| matches!(m, SelectionMode::Add | SelectionMode::Subtract)) else { return inside };
-    if band.is_empty() {
-        return Some(old.clone());
-    }
-    let values = inside.map_or_else(|| vec![0.0; band.width() as usize * band.height() as usize], |w| w.read_region(band));
-    let mut s = old.clone();
-    s.write_region(band, &values);
-    s.prune();
-    (s.tile_count() > 0).then_some(s)
+    let reach = if radius > 0.0 { (radius.min(1000.0) * 3.0).ceil() + 2.0 } else { 1.0 };
+    let c = |v: f32| v.clamp(-1e8, 1e8) as i32;
+    Rect::new(c((x0 - reach).floor()), c((y0 - reach).floor()), c((x1 + reach).ceil()), c((y1 + reach).ceil()))
 }
 
 macro_rules! spec {
@@ -1393,6 +1375,74 @@ mod tests {
         assert_eq!(coverage(&s, 2, 2), 1.0);
     }
 
+    /// Lasso and feathered marquee work over the shape's bounds only, and select exactly what
+    /// combining over the whole canvas selects (the oracle), in every mode, near the canvas edges.
+    #[test]
+    fn bounded_lasso_and_feathered_marquee_match_the_whole_canvas() {
+        use photocraft_algo::selection as sel;
+        let pts = [(-6.0f32, 3.5f32), (40.0, 8.0), (52.0, 47.0), (12.0, 30.5)];
+        for feather in [0.0f32, 2.5] {
+            for mode in ["replace", "add", "subtract", "intersect"] {
+                let mut s = session();
+                s.execute("select.rect", json!({"x": 20, "y": 10, "width": 30, "height": 25})).unwrap();
+                let before = s.active().unwrap().doc.selection.clone();
+                let area = s.active().unwrap().doc.bounds();
+                let mut m = sel::polygon(&pts, area, true);
+                if feather > 0.0 {
+                    m = sel::feather(&m, area.width() as usize, area.height() as usize, feather);
+                }
+                let want = sel::combine(before.as_ref(), &m, area, sel::SelectionMode::parse(mode));
+                let p: Vec<[f32; 2]> = pts.iter().map(|(x, y)| [*x, *y]).collect();
+                s.execute("select.lasso", json!({"points": p, "feather": feather, "mode": mode})).unwrap();
+                let got = s.active().unwrap().doc.selection.clone();
+                assert_eq!(sel::mask_from_surface(want.as_ref(), area), sel::mask_from_surface(got.as_ref(), area), "lasso {mode} feather {feather}");
+                // A feathered marquee too.
+                let mut t = session();
+                t.execute("select.rect", json!({"x": 20, "y": 10, "width": 30, "height": 25})).unwrap();
+                let before = t.active().unwrap().doc.selection.clone();
+                let r = photocraft_geom::Rect::new(-4, 5, 30, 40);
+                let mut shape = photocraft_raster::Surface::new(photocraft_color::PixelFormat::GRAY8);
+                shape.fill_rect(r.intersect(&area), &[1.0]);
+                let fm = sel::feather(&sel::mask_from_surface(Some(&shape), area), area.width() as usize, area.height() as usize, feather.max(1.0));
+                let want = sel::combine(before.as_ref(), &fm, area, sel::SelectionMode::parse(mode));
+                t.execute("select.rect", json!({"x": -4, "y": 5, "width": 34, "height": 35, "feather": feather.max(1.0), "mode": mode})).unwrap();
+                let got = t.active().unwrap().doc.selection.clone();
+                assert_eq!(sel::mask_from_surface(want.as_ref(), area), sel::mask_from_surface(got.as_ref(), area), "marquee {mode} feather {feather}");
+            }
+        }
+    }
+
+    /// `cargo test --release -p photocraft-engine --lib bench_lasso -- --ignored --nocapture`:
+    /// a lasso over a third of a 2000 x 3000 page, and its parts.
+    #[test]
+    #[ignore]
+    fn bench_lasso_2000x3000() {
+        use photocraft_algo::selection as sel;
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 2000, "height": 3000})).unwrap();
+        let pts: Vec<[f32; 2]> = (0..120)
+            .map(|i| {
+                let t = i as f32 / 119.0;
+                [2000.0 * (0.2 + 0.6 * t), 3000.0 * (0.35 + 0.3 * t) + (t * 18.85).sin() * 150.0]
+            })
+            .collect();
+        let tp: Vec<(f32, f32)> = pts.iter().map(|p| (p[0], p[1])).collect();
+        for _ in 0..3 {
+            let t = std::time::Instant::now();
+            s.execute("select.lasso", json!({"points": pts})).unwrap();
+            let all = t.elapsed().as_secs_f64() * 1e3;
+            let area = shape_bounds(&tp, 0.0).intersect(&s.active().unwrap().doc.bounds());
+            let t = std::time::Instant::now();
+            let m = sel::polygon(&tp, area, true);
+            let poly = t.elapsed().as_secs_f64() * 1e3;
+            let t = std::time::Instant::now();
+            let c = sel::combine_bounded(None, &m, area, sel::SelectionMode::Replace);
+            let comb = t.elapsed().as_secs_f64() * 1e3;
+            drop(c);
+            eprintln!("lasso {all:.2} ms (polygon {poly:.2}, combine {comb:.2}) over {area:?}");
+        }
+    }
+
     /// The previous per-sample padding and cropping, kept as the oracle for the row-wise ones.
     fn old_pad_mask(m: &[f32], w: usize, h: usize, pad: usize, outside_empty: bool) -> Vec<f32> {
         let pw = w + 2 * pad;
@@ -1460,7 +1510,7 @@ mod tests {
             let points: Vec<[f32; 2]> = pts.iter().map(|p| [p.0, p.1]).collect();
             s.execute("select.lasso", json!({"points": points, "antiAlias": aa, "mode": m})).unwrap();
             let got = s.active().unwrap().doc.selection.clone();
-            let read = |x: &Option<Surface>| x.as_ref().map(|s| s.read_region(area));
+            let read = |x: &Option<photocraft_raster::Surface>| x.as_ref().map(|s| s.read_region(area));
             assert_eq!(read(&got), read(&want), "case {case}: {m}, anti-alias {aa}, {pts:?}");
         }
     }

@@ -465,7 +465,10 @@ async fn store(cache: &Cache, url: &str, model: &ModelInfo, blob: &Blob) -> std:
     JsFuture::from(cache.put_with_str(url, &resp)).await.map(|_| ()).map_err(js_err)
 }
 
-/// The AI Model Manager's download (see the protocol in the module docs).
+/// The AI Model Manager's download (see the protocol in the module docs). Resumable: the bytes
+/// are kept in Cache Storage in 16 MB parts (`<url>?capishot-part=<k>`) as they arrive, so a
+/// pause (the page terminates this worker) or a closed tab loses at most one part; the next
+/// download of the file hashes the parts it finds and asks the server for the rest (HTTP Range).
 async fn download(msg: JsValue) {
     let name = get(&msg, "model").as_string().unwrap_or_default();
     let reply = |ty: &str, extra: &[(&str, JsValue)]| {
@@ -481,17 +484,134 @@ async fn download(msg: JsValue) {
         }
         let cache = open_cache().await.ok_or_else(|| AiError::Cache("this browser can't store models here (Cache Storage is unavailable, as in some private windows)".into()))?;
         let url = model.url(&base);
-        let blob = fetch_verified(&url, model, &mut |done, total| {
+        let blob = fetch_resumable(&cache, &url, model, &mut |done, total| {
             reply("dl-progress", &[("done", (done as f64).into()), ("total", (total as f64).into())]);
         })
         .await?;
-        store(&cache, &url, model, &blob).await.map_err(|e| AiError::Cache(format!("couldn't store {} ({e}); free some space or allow this site more storage", model.title)))
+        store(&cache, &url, model, &blob).await.map_err(|e| AiError::Cache(format!("couldn't store {} ({e}); free some space or allow this site more storage", model.title)))?;
+        drop_parts(&cache, &url).await;
+        Ok(())
     }
     .await;
     match r {
         Ok(()) => reply("dl-done", &[]),
         Err(e) => reply("dl-error", &[("message", e.to_string().into())]),
     }
+}
+
+/// Bytes per stored part of an unfinished download.
+const PART: usize = 16 << 20;
+
+/// The cache key of part `k` of `url`.
+pub fn part_url(url: &str, k: usize) -> String {
+    format!("{url}?capishot-part={k}")
+}
+
+/// Deletes the stored parts of `url`.
+async fn drop_parts(cache: &Cache, url: &str) {
+    for k in 0..4096 {
+        match JsFuture::from(cache.delete_with_str(&part_url(url, k))).await {
+            Ok(v) if v.as_bool() == Some(true) => {}
+            _ => break,
+        }
+    }
+}
+
+/// Streams `url` like [`fetch_verified`], resuming after the parts already stored.
+async fn fetch_resumable(cache: &Cache, url: &str, model: &ModelInfo, progress: &mut dyn FnMut(u64, u64)) -> Result<Blob> {
+    use sha2::Digest;
+    let err = |e: String| AiError::Download(format!("{url}: {e}"));
+    // 1. The parts kept from before, hashed in order.
+    let mut hash = sha2::Sha256::new();
+    let parts = Array::new();
+    let mut done = 0u64;
+    let mut k = 0usize;
+    loop {
+        let Ok(hit) = JsFuture::from(cache.match_with_str(&part_url(url, k))).await else { break };
+        let Ok(resp) = hit.dyn_into::<Response>() else { break };
+        let Ok(buf) = resp.array_buffer() else { break };
+        let Ok(buf) = JsFuture::from(buf).await else { break };
+        let bytes = Uint8Array::new(&buf);
+        hash.update(bytes.to_vec());
+        done = done.saturating_add(u64::from(bytes.length()));
+        let part = Blob::new_with_u8_array_sequence(&Array::of1(&bytes)).map_err(|e| err(js_err(e)))?;
+        parts.push(&part);
+        k += 1;
+    }
+    if done > model.bytes {
+        drop_parts(cache, url).await;
+        return Err(err("the kept part of the download is damaged; try again".into()));
+    }
+    // 2. The rest from the server.
+    let init = web_sys::RequestInit::new();
+    if done > 0 {
+        let headers = web_sys::Headers::new().map_err(|e| err(js_err(e)))?;
+        headers.set("Range", &format!("bytes={done}-")).map_err(|e| err(js_err(e)))?;
+        init.set_headers(&headers);
+    }
+    let resp: Response = JsFuture::from(scope().fetch_with_str_and_init(url, &init)).await.map_err(|e| err(js_err(e)))?.dyn_into().map_err(|_| err("not a response".into()))?;
+    if !resp.ok() {
+        return Err(err(format!("HTTP {}", resp.status())));
+    }
+    if done > 0 && resp.status() != 206 {
+        // The server sent the whole file: start over.
+        drop_parts(cache, url).await;
+        return Box::pin(fetch_resumable(cache, url, model, progress)).await;
+    }
+    let body = resp.body().ok_or_else(|| err("no body".into()))?;
+    let reader: ReadableStreamDefaultReader = body.get_reader().dyn_into().map_err(|_| err("no reader".into()))?;
+    let pending = Array::new();
+    let mut pending_len = 0usize;
+    let mut buf: Vec<u8> = Vec::new();
+    let mut throttle = Throttle::default();
+    progress(done, model.bytes);
+    loop {
+        let chunk = JsFuture::from(reader.read()).await.map_err(|e| err(js_err(e)))?;
+        let end = get(&chunk, "done").as_bool().unwrap_or(true);
+        if !end {
+            let v: Uint8Array = get(&chunk, "value").dyn_into().map_err(|_| err("bad chunk".into()))?;
+            let n = v.length() as usize;
+            done = done.saturating_add(n as u64);
+            if done > model.bytes {
+                let _ = reader.cancel();
+                drop_parts(cache, url).await;
+                return Err(err("larger than expected".into()));
+            }
+            buf.resize(n, 0);
+            v.copy_to(&mut buf);
+            hash.update(&buf);
+            pending.push(&v);
+            pending_len += n;
+        }
+        // Keep a full part (or the tail) so a pause or a closed tab doesn't lose it.
+        if pending_len >= PART || (end && pending_len > 0) {
+            let part = Blob::new_with_u8_array_sequence(&pending).map_err(|e| err(js_err(e)))?;
+            let r = Response::new_with_opt_blob(Some(&part)).map_err(|e| err(js_err(e)))?;
+            JsFuture::from(cache.put_with_str(&part_url(url, k), &r))
+                .await
+                .map_err(|e| AiError::Cache(format!("couldn't keep the download ({}); free some space or allow this site more storage", js_err(e))))?;
+            parts.push(&part);
+            k += 1;
+            pending.set_length(0);
+            pending_len = 0;
+        }
+        if end {
+            break;
+        }
+        if throttle.ready(now_ms()) {
+            progress(done, model.bytes);
+        }
+    }
+    progress(done, model.bytes);
+    let actual: String = hash.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    if done != model.bytes || actual != model.sha256 {
+        drop_parts(cache, url).await;
+        if done != model.bytes {
+            return Err(AiError::Checksum { expected: format!("{} bytes", model.bytes), actual: format!("{done} bytes") });
+        }
+        return Err(AiError::Checksum { expected: model.sha256.to_string(), actual });
+    }
+    Blob::new_with_blob_sequence(&parts).map_err(|e| err(js_err(e)))
 }
 
 async fn inpaint(msg: JsValue) {
@@ -626,14 +746,14 @@ async fn genfill_inner(msg: &JsValue, id: f64) -> std::result::Result<(Vec<Vec<f
             GENFILL.with(|g| *g.borrow_mut() = None);
             let rt = runtime(cpu).await.map_err(|e| e.to_string())?;
             let on_gpu = rt.accel() == photocraft_ai::runtime::Accel::Gpu;
-            // The light tier runs on the CPU (4-bit weights dequantized per layer); the others need WebGPU.
-            if !on_gpu && tier != Tier::Ultra {
-                return Err("Generative Fill (Standard) needs WebGPU (no usable GPU here); choose Quality: Ultra-light, or use Clean with AI".into());
+            // The light tiers run on the CPU too (quantized weights dequantized per layer); the others need WebGPU.
+            if !on_gpu && !matches!(tier, Tier::Ultra | Tier::Fast) {
+                return Err("Generative Fill (Standard) needs WebGPU (no usable GPU here); choose Quality: Fast or Ultra-light, or use Clean with AI".into());
             }
             let force_f32 = get(msg, "f32").as_bool().unwrap_or(false) || !on_gpu;
             let dtype = if force_f32 { photocraft_ai_sd::burn::tensor::DType::F32 } else { precision(rt.device(), false) };
             // f32 weights would need 4.5 GB of GPU memory: refuse unless asked for (Advanced).
-            if dtype != photocraft_ai_sd::burn::tensor::DType::F16 && !force_f32 && tier != Tier::Ultra {
+            if dtype != photocraft_ai_sd::burn::tensor::DType::F16 && !force_f32 && !matches!(tier, Tier::Ultra | Tier::Fast) {
                 return Err("Generative Fill needs a GPU with 16-bit float shaders (WebGPU shader-f16), which this browser or GPU doesn't offer; use Clean with AI instead".into());
             }
             let mut loader = Loader::new(rt.device(), dtype).map_err(|e| e.to_string())?;

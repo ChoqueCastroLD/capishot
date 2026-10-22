@@ -91,7 +91,7 @@ fn genfill(app: &mut PhotocraftApp, params: &Value) -> Option<Result<Value, Stri
     if let M::NeedsDownload { .. } = state
         && let Some(m) = first_missing(app, tier)
     {
-        return Some(Ok(open(app, genfill_cmds::ID, m)));
+        return Some(Ok(open_tier(app, tier, m)));
     }
     app.ai_model_last = Some(genfill_cmds::ID.to_string());
     Some(match app.run(genfill_cmds::ID, params.clone()) {
@@ -99,7 +99,7 @@ fn genfill(app: &mut PhotocraftApp, params: &Value) -> Option<Result<Value, Stri
             Some(m) => {
                 app.ui.status.clear();
                 app.ui.status_error = false;
-                Ok(open(app, genfill_cmds::ID, m))
+                Ok(open_tier(app, tier, m))
             }
             None => Err(e),
         },
@@ -210,6 +210,20 @@ fn open(app: &mut PhotocraftApp, id: &str, model: &'static ModelInfo) -> Value {
     json!({"dialog": dialog, "modelMissing": model.id})
 }
 
+/// The dialog for a Generative Fill tier: it names the tier and its whole size, not one file.
+fn open_tier(app: &mut PhotocraftApp, tier: photocraft_ai_sd::service::Tier, first: &'static ModelInfo) -> Value {
+    let r = open(app, genfill_cmds::ID, first);
+    let name = crate::i18n::fmt(tl!("Generative Fill - {tier}"), &[("tier", crate::ai_models_ui::tier_name(tier))]);
+    let title = crate::i18n::fmt(tl!("{model} isn't downloaded"), &[("model", &name)]);
+    if let Some(id) = r.get("dialog").and_then(Value::as_u64)
+        && let Some(d) = app.ui.dialogs.iter_mut().find(|d| d.id == id)
+    {
+        d.fields.insert("tier".into(), json!(tier.id()));
+        d.fields.insert("__label".into(), json!(title));
+    }
+    r
+}
+
 pub fn owns(fields: &Map<String, Value>) -> bool {
     fields.contains_key(MARK)
 }
@@ -226,9 +240,13 @@ pub fn body(app: &PhotocraftApp, ui: &mut egui::Ui, f: &Map<String, Value>) {
     let Some(m) = model_of(f) else { return };
     let dim = crate::theme::Tokens::get(ui.ctx()).text_dim;
     let tool = tool_name(f.get("__command").and_then(Value::as_str).unwrap_or_default());
-    let mb = crate::ai_models_ui::mb(m.bytes);
+    let tier = f.get("tier").and_then(Value::as_str).and_then(photocraft_ai_sd::service::Tier::from_id);
+    let files = tier.and_then(photocraft_ai_sd::files::tier);
+    let mb = crate::ai_models_ui::mb(files.map_or(m.bytes, |f| f.bytes()));
+    let tier_title = tier.map(|t| crate::i18n::fmt(tl!("Generative Fill - {tier}"), &[("tier", crate::ai_models_ui::tier_name(t))]));
+    let m_title = tier_title.as_deref().unwrap_or(m.title);
     ui.set_max_width(420.0);
-    ui.label(crate::i18n::fmt(tl!("{tool} needs {model} ({mb} MB), which isn't on this device yet."), &[("tool", &tool), ("model", m.title), ("mb", &mb)]));
+    ui.label(crate::i18n::fmt(tl!("{tool} needs {model} ({mb} MB), which isn't on this device yet."), &[("tool", &tool), ("model", m_title), ("mb", &mb)]));
     ui.add_space(6.0);
     let status = app.session.ai_models().map(|s| s.status(m));
     if let Some(Status::Downloading { done, total, .. }) = status {
