@@ -391,6 +391,7 @@ pub(crate) fn exr_color_channels<'a>(names: impl IntoIterator<Item = &'a str>) -
 }
 
 /// Strip an optional `layer.` prefix from a channel name (`diffuse.R` → `R`).
+#[cfg_attr(not(feature = "exr"), allow(dead_code))]
 pub(crate) fn base_channel_name(name: &str) -> &str {
     name.rsplit('.').next().unwrap_or(name)
 }

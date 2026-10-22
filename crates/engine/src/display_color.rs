@@ -107,6 +107,7 @@ fn encode_rgba8(buf: &Buffer) -> Rgba8Image {
 }
 
 /// Pixels per piece [`par_pixels`] hands to one thread.
+#[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
 const PAR_PIXELS: usize = 16 * 1024;
 
 /// `f` over matching pieces of `dst` and `src`, in parallel off wasm. The display encodes run on

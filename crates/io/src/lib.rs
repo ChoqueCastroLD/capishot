@@ -530,7 +530,9 @@ fn export_stages(doc: &Document, name_or_ext: &str, opts: &ExportOptions, ctl: &
         // Capishot's seal: the merged image comes from psd-compiler (see `psdc`), on the desktop
         // and in the browser alike. The file is then written without the compositor's merged
         // image (it would be rendered only to be replaced) and psd-compiler fills it in.
-        let psdc = opts.psdc_composite && psdc::renders_merged(doc);
+        // Without Maximize Compatibility the merged image is Photoshop's white placeholder: there
+        // is nothing for psd-compiler to render.
+        let psdc = opts.psdc_composite && opts.psd_maximize_compatibility && psdc::renders_merged(doc);
         let build = |merged_image: bool| -> Result<(PsdFile, Vec<String>), IoError> {
             let o = PsdExportOptions {
                 force_psb: opts.force_psb || ext == "psb",
