@@ -42,13 +42,15 @@ fn doc(n: usize) -> (Document, LayerId) {
 
 fn app(n: usize) -> (H, LayerId) {
     let (d, mid) = doc(n);
-    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 860.0)).with_pixels_per_point(1.0).with_max_steps(200).build_eframe(move |cc| {
-        PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
-        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Services::default());
-        app.session.open_document(d, None);
-        app.sync_views();
-        app
-    });
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 860.0)).with_pixels_per_point(1.0).with_max_steps(200).with_step_dt(1.0 / 60.0).build_eframe(
+        move |cc| {
+            PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Services::default());
+            app.session.open_document(d, None);
+            app.sync_views();
+            app
+        },
+    );
     h.run_steps(8);
     (h, mid)
 }
@@ -71,7 +73,8 @@ fn counter(h: &H, name: &str) -> u64 {
 #[test]
 fn an_idle_app_asks_for_no_frames() {
     let (mut h, _) = app(60);
-    let _ = h.try_run();
+    // Real time: the CPU canvas builds its tiles on worker threads, polling until they land.
+    let _ = h.try_run_realtime();
     for _ in 0..20 {
         h.step();
         assert!(!repaint_asked(&h), "idle frame asked for another: {:?}", h.ctx.repaint_causes());
@@ -79,7 +82,7 @@ fn an_idle_app_asks_for_no_frames() {
     // A pointer resting on the canvas (Move tool, rollover highlight on) costs no frames either.
     h.state_mut().ui.tool = Tool::Move;
     h.event(Event::PointerMoved(screen(&h, 300.0, 200.0)));
-    let _ = h.try_run();
+    let _ = h.try_run_realtime();
     for _ in 0..5 {
         h.step();
         assert!(!repaint_asked(&h), "resting pointer asked for frames: {:?}", h.ctx.repaint_causes());
@@ -294,4 +297,114 @@ fn a_move_drag_reuses_its_preview_document() {
     let after = bounds(&h);
     assert_eq!(after.y0, before.y0);
     assert!(after.x0 > before.x0, "moved right: {before:?} -> {after:?}");
+}
+
+/// A press that starts on the chrome (menu bar, toolbar) with a jittering pointer until the
+/// release is still a click: the chrome is built every frame (never repainted from shapes), so
+/// egui keeps the pressed widget. Regression: frozen chrome between press and release ate menu
+/// clicks on the web.
+#[test]
+fn a_jittery_click_on_the_chrome_still_clicks() {
+    use egui_kittest::kittest::Queryable;
+    let (mut h, _) = app(40);
+    h.state_mut().ui.tool = Tool::Brush;
+    let _ = h.try_run();
+    // Down, a few one-pixel moves (each its own frame), up: a real hand on a mouse.
+    let human_click = |h: &mut H, at: Pos2| {
+        h.event(Event::PointerMoved(at));
+        h.step();
+        h.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+        h.step();
+        for (dx, dy) in [(1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (-1.0, 1.0)] {
+            h.event(Event::PointerMoved(at + egui::vec2(dx, dy)));
+            h.step();
+        }
+        let up = at + egui::vec2(-1.0, 1.0);
+        h.event(Event::PointerButton { pos: up, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+        h.run_steps(4);
+    };
+    let reused = counter(&h, "chrome_reused");
+    let file = h.get_by_label("File").rect().center();
+    human_click(&mut h, file);
+    assert!(h.query_all_by_label_contains("Open").next().is_some(), "the File menu opened");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(4);
+    // A toolbar button: the Move tool, the topmost square click target left of the canvas.
+    assert_ne!(h.state().ui.tool, Tool::Move);
+    let left = h.state().last_canvas_rect.left();
+    let first = h.ctx.viewport(|v| {
+        v.prev_pass
+            .widgets
+            .layers()
+            .flat_map(|(_, w)| w.iter())
+            .filter(|w| w.rect.right() <= left && (w.rect.width() - w.rect.height()).abs() < 0.5 && w.rect.width() >= 24.0 && w.sense.senses_click())
+            .map(|w| w.rect)
+            .filter(|r| r.top() > 60.0)
+            .min_by(|a, b| a.top().total_cmp(&b.top()))
+    });
+    let first = first.expect("toolbar buttons");
+    human_click(&mut h, first.center());
+    let picked = h.state().ui.tool == Tool::Move;
+    assert!(picked, "a jittery click on the toolbar picked the Move tool");
+    assert_eq!(counter(&h, "chrome_reused"), reused, "chrome presses never reuse frozen chrome");
+    // A toolbar flyout (right-click on the slot) hangs over the canvas: a jittery click on its
+    // second item, inside the canvas rect, still picks that tool.
+    h.event(Event::PointerMoved(first.center()));
+    h.step();
+    for pressed in [true, false] {
+        h.event(Event::PointerButton { pos: first.center(), button: PointerButton::Secondary, pressed, modifiers: Modifiers::NONE });
+        h.step();
+    }
+    h.run_steps(2);
+    let item = egui::pos2(first.right() + 6.0 + 90.0, first.top() + 6.0 + 26.0 + 13.0);
+    assert!(h.state().last_canvas_rect.contains(item), "the flyout item lies over the canvas");
+    human_click(&mut h, item);
+    assert_ne!(h.state().ui.tool, Tool::Move, "the flyout's second tool was picked");
+    assert_eq!(counter(&h, "chrome_reused"), reused, "a press on the flyout never freezes the chrome");
+    // No document open (the home screen; the canvas rect is whatever the last document left):
+    // the menus still click.
+    h.state_mut().run("file.close", json!({"discard": true})).expect("close");
+    let _ = h.try_run();
+    let file = h.get_by_label("File").rect().center();
+    human_click(&mut h, file);
+    assert!(h.query_all_by_label_contains("Open").next().is_some(), "the File menu opened without a document");
+    assert_eq!(counter(&h, "chrome_reused"), reused);
+}
+
+/// The Crop tool's first press on a big stack with pixels past the canvas doesn't composite them
+/// on the UI thread (they land a few frames later; ~0.5 s on a 100-layer page before), and the
+/// app settles afterwards (no frames asked for once they landed).
+#[test]
+fn crop_press_composites_past_the_canvas_off_the_ui_thread() {
+    let (mut d, _) = doc(60);
+    for l in d.layers.iter_mut().filter(|l| !l.is_group()).skip(1) {
+        if let Some(s) = l.surface_mut() {
+            s.fill_rect(Rect::new(560, 0, 1400, 400), &[0.9, 0.2, 0.1, 1.0]);
+        }
+    }
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 860.0)).with_pixels_per_point(1.0).with_max_steps(400).with_step_dt(1.0 / 60.0).build_eframe(
+        move |cc| {
+            PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Services::default());
+            app.session.open_document(d, None);
+            app.sync_views();
+            app
+        },
+    );
+    h.run_steps(8);
+    h.state_mut().ui.tool = Tool::Crop;
+    let _ = h.try_run();
+    let p = screen(&h, 300.0, 200.0);
+    h.event(Event::PointerMoved(p));
+    h.step();
+    h.event(Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    h.step();
+    assert!(h.state().perf.spans.contains_key("crop-beyond-canvas"), "the press started the composite");
+    assert_eq!(counter(&h, "crop_beyond_async"), 1, "off the UI thread");
+    // It lands, and then nothing more is asked for.
+    let _ = h.try_run_realtime();
+    h.event(Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    let _ = h.try_run_realtime();
+    h.step();
+    assert!(!repaint_asked(&h), "settled: {:?}", h.ctx.repaint_causes());
 }

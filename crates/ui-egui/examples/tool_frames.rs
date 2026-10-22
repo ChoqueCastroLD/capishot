@@ -282,14 +282,19 @@ impl Row {
         s.sort_by(f64::total_cmp);
         t.sort_by(f64::total_cmp);
         let long = self.frames.iter().filter(|f| f.step + f.tess > 16.0).count();
+        // The press frame and the release frame (the second to last) of a drag.
+        let press = self.frames.first().map_or(0.0, |f| f.step);
+        let release = self.frames.len().checked_sub(2).and_then(|i| self.frames.get(i)).map_or(0.0, |f| f.step);
         let counters: Vec<String> = self.counters.iter().filter(|c| c.1 > 0).map(|(k, v)| format!("{k}={v}")).collect();
         println!(
-            "{:<28} n {:>4}  frame p50 {:>7.2} p95 {:>7.2} max {:>7.2}  tess p50 {:>5.2} p95 {:>5.2}  long {:>3}  {}",
+            "{:<28} n {:>4}  frame p50 {:>7.2} p95 {:>7.2} max {:>7.2}  press {:>7.2} release {:>7.2}  tess p50 {:>5.2} p95 {:>5.2}  long {:>3}  {}",
             self.name,
             s.len(),
             q(&s, 0.5),
             q(&s, 0.95),
             s.last().copied().unwrap_or(0.0),
+            press,
+            release,
             q(&t, 0.5),
             q(&t, 0.95),
             long,
@@ -302,7 +307,7 @@ impl Row {
         let mut t: Vec<f64> = self.frames.iter().map(|f| f.tess).collect();
         t.sort_by(f64::total_cmp);
         json!({"name": self.name, "frames": s.len(), "p50": q(&s, 0.5), "p95": q(&s, 0.95), "max": s.last().copied().unwrap_or(0.0),
-            "tess_p50": q(&t, 0.5), "tess_p95": q(&t, 0.95), "repaints": self.frames.iter().filter(|f| f.repaint).count(),
+            "press": self.frames.first().map_or(0.0, |f| f.step), "release": self.frames.len().checked_sub(2).and_then(|i| self.frames.get(i)).map_or(0.0, |f| f.step), "tess_p50": q(&t, 0.5), "tess_p95": q(&t, 0.95), "repaints": self.frames.iter().filter(|f| f.repaint).count(),
             "counters": self.counters.iter().map(|(k, v)| (k.to_string(), json!(v))).collect::<serde_json::Map<_, _>>()})
     }
 }
@@ -439,6 +444,15 @@ fn scenario(h: &mut H, pg: &Page, name: &str, moves: usize, per_frame: usize) ->
             let f = drag(h, &pts, per_frame, Modifiers::NONE);
             h.key_press(egui::Key::Escape);
             settle(h, 3);
+            f
+        }
+        "crop" => {
+            set_tool(h, Tool::Crop);
+            let pts: Vec<[f64; 2]> = (0..moves).map(|i| [w * (0.05 + 0.3 * i as f64 / moves as f64), hh * (0.05 + 0.3 * i as f64 / moves as f64)]).collect();
+            let f = drag(h, &pts, per_frame, Modifiers::NONE);
+            h.key_press(egui::Key::Escape);
+            settle(h, 3);
+            set_tool(h, Tool::Move);
             f
         }
         "marquee" | "lasso" => {
@@ -603,6 +617,7 @@ const ALL: &[&str] = &[
     "transform",
     "marquee",
     "lasso",
+    "crop",
     "type",
     "undo-redo",
     "layers-scroll",
@@ -663,6 +678,9 @@ fn main() {
         let frames = scenario(&mut h, &pg, name, moves, per_frame);
         let row = Row { name: name.to_string(), frames, counters: diff(&before, &counters(&h)) };
         row.print();
+        if std::env::var_os("TOOL_FRAMES_SPANS").is_some() {
+            println!("    spans {:?} last refresh {} {:.1} ms", h.state().perf.spans, h.state().perf.last_refresh, h.state().perf.composite_ms);
+        }
         if *name == "idle" {
             let reps = row.frames.iter().filter(|f| f.repaint).count();
             println!("    idle frames asking for another: {reps}/{}; causes: {:?}", row.frames.len(), h.ctx.repaint_causes());
