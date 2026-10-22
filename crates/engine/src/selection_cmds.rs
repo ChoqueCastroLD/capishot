@@ -1169,6 +1169,37 @@ mod tests {
         }
     }
 
+    /// `cargo test --release -p photocraft-engine --lib bench_lasso -- --ignored --nocapture`:
+    /// a lasso over a third of a 2000 x 3000 page, and its parts.
+    #[test]
+    #[ignore]
+    fn bench_lasso_2000x3000() {
+        use photocraft_algo::selection as sel;
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 2000, "height": 3000})).unwrap();
+        let pts: Vec<[f32; 2]> = (0..120)
+            .map(|i| {
+                let t = i as f32 / 119.0;
+                [2000.0 * (0.2 + 0.6 * t), 3000.0 * (0.35 + 0.3 * t) + (t * 18.85).sin() * 150.0]
+            })
+            .collect();
+        let tp: Vec<(f32, f32)> = pts.iter().map(|p| (p[0], p[1])).collect();
+        for _ in 0..3 {
+            let t = std::time::Instant::now();
+            s.execute("select.lasso", json!({"points": pts})).unwrap();
+            let all = t.elapsed().as_secs_f64() * 1e3;
+            let area = shape_bounds(&tp, 0.0).intersect(&s.active().unwrap().doc.bounds());
+            let t = std::time::Instant::now();
+            let m = sel::polygon(&tp, area, true);
+            let poly = t.elapsed().as_secs_f64() * 1e3;
+            let t = std::time::Instant::now();
+            let c = sel::combine_bounded(None, &m, area, sel::SelectionMode::Replace);
+            let comb = t.elapsed().as_secs_f64() * 1e3;
+            drop(c);
+            eprintln!("lasso {all:.2} ms (polygon {poly:.2}, combine {comb:.2}) over {area:?}");
+        }
+    }
+
     /// The previous per-sample padding and cropping, kept as the oracle for the row-wise ones.
     fn old_pad_mask(m: &[f32], w: usize, h: usize, pad: usize, outside_empty: bool) -> Vec<f32> {
         let pw = w + 2 * pad;
