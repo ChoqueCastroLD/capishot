@@ -254,59 +254,6 @@ impl BrushContext {
         let noise = b.noise && !dual;
         let tex_tip = !dual && b.texture.enabled && b.texture.each_tip && self.texture.is_some();
         let (cx, cy) = if aliased { grid_center(d.center.x, d.center.y, 2.0 * d.radius) } else { (d.center.x as f32, d.center.y as f32) };
-        let r = d.radius;
-        let ro = d.roundness.max(0.5 / r).min(1.0);
-        let rm = (r * ro).max(0.5);
-        let reach_r = rm + 0.5;
-        let reach2 = reach_r * reach_r;
-        let is_circle = mips.is_none() && ro >= 0.999 && (!dual && d.proj_scale >= 0.999 || dual);
-        // The fast path writes no depth (Wet Edges records it per pixel).
-        let simple = is_circle && !aliased && rm >= SMALL_TIP_RADIUS && !noise && !tex_tip && !wet && depth.is_none();
-        if simple {
-            let inner = rm * hardness.clamp(0.0, 1.0);
-            let has_falloff = rm - inner >= 1e-3;
-            let inv_range = if has_falloff { 1.0 / (rm - inner) } else { 0.0 };
-            let alpha = d.alpha;
-            let rasterize_simple = |yy: usize, row: &mut [f32]| {
-                let y = rect.y0 + yy as i32;
-                let dy = y as f32 + 0.5 - cy;
-                let dy2 = dy * dy;
-                if dy2 >= reach2 {
-                    return;
-                }
-                for (xx, slot) in row.iter_mut().enumerate() {
-                    let dx = rect.x0 as f32 + xx as f32 + 0.5 - cx;
-                    let d2 = dx * dx + dy2;
-                    if d2 >= reach2 {
-                        continue;
-                    }
-                    let dd = d2.sqrt();
-                    let edge = (reach_r - dd).clamp(0.0, 1.0);
-                    let falloff = if !has_falloff || dd <= inner {
-                        1.0
-                    } else {
-                        let t = ((dd - inner) * inv_range).min(1.0);
-                        let s = 1.0 - t * t;
-                        let s2 = s * s;
-                        s2 * s2
-                    };
-                    *slot = edge * falloff * alpha;
-                }
-            };
-            #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
-            if h >= 64 {
-                out.par_chunks_mut(w).enumerate().for_each(|(yy, row)| rasterize_simple(yy, row));
-            } else {
-                for yy in 0..h {
-                    rasterize_simple(yy, &mut out[yy * w..(yy + 1) * w]);
-                }
-            }
-            #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
-            for yy in 0..h {
-                rasterize_simple(yy, &mut out[yy * w..(yy + 1) * w]);
-            }
-            return;
-        }
         let (sn, cs) = d.angle.sin_cos();
         let (fx, fy) = (if d.flip_x { -1.0 } else { 1.0 }, if d.flip_y { -1.0 } else { 1.0 });
         let proj = (!dual && d.proj_scale < 0.999).then(|| {

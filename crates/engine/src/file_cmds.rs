@@ -1061,9 +1061,11 @@ pub(crate) struct BatchInput {
 }
 
 /// Subfolders below a batch input folder are walked at most this deep ("Include All Subfolders").
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub(crate) const MAX_SUBFOLDER_DEPTH: usize = 32;
 /// A batch over subfolders lists at most this many files; a larger tree is an error, not a run
 /// that silently stops partway.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub(crate) const MAX_SUBFOLDER_FILES: usize = 100_000;
 
 /// [`batch_inputs`] for the commands whose Photoshop dialog has "Include All Subfolders" (Batch,

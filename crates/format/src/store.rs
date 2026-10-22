@@ -619,6 +619,8 @@ fn write_bundle_file(root: &Path, path: &Path, data: &[u8]) -> Result<()> {
         validate_bundle_file(root, path)?;
         file.write_all(data)?;
         file.sync_all()?;
+        // Closed before the rename (on wasm a `File` holds nothing to drop).
+        #[allow(clippy::drop_non_drop)]
         drop(file);
         // Preserve the existing mode where possible, as the generic atomic writer does.
         if let Ok(permissions) = std::fs::metadata(path).map(|m| m.permissions()) {

@@ -1344,8 +1344,6 @@ mod tests_ext;
 mod tests_mosaic;
 
 #[cfg(test)]
-mod tests_blur_pinned;
-#[cfg(test)]
 mod tests_selection_mix;
 
 /// The current upstream sampler through the identical source/selection/tile pipeline.

@@ -161,7 +161,7 @@ fn selection_mix_preserves_sparse_mask_coverage_at_tile_boundaries() {
             let coverage = sel.read_region(area);
             let filtered = [0.8, 0.6, 0.4, 0.2];
             let mut data = filtered.repeat(coverage.len());
-            mix_selection(&mut data, area, &sel, &orig, true);
+            mix_selection(&mut data, area, &sel, &orig, false);
             for ((result, original), k) in data.as_chunks::<4>().0.iter().zip(orig.data.as_chunks::<4>().0.iter()).zip(coverage) {
                 let expected = std::array::from_fn::<_, 4, _>(|c| match k {
                     0.0 => original[c],
