@@ -569,11 +569,22 @@ pub(crate) fn polygon_selection(s: &mut Session, cmd: &str, label: &str, pts: &[
     // Only the polygon's bounds (grown by the feather's reach) are rasterized and combined: a
     // lasso costs its own size, not the canvas's (~25 ms on 2000 x 3000 before).
     let area = shape_bounds(pts, feather).intersect(&canvas);
+    let m = mode(p);
+    // A new selection without feather: its tiles straight from the polygon (whole tiles inside
+    // it shared, `sel::polygon_surface`).
+    let fresh = matches!(m, SelectionMode::Replace) || (matches!(m, SelectionMode::Add) && s.active().is_some_and(|st| st.doc.selection.is_none()));
+    if feather <= 0.0 && fresh {
+        let surface = sel::polygon_surface(pts, area, b(p, "antiAlias", true));
+        let selected = s.edit(label, |doc, _| {
+            doc.selection = (surface.tile_count() > 0).then_some(surface);
+            Ok(doc.selection.is_some())
+        })?;
+        return Ok(json!({ "selected": selected }));
+    }
     let mut mask = sel::polygon(pts, area, b(p, "antiAlias", true));
     if feather > 0.0 {
         mask = sel::feather(&mask, area.width() as usize, area.height() as usize, feather);
     }
-    let m = mode(p);
     let selected = s.edit(label, |doc, _| {
         doc.selection = sel::combine_bounded(doc.selection.as_ref(), &mask, area, m);
         Ok(doc.selection.is_some())

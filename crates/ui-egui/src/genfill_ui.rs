@@ -139,7 +139,8 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
         ];
         crate::widgets::dropdown(ui, "genfill-quality", &mut quality, &opts, 220.0);
         ui.label(tl!("Variants:"));
-        let opts: Vec<(String, &str)> = std::iter::once(("auto".to_string(), tl!("Automatic"))).chain(["1", "2", "3", "4"].iter().map(|v| ((*v).to_string(), *v))).collect();
+        let opts: Vec<(String, &str)> =
+            std::iter::once(("auto".to_string(), tl!("Automatic"))).chain(["1", "2", "3", "4"].iter().map(|v| ((*v).to_string(), *v))).collect();
         crate::widgets::dropdown(ui, "genfill-variants", &mut variants, &opts, 90.0);
     });
     f.insert("variants".into(), json!(variants));

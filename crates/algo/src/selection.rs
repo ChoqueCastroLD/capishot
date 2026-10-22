@@ -163,6 +163,11 @@ pub fn combine_bounded(old: Option<&Surface>, mask: &[f32], bounds: Rect, mode: 
     if bounds.is_empty() || mask.len() != bounds.width() as usize * bounds.height() as usize {
         return combine_region(old, None, mode);
     }
+    // A new selection: its tiles straight from the mask, in parallel, empty ones skipped.
+    if matches!((mode, old), (SelectionMode::Replace, _) | (SelectionMode::Add, None)) {
+        let s = surface_from_masks(bounds, mask, None, |_, v| v);
+        return (s.tile_count() > 0).then_some(s);
+    }
     let bytes: Vec<u8> = mask.iter().map(|v| coverage8(*v)).collect();
     combine_region(old, Some(&Region { bbox: bounds, mask: bytes }), mode)
 }
@@ -807,6 +812,126 @@ pub fn feather(m: &[f32], w: usize, h: usize, radius: f32) -> Vec<f32> {
     crate::selection_blur::feather(m, w, h, radius)
 }
 
+/// One pixel row of a polygon: each sub-row's spans, and the whole pixels every sub-row covers.
+type RowCover = (Vec<Vec<(f32, f32)>>, Vec<(usize, usize)>);
+
+/// [`polygon`] straight into a GRAY8 selection surface over `area`, the same coverage
+/// ([`mask_to_surface`] of [`polygon`]), without the float mask: per band of tiles, tiles the
+/// polygon covers completely are the one shared solid tile and empty ones are skipped; only
+/// tiles its edge crosses are rasterized. A lasso over a third of a 4000 x 6000 page cost 22 ms
+/// as a mask; most of its tiles are inside it.
+pub fn polygon_surface(points: &[(f32, f32)], area: Rect, anti_alias: bool) -> Surface {
+    let mut s = Surface::new(PixelFormat::GRAY8);
+    if points.len() < 3 || area.is_empty() {
+        return s;
+    }
+    let sub = if anti_alias { 4 } else { 1 };
+    let w = area.width() as usize;
+    let full = s.solid_tile(&[1.0]);
+    let blank = s.solid_tile(&[0.0]);
+    let ts = TILE_SIZE;
+    let (ty0, ty1) = (area.y0.div_euclid(ts), (area.y1 - 1).div_euclid(ts) + 1);
+    let (tx0, tx1) = (area.x0.div_euclid(ts), (area.x1 - 1).div_euclid(ts) + 1);
+    // One pixel row's spans per sub-row, in `area`-local x (as `polygon` clamps them).
+    let row_spans = |py: usize, xs: &mut Vec<f32>, out: &mut Vec<Vec<(f32, f32)>>| {
+        out.iter_mut().for_each(Vec::clear);
+        out.resize_with(sub, Vec::new);
+        for (s, spans) in out.iter_mut().enumerate() {
+            let y = area.y0 as f32 + py as f32 + (s as f32 + 0.5) / sub as f32;
+            xs.clear();
+            for i in 0..points.len() {
+                let (a, b) = (points[i], points[(i + 1) % points.len()]);
+                if (a.1 <= y && b.1 > y) || (b.1 <= y && a.1 > y) {
+                    xs.push(a.0 + (y - a.1) / (b.1 - a.1) * (b.0 - a.0));
+                }
+            }
+            xs.sort_by(|a, b| a.total_cmp(b));
+            for span in xs.as_chunks::<2>().0 {
+                let (x0, x1) = ((span[0] - area.x0 as f32).max(0.0), (span[1] - area.x0 as f32).min(w as f32));
+                if x1 > x0 {
+                    spans.push((x0, x1));
+                }
+            }
+        }
+    };
+    let bands = par_map((ty1 - ty0) as usize, |b| {
+        let ty = ty0 + b as i32;
+        let band = Rect::new(area.x0, (ty * ts).max(area.y0), area.x1, ((ty + 1) * ts).min(area.y1));
+        let rows = band.height() as usize;
+        let (mut xs, mut spans) = (Vec::new(), Vec::new());
+        // Per pixel row: every sub-row's spans, and the pixels all of them cover completely.
+        let mut row_data: Vec<RowCover> = Vec::with_capacity(rows);
+        for r in 0..rows {
+            let py = (band.y0 - area.y0) as usize + r;
+            row_spans(py, &mut xs, &mut spans);
+            // Whole pixels inside a span of every sub-row (an intersection of interval lists).
+            let mut whole: Vec<(usize, usize)> =
+                spans.first().map_or_else(Vec::new, |f| f.iter().map(|(a, b)| (a.ceil() as usize, b.floor() as usize)).filter(|(a, b)| a < b).collect());
+            for other in spans.iter().skip(1) {
+                let mut next = Vec::new();
+                for &(a0, a1) in &whole {
+                    for &(b0, b1) in other {
+                        let (lo, hi) = (a0.max(b0.ceil() as usize), a1.min(b1.floor() as usize));
+                        if lo < hi {
+                            next.push((lo, hi));
+                        }
+                    }
+                }
+                whole = next;
+            }
+            row_data.push((spans.clone(), whole));
+        }
+        let mut tiles = Vec::new();
+        for tx in tx0..tx1 {
+            let tc = TileCoord::new(tx, ty);
+            let tr = tc.rect().intersect(&area);
+            let (lx0, lx1) = ((tr.x0 - area.x0) as usize, (tr.x1 - area.x0) as usize);
+            let touched = row_data.iter().any(|(sp, _)| sp.iter().any(|v| v.iter().any(|&(a, b)| (a as usize) < lx1 && b > lx0 as f32)));
+            if !touched {
+                continue;
+            }
+            if tr == tc.rect() && row_data.iter().all(|(_, whole)| whole.iter().any(|&(a, b)| a <= lx0 && b >= lx1)) {
+                tiles.push((tc, Arc::clone(&full)));
+                continue;
+            }
+            let mut tile = Arc::clone(&blank);
+            let data = Arc::make_mut(&mut tile).bytes_mut();
+            let span_w = lx1 - lx0;
+            let mut acc = vec![0.0f32; span_w];
+            for (r, (sp, _)) in row_data.iter().enumerate() {
+                acc.iter_mut().for_each(|v| *v = 0.0);
+                for spans in sp {
+                    for &(x0, x1) in spans {
+                        let (c0, c1) = ((x0.floor() as usize).max(lx0), (x1.ceil() as usize).min(w).min(lx1));
+                        for cx in c0..c1 {
+                            let cov = if anti_alias {
+                                ((cx + 1) as f32).min(x1) - (cx as f32).max(x0)
+                            } else {
+                                let c = cx as f32 + 0.5;
+                                if c >= x0 && c < x1 { 1.0 } else { 0.0 }
+                            };
+                            acc[cx - lx0] += cov.max(0.0) / sub as f32;
+                        }
+                    }
+                }
+                let y = band.y0 + r as i32;
+                let o = (y - ty * ts) as usize * ts as usize + (tr.x0 - tx * ts) as usize;
+                if let Some(dst) = data.get_mut(o..o + span_w) {
+                    for (d, v) in dst.iter_mut().zip(&acc) {
+                        *d = coverage8(v.min(1.0));
+                    }
+                }
+            }
+            if data.iter().any(|b| *b > 0) {
+                tiles.push((tc, tile));
+            }
+        }
+        tiles
+    });
+    s.put_tiles(bands.into_iter().flatten());
+    s
+}
+
 /// Anti-aliased polygon (even-odd) coverage over `area`: exact horizontal
 /// coverage, 4 sub-rows per pixel row (or 1 when not anti-aliased).
 pub fn polygon(points: &[(f32, f32)], area: Rect, anti_alias: bool) -> Vec<f32> {
@@ -893,6 +1018,28 @@ mod tests {
                         assert_eq!(mask_from_surface(Some(&w), area), mask_from_surface(Some(&g), area), "{mode:?} aa {aa} old {}", old.is_some());
                     }
                 }
+            }
+        }
+    }
+
+    /// The tile-direct polygon is the mask polygon's surface, pixel for pixel: anti-aliased and
+    /// not, a self-intersecting shape, one reaching past the area, and a big shape with whole
+    /// tiles inside it.
+    #[test]
+    fn polygon_surface_matches_the_mask() {
+        let area = Rect::new(-37, 11, 900, 700);
+        let shapes: [&[(f32, f32)]; 4] = [
+            &[(10.5, 20.2), (850.0, 40.7), (700.3, 690.0), (-60.0, 400.0)],
+            &[(100.0, 100.0), (600.0, 500.0), (600.0, 100.0), (100.0, 500.0)],
+            &[(0.0, 0.0), (2000.0, 0.0), (2000.0, 2000.0), (0.0, 2000.0)],
+            &[(300.25, 300.75), (310.5, 300.75), (305.0, 309.9)],
+        ];
+        for pts in shapes {
+            for aa in [false, true] {
+                let want = mask_to_surface(&polygon(pts, area, aa), area);
+                let got = polygon_surface(pts, area, aa);
+                assert_eq!(mask_from_surface(Some(&got), area), mask_from_surface(Some(&want), area), "aa {aa} {pts:?}");
+                assert_eq!(got.tile_count(), want.tile_count(), "same tiles kept: aa {aa}");
             }
         }
     }

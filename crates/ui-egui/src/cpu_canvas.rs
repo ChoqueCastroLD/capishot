@@ -69,6 +69,8 @@ pub struct TileCanvas {
     pub(crate) level: u32,
     /// Tiles being composited on the worker pool, off the UI thread (threads build, desktop).
     pending: Option<Pending>,
+    /// A Move drag's cached composites below and above the moving layers (`move_cpu`).
+    move_split: Option<crate::move_cpu::Split>,
 }
 
 /// Missing tiles composited in the background: the canvas keeps drawing (other levels stand in)
@@ -298,10 +300,22 @@ pub fn paint(
     visible: DRect,
 ) {
     let Some(target) = crate::canvas::cpu_target(app, idx, output) else { return };
-    let crate::canvas::CpuTarget { doc, revision, preview_key, display, display_key, damage, id } = target;
+    let crate::canvas::CpuTarget { mut doc, revision, preview_key, display, display_key, damage, id } = target;
     let size = [doc.size.width, doc.size.height];
     let level = level_for(zoom, size);
     let key = crate::canvas::cache_key(id, output);
+    let move_plan = crate::move_ui::cpu_plan(app, idx, &doc);
+    // A lazy Move preview (`move_ui`: the document as it is, the canvas shifting the moving layers
+    // itself) that the split can't draw this frame: shifted here, as `move_ui` would have.
+    let mut lazy = move_plan.as_ref().is_some_and(|p| Arc::ptr_eq(&p.base, &doc) && p.offset != (0, 0));
+    let shift = |doc: &mut Arc<Document>, lazy: &mut bool| {
+        if std::mem::take(lazy)
+            && let Some(p) = move_plan.as_ref()
+            && let Ok(d) = photocraft_engine::layer_multi_cmds::moved(&p.base, &p.ids, p.offset.0, p.offset.1)
+        {
+            *doc = Arc::new(d);
+        }
+    };
     let tex_budget = texture_budget(app);
     let mip_budget = mip_budget(app);
     let cache = app.canvases.entry(key).or_default();
@@ -313,6 +327,9 @@ pub fn paint(
         tc.tiles.clear();
         tc.size = size;
         tc.shown = None;
+    }
+    if move_plan.is_none() {
+        tc.move_split = None;
     }
     let now = (revision, preview_key ^ display_key);
     if tc.shown != Some(now) {
@@ -377,6 +394,7 @@ pub fn paint(
     let mut first = true;
     let mut composite_ms = 0.0;
     let mut upload_ms = 0.0;
+    let mut move_split_frames = 0u64;
     loop {
         let jobs = match batches.pop() {
             Some(j) => j,
@@ -398,11 +416,44 @@ pub fn paint(
             })
             .collect();
         let c0 = crate::gpu_canvas::now_ms();
-        let source = source.get_or_insert_with(|| {
-            let faithful = level == 0 || photocraft_compose::proxy::lod_faithful(&doc);
-            faithful.then(|| tc.reduced(&doc, level))
-        });
-        let bufs = render_level(&doc, source.as_deref(), f, &rects);
+        let faithful = level == 0 || photocraft_compose::proxy::lod_faithful(&doc);
+        // A Move drag: only the moving layers are re-blended over cached composites (`move_cpu`).
+        let mut split_bufs = None;
+        if let Some(plan) = move_plan.as_ref().filter(|_| faithful) {
+            let held: Vec<(DRect, DRect)> = jobs
+                .iter()
+                .map(|j| match j {
+                    Job::Full(_, r) => (*r, *r),
+                    Job::Part(k, r) => (*r, tc.tiles.get(k).map_or(*r, |t| t.held)),
+                })
+                .collect();
+            let levels = tc.levels.clone();
+            let mut reduce = |d: &Document| {
+                if level == 0 {
+                    return d.clone();
+                }
+                let mut l = levels.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                l.mips.document(d, level)
+            };
+            if !tc.move_split.as_ref().is_some_and(|s| s.is_for(plan, level)) {
+                tc.move_split = crate::move_cpu::Split::new(plan, level, &mut reduce);
+            }
+            split_bufs = tc.move_split.as_mut().and_then(|s| s.render(plan.offset, &held));
+            if split_bufs.is_some() {
+                move_split_frames += 1;
+            }
+        }
+        let bufs = match split_bufs {
+            Some(b) => b,
+            None => {
+                if lazy {
+                    shift(&mut doc, &mut lazy);
+                    source = None;
+                }
+                let source = source.get_or_insert_with(|| faithful.then(|| tc.reduced(&doc, level)));
+                render_level(&doc, source.as_deref(), f, &rects)
+            }
+        };
         let c1 = crate::gpu_canvas::now_ms();
         composite_ms += c1 - c0;
         for (job, buf) in jobs.into_iter().zip(bufs) {
@@ -436,6 +487,11 @@ pub fn paint(
         upload_ms += crate::gpu_canvas::now_ms() - c1;
     }
     // Missing tiles left: composited on the worker pool while the frame goes on.
+    if lazy && rest.peek().is_some() {
+        // Missing tiles go to the worker pool with the document as shown.
+        shift(&mut doc, &mut lazy);
+    }
+    let split_ready = move_plan.as_ref().is_some_and(|p| tc.move_split.as_ref().is_some_and(|s| s.is_for(p, level)));
     if ASYNC_TILES && rest.peek().is_some() && tc.pending.is_none() {
         let jobs: Vec<(TileKey, DRect)> = rest
             .by_ref()
@@ -468,6 +524,8 @@ pub fn paint(
     if px > 0 {
         app_perf(app, key, px, composite_ms, upload_ms);
     }
+    app.perf_counters.move_split += move_split_frames.min(1);
+    app.cpu_move_split = split_ready.then_some((id, revision, app.frame));
     let Some(tc) = app.canvases.get_mut(&key).and_then(|c| c.tiles.as_mut()) else { return };
     // Draw: a tile not drawn yet at this level shows from the nearest level that has its area.
     let mut shown = 0usize;

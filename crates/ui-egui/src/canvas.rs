@@ -3688,11 +3688,30 @@ fn paint_mapped_quad(painter: &egui::Painter, xf: &ViewXform, size: [f32; 2], co
 
 /// Draw boundary segments as marching ants: white base, black dashes phased along x + y.
 fn marching_ants_segments(painter: &egui::Painter, xf: &ViewXform, segs: &[crate::outline::Segment], time: f64) {
+    if let Some(mesh) = marching_ants_mesh(xf, segs, time, painter.clip_rect()) {
+        painter.add(egui::Shape::mesh(mesh));
+    }
+}
+
+/// The marching ants of `segs` as one mesh: each visible segment a 1 px white line, its black
+/// dashes on top, phased by screen position so dashes line up across joined segments and move with
+/// `time`. One shape for the whole outline: a lasso's staircase is thousands of segments, and a
+/// shape per segment and per dash (built and tessellated every frame the ants move) cost more
+/// than the selection command.
+pub(crate) fn marching_ants_mesh(xf: &ViewXform, segs: &[crate::outline::Segment], time: f64, clip: Rect) -> Option<egui::Mesh> {
     let dash = 4.0f32;
     let phase = ((time * 10.0) % (dash as f64 * 2.0)) as f32;
-    let white = Stroke::new(1.0, Color32::WHITE);
-    let black = Stroke::new(1.0, Color32::BLACK);
-    let clip = painter.clip_rect();
+    let mut mesh = egui::Mesh::default();
+    // A 1 px wide quad from `a` to `b`.
+    let quad = |mesh: &mut egui::Mesh, a: Pos2, b: Pos2, dir: Vec2, color: Color32| {
+        let n = vec2(-dir.y, dir.x) * 0.5;
+        let i = mesh.vertices.len() as u32;
+        for p in [a + n, a - n, b - n, b + n] {
+            mesh.colored_vertex(p, color);
+        }
+        mesh.add_triangle(i, i + 1, i + 2);
+        mesh.add_triangle(i, i + 2, i + 3);
+    };
     for (a, b) in segs {
         let pa = xf.to_screen(a[0] as f32, a[1] as f32);
         let pb = xf.to_screen(b[0] as f32, b[1] as f32);
@@ -3701,24 +3720,24 @@ fn marching_ants_segments(painter: &egui::Painter, xf: &ViewXform, segs: &[crate
         }
         let pa = pos2(pa.x.round() + 0.5, pa.y.round() + 0.5);
         let pb = pos2(pb.x.round() + 0.5, pb.y.round() + 0.5);
-        painter.line_segment([pa, pb], white);
         let len = pa.distance(pb);
         if len < 0.5 {
             continue;
         }
         let dir = (pb - pa) / len;
-        // Phase by screen position so dashes line up across joined segments.
+        quad(&mut mesh, pa, pb, dir, Color32::WHITE);
         let start = (pa.x + pa.y + phase).rem_euclid(dash * 2.0);
         let mut t = -start;
         while t < len {
             let s0 = t.max(0.0);
             let s1 = (t + dash).min(len);
             if s1 > s0 {
-                painter.line_segment([pa + dir * s0, pa + dir * s1], black);
+                quad(&mut mesh, pa + dir * s0, pa + dir * s1, dir, Color32::BLACK);
             }
             t += dash * 2.0;
         }
     }
+    (!mesh.indices.is_empty()).then_some(mesh)
 }
 
 #[allow(dead_code)]
@@ -5126,7 +5145,9 @@ pub(crate) fn finish_gesture(app: &mut PhotocraftApp, d: Drag) {
                 let o = &app.ui.tool_options;
                 // The Patch and Content-Aware Move tools have no Feather in their options bar.
                 let feather = if d.tool == Tool::Lasso { o.feather } else { 0.0 };
+                let t0 = crate::gpu_canvas::now_ms();
                 let made = app.run("select.lasso", json!({"points": pts, "mode": mode, "antiAlias": o.anti_alias, "feather": feather}));
+                app.perf.span("lasso", crate::gpu_canvas::now_ms() - t0);
                 // The lasso only outlines the patch; say that it is dragged next (#1715).
                 if made.is_ok() && d.tool != Tool::Lasso {
                     crate::retouch_ui::patch_hint(app);
@@ -6623,6 +6644,36 @@ mod tests {
         let dragged = frame(&mut app, vec![egui::Event::PointerMoved(start + vec2(60.0, 0.0))]);
         frame(&mut app, vec![press(start + vec2(60.0, 0.0), false)]);
         assert_ne!(dragged.center, center0, "a secondary window's Hand pans while transforming");
+    }
+
+    /// The ants of a long staircase outline are one mesh (not a shape per segment and dash):
+    /// a white 1 px line over every visible segment with black dashes on it, nothing outside the
+    /// clip, and the dashes move with time.
+    #[test]
+    fn marching_ants_are_one_mesh() {
+        let xf = ViewXform {
+            rect: Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 300.0)),
+            zoom: 1.0,
+            center: [200.0, 150.0],
+            flip: false,
+            rotation: 0.0,
+            aspect: 1.0,
+        };
+        // A 1000-step staircase (a lasso's diagonal), half of it off screen.
+        let segs: Vec<crate::outline::Segment> = (0..1000).flat_map(|i| [([i, i], [i + 1, i]), ([i + 1, i], [i + 1, i + 1])]).collect();
+        let clip = xf.rect;
+        let m = marching_ants_mesh(&xf, &segs, 0.0, clip).expect("ants");
+        let visible = segs
+            .iter()
+            .filter(|(a, b)| clip.intersects(Rect::from_two_pos(xf.to_screen(a[0] as f32, a[1] as f32), xf.to_screen(b[0] as f32, b[1] as f32)).expand(1.0)))
+            .count();
+        let quads = m.vertices.len() / 4;
+        assert!(quads >= visible && quads <= visible * 2, "a white quad per visible segment plus dashes: {quads} for {visible}");
+        assert!(m.vertices.iter().all(|v| v.pos.x >= -3.0 && v.pos.y >= -3.0 && v.pos.x <= 403.0 && v.pos.y <= 303.0), "only what is on screen");
+        let black = |m: &egui::Mesh| m.vertices.iter().filter(|v| v.color == Color32::BLACK).map(|v| v.pos).collect::<Vec<_>>();
+        let later = marching_ants_mesh(&xf, &segs, 0.35, clip).expect("ants");
+        assert_ne!(black(&m), black(&later), "the dashes march");
+        assert!(marching_ants_mesh(&xf, &segs[..0], 0.0, clip).is_none());
     }
 
     #[test]
