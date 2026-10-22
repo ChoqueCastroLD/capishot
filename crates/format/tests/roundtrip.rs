@@ -831,6 +831,7 @@ fn decreasing_deep_counts_are_refused_at_load() {
     assert!(err.to_string().contains("must not decrease"), "{err}");
 }
 
+#[test]
 fn variables_follow_layer_id_remapping() {
     let mut doc = rich_doc(ColorMode::Rgb, SampleType::U8);
     let id_of = |d: &Document, name: &str| d.walk().into_iter().find(|(_, _, l)| l.name == name).unwrap().2.id;

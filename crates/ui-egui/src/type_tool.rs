@@ -874,52 +874,6 @@ fn word_boundary(text: &str, from: usize, forward: bool) -> usize {
     photocraft_text::word_boundary(text, from, forward)
 }
 
-/// Most clicks in a run that select more: 2 a word, 3 a line, 4 a paragraph, 5 all text. The
-/// next quick click starts over with a caret.
-const MAX_CLICKS: u32 = 5;
-
-/// The selection (anchor, caret) a run of `count` clicks makes at character `caret`: 1 a caret,
-/// 2 the word under it, 3 its visual line as laid out (a column in vertical type), 4 its
-/// paragraph up to the hard return, 5 all text. `line` is the laid-out line the click hit; it
-/// decides at a soft wrap, where one caret offset ends a line and starts the next. Without a
-/// layout a line is its paragraph. Offsets past the text are clamped, so an empty layer or a
-/// stale caret never panics.
-pub(crate) fn click_selection(layout: Option<&TextLayout>, text: &str, caret: usize, line: Option<usize>, count: u32) -> (usize, usize) {
-    let n = text.chars().count();
-    let c = caret.min(n);
-    match count {
-        2 => {
-            let chars: Vec<char> = text.chars().collect();
-            let word = |i: usize| chars.get(i).is_some_and(|ch| ch.is_alphanumeric());
-            let (mut a, mut b) = (c, c);
-            while a > 0 && word(a - 1) {
-                a -= 1;
-            }
-            while word(b) {
-                b += 1;
-            }
-            (a, b)
-        }
-        3 => {
-            let Some(l) = layout else { return paragraph_of(text, c) };
-            let ln = line.and_then(|i| l.lines.get(i)).or_else(|| l.lines.get(photocraft_text::line_index(l, byte_of(text, c))));
-            ln.map_or((c, c), |ln| (photocraft_text::char_index(text, ln.range.start), photocraft_text::char_index(text, ln.range.end)))
-        }
-        4 => paragraph_of(text, c),
-        5 => (0, n),
-        _ => (c, c),
-    }
-}
-
-/// Characters of the paragraph holding character `c`, without its hard return.
-fn paragraph_of(text: &str, c: usize) -> (usize, usize) {
-    let b = byte_of(text, c);
-    let paras = photocraft_text::layout::split_paragraphs(text);
-    let Some(r) = paras.iter().find(|r| b >= r.start && b < r.end).or_else(|| paras.last()) else { return (c, c) };
-    let body = text.get(r.clone()).unwrap_or("").trim_end_matches(['\r', '\n']);
-    let start = photocraft_text::char_index(text, r.start);
-    (start, start + body.chars().count())
-}
 
 /// Caret on the neighbouring line (±1; a column in vertical type), keeping the position
 /// along the line. Works in line space, so it serves both orientations.

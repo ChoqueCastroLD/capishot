@@ -49,9 +49,6 @@ pub struct Graph {
     flow: f64,
 }
 
-/// Solver steps between two asks of a [`Graph::maxflow_until`] stop callback.
-pub(super) const STOP_EVERY: usize = 1024;
-
 impl Graph {
     /// A graph with `nodes` nodes and room for `edges` undirected edge pairs.
     pub fn with_capacity(nodes: usize, edges: usize) -> Self {

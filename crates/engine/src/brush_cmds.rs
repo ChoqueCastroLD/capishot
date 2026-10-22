@@ -155,7 +155,7 @@ fn normalize_brush_patch(patch: &Value, schema: &Value, cmd: &str, path: &str) -
         if here == "color" {
             match v {
                 Value::String(h) => {
-                    let c = crate::commands::parse_hex(h).ok_or_else(|| bad(cmd, format!("`color` must be \"#rrggbb\" or [r, g, b, a] floats in 0..1")))?;
+                    let c = crate::commands::parse_hex(h).ok_or_else(|| bad(cmd, "`color` must be \"#rrggbb\" or [r, g, b, a] floats in 0..1"))?;
                     out.insert(k.clone(), json!(c));
                     continue;
                 }

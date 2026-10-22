@@ -1130,6 +1130,7 @@ fn shifting_a_layer_refuses_a_deep_origin_overflow() {
     assert!(matches!(&l.content, LayerContent::Deep(d) if d.x == i32::MAX));
 }
 
+#[test]
 fn displace_smart_filter_reads_its_map_path_on_re_render() {
     let dir = std::env::temp_dir().join(format!("pcraft-displace-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

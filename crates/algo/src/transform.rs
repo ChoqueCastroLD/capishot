@@ -638,6 +638,12 @@ mod tests {
     /// Bicubic warps read the 4×4 taps directly where they're all in the source window and
     /// through the bounds-checked reader near its edges: every output pixel must be bit for bit
     /// the per-tap formula over the whole (premultiplied) source.
+    fn catmull_rom(t: f64) -> [f64; 4] {
+        let t2 = t * t;
+        let t3 = t2 * t;
+        [-0.5 * t3 + t2 - 0.5 * t, 1.5 * t3 - 2.5 * t2 + 1.0, -1.5 * t3 + 2.0 * t2 + 0.5 * t, 0.5 * t3 - 0.5 * t2]
+    }
+
     #[test]
     fn bicubic_warp_matches_the_per_tap_formula_bit_for_bit() {
         let fmt = PixelFormat::new(photocraft_color::ColorMode::Rgb, photocraft_color::SampleType::F32, true);

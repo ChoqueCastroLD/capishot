@@ -366,7 +366,18 @@ impl Loader<'_> {
             if s.tile(c).is_some() {
                 return Err(FormatError::corrupt(format!("duplicate tile ({}, {})", t.tx, t.ty)));
             }
+            // A tile referenced again in this load: decoded and charged once (#3315).
+            if let Some(tile) = self.tiles.get(&f.sample).and_then(|m| m.get(&t.hash)) {
+                // One hash names one byte string, so a cached tile of another length means
+                // the same hash was referenced from formats of different pixel sizes.
+                if tile.bytes().len() != len {
+                    return Err(FormatError::corrupt(format!("tile {} is referenced with different sizes", t.hash)));
+                }
+                s.put_tiles([(c, tile.clone())]);
+                continue;
+            }
             if let Some(tile) = self.fetch.shared_tile(&t.hash, len)? {
+                self.tiles.entry(f.sample).or_default().insert(t.hash.clone(), tile.clone());
                 s.put_tiles(std::iter::once((c, tile)));
                 continue;
             }
@@ -375,6 +386,7 @@ impl Loader<'_> {
             s.tile_mut(c).bytes_mut().copy_from_slice(&bytes);
             if let Some(tile) = s.tile(c) {
                 self.fetch.cache_tile(&t.hash, tile);
+                self.tiles.entry(f.sample).or_default().insert(t.hash.clone(), tile.clone());
             }
         }
         Ok(s)

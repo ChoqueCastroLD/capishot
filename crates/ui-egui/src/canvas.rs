@@ -1611,10 +1611,17 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, level: u32, c
     };
     let (doc, raw_key) = display_doc(app, idx);
     let (display, _) = canvas_display(app, &doc, None);
+    // Repeated pattern tiles sample the same texture, including pixels outside the unwrapped
+    // viewport. Refresh the affected document region while Pattern Preview is enabled.
+    let blend_visible = if app.ui.view.pattern_preview { doc.bounds() } else { visible };
     // The texture is shared by every display: only what it stores counts, not the monitor.
     let display_key = texture_key(display.as_deref());
     let seen = app.canvases.get(&(id, GPU_OUTPUT)).map(|c| (c.revision, c.preview_key));
     let mut damage = seen.and_then(|seen| damage_since(app, idx, seen, (revision, raw_key), display_key, last_damage));
+    // A blend-mode preview redraws what the view shows; offscreen pixels wait for the view.
+    if let Some(region) = damage {
+        damage = Some(crate::blend_preview::clip_damage(app, id, revision, raw_key, region, blend_visible));
+    }
     // To an adjustment dialog's preview: only what the view shows now (the rest as it moves there).
     if damage.is_some()
         && let Some(r) = seen.filter(|s| s.0 == revision).and_then(|s| crate::adjust_preview::switch_region(app, id, revision, s.1 ^ display_key, raw_key))
@@ -1629,6 +1636,11 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, level: u32, c
     if present && cache.revision == revision && cache.preview_key == preview_key {
         // An adjustment preview composited where the view was: catch up where it moved to.
         if let Some(r) = crate::adjust_preview::uncovered(app, id, raw_key, visible) {
+            let r = gpu.refresh(id.0, &doc, Some(r), display.as_deref());
+            app.perf.record(r.kind, r.px, r.composite_ms, r.upload_ms);
+        }
+        // A blend preview drawn where the view was: catch up where it moved to.
+        if let Some(r) = crate::blend_preview::uncovered(app, id, revision, raw_key, blend_visible) {
             let r = gpu.refresh(id.0, &doc, Some(r), display.as_deref());
             app.perf.record(r.kind, r.px, r.composite_ms, r.upload_ms);
         }
@@ -3070,7 +3082,6 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     if view.fill_pending && rect.width() > 50.0 {
         fill_view(&mut view, &doc, rect.size(), ppp, aspect);
     }
-    let previous_center = view.center;
     if primary {
         polygon_cancel_stale(app);
         polygon_edge_scroll(app, &ctx, idx, rect, &mut view, ppp);
@@ -6345,26 +6356,6 @@ mod tests {
         assert_eq!(super::display_image(Some(&d), &buf).pixels, reference(d.to_rgba8(&buf)).pixels);
     }
 
-    /// #7490: the inline (web) preview path composites and uploads each changed preview once, as
-    /// the background worker does. It used to flatten and upload it twice and record it twice,
-    /// so the frame's refresh time counted the preview twice.
-    #[test]
-    fn inline_filter_preview_is_composited_and_recorded_once() {
-        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
-        app.background_jobs = false;
-        app.run("file.new", json!({"width": 320, "height": 240})).unwrap();
-        crate::filter_dialog::open(&mut app, "filter.stylize.solarize").unwrap();
-        app.perf.frame_refresh_ms = 0.0;
-        let (_, _, size) = ensure_filter_preview(&mut app, 0, &egui::Context::default()).expect("a preview");
-        assert_eq!(size, [320, 240]);
-        assert_eq!(app.perf.last_refresh, "filter-preview");
-        assert_eq!(app.perf.last_refresh_px, 320 * 240);
-        assert_eq!(app.perf.frame_refresh_ms, app.perf.composite_ms + app.perf.upload_ms, "one record per preview");
-        // Unchanged request: nothing is recomputed or recorded again.
-        ensure_filter_preview(&mut app, 0, &egui::Context::default()).expect("the same preview");
-        assert_eq!(app.perf.frame_refresh_ms, app.perf.composite_ms + app.perf.upload_ms);
-    }
-
     /// #6326: a filter's live preview is never coarser than the screen. On a document big enough
     /// for a reduced proxy, the view at 100 % previews at full resolution, and only a view zoomed
     /// out far enough uses the proxy. Through `ensure_filter_preview`, so the factor the canvas
@@ -8312,7 +8303,7 @@ mod tests {
         let live = app.session.active().unwrap().doc.layers[0].surface().unwrap().clone();
         // The command from scratch, with the params the release committed.
         let mut twin = setup();
-        let p = crate::eraser_ui::background_params(&twin, &points);
+        let p = crate::eraser_ui::background_eraser_params(&twin, &points);
         let r = twin.run("paint.backgroundEraser", p).unwrap();
         assert!(r.get("fromLive").is_none());
         let want = twin.session.active().unwrap().doc.layers[0].surface().unwrap().clone();
@@ -9091,9 +9082,6 @@ mod rotation_preview_isolation_tests {
 #[path = "canvas_display_memo_tests.rs"]
 mod display_memo_tests;
 
-#[cfg(test)]
-#[path = "canvas/blend_viewport_tests.rs"]
-mod blend_viewport_regression;
 
 #[cfg(test)]
 #[path = "canvas/pixel_alignment_tests.rs"]

@@ -947,9 +947,6 @@ fn main() -> eframe::Result {
         if let Some(s) = sentinel.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() {
             s.finish();
         }
-        // Stop listening first, or the relaunch would hand its files to this exiting process.
-        #[cfg(all(unix, not(target_os = "macos")))]
-        drop(single_instance);
         if let Ok(exe) = std::env::current_exe() {
             let launched = std::process::Command::new(exe)
                 .args(std::env::args_os().skip(1))

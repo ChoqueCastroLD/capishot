@@ -72,30 +72,7 @@ impl CutParts {
         let bounds = photocraft_compose::bounds::content_bounds;
         let b = bounds(sel).intersect(&if mask { doc.bounds() } else { bounds(surf) });
         if !b.is_empty() {
-            let n = with_alpha.channels();
-            let a = n - 1;
-            let mut rp = base.read_region(b);
-            let mut pp = rp.clone();
-            let w = b.width() as usize;
-            // The selection's coverage over `b`, a row at a time (one tile lookup per run).
-            let mut cover = vec![0.0f32; w];
-            for (i, (p, r)) in pp.chunks_exact_mut(n).zip(rp.chunks_exact_mut(n)).enumerate() {
-                if i % w == 0 {
-                    sel.sample_row_strided(b.y0 + (i / w) as i32, b.x0, 1, 0, &mut cover);
-                }
-                let k = cover.get(i % w).copied().unwrap_or(0.0);
-                if k <= 0.0 {
-                    p.fill(0.0);
-                } else {
-                    p[a] *= k;
-                }
-                if !copy && !fill {
-                    r[a] *= 1.0 - k;
-                }
-            }
-            if !mask {
-                rest.write_region(b, &rp);
-            }
+            piece = cut_piece(&base, sel, b, with_alpha)?;
             if fill {
                 let opaque_bg = [background[0], background[1], background[2], 1.0];
                 crate::pixels::try_fill_surface(&mut rest, b, opaque_bg, Some(sel), false)?;
@@ -188,7 +165,7 @@ impl CutParts {
         let mut out = self.rest.clone();
         let piece = self.piece_at(dx, dy);
         // The moved piece's content bounds: its scanned ones, moved.
-        let b = if self.piece_bounds.is_empty() { Rect::EMPTY } else { self.piece_bounds.translate(dx, dy) };
+        let b = self.piece_bounds.translate(dx, dy);
         if self.mask {
             crate::fill_cmds::composite_over(&mut out, &piece, b, None)?;
         } else {

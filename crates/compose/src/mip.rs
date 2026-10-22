@@ -537,6 +537,7 @@ mod tests {
             size: 8.0,
             position: StrokePosition::Outside,
             paint: FxPaint::Color(Color::rgb(1.0, 1.0, 1.0)),
+            overprint: false,
         }));
         assert!(crate::effects::has_effects(&doc.layers[2]));
         let mut cache = MipCache::default();
