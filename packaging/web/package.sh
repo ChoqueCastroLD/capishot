@@ -28,10 +28,10 @@ if grep -Eq '(src|href)="/[^/]' "$SITE/index.html"; then
   exit 1
 fi
 
-# Size gate (issue #198): Cloudflare Pages/Workers reject any single file over 25 MiB, and other
-# hosts and CDNs have similar caps. Enforce the host cap during packaging so releases remain
-# uploadable. Override with PHOTOCRAFT_WASM_MAX_BYTES only to investigate.
-MAX_WASM_BYTES="${PHOTOCRAFT_WASM_MAX_BYTES:-26214400}" # 25 MiB
+# Size gate (issue #198): Capishot is served by its own nginx, which has no per-file cap (the
+# 25 MiB one is Cloudflare Pages'). 32 MiB still catches a runaway build. Override with
+# PHOTOCRAFT_WASM_MAX_BYTES only to investigate.
+MAX_WASM_BYTES="${PHOTOCRAFT_WASM_MAX_BYTES:-33554432}" # 32 MiB
 WASM_COUNT=0
 for wasm in "$SITE"/*.wasm; do
   [ -f "$wasm" ] || continue
@@ -39,7 +39,7 @@ for wasm in "$SITE"/*.wasm; do
   size=$(wc -c <"$wasm" | tr -d ' ')
   echo "$(basename "$wasm"): $size bytes ($((size / 1048576)) MiB; limit $MAX_WASM_BYTES)"
   if [ "$size" -gt "$MAX_WASM_BYTES" ]; then
-    echo "error: $(basename "$wasm") is $size bytes, over the $MAX_WASM_BYTES-byte limit (Cloudflare's per-file cap is 25 MiB)" >&2
+    echo "error: $(basename "$wasm") is $size bytes, over the $MAX_WASM_BYTES-byte limit" >&2
     exit 1
   fi
 done

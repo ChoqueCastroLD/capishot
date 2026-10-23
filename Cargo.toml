@@ -186,31 +186,6 @@ opt-level = 3
 # CPU kernels (burn-flex, gemm, macerator, pulp) and the networks are built for speed, opt-level 3
 # (15-20 % faster on one thread than wasm-release's "z"); the rest (the WebGPU stack: wgpu, cubecl's kernel
 # generators) for size, so the plain worker stays under the 24 MiB per-file limit.
-# The single-threaded web build (packaging/web, Trunk): `wasm-release` with the pixel crates at
-# "z" (raster and color at "s"), so its one .wasm stays under Cloudflare's 25 MiB per-file cap
-# (packaging/web/package.sh). The threads build (packaging/web-threads), which browsers with
-# cross-origin isolation load, keeps them at 3.
-[profile.wasm-release-st]
-inherits = "wasm-release"
-[profile.wasm-release-st.package.photocraft-algo]
-opt-level = "z"
-[profile.wasm-release-st.package.photocraft-compose]
-opt-level = "z"
-[profile.wasm-release-st.package.photocraft-paint]
-opt-level = "z"
-[profile.wasm-release-st.package.photocraft-cms]
-opt-level = "z"
-[profile.wasm-release-st.package.photocraft-raster]
-opt-level = "s"
-[profile.wasm-release-st.package.photocraft-color]
-opt-level = "s"
-[profile.wasm-release-st.package.photocraft-codecs]
-opt-level = "z"
-[profile.wasm-release-st.package.photocraft-vector]
-opt-level = "z"
-[profile.wasm-release-st.package.photocraft-raw]
-opt-level = "z"
-
 [profile.wasm-ai]
 inherits = "release"
 opt-level = "s"
