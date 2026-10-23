@@ -1816,6 +1816,19 @@ fn complete_cow<'a>(
     Ok(prev.map(|c| c.img).ok_or(Cow::Owned(Vec::new())))
 }
 
+/// Offsets [`best_offset`] tries one by one; a larger window is searched on a coarse grid.
+const PROXIMITY_FULL_SEARCH: i64 = 160_000;
+
+/// The grid step of [`best_offset`]'s first pass over offsets within `max_radius`: 1 (every
+/// offset) while the window has at most [`PROXIMITY_FULL_SEARCH`] offsets, else a 49 × 49 grid.
+/// A coarse step out of phase with a screentone's dot pitch scores every tone offset badly, so a
+/// flat area wins and the patch lands as a blotch in the tone; spot-heal windows are mostly small
+/// enough to search fully (the score bails out early once an offset is clearly worse).
+pub(crate) fn proximity_search_step(max_radius: i32) -> i32 {
+    let side = 2 * i64::from(max_radius.max(0)) + 1;
+    if side * side <= PROXIMITY_FULL_SEARCH { 1 } else { (max_radius / 24).max(1) }
+}
+
 /// Proximity match: the displacement `(dx, dy)` (within `max_radius`) whose surroundings best match the
 /// ring of `ring` pixels around the hole, with the displaced hole fully inside the grid and outside the
 /// hole. `None` if no displacement fits.
@@ -1874,8 +1887,9 @@ pub fn best_offset(w: usize, h: usize, ch: usize, img: &[f32], hole: &[bool], ri
         // Mild preference for nearer sources on ties.
         Some(e / n * penalty)
     };
-    // Coarse grid over the search window, then a full-resolution refinement around the winner.
-    let step = (max_radius / 24).max(1);
+    // Coarse grid over the search window, then a full-resolution refinement around the winner
+    // ([`proximity_search_step`]: every offset when the window is small enough).
+    let step = proximity_search_step(max_radius);
     let mut best: Option<((i32, i32), f32)> = None;
     let consider = |dx: i32, dy: i32, best: &mut Option<((i32, i32), f32)>| {
         if let Some(e) = eval(dx, dy, best.map_or(f32::INFINITY, |(_, error)| error))

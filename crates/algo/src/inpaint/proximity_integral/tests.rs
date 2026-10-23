@@ -207,7 +207,7 @@ fn old_best_offset(w: usize, h: usize, ch: usize, img: &[f32], hole: &[bool], ri
         Some(e / pts.len().max(1) as f32 * (1.0 + 1e-3 * ((dx as f32).hypot(dy as f32) / max_radius as f32)))
     };
     // Coarse grid over the search window, then a full-resolution refinement around the winner.
-    let step = (max_radius / 24).max(1);
+    let step = crate::inpaint::proximity_search_step(max_radius);
     let mut best: Option<((i32, i32), f32)> = None;
     let consider = |dx: i32, dy: i32, best: &mut Option<((i32, i32), f32)>| {
         if let Some(e) = eval(dx, dy)
