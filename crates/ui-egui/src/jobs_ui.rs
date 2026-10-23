@@ -300,7 +300,9 @@ pub fn start_save(
     let result_path = path.clone();
     let state = Arc::new(SaveState::default());
     let worker = Arc::clone(&state);
-    let started = app.session.start_job(
+    // On a worker in the browser threads build too: a big PSD takes seconds to encode, and the
+    // page must keep drawing (and show the save's progress) meanwhile.
+    let started = app.session.start_job_in_worker(
         SAVE_JOB,
         json!({"path": path}),
         &label,
@@ -346,10 +348,17 @@ fn warnings_of(v: &Value) -> Vec<String> {
 fn finish_save(app: &mut PhotocraftApp, ctx: &egui::Context, save: SaveJob, label: &str, outcome: JobOutcome) {
     match outcome {
         JobOutcome::Done(v) => {
+            // A browser download is only a request the user can cancel: the document stays unsaved
+            // at the revision it was last confirmed saved at (#4962).
+            let previous = app.session.documents().iter().find(|st| st.doc.id == save.doc).map_or(save.revision, |st| st.saved_revision);
+            let revision = crate::saved_revision_after_write(!app.services.write_unconfirmed, save.revision, previous);
             if save.automation {
-                app.saved_automation(save.doc, save.revision, &save.path, &warnings_of(&v), save.copy);
+                app.saved_automation(save.doc, revision, &save.path, &warnings_of(&v), save.copy);
             } else {
-                app.saved(save.doc, save.revision, &save.path, &warnings_of(&v), save.copy);
+                app.saved(save.doc, revision, &save.path, &warnings_of(&v), save.copy);
+            }
+            if !save.copy {
+                crate::prefs_ui::document_written(app, save.doc, save.revision);
             }
             if !save.copy {
                 crate::discard_ui::saved_document(app, ctx, save.doc);

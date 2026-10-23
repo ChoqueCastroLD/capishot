@@ -50,6 +50,12 @@ pub struct Runtime {
     retry_after: HashMap<DocId, f64>,
     recovery_error: Option<String>,
     autosave_errors: HashMap<DocId, String>,
+    /// The revision each document was last written to its file at (Save, or a browser download
+    /// that may not report back), for [`crate::Services::autosave_unsaved_only`].
+    written_at: HashMap<DocId, u64>,
+    /// When each document's last checkpoint was confirmed stored (`now_ms`), for the status
+    /// bar's "Autosaved N min ago".
+    autosaved_at: HashMap<DocId, f64>,
     log_len: usize,
     /// Snapping state of the drag in progress (see `snap_ui`).
     pub(crate) snap: Option<crate::snap_ui::ActiveSnap>,
@@ -404,11 +410,18 @@ fn finish_discovery(app: &mut PhotocraftApp) {
     start_next_recovery(app);
 }
 
+/// Opens `documents` recovered by the shell, one at a time (see `recovery_ui`).
+pub(crate) fn queue_recovery(app: &mut PhotocraftApp, documents: Vec<crate::Recoverable>) {
+    app.prefs_rt.recovery_queue.extend(documents);
+    start_next_recovery(app);
+}
+
 fn start_next_recovery(app: &mut PhotocraftApp) {
     while app.prefs_rt.recovery_pending.is_none() {
         let Some(r) = app.prefs_rt.recovery_queue.pop_front() else { return };
         let label = format!("Recovering {}", r.name);
-        let started = app.session.start_job(
+        // Decoded on a worker (in the browser threads build too): the page keeps drawing.
+        let started = app.session.start_job_in_worker(
             "file.recover",
             json!({}),
             &label,
@@ -895,6 +908,7 @@ fn autosave(app: &mut PhotocraftApp) {
                     Ok(()) => {
                         app.prefs_rt.recovery_keys.remove(&id);
                         app.prefs_rt.autosaved.remove(&id);
+                        app.prefs_rt.autosaved_at.remove(&id);
                         app.prefs_rt.pending_autosaves.remove(&id);
                         app.prefs_rt.catch_up.remove(&id);
                         app.prefs_rt.retry_after.remove(&id);
@@ -920,6 +934,7 @@ fn autosave(app: &mut PhotocraftApp) {
                     Ok(()) => {
                         app.prefs_rt.autosaved.insert(id, stamp);
                         app.prefs_rt.retry_after.remove(&id);
+                        app.prefs_rt.autosaved_at.insert(id, now);
                         if let Some(error) = app.prefs_rt.autosave_errors.remove(&id)
                             && app.ui.status == error
                         {
@@ -964,6 +979,11 @@ fn autosave(app: &mut PhotocraftApp) {
         .iter()
         .enumerate()
         .filter_map(|(index, st)| {
+            // The browser keeps checkpoints of unsaved work only: a document written to its file
+            // (or downloaded) at this revision needs none.
+            if app.services.autosave_unsaved_only && (!st.is_dirty() || app.prefs_rt.written_at.get(&st.doc.id) == Some(&st.revision)) {
+                return None;
+            }
             let stamp = CheckpointStamp::of(st, recovery_context(app, index, st));
             let retry_due = app.prefs_rt.retry_after.get(&st.doc.id).is_some_and(|time| now >= *time);
             if (!due && !retry_due && !app.prefs_rt.catch_up.contains(&st.doc.id))
@@ -987,6 +1007,44 @@ fn autosave(app: &mut PhotocraftApp) {
                     app.prefs_rt.retry_after.insert(doc.id, now + 30_000.0);
                     app.prefs_rt.autosave_errors.insert(doc.id, format!("Autosave failed: {e}. Your document remains open; save a copy or free disk space."));
                 }
+            }
+        }
+    }
+}
+
+/// The status bar's autosave note for the active document: when its last checkpoint was stored,
+/// while it has one.
+pub(crate) fn autosave_hint(app: &PhotocraftApp) -> Option<String> {
+    app.services.autosave.as_ref()?;
+    let st = app.session.active()?;
+    let at = *app.prefs_rt.autosaved_at.get(&st.doc.id)?;
+    let now = crate::gpu_canvas::now_ms();
+    Some(crate::i18n::fmt(tl!("Autosaved {when}"), &[("when", &crate::recovery_ui::ago(at, now))]))
+}
+
+/// Document `doc` was written to its own file at `revision` (a Save, not a copy). Where only
+/// unsaved work is checkpointed ([`crate::Services::autosave_unsaved_only`], the browser), its
+/// checkpoint is removed now and none is written until it changes again.
+pub(crate) fn document_written(app: &mut PhotocraftApp, doc: DocId, revision: u64) {
+    app.prefs_rt.written_at.insert(doc, revision);
+    if !app.services.autosave_unsaved_only {
+        return;
+    }
+    let owned = app.prefs_rt.recovery_keys.contains_key(&doc)
+        || app.prefs_rt.autosaved.contains_key(&doc)
+        || app.prefs_rt.pending_autosaves.contains_key(&doc)
+        || app.prefs_rt.autosave_errors.contains_key(&doc);
+    if !owned || app.prefs_rt.retiring.contains(&doc) {
+        return;
+    }
+    if let Some(discard) = app.services.discard_autosave.as_mut() {
+        match discard(doc.0, app.prefs_rt.recovery_keys.get(&doc).map(String::as_str)) {
+            Ok(()) => {
+                app.prefs_rt.retiring.insert(doc);
+            }
+            Err(e) => {
+                app.prefs_rt.retry_after.insert(doc, crate::gpu_canvas::now_ms() + 30_000.0);
+                app.prefs_rt.autosave_errors.insert(doc, format!("Could not remove recovery checkpoint: {e}"));
             }
         }
     }
@@ -4661,6 +4719,50 @@ mod tests {
     fn complete(c: &Completed, id: DocId, revision: u64, result: Result<(), String>) {
         c.lock().unwrap().push(crate::AutosaveCompletion { document_id: id.0, revision, result, retired: false });
     }
+    /// The browser's policy (`autosave_unsaved_only`): only unsaved documents are checkpointed,
+    /// a Save (even an unconfirmed download) removes the checkpoint, and the next edit makes one
+    /// again; the status bar then says when.
+    #[test]
+    fn unsaved_only_autosave_checkpoints_unsaved_work_and_a_save_removes_it() {
+        let (mut app, queued, completed) = checkpoint_app();
+        let discarded: Arc<Mutex<Vec<u64>>> = Arc::default();
+        let d = discarded.clone();
+        app.services.discard_autosave = Some(Box::new(move |id, _| {
+            d.lock().unwrap().push(id);
+            Ok(())
+        }));
+        app.services.autosave_unsaved_only = true;
+        let ctx = egui::Context::default();
+        app.run("file.new", json!({"width": 8, "height": 8})).unwrap();
+        let id = app.session.active().unwrap().doc.id;
+        app.session.active_mut().unwrap().saved_revision = app.session.active().unwrap().revision;
+        autosave_now(&mut app);
+        tick(&mut app, &ctx);
+        assert!(queued.lock().unwrap().is_empty(), "a document without unsaved changes needs no checkpoint");
+        app.run("edit.fill", json!({"color": "#ff0000"})).unwrap();
+        autosave_now(&mut app);
+        tick(&mut app, &ctx);
+        assert_eq!(queued.lock().unwrap().len(), 1);
+        let revision = app.session.active().unwrap().revision;
+        complete(&completed, id, revision, Ok(()));
+        tick(&mut app, &ctx);
+        assert!(autosave_hint(&app).is_some_and(|h| h.contains("just now")), "{:?}", autosave_hint(&app));
+        // Saved (a download leaves the document unsaved): the checkpoint goes, and none is made
+        // for that revision.
+        document_written(&mut app, id, revision);
+        assert_eq!(*discarded.lock().unwrap(), [id.0]);
+        completed.lock().unwrap().push(crate::AutosaveCompletion { document_id: id.0, revision: 0, result: Ok(()), retired: true });
+        tick(&mut app, &ctx);
+        assert!(autosave_hint(&app).is_none());
+        autosave_now(&mut app);
+        tick(&mut app, &ctx);
+        assert_eq!(queued.lock().unwrap().len(), 1, "the saved revision isn't checkpointed again");
+        app.run("edit.fill", json!({"color": "#00ff00"})).unwrap();
+        autosave_now(&mut app);
+        tick(&mut app, &ctx);
+        assert_eq!(queued.lock().unwrap().len(), 2, "a new edit is");
+    }
+
     #[test]
     fn autosave_acknowledges_disk_completion_and_keeps_live_ram_fresh() {
         let (mut app, queued, completed) = checkpoint_app();

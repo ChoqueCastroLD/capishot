@@ -3626,3 +3626,19 @@ curves	Smooth	Lisser
 	1×	1×
 	1.5×	1.5×
 	2×	2×
+# Crash recovery (recovery_ui, web autosave)
+	Recover	Récupérer
+	Discard	Ignorer
+	Later	Plus tard
+	Recover Documents	Récupérer les documents
+	Recover Documents…	Récupérer les documents…
+	There are no documents to recover.	Aucun document à récupérer.
+	Capishot didn't close properly last time. These documents had unsaved changes:	Capishot ne s'est pas fermé correctement la dernière fois. Ces documents contenaient des modifications non enregistrées :
+	These documents had unsaved changes that were never saved:	Ces documents contenaient des modifications jamais enregistrées :
+	Saved {when}	Enregistré {when}
+	Autosaved {when}	Enregistrement automatique {when}
+	just now	à l'instant
+@plural	{n} min ago|{n} min ago	il y a {n} min|il y a {n} min
+@plural	{n} hour ago|{n} hours ago	il y a {n} heure|il y a {n} heures
+@plural	{n} day ago|{n} days ago	il y a {n} jour|il y a {n} jours
+@plural	Recover {n} document|Recover {n} documents	Récupérer {n} document|Récupérer {n} documents

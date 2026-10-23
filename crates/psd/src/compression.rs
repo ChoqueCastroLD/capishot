@@ -350,6 +350,10 @@ fn decode_rle(data: &[u8], layout: &PlaneLayout, total: usize) -> Result<Vec<u8>
     Ok(out)
 }
 
+/// Bytes of plane each RLE thread packs at least: below this, starting a thread costs more than
+/// the packing it saves.
+const PARALLEL_RLE_BYTES: usize = 256 << 10;
+
 fn encode_rle(decoded: &[u8], layout: &PlaneLayout) -> Result<Vec<u8>> {
     let rows = layout.rows()?;
     let rb = layout.row_bytes();
@@ -357,8 +361,14 @@ fn encode_rle(decoded: &[u8], layout: &PlaneLayout) -> Result<Vec<u8>> {
     if rows == 0 {
         return Ok(Vec::new());
     }
-    // Rows are independent, so they pack in parallel chunks and concatenate in order.
+    // Rows are independent, so they pack in parallel chunks and concatenate in order: on scoped
+    // threads natively, on the rayon Web Worker pool in the browser threads build.
+    // A small plane (most layer channels) packs faster on this thread than threads can start.
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+    let threads = rayon::current_num_threads().clamp(1, 32);
+    #[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
     let threads = if cfg!(target_arch = "wasm32") { 1 } else { std::thread::available_parallelism().map_or(1, |v| v.get()).clamp(1, 32) };
+    let threads = threads.min(decoded.len() / PARALLEL_RLE_BYTES).max(1);
     let chunk_rows = rows.div_ceil(threads).max(1);
     struct Chunk {
         counts: Vec<u8>,
@@ -380,6 +390,18 @@ fn encode_rle(decoded: &[u8], layout: &PlaneLayout) -> Result<Vec<u8>> {
         }
         Ok(chunk)
     };
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+    let chunk_list: Vec<Chunk> = {
+        use rayon::prelude::*;
+        (0..threads)
+            .into_par_iter()
+            .map(|t| {
+                let first = t * chunk_rows;
+                pack_chunk(first, chunk_rows.min(rows.saturating_sub(first)))
+            })
+            .collect::<Result<Vec<_>>>()?
+    };
+    #[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
     let chunk_list: Vec<Chunk> = if threads == 1 {
         vec![pack_chunk(0, rows)?]
     } else {

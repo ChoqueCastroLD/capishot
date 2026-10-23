@@ -246,7 +246,19 @@ impl Boot {
         preset_warnings.extend(warnings);
         crate::startup::mark("session");
         let control = crate::embed::install(&embed_query, ctx.clone());
-        let mut app = PhotocraftApp::new(session, services(inbox.clone(), photopea.clone())).with_control(control);
+        // Crash recovery: this page's session, its autosave services and the panic hook that
+        // marks it crashed (recovery.rs).
+        let recovery = crate::recovery::Recovery::start();
+        install_panic_hook();
+        let outbox: Outbox = Arc::default();
+        let mut services = services(inbox.clone(), photopea.clone(), outbox.clone());
+        let r = recovery.services();
+        (services.autosave, services.discard_autosave, services.poll_autosave) = (r.autosave, r.discard_autosave, r.poll_autosave);
+        (services.autosave_unsaved_only, services.recovery_menu) = (r.autosave_unsaved_only, r.recovery_menu);
+        let mut app = PhotocraftApp::new(session, services).with_control(control);
+        if app.session.prefs().file_handling.recover_on_launch && photopea.is_none() {
+            recovery.discover(true);
+        }
         // Image › Upscale with AI…: the AI worker module, loaded on first use (ai_bridge.rs).
         // Window › AI Models… (`ai.models.*`): downloads through a second worker instance.
         if let Some(ai) = crate::ai_bridge::from_page() {
@@ -290,7 +302,7 @@ impl Boot {
         if let Some(el) = loading {
             el.remove();
         }
-        WebShell { app, inbox, places, canvas: pen_target, unsaved, served, user_fonts, database, presets, startup_frames: 0, perf }
+        WebShell { app, inbox, places, canvas: pen_target, unsaved, served, user_fonts, database, presets, startup_frames: 0, perf, recovery, outbox, photopea }
     }
 }
 
@@ -536,6 +548,16 @@ fn drop_position(canvas: &web_sys::HtmlCanvasElement, ctx: &egui::Context) -> Op
 /// Closing or reloading the tab while a document has unsaved changes asks first, as closing the
 /// desktop window does: the browser shows its own "Leave site?" prompt (#1380). `unsaved` is
 /// refreshed every frame by [`WebShell`].
+/// Wraps the panic hook eframe installed: a panic first hands recovery what it can
+/// (`recovery::on_panic`), so the next load offers the unsaved documents.
+fn install_panic_hook() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        crate::recovery::on_panic();
+        previous(info);
+    }));
+}
+
 fn guard_unload(unsaved: Arc<AtomicBool>) {
     use wasm_bindgen::closure::Closure;
     let Some(window) = web_sys::window() else { return };
@@ -706,9 +728,33 @@ struct WebShell {
     /// Frames begun so far, counted up to 2 (for the startup timings).
     startup_frames: u8,
     perf: crate::frame_perf::FramePerf,
+    /// Autosave and crash rescue (recovery.rs).
+    recovery: crate::recovery::Recovery,
+    /// Saves encoded on the worker pool, waiting to be handed to the browser.
+    outbox: Outbox,
+    photopea: Option<crate::embed_protocol::PhotopeaConfig>,
 }
 
 impl WebShell {
+    /// Hands the saves the worker pool finished to the browser (a download, or the Photopea-style
+    /// host's save server), on the page's thread where its APIs live.
+    fn deliver_saves(&mut self) {
+        let saves = std::mem::take(&mut *self.outbox.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+        for s in saves {
+            let result = match s.bytes {
+                Ok(bytes) => {
+                    let r = deliver(self.photopea.as_ref(), &s.path, &bytes);
+                    if let Err(e) = &r {
+                        photocraft_ui_egui::notices::error(&mut self.app, i18n::fmt(i18n::t("Save failed: {error}"), &[("error", e)]));
+                    }
+                    r
+                }
+                Err(e) => Err(e),
+            };
+            crate::usage_stats::doc_saved_stats(&s.path, s.size, s.layers, result.as_ref().map(|_| ()), s.ms);
+        }
+    }
+
     fn save_presets(&mut self, ctx: &egui::Context) {
         if let Some(db) = self.database.clone()
             && let Some(batch) = self.presets.begin()
@@ -887,6 +933,8 @@ impl eframe::App for WebShell {
         self.serve_fonts(ctx);
         self.pump_user_fonts(ctx);
         fetch_catalogs(ctx);
+        self.recovery.tick(&mut self.app);
+        self.deliver_saves();
         self.app.logic(ctx, frame);
         crate::embed::process(&mut self.app);
         crate::usage_stats::sync(&self.app, ctx);
@@ -924,8 +972,76 @@ impl eframe::App for WebShell {
     }
 }
 
-fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig>) -> Services {
+/// A save the worker pool encoded (or failed to), for [`WebShell::deliver_saves`].
+struct EncodedSave {
+    path: String,
+    bytes: Result<Vec<u8>, String>,
+    /// The document's size and layer count, for the usage statistics.
+    size: (u32, u32),
+    layers: usize,
+    ms: f64,
+}
+
+type Outbox = Arc<Mutex<Vec<EncodedSave>>>;
+
+/// Where a save's bytes go: the host's save server for the documents it takes (embedded in
+/// Photopea's way), else a browser download.
+fn deliver(photopea: Option<&crate::embed_protocol::PhotopeaConfig>, path: &str, bytes: &[u8]) -> Result<(), String> {
+    match photopea {
+        Some(config) if config.saves(path) => crate::embed::upload(config, path, bytes),
+        _ => download(path, bytes),
+    }
+}
+
+/// The share of a save's progress that encoding fills; handing the bytes to the browser the rest.
+#[cfg(target_feature = "atomics")]
+const ENCODE_SHARE: f32 = 0.95;
+
+/// The threads build's save: encoded on the worker pool (the page keeps drawing and shows the
+/// progress), then handed to the browser on the page's thread ([`WebShell::deliver_saves`]).
+#[cfg(target_feature = "atomics")]
+fn save_in_worker(outbox: Outbox) -> Option<photocraft_ui_egui::SaveFileFn> {
+    Some(Arc::new(move |doc: &Document, path: &str, settings: &photocraft_ui_egui::ExportSettings, ctl: &photocraft_ui_egui::jobs_ui::SaveCtl| {
+        ctl.progress(0.0, "Encoding");
+        let t0 = js_sys::Date::now();
+        let opts = settings.io_options();
+        let cancelled = || ctl.check().is_err();
+        let progress = |f: f32| ctl.progress(f * ENCODE_SHARE, "");
+        let interrupt = photocraft_raster::Interrupt::new(&cancelled, &progress);
+        let r = photocraft_io::export_with(doc, path, &opts, &interrupt).map_err(|e| e.to_string());
+        let stats = |bytes| EncodedSave {
+            path: path.to_string(),
+            bytes,
+            size: (doc.size.width, doc.size.height),
+            layers: doc.layer_count(),
+            ms: js_sys::Date::now() - t0,
+        };
+        let push = |save| outbox.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(save);
+        match r {
+            Err(e) => {
+                if ctl.check().is_ok() {
+                    push(stats(Err(e.clone())));
+                }
+                Err(e)
+            }
+            Ok(r) => {
+                ctl.commit()?;
+                push(stats(Ok(r.bytes)));
+                ctl.progress(1.0, "");
+                Ok(r.warnings)
+            }
+        }
+    }))
+}
+
+#[cfg(not(target_feature = "atomics"))]
+fn save_in_worker(_outbox: Outbox) -> Option<photocraft_ui_egui::SaveFileFn> {
+    None
+}
+
+fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig>, outbox: Outbox) -> Services {
     Services {
+        save_file: save_in_worker(outbox),
         screen_pick: screen_color_service(),
         import: Some(Box::new(|name: &str, bytes: &[u8], max_svg_group_depth: usize| {
             let t0 = js_sys::Date::now();
@@ -977,10 +1093,7 @@ fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig
             }
         })),
         // Embedded in Photopea's way with a save server: documents in its formats go there.
-        write: Some(Box::new(move |path: &str, bytes: &[u8]| match &photopea {
-            Some(config) if config.saves(path) => crate::embed::upload(config, path, bytes),
-            _ => download(path, bytes),
-        })),
+        write: Some(Box::new(move |path: &str, bytes: &[u8]| deliver(photopea.as_ref(), path, bytes))),
         // A download may be cancelled and never reports back: it doesn't save the document.
         write_unconfirmed: true,
         encode_png: Some(Box::new(|w, h, rgba| {
@@ -1019,7 +1132,8 @@ fn download(path: &str, bytes: &[u8]) -> Result<(), String> {
     let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "photocraft".into());
     let window = web_sys::window().ok_or("no window")?;
     let document = window.document().ok_or("no document")?;
-    let parts = js_sys::Array::of1(&js_sys::Uint8Array::from(bytes));
+    let view = js_sys::Uint8Array::from(bytes);
+    let parts = js_sys::Array::of1(&view);
     let opts = web_sys::BlobPropertyBag::new();
     opts.set_type(mime_for(&name));
     let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &opts).map_err(js)?;

@@ -271,6 +271,10 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
                 app.open_dialog_file()
             }
         }
+        crate::recovery_ui::COMMAND => {
+            crate::recovery_ui::request(app);
+            Ok(Value::Null)
+        }
         "file.openDeep" => {
             if let Some(path) = params.get("path").and_then(Value::as_str) {
                 app.open_path_deep(path)?;
@@ -789,6 +793,7 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
         | "edit.search" => true,
         "type.loadFonts" | "type.loadFontFolder" | "type.manageFonts" => true,
         crate::ai_models_ui::COMMAND => true,
+        crate::recovery_ui::COMMAND => crate::recovery_ui::available(app),
         i if i.starts_with("file.openRecent.") => true,
         i if i.starts_with(DOCUMENT_ITEM) => true,
         i if crate::links::url_for(i).is_some() => true,

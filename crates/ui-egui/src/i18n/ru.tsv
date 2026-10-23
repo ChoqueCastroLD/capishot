@@ -3593,3 +3593,19 @@ curves	Smooth	Сгладить
 	1×	1×
 	1.5×	1.5×
 	2×	2×
+# Crash recovery (recovery_ui, web autosave)
+	Recover	Восстановить
+	Discard	Удалить
+	Later	Позже
+	Recover Documents	Восстановить документы
+	Recover Documents…	Восстановить документы…
+	There are no documents to recover.	Нет документов для восстановления.
+	Capishot didn't close properly last time. These documents had unsaved changes:	В прошлый раз Capishot закрылся некорректно. В этих документах были несохранённые изменения:
+	These documents had unsaved changes that were never saved:	В этих документах есть изменения, которые так и не были сохранены:
+	Saved {when}	Сохранено {when}
+	Autosaved {when}	Автосохранение {when}
+	just now	только что
+@plural	{n} min ago|{n} min ago	{n} мин назад|{n} мин назад|{n} мин назад
+@plural	{n} hour ago|{n} hours ago	{n} час назад|{n} часа назад|{n} часов назад
+@plural	{n} day ago|{n} days ago	{n} день назад|{n} дня назад|{n} дней назад
+@plural	Recover {n} document|Recover {n} documents	Восстановить {n} документ|Восстановить {n} документа|Восстановить {n} документов

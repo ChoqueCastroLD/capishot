@@ -3804,3 +3804,19 @@ curves	Smooth	매끄럽게
 	1×	1×
 	1.5×	1.5×
 	2×	2×
+# Crash recovery (recovery_ui, web autosave)
+	Recover	복구
+	Discard	삭제
+	Later	나중에
+	Recover Documents	문서 복구
+	Recover Documents…	문서 복구…
+	There are no documents to recover.	복구할 문서가 없습니다.
+	Capishot didn't close properly last time. These documents had unsaved changes:	지난번에 Capishot이 정상적으로 종료되지 않았습니다. 다음 문서에 저장되지 않은 변경 사항이 있었습니다:
+	These documents had unsaved changes that were never saved:	다음 문서에 저장되지 않은 변경 사항이 있습니다:
+	Saved {when}	저장됨 {when}
+	Autosaved {when}	자동 저장됨 {when}
+	just now	방금
+@plural	{n} min ago|{n} min ago	{n}분 전
+@plural	{n} hour ago|{n} hours ago	{n}시간 전
+@plural	{n} day ago|{n} days ago	{n}일 전
+@plural	Recover {n} document|Recover {n} documents	문서 {n}개 복구

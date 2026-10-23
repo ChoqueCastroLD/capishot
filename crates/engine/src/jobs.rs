@@ -298,6 +298,9 @@ pub struct Jobs {
     next: u64,
     /// Set while [`Session::start`] runs a command: [`run`] spawns instead of running inline.
     spawn: bool,
+    /// Set while [`Session::start_job_in_worker`] runs: the browser threads build runs the job
+    /// on its rayon Web Worker pool too (other jobs stay inline there, as they always have).
+    spawn_web: bool,
     /// The job a command registered while `spawn` was set (picked up by `start`).
     pending: Option<Running>,
     running: Vec<Running>,
@@ -381,7 +384,7 @@ pub fn run<T: Send + 'static>(
     // The job's document: stored paths it follows are resolved against it on any thread.
     let document = s.active().and_then(|d| d.path.as_deref()).map(std::path::PathBuf::from);
     let _document = crate::doc_path::scope(document.as_deref());
-    if !s.jobs.spawn || cfg!(target_arch = "wasm32") {
+    if !s.jobs.spawn || (cfg!(target_arch = "wasm32") && !(SPAWNS && s.jobs.spawn_web)) {
         let t = work(&s.jobs.inline.clone().unwrap_or_default())?;
         return apply(s, t);
     }
@@ -757,6 +760,25 @@ impl Session {
             }
             (Ok(v), None) => Ok(Started::Done(v)),
         }
+    }
+
+    /// [`Self::start_job`] that runs `work` off the page's thread in the browser threads build
+    /// too (on the rayon Web Worker pool), so a long job (a save) never freezes the page. `work`
+    /// must not touch the browser's APIs, which only the page's thread may call. Inline in the
+    /// single-threaded browser build, a worker thread natively, as `start_job`.
+    pub fn start_job_in_worker<T: Send + 'static>(
+        &mut self,
+        command: &str,
+        params: Value,
+        label: &str,
+        lock_document: bool,
+        work: impl FnOnce(&JobCtx) -> Result<T> + Send + 'static,
+        apply: impl FnOnce(&mut Session, T) -> Result<Value> + Send + 'static,
+    ) -> Result<Started> {
+        self.jobs.spawn_web = true;
+        let r = self.start_job(command, params, label, lock_document, work, apply);
+        self.jobs.spawn_web = false;
+        r
     }
 
     /// Apply finished background jobs (on this thread) and return every job that ended since

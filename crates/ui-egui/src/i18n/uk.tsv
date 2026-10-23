@@ -4324,3 +4324,19 @@ curves	Smooth	Згладити
 	1×	1×
 	1.5×	1.5×
 	2×	2×
+# Crash recovery (recovery_ui, web autosave)
+	Recover	Відновити
+	Discard	Видалити
+	Later	Пізніше
+	Recover Documents	Відновити документи
+	Recover Documents…	Відновити документи…
+	There are no documents to recover.	Немає документів для відновлення.
+	Capishot didn't close properly last time. These documents had unsaved changes:	Минулого разу Capishot закрився некоректно. У цих документах були незбережені зміни:
+	These documents had unsaved changes that were never saved:	У цих документах є зміни, які так і не були збережені:
+	Saved {when}	Збережено {when}
+	Autosaved {when}	Автозбереження {when}
+	just now	щойно
+@plural	{n} min ago|{n} min ago	{n} хв тому|{n} хв тому|{n} хв тому
+@plural	{n} hour ago|{n} hours ago	{n} годину тому|{n} години тому|{n} годин тому
+@plural	{n} day ago|{n} days ago	{n} день тому|{n} дні тому|{n} днів тому
+@plural	Recover {n} document|Recover {n} documents	Відновити {n} документ|Відновити {n} документи|Відновити {n} документів

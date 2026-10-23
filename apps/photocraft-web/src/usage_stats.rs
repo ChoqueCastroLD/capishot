@@ -113,14 +113,19 @@ pub fn doc_open(file: &str, bytes: usize, result: Result<&Document, &String>, ms
 
 /// A document was encoded for saving (layered formats) or exporting (flat images).
 pub fn doc_saved(file: &str, doc: &Document, ok: Result<(), &String>, ms: f64) {
+    doc_saved_stats(file, (doc.size.width, doc.size.height), doc.layer_count(), ok, ms);
+}
+
+/// [`doc_saved`] from the document's size and layer count (a save encoded on the worker pool).
+pub fn doc_saved_stats(file: &str, (width, height): (u32, u32), layers: usize, ok: Result<(), &String>, ms: f64) {
     if !telemetry::is_active() {
         return;
     }
     let kind = telemetry::file_kind(file);
     let (event, id) = if telemetry::is_document_kind(kind) { ("doc_save", "file.save") } else { ("export", "file.export") };
     let e = json!({
-        "e": event, "kind": kind, "mp": telemetry::mp_bucket(doc.size.width, doc.size.height),
-        "layers": telemetry::layers_bucket(doc.layer_count()), "ms": round(ms), "ok": ok.is_ok(),
+        "e": event, "kind": kind, "mp": telemetry::mp_bucket(width, height),
+        "layers": telemetry::layers_bucket(layers), "ms": round(ms), "ok": ok.is_ok(),
     });
     telemetry::with(|r| {
         r.event(e);

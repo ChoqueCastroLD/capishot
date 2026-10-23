@@ -3222,3 +3222,21 @@ fontWeight	Italic	Itálico
 	1×	1×
 	1.5×	1.5×
 	2×	2×
+# Crash recovery (recovery_ui, web autosave)
+	Recover	Recuperar
+	Discard	Descartar
+	Later	Mais tarde
+	Recover Documents	Recuperar documentos
+	Recover Documents…	Recuperar documentos…
+	There are no documents to recover.	Não há documentos para recuperar.
+	Capishot didn't close properly last time. These documents had unsaved changes:	O Capishot não fechou corretamente da última vez. Estes documentos tinham alterações por guardar:
+	These documents had unsaved changes that were never saved:	Estes documentos tinham alterações que nunca foram guardadas:
+	Saved {when}	Guardado {when}
+	Autosaved {when}	Guardado automaticamente {when}
+	just now	agora mesmo
+	The browser's storage for this site is full, so unsaved changes can't be kept for recovery. Save your work (File › Save), or free space in the browser's site settings.	O armazenamento do navegador para este site está cheio, por isso as alterações por guardar não podem ser mantidas para recuperação. Guarde o seu trabalho (Ficheiro › Guardar) ou liberte espaço nas definições do site no navegador.
+	Crash recovery	Recuperação após falha
+@plural	{n} min ago|{n} min ago	há {n} min|há {n} min
+@plural	{n} hour ago|{n} hours ago	há {n} hora|há {n} horas
+@plural	{n} day ago|{n} days ago	há {n} dia|há {n} dias
+@plural	Recover {n} document|Recover {n} documents	Recuperar {n} documento|Recuperar {n} documentos

@@ -22,6 +22,10 @@ thiserror = { workspace = true }
 flate2 = { workspace = true }
 serde = { workspace = true, optional = true }
 
+# The browser threads build (wasm with `atomics`, packaging/web-threads) packs RLE rows on rayon.
+[target.'cfg(all(target_arch = "wasm32", target_feature = "atomics"))'.dependencies]
+rayon = { workspace = true }
+
 [dev-dependencies]
 proptest = { workspace = true }
 photocraft-psd = { path = ".", features = ["testgen"] }

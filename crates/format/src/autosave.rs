@@ -736,3 +736,185 @@ fn file_fingerprint(path: &Path) -> Result<FileFingerprint> {
         inode: metadata.ino(),
     })
 }
+
+// ---------------------------------------------------------------------------
+// Checkpoints as named objects (storage without a filesystem: the browser's)
+// ---------------------------------------------------------------------------
+
+/// A recovery checkpoint as named objects, for storage that has no directories or atomic
+/// renames (the browser's origin-private file system or IndexedDB). Same descriptor and objects
+/// as a recovery bundle ([`Autosaver`]): the compressed tiles and blobs by name (`tiles/<hash>`,
+/// `blobs/<hash>`), then the descriptor, which publishes the checkpoint and so is stored last.
+pub struct ObjectCheckpoint {
+    /// The descriptor (the bundle's `<key>.json` sidecar).
+    pub descriptor: Vec<u8>,
+    /// The compressed objects the storage doesn't hold yet.
+    pub objects: Vec<(String, Vec<u8>)>,
+    /// Every object the descriptor names: once it is stored, any other object of the key can go.
+    pub live: Vec<String>,
+}
+
+/// Encodes recovery checkpoints of one document as [`ObjectCheckpoint`]s: the current state, no
+/// undo history (the browser keeps its storage small). Objects stored by an earlier checkpoint
+/// ([`Self::committed`]) aren't encoded again, so a checkpoint after a small edit writes a few
+/// tiles and the descriptor.
+#[derive(Default)]
+pub struct ObjectAutosaver {
+    writer: PcraftWriter,
+    stored: std::collections::HashSet<String>,
+}
+
+impl ObjectAutosaver {
+    /// The checkpoint of `doc` described by `info` (its key, name, time and revision) and the
+    /// view `context`.
+    pub fn checkpoint(&mut self, doc: &Document, info: RecoveryInfo, context: serde_json::Value) -> Result<ObjectCheckpoint> {
+        if !safe_key(&info.key) {
+            return Err(FormatError::corrupt("unsafe recovery key"));
+        }
+        if serde_json::to_vec(&context)?.len() > 64 << 10 {
+            return Err(FormatError::LimitExceeded("recovery context exceeds 64 KiB".into()));
+        }
+        let prepared = self.writer.prepare(doc, &SaveOptions::default())?;
+        if prepared.manifest.len() as u64 > MAX_DESCRIPTOR
+            || prepared.decoded_bytes > LoadOptions::default().max_total_bytes
+            || prepared.objects.values().any(|object| matches!(object, store::Object::Blob(blob) if blob.len() > LoadOptions::default().max_blob_bytes))
+        {
+            return Err(FormatError::LimitExceeded("recovery state exceeds restore limits".into()));
+        }
+        let live: Vec<String> = prepared.objects.keys().cloned().collect();
+        let objects = prepared.objects.iter().filter(|(name, _)| !self.stored.contains(*name)).map(|(name, object)| (name.clone(), object.compressed())).collect();
+        let current = String::from_utf8(prepared.manifest).map_err(|_| FormatError::corrupt("invalid UTF-8 manifest"))?;
+        let history = History::default().checkpoint();
+        let checkpoint = Checkpoint {
+            version: 1,
+            current,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            current_label: history.current_label,
+            current_layers: history.current_layers.into(),
+            max_states: history.max_states,
+            max_bytes: history.max_bytes,
+        };
+        let descriptor = serde_json::to_vec(&Descriptor { info, checkpoint: Some(checkpoint), context })?;
+        if descriptor.len() as u64 > MAX_DESCRIPTOR {
+            return Err(FormatError::LimitExceeded("recovery checkpoint is too large".into()));
+        }
+        Ok(ObjectCheckpoint { descriptor, objects, live })
+    }
+
+    /// A checkpoint's objects and descriptor are stored: later checkpoints skip `live`.
+    pub fn committed(&mut self, live: Vec<String>) {
+        self.stored = live.into_iter().collect();
+    }
+
+    /// What the storage holds is unknown (a write failed): the next checkpoint writes everything.
+    pub fn forget(&mut self) {
+        self.stored.clear();
+    }
+}
+
+/// What a stored [`ObjectCheckpoint`] descriptor describes (for listing; nothing is decoded).
+pub fn object_checkpoint_info(descriptor: &[u8]) -> Result<RecoveryInfo> {
+    if descriptor.len() as u64 > MAX_DESCRIPTOR {
+        return Err(FormatError::LimitExceeded("recovery descriptor too large".into()));
+    }
+    #[derive(Deserialize)]
+    struct Head {
+        #[serde(flatten)]
+        info: RecoveryInfo,
+    }
+    let head: Head = serde_json::from_slice(descriptor)?;
+    if !safe_key(&head.info.key) {
+        return Err(FormatError::corrupt("unsafe recovery key"));
+    }
+    Ok(head.info)
+}
+
+/// Loads the document of a stored [`ObjectCheckpoint`] from its descriptor and its objects (by
+/// name), with its history and view context.
+pub fn recover_object_checkpoint(descriptor: &[u8], objects: &HashMap<String, Vec<u8>>) -> Result<(Document, HistoryCheckpoint, serde_json::Value)> {
+    if descriptor.len() as u64 > MAX_DESCRIPTOR {
+        return Err(FormatError::LimitExceeded("recovery descriptor too large".into()));
+    }
+    let descriptor: Descriptor = serde_json::from_slice(descriptor)?;
+    if !safe_key(&descriptor.info.key) {
+        return Err(FormatError::corrupt("unsafe recovery key"));
+    }
+    if serde_json::to_vec(&descriptor.context)?.len() > 64 << 10 {
+        return Err(FormatError::LimitExceeded("recovery context exceeds 64 KiB".into()));
+    }
+    let checkpoint = descriptor.checkpoint.ok_or_else(|| FormatError::corrupt("recovery descriptor has no checkpoint"))?;
+    if checkpoint.version != 1 {
+        return Err(FormatError::Unsupported("newer recovery checkpoint version".into()));
+    }
+    struct Memory<'a> {
+        manifest: String,
+        objects: &'a HashMap<String, Vec<u8>>,
+    }
+    impl ByteSource for Memory<'_> {
+        fn get(&self, path: &str, max: usize) -> Result<Vec<u8>> {
+            let bytes = if path == store::MANIFEST { self.manifest.as_bytes() } else { self.objects.get(path).ok_or_else(|| FormatError::corrupt(format!("missing `{path}`")))? };
+            if bytes.len() > max {
+                return Err(FormatError::LimitExceeded(format!("`{path}` exceeds its size limit")));
+            }
+            Ok(bytes.to_vec())
+        }
+    }
+    let doc = store::load(&Memory { manifest: checkpoint.current, objects }, &LoadOptions::default())?;
+    Ok((doc, History::default().checkpoint(), descriptor.context))
+}
+
+#[cfg(test)]
+mod object_tests {
+    use super::*;
+    use photocraft_doc::{Color, ColorMode, Layer, SampleType, Size};
+
+    fn info(key: &str, revision: u64) -> RecoveryInfo {
+        RecoveryInfo { key: key.into(), document_name: "Page 1".into(), original_path: None, saved_at: 1_700_000_000, revision }
+    }
+
+    fn doc() -> Document {
+        let mut doc = Document::new("Page 1", Size::new(300, 200), ColorMode::Rgb, SampleType::U8);
+        let mut l = Layer::raster("ink", doc.pixel_format());
+        l.surface_mut().unwrap().fill_rect(photocraft_geom::Rect::new(10, 10, 120, 90), &[0.2, 0.4, 0.8, 1.0]);
+        doc.layers.push(l);
+        doc.layers.push(Layer::raster("empty", doc.pixel_format()));
+        let _ = Color::BLACK;
+        doc
+    }
+
+    /// Store objects then descriptor, read them back: the same layers and pixels, and the
+    /// second checkpoint after a small edit writes only the changed tile.
+    #[test]
+    fn object_checkpoints_round_trip_and_write_only_new_objects() {
+        let mut saver = ObjectAutosaver::default();
+        let mut d = doc();
+        let first = saver.checkpoint(&d, info("web-a-1", 3), serde_json::json!({"active": true})).unwrap();
+        assert_eq!(first.objects.len(), first.live.len(), "a first checkpoint writes every object");
+        let mut store: HashMap<String, Vec<u8>> = first.objects.into_iter().collect();
+        saver.committed(first.live);
+        assert_eq!(object_checkpoint_info(&first.descriptor).unwrap(), info("web-a-1", 3));
+        let (back, history, context) = recover_object_checkpoint(&first.descriptor, &store).unwrap();
+        assert_eq!(back.layers.len(), 2);
+        assert_eq!(back.layers[0].surface().unwrap().pixel(20, 20), d.layers[0].surface().unwrap().pixel(20, 20));
+        assert!(history.undo.is_empty());
+        assert_eq!(context["active"], true);
+        // A dab in one corner: one tile changes.
+        d.layers[0].surface_mut().unwrap().fill_rect(photocraft_geom::Rect::new(0, 0, 4, 4), &[1.0, 0.0, 0.0, 1.0]);
+        let second = saver.checkpoint(&d, info("web-a-1", 4), serde_json::Value::Null).unwrap();
+        assert_eq!(second.objects.len(), 1, "{:?}", second.objects.iter().map(|o| &o.0).collect::<Vec<_>>());
+        store.extend(second.objects);
+        store.retain(|name, _| second.live.contains(name));
+        let (back, _, _) = recover_object_checkpoint(&second.descriptor, &store).unwrap();
+        assert_eq!(back.layers[0].surface().unwrap().pixel(1, 1), d.layers[0].surface().unwrap().pixel(1, 1));
+        // A missing object is an error, not a blank layer.
+        store.clear();
+        assert!(recover_object_checkpoint(&second.descriptor, &store).is_err());
+    }
+
+    #[test]
+    fn unsafe_keys_are_refused() {
+        let mut saver = ObjectAutosaver::default();
+        assert!(saver.checkpoint(&doc(), info("../x", 1), serde_json::Value::Null).is_err());
+    }
+}

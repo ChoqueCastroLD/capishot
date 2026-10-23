@@ -3613,3 +3613,19 @@ curves	Smooth	Haluskan
 	1×	1×
 	1.5×	1.5×
 	2×	2×
+# Crash recovery (recovery_ui, web autosave)
+	Recover	Pulihkan
+	Discard	Buang
+	Later	Nanti
+	Recover Documents	Pulihkan Dokumen
+	Recover Documents…	Pulihkan Dokumen…
+	There are no documents to recover.	Tidak ada dokumen untuk dipulihkan.
+	Capishot didn't close properly last time. These documents had unsaved changes:	Capishot tidak ditutup dengan benar terakhir kali. Dokumen ini memiliki perubahan yang belum disimpan:
+	These documents had unsaved changes that were never saved:	Dokumen ini memiliki perubahan yang tidak pernah disimpan:
+	Saved {when}	Disimpan {when}
+	Autosaved {when}	Disimpan otomatis {when}
+	just now	baru saja
+@plural	{n} min ago|{n} min ago	{n} menit lalu
+@plural	{n} hour ago|{n} hours ago	{n} jam lalu
+@plural	{n} day ago|{n} days ago	{n} hari lalu
+@plural	Recover {n} document|Recover {n} documents	Pulihkan {n} dokumen

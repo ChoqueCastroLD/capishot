@@ -4367,3 +4367,19 @@ curves	Smooth	Vloeiend maken
 	1×	1×
 	1.5×	1.5×
 	2×	2×
+# Crash recovery (recovery_ui, web autosave)
+	Recover	Herstellen
+	Discard	Verwerpen
+	Later	Later
+	Recover Documents	Documenten herstellen
+	Recover Documents…	Documenten herstellen…
+	There are no documents to recover.	Er zijn geen documenten om te herstellen.
+	Capishot didn't close properly last time. These documents had unsaved changes:	Capishot is de vorige keer niet goed afgesloten. Deze documenten hadden niet-opgeslagen wijzigingen:
+	These documents had unsaved changes that were never saved:	Deze documenten hadden wijzigingen die nooit zijn opgeslagen:
+	Saved {when}	Opgeslagen {when}
+	Autosaved {when}	Automatisch opgeslagen {when}
+	just now	zojuist
+@plural	{n} min ago|{n} min ago	{n} min geleden|{n} min geleden
+@plural	{n} hour ago|{n} hours ago	{n} uur geleden|{n} uur geleden
+@plural	{n} day ago|{n} days ago	{n} dag geleden|{n} dagen geleden
+@plural	Recover {n} document|Recover {n} documents	{n} document herstellen|{n} documenten herstellen

@@ -117,6 +117,9 @@ pub fn fall_back(app: &mut PhotocraftApp, fault: &photocraft_gpu::Fault) {
     app.perf.gpu_info.canvas = "cpu".into();
     app.perf.gpu_info.lost = Some(fault.to_string());
     let title = if fault.is_lost() { LOST_MESSAGE } else { ERROR_MESSAGE };
+    // Unsaved work goes to crash recovery now, not at the next autosave: a lost device is often
+    // the start of a crash (the browser may drop the tab next).
+    crate::prefs_ui::autosave_now(app);
     queue_fallback_notice(app, fault.to_string());
     app.ui.status = tl!(title).to_string();
     app.ui.status_error = true;

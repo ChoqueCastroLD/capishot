@@ -4308,3 +4308,19 @@ curves	Smooth	Εξομάλυνση
 	1×	1×
 	1.5×	1.5×
 	2×	2×
+# Crash recovery (recovery_ui, web autosave)
+	Recover	Ανάκτηση
+	Discard	Απόρριψη
+	Later	Αργότερα
+	Recover Documents	Ανάκτηση εγγράφων
+	Recover Documents…	Ανάκτηση εγγράφων…
+	There are no documents to recover.	Δεν υπάρχουν έγγραφα για ανάκτηση.
+	Capishot didn't close properly last time. These documents had unsaved changes:	Το Capishot δεν έκλεισε σωστά την τελευταία φορά. Αυτά τα έγγραφα είχαν μη αποθηκευμένες αλλαγές:
+	These documents had unsaved changes that were never saved:	Αυτά τα έγγραφα είχαν αλλαγές που δεν αποθηκεύτηκαν ποτέ:
+	Saved {when}	Αποθηκεύτηκε {when}
+	Autosaved {when}	Αυτόματη αποθήκευση {when}
+	just now	μόλις τώρα
+@plural	{n} min ago|{n} min ago	πριν από {n} λεπτό|πριν από {n} λεπτά
+@plural	{n} hour ago|{n} hours ago	πριν από {n} ώρα|πριν από {n} ώρες
+@plural	{n} day ago|{n} days ago	πριν από {n} ημέρα|πριν από {n} ημέρες
+@plural	Recover {n} document|Recover {n} documents	Ανάκτηση {n} εγγράφου|Ανάκτηση {n} εγγράφων
