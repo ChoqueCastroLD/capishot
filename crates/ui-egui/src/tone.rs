@@ -170,7 +170,7 @@ fn composite_bins(doc: &Document, source: HistSource, space: ToneSpace, h: &mut 
 }
 
 /// Bin-wise sum of two sets of histograms (saturating: a hostile canvas can exceed `u32`).
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
 fn add_bins(mut a: Vec<[u32; 256]>, b: Vec<[u32; 256]>) -> Vec<[u32; 256]> {
     for (dst, src) in a.iter_mut().zip(&b) {
         for (x, y) in dst.iter_mut().zip(src) {
