@@ -705,9 +705,12 @@ fn save_for_web(app: &mut PhotocraftApp, p: Value) -> Result<Value, String> {
         app.ui.status_error = true;
     })?;
     app.sync_views();
-    app.ui.status =
-        crate::i18n::trn(crate::i18n::current(), r["files"].as_array().map_or(0, Vec::len) as u64, "Saved for Web: {n} file", "Saved for Web: {n} files");
-    app.ui.status_error = false;
+    // A background export says so when it lands.
+    if r.get("pending").is_none() {
+        app.ui.status =
+            crate::i18n::trn(crate::i18n::current(), r["files"].as_array().map_or(0, Vec::len) as u64, "Saved for Web: {n} file", "Saved for Web: {n} files");
+        app.ui.status_error = false;
+    }
     Ok(r)
 }
 
@@ -716,6 +719,31 @@ fn download_for_web(app: &mut PhotocraftApp, mut p: Value) -> Result<Value, Stri
     // Browser downloads have no directory hierarchy. Keep the HTML's image and spacer URLs
     // beside the downloaded page, matching the names handed to the platform service.
     p["imagesFolder"] = json!("");
+    // Rendered and encoded in the background: the page keeps drawing.
+    if crate::jobs_ui::exports_in_background(app) {
+        let job = web_cmds::prepare_save_for_web(&mut app.session, &p).map_err(|e| e.to_string())?;
+        let result: std::sync::Arc<std::sync::Mutex<Value>> = std::sync::Arc::default();
+        let out = std::sync::Arc::clone(&result);
+        let path = p.get("path").and_then(Value::as_str).unwrap_or("").to_string();
+        return crate::jobs_ui::produce_files(
+            app,
+            &path,
+            WEB_COMMAND,
+            tl!("Save for Web (Legacy)…"),
+            move |_| {
+                let (files, r) = job.run().map_err(|e| e.to_string())?;
+                *out.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = r;
+                Ok(files.into_iter().map(|(path, bytes)| crate::jobs_ui::Produced { path, bytes, warnings: Vec::new() }).collect())
+            },
+            move |app, _| {
+                web_cmds::SaveForWeb::finish(&mut app.session, &p);
+                let r = std::mem::take(&mut *result.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+                app.ui.status = crate::i18n::trn(crate::i18n::current(), r["files"].as_array().map_or(0, Vec::len) as u64, "Saved for Web: {n} file", "Saved for Web: {n} files");
+                app.ui.status_error = false;
+                Ok(r)
+            },
+        );
+    }
     let write = app.services.write.as_mut().ok_or("no download service")?;
     web_cmds::save_for_web_with_writer(&mut app.session, &p, &mut |path, bytes| write(path, bytes).map_err(photocraft_engine::EngineError::Other))
         .map_err(|e| e.to_string())

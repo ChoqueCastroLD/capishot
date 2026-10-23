@@ -7778,6 +7778,7 @@ dependencies = [
  "sys-locale",
  "toml",
  "unicode-bidi",
+ "wasm_sync",
  "winsafe",
 ]
 

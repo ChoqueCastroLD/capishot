@@ -1139,6 +1139,8 @@ fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig
         })),
         // Embedded in Photopea's way with a save server: documents in its formats go there.
         write: Some(Box::new(move |path: &str, bytes: &[u8]| deliver(photopea.as_ref(), path, bytes))),
+        // Exports encoded in the background count in the usage statistics like inline saves.
+        file_saved: Some(Box::new(crate::usage_stats::doc_saved_stats)),
         // A download may be cancelled and never reports back: it doesn't save the document.
         write_unconfirmed: true,
         encode_png: Some(Box::new(|w, h, rgba| {

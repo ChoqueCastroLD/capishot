@@ -52,7 +52,13 @@ pub fn key_of(letter: char) -> Option<Key> {
     if letter == '\0' {
         return None;
     }
-    Key::from_name(&letter.to_string())
+    // Asked for every tool on every frame (shortcut handling): ASCII letters come from a table
+    // built once instead of parsing a key name each time.
+    static ASCII: std::sync::OnceLock<[Option<Key>; 128]> = std::sync::OnceLock::new();
+    match ASCII.get_or_init(|| std::array::from_fn(|i| char::from_u32(i as u32).and_then(|c| Key::from_name(&c.to_string())))).get(letter as usize) {
+        Some(k) => *k,
+        None => Key::from_name(&letter.to_string()),
+    }
 }
 
 /// Is `k` some tool's single-key shortcut?

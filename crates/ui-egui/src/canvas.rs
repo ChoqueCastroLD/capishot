@@ -1302,6 +1302,14 @@ pub fn navigator_waits_for_gpu(_app: &PhotocraftApp, _idx: usize, _ctx: &egui::C
     false
 }
 
+/// A Navigator image composited on the worker pool, for the document state `snapshot` with the
+/// preview `key` (see [`navigator_texture`]).
+pub(crate) struct NavigatorPending {
+    snapshot: std::sync::Weak<Document>,
+    key: u64,
+    image: std::sync::Arc<wasm_sync::Mutex<Option<egui::ColorImage>>>,
+}
+
 pub fn navigator_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize) -> Option<egui::TextureId> {
     // Keyed by the document snapshot, not its revision: selecting a layer changes no pixels.
     let (snapshot, id, revision, last_damage) =
@@ -1354,7 +1362,35 @@ pub fn navigator_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usiz
         app.navigator_textures.insert(id, (snapshot, preview_key, revision, t.clone()));
         return Some(t.id());
     }
-    let image = display_image(display.as_deref(), &photocraft_compose::thumbnail_buffer(&doc, NAVIGATOR_SIDE));
+    // The browser threads build composites the whole thumbnail on its worker pool: the panel keeps
+    // its image (or none yet) for the frames that takes instead of the page waiting for it.
+    let image = if crate::jobs_ui::POOL_THREADS {
+        let pending = app.navigator_pending.get(&id).filter(|p| p.snapshot.ptr_eq(&snapshot) && p.key == preview_key);
+        match pending.map(|p| p.image.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take()) {
+            Some(Some(image)) => {
+                app.navigator_pending.remove(&id);
+                image
+            }
+            Some(None) => {
+                ctx.request_repaint_after(std::time::Duration::from_millis(16));
+                return cached.map(|(_, _, _, t)| t.id());
+            }
+            None => {
+                let slot: std::sync::Arc<wasm_sync::Mutex<Option<egui::ColorImage>>> = std::sync::Arc::default();
+                let out = std::sync::Arc::clone(&slot);
+                let (doc, display) = (doc.clone(), display.clone());
+                crate::jobs_ui::on_pool(move || {
+                    let image = display_image(display.as_deref(), &photocraft_compose::thumbnail_buffer(&doc, NAVIGATOR_SIDE));
+                    *out.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(image);
+                });
+                app.navigator_pending.insert(id, NavigatorPending { snapshot, key: preview_key, image: slot });
+                ctx.request_repaint_after(std::time::Duration::from_millis(16));
+                return cached.map(|(_, _, _, t)| t.id());
+            }
+        }
+    } else {
+        display_image(display.as_deref(), &photocraft_compose::thumbnail_buffer(&doc, NAVIGATOR_SIDE))
+    };
     let tex = match cached {
         Some((_, _, _, mut t)) => {
             t.set(image, TextureOptions::LINEAR);
