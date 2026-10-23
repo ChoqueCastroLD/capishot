@@ -70,7 +70,7 @@ pub(super) fn install_dialog(app: &mut PhotocraftApp) {
         return;
     }
     // The dialog never blocks the frame (`file_dialog`); the install starts once it answers.
-    if let Err(e) = app.pick_folder(|app, dir| {
+    if let Err(e) = app.ask_folder(|app, dir| {
         install_path(app, &dir);
         Ok(Value::Null)
     }) && e != crate::file_dialog::CANCELLED

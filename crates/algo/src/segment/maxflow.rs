@@ -23,6 +23,12 @@ const INF_DIST: u32 = u32::MAX;
 /// Residual capacities at or below this count as saturated (guards against float round-off
 /// leaving tiny positive residuals that would cause long chains of negligible augmentations).
 const EPS: f32 = 1e-5;
+/// How many steps the max-flow loops take between asks whether to stop.
+const CANCEL_EVERY: u32 = 1024;
+
+fn never() -> bool {
+    false
+}
 
 /// A directed graph with source/sink terminal capacities.
 #[derive(Clone, Debug, Default)]
@@ -42,9 +48,6 @@ pub struct Graph {
     r_cap: Vec<f32>,
     flow: f64,
 }
-
-/// Solver steps between two asks of a [`Graph::maxflow_until`] stop callback.
-pub(super) const STOP_EVERY: usize = 1024;
 
 impl Graph {
     /// A graph with `nodes` nodes and room for `edges` undirected edge pairs.
@@ -113,36 +116,35 @@ impl Graph {
 
     /// Computes the maximum flow (= minimum cut capacity).
     pub fn maxflow(&mut self) -> f64 {
-        self.maxflow_until(&|| false).unwrap_or(self.flow)
+        self.maxflow_with(&never).unwrap_or(self.flow)
     }
 
-    /// [`Graph::maxflow`] that gives up, returning `None` with the graph left mid-solve, once
-    /// `stop` says so (asked every [`STOP_EVERY`] steps). Until then it does exactly the same
-    /// work, so a finished solve gives the same flow and cut.
-    pub fn maxflow_until(&mut self, stop: &dyn Fn() -> bool) -> Option<f64> {
+    /// [`Graph::maxflow`] that stops when `cancel` returns true (asked every few thousand steps):
+    /// `None` then, and the cut is meaningless. Not cancelled, it does exactly what
+    /// [`Graph::maxflow`] does.
+    pub fn maxflow_with(&mut self, cancel: &dyn Fn() -> bool) -> Option<f64> {
         if self.node_count() >= 4096 {
             let mut source = false;
             let mut sink = false;
             for &capacity in &self.tr_cap {
                 if !capacity.is_finite() {
-                    return self.bk(stop);
+                    return self.bk(cancel);
                 }
                 source |= capacity > EPS;
                 sink |= capacity < -EPS;
             }
             if source && sink && self.r_cap.iter().all(|v| v.is_finite() && *v >= 0.0) {
-                return self.push_relabel(stop);
+                return self.push_relabel(cancel);
             }
         }
-        self.bk(stop)
+        self.bk(cancel)
     }
 
     pub(super) fn maxflow_bk(&mut self) -> f64 {
-        self.bk(&|| false).unwrap_or(self.flow)
+        self.bk(&never).unwrap_or(self.flow)
     }
 
-    /// Boykov–Kolmogorov augmenting paths; `None` if `stop` ended it early.
-    fn bk(&mut self, stop: &dyn Fn() -> bool) -> Option<f64> {
+    fn bk(&mut self, cancel: &dyn Fn() -> bool) -> Option<f64> {
         let n = self.node_count();
         let mut queue: VecDeque<u32> = VecDeque::new();
         let mut orphans: VecDeque<u32> = VecDeque::new();
@@ -160,10 +162,10 @@ impl Graph {
             }
         }
         let mut time = 0u32;
-        let mut steps = 0usize;
+        let mut steps = 0u32;
         while let Some(i) = queue.pop_front() {
-            steps += 1;
-            if steps.is_multiple_of(STOP_EVERY) && stop() {
+            steps = steps.wrapping_add(1);
+            if steps.is_multiple_of(CANCEL_EVERY) && cancel() {
                 return None;
             }
             let i = i as usize;

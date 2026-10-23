@@ -33,15 +33,15 @@ pub struct CloneSource {
     pub rotation: f64,
     pub flip_h: bool,
     pub flip_v: bool,
-    /// The panel's link between W and H (Maintain Aspect Ratio): changing one scales the other
+    /// The panel's W/H link (Maintain aspect ratio): setting one of W and H scales the other
     /// by the same factor.
     #[serde(default)]
-    pub link: bool,
+    pub linked: bool,
 }
 
 impl Default for CloneSource {
     fn default() -> Self {
-        CloneSource { source: None, anchor: None, layer: None, scale: [100.0, 100.0], rotation: 0.0, flip_h: false, flip_v: false, link: false }
+        CloneSource { source: None, anchor: None, layer: None, scale: [100.0, 100.0], rotation: 0.0, flip_h: false, flip_v: false, linked: false }
     }
 }
 
@@ -60,8 +60,7 @@ impl CloneSource {
     fn to_json(&self, i: usize) -> Value {
         json!({
             "index": i, "source": self.source, "anchor": self.anchor, "offset": self.offset(), "layer": self.layer,
-            "width": self.scale[0], "height": self.scale[1], "rotation": self.rotation, "flipH": self.flip_h, "flipV": self.flip_v,
-            "link": self.link,
+            "width": self.scale[0], "height": self.scale[1], "linked": self.linked, "rotation": self.rotation, "flipH": self.flip_h, "flipV": self.flip_v,
         })
     }
 }
@@ -201,6 +200,25 @@ pub fn resolve(s: &Session, p: &Value, first: (f64, f64), cmd: &str) -> Result<(
     Ok((Mapping { source: src, anchor, m }, aligned.then_some([anchor.0, anchor.1])))
 }
 
+/// The Clone Source overlay's blend mode applied to one pixel: the source `src` over the image
+/// under the brush `dst`, both straight RGBA. Where the image is transparent the source shows
+/// unchanged; the result keeps the source's alpha (the overlay's opacity applies on top).
+/// Unknown modes draw as Normal.
+pub fn overlay_blend(mode: &str, src: [f32; 4], dst: [f32; 4]) -> [f32; 4] {
+    let f: fn(f32, f32) -> f32 = match mode {
+        "darken" => f32::min,
+        "lighten" => f32::max,
+        "difference" => |s, d| (s - d).abs(),
+        _ => return src,
+    };
+    let a = dst[3].clamp(0.0, 1.0);
+    let mut out = src;
+    for (o, (&s, &d)) in out.iter_mut().zip(src.iter().zip(&dst)).take(3) {
+        *o = s + (f(s, d) - s) * a;
+    }
+    out
+}
+
 /// Bilinear resample of `src` (covering [`Mapping::source_rect`]) onto `dst`, interpolating
 /// premultiplied by the alpha channel `alpha` when there is one. Outside `src` is transparent.
 pub fn resample(src: &Region, dst: Rect, map: &Mapping, alpha: Option<usize>) -> Region {
@@ -294,24 +312,27 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         slot.anchor = Some(a);
         slot.source = Some([a[0] + dx, a[1] + dy]);
     }
-    if let Some(b) = p.get("link").and_then(Value::as_bool) {
-        slot.link = b;
-    }
     if let Some(a) = p.get("scale").and_then(Value::as_array) {
         slot.scale = [a.first().and_then(Value::as_f64).unwrap_or(100.0), a.get(1).and_then(Value::as_f64).unwrap_or(100.0)];
     }
-    let num = |k: &str| p.get(k).and_then(Value::as_f64).filter(|v| v.is_finite());
-    match (num("width"), num("height")) {
-        // Linked: one of W/H changes the other by the same factor (a sign is a flip and stays).
-        (Some(w), None) if slot.link => slot.scale = linked_scale(slot.scale, 0, w),
-        (None, Some(h)) if slot.link => slot.scale = linked_scale(slot.scale, 1, h),
-        (w, h) => {
-            if let Some(w) = w {
-                slot.scale[0] = w;
-            }
-            if let Some(h) = h {
-                slot.scale[1] = h;
-            }
+    if let Some(b) = p.get("linked").and_then(Value::as_bool) {
+        slot.linked = b;
+    }
+    let num = |k: &str| p.get(k).and_then(Value::as_f64);
+    let before = slot.scale;
+    let (w, h) = (num("width"), num("height"));
+    if let Some(w) = w {
+        slot.scale[0] = w;
+    }
+    if let Some(h) = h {
+        slot.scale[1] = h;
+    }
+    // Linked W/H keep their ratio: the field that was not given follows the one that was.
+    if slot.linked {
+        match (w, h) {
+            (Some(w), None) if before[0].abs() > 1e-9 => slot.scale[1] = before[1] * w / before[0],
+            (None, Some(h)) if before[1].abs() > 1e-9 => slot.scale[0] = before[0] * h / before[1],
+            _ => {}
         }
     }
     if slot.scale.iter().any(|v| !(1.0..=1000.0).contains(&v.abs())) {
@@ -333,15 +354,6 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         s.presets.clone.active = i;
     }
     Ok(s.presets.clone.slots[i].to_json(i))
-}
-
-/// W/H after setting side `k` to `v` with the link on: the other side scales by the same factor.
-fn linked_scale(scale: [f64; 2], k: usize, v: f64) -> [f64; 2] {
-    let (old, other) = (scale[k], scale[1 - k]);
-    let mut out = scale;
-    out[k] = v;
-    out[1 - k] = if old.abs() > 1e-9 { other * (v / old).abs() } else { other.signum() * v.abs() };
-    out
 }
 
 fn reset_transform(s: &mut Session, p: &Value) -> Result<Value> {
@@ -385,7 +397,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Clone Sources",
             menu: &[],
             shortcut: None,
-            params: "{} → {active,sources:[{index,source,anchor,offset,layer,width,height,rotation,flipH,flipV,link}],overlay}",
+            params: "{} → {active,sources:[{index,source,anchor,offset,layer,width,height,linked,rotation,flipH,flipV}],overlay}",
             enabled: always,
             run: list,
             journal: false,
@@ -405,7 +417,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Set Clone Source",
             menu: &[],
             shortcut: None,
-            params: r##"{"index":0..4?=active,"source":[x,y]? (⌥-click; re-pairs with the next stroke),"offset":[dx,dy]?,"width":%?,"height":%?|"scale":[w%,h%]?,"rotation":deg?,"flipH":bool?,"flipV":bool?,"link":bool? (W/H linked: width or height alone scales both),"layer":id?,"clear":bool?,"select":bool=true}"##,
+            params: r##"{"index":0..4?=active,"source":[x,y]? (⌥-click; re-pairs with the next stroke),"offset":[dx,dy]?,"width":%?,"height":%?|"scale":[w%,h%]?,"linked":bool? (W/H link: a lone width or height scales the other by the same factor),"rotation":deg?,"flipH":bool?,"flipV":bool?,"layer":id?,"clear":bool?,"select":bool=true}"##,
             enabled: always,
             run: set,
             journal: true,
@@ -451,27 +463,26 @@ mod tests {
     }
 
     #[test]
-    fn linked_width_and_height_scale_together() {
+    fn linked_width_and_height_keep_their_ratio() {
         let mut s = Session::new();
-        s.execute("cloneSource.set", json!({"source": [10, 10], "width": 120, "height": 60})).unwrap();
-        // Unlinked: each side on its own.
-        let r = s.execute("cloneSource.set", json!({"width": 150})).unwrap();
-        assert_eq!((r["width"].as_f64(), r["height"].as_f64()), (Some(150.0), Some(60.0)));
-        // Linked: the other side follows by the same factor, a flip keeps its sign.
-        s.execute("cloneSource.set", json!({"link": true, "height": -60})).unwrap();
-        let r = s.execute("cloneSource.set", json!({"width": 300})).unwrap();
-        assert_eq!((r["width"].as_f64(), r["height"].as_f64(), r["link"].as_bool()), (Some(300.0), Some(-120.0), Some(true)));
-        let r = s.execute("cloneSource.set", json!({"height": -60})).unwrap();
-        assert_eq!((r["width"].as_f64(), r["height"].as_f64()), (Some(150.0), Some(-60.0)));
-        // Both given: both taken as they are; Reset Transform keeps the link.
-        let r = s.execute("cloneSource.set", json!({"width": 100, "height": 50})).unwrap();
-        assert_eq!((r["width"].as_f64(), r["height"].as_f64()), (Some(100.0), Some(50.0)));
-        let r = s.execute("cloneSource.resetTransform", json!({})).unwrap();
-        assert_eq!((r["width"].as_f64(), r["height"].as_f64(), r["link"].as_bool()), (Some(100.0), Some(100.0), Some(true)));
-        // Clamped like any scale; a zero side can't divide.
-        assert_eq!(linked_scale([0.0, 50.0], 0, 200.0), [200.0, 200.0]);
-        let r = s.execute("cloneSource.set", json!({"width": 5000})).unwrap();
-        assert_eq!((r["width"].as_f64(), r["height"].as_f64()), (Some(1000.0), Some(1000.0)));
+        s.execute("cloneSource.set", json!({"width": 50, "height": 200})).unwrap();
+        s.execute("cloneSource.set", json!({"width": 100})).unwrap();
+        assert_eq!(s.presets.clone.active().scale, [100.0, 200.0], "unlinked: H stays");
+        let r = s.execute("cloneSource.set", json!({"linked": true, "width": 150})).unwrap();
+        assert_eq!((r["width"].as_f64(), r["height"].as_f64(), r["linked"].as_bool()), (Some(150.0), Some(300.0), Some(true)));
+        s.execute("cloneSource.set", json!({"height": 60})).unwrap();
+        assert_eq!(s.presets.clone.active().scale, [30.0, 60.0], "linked: W follows H");
+    }
+
+    #[test]
+    fn overlay_blend_modes_mix_with_the_image_under_the_brush() {
+        let (src, dst) = ([0.8, 0.2, 0.5, 1.0], [0.3, 0.6, 0.5, 1.0]);
+        let close = |a: [f32; 4], b: [f32; 4]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6);
+        assert_eq!(overlay_blend("normal", src, dst), src);
+        assert!(close(overlay_blend("darken", src, dst), [0.3, 0.2, 0.5, 1.0]));
+        assert!(close(overlay_blend("lighten", src, dst), [0.8, 0.6, 0.5, 1.0]));
+        assert!(close(overlay_blend("difference", src, dst), [0.5, 0.4, 0.0, 1.0]));
+        assert_eq!(overlay_blend("difference", src, [0.3, 0.6, 0.5, 0.0]), src, "a transparent image leaves the source as is");
     }
 
     #[test]

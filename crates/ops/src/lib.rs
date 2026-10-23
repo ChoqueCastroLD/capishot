@@ -30,18 +30,21 @@ pub struct HistoryState {
     has_selection: bool,
     /// The layers targeted when this state was created.
     pub layers: LayerTarget,
+    /// Stable id within its [`History`] (History panel rows and the History Brush's source
+    /// follow it while older states fall off). Never reused.
+    id: u64,
 }
 
 impl HistoryState {
     /// Build a resident recovery state without copying pixel data.
     pub fn from_document(label: impl Into<String>, document: Arc<Document>) -> Self {
-        Self { label: label.into(), has_selection: document.selection.is_some(), document: StoredDocument::Resident(document), layers: LayerTarget::default() }
+        Self { label: label.into(), has_selection: document.selection.is_some(), document: StoredDocument::Resident(document), layers: LayerTarget::default(), id: 0 }
     }
 
     /// Build a lazily restored recovery state. `has_selection` is metadata for
     /// selection menus, which must not read storage merely to draw themselves.
     pub fn from_archive(label: impl Into<String>, has_selection: bool, archive: Arc<dyn ArchivedDocument>) -> Self {
-        Self { label: label.into(), has_selection, document: StoredDocument::Archived(archive), layers: LayerTarget::default() }
+        Self { label: label.into(), has_selection, document: StoredDocument::Archived(archive), layers: LayerTarget::default(), id: 0 }
     }
 
     /// May read storage for a cold state; recovery writers call this on a worker.
@@ -119,6 +122,17 @@ impl StoredDocument {
     }
 }
 
+/// What History panel › Clear History took off the list, kept for its undo.
+#[derive(Clone, Debug)]
+struct Cleared {
+    undo: VecDeque<HistoryState>,
+    redo: Vec<HistoryState>,
+    brush_source: Option<u64>,
+}
+
+/// The undo label of the step [`History::clear_states`] adds (Edit › Undo Clear History).
+pub const CLEAR_HISTORY_LABEL: &str = "Clear History";
+
 #[derive(Clone, Debug)]
 pub struct History {
     /// Past states; the last one is the state *before* the current document.
@@ -134,6 +148,15 @@ pub struct History {
     current_layers: LayerTarget,
     current_archive: Option<Arc<dyn ArchivedDocument>>,
     current_archive_document: Option<std::sync::Weak<Document>>,
+    /// The states History panel › Clear History took off the list, kept so the next undo puts
+    /// them back (Clear History is itself undoable). Any new step drops them.
+    cleared: Option<Box<Cleared>>,
+    /// [`HistoryState::id`] of the current state.
+    current_id: u64,
+    /// The id the next state gets: never reused, so a discarded state's id names no other.
+    next_id: u64,
+    /// The History Brush's source state, set in the History panel (`None`: the default).
+    brush_source: Option<u64>,
 }
 
 impl Default for History {
@@ -171,9 +194,26 @@ impl History {
         if checkpoint.max_states == 0 || checkpoint.max_states > MAX_RECOVERY_STATES {
             return Err("Recovery history state limit must be between 1 and 10000".into());
         }
+        // Ids are per History: number the recovered states afresh, oldest first.
+        let (mut undo, mut redo) = (checkpoint.undo, checkpoint.redo);
+        let mut next_id = 0u64;
+        for state in undo.iter_mut() {
+            state.id = next_id;
+            next_id += 1;
+        }
+        let current_id = next_id;
+        next_id += 1;
+        for state in redo.iter_mut().rev() {
+            state.id = next_id;
+            next_id += 1;
+        }
         Ok(Self {
-            undo: checkpoint.undo.into(),
-            redo: checkpoint.redo,
+            undo: undo.into(),
+            redo,
+            cleared: None,
+            current_id,
+            next_id,
+            brush_source: None,
             current_label: checkpoint.current_label,
             current_layers: checkpoint.current_layers,
             current_archive: None,
@@ -193,6 +233,10 @@ impl History {
             current_layers: LayerTarget::default(),
             current_archive: None,
             current_archive_document: None,
+            cleared: None,
+            current_id: 0,
+            next_id: 1,
+            brush_source: None,
         }
     }
 
@@ -221,27 +265,37 @@ impl History {
     /// Record that `before` was replaced by a new current document via step `label`.
     pub fn record(&mut self, label: impl Into<String>, before: Arc<Document>, layers: LayerTarget) {
         self.clear_current_archive();
+        // A new step forgets what Clear History took off the list.
+        self.cleared = None;
         let prev_label = std::mem::replace(&mut self.current_label, label.into());
         let prev_layers = std::mem::replace(&mut self.current_layers, layers);
+        let prev_id = std::mem::replace(&mut self.current_id, self.next_id);
+        self.next_id = self.next_id.wrapping_add(1);
         self.undo.push_back(HistoryState {
             label: prev_label,
             has_selection: before.selection.is_some(),
             document: StoredDocument::Resident(before),
             layers: prev_layers,
+            id: prev_id,
         });
         self.redo.clear();
         while self.undo.len() > self.max_states {
-            self.undo.pop_front();
+            // The History Brush's source doesn't fall off (as in Photoshop): the next oldest does.
+            let pinned = self.max_states > 1 && self.undo.front().is_some_and(|s| Some(s.id) == self.brush_source);
+            self.undo.remove(usize::from(pinned));
         }
     }
 
     pub fn can_undo(&self) -> bool {
-        !self.undo.is_empty()
+        !self.undo.is_empty() || self.cleared.is_some()
     }
     pub fn can_redo(&self) -> bool {
         !self.redo.is_empty()
     }
     pub fn undo_label(&self) -> Option<&str> {
+        if self.cleared.is_some() {
+            return Some(CLEAR_HISTORY_LABEL);
+        }
         self.can_undo().then_some(self.current_label.as_str())
     }
     pub fn redo_label(&self) -> Option<&str> {
@@ -258,6 +312,14 @@ impl History {
 
     /// Restore first: a failed archive read never moves either history stack.
     pub fn try_undo(&mut self, current: Arc<Document>) -> Result<Option<(Arc<Document>, LayerTarget)>, String> {
+        // Undo Clear History: the cleared states come back; the document doesn't change.
+        if let Some(cleared) = self.cleared.take() {
+            let Cleared { undo, redo, brush_source } = *cleared;
+            self.undo = undo;
+            self.redo = redo;
+            self.brush_source = brush_source;
+            return Ok(Some((current, self.current_layers.clone())));
+        }
         let Some(prev) = self.undo.back() else { return Ok(None) };
         let restored = prev.document.load()?;
         let Some(prev) = self.undo.pop_back() else { return Ok(None) };
@@ -265,7 +327,8 @@ impl History {
         let layers = std::mem::replace(&mut self.current_layers, prev.layers.clone());
         let has_selection = current.selection.is_some();
         let document = self.take_current_document(current);
-        self.redo.push(HistoryState { label, has_selection, document, layers });
+        let id = std::mem::replace(&mut self.current_id, prev.id);
+        self.redo.push(HistoryState { label, has_selection, document, layers, id });
         self.current_archive = match prev.document {
             StoredDocument::Archived(archive) => Some(archive),
             _ => None,
@@ -282,7 +345,8 @@ impl History {
         let layers = std::mem::replace(&mut self.current_layers, next.layers.clone());
         let has_selection = current.selection.is_some();
         let document = self.take_current_document(current);
-        self.undo.push_back(HistoryState { label, has_selection, document, layers });
+        let id = std::mem::replace(&mut self.current_id, next.id);
+        self.undo.push_back(HistoryState { label, has_selection, document, layers, id });
         self.current_archive = match next.document {
             StoredDocument::Archived(archive) => Some(archive),
             _ => None,
@@ -309,6 +373,89 @@ impl History {
         self.try_state(i).ok().flatten()
     }
 
+    /// Id of History panel row `i`: the [`History::entries`] (0 = oldest, then the current state),
+    /// then the redo states, the next redo first ([`History::redo_labels`]). `None` past the end.
+    pub fn row_id(&self, i: usize) -> Option<u64> {
+        let past = self.undo.len();
+        match i.checked_sub(past) {
+            None => self.undo.get(i).map(|s| s.id),
+            Some(0) => Some(self.current_id),
+            Some(k) => self.redo.iter().rev().nth(k - 1).map(|s| s.id),
+        }
+    }
+
+    /// The History panel row of the state with id `id`, if it is still held.
+    pub fn row_of(&self, id: u64) -> Option<usize> {
+        let past = self.undo.len();
+        if id == self.current_id {
+            return Some(past);
+        }
+        if let Some(i) = self.undo.iter().position(|s| s.id == id) {
+            return Some(i);
+        }
+        self.redo.iter().rev().position(|s| s.id == id).map(|k| past + 1 + k)
+    }
+
+    /// Document of History panel row `i` (see [`History::row_id`]); `current` is the current
+    /// document, which the history does not hold. May read scratch storage for a cold state.
+    pub fn row_doc(&self, i: usize, current: &Arc<Document>) -> Option<Arc<Document>> {
+        let past = self.undo.len();
+        match i.checked_sub(past) {
+            None => self.state(i),
+            Some(0) => Some(current.clone()),
+            Some(k) => self.redo.iter().rev().nth(k - 1).and_then(|s| s.document.load().ok()),
+        }
+    }
+
+    /// Make row `i` the History Brush's source (the History panel's source column). It stays on
+    /// that state while older states fall off, and the state itself is kept when it would fall off
+    /// the history by count; `false` if there is no such row.
+    pub fn set_brush_source(&mut self, i: usize) -> bool {
+        let Some(id) = self.row_id(i) else { return false };
+        self.brush_source = Some(id);
+        true
+    }
+
+    /// The History Brush's source row: the oldest state held by default, else the state set with
+    /// [`History::set_brush_source`]. `None` once that state is gone.
+    pub fn brush_source(&self) -> Option<usize> {
+        match self.brush_source {
+            None => Some(0),
+            Some(id) => self.row_of(id),
+        }
+    }
+
+    /// Make the History Brush's source the default again (the oldest state held), pinning no state.
+    pub fn reset_brush_source(&mut self) {
+        self.brush_source = None;
+    }
+
+    /// History panel › Clear History: take every state but the current one off the list without
+    /// changing the document. Unlike [`Self::clear`] (Edit › Purge › Histories) it is undoable:
+    /// the next [`Self::undo`] puts the states back, and the next recorded step forgets them.
+    /// Returns false (and changes nothing) when the current state is the only one.
+    pub fn clear_states(&mut self) -> bool {
+        if self.undo.is_empty() && self.redo.is_empty() {
+            return false;
+        }
+        let undo = std::mem::take(&mut self.undo);
+        let redo = std::mem::take(&mut self.redo);
+        let brush_source = self.brush_source.take();
+        self.cleared = Some(Box::new(Cleared { undo, redo, brush_source }));
+        true
+    }
+
+    /// Whether the last change to the list was Clear History (so undo restores the states).
+    pub fn is_cleared(&self) -> bool {
+        self.cleared.is_some()
+    }
+
+    /// Every state history holds, cleared ones included while Clear History can be undone.
+    fn held_states(&self) -> impl Iterator<Item = &HistoryState> {
+        let cleared = self.cleared.as_deref().into_iter().flat_map(|c| c.undo.iter().chain(c.redo.iter()));
+        self.undo.iter().chain(self.redo.iter()).chain(cleared)
+    }
+
     /// Metadata-only query for menus; never hydrates a cold snapshot.
     pub fn has_past_selection(&self) -> bool {
         self.undo.iter().any(|state| state.has_selection)
@@ -333,9 +480,7 @@ impl History {
     /// Resident snapshots only; this never reads scratch storage.
     pub fn resident_states(&self) -> Vec<Arc<Document>> {
         let mut seen = HashSet::new();
-        self.undo
-            .iter()
-            .chain(self.redo.iter())
+        self.held_states()
             .filter_map(|state| state.document.resident().cloned())
             .chain(self.current_archive.iter().filter_map(|archive| archive.resident().cloned()))
             .filter(|doc| seen.insert(Arc::as_ptr(doc) as usize))
@@ -477,6 +622,9 @@ impl History {
     /// last step can no longer be undone and its pixels are released.
     pub fn purge_last(&mut self) -> bool {
         self.redo.clear();
+        if self.cleared.take().is_some() {
+            return true;
+        }
         self.undo.pop_back().is_some()
     }
 
@@ -503,10 +651,58 @@ impl History {
         }
     }
 
+    /// Forget every past and redo state (Edit › Purge › Histories). The History Brush's source
+    /// goes back to the default.
     pub fn clear(&mut self) {
         self.clear_current_archive();
         self.undo.clear();
         self.redo.clear();
+        self.cleared = None;
+        self.reset_brush_source();
+    }
+
+    /// Bytes only `extra` documents hold (History panel snapshots): not `current`'s and not any
+    /// resident state's. 0 without `extra`, without walking the states.
+    pub fn extra_bytes(&self, current: &Document, extra: &[&Document]) -> usize {
+        if extra.is_empty() {
+            return 0;
+        }
+        let mut seen = HashSet::new();
+        document_bytes(current, &mut seen);
+        for doc in self.resident_states() {
+            document_bytes(&doc, &mut seen);
+        }
+        extra.iter().fold(0usize, |n, d| n.saturating_add(document_bytes(d, &mut seen)))
+    }
+
+    /// [`History::unique_bytes`] less the bytes `keep` documents also hold: what clearing the
+    /// history frees while they stay (Edit › Purge › Histories keeps the snapshots).
+    pub fn unique_bytes_besides(&self, current: &Document, keep: &[&Document]) -> usize {
+        let mut seen = HashSet::new();
+        document_bytes(current, &mut seen);
+        for d in keep {
+            document_bytes(d, &mut seen);
+        }
+        self.resident_states().iter().fold(0usize, |n, doc| n.saturating_add(document_bytes(doc, &mut seen)))
+    }
+
+    /// [`History::trim`] with the bytes only `pinned` documents hold (History panel snapshots)
+    /// counted against the budget too.
+    pub fn trim_with(&mut self, current: &Document, pinned: &[&Document]) -> usize {
+        if pinned.is_empty() {
+            return self.trim(current);
+        }
+        let mut seen = HashSet::new();
+        document_bytes(current, &mut seen);
+        let extra = pinned.iter().fold(0usize, |n, d| n.saturating_add(document_bytes(d, &mut seen)));
+        let budget = self.max_bytes;
+        if budget == 0 {
+            return 0;
+        }
+        self.max_bytes = budget.saturating_sub(extra).max(1);
+        let n = self.trim(current);
+        self.max_bytes = budget;
+        n
     }
 
     /// Approximate unique tile and shared binary-payload bytes held by history.

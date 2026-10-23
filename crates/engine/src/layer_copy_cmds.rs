@@ -179,7 +179,7 @@ fn snapshot(sdoc: &Document, ids: &[LayerId]) -> Result<LayerClip> {
         let src_layer = sdoc.layer(*id).ok_or(EngineError::NoLayer(*id))?;
         let l = src_layer.duplicate();
         // A copied Background arrives as an ordinary layer (the destination keeps its own).
-        if crate::extra_cmds::is_background(src_layer) && sdoc.layers.first().is_some_and(|b| b.id == *id) {
+        if sdoc.is_background(*id) {
             backgrounds.push(l.id);
         }
         copies.layers.push(l);
@@ -266,7 +266,12 @@ fn copy_to_document(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let from = &s.documents()[src];
     let ids = layer_ids(&from.doc, p, from.selected_layers(), CMD)?;
-    let clip = snapshot(&from.doc, &ids)?;
+    let mut clip = snapshot(&from.doc, &ids)?;
+    // One layer: `name` names its copy, in the same step (Duplicate Layer… › As).
+    if let ([one], Some(name)) = (clip.copies.layers.as_mut_slice(), p.get("name").and_then(Value::as_str).filter(|n| !n.is_empty())) {
+        one.name = name.to_string();
+        clip.backgrounds.clear();
+    }
     let label = if ids.len() == 1 { "Duplicate Layer" } else { "Duplicate Layers" };
     land(s, clip, dest, src, &Placement::parse(p)?, label)
 }
@@ -314,6 +319,66 @@ fn paste_enabled(s: &Session) -> std::result::Result<(), String> {
     s.layer_clipboard.as_ref().filter(|c| !c.is_empty()).map(|_| ()).ok_or_else(|| "no layers have been copied".into())
 }
 
+/// `layer.duplicate` with `"document": "new"`: Photoshop's Duplicate Layer… ›
+/// Document: New. A new document the size of the source's canvas holds just the duplicated
+/// layers at their canvas positions (a transparent background elsewhere); the source is
+/// untouched and the new document becomes active. Mode, depth, resolution, profile,
+/// patterns and global light come along so the copies render the same.
+pub(crate) fn duplicate_to_new_document(s: &mut Session, p: &Value) -> Result<Value> {
+    let src = s.active_index().ok_or(EngineError::NoDocument)?;
+    let sdoc = s.documents().get(src).ok_or(EngineError::NoDocument)?.doc.clone();
+    let ids = match crate::commands::explicit_layer(s, p)? {
+        Some(id) => vec![id],
+        None => s.active().ok_or(EngineError::NoDocument)?.selected_layers(),
+    };
+    if let Some(missing) = ids.iter().find(|id| sdoc.layer(**id).is_none()) {
+        return Err(EngineError::NoLayer(*missing));
+    }
+    let ids = crate::layer_multi_cmds::top_level(&sdoc, &ids);
+    if ids.is_empty() {
+        return Err(bad("no layers to copy"));
+    }
+    if !layered(sdoc.mode) {
+        return Err(EngineError::Other(format!("layers can't be duplicated with a {:?} document", sdoc.mode)));
+    }
+    let doc_name = p.get("documentName").and_then(Value::as_str).filter(|n| !n.is_empty()).map(str::to_string).unwrap_or_else(|| format!("{} copy", sdoc.name));
+    let mut nd = Document::new(doc_name, sdoc.size, sdoc.mode, sdoc.depth);
+    nd.resolution_dpi = sdoc.resolution_dpi;
+    nd.icc_profile.clone_from(&sdoc.icc_profile);
+    nd.patterns.clone_from(&sdoc.patterns);
+    nd.global_light = sdoc.global_light;
+    for id in &ids {
+        let mut l = sdoc.layer(*id).ok_or(EngineError::NoLayer(*id))?.duplicate();
+        if ids.len() == 1
+            && let Some(name) = p.get("name").and_then(Value::as_str).filter(|n| !n.is_empty())
+        {
+            l.name = name.to_string();
+        }
+        nd.layers.push(l);
+    }
+    // Contents ids belong to a document: fresh ones keep the copies independent of the
+    // source while preserving sharing within the batch (as `adapt_copies` does).
+    let mut contents = HashMap::new();
+    let smart_ids: Vec<_> = nd.walk().into_iter().filter_map(|(_, _, l)| matches!(l.content, LayerContent::Smart(_)).then_some(l.id)).collect();
+    for id in smart_ids {
+        if let Some(l) = nd.layer_mut(id)
+            && let LayerContent::Smart(sm) = &mut l.content
+        {
+            sm.contents_id = *contents.entry(sm.contents_id).or_insert_with(SmartContentsId::fresh);
+        }
+    }
+    let new_ids: Vec<LayerId> = nd.layers.iter().map(|l| l.id).collect();
+    let index = s.add_document(nd, None);
+    crate::layer_multi_cmds::reselect(s, new_ids.clone(), new_ids.last().copied());
+    let mut out = json!({"document": index, "layers": new_ids.iter().map(|l| l.0).collect::<Vec<_>>()});
+    if let [one] = new_ids.as_slice()
+        && let Some(map) = out.as_object_mut()
+    {
+        map.insert("layer".into(), json!(one.0));
+    }
+    Ok(out)
+}
+
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec {
@@ -321,7 +386,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Copy Layers to Document",
             menu: &[],
             shortcut: None,
-            params: r##"{"document":index (destination),"layers":[id,…]?=the source's selected layers,"source":index?=active,"center":bool=false (centre on the destination's canvas),"at":[x,y]? (centre the copies on this point),"offset":[dx,dy]?=[0,0] (from their place in the source)}"##,
+            params: r##"{"document":index (destination),"layers":[id,…]?=the source's selected layers,"source":index?=active,"center":bool=false (centre on the destination's canvas),"at":[x,y]? (centre the copies on this point),"offset":[dx,dy]?=[0,0] (from their place in the source),"name":str? (one layer: the copy's name)}"##,
             enabled,
             run: copy_to_document,
             journal: true,

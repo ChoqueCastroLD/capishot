@@ -47,13 +47,15 @@ pub const SECONDARY: &[(&str, &str)] =
 
 /// Every key binding, most modifiers first (so ⇧⌘Z wins over ⌘Z), each key owned by one command:
 /// command and shell shortcuts, then the menu catalogue's for live items without their own,
-/// then Edit › Keyboard Shortcuts assignments to any other menu item. D and X
+/// then Edit › Keyboard Shortcuts assignments to any other menu item, then the commands'
+/// alternate keys (#3665: F3 is Copy as well as ⌘C, see
+/// [`photocraft_engine::prefs::ALTERNATE_SHORTCUTS`]), which a main key of another command wins. D and X
 /// (`tools.defaultColors` / `tools.swapColors`) and the fill keys are commands like any other, so
 /// their overrides apply. Held temporary tools (Space…) are not here: see [`crate::hold_keys`].
 pub fn bindings(app: &PhotocraftApp) -> Vec<(String, KeyboardShortcut)> {
     let prefs = app.session.prefs();
     let action_ids: Vec<String> = app.session.actions.list.iter().map(|a| crate::actions::shortcut_id(&a.name)).collect();
-    let actions = action_ids.iter().map(|id| (id.as_str(), prefs.shortcut(id, None)));
+    let actions = action_ids.iter().map(|id| (id.as_str(), prefs.shortcut(id, None).map(str::to_string)));
     // The Keyboard Shortcuts dialog lists Photoshop's Window › <panel> item (`window.panel.*`)
     // in place of the shell command it runs (`window.toggle.*`, see `menus::panel_alias`), so an
     // edit to that row reassigns or removes the shell command's default too (#1272).
@@ -63,8 +65,8 @@ pub fn bindings(app: &PhotocraftApp) -> Vec<(String, KeyboardShortcut)> {
                 crate::menus::panel_alias(k) == Some(id) && crate::menu_catalog::CATALOG.iter().any(|c| c.3 == k.as_str() && c.2.is_some() && c.2 == sc)
             })
     };
-    let ui = crate::menus::UI_COMMANDS.iter().map(|(id, _, _, sc)| (*id, if aliased(id, *sc) { None } else { prefs.shortcut(id, *sc) }));
-    let engine = photocraft_engine::command_specs().iter().map(|c| (c.id, prefs.shortcut(c.id, c.shortcut)));
+    let ui = crate::menus::UI_COMMANDS.iter().map(|(id, _, _, sc)| (*id, if aliased(id, *sc) { None } else { prefs.shortcut(id, *sc).map(str::to_string) }));
+    let engine = photocraft_engine::command_specs().iter().map(|c| (c.id, prefs.shortcut(c.id, c.shortcut).map(str::to_string)));
     let own: std::collections::HashSet<&str> = crate::menus::UI_COMMANDS
         .iter()
         .map(|c| c.0)
@@ -73,7 +75,7 @@ pub fn bindings(app: &PhotocraftApp) -> Vec<(String, KeyboardShortcut)> {
     let catalog = crate::menu_catalog::CATALOG
         .iter()
         .filter(|(_, _, sc, id)| sc.is_some() && !own.contains(id) && crate::menus::is_live(id))
-        .map(|&(_, _, sc, id)| (id, prefs.shortcut(id, sc)));
+        .map(|&(_, _, sc, id)| (id, prefs.shortcut(id, sc).map(str::to_string)));
     let overrides = prefs
         .shortcuts
         .iter()
@@ -84,17 +86,32 @@ pub fn bindings(app: &PhotocraftApp) -> Vec<(String, KeyboardShortcut)> {
                 && !crate::menus::UI_COMMANDS.iter().any(|c| c.0 == id.as_str())
                 && !crate::hold_keys::is_temporary(id)
         })
-        .map(|(id, sc)| (id.as_str(), Some(sc.as_str())));
-    // Photoshop's second shortcuts, kept while the command's main one is the default.
-    let secondary = SECONDARY.iter().filter(|(id, _)| !prefs.shortcuts.contains_key(*id)).map(|&(id, sc)| (id, Some(sc)));
+        .map(|(id, sc)| (id.as_str(), Some(sc.clone())));
     // A key the user assigned in Edit › Keyboard Shortcuts belongs to that command, ahead of any
     // default that still names it (#1272): OK clears the old owner's row, but that row can be
     // another id for the same item, or a default the dialog doesn't list.
-    let mut candidates: Vec<(&str, Option<&str>)> = actions.chain(ui).chain(engine).chain(catalog).chain(overrides).chain(secondary).collect();
-    candidates.sort_by_key(|(id, sc)| !(sc.is_some() && prefs.shortcuts.get(*id).map(String::as_str) == *sc));
+    let mut candidates: Vec<(&str, Option<String>, bool)> = actions
+        .chain(ui)
+        .chain(engine)
+        .chain(catalog)
+        .chain(overrides)
+        .map(|(id, sc)| {
+            let user = sc.is_some() && prefs.shortcuts.get(id) == sc.as_ref();
+            (id, sc, user)
+        })
+        .collect();
+    // Each command's alternates after every main key, the user's ahead of the defaults.
+    let alternate_ids: std::collections::BTreeSet<&str> =
+        photocraft_engine::prefs::ALTERNATE_SHORTCUTS.iter().map(|(id, _)| *id).chain(prefs.alternate_shortcuts.keys().map(String::as_str)).collect();
+    for id in alternate_ids {
+        let main = prefs.shortcut(id, crate::shortcuts::default_shortcut(id).as_deref()).map(str::to_string);
+        let user = prefs.alternate_shortcuts.contains_key(id);
+        candidates.extend(prefs.alternates(id, main.as_deref()).into_iter().map(|k| (id, Some(k), user)));
+    }
+    candidates.sort_by_key(|(_, _, user)| !user);
     let mut all: Vec<(String, KeyboardShortcut)> = Vec::new();
-    for (id, sc) in candidates {
-        let Some(sc) = sc.and_then(parse) else { continue };
+    for (id, sc, _) in candidates {
+        let Some(sc) = sc.as_deref().and_then(parse) else { continue };
         if !all.iter().any(|(_, b)| *b == sc) {
             all.push((id.to_string(), sc));
         }
@@ -204,7 +221,9 @@ fn key_owner(app: &PhotocraftApp, ctx: &egui::Context) -> (bool, usize, bool, bo
 }
 
 /// Keys whose shortcuts follow the key's position, as in Photoshop: ⇧⌘. is ⇧⌘> on a US layout,
-/// but types `:` on Nordic and German ones, so its character would never match.
+/// but types `:` on Nordic and German ones, so its character would never match. Only ⌘ shortcuts
+/// follow the position: a plain `,` or `;` binding (brush hardness on AZERTY, where `;` sits on the
+/// US comma key) must match the character typed.
 const POSITIONAL: [Key; 2] = [Key::Period, Key::Comma];
 
 /// Dispatch this frame's shortcut presses in the order they arrived (⌘Z then ⌘S undoes, then
@@ -225,7 +244,7 @@ pub fn dispatch_pressed(app: &mut PhotocraftApp, ctx: &egui::Context, focus: Foc
         egui::Event::Key { key, physical_key, pressed: true, modifiers, .. } => {
             let by_position = physical_key
                 .filter(|p| POSITIONAL.contains(p))
-                .and_then(|p| table.iter().find(|(_, sc)| sc.logical_key == p && key_matches(sc, p, *modifiers)));
+                .and_then(|p| table.iter().find(|(_, sc)| sc.modifiers.command && sc.logical_key == p && key_matches(sc, p, *modifiers)));
             by_position.or_else(|| table.iter().find(|(_, sc)| key_matches(sc, *key, *modifiers))).map(|(id, _)| (id.clone(), *key == Key::Tab))
         }
         _ => None,
@@ -243,7 +262,7 @@ pub fn dispatch_pressed(app: &mut PhotocraftApp, ctx: &egui::Context, focus: Foc
             // panels instead, #1313): the shortcut took it, so cancel that move.
             ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
         }
-        let id = delete_key_command(app, id);
+        let id = clip_key_command(app, delete_key_command(app, id));
         let owner = key_owner(app, ctx);
         dispatch(app, ctx, &id);
         ran = true;
@@ -259,7 +278,8 @@ pub fn dispatch_pressed(app: &mut PhotocraftApp, ctx: &egui::Context, focus: Foc
 /// type or shape layer the key did nothing. A selection, a single channel or Quick Mask keeps Clear.
 /// With the active layer's mask targeted the key edits the mask, never the layer's pixels: a
 /// selection is filled with the background colour in the mask (Photoshop's Delete on a mask), and
-/// with no selection the mask itself is deleted, as Layer › Layer Mask › Delete.
+/// with no selection the mask itself is deleted, as Layer › Layer Mask › Delete, unless several
+/// layers are selected: then they are deleted.
 fn delete_key_command(app: &PhotocraftApp, id: String) -> String {
     if id != "edit.clear" {
         return id;
@@ -272,7 +292,10 @@ fn delete_key_command(app: &PhotocraftApp, id: String) -> String {
     let solo_mask = colors_off && has_mask && !alpha_on && st.doc.quick_mask.is_none();
     let layer_mask = st.channel_view.target == photocraft_engine::channel_cmds::ChannelTarget::LayerMask;
     let mask = (app.ui.mask_target || solo_mask || layer_mask) && has_mask;
-    if mask && (composite || layer_mask) {
+    // Several selected layers outrank the active one's targeted mask (#4025): a new adjustment
+    // layer targets its mask, so the first press used to delete only that mask.
+    let several = st.selected_layers().len() > 1;
+    if mask && (composite || layer_mask) && !(several && composite && st.doc.selection.is_none()) {
         let cmd = if st.doc.selection.is_some() { "edit.fillBackground" } else { "layer.layerMask.delete" };
         return cmd.into();
     }
@@ -280,6 +303,26 @@ fn delete_key_command(app: &PhotocraftApp, id: String) -> String {
         return id;
     }
     "layer.delete".into()
+}
+
+/// Create Clipping Mask's key (⌥⌘G) releases when there is nothing left to clip, as in Photoshop,
+/// whose Layer menu has one item that reads Create or Release Clipping Mask with the same
+/// shortcut: pressing it again takes the clip off. That is when the layers Create Clipping Mask
+/// would clip are all clipped already: the selected layer, or with several selected, every one
+/// above the lowest.
+pub(crate) fn clip_key_releases(app: &PhotocraftApp) -> bool {
+    let Some(st) = app.session.active() else { return false };
+    let selected = st.selected_layers();
+    let clips = match selected.as_slice() {
+        [] => return false,
+        [one] => std::slice::from_ref(one),
+        [_lowest, above @ ..] => above,
+    };
+    clips.iter().all(|id| st.doc.layer(*id).is_some_and(|l| l.clipped))
+}
+
+fn clip_key_command(app: &PhotocraftApp, id: String) -> String {
+    if id == "layer.createClippingMask" && clip_key_releases(app) { "layer.releaseClippingMask".into() } else { id }
 }
 
 /// Why `id` can't run now (the engine's reason when it has one).
@@ -300,6 +343,7 @@ fn label(id: &str) -> String {
         .map(|c| c.1)
         .or_else(|| crate::menus::UI_COMMANDS.iter().find(|c| c.0 == id).map(|c| c.1))
         .or_else(|| photocraft_engine::commands::find(id).map(|c| c.label))
+        .or_else(|| crate::tool_shortcuts::tool(id).map(|tool| tool.label()))
         .unwrap_or(id)
         .trim_end_matches('…')
         .to_string()
@@ -315,7 +359,8 @@ fn dispatch_shortcut(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str) {
     let command_id = if action.is_some() { "actions.play" } else { id };
     let outcome = if !crate::menus::is_enabled(app, command_id) {
         let why = disabled_reason(app, command_id);
-        app.ui.status = format!("{} is not available: {why}", label(id));
+        let template = "{label} is not available: {reason}";
+        app.ui.status = crate::i18n::fmt(tl!(template), &[("label", crate::i18n::tr_id(crate::i18n::current(), id, &label(id))), ("reason", tl!(&why))]);
         app.ui.status_error = true;
         Outcome::Disabled(why)
     } else if ctx.data(|d| d.get_temp::<bool>(dry_run_id())).unwrap_or(false) {

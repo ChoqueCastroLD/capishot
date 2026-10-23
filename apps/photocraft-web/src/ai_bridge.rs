@@ -561,7 +561,13 @@ impl photocraft_ai_sd::service::GenFill for WebGenFill {
         // Standard and up: WebGPU, the plain worker. Ultra-light also runs on the CPU (the threads
         // worker on cross-origin isolated pages).
         let ultra = matches!(req.tier, photocraft_ai_sd::service::Tier::Ultra | photocraft_ai_sd::service::Tier::Fast);
-        let target = if ultra { self.up.target(req.cpu, req.threads) } else { self.up.target(false, 0).map(|t| Target { threads: false, pool: 0, ..t }) };
+        // Advanced `precision: "f32"` runs on whatever WebGPU adapter there is (a software one
+        // too: slow, for testing), even where Auto wouldn't use the GPU.
+        let target = if ultra {
+            self.up.target(req.cpu, req.threads)
+        } else {
+            self.up.target(false, 0).map(|t| Target { threads: false, pool: 0, cpu: t.cpu && !req.f32, ..t })
+        };
         let Some(target) = target else { return done(Err(SdError::Unavailable(NO_WORKER.into()))) };
         let rgb = Float32Array::from(req.rgb.as_slice());
         let mask = Float32Array::from(req.mask.as_slice());

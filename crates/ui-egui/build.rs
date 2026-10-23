@@ -8,10 +8,10 @@
 //!
 //! A missing or malformed file gives empty tables (or no names) and a warning.
 //!
-//! Also deflates the translation catalogs (`src/i18n/*.tsv`) into `OUT_DIR/i18n/<code>.tsv.deflate`
-//! for `i18n::LANGUAGES`: stored compressed they take ~0.65 MB of the binary instead of ~1.9 MB,
-//! which keeps the web build under its 24 MiB size gate (packaging/web/package.sh). A catalog is
-//! inflated the first time its language is used.
+//! Also packs the translation catalogs (`src/i18n/*.tsv`) into `OUT_DIR/i18n/` for
+//! `i18n::LANGUAGES` (see [`pack_catalogs`]): stored that way they take ~0.5 MB of the binary
+//! instead of ~2.2 MB, which keeps the web build under its 24 MiB size gate
+//! (packaging/web/package.sh). A catalog is unpacked the first time its language is used.
 
 use std::fmt::Write as _;
 
@@ -27,39 +27,107 @@ fn main() {
     if let Err(e) = std::fs::write(&out, generate(&json, &people)) {
         println!("cargo::warning=writing {}: {e}", out.display());
     }
-    deflate_catalogs();
+    pack_catalogs();
 }
 
+/// Whether a catalog line is an entry (`context<TAB>source<TAB>translation`, source and
+/// translation non-empty, as `i18n::catalog::parse_entries` reads it), and its key and translation.
+fn catalog_entry(line: &str) -> Option<(&str, &str)> {
+    if line.starts_with('#') {
+        return None;
+    }
+    let mut cols = line.splitn(3, '\t');
+    let (ctx, src, tr) = (cols.next()?, cols.next()?, cols.next()?);
+    let key = line.get(..ctx.len() + 1 + src.len())?;
+    (!src.is_empty() && !tr.is_empty() && !tr.contains('\t')).then_some((key, tr))
+}
+
+/// Pack every `src/i18n/*.tsv` into `OUT_DIR/i18n/`, losslessly (`i18n::unpack` restores each file
+/// byte for byte). Every catalog repeats the same English sources, so they are stored once:
+///
+/// - `keys.deflate`: every entry's `context<TAB>source`, one per line, in order of first
+///   appearance (the largest catalog first).
+/// - `<code>.tsv.deflate`: the catalog, each entry line replaced by `\x01<translation>` when its key
+///   follows the previous entry's in `keys`, else `\x02<offset><TAB><translation>` (the offset from
+///   there). Other lines are kept; one that starts with \x01, \x02 or \x03 gets a \x03 prefix.
+///
+/// Both are deflated. A catalog that can't be written is a build error (`include_bytes!` would
+/// fail on it anyway, with a less helpful message).
 /// Catalogs compiled in without the `all-catalogs` feature (the web build): the languages most of
 /// its users read. The others are written empty and fetched at run time (`i18n::provide_catalog`).
 const ALWAYS_COMPILED_IN: [&str; 2] = ["es.tsv", "pt-br.tsv"];
 
-/// Deflate every `src/i18n/*.tsv` into `OUT_DIR/i18n/`. A catalog that can't be written is a
-/// build error (`include_bytes!` would fail on it anyway, with a less helpful message).
-fn deflate_catalogs() {
+fn pack_catalogs() {
     use std::io::Write as _;
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/i18n");
     let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap_or_default()).join("i18n");
     let all = std::env::var_os("CARGO_FEATURE_ALL_CATALOGS").is_some();
     println!("cargo::rerun-if-changed={}", src.display());
+    let deflate = |bytes: &[u8]| -> std::io::Result<Vec<u8>> {
+        let mut z = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::best());
+        z.write_all(bytes)?;
+        z.finish()
+    };
     let result = (|| -> std::io::Result<()> {
         std::fs::create_dir_all(&out)?;
+        let mut catalogs = Vec::new();
         for entry in std::fs::read_dir(&src)? {
             let path = entry?.path();
             let Some(name) = path.file_name().and_then(|n| n.to_str()).filter(|n| n.ends_with(".tsv")) else { continue };
             println!("cargo::rerun-if-changed={}", path.display());
             if !all && !ALWAYS_COMPILED_IN.contains(&name) {
+                // Fetched at run time as `<code>.tsv`: nothing compiled in, and its keys stay out
+                // of the shared key table.
                 std::fs::write(out.join(format!("{name}.deflate")), [])?;
                 continue;
             }
-            let mut z = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::best());
-            z.write_all(&std::fs::read(&path)?)?;
-            std::fs::write(out.join(format!("{name}.deflate")), z.finish()?)?;
+            catalogs.push((name.to_owned(), std::fs::read_to_string(&path)?));
+        }
+        // Largest first, then by name: the key order (and so the output) is reproducible.
+        catalogs.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(&b.0)));
+        let mut keys: Vec<&str> = Vec::new();
+        let mut index = std::collections::HashMap::new();
+        for line in catalogs.iter().flat_map(|(_, text)| text.split('\n')) {
+            if let Some((key, _)) = catalog_entry(line) {
+                index.entry(key).or_insert_with(|| {
+                    keys.push(key);
+                    keys.len() - 1
+                });
+            }
+        }
+        std::fs::write(out.join("keys.deflate"), deflate(keys.join("\n").as_bytes())?)?;
+        for (name, text) in &catalogs {
+            let mut packed = String::with_capacity(text.len());
+            let mut next = 0usize;
+            for (n, line) in text.split('\n').enumerate() {
+                if n > 0 {
+                    packed.push('\n');
+                }
+                match catalog_entry(line) {
+                    Some((key, tr)) => {
+                        let i = index.get(key).copied().unwrap_or_default();
+                        if i == next {
+                            packed.push('\x01');
+                        } else {
+                            let _ = write!(packed, "\x02{}\t", i as i64 - next as i64);
+                        }
+                        packed.push_str(tr);
+                        next = i + 1;
+                    }
+                    None => {
+                        if line.starts_with(['\x01', '\x02', '\x03']) {
+                            packed.push('\x03');
+                        }
+                        packed.push_str(line);
+                    }
+                }
+            }
+            std::fs::write(out.join(format!("{name}.deflate")), deflate(packed.as_bytes())?)?;
         }
         Ok(())
     })();
     if let Err(e) = result {
-        println!("cargo::error=deflating the translation catalogs in {}: {e}", src.display());
+        println!("cargo::error=packing the translation catalogs in {}: {e}", src.display());
     }
 }
 

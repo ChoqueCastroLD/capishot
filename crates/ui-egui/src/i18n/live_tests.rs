@@ -10,9 +10,16 @@ fn lang(code: &str) -> Lang {
 
 #[test]
 fn requested_languages_resolve_regional_preferences() {
-    for (tag, code) in
-        [("en-US", "en"), ("zh-CN", "zh-hans"), ("ja-JP", "ja"), ("ko-KR", "ko"), ("ru-RU", "ru"), ("uk-UA", "uk"), ("fr-CA", "fr"), ("id-ID", "id")]
-    {
+    for (tag, code) in [
+        ("en-US", "en"),
+        ("zh-CN", "zh-hans"),
+        ("ja-JP", "ja"),
+        ("ko-KR", "ko"),
+        ("ru-RU", "ru"),
+        ("uk-UA", "uk"),
+        ("fr-CA", "fr"),
+        ("id-ID", "id"),
+    ] {
         assert_eq!(Lang::from_pref(tag), lang(code), "{tag}");
     }
     assert_eq!(lang_from_tag("ko_KR.UTF-8"), Some(lang("ko")));
@@ -30,6 +37,46 @@ fn ukrainian_native_app_menu_keeps_product_and_language_names() {
             assert_eq!(layout.bar.find(id).map(|item| item.label.as_str()), Some(label), "{id}");
         }
         assert_eq!(layout.bar.find("app.language.uk").map(|item| (item.label.as_str(), item.checked)), Some(("Українська", Some(true))));
+    });
+}
+
+#[test]
+fn ukrainian_color_picker_titles_draw_in_the_selected_language() {
+    with_language(Lang::EN, || {
+        for (target, expected) in [("foreground", "Вибір кольору (основний колір)"), ("background", "Вибір кольору (колір тла)")]
+        {
+            let mut h = harness();
+            h.state_mut().run("prefs.set", json!({"path": "interface.language", "value": "uk"})).unwrap();
+            crate::color_picker_ui::open(h.state_mut(), target);
+            h.run_steps(4);
+            let text = drawn_text(&h);
+            assert!(text.iter().any(|text| text == expected), "missing title {expected}");
+            assert!(!text.iter().any(|text| text.starts_with("Color Picker")), "no English picker title");
+        }
+        assert_eq!(tr(lang("uk"), "Color Picker (Custom Canvas Color)"), "Вибір кольору (власний колір полотна)");
+    });
+}
+
+#[test]
+fn ukrainian_rasterize_prompts_explain_the_loss_of_editable_content() {
+    use crate::rasterize_prompt::Kind;
+
+    for kind in Kind::ALL {
+        let translated = tr(lang("uk"), kind.message());
+        assert_ne!(translated, kind.message(), "{kind:?}: the warning must be translated");
+        assert!(translated.contains("більше не можна буде редагувати"), "{kind:?}: explain the loss of editability");
+    }
+    with_language(Lang::EN, || {
+        let mut h = harness();
+        h.state_mut().run("prefs.set", json!({"path": "interface.language", "value": "uk"})).unwrap();
+        h.state_mut().run("type.create", json!({"text": "Editable text"})).unwrap();
+        let layer = h.state().session.active().unwrap().active_layer.unwrap();
+        crate::rasterize_prompt::open(h.state_mut(), Kind::Type, layer, crate::state::Tool::Brush, [10.0, 10.0, 1.0]);
+        h.run_steps(4);
+        let expected = tr(lang("uk"), Kind::Type.message());
+        let text = drawn_text(&h);
+        assert!(text.iter().any(|text| text == expected), "the actual dialog draws the Ukrainian warning");
+        assert!(!text.iter().any(|text| text == Kind::Type.message()));
     });
 }
 
@@ -84,7 +131,8 @@ fn dynamic_brush_sections_have_translations_and_draw_in_the_selected_language() 
         h.state_mut().ui.panels.brush_settings = true;
         h.run_steps(4);
         let text = drawn_text(&h);
-        assert!(text.iter().filter(|text| text.as_str() == "画笔笔尖形状").count() >= 2, "both the section row and heading must be translated");
+        // The section row is the only place the name is drawn: the options pane has no heading (#3477).
+        assert_eq!(text.iter().filter(|text| text.as_str() == "画笔笔尖形状").count(), 1, "the section row must be translated");
         assert!(!text.iter().any(|text| text == "Brush Tip Shape"));
     });
 }
@@ -166,6 +214,8 @@ fn cjk_font_order_follows_the_selected_language() {
 #[test]
 fn korean_glyphs_remain_available_after_repeated_language_switches() {
     use photocraft_text::cjk::{self, CjkChar, CjkScript};
+    #[cfg(target_os = "linux")]
+    crate::cjk_fonts::wait_for_fontconfig_cjk_scan();
     if !cjk::font_files(CjkScript::Korean).iter().any(|font| font.path.is_file()) {
         eprintln!("skipping: no installed Korean font");
         return;
@@ -354,4 +404,27 @@ fn drawn_text(h: &egui_kittest::Harness<'_, PhotocraftApp>) -> Vec<String> {
         collect(&shape.shape, &mut text);
     }
     text
+}
+
+#[test]
+fn czech_shortcut_conflicts_keep_warning_state_and_shortcut_codes() {
+    with_language(Lang::EN, || {
+        let mut h = harness();
+        h.state_mut().run("prefs.set", json!({"path": "interface.language", "value": "cs"})).expect("language");
+        let ctx = h.ctx.clone();
+        let result = crate::menus::invoke(h.state_mut(), &ctx, "edit.keyboardShortcuts", json!({})).expect("shortcut dialog");
+        let id = result["dialog"].as_u64().expect("dialog id");
+        h.run_steps(4);
+        let fields = &mut h.state_mut().ui.dialogs.iter_mut().find(|d| d.id == id).expect("dialog").fields;
+        fields.insert("selected".into(), json!("file.new"));
+        fields.insert("capture".into(), json!(true));
+        let mods = egui::Modifiers { ctrl: true, command: true, ..Default::default() };
+        h.event(egui::Event::Key { key: egui::Key::O, physical_key: None, pressed: true, repeat: false, modifiers: mods });
+        h.event(egui::Event::Key { key: egui::Key::O, physical_key: None, pressed: false, repeat: false, modifiers: mods });
+        h.run_steps(4);
+        let fields = &h.state().ui.dialogs.iter().find(|d| d.id == id).expect("dialog").fields;
+        assert_eq!(fields["messageWarning"], json!(true));
+        assert!(fields["message"].as_str().expect("message").contains("již používá"));
+        assert_eq!(fields["overrides"]["file.new"], json!("Cmd+O"));
+    });
 }

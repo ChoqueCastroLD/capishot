@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::Stroke;
 use crate::replace::{Limits, Sampling};
-use crate::retouch::{Region, alpha_index, apply_dab_stroke};
+use crate::retouch::{Footprint, Region, alpha_index, apply_dab_stroke};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -49,12 +49,12 @@ fn dist(a: &[f32], b: &[f32]) -> f32 {
 /// the selection limits the effect. Returns the damaged rectangle; empty when the surface has no
 /// alpha channel.
 pub fn apply_background_eraser(target: &mut Surface, stroke: &Stroke, bs: &BgEraseSettings, selection: Option<&Surface>) -> Rect {
-    let Some(effect) = background_eraser_effect(&target.format(), bs) else { return Rect::EMPTY };
+    let Some(effect) = background_eraser_effect(target, bs) else { return Rect::EMPTY };
     apply_dab_stroke(target, &background_eraser_stroke(stroke), selection, false, 0, effect)
 }
 
 /// The stroke [`apply_background_eraser`] runs its dabs along: full opacity (the tool has none),
-/// painting (the effect lowers alpha itself).
+/// never the brush's erase flag. Live previews run the same dabs.
 pub fn background_eraser_stroke(stroke: &Stroke) -> Stroke {
     let mut stroke = stroke.clone();
     stroke.brush.opacity = 1.0;
@@ -62,19 +62,16 @@ pub fn background_eraser_stroke(stroke: &Stroke) -> Stroke {
     stroke
 }
 
-/// The Background Eraser's effect at one dab (run in order along the stroke, as
-/// `retouch::apply_dab_stroke` does): sample the colour under the hotspot and lower the alpha of
-/// similar pixels in the footprint. `None` for a format without alpha. Shared by the command and
-/// the live stroke shown while it is drawn, so both erase the same pixels.
-pub fn background_eraser_effect(
-    fmt: &photocraft_color::PixelFormat,
-    bs: &BgEraseSettings,
-) -> Option<impl FnMut(&mut Region, &crate::retouch::Footprint) + use<>> {
-    let a = alpha_index(fmt)?;
+/// One Background Eraser dab's edit of a working copy of `pre` (the target before the stroke):
+/// shared by [`apply_background_eraser`] and live previews that run the dabs as they come, so both
+/// erase the same pixels. `None` when `pre` has no alpha channel (nothing can be erased).
+pub fn background_eraser_effect(pre: &Surface, bs: &BgEraseSettings) -> Option<impl FnMut(&mut Region, &Footprint) + use<>> {
+    let fmt = pre.format();
+    let a = alpha_index(&fmt)?;
     let nc = a;
     let tol = if bs.tolerance.is_finite() { bs.tolerance.clamp(0.0, 1.0) } else { 0.0 };
     let soft = bs.limits != Limits::FindEdges;
-    let native = |c: [f32; 4]| -> Vec<f32> { from_rgba(fmt, [c[0], c[1], c[2], 1.0])[..nc].to_vec() };
+    let native = |c: [f32; 4]| -> Vec<f32> { from_rgba(&fmt, [c[0], c[1], c[2], 1.0])[..nc].to_vec() };
     let swatch = native(bs.background);
     let fg = native(bs.foreground);
     let (sampling, limits, protect_foreground) = (bs.sampling, bs.limits, bs.protect_foreground);
@@ -89,36 +86,46 @@ pub fn background_eraser_effect(
             1.0
         }
     };
-    Some(move |work: &mut Region, fp: &crate::retouch::Footprint| {
+    let pre = pre.clone();
+    // The pixels before the stroke under the working copy, read once per working area. Sampling
+    // and matching read these, so a dab landing on pixels earlier dabs already erased still
+    // samples and matches (#1280).
+    let mut orig: Option<Region> = None;
+    Some(move |work: &mut Region, fp: &Footprint| {
         let r = fp.rect.intersect(&work.rect);
         if r.is_empty() {
             return;
         }
+        if orig.as_ref().is_none_or(|o| o.rect != work.rect) {
+            orig = Some(Region::read(&pre, work.rect));
+        }
+        let Some(orig) = orig.as_ref() else { return };
         let (cx, cy) = (fp.dab.center.x.floor() as i32, fp.dab.center.y.floor() as i32);
-        // The hotspot's colour (None where it is already transparent or off the working area).
-        let hotspot = |work: &Region| -> Option<Vec<f32>> {
-            if !work.rect.contains(cx, cy) {
+        // The hotspot's colour (None where it was transparent before the stroke or is off the
+        // working area).
+        let hotspot = || -> Option<Vec<f32>> {
+            if !orig.rect.contains(cx, cy) {
                 return None;
             }
-            let p = work.px(cx, cy);
+            let p = orig.px(cx, cy);
             (p[a] > 0.0).then(|| p[..nc].to_vec())
         };
         let sampled = match sampling {
-            Sampling::Continuous => hotspot(work),
-            Sampling::Once => once.get_or_insert_with(|| hotspot(work)).clone(),
+            Sampling::Continuous => hotspot(),
+            Sampling::Once => once.get_or_insert_with(hotspot).clone(),
             Sampling::BackgroundSwatch => Some(swatch.clone()),
         };
         let Some(sampled) = sampled else { return };
         let (w, h) = (r.width() as usize, r.height() as usize);
-        // Per-pixel match weight. Erasing only lowers alpha, so the working copy still holds the
-        // pre-stroke colours.
+        // Per-pixel match weight from the pre-stroke colours: the contiguous fill passes through
+        // pixels this stroke already erased.
         let mut weight = vec![0.0f32; w * h];
         for y in r.y0..r.y1 {
             for x in r.x0..r.x1 {
                 if fp.at(x, y) <= 0.0 {
                     continue;
                 }
-                let p = work.px(x, y);
+                let p = orig.px(x, y);
                 if p[a] <= 0.0 {
                     continue;
                 }
@@ -262,6 +269,27 @@ mod tests {
         let bs = BgEraseSettings { sampling: Sampling::Once, tolerance: 0.05, protect_foreground: true, foreground: GREEN, ..Default::default() };
         apply_background_eraser(&mut t, &stroke(&[(20.0, 20.0)]), &bs, None);
         assert_eq!(t, s);
+    }
+
+    #[test]
+    fn one_pass_clears_the_whole_stroke_when_dabs_overlap_erased_pixels() {
+        // #1280: later dabs land their hotspot on pixels earlier dabs already erased.
+        let fmt = PixelFormat::RGBA8;
+        let mut s = Surface::new(fmt);
+        s.fill_rect(Rect::new(0, 0, 60, 30), &from_rgba(&fmt, GREEN));
+        let mut st = stroke(&[(10.0, 15.0), (50.0, 15.0)]);
+        st.brush.size = 20.0;
+        for sampling in [Sampling::Continuous, Sampling::Once] {
+            let mut t = s.clone();
+            let bs = BgEraseSettings { sampling, limits: Limits::Contiguous, ..Default::default() };
+            apply_background_eraser(&mut t, &st, &bs, None);
+            // Everything within radius − 1 of the line.
+            for y in 6..24 {
+                for x in 10..51 {
+                    assert_eq!(alpha(&t, x, y), 0.0, "{sampling:?} ({x}, {y}) left behind");
+                }
+            }
+        }
     }
 
     #[test]

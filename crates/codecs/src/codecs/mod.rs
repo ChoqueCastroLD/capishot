@@ -1,5 +1,8 @@
+pub(crate) mod dds;
+pub(crate) mod dds_bc;
 #[cfg(feature = "exr")]
 pub(crate) mod deep_exr;
+pub(crate) mod dpx;
 #[cfg(feature = "exr")]
 pub(crate) mod exr;
 // Without the `exr` feature (the web build): the same entry points, each an "unsupported" error.
@@ -8,12 +11,18 @@ pub(crate) mod exr;
 pub(crate) mod exr;
 pub(crate) mod exr_cryptomatte;
 pub(crate) mod fits;
+pub(crate) mod gif_frames;
+pub(crate) mod gif_palette;
 pub(crate) mod heif;
 pub(crate) mod jpeg;
+pub(crate) mod pcx;
 pub(crate) mod png;
 pub(crate) mod pnm;
+pub(crate) mod tga;
 pub(crate) mod tiff;
+pub(crate) mod tiff_exif;
 pub(crate) mod tiff_ifd;
 pub(crate) mod via_image;
 pub(crate) mod vp8;
 pub(crate) mod webp;
+pub(crate) mod xpm;
