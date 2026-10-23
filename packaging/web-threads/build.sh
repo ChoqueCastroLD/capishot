@@ -116,7 +116,7 @@ if [ "${PHOTOCRAFT_WEB_AI:-1}" != "0" ]; then
 fi
 
 # Cloudflare Workers/Pages reject any single file over 25 MiB; fail well before that.
-max="${PHOTOCRAFT_WASM_MAX_BYTES:-25165824}" # 24 MiB
+max="${PHOTOCRAFT_WASM_MAX_BYTES:-33554432}" # 32 MiB (our nginx has no 25 MiB limit)
 size=$(wc -c <"$OUT/photocraft_bg.wasm.gz" | tr -d ' ')
 echo "photocraft_bg.wasm: $raw bytes ($((raw / 1048576)) MiB), gzipped $size bytes ($((size / 1048576)) MiB; limit $max)"
 big=$(find "$OUT" -type f -size +"$max"c)
