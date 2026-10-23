@@ -224,3 +224,35 @@ fn level_rects_round_out() {
     assert_eq!(level_rect(Rect::new(5, 5, 6, 6), 0), Rect::new(5, 5, 6, 6));
     assert_eq!(level_bounds(Rect::new(0, 0, 2001, 3), 3), Rect::new(0, 0, 250, 1));
 }
+
+#[test]
+fn reduced_renders_reuse_the_reduced_lower_stack() {
+    let Some(mut g) = gpu() else { return };
+    let mut d = mixed_doc();
+    let top = d.layers.len() - 1;
+    for level in [2, 1, 2] {
+        render_to_vec_lod(&mut g.comp, &g.device, &g.queue, &d, d.bounds(), level).unwrap();
+        for (k, op) in [0.3f32, 0.6, 0.45].into_iter().enumerate() {
+            d.layers[top].opacity = op;
+            let (got, st) = render_to_vec_lod(&mut g.comp, &g.device, &g.queue, &d, d.bounds(), level).unwrap();
+            let mut fresh = Compositor::try_new_with_format(&g.device, wgpu::TextureFormat::Rgba32Float).unwrap();
+            fresh.set_composite_cache_budget(0);
+            let (want, _) = render_to_vec_lod(&mut fresh, &g.device, &g.queue, &d, d.bounds(), level).unwrap();
+            assert!(diffs(&got, &want).0 <= 1e-5, "level {level} edit {k}: cached differs");
+            if k > 0 {
+                assert!(st.prefix_hits > 0, "level {level} edit {k}: the lower stack is reused");
+            }
+            // A damage rect alone, from the cache.
+            let r = Rect::new(120, 90, 333, 260);
+            let (part, _) = render_to_vec_lod(&mut g.comp, &g.device, &g.queue, &d, r, level).unwrap();
+            let lr = level_rect(r, level).intersect(&level_bounds(d.bounds(), level));
+            let w = level_bounds(d.bounds(), level).width() as usize;
+            for y in 0..lr.height() as usize {
+                for x in 0..lr.width() as usize {
+                    let (a, b) = (part[y * lr.width() as usize + x], want[(lr.y0 as usize + y) * w + lr.x0 as usize + x]);
+                    assert!((0..4).all(|c| (a[c] - b[c]).abs() <= 1e-5), "level {level} damage at {x},{y}");
+                }
+            }
+        }
+    }
+}

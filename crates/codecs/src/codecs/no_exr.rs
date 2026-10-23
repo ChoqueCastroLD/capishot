@@ -39,3 +39,7 @@ pub(crate) fn decode_deep(_bytes: &[u8], _limits: &Limits) -> Result<DeepImage, 
 pub(crate) fn encode(_src: &Image, _plan: Plan, _opts: &EncodeOptions) -> Result<Vec<u8>, CodecError> {
     unsupported()
 }
+
+pub(crate) fn probe(_bytes: &[u8], _limits: &Limits) -> Result<(u32, u32), CodecError> {
+    unsupported()
+}

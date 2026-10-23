@@ -27,7 +27,7 @@ pub fn click(app: &mut PhotocraftApp, tool: Tool, x: f64, y: f64) -> bool {
         "tolerance": o.tolerance,
         "antiAlias": o.anti_alias,
         "contiguous": o.contiguous,
-        "sampleAllLayers": o.sample_all_layers,
+        "sampleAllLayers": o.sample_all.magic_eraser,
         "opacity": o.magic_eraser_opacity,
     });
     let r = app.run("paint.magicEraser", p);
@@ -54,27 +54,22 @@ pub fn finish_stroke(app: &mut PhotocraftApp, tool: Tool, points: &[[f64; 3]]) -
     if tool != Tool::BackgroundEraser {
         return false;
     }
-    let p = background_params(app, points);
-    let r = app.run("paint.backgroundEraser", p);
+    let r = app.run("paint.backgroundEraser", background_eraser_params(app, points));
     report(app, r);
     true
 }
 
-/// The `paint.backgroundEraser` params of a stroke through `points` with the options bar's
-/// settings: what the release commits, and what the live stroke drawn meanwhile is begun with
-/// (the commit takes the live pixels only when they match).
-pub(crate) fn background_params(app: &PhotocraftApp, points: &[[f64; 3]]) -> Value {
+/// `paint.backgroundEraser` params for a stroke along `points`: shared by the live preview and
+/// the commit, with the jitter seed from the first point (`retouch_ui::stroke_seed`).
+pub(crate) fn background_eraser_params(app: &PhotocraftApp, points: &[[f64; 3]]) -> Value {
     let o = &app.ui.tool_options;
-    // The brush's jitter seed, the same for the live stroke and its commit: from where the
-    // stroke started.
-    let seed = points.first().map_or(0, |q| (q[0].to_bits().rotate_left(21) ^ q[1].to_bits()).wrapping_mul(0x9E37_79B9_7F4A_7C15));
     json!({
-        "seed": seed,
         "points": points,
         "sampling": o.bg_sampling,
         "limits": o.bg_limits,
         "tolerance": o.bg_tolerance,
         "protectForegroundColor": o.bg_protect_fg,
+        "seed": crate::retouch_ui::stroke_seed(points),
     })
 }
 
@@ -117,7 +112,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bo
             widgets::value_field(ui, &mut o.tolerance, 0.0..=255.0, "", 58.0);
             widgets::checkbox(ui, &mut o.anti_alias, tl!("Anti-alias"));
             widgets::checkbox(ui, &mut o.contiguous, tl!("Contiguous"));
-            widgets::checkbox(ui, &mut o.sample_all_layers, tl!("Sample All Layers"));
+            widgets::checkbox(ui, &mut o.sample_all.magic_eraser, tl!("Sample All Layers"));
             widgets::vline(ui, 22.0);
             opt(ui, tl!("Opacity:"));
             widgets::value_field(ui, &mut o.magic_eraser_opacity, 1.0..=100.0, "%", 62.0);

@@ -748,7 +748,7 @@ async fn genfill_inner(msg: &JsValue, id: f64) -> std::result::Result<(Vec<Vec<f
             let on_gpu = rt.accel() == photocraft_ai::runtime::Accel::Gpu;
             // The light tiers run on the CPU too (quantized weights dequantized per layer); the others need WebGPU.
             if !on_gpu && !matches!(tier, Tier::Ultra | Tier::Fast) {
-                return Err("Generative Fill (Standard) needs WebGPU (no usable GPU here); choose Quality: Fast or Ultra-light, or use Clean with AI".into());
+                return Err("This Generative Fill quality needs WebGPU (no usable GPU here); choose Quality: Fast or Ultra-light, or use Clean with AI".into());
             }
             let force_f32 = get(msg, "f32").as_bool().unwrap_or(false) || !on_gpu;
             let dtype = if force_f32 { photocraft_ai_sd::burn::tensor::DType::F32 } else { precision(rt.device(), false) };

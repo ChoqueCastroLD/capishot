@@ -128,6 +128,7 @@ fn page(w: u32, h: u32, n: usize) -> Page {
                         size: 6.0,
                         position: StrokePosition::Outside,
                         paint: FxPaint::Color(Color::rgb(0.0, 0.0, 0.0)),
+                        overprint: false,
                     })
                 } else {
                     Effect::default_drop_shadow()

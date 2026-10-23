@@ -38,6 +38,68 @@ pub fn check(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
 }
 
+/// End-of-frame check of the device the window itself draws with (#3438). Once wgpu reports it
+/// lost (a driver reset, for example after the PC slept), egui-wgpu can't draw another frame: one
+/// with shapes panics creating its staging buffers (#1215), and one without leaves a frozen window
+/// whose close button opens an unsaved-changes prompt nobody can see. So this frame and every later
+/// one draw nothing; the first writes every unsaved document to crash recovery, waits for the
+/// writes, and closes the app without asking once all of them are saved. The next launch reopens
+/// the documents. If a write fails (a full disk, say) the app stays open with the documents in
+/// memory and tries again every [`RECOVERY_RETRY_SECS`]: closing would lose them.
+pub fn check_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let Some((device, health)) = app.window_device.as_ref() else { return };
+    // A loss while the app sat idle or the PC slept is noticed here, before the next frame.
+    health.probe(device);
+    if !health.device_lost() {
+        return;
+    }
+    ctx.graphics_mut(|g| *g = Default::default());
+    let now = ctx.input(|i| i.time);
+    if !app.window_lost {
+        app.window_lost = true;
+        let reason = health.fault().map_or_else(|| "GPU device lost".to_string(), |f| f.to_string());
+        log::error!("{reason}: the window can't be drawn any more; saving unsaved documents for recovery and closing");
+    } else {
+        match app.window_recovery_retry {
+            // Saved, and the close is on its way.
+            None => return,
+            Some(at) if now < at => {
+                ctx.request_repaint_after(std::time::Duration::from_secs_f64((at - now).max(0.0)));
+                return;
+            }
+            Some(_) => {}
+        }
+    }
+    match save_for_recovery(app, ctx) {
+        Ok(()) => {
+            app.window_recovery_retry = None;
+            app.allow_close = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        Err(e) => {
+            log::error!("{e}; keeping the documents open and trying again in {RECOVERY_RETRY_SECS} s");
+            app.window_recovery_retry = Some(now + RECOVERY_RETRY_SECS);
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(RECOVERY_RETRY_SECS));
+        }
+    }
+}
+
+/// Seconds between attempts to save unsaved work for recovery after the window's device was lost.
+pub const RECOVERY_RETRY_SECS: f64 = 2.0;
+
+/// Write every document with unsaved changes to crash recovery (Capishot's checkpoint writer,
+/// `prefs_ui::tick`), whatever the autosave timer, and report whether each is known to be on
+/// disk at its current revision. Until then the caller keeps the documents open and retries.
+fn save_for_recovery(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String> {
+    if app.services.autosave.is_none() {
+        return Err("no crash-recovery autosave".into());
+    }
+    crate::prefs_ui::autosave_now(app);
+    crate::prefs_ui::tick(app, ctx);
+    let pending = crate::prefs_ui::recovery_pending(app);
+    if pending.is_empty() { Ok(()) } else { Err(format!("waiting for recovery checkpoints of {}", pending.join(", "))) }
+}
+
 /// Drop the GPU canvas after `fault`: free its resources, send every view through the CPU
 /// path, record why, and tell the user. Documents are untouched.
 pub fn fall_back(app: &mut PhotocraftApp, fault: &photocraft_gpu::Fault) {
@@ -50,18 +112,27 @@ pub fn fall_back(app: &mut PhotocraftApp, fault: &photocraft_gpu::Fault) {
     app.prefs_rt.gpu_style = None;
     app.perf.gpu = false;
     app.perf.gpu_fallback = Some(fault.to_string());
+    // The CPU canvas has no GPU memory budget: GPU Memory Full no longer applies.
+    app.perf.gpu_layer_fit = None;
     app.perf.gpu_info.canvas = "cpu".into();
     app.perf.gpu_info.lost = Some(fault.to_string());
     let title = if fault.is_lost() { LOST_MESSAGE } else { ERROR_MESSAGE };
     queue_fallback_notice(app, fault.to_string());
-    app.ui.status = title.to_string();
+    app.ui.status = tl!(title).to_string();
     app.ui.status_error = true;
 }
 
-/// Help › System Info: version, platform and the graphics state.
+/// English diagnostics for issue reports (Copy and the control API), independent of UI language.
 pub fn system_info(app: &PhotocraftApp) -> Vec<String> {
-    let mut v =
-        vec![format!("Capishot {}", photocraft_engine::build_info::long_version()), format!("Platform: {} {}", std::env::consts::OS, std::env::consts::ARCH)];
+    crate::i18n::with_language(crate::i18n::Lang::EN, || system_info_ui(app))
+}
+
+/// Help › System Info's on-screen text: version, platform and the graphics state.
+pub fn system_info_ui(app: &PhotocraftApp) -> Vec<String> {
+    let mut v = vec![format!("Capishot {}", photocraft_engine::build_info::long_version()), {
+        let template = "Platform: {os} {arch}";
+        crate::i18n::fmt(tl!(template), &[("os", std::env::consts::OS), ("arch", std::env::consts::ARCH)])
+    }];
     v.extend(app.perf.gpu_info.lines());
     v.extend(crate::monitor_status::summary_lines(app));
     v

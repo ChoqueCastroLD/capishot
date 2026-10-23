@@ -46,6 +46,9 @@ pub struct DocM {
     pub layers: Vec<LayerM>,
     pub channels: Vec<ChannelM>,
     pub guides: Guides,
+    /// The rulers' zero point in document pixels (absent in older files: the top-left).
+    #[serde(default)]
+    pub ruler_origin: [f64; 2],
     pub selection: Option<SurfaceM>,
     pub metadata: MetadataM,
     pub global_light: GlobalLight,
@@ -84,6 +87,9 @@ pub struct DocM {
     /// Window › Timeline.
     #[serde(default)]
     pub timeline: Option<photocraft_doc::Timeline>,
+    /// The JPEG quality / WebP encoding File › Save reuses.
+    #[serde(default, skip_serializing_if = "photocraft_doc::FileEncoding::is_empty")]
+    pub file_encoding: photocraft_doc::FileEncoding,
     /// Image › Analysis: measurement scale, count groups, ruler.
     #[serde(default)]
     pub measurement: photocraft_doc::Measurement,
@@ -288,6 +294,12 @@ pub enum ContentM {
         stroke: Option<ShapeStroke>,
         #[serde(default)]
         live: Option<LiveShape>,
+        /// The path's density as the fill's mask; older files have none (100 %).
+        #[serde(default = "full_density")]
+        density: f32,
+        /// The path's feather in px; older files have none.
+        #[serde(default)]
+        feather: f32,
     },
     Smart {
         /// Shared source identity; older bundles did not record it.
@@ -331,6 +343,10 @@ pub struct DeepChannelM {
     pub name: String,
     /// Every sample, little-endian f32.
     pub samples: Hash,
+}
+
+fn full_density() -> f32 {
+    1.0
 }
 
 fn yes() -> bool {
@@ -398,5 +414,18 @@ mod channel_tests {
         assert_eq!(c.color, photocraft_doc::AlphaChannel::DEFAULT_COLOR);
         assert_eq!(c.opacity, 0.5);
         assert_eq!(c.indicates, photocraft_doc::ColorIndicates::MaskedAreas);
+    }
+}
+
+#[cfg(test)]
+mod shape_tests {
+    use super::*;
+
+    /// Shapes saved before Density and Feather load at 100 % and no feather.
+    #[test]
+    fn older_shapes_load_at_full_density_without_feather() {
+        let old = serde_json::json!({ "kind": "shape", "fill": null, "cache": null, "psd_raw": null });
+        let ContentM::Shape { density, feather, .. } = serde_json::from_value(old).unwrap() else { panic!("a shape") };
+        assert_eq!((density, feather), (1.0, 0.0));
     }
 }

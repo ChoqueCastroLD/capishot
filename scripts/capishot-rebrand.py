@@ -10,7 +10,7 @@ import os
 import re
 import sys
 
-KEEP = ['Based on PhotoCraft', 'PhotoCraftCo', 'PhotoCraft contributors', 'PhotoCraft authors', 'storytold/photocraft']
+KEEP = ['Based on PhotoCraft', 'gamma 1.732, PhotoCraft', '-compatible (PhotoCraft)', 'PhotoCraftCo', 'PhotoCraft contributors', 'PhotoCraft authors', 'storytold/photocraft']
 EXTS = ('.rs', '.tsv', '.html', '.toml', '.css', '.js', '.json', '.md')
 SKIP_DIRS = ('crates/cms',)
 # Byte-exact test fixtures whose lengths the tests depend on.

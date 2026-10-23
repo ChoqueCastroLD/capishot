@@ -1091,9 +1091,25 @@ fn path_rename(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn path_to_selection(s: &mut Session, p: &Value) -> Result<Value> {
     let path = resolve_path(s, p.get("name").and_then(Value::as_str))?;
-    let feather = f64p(p, "feather").unwrap_or(0.0) as f32;
-    let aa = p.get("antiAlias").and_then(Value::as_bool).unwrap_or(true);
-    let mode = SelectionMode::parse(p.get("mode").and_then(Value::as_str).unwrap_or("replace"));
+    // Validate before rasterizing or touching selection history. An unchecked feather value
+    // could silently become zero (negative/string), or expand into an excessive blur.
+    let feather = match p.get("feather") {
+        None => 0.0,
+        Some(v) => v
+            .as_f64()
+            .filter(|n| n.is_finite() && (0.0..=1000.0).contains(n))
+            .ok_or_else(|| bad("path.toSelection", "`feather` must be a finite number within 0..1000"))? as f32,
+    };
+    let aa = match p.get("antiAlias") {
+        None => true,
+        Some(Value::Bool(v)) => *v,
+        _ => return Err(bad("path.toSelection", "`antiAlias` must be a boolean")),
+    };
+    let mode = match p.get("mode") {
+        None => SelectionMode::Replace,
+        Some(Value::String(v)) if matches!(v.as_str(), "replace" | "add" | "subtract" | "intersect") => SelectionMode::parse(v),
+        _ => return Err(bad("path.toSelection", "`mode` must be replace, add, subtract or intersect")),
+    };
     let area = s.active().ok_or(EngineError::NoDocument)?.doc.bounds();
     let mut mask = vector::fill_rasterizer(&path, vector::DEFAULT_TOLERANCE).render(area);
     if !aa {
@@ -1192,9 +1208,119 @@ fn paint_coverage(surf: &mut photocraft_raster::Surface, area: Rect, cov: &[f32]
     surf.prune();
 }
 
+/// Stroke Path's brush-based tools besides the Brush, Pencil and Eraser it renders itself: each
+/// paints the path with its own `paint.*` command (Photoshop's Stroke Path dialog Tool list).
+pub const STROKE_PATH_TOOLS: &[(&str, &str)] = &[
+    ("backgroundEraser", "paint.backgroundEraser"),
+    ("cloneStamp", "paint.cloneStamp"),
+    ("patternStamp", "paint.patternStamp"),
+    ("healingBrush", "paint.healingBrush"),
+    ("spotHealingBrush", "paint.spotHealing"),
+    ("historyBrush", "paint.historyBrush"),
+    ("blur", "paint.blur"),
+    ("sharpen", "paint.sharpen"),
+    ("smudge", "paint.smudge"),
+    ("dodge", "paint.dodge"),
+    ("burn", "paint.burn"),
+    ("sponge", "paint.sponge"),
+    ("colorReplacement", "paint.colorReplacement"),
+    ("mixerBrush", "paint.mixerBrush"),
+];
+
+/// At most this many points per subpath when Simulate Pressure resamples it.
+const MAX_PRESSURE_POINTS: f64 = 200_000.0;
+
+/// The stroke points along one flattened subpath. With `simulate` (Stroke Path's Simulate
+/// Pressure) the subpath is resampled about every pixel and the pressure rises from 0 at its start
+/// to full at the middle and falls back to 0 at its end, so a brush whose size or opacity follows
+/// pen pressure tapers at both ends, as in Photoshop. Otherwise every point has full pressure.
+fn stroke_points(pts: &[(f64, f64)], closed: bool, simulate: bool) -> Vec<photocraft_paint::StrokePoint> {
+    use photocraft_paint::StrokePoint;
+    let mut line = pts.to_vec();
+    if closed && let Some(&first) = pts.first() {
+        line.push(first);
+    }
+    let full = |line: Vec<(f64, f64)>| line.into_iter().map(|(x, y)| StrokePoint::new(x, y, 1.0)).collect();
+    if !simulate {
+        return full(line);
+    }
+    let seg = |a: &(f64, f64), b: &(f64, f64)| (b.0 - a.0).hypot(b.1 - a.1);
+    let total: f64 = line.iter().zip(line.iter().skip(1)).map(|(a, b)| seg(a, b)).sum();
+    if !(total.is_finite() && total > 0.0) {
+        return full(line);
+    }
+    let step = (total / MAX_PRESSURE_POINTS).max(1.0);
+    let pressure = |d: f64| (d / total * std::f64::consts::PI).sin().clamp(0.0, 1.0) as f32;
+    let mut out = Vec::new();
+    let mut walked = 0.0;
+    for (a, b) in line.iter().zip(line.iter().skip(1)) {
+        let len = seg(a, b);
+        let n = (len / step).ceil().clamp(1.0, MAX_PRESSURE_POINTS) as usize;
+        for i in 0..n {
+            let t = i as f64 / n as f64;
+            out.push(StrokePoint::new(a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t, pressure(walked + len * t)));
+        }
+        walked += len;
+    }
+    if let Some(&(x, y)) = line.last() {
+        out.push(StrokePoint::new(x, y, 0.0));
+    }
+    out
+}
+
+/// Stroke Path with a tool that has its own `paint.*` command: the command runs once per subpath,
+/// with the caller's params (size, opacity, the tool's options) and the path's points, all in one
+/// history step. Only `path.stroke` itself is journalled, so a recorded action replays it once.
+fn stroke_with_command(s: &mut Session, p: &Value, cmd: &str, lines: &[vector::Polyline], simulate: bool) -> Result<Value> {
+    let mut params = p.as_object().cloned().unwrap_or_default();
+    for k in ["name", "tool", "simulatePressure", "coalesce"] {
+        params.remove(k);
+    }
+    let journal = s.journal.len();
+    let r = crate::analysis_cmds::compound(s, "Stroke Path", |s| {
+        // The union of what each subpath's command changed; None when one of them didn't say.
+        let mut dmg = Some(Rect::EMPTY);
+        for pl in lines {
+            let pts = stroke_points(&pl.pts, pl.closed, simulate);
+            if pts.is_empty() {
+                continue;
+            }
+            let mut call = params.clone();
+            call.insert("points".into(), Value::Array(pts.iter().map(|q| json!([q.x, q.y, q.pressure])).collect()));
+            s.execute(cmd, Value::Object(call))?;
+            let r = s.active().and_then(|d| d.last_damage);
+            dmg = dmg.zip(r).map(|(a, b)| {
+                if a.is_empty() {
+                    b
+                } else if b.is_empty() {
+                    a
+                } else {
+                    a.union(&b)
+                }
+            });
+        }
+        Ok(dmg)
+    });
+    s.journal.truncate(journal);
+    let dmg = r?;
+    if let Some(st) = s.active_mut() {
+        st.last_damage = dmg;
+    }
+    let dmg = dmg.unwrap_or_else(|| s.active().map_or(Rect::EMPTY, |d| d.doc.bounds()));
+    Ok(json!({ "damage": [dmg.x0, dmg.y0, dmg.width(), dmg.height()] }))
+}
+
 fn path_stroke(s: &mut Session, p: &Value) -> Result<Value> {
     let path = resolve_path(s, p.get("name").and_then(Value::as_str))?;
     let tool = p.get("tool").and_then(Value::as_str).unwrap_or("brush");
+    let simulate = match p.get("simulatePressure") {
+        None | Some(Value::Null) => false,
+        Some(v) => v.as_bool().ok_or_else(|| bad("path.stroke", "`simulatePressure` must be true or false"))?,
+    };
+    if let Some(&(_, cmd)) = STROKE_PATH_TOOLS.iter().find(|(t, _)| *t == tool) {
+        let lines = vector::flatten_path(&path, 0.1);
+        return stroke_with_command(s, p, cmd, &lines, simulate);
+    }
     let base = s.tools.brush.clone();
     let fg = s.tools.foreground;
     let mut brush = photocraft_paint::BrushSettings {
@@ -1213,7 +1339,10 @@ fn path_stroke(s: &mut Session, p: &Value) -> Result<Value> {
     match tool {
         "pencil" => brush.hardness = 1.0,
         "brush" | "eraser" => {}
-        o => return Err(bad("path.stroke", format!("unknown tool `{o}` (brush|pencil|eraser)"))),
+        o => {
+            let tools: Vec<&str> = ["brush", "pencil", "eraser"].into_iter().chain(STROKE_PATH_TOOLS.iter().map(|(t, _)| *t)).collect();
+            return Err(bad("path.stroke", format!("unknown tool `{o}` ({})", tools.join("|"))));
+        }
     }
     crate::brush_cmds::validate_brush(&brush, "path.stroke")?;
     let lines = vector::flatten_path(&path, 0.1);
@@ -1237,12 +1366,7 @@ fn path_stroke(s: &mut Session, p: &Value) -> Result<Value> {
         }
         let mut dmg = Rect::EMPTY;
         for pl in &lines {
-            let mut pts: Vec<photocraft_paint::StrokePoint> = pl.pts.iter().map(|&(x, y)| photocraft_paint::StrokePoint::new(x, y, 1.0)).collect();
-            if pl.closed
-                && let Some(first) = pts.first().copied()
-            {
-                pts.push(first);
-            }
+            let pts = stroke_points(&pl.pts, pl.closed, simulate);
             if pts.is_empty() {
                 continue;
             }
@@ -1261,11 +1385,15 @@ fn path_stroke(s: &mut Session, p: &Value) -> Result<Value> {
 fn vector_mask_info(s: &Session, id: LayerId) -> Result<Value> {
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let l = d.doc.layer(id).ok_or(EngineError::NoLayer(id))?;
-    Ok(match &l.vector_mask {
-        Some(v) => {
+    Ok(match (&l.vector_mask, &l.content) {
+        (Some(v), _) => {
             json!({ "layer": id.0, "path": path_json(&v.path), "enabled": v.enabled, "linked": v.linked, "density": v.density * 100.0, "feather": v.feather })
         }
-        None => json!({ "layer": id.0, "vectorMask": null }),
+        // A shape layer's path is its vector mask.
+        (None, LayerContent::Shape(sh)) => {
+            json!({ "layer": id.0, "path": path_json(&sh.path), "enabled": true, "linked": true, "shape": true, "density": sh.density * 100.0, "feather": sh.feather })
+        }
+        (None, _) => json!({ "layer": id.0, "vectorMask": null }),
     })
 }
 
@@ -1307,6 +1435,45 @@ fn vector_mask_edit(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "layer.vectorMask.edit";
     let id = layer_id(s, p)?;
     let path = p.get("path").map(parse_path).transpose().map_err(|e| bad(CMD, e))?;
+    // Same range as a pixel mask's feather (`layer.layerMask.edit`), checked before any edit (#4201).
+    let feather = p
+        .get("feather")
+        .map(|v| {
+            v.as_f64()
+                .filter(|n| n.is_finite() && (0.0..=1000.0).contains(n))
+                .map(|n| n as f32)
+                .ok_or_else(|| bad(CMD, "`feather` must be a finite number within 0..1000"))
+        })
+        .transpose()?;
+    let density = p
+        .get("density")
+        .map(|v| {
+            v.as_f64()
+                .filter(|n| n.is_finite() && (0.0..=100.0).contains(n))
+                .map(|n| (n / 100.0) as f32)
+                .ok_or_else(|| bad(CMD, "`density` must be a finite number within 0..100 (%)"))
+        })
+        .transpose()?;
+    // A shape layer's path is its vector mask (Photoshop's Properties › Masks): Density and
+    // Feather soften its fill; the path itself is edited with the shape and path commands.
+    if s.active().and_then(|d| d.doc.layer(id)).is_some_and(|l| matches!(l.content, LayerContent::Shape(_)) && l.vector_mask.is_none()) {
+        if let Some(k) = ["path", "enabled", "linked", "invert"].into_iter().find(|k| p.get(*k).is_some()) {
+            return Err(bad(CMD, format!("`{k}`: a shape layer's vector mask is its path; only `density` and `feather` apply")));
+        }
+        if density.is_none() && feather.is_none() {
+            return vector_mask_info(s, id);
+        }
+        with_shape(s, id, "Edit Vector Mask", |sh, _| {
+            if let Some(d) = density {
+                sh.density = d;
+            }
+            if let Some(f) = feather {
+                sh.feather = f;
+            }
+            Ok(())
+        })?;
+        return vector_mask_info(s, id);
+    }
     s.edit("Edit Vector Mask", |doc, _| {
         let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
         let vm = l.vector_mask.as_mut().ok_or_else(|| EngineError::Other("layer has no vector mask".into()))?;
@@ -1319,11 +1486,11 @@ fn vector_mask_edit(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(b) = p.get("linked").and_then(Value::as_bool) {
             vm.linked = b;
         }
-        if let Some(d) = f64p(p, "density") {
-            vm.density = (d / 100.0).clamp(0.0, 1.0) as f32;
+        if let Some(d) = density {
+            vm.density = d;
         }
-        if let Some(f) = f64p(p, "feather") {
-            vm.feather = f.max(0.0) as f32;
+        if let Some(f) = feather {
+            vm.feather = f;
         }
         if let Some(b) = p.get("invert").and_then(Value::as_bool)
             && b
@@ -1523,7 +1690,7 @@ fn combine_shapes(s: &mut Session, p: &Value, op: &str, label: &str) -> Result<V
 }
 
 fn selection_to_shape(s: &mut Session, p: &Value) -> Result<Value> {
-    let tol = f64p(p, "tolerance").unwrap_or(2.0).clamp(0.5, 10.0);
+    let tol = f64p(p, "tolerance").or_else(|| f64p(p, "simplifyTolerance")).unwrap_or(2.0).clamp(0.5, 10.0);
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let area = d.doc.bounds();
     let mask = sel::mask_from_surface(d.doc.selection.as_ref(), area);
@@ -1689,7 +1856,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "path.stroke",
             "Stroke Path",
             [],
-            r##"{"name":str|"work"|"layer"="work","layer":id? (pixel layer),"tool":"brush|pencil|eraser"="brush","size":0.5..5000 px?,"hardness":0..1?,"opacity":0..100?,"color":"#rrggbb"=foreground} (current brush settings otherwise)"##,
+            r##"{"name":str|"work"|"layer"="work","layer":id? (pixel layer),"tool":"brush|pencil|eraser|backgroundEraser|cloneStamp|patternStamp|healingBrush|spotHealingBrush|historyBrush|blur|sharpen|smudge|dodge|burn|sponge|colorReplacement|mixerBrush"="brush","simulatePressure":bool=false (taper both ends when the brush follows pen pressure),"size":0.5..5000 px?,"hardness":0..1?,"opacity":0..100?,"color":"#rrggbb"=foreground} (current brush settings otherwise; tools past the Eraser run their paint.* command along the path and take its params)"##,
             has_layer,
             path_stroke
         ),
@@ -1713,7 +1880,9 @@ pub fn specs() -> Vec<CommandSpec> {
             "layer.vectorMask.edit",
             "Edit Vector Mask",
             [],
-            leak(format!(r##"{{"layer":id?,"path":{{…}}?,"enabled":bool?,"linked":bool?,"density":0..100?,"feather":px?,"invert":true?}}. {PATH_FORM}"##)),
+            leak(format!(
+                r##"{{"layer":id?,"path":{{…}}?,"enabled":bool?,"linked":bool?,"density":0..100?,"feather":0..1000? (pixels),"invert":true?}}. On a shape layer (whose path is its vector mask) only density and feather apply: they soften its fill, which shows beyond the path at 100 − density %. {PATH_FORM}"##
+            )),
             has_layer,
             vector_mask_edit
         ),
@@ -1776,14 +1945,7 @@ pub fn specs() -> Vec<CommandSpec> {
             has_layer,
             merge_components
         ),
-        spec!(
-            "select.convertToShape",
-            "Convert Selection to Shape",
-            [],
-            r##"{"tolerance":px=2,"fill":"#rrggbb"=foreground,"name":str?} → shape.info"##,
-            has_selection,
-            selection_to_shape
-        ),
+        spec!("select.convertToShape", "Convert to Shape", [], r##"{"tolerance":0.5..10 px=2} → shape.info"##, has_selection, selection_to_shape),
         CommandSpec {
             id: "layer.vectorMask.info",
             label: "Vector Mask Info",

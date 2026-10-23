@@ -26,8 +26,7 @@ mod system;
 pub use system::system_lang;
 
 use std::cell::Cell;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{LazyLock, Mutex, OnceLock, PoisonError};
+use std::sync::OnceLock;
 
 use catalog::Catalog;
 
@@ -40,15 +39,13 @@ pub struct LangInfo {
     /// Catalog file contents, raw-deflated by build.rs (empty for the built-in English); see
     /// [`LangInfo::text`].
     pub source: &'static [u8],
-    /// Plural form index for a count (English: 0 = one, 1 = other; Japanese and Chinese: always 0;
+    /// Plural form index for a count (English: 0 = one, 1 = other; Japanese, Chinese and Hungarian: always 0;
     /// Czech: 0 = one, 1 = few (2–4), 2 = other; French: 0 = one (0 and 1), 1 = other). A catalog's `@plural` entries list one form per
     /// index.
     pub plural: fn(u64) -> usize,
     /// Must the catalog cover every menu string? (checked by the tests)
     pub complete_menus: bool,
     catalog: OnceLock<Catalog>,
-    /// Has [`take_catalog_requests`] been told this catalog is wanted? (Run-time catalogs only.)
-    requested: AtomicBool,
 }
 
 /// A script's reading direction.
@@ -118,8 +115,8 @@ fn plural_polish(n: u64) -> usize {
     }
 }
 
-/// A catalog file as deflated by build.rs (the binary would otherwise carry ~1.9 MB of
-/// translations, which the web build's size gate can't afford).
+/// A catalog file as packed by build.rs (`pack_catalogs`; the binary would otherwise carry ~2.2 MB
+/// of translations, which the web build's size gate can't afford). See [`unpack`].
 macro_rules! catalog {
     ($code:literal) => {
         include_bytes!(concat!(env!("OUT_DIR"), "/i18n/", $code, ".tsv.deflate"))
@@ -143,172 +140,85 @@ fn inflate(source: &[u8]) -> Result<String, String> {
     Ok(text)
 }
 
+/// Every catalog entry's `context<TAB>source`, stored once for all catalogs (build.rs).
+static KEYS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/i18n/keys.deflate"));
+
+/// Restore a catalog file from its packed form (build.rs `pack_catalogs`): entry lines refer to
+/// [`KEYS`] instead of repeating the English source. Bad data gives an error (and the language
+/// falls back to English), never a panic.
+fn unpack(source: &[u8]) -> Result<String, String> {
+    static KEY_TEXT: OnceLock<Result<String, String>> = OnceLock::new();
+    if source.is_empty() {
+        return Ok(String::new());
+    }
+    let keys: Vec<&str> = KEY_TEXT.get_or_init(|| inflate(KEYS)).as_ref().map_err(|e| format!("catalog keys: {e}"))?.split('\n').collect();
+    expand(&inflate(source)?, &keys)
+}
+
+/// [`unpack`]'s second step: replace each packed entry line with its key and translation.
+fn expand(packed: &str, keys: &[&str]) -> Result<String, String> {
+    let mut text = String::with_capacity(packed.len().saturating_mul(2));
+    let mut next = 0usize;
+    for (n, line) in packed.split('\n').enumerate() {
+        if n > 0 {
+            text.push('\n');
+        }
+        let bad = || format!("packed line {}: bad key reference", n + 1);
+        let (index, tr) = if let Some(tr) = line.strip_prefix('\x01') {
+            (next, tr)
+        } else if let Some(rest) = line.strip_prefix('\x02') {
+            let (offset, tr) = rest.split_once('\t').ok_or_else(bad)?;
+            let offset: i64 = offset.parse().map_err(|_| bad())?;
+            let index = i64::try_from(next).ok().and_then(|n| n.checked_add(offset)).and_then(|i| usize::try_from(i).ok()).ok_or_else(bad)?;
+            (index, tr)
+        } else {
+            text.push_str(line.strip_prefix('\x03').unwrap_or(line));
+            continue;
+        };
+        text.push_str(keys.get(index).ok_or_else(bad)?);
+        text.push('\t');
+        text.push_str(tr);
+        next = index.saturating_add(1);
+        if text.len() as u64 > MAX_CATALOG_BYTES {
+            return Err(format!("over {MAX_CATALOG_BYTES} bytes"));
+        }
+    }
+    Ok(text)
+}
+
 /// The registry. English first: it is the fallback and the source language.
 pub static LANGUAGES: [LangInfo; 17] = [
-    LangInfo {
-        code: "en",
-        name: "English",
-        source: b"",
-        plural: plural_one_other,
-        complete_menus: false,
-        catalog: OnceLock::new(),
-        requested: AtomicBool::new(false),
-    },
-    LangInfo {
-        code: "ja",
-        name: "日本語",
-        source: catalog!("ja"),
-        plural: plural_none,
-        complete_menus: true,
-        catalog: OnceLock::new(),
-        requested: AtomicBool::new(false),
-    },
-    LangInfo {
-        code: "zh-hans",
-        name: "简体中文",
-        source: catalog!("zh-hans"),
-        plural: plural_none,
-        complete_menus: true,
-        catalog: OnceLock::new(),
-        requested: AtomicBool::new(false),
-    },
+    LangInfo { code: "en", name: "English", source: b"", plural: plural_one_other, complete_menus: false, catalog: OnceLock::new() },
+    LangInfo { code: "ja", name: "日本語", source: catalog!("ja"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
+    LangInfo { code: "zh-hans", name: "简体中文", source: catalog!("zh-hans"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
     // Traditional Chinese in the vocabulary used in Taiwan; `zh-TW`, `zh-HK`, `zh-MO` and `zh-Hant-*`
     // locales all resolve here (see `candidates`).
-    LangInfo {
-        code: "zh-hant",
-        name: "繁體中文",
-        source: catalog!("zh-hant"),
-        plural: plural_none,
-        complete_menus: true,
-        catalog: OnceLock::new(),
-        requested: AtomicBool::new(false),
-    },
-    LangInfo {
-        code: "es",
-        name: "Español",
-        source: catalog!("es"),
-        plural: plural_one_other,
-        complete_menus: true,
-        catalog: OnceLock::new(),
-        requested: AtomicBool::new(false),
-    },
-    LangInfo {
-        code: "ru",
-        name: "Русский",
-        source: catalog!("ru"),
-        plural: plural_russian,
-        complete_menus: true,
-        catalog: OnceLock::new(),
-        requested: AtomicBool::new(false),
-    },
+    LangInfo { code: "zh-hant", name: "繁體中文", source: catalog!("zh-hant"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
+    LangInfo { code: "es", name: "Español", source: catalog!("es"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
+    LangInfo { code: "ru", name: "Русский", source: catalog!("ru"), plural: plural_russian, complete_menus: true, catalog: OnceLock::new() },
     // Ukrainian has the same one/few/many rule for integer counts.
-    LangInfo {
-        code: "uk",
-        name: "Українська",
-        source: catalog!("uk"),
-        plural: plural_russian,
-        complete_menus: true,
-        catalog: OnceLock::new(),
-        requested: AtomicBool::new(false),
-    },
-    LangInfo {
-        code: "cs",
-        name: "Čeština",
-        source: catalog!("cs"),
-        plural: plural_cs,
-        complete_menus: true,
-        catalog: OnceLock::new(),
-        requested: AtomicBool::new(false),
-    },
-    LangInfo {
-        code: "fr",
-        name: "Français",
-        source: catalog!("fr"),
-        plural: plural_fr,
-        complete_menus: true,
-        catalog: OnceLock::new(),
-        requested: AtomicBool::new(false),
-    },
-    LangInfo {
-        code: "id",
-        name: "Bahasa Indonesia",
-        source: catalog!("id"),
-        plural: plural_none,
-        complete_menus: true,
-        catalog: OnceLock::new(),
-        requested: AtomicBool::new(false),
-    },
-    LangInfo {
-        code: "ko",
-        name: "한국어",
-        source: catalog!("ko"),
-        plural: plural_none,
-        complete_menus: true,
-        catalog: OnceLock::new(),
-        requested: AtomicBool::new(false),
-    },
-    LangInfo {
-        code: "pl",
-        name: "Polski",
-        source: catalog!("pl"),
-        plural: plural_polish,
-        complete_menus: true,
-        catalog: OnceLock::new(),
-        requested: AtomicBool::new(false),
-    },
-    LangInfo {
-        code: "de",
-        name: "Deutsch",
-        source: catalog!("de"),
-        plural: plural_one_other,
-        complete_menus: true,
-        catalog: OnceLock::new(),
-        requested: AtomicBool::new(false),
-    },
+    LangInfo { code: "uk", name: "Українська", source: catalog!("uk"), plural: plural_russian, complete_menus: true, catalog: OnceLock::new() },
+    LangInfo { code: "cs", name: "Čeština", source: catalog!("cs"), plural: plural_cs, complete_menus: true, catalog: OnceLock::new() },
+    LangInfo { code: "fr", name: "Français", source: catalog!("fr"), plural: plural_fr, complete_menus: true, catalog: OnceLock::new() },
+    LangInfo { code: "id", name: "Bahasa Indonesia", source: catalog!("id"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
+    LangInfo { code: "ko", name: "한국어", source: catalog!("ko"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
+    LangInfo { code: "pl", name: "Polski", source: catalog!("pl"), plural: plural_polish, complete_menus: true, catalog: OnceLock::new() },
+    LangInfo { code: "de", name: "Deutsch", source: catalog!("de"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
     // Brazilian Portuguese; `pt`, `pt-BR` and `pt-PT` locales all resolve here (see `candidates`).
-    LangInfo {
-        code: "pt-br",
-        name: "Português (Brasil)",
-        source: catalog!("pt-br"),
-        plural: plural_pt,
-        complete_menus: true,
-        catalog: OnceLock::new(),
-        requested: AtomicBool::new(false),
-    },
-    LangInfo {
-        code: "el",
-        name: "Ελληνικά",
-        source: catalog!("el"),
-        plural: plural_one_other,
-        complete_menus: true,
-        catalog: OnceLock::new(),
-        requested: AtomicBool::new(false),
-    },
+    LangInfo { code: "pt-br", name: "Português (Brasil)", source: catalog!("pt-br"), plural: plural_pt, complete_menus: true, catalog: OnceLock::new() },
+    LangInfo { code: "el", name: "Ελληνικά", source: catalog!("el"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
     // Dutch; `nl-NL` and `nl-BE` locales both resolve here.
-    LangInfo {
-        code: "nl",
-        name: "Nederlands",
-        source: catalog!("nl"),
-        plural: plural_one_other,
-        complete_menus: true,
-        catalog: OnceLock::new(),
-        requested: AtomicBool::new(false),
-    },
-    LangInfo {
-        code: "it",
-        name: "Italiano",
-        source: catalog!("it"),
-        plural: plural_one_other,
-        complete_menus: true,
-        catalog: OnceLock::new(),
-        requested: AtomicBool::new(false),
-    },
+    LangInfo { code: "nl", name: "Nederlands", source: catalog!("nl"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
+    LangInfo { code: "it", name: "Italiano", source: catalog!("it"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
+    // Hungarian: a count takes the singular noun ("3 réteg"), so one plural form.
+    // Turkish; `tr`, `tr-TR` and `tr_TR` locales resolve here.
+    // Vietnamese; `vi-VN` resolves here.
 ];
 
 impl LangInfo {
     /// The catalog file's text (empty for English, or if the bundled data can't be inflated).
     pub fn text(&self) -> String {
-        inflate(self.source).unwrap_or_else(|e| {
+        unpack(self.source).unwrap_or_else(|e| {
             log::error!("translation catalog {}: {e}; showing English", self.code);
             String::new()
         })
@@ -320,8 +230,10 @@ impl LangInfo {
         }
         if self.is_fetched() {
             // Not compiled in (no `all-catalogs`): English until the shell installs it.
-            if !self.requested.load(Ordering::Relaxed) && !self.requested.swap(true, Ordering::Relaxed) {
-                REQUESTS.lock().unwrap_or_else(PoisonError::into_inner).push(self.code);
+            let mut asked = REQUESTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if !asked.contains(&self.code) {
+                asked.push(self.code);
+                REQUESTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(self.code);
             }
             return &NO_CATALOG;
         }
@@ -335,10 +247,12 @@ impl LangInfo {
 }
 
 /// What a run-time catalog reads as until it arrives: nothing, so the UI shows English.
-static NO_CATALOG: LazyLock<Catalog> = LazyLock::new(Catalog::default);
+static NO_CATALOG: std::sync::LazyLock<Catalog> = std::sync::LazyLock::new(|| Catalog::parse(""));
 
 /// Run-time catalogs the UI has asked for and the shell hasn't fetched yet.
-static REQUESTS: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+static REQUESTS: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+/// Every run-time catalog asked for so far (each is asked for once).
+static REQUESTED: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
 
 /// Without the `all-catalogs` feature only Spanish and Brazilian Portuguese are compiled in (the
 /// web build: the others would add ~0.7 MB to every download). The first time the UI needs one of
@@ -346,7 +260,7 @@ static REQUESTS: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 /// (`<code>.tsv`) and installs it with [`provide_catalog`]. With every catalog compiled in this
 /// is always empty.
 pub fn take_catalog_requests() -> Vec<&'static str> {
-    std::mem::take(&mut *REQUESTS.lock().unwrap_or_else(PoisonError::into_inner))
+    std::mem::take(&mut *REQUESTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
 }
 
 /// Install a run-time catalog (the text of `<code>.tsv`) fetched for [`take_catalog_requests`].
@@ -354,11 +268,6 @@ pub fn take_catalog_requests() -> Vec<&'static str> {
 /// skipped, as for bundled catalogs; the text is capped like an inflated one.
 pub fn provide_catalog(code: &str, text: &str) -> Result<(), String> {
     let info = LANGUAGES.iter().find(|l| l.code.eq_ignore_ascii_case(code)).ok_or_else(|| format!("no language {code:?}"))?;
-    install(info, text)
-}
-
-fn install(info: &LangInfo, text: &str) -> Result<(), String> {
-    let code = info.code;
     if !info.is_fetched() || info.catalog.get().is_some() {
         return Ok(());
     }
@@ -630,6 +539,21 @@ mod tests {
         assert_eq!(Lang::from_pref("xx-unknown"), Lang::EN);
     }
 
+    /// The brush size/hardness shortcut rows (`tools.*` commands without a menu item) must be translated in
+    /// every catalog, or they show English in the Keyboard Shortcuts dialog and cannot be found by searching.
+    #[test]
+    fn brush_size_and_hardness_shortcuts_are_translated_in_every_language() {
+        let keys = ["Decrease Brush Size", "Increase Brush Size", "Decrease Brush Hardness", "Increase Brush Hardness"];
+        for lang in Lang::all().filter(|lang| *lang != Lang::EN) {
+            for key in keys {
+                assert!(has(lang, key), "{} has no translation for {key:?}", lang.code());
+            }
+        }
+        let zh = Lang::from_code("zh-hans").expect("zh-hans registered");
+        assert_eq!(tr(zh, "Decrease Brush Size"), "减小画笔大小");
+        assert_eq!(tr(zh, "Increase Brush Size"), "增大画笔大小");
+    }
+
     #[test]
     fn simplified_chinese_covers_dynamic_shortcuts_and_layer_counts() {
         let zh = Lang::from_code("zh-hans").expect("zh-hans registered");
@@ -724,6 +648,94 @@ mod tests {
         assert_eq!(trn(ru(), 22, "{n} item", "{n} items"), "22 элемента");
         assert_eq!(trn(ru(), 101, "{n} item", "{n} items"), "101 элемент");
         assert_eq!(trn(ru(), 111, "{n} item", "{n} items"), "111 элементов");
+    }
+
+    #[test]
+    fn russian_status_messages_agree_with_counts() {
+        let ru = Lang::from_code("ru").expect("ru registered");
+        let cases = [
+            (
+                "Exported {n} swatch to {file}",
+                "Exported {n} swatches to {file}",
+                ["Экспортирован {n} образец в {file}", "Экспортированы {n} образца в {file}", "Экспортировано {n} образцов в {file}"],
+            ),
+            (
+                "Imported {n} brush from {group}",
+                "Imported {n} brushes from {group}",
+                ["Импортирована {n} кисть из {group}", "Импортированы {n} кисти из {group}", "Импортировано {n} кистей из {group}"],
+            ),
+            (
+                "Imported {n} swatch from {file}",
+                "Imported {n} swatches from {file}",
+                ["Импортирован {n} образец из {file}", "Импортированы {n} образца из {file}", "Импортировано {n} образцов из {file}"],
+            ),
+            ("Played {n} step", "Played {n} steps", ["Воспроизведён {n} шаг", "Воспроизведены {n} шага", "Воспроизведено {n} шагов"]),
+            (
+                "Updated {n} linked smart object changed on disk",
+                "Updated {n} linked smart objects changed on disk",
+                [
+                    "Обновлён {n} связанный смарт-объект, изменённый на диске",
+                    "Обновлены {n} связанных смарт-объекта, изменённых на диске",
+                    "Обновлено {n} связанных смарт-объектов, изменённых на диске",
+                ],
+            ),
+            (
+                "{n} layer recorded by this comp was deleted. Update the comp, or clear the warning.",
+                "{n} layers recorded by this comp were deleted. Update the comp, or clear the warning.",
+                [
+                    "Удалён {n} слой, записанный в этом варианте. Обновите вариант или сбросьте предупреждение.",
+                    "Удалены {n} слоя, записанных в этом варианте. Обновите вариант или сбросьте предупреждение.",
+                    "Удалено {n} слоёв, записанных в этом варианте. Обновите вариант или сбросьте предупреждение.",
+                ],
+            ),
+            ("{n} sample point removed", "{n} sample points removed", ["Удалена {n} точка замера", "Удалены {n} точки замера", "Удалено {n} точек замера"]),
+            (
+                "Loaded {n} action from {file}",
+                "Loaded {n} actions from {file}",
+                ["Загружена {n} операция из {file}", "Загружены {n} операции из {file}", "Загружено {n} операций из {file}"],
+            ),
+            (
+                "Saved {n} action to {file}",
+                "Saved {n} actions to {file}",
+                ["Сохранена {n} операция в {file}", "Сохранены {n} операции в {file}", "Сохранено {n} операций в {file}"],
+            ),
+            (
+                "{n} step with no Photoshop equivalent left out",
+                "{n} steps with no Photoshop equivalent left out",
+                [
+                    "Пропущен {n} шаг без эквивалента в Photoshop",
+                    "Пропущены {n} шага без эквивалента в Photoshop",
+                    "Пропущено {n} шагов без эквивалента в Photoshop",
+                ],
+            ),
+        ];
+        // Include zero, teens, and compound counts as well as each basic form.
+        for (n, form) in [(0, 2), (1, 0), (2, 1), (3, 1), (4, 1), (5, 2), (11, 2), (12, 2), (14, 2), (21, 0), (22, 1), (25, 2), (101, 0), (112, 2)] {
+            for (one, other, forms) in cases {
+                let expected = forms[form].replace("{n}", &n.to_string());
+                assert_eq!(trn(ru, n, one, other), expected, "{one}, n={n}");
+            }
+        }
+        assert_eq!(
+            fmt(&trn(ru, 2, "Imported {n} brush from {group}", "Imported {n} brushes from {group}"), &[("group", "Кисти")]),
+            "Импортированы 2 кисти из Кисти"
+        );
+        assert_eq!(
+            fmt(&trn(ru, 22, "Loaded {n} action from {file}", "Loaded {n} actions from {file}"), &[("file", "actions.atn")]),
+            "Загружены 22 операции из actions.atn"
+        );
+    }
+
+    #[test]
+    fn russian_font_weights_and_reviewed_labels() {
+        let ru = Lang::from_code("ru").expect("ru registered");
+        assert_eq!(tr_ctx(ru, "fontWeight", "ExtraLight"), "Сверхтонкий");
+        assert_eq!(tr_ctx(ru, "fontWeight", "Light"), "Лёгкий");
+        assert_eq!(tr_ctx(ru, "fontWeight", "ExtraBold"), "Сверхжирный");
+        assert_eq!(tr_ctx(ru, "fontWeight", "Black"), "Сверхжирный (Black)");
+        assert_eq!(tr(ru, "Delete and Fill Selection"), "Удалить и залить выделение");
+        assert_eq!(tr(ru, "Discard the embedded profile (don't color manage)"), "Не использовать встроенный профиль (без управления цветом)");
+        assert_eq!(tr(ru, "No object found there — drag a rectangle around it"), "Объект не найден — обведите его прямоугольником");
     }
 
     #[test]
@@ -852,13 +864,13 @@ mod tests {
         assert_eq!(tr(CS(), "All"), "Vše");
     }
 
-    /// The deflated catalogs in the binary inflate to exactly the `.tsv` files.
+    /// The packed catalogs in the binary unpack to exactly the `.tsv` files.
     #[test]
-    fn deflated_catalogs_match_their_files() {
+    fn packed_catalogs_match_their_files() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/i18n");
         for l in LANGUAGES.iter().skip(1) {
             let file = std::fs::read_to_string(dir.join(format!("{}.tsv", l.code))).unwrap();
-            assert_eq!(inflate(l.source).unwrap(), file, "{}", l.code);
+            assert_eq!(unpack(l.source).unwrap(), file, "{}", l.code);
             assert!(l.source.len() < file.len() / 2, "{}: stored deflated", l.code);
         }
         assert_eq!(LANGUAGES[0].text(), "", "English has no catalog");
@@ -877,38 +889,21 @@ mod tests {
             plural: plural_none,
             complete_menus: false,
             catalog: OnceLock::new(),
-            requested: AtomicBool::new(false),
         }));
         assert_eq!(info.text(), "");
         assert_eq!(tr(Lang(info), "Layer"), "Layer", "falls back to English");
     }
 
-    /// A catalog that isn't compiled in reads as English, is asked for once, and translates
-    /// once installed; compiled-in languages ignore a provided catalog.
+    /// Packed lines unpack to their keys; references to keys that don't exist are an error, not a
+    /// panic.
     #[test]
-    fn run_time_catalogs_are_requested_once_and_installed() {
-        let info: &'static LangInfo = Box::leak(Box::new(LangInfo {
-            code: "xx-fetched",
-            name: "x",
-            source: b"",
-            plural: plural_one_other,
-            complete_menus: false,
-            catalog: OnceLock::new(),
-            requested: AtomicBool::new(false),
-        }));
-        assert_eq!(tr(Lang(info), "Layer"), "Layer", "English until it arrives");
-        assert_eq!(tr(Lang(info), "Image"), "Image");
-        let asked: Vec<_> = take_catalog_requests().into_iter().filter(|c| *c == "xx-fetched").collect();
-        assert_eq!(asked, ["xx-fetched"], "asked for once");
-        install(info, "\tLayer\tCapa\n").unwrap();
-        assert_eq!(tr(Lang(info), "Layer"), "Capa");
-        assert!(!take_catalog_requests().contains(&"xx-fetched"));
-        assert!(install(info, &"x".repeat(MAX_CATALOG_BYTES as usize + 1)).is_ok(), "already installed: kept");
-        // Compiled in (this test build has every catalog): a provided one changes nothing.
-        let before = tr(Lang::from_code("ja").unwrap(), "Layer").to_string();
-        provide_catalog("ja", "\tLayer\tX\n").unwrap();
-        assert_eq!(tr(Lang::from_code("ja").unwrap(), "Layer"), before);
-        assert!(provide_catalog("tlh", "").is_err(), "unknown language");
+    fn packed_lines_unpack_and_bad_references_are_errors() {
+        let keys = ["\tOpen", "@id\tfile.open", "\tClose"];
+        let packed = "# c\n\x01Ouvrir\n\x02-1\tOuvrir\n\x02+1\tFermer\n\x03\x01x\n";
+        assert_eq!(expand(packed, &keys).unwrap(), "# c\n\tOpen\tOuvrir\n\tOpen\tOuvrir\n\tClose\tFermer\n\x01x\n");
+        for bad in ["\x02-1\tx", "\x02 3\tx", "\x023", "\x029223372036854775807\tx", "\x02-9223372036854775808\tx", "\x01a\n\x01b\n\x01c\n\x01d"] {
+            assert!(expand(bad, &keys).is_err(), "{bad:?}");
+        }
     }
 
     /// Every bundled catalog is well-formed and consistent with its sources.
@@ -1047,6 +1042,73 @@ mod tests {
         assert!(code.starts_with("a\n") && code.ends_with("\nc"), "{code}");
     }
 
+    #[test]
+    fn czech_status_templates_preserve_details_and_plural_counts() {
+        let cs = CS();
+        let template = "Step {step} ({id}) failed: {error}";
+        let args = [("step", "2"), ("id", "file.export"), ("error", "disk full: /tmp/image.psd")];
+        assert_eq!(fmt(tr(cs, template), &args), "Krok 2 (file.export) selhal: disk full: /tmp/image.psd");
+        assert_eq!(fmt(tr(Lang::EN, template), &args), "Step 2 (file.export) failed: disk full: /tmp/image.psd");
+        // Languages without these dynamic templates keep the English source.
+        assert_eq!(tr(JA(), template), template);
+        for (n, expected) in [(0, "Odstraněno 0 bodů měření"), (1, "Odstraněn 1 bod měření"), (2, "Odstraněny 2 body měření"), (5, "Odstraněno 5 bodů měření")]
+        {
+            assert_eq!(trn(cs, n, "{n} sample point removed", "{n} sample points removed"), expected);
+        }
+        let one = "Imported {n} swatch from {file}";
+        let other = "Imported {n} swatches from {file}";
+        assert_eq!(fmt(&trn(cs, 3, one, other), &[("file", "English name.aco")]), "Importovány 3 vzorky ze souboru English name.aco");
+        assert_eq!(tr(cs, "Preferences can't be saved"), "Předvolby nelze uložit");
+    }
+
+    #[test]
+    fn czech_dialog_and_hardware_labels_preserve_names() {
+        let cs = CS();
+        for label in [
+            "New Crop Preset…",
+            "Delete Crop Preset…",
+            "Color Picker (Background Color)",
+            "Color Picker (Foreground Color)",
+            "Pro (Medium Gray)",
+            "Grid view",
+            "List view",
+            "Scroll menu up",
+            "Scroll menu down",
+            "Commit transform",
+            "Cancel transform",
+        ] {
+            assert_ne!(tr(cs, label), label, "{label}");
+        }
+        for kind in [
+            crate::rasterize_prompt::Kind::Type,
+            crate::rasterize_prompt::Kind::Shape,
+            crate::rasterize_prompt::Kind::SmartObject,
+            crate::rasterize_prompt::Kind::Fill,
+        ] {
+            assert_ne!(tr(cs, kind.message()), kind.message());
+        }
+        assert_eq!(fmt(tr(cs, "Driver: {driver}"), &[("driver", "Mesa 25.0")]), "Ovladač: Mesa 25.0");
+        assert_eq!(
+            fmt(tr(cs, "Monitor profile on {display}: {profile}"), &[("display", "DELL U2720Q"), ("profile", "sRGB IEC61966-2.1")]),
+            "Profil monitoru DELL U2720Q: sRGB IEC61966-2.1"
+        );
+    }
+
+    #[test]
+    fn czech_composed_labels_use_context_and_preserve_document_names() {
+        let cs = CS();
+        assert_eq!(tr(cs, "Zoom"), "Lupa");
+        assert_eq!(tr_ctx(cs, "navigator", "Zoom"), "Zvětšení");
+        assert_eq!(tr_ctx(Lang::EN, "navigator", "Zoom"), "Zoom");
+        let template = "Data Set: {name}  ({index}/{total})";
+        assert_eq!(fmt(tr(cs, template), &[("name", "Data Set 1"), ("index", "1"), ("total", "2")]), "Datová sada: Data Set 1  (1/2)");
+        for (n, expected) in
+            [(1, "Importován 1 přechod ze souboru Sunset"), (3, "Importovány 3 přechody ze souboru Sunset"), (5, "Importováno 5 přechodů ze souboru Sunset")]
+        {
+            assert_eq!(fmt(&trn(cs, n, "Imported {n} gradient from {file}", "Imported {n} gradients from {file}"), &[("file", "Sunset")]), expected);
+        }
+    }
+
     /// Every `tl!("literal")` in the shell has an entry in each language that claims complete menus
     /// (so a new label can't ship untranslated by accident). Literals that are deliberately shown as
     /// they are (names, units) are listed in `KEEP_AS_IS`.
@@ -1148,6 +1210,25 @@ mod tests {
         assert_eq!(tr(Lang::EN, "Seafoam"), "Seafoam");
     }
 
+    /// These labels are passed to `tl!` dynamically, so the literal coverage scan misses them.
+    #[test]
+    fn russian_dynamic_selection_theme_and_measurement_labels_are_translated() {
+        let ru = Lang::from_code("ru").expect("ru registered");
+        let (inverse_label, _) =
+            crate::canvas_tool_menu::SELECTION_MENU.iter().flatten().find(|(_, id)| *id == "select.inverse").expect("selection menu has Select Inverse");
+        assert_eq!(tr(ru, inverse_label), "Инвертировать выделение");
+        for kind in [crate::theme::ThemeKind::ProLight, crate::theme::ThemeKind::ProLightGray] {
+            assert!(has(ru, kind.label()), "Russian theme label missing {}", kind.label());
+        }
+        for (_, label) in photocraft_engine::analysis_cmds::COLUMNS {
+            assert!(has(ru, label), "Russian measurement header missing {label}");
+        }
+        assert_eq!(tr(ru, "Pro (Light)"), "Pro (светлая)");
+        assert_eq!(tr(ru, "Pro (Light Gray)"), "Pro (светло-серая)");
+        assert_eq!(tr(ru, "Date and Time"), "Дата и время");
+        assert_eq!(tr(ru, "Integrated Density"), "Интегральная плотность");
+    }
+
     /// Font style labels are built from dynamic words (weights, "Italic"), so the literal
     /// scanner cannot cover them; "Light" there is a weight, distinct from the Camera Raw
     /// "Light" section (`type_tool::style_label`).
@@ -1185,7 +1266,20 @@ mod tests {
 
     #[test]
     fn mixer_brush_ui_strings_have_translations_in_every_registered_language() {
-        const STRINGS: &[&str] = &["Mixer Brush", "Mixer Brush Tool", "Wet", "Load", "Mix", "Flow", "Sample All Layers"];
+        const STRINGS: &[&str] = &[
+            "Mixer Brush",
+            "Mixer Brush Tool",
+            "Wet",
+            "Load",
+            "Mix",
+            "Flow",
+            "Sample All Layers",
+            "Current Brush Load",
+            "Load Brush",
+            "Clean Brush",
+            "Load the brush after each stroke",
+            "Clean the brush after each stroke",
+        ];
         for lang in Lang::all() {
             for source in STRINGS {
                 let translated = tr(lang, source);

@@ -503,6 +503,18 @@ pub struct Translated {
     pub offset: (i32, i32),
 }
 
+impl Translated {
+    /// Draw layer `layer`'s content (or mask) — `surface`, as the document holds it, unmoved —
+    /// moved by `offset`: a Move drag's preview without a moved copy of the pixels. The plan
+    /// places the layer's bounds (and those of the groups around it) at the offset, and the
+    /// lower-stack cache isn't used from the layer's unit up. Only for
+    /// [`plan::movable_in_place`] layers (rendering refuses others); a CPU fallback draws the
+    /// document as it is, so callers keep a moved copy for that path.
+    pub fn in_place(layer: LayerId, mask: bool, surface: &Surface, offset: (i32, i32)) -> Self {
+        Translated { layer, mask, shown: surface_fingerprint(surface), source: surface.clone(), offset }
+    }
+}
+
 /// Identity of a surface's pixels: tile `Arc`s and coordinates, default pixel and format.
 pub fn surface_fingerprint(s: &Surface) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325 ^ s.tile_count() as u64;
@@ -929,6 +941,25 @@ impl Compositor {
         self.translated = translated;
     }
 
+    /// The layers (and masks) of `doc` that [`Translated::in_place`] entries draw moved from
+    /// the surfaces the document holds.
+    fn moved_in_place(&self, doc: &Document) -> (plan::Moved, std::collections::HashSet<LayerId>) {
+        let mut moved = plan::Moved::new();
+        let mut masks = std::collections::HashSet::new();
+        for t in self.translated.iter().filter(|t| t.shown == surface_fingerprint(&t.source)) {
+            let Some(l) = doc.layer(t.layer) else { continue };
+            let held = if t.mask { l.mask.as_ref().map(|m| &m.surface) } else { l.surface() };
+            if held.is_some_and(|s| surface_fingerprint(s) == t.shown) {
+                if t.mask {
+                    masks.insert(t.layer);
+                } else {
+                    moved.insert(t.layer, t.offset);
+                }
+            }
+        }
+        (moved, masks)
+    }
+
     /// The source and offset to draw `surface` (layer `layer`'s content or mask) from, if it is
     /// one of the [`Translated`] surfaces.
     fn translation(&self, layer: LayerId, mask: bool, surface: &Surface) -> Option<(Surface, (i32, i32))> {
@@ -987,7 +1018,7 @@ impl Compositor {
     /// pixel: exact through level 2, a regular subsample above); effect maps, fills and patterns are sampled at the pixel's centre. The result
     /// differs from the mip-mapped full-size composite only by that resampling. The chunks
     /// handed to `sink` are in the level's coordinates ([`level_rect`] of the region, clipped
-    /// to [`level_bounds`]). Lower-stack reuse applies at full size only.
+    /// to [`level_bounds`]). Lower-stack reuse works per level (a change of level starts over).
     pub fn render_lod(
         &mut self,
         device: &wgpu::Device,
@@ -1057,7 +1088,8 @@ impl Compositor {
     ) -> Result<Stats, Unsupported> {
         let canvas = doc.bounds();
         let region = region.intersect(&canvas);
-        let plan = plan(doc)?;
+        let (moved, moved_masks) = self.moved_in_place(doc);
+        let plan = plan::plan_moved(doc, Some(&moved))?;
         self.check_fx(doc, &plan)?;
         self.pattern_mode = doc.pixel_format().mode;
         let mut stats = Stats { passes: plan.passes.len(), slots: plan.slots, level, ..Default::default() };
@@ -1076,7 +1108,11 @@ impl Compositor {
 
         // Only render owns submission. A caller may discard encode's command buffer, so it
         // cannot establish (or consume) a checkpoint whose GPU copy might never execute.
-        let checkpoint = if flush && level == 0 { self.prefix.prepare(doc, &plan) } else { None };
+        // Moving layers change what the stack shows without changing the document: nothing at or
+        // above their root unit may come from the lower-stack cache.
+        let moved_root = (!moved.is_empty()).then(|| doc.layers.iter().position(|l| plan::layer_or_inside(l, &|k| moved.contains_key(&k.id)))).flatten();
+        // Per level of detail: a drag composited reduced reuses the reduced lower stack too.
+        let checkpoint = if flush { self.prefix.prepare(doc, &plan, moved_root, level) } else { None };
 
         // Effect maps of whole regions first (they may render group shapes through sub-plans);
         // regions larger than the limit are built per cell below.
@@ -1087,7 +1123,7 @@ impl Compositor {
                 self.sync_fx(device, queue, encoder, doc, f, (f.layer.id, None), f.region, &mut stats);
             }
         }
-        let fr = self.frame_res(device, queue, canvas, &plan);
+        let fr = self.frame_res(device, queue, canvas, &plan, &moved, &moved_masks);
 
         // Page cells; every other frame in reverse, so a repeated full refresh of a document
         // larger than the budget starts with the pages still resident.
@@ -1131,7 +1167,7 @@ impl Compositor {
                 // render its whole chunk once, so the cache holds all of it and the dabs that
                 // follow there skip the lower stack.
                 let step = self.chunk as i32;
-                let canvas_cell = cr.intersect(&canvas);
+                let canvas_cell = level_rect(cr.intersect(&canvas), level).intersect(&lbounds);
                 for c in &mut chunks {
                     if !self.prefix.contains(*c) {
                         let (x0, y0) = (c.x0.div_euclid(step) * step, c.y0.div_euclid(step) * step);
@@ -1235,10 +1271,31 @@ impl Compositor {
     }
 
     /// Per-frame resources of `plan`: the tile area of each pass's surfaces, its LUT and pattern.
-    fn frame_res(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, canvas: Rect, plan: &Plan<'_>) -> FrameRes {
+    fn frame_res(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        canvas: Rect,
+        plan: &Plan<'_>,
+        moved: &plan::Moved,
+        moved_masks: &std::collections::HashSet<LayerId>,
+    ) -> FrameRes {
         let grid = tile_grid(canvas);
-        let area = |s: &Surface| s.tile_bounds().intersect(&grid);
-        let pass_areas = |p: &plan::Pass<'_>| (p.tex.as_ref().map_or(Rect::EMPTY, |t| area(t.surface.get())), p.mask.as_ref().map_or(Rect::EMPTY, |m| area(m.surface.get())));
+        // Where a surface shows: moved in place layers (and their masks) at their offset.
+        let area = |s: &Surface, layer: LayerId, mask: bool| {
+            let b = s.tile_bounds();
+            let b = match moved.get(&layer) {
+                Some(&(dx, dy)) if !mask || moved_masks.contains(&layer) => b.translate(dx, dy),
+                _ => b,
+            };
+            b.intersect(&grid)
+        };
+        let pass_areas = |p: &plan::Pass<'_>| {
+            (
+                p.tex.as_ref().map_or(Rect::EMPTY, |t| area(t.surface.get(), t.layer, false)),
+                p.mask.as_ref().map_or(Rect::EMPTY, |m| area(m.surface.get(), m.layer, true)),
+            )
+        };
         let areas = plan.passes.iter().map(pass_areas).collect();
         let member_areas = plan.passes.iter().map(|p| p.members.iter().map(pass_areas).collect()).collect();
         let frame = self.frame;

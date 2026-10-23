@@ -44,7 +44,7 @@ cargo xtask stats                                          # tests and lines per
 cargo xtask parity                                         # Photoshop menu coverage -> docs/parity-checklist.md
 ```
 
-Image code is slow at `opt-level 0`, so the workspace profile builds dependencies at `opt-level 2`. Use `--release` for anything interactive.
+Image code is slow at `opt-level 0`, so the workspace profile builds dependencies at `opt-level 2`. Use `--release` for anything interactive. Test builds compile ui-egui itself at `opt-level 0` (`[profile.test.package.photocraft-ui-egui]` in `Cargo.toml`): it was one of the biggest test-build units, and its tests run no heavy pixel code of their own.
 
 The dev profile builds with `debug = "line-tables-only"`: panic backtraces keep file and line, and test binaries link about twice as fast. To inspect local variables in a debugger, build with `CARGO_PROFILE_DEV_DEBUG=true`.
 
@@ -59,7 +59,7 @@ cargo nextest run --workspace              # parallel across binaries (cargo ins
 cargo test --doc --workspace               # nextest does not run doctests
 ```
 
-[cargo-nextest](https://nexte.st) runs each test in its own process. `.config/nextest.toml` puts the GPU tests (`photocraft-gpu`, and ui-egui's integration and canvas/GPU tests) in a group of at most 4 at a time, because each process opens its own wgpu device and the in-process `gpu_lock()` no longer serializes them. On a 32-thread Windows machine the full workspace went from 297 s (`cargo test`) to about 120 s (#2204). Ignored tests run with `cargo nextest run --run-ignored only`. CI still runs `cargo test`, and a full `cargo test` stays the final check before a PR.
+[cargo-nextest](https://nexte.st) runs each test in its own process. `.config/nextest.toml` puts the GPU tests (`photocraft-gpu`, and ui-egui's integration and canvas/GPU tests) in a group of at most 4 at a time, because each process opens its own wgpu device and the in-process `gpu_lock()` no longer serializes them. On a 32-thread Windows machine the full workspace went from 297 s (`cargo test`) to about 120 s (#2204). Ignored tests run with `cargo nextest run --run-ignored only`. CI runs it with `--profile ci` (fail-fast, a 10-minute hang timeout), plus `cargo test --doc` for the doctests (#6117); a full `cargo test` stays the final check before a PR.
 
 ## Fonts (craft-fonts)
 
@@ -77,32 +77,18 @@ CRAFT_FONTS_DIR="$PWD/../craft-fonts" cargo test --workspace     # runs the Japa
 - `crates/text/build.rs` reads `$CRAFT_FONTS_DIR/fonts/manifest.txt` and embeds the fonts as `photocraft_text::CRAFT_FONTS` (`crates/text/src/craft_fonts.rs`). Unset, `CRAFT_FONTS` is empty and the build is unchanged. A bad path is a build warning, or an error with `CRAFT_FONTS_REQUIRED=1` (release builds set both).
 - **UI:** the Japanese fonts (BIZ UDPGothic Regular first) are the first Japanese fallback in the lazy CJK loader (`crates/ui-egui/src/cjk_fonts.rs`), ahead of the system Japanese fonts and in the same locale script order, appended last to every egui family with the usual baseline alignment.
 - **Type tool:** the text engine registers them in `FontDb::new` (so also with no system fonts) and puts them first in the Japanese slot of the locale-ordered fallback list: BIZ UDPGothic for sans runs, Shippori Mincho / BIZ UDMincho for serif runs.
-- **Web:** the wasm32 build never embeds craft-fonts, even with `CRAFT_FONTS_DIR` set: measured on 2026-10-06, the UI face alone took the release wasm from 24.19 MB to 28.87 MB, over the 25 MiB gate in `packaging/web/package.sh`. Instead it loads fonts served next to it, on demand: `fonts/manifest.txt` beside `index.html`, in craft-fonts' manifest format (`crates/text/src/served.rs`; hosting: `packaging/web/README.md` › Fonts). `PHOTOCRAFT_WEB_FONTS_DIR="$PWD/../craft-fonts" packaging/web/package.sh` puts craft-fonts there. Served families are in the font menus and are fetched when picked or when a document's text needs them; they aren't in the script fallback list yet, so Japanese text set in a Latin font still needs a Japanese font picked (#1615).
-- **Google Fonts index:** `cargo xtask fonts-index --repo <google/fonts checkout> --out <file> [--commit <sha>]` walks `{ofl,apache,ufl}/*/METADATA.pb` and writes the JSON index (schema 1; format documented in `crates/text/src/catalog.rs`) that `photocraft_text::catalog::Catalog::parse` validates and searches. It hashes the font files and reads axes and PostScript names (including `fvar` named instances) with skrifa. Treat the checkout as untrusted data: pass it only as `--repo`, never run anything from inside it. Nothing is downloaded by this command.
-- **Try Google Fonts downloads locally:** the pinned index does not exist yet (`INDEX_URLS` in `crates/fontfetch/src/lib.rs` is empty), so point the app at a local one. Build an index from a `google/fonts` checkout (a few families are enough), then launch with it and turn the preference on:
+- **Web:** the wasm32 build never embeds craft-fonts, even with `CRAFT_FONTS_DIR` set: measured on 2026-10-06, the UI face alone took the release wasm from 24.19 MB to 28.87 MB, over the 24 MiB gate in `packaging/web/package.sh`. Instead it loads fonts served next to it, on demand: `fonts/manifest.txt` beside `index.html`, in craft-fonts' manifest format (`crates/text/src/served.rs`; hosting: `packaging/web/README.md` › Fonts). `PHOTOCRAFT_WEB_FONTS_DIR="$PWD/../craft-fonts" packaging/web/package.sh` puts craft-fonts there. Served families are in the font menus and are fetched when picked or when a document's text needs them; they aren't in the script fallback list yet, so Japanese text set in a Latin font still needs a Japanese font picked (#1615).
+- Tests that need the fonts skip with a message when `CRAFT_FONTS` is empty; CI runs them again with `CRAFT_FONTS_DIR` set, in its own Linux job (`test (with craft-fonts)`). Desktop releases check out craft-fonts at the commit pinned in `.github/workflows/release.yml` (`CRAFT_FONTS_REF`; ci.yml pins the same commit) and ship each font's `OFL.txt` as `OFL-<family>.txt`.
 
-  ```sh
-  cargo xtask fonts-index --repo ../google-fonts --out /tmp/gf-index.json
-  PHOTOCRAFT_FONT_INDEX_FILE=/tmp/gf-index.json PHOTOCRAFT_CONFIG_DIR=/tmp/pc-config cargo run -p photocraft
-  # Edit > Preferences > Type > "Allow online fonts" (or: prefs.set {"values": {"type.allowOnlineFonts": true}} from the control channel's own user, not an MCP client)
-  # then: type.fonts.catalog {"query": "noto"}, type.fonts.install {"family": "Noto Sans JP"}, type.fonts.installed, type.fonts.remove
-  ```
+## One instance per user
 
-  Downloaded fonts live in `<config dir>/Fonts/Google/<slug>/` (never the OS font folders) and are registered from disk at the next start, with no network. The override file is still fully validated, and the font files are still fetched (jsDelivr, then raw.githubusercontent.com) and checked against the index's size and sha256. Headless: `photocraft-cli run ... --allow-online-fonts` (also `batch`, `mcp`, `serve`) turns the preference on for that process only; nothing is saved, and the CLI never reads or writes the preferences file. Automation clients (MCP, the control channel, `serve`) cannot enable the preference themselves: `prefs.set` of `type.allowOnlineFonts` (or of the whole `type` section) is refused for them, so only the person who runs the app or the CLI can opt in.
-- **Google Fonts in the UI** (`crates/ui-egui/src/fonts_ui.rs`): the font picker (options bar and Character panel) has two tabs, Fonts and Find More. Find More searches `type.fonts.catalog` (query, category, language/subset) and each row's cloud button starts `type.fonts.install` as a background job (progress on the row and in the status bar, Cancel on the row or Esc; the finished family is in the Fonts tab and clickable in the row at once). The first time Find More opens with `type.allowOnlineFonts` off it shows a consent card instead of the list and fetches nothing; Allow sets the preference as a user action (the automation guard still refuses it for MCP and the control channel), Not now leaves it off. Variable families say that only the default weight is available. Errors (offline, index not set up, sha mismatch, turned off) show inline with Retry. Type › Resolve Missing Fonts… opens a dialog (missing families, a Replace with picker each, Download from Google Fonts for the ones the index has, OK applies the replacements); Preferences › Type › Manage downloaded fonts… lists `type.fonts.installed` with Remove, and removing a font that open documents use asks first (counts of layers and documents, then Remove anyway; those layers become missing fonts, nothing is re-laid out). The picker's tab, query and filters are `UiState::fonts` (visible in `ui.inspect`, settable with `ui.set {"fonts": {"tab": "findMore", "query": "...", "category": "SERIF", "subset": "japanese"}}`); the two dialogs are `prefs_ui` dialogs whose fields `ui.dialog.*` can read and set. Tests use a fake fetcher and store (`crates/ui-egui/tests/support/dev_fonts.rs`, no network).
-- **See the Google Fonts UI offscreen:** `snapshot --dev-fonts` attaches that fake backend (a demo index of a few families; Oswald's download never finishes so progress shows; Anton and Karla can be installed) and `--allow-online-fonts` turns the preference on. For example, the Find More list with the picker open (use `--background-jobs` to behave like the app, `--click-wait-ms` to let jobs finish between clicks, several `--click-at X,Y` run in order):
-
-  ```sh
-  cargo run -p photocraft-ui-egui --example snapshot -- --dev-fonts --allow-online-fonts --background-jobs --click-wait-ms 300 \
-    --size 1280x720 --scale 1 --out find-more.png \
-    --script '[["engine.execute",{"command":"file.new","params":{"width":900,"height":500}}],["engine.execute",{"command":"type.create","params":{"x":60,"y":120,"text":"Hello","size":64}}],["ui.set",{"tool":"type","fonts":{"tab":"findMore"}}]]' \
-    --click-at 245,49
-  ```
-- Tests that need the fonts skip with a message when `CRAFT_FONTS` is empty; CI's Linux job runs the tests a second time with `CRAFT_FONTS_DIR` set. Desktop releases check out craft-fonts at the commit pinned in `.github/workflows/release.yml` (`CRAFT_FONTS_REF`; ci.yml pins the same commit) and ship each font's `OFL.txt` as `OFL-<family>.txt`.
+On Windows and Linux the first PhotoCraft holds an exclusive lock on `instance.lock` in the config directory and listens on a loopback port named in `instance.json` (with a fresh 256-bit token; the file is 0600 on Unix). Inside a Flatpak it listens on a Unix socket instead, `$XDG_RUNTIME_DIR/app/<app id>/instance.sock` (0600), because Flatpak isolates each sandbox's network namespace, loopback included, unless the app is granted `--share=network`, while that runtime directory is shared by all sandboxes of the app (#1540); the lock, token and protocol are the same. A later launch hands its file arguments there and exits, so files opened from Explorer or a file manager become tabs in the running window (#3708). The primary answers `ok` only once its UI has taken the files; a launch that gets anything else (the primary is starting, hung or closing) keeps retrying the lock for up to 10 s, becoming the primary itself once the old one lets go, and then starts a separate instance, so a file is never acknowledged and lost. When the event loop ends (and before the CPU-compatibility relaunch) the primary refuses new files and frees the lock. It applies only with the per-user settings folder: a portable copy (`PhotoCraftData` beside the executable) or `PHOTOCRAFT_CONFIG_DIR` may be shared between users, so those launches run separately. So do `--new-instance` (or `PHOTOCRAFT_NEW_INSTANCE=1`), every `--control` launch, and launches given a per-process option (`--safe-gpu`, `--present-mode`, `--frame-latency`, `--stroke-trace`, `--in-window-menus`, `--automation-*-root`). A `cargo run` while an installed PhotoCraft is running forwards to it: pass `--new-instance` or set `PHOTOCRAFT_CONFIG_DIR`. macOS gets the same behaviour from LaunchServices (`apple_events.rs`). On native Wayland the running window can't bring itself forward (that takes the launcher's `XDG_ACTIVATION_TOKEN`, and winit 0.30 can't activate an existing window with one), so it asks for attention instead and the taskbar highlights it; X11, XWayland and Windows bring it to the front. Code: `apps/photocraft/src/single_instance.rs`.
 
 ## Graphics startup and device loss
 
-`--safe-gpu` starts with the CPU renderer for one launch (no GPU canvas; a software adapter for the window where the platform has one: WARP on Windows, llvmpipe over GL on Linux). Before creating the wgpu device the app writes and locks `gpu-starting.json` in the config directory; it clears it once the first frames have rendered. A launch that finds an unlocked marker knows the previous start died inside the graphics driver (#4) and uses the next safer backend (Windows: Vulkan → DX12 → CPU; Linux: Vulkan → GL → CPU; macOS: Metal → CPU), remembering it in `performance.gpuBackend` (Preferences › Performance › GPU Backend, with **Reset GPU Backend**). With `auto`, Intel adapters on Windows use DX12. Help › System Info shows the adapter, backend, driver and fallback state.
+`--safe-gpu` starts with the CPU renderer for one launch (no GPU canvas; a software adapter for the window where the platform has one: WARP on Windows, llvmpipe over GL on Linux). Before creating the wgpu device the app writes and locks `gpu-starting.json` in the config directory; it clears it once the first frames have rendered. A launch that finds an unlocked marker knows the previous start died inside the graphics driver (#4) and uses the next safer backend (Windows: Vulkan → DX12 → CPU; Linux: Vulkan → GL → CPU; macOS: Metal → CPU), remembering a working hardware backend in `performance.gpuBackend` (Preferences › Performance › GPU Backend, with **Reset GPU Backend**). CPU recovery is temporary until **Keep Using CPU** is chosen in the recovery dialog; dismissing the dialog or quitting without a choice preserves the previous GPU preference (#3483). With `auto`, Intel and Qualcomm (Windows on ARM) adapters on Windows use DX12; when DXGI lists an Intel adapter, the app creates its wgpu instance with DX12 and GL only, so the first start doesn't load the Intel Vulkan driver, and a discrete GPU beside the Intel one also runs on DX12. Help › System Info shows the adapter, backend, driver and fallback state.
+
+On Linux, on a machine with several GPUs (say an eGPU, a discrete laptop GPU and an iGPU), `auto` takes the first discrete adapter the driver lists; choose another in Preferences › Performance › Advanced › GPU adapter (`performance.gpuAdapter`, Linux; a case-insensitive piece of the adapter's name, empty is automatic), or for one launch with `PHOTOCRAFT_GPU_ADAPTER=nvidia`. An adapter that is missing or can't present to the window falls back to the automatic choice, with a note in System Info.
 
 On DX12 the shader compiler is FXC (`d3dcompiler_47.dll`, part of Windows), or a `dxcompiler.dll` placed beside `photocraft.exe`, loaded by its full path. wgpu's default looks `dxcompiler.dll` up by name, which reaches the current directory and `PATH` and loaded other programs' incompatible builds (#712).
 
@@ -113,9 +99,11 @@ keep the marker for recovery.
 
 If the device is lost while running (#243), every GPU entry point checks the device's health flag first, the canvas switches to the CPU compositor for the rest of the session and a notice says "GPU device was lost; using the CPU renderer." `ui.gpu.simulateLoss` triggers this path from the control channel.
 
+The window itself draws with the same device (or, with the CPU canvas, one it watches), and nothing can draw it once wgpu reports that device lost, for example after a driver reset while the PC slept (#3438). A frame with shapes then panicked inside egui-wgpu ("Failed to create staging buffer", #1215). A frame without any froze the window, and the close button opened an unsaved-changes prompt nobody could see. `gpu_status::check_window` polls the device each frame. Once wgpu reports it lost, frames draw nothing, every unsaved document is written to crash recovery (`Services::flush_autosaves` waits for the writes), and the app closes; the next launch reopens them. `ui.gpu.simulateLoss {destroy: true}` destroys the real device to test this path.
+
 ## Logs
 
-The desktop app writes its `log` records to standard error and to `logs/photocraft.log` in the settings directory (Linux `~/.config/photocraft/logs/`, macOS `~/Library/Application Support/Photocraft/logs/`, Windows `%APPDATA%\Photocraft\logs\`, or under `PHOTOCRAFT_CONFIG_DIR` / the portable data folder). A start launched from a desktop menu or the Dock has no terminal, so this file is what to attach to a bug report: GPU startup fallbacks, a lost device and the crash guard's panic report all land there. Each launch moves the previous log to `photocraft.1.log` (and that one to `photocraft.2.log`), so the log of a run that crashed survives the next start. The file stops growing at 16 MiB. `--version` and command-line errors write no file.
+The desktop app writes its `log` records to standard error and to `logs/photocraft.log` in the settings directory (Linux `~/.config/photocraft/logs/`, macOS `~/Library/Application Support/Photocraft/logs/`, Windows `%APPDATA%\Photocraft\logs\`, or under `PHOTOCRAFT_CONFIG_DIR` / the portable data folder). A start launched from a desktop menu or the Dock has no terminal, so this file is what to attach to a bug report: GPU startup fallbacks, a lost device and the crash guard's panic report all land there. Each launch moves the previous log to `photocraft.1.log` (and that one to `photocraft.2.log`), so the log of a run that crashed survives the next start. A launch while another PhotoCraft is still running leaves that instance's log where it is and writes its own `photocraft-<pid>.log` next to it (the newest two of those are kept once their instances have exited; the `PhotoCraft <version>, log file <path>` line at startup names the file in use). The file stops growing at 16 MiB. `--version` and command-line errors write no file.
 
 By default PhotoCraft's own crates log at `info` and everything else at `warn`. `RUST_LOG` replaces that with env_logger-style directives, for example `RUST_LOG=debug`, `RUST_LOG=warn,photocraft_gpu=trace` or `RUST_LOG=info,wgpu_core=warn`; a directive ending in `*` covers every target starting with it (`photocraft*=debug`). The logger is `apps/photocraft/src/logging.rs`; the web build logs to the browser console instead.
 
@@ -124,13 +112,15 @@ By default PhotoCraft's own crates log at `info` and everything else at `warn`. 
 | Variable | Effect |
 |---|---|
 | `PHOTOCRAFT_CONTROL_PORT` | Same as `--control <port>` |
+| `PHOTOCRAFT_NO_PRINT` | Set to anything but `0`: `file.print` / `file.printOneCopy` refuse to spool (`dryRun` still works). CI sets it, with `LPDEST=photocraft-no-such-printer` as a second net; set both when running the panic hunt or fuzzers locally |
 | `RUST_LOG` | Log levels for standard error and the log file (see [Logs](#logs)) |
 | `PHOTOCRAFT_CONTROL_TOKEN` | 64-hex bearer token for control TCP (avoid on shared systems where environment inspection is possible) |
 | `PHOTOCRAFT_CONTROL_TOKEN_FILE` | Read, or create for a server, the control bearer-token file |
 | `PHOTOCRAFT_AUTOMATION_READ_ROOT` | Desktop app only: automation read root. Headless CLI modes require the `--automation-read-root` flag |
 | `PHOTOCRAFT_AUTOMATION_WRITE_ROOT` | Desktop app only: automation write root. Headless CLI modes require the `--automation-write-root` flag |
 | `PHOTOCRAFT_CPU_CANVAS=1` | Force the CPU canvas path instead of the wgpu shader canvas |
-| `PHOTOCRAFT_NATIVE_WAYLAND=1` | Linux: stay on native Wayland when a pen is attached (by default the window then opens through Xwayland, because Wayland gives the app no pen input; #639) |
+| `PHOTOCRAFT_NATIVE_WAYLAND=1` | Linux: stay on native Wayland when a pen is attached (by default the window then opens through Xwayland, because Wayland gives the app no pen input; #639). A pen is an input device with `BTN_TOOL_PEN` and the `ABS_X`/`ABS_Y` axes; virtual keyboards that claim every key are not pens (#1072) |
+| `PHOTOCRAFT_GPU_ADAPTER=nvidia` | Linux: use the graphics adapter whose name contains this (case-insensitive); overrides `performance.gpuAdapter` for one launch |
 | `WGPU_BACKEND=dx12` | Pick the wgpu backend(s) (`vulkan`, `dx12`, `metal`, `gl`); overrides `performance.gpuBackend` and the startup fallback |
 | `WGPU_DX12_COMPILER=fxc` | DX12 shader compiler (`fxc`, `dxc`, `auto`); `dxc` and `auto` look `dxcompiler.dll` up through the DLL search path |
 | `PHOTOCRAFT_GPU_TILE=2048` | Force GPU canvas tiling (tests tile seams) |
@@ -138,6 +128,10 @@ By default PhotoCraft's own crates log at `info` and everything else at `warn`. 
 | `PHOTOCRAFT_CPU_COMPOSE=1` | Keep the wgpu canvas but composite on the CPU (compare GPU vs CPU renders, e.g. with the snapshot example) |
 | `PHOTOCRAFT_LOCALE` | Override Auto's native UI language for this launch; unsupported tags use English. See [system language detection](localization.md#first-launch-and-system-language). |
 | `PHOTOCRAFT_FX_TRACE=1` | Print the CPU time spent on GPU effect shapes and distance fields per rebuild |
+| `PHOTOCRAFT_STROKE_TRACE=1` (or `=<file.csv>`; also `--stroke-trace <stderr|file.csv>`, or `ui.set {"strokeTrace": true|false}` at runtime, without a file) | Time every frame of each brush stroke; print a summary per stroke, and with a path also append each frame to that CSV (see [Stroke latency trace](#stroke-latency-trace)) |
+| `PHOTOCRAFT_PRESENT_MODE=novsync` (or `--present-mode`) | Present mode for this launch: `fifo`, `autovsync`, or `novsync` (also `immediate`, `mailbox`: no vsync, the first of Immediate, Mailbox, Fifo the driver offers). Default: vsync, or no vsync when Preferences › Performance › Low-Latency Drawing is on (it ships off). For latency comparisons; shown in the stroke trace |
+| `PHOTOCRAFT_FRAME_LATENCY=1` (or `--frame-latency`) | Frames the swap chain may queue, 1 to 3 (wgpu's GL backend ignores it). For latency comparisons; shown in the stroke trace |
+| `PHOTOCRAFT_PRINT_PORTAL=1` | Linux: File › Print always opens the system print dialog (the XDG print portal) instead of talking to CUPS; `0` never does. See [printing](printing.md). |
 | `PHOTOCRAFT_THEME_FILE=tokens.json` | **Debug builds only:** live design-token overrides, re-read on change |
 
 ### Live design tokens
@@ -147,6 +141,26 @@ By default PhotoCraft's own crates log at `info` and everything else at `warn`. 
 ```
 
 Keys are the field names of `theme::Tokens` (`crates/ui-egui/src/theme.rs`). Edit and save the file while the app runs to see changes immediately, with no recompile. This is compiled out of release builds.
+
+### Stroke latency trace
+
+To find where a stroke's input-to-pixel time goes on a given machine (#1343), launch with `PHOTOCRAFT_STROKE_TRACE=1` (a summary per stroke on standard error) or `PHOTOCRAFT_STROKE_TRACE=strokes.csv` (also every frame, appended to that file). Paint a few strokes with the mouse or pen. Each summary gives p50/p95 in ms:
+
+```text
+stroke trace: 62 frames on vulkan NVIDIA GeForce RTX 5090 (p50/p95 ms): interval 8.33/8.53 moves/frame 1.00/2.00 stroke 0.80/1.53 canvas 0.40/0.75 ui 0.91/1.41 cpu 2.20/2.84 wait 6.04/6.64
+```
+
+| Column | What it is |
+|---|---|
+| `interval` | Time between frame starts while drawing (the display's refresh period when the app keeps up) |
+| `moves/frame` | Pointer moves the OS delivered per frame (control-channel `ui.pointer` input bypasses raw input and counts 0) |
+| `stroke` | Rendering the stroke's new points (the live stroke; on the last frame, the commit) |
+| `canvas` | Canvas refresh: composite and upload |
+| `ui` | Building the UI, the two above included |
+| `cpu` | eframe's CPU time per frame: UI, tessellation and GPU submission, without the vsync wait |
+| `wait` | `interval − cpu`: waiting on vsync or the swap chain, or idle |
+
+What the app can't time is the rest of input-to-photon: the OS input queue before a frame starts (up to one `interval`), frames queued for the display (the surface keeps up to two; the GL backend ignores that setting), and the compositor. So the first line names the backend and how frames are presented. To compare presentation settings without rebuilding, launch with `PHOTOCRAFT_PRESENT_MODE` and `PHOTOCRAFT_FRAME_LATENCY` (see [Environment variables](#environment-variables)): with `novsync` the app no longer waits on vsync (`wait` near 0): each refresh shows the newest frame, and where the driver only offers Immediate, the screen may tear. The last summary is also in the control channel's `perf.strokeTrace` (`ui.inspect`). The code is `crates/ui-egui/src/stroke_trace.rs`.
 
 ## Driving the app programmatically
 
@@ -164,6 +178,7 @@ See `docs/control-protocol.md` for every method. Tips:
 - **macOS does not render occluded windows.** `ui.screenshot` raises the window first (`focus: true` by default). Use `ui.focus` before other visual checks.
 - **Capture only our own window.** For native captures (to see the real title bar and traffic lights), capture by window id (`screencapture -l <CGWindowID>`), never a screen region, which can grab other apps.
 - **Pointer gestures:** `ui.pointer` takes events in *document* coordinates and runs them through the same tool state machine as the mouse.
+- **Seeing tile storage:** `ui.set {"tileGrid": true}` overlays the active layer's stored tiles, which shows how sparse a layer is and which tiles share pixels (`ui-egui/src/tile_overlay.rs`).
 
 ## Headless CLI
 
@@ -208,7 +223,7 @@ For headless MCP clients, pass absolute paths to deliberately chosen trusted wor
 Tools:
 
 - `session_list`
-- `doc_open`, `doc_new`, `doc_save`, `doc_export`, `doc_inspect`, `doc_render_preview` (returns a PNG image), `doc_select`, `doc_close`
+- `doc_open`, `doc_new`, `doc_place`, `doc_export_layers`, `doc_export_data_sets`, `doc_import_data_sets`, `doc_save`, `doc_export`, `doc_inspect`, `doc_render_preview` (returns a PNG image), `doc_select`, `doc_close`
 - `command_list`, `command_run`, `command_batch` (several commands per call)
 - `jobs_list` (running background jobs with progress, then recently finished ones with their result or error), `jobs_cancel` (one job by id, or every running job)
 - bridge only: `ui_inspect`, `ui_screenshot`, `ui_pointer`, `ui_menu_invoke`, `ui_set`, `control_call`
@@ -241,7 +256,9 @@ claude mcp add photocraft -- "$PWD/target/release/photocraft-cli" mcp \
 `doc_inspect` (and the engine command `document.inspect`) reports the layer tree with kinds,
 bounds, masks, selection, effects (`effects.items[].kind`), smart filters (`smartFilters[]`), smart
 object sources (`smartSource`: `embedded` with its file name, or `linked` with a file path or, for a
-PSD placed layer, the `Idnt` uuid its duplicates share), type
+PSD placed layer, the `Idnt` uuid its duplicates share), shared contents (`smartContents`: an `id`
+every copy of the same contents has, and the number of `instances`; Replace Contents changes them
+all and lists them in its result), type
 text, adjustment settings, channels and history, so agents can verify what they did without a
 screenshot. `crates/automation/tests/agent_tasks.rs` is the reference: ten realistic edit tasks
 (title card, colour grade, undo/redo, editable smart blur, masks, saved selections, align,
@@ -262,7 +279,7 @@ A typical agent loop (place inputs under the configured read root and outputs un
 
 `crates/cms` is our own pure-Rust ICC engine (v2/v4 parsing, matrix/TRC and LUT profiles, all four
 intents, black point compensation). It ships CC0 built-in profiles, including a synthetic
-"Photocraft Coated CMYK", because Adobe's CMYK profiles are proprietary (see `crates/cms/README.md`).
+"PhotoCraft Coated CMYK", because Adobe's CMYK profiles are proprietary (see `crates/cms/README.md`).
 
 - Documents carry an optional embedded ICC profile (`Document::icc_profile`); `edit.assignProfile`
   and `edit.convertToProfile` change it. Mode changes (`image.mode.*`) convert through cms.
@@ -304,6 +321,7 @@ translations do not affect the denominator. Unregistered locale TSV files are ig
 - **Numbers** (7360 × 4912, 8 text layers + one painted layer with drop shadow + stroke + bevel, Hue/Saturation on top; M4 Pro; `cargo run --release -p photocraft-ui-egui --example fx_bench`), CPU fallback → GPU: full refresh with warm effect maps 5.7 s → 47 ms; Hue/Saturation tweak above the effects 4.7 s → 31 ms; brush dab on a plain layer 32 → 1.7 ms; brush dab on the effect layer (its maps rebuilt around the dab) 659 → 3.7 ms; first refresh (all maps built) 6.4 s → 0.39 s. With the CPU ~14× oversubscribed by parallel builds (min of 7 runs): 8.1 s → 0.33 s, 9.9 s → 0.28 s, 28 → 2.2 ms, 1.7 s → 89 ms; moving a text layer 7 px 336 → 13 ms. `fx_bench --compare corpus/psd/…/*.psd` reports the GPU vs CPU difference on real files (30 of the 31 corpus files with effects render on the GPU, worst 0.12/255).
 - On the CPU path `compose::effect_maps` caches shadow, glow, bevel and satin maps per layer state (LRU, 768 MB budget).
 - Live adjustment previews on large documents use a downsampled proxy (`ui-egui/src/proxy.rs`).
+- **Content-Aware tools** (`algo::inpaint`, `algo::content_aware`: Fill, Spot Healing, Patch, Content-Aware Move). `cargo run --release -p photocraft-engine --example content_aware_bench -- bench caf|heal|cancel` times the P21, P22 and P49 rows without the UI, one sample per line, so two builds can be run in turn and pooled. `-- hash` prints a hash of every tool's output at 8, 16 and 32 bits and in Gray, CMYK and Lab: the fill is fitted to Photoshop, so a speed-up must leave both builds' lists equal. The solver works only over the hole's bounds grown by a patch radius (nothing else changes or is matched). PatchMatch sweeps its bands in wavefronts when there are fewer bands than threads; each cell sees the same neighbours and random numbers as in raster order, so the result does not depend on the thread count. Cancellation is checked per row: a 24 MP fill stops within tens of milliseconds, most of it spent freeing its buffers.
 - `ui.inspect` returns `perf` timings (UI ms per frame, composite ms, upload ms).
 - Never scan full surfaces per frame. Cache per document revision (`PhotocraftApp::cached_bounds`). An uncached `content_bounds()` on a 36 MP layer once cost 77 ms per frame.
 
@@ -372,9 +390,7 @@ trunk build --release              # writes ../../dist/web (index.html, .js glue
 trunk serve --release              # dev server on http://127.0.0.1:8765
 ```
 
-Any static file server works for `dist/web`, for example `python3 -m http.server 8765` run inside that directory. Trunk downloads the matching `wasm-bindgen` and `wasm-opt` itself. `trunk build --release` uses the `wasm-release` Cargo profile (`data-cargo-profile` in `index.html`: fat LTO, opt-level "z" for `photocraft-ui-egui` and `photocraft-engine`, "s" for other crates except pixel processing, which keeps level 3). The UI and engine overrides reduce browser code size while retaining the speed-oriented settings for the pixel-core crates. Engine-contained image preparation may trade speed for size in the browser; native profiles are unaffected. Serve the `.wasm` with compression; its raw size varies with the source and compiler. Keep it under 24 MiB (`packaging/web/package.sh` enforces this; Cloudflare's per-file cap is 25 MiB). Pull-request CI also builds the actual browser app with the same pinned Trunk version as the release job and runs `packaging/web/package.sh`, including the relative-URL and 24 MiB checks. The `web build and wasm size gate` check runs on main and on PRs that change something the web build compiles or packages (`apps/photocraft-web`, `packaging/web`, crate sources and manifests, `Cargo.toml`/`Cargo.lock`, the CI workflow), and reports the resulting wasm size in the Actions job summary. The web build never embeds craft-fonts (see Fonts above). To see where the bytes go, run `twiggy top -n 40` on `target/wasm32-unknown-unknown/wasm-release/photocraft-web.wasm` (before wasm-opt strips the names).
-
-What the web build leaves out, to keep the download small (every visit pays for it): OpenEXR (`photocraft-codecs` feature `exr`), camera raw development (`photocraft-io` feature `camera-raw`; a raw opens as its embedded JPEG preview with a warning), WebAssembly filter plug-ins (`plugins` on `photocraft-engine`/`photocraft-ui-egui`), HEIC/HEIF (`heif`), egui's Ubuntu-Light and Hack fonts (egui's `default_fonts`; `theme.rs` installs Inter, JetBrains Mono and egui's two emoji/icon fonts), and every translation catalog but Spanish and Brazilian Portuguese (`photocraft-ui-egui` feature `all-catalogs`): the others ship next to the page as `i18n/<code>.tsv` (Trunk `copy-file` links in `index.html`, `packaging/web-threads/build.sh`) and are fetched when the language is chosen, the UI showing English until it arrives. These features are default-on in their crates and off in the workspace dependency table, so the desktop app and CLI turn them on explicitly; `photocraft-web`'s `full` feature puts them all back. The console logs where startup goes, once: `photocraft-web: startup: wasm running at … ms, presets loaded …, graphics ready …, fonts and theme …, session …, app …, canvas …, first frame …, first frame drawn …` (milliseconds since navigation; the threads page also logs when the module was compiled and the worker pool started).
+Any static file server works for `dist/web`, for example `python3 -m http.server 8765` run inside that directory. Trunk downloads the matching `wasm-bindgen` and `wasm-opt` itself. `trunk build --release` uses the `wasm-release` Cargo profile (`data-cargo-profile` in `index.html`: fat LTO, opt-level "z" for the UI, engine, I/O and web shells and for large crates off the hot paths (document model, file parsers, JSON, SVG parsing, shader translation), "s" for other crates except pixel processing, which keeps level 3). The UI override reduces browser code size while retaining the speed-oriented settings for filters and compositing. Serve the `.wasm` with compression; its raw size varies with the source and compiler. Some static hosts refuse a file that large (Cloudflare's per-file cap is 25 MiB), so the release site doesn't hold it as one file: `packaging/web/package.sh` gzips it, cuts it into parts of at most 20 MiB under `app/`, and ships the page of `apps/photocraft-web-boot`, a small module that fetches the parts, has the browser inflate them (or inflates them itself where the browser can't) and passes the stream to the app's own loader (issue #5302). The script fails if any file in the site is over 24 MiB; the wasm's own size is no longer limited, but it is still what every visitor downloads, so watch it. Pull-request CI also builds the actual browser app with the same pinned Trunk version as the release job and runs `packaging/web/package.sh`, including the relative-URL and file-size checks. The `web build and wasm size gate` check runs on main and on PRs that change something the web build compiles or packages (`apps/photocraft-web`, `apps/photocraft-web-boot`, `packaging/web`, crate sources and manifests, `Cargo.toml`/`Cargo.lock`, the CI workflow), and reports the wasm's size and the site's largest file in the Actions job summary. The web build never embeds craft-fonts (see Fonts above). To see where the bytes go, run `twiggy top -n 40` on `target/wasm32-unknown-unknown/wasm-release/photocraft-web.wasm` (before wasm-opt strips the names).
 
 URL flags: `?webgl` forces the WebGL2 backend, and `?cpu` forces the CPU canvas path.
 
@@ -390,9 +406,9 @@ HTTPS/reverse-proxy deployment and browser limitations.
 
 How the web shell (`apps/photocraft-web/src/web.rs`) differs from desktop:
 
-- **Open** uses `rfd::AsyncFileDialog`. The bytes arrive asynchronously in `Services::inbox`, which the app drains every frame.
+- **File dialogs** use `rfd::AsyncFileDialog`. Chosen file contents arrive asynchronously through `Services::file_dialog`; this includes File › Open and single-file commands such as Place Embedded.
 - **Save / Save As / Export** trigger a browser download of the encoded bytes. The shell does this with a Blob, an object URL and a temporary `<a download>`, all created from Rust. There is no save dialog, so the suggested name becomes the download name.
-- **Drag-and-drop:** `WebShell` takes the frame's `dropped_files` before the app sees them. It reads each file with `DroppedFile::bytes_async` and pushes the bytes into the inbox.
+- **Drag-and-drop:** `WebShell` takes the frame's `dropped_files` before the app sees them. It reads each file with `DroppedFile::bytes_async` and pushes the bytes into `Services::inbox`.
 - **Startup failures:** `index.html` shows "Loading PhotoCraft…" until the app removes it, or replaces it with the error when the web runner fails to start. If the `.wasm` never downloads or doesn't match the page's `.js` (a stale cached `index.html` after a deploy), no Rust runs at all, so the page itself (CSS only, no script) adds a hint with a Reload link after 20 seconds.
 - **No control server:** browsers can't listen on TCP. The page itself can drive the app through `window.photocraft` (`request()` takes the control-channel methods), and an embedding page through `postMessage` (`packaging/web/README.md` › Driving the embedded app). To automate the web build from outside, drive headless Chrome with `--remote-debugging-port`. `Page.setInterceptFileChooserDialog` plus `DOM.setFileInputFiles` covers Open, `Input.dispatchDragEvent` with `files` covers drops, and `Browser.setDownloadBehavior` captures downloads.
 - Headless Chrome on macOS (`--headless=new --enable-unsafe-webgpu`) gets a real WebGPU adapter.
@@ -437,6 +453,27 @@ Input calls (`ui.key`, `ui.type`, `ui.click`) now reply only after the app has p
 so a following `ui.inspect` observes their effect.
 
 
+## Photoshop Actions (.atn)
+
+`photocraft-psd` reads and writes Photoshop Actions files (`atn`, version 16: Photoshop 6 and
+later); `photocraft-engine`'s `atn_cmds` maps their events onto commands (`actions.load`,
+`actions.save`; the Actions panel menu's Load/Save Actions…; `photocraft-cli batch --actions
+set.atn`). To see what a set holds (event ids, panel names, the parameter keys Photoshop
+recorded) when adding an event to the table:
+
+```sh
+cargo run -p photocraft-psd --example atn_dump -- "Default Actions.atn"
+cargo run -p photocraft-psd --example atn_roundtrip -- "Default Actions.atn"   # parse, write, diff
+```
+
+The real-file oracles are `corpus/atn/` (16 sets from seven public repositories, see *Test
+corpora*): `photocraft-psd`'s corpus test parses every file and rewrites it byte for byte;
+`photocraft-engine`'s loads, saves and reloads every set and caps the steps that still have no
+PhotoCraft equivalent.
+
+Events outside the table load as `actions.photoshopStep` steps that keep the descriptor
+verbatim (so Save Actions writes them back) and fail at playback with the step's Photoshop name.
+
 ## Remove Tool quality
 
 `cargo run --release -p photocraft-engine --example remove_quality -- <dir> [out dir]` fills
@@ -468,11 +505,13 @@ against committed **sha256 manifests**. All pins are in one place:
 | Directory | What | Source | Manifest |
 |---|---|---|---|
 | `corpus/photoshop/` | 256 PSDs we authored with Photoshop: smart filters, layer-style effect shapes, the text engine, adjustments in every mode and depth | https://github.com/storytold/photocraft-corpus (ours, MIT OR Apache-2.0) | `xtask/photoshop-corpus.sha256` |
+| `corpus/gimp/` | 14 XCF files written by GIMP 3.2.6 with GIMP's merged rendering of each as a PNG (28 files), the oracles of the XCF reader | https://github.com/storytold/photocraft-corpus (ours, MIT OR Apache-2.0; its own pin) | `xtask/gimp-corpus.sha256` |
 | `corpus/psd/` | 170 small psd-tools and ag-psd files, the mix most PSD tests use | psd-tools and ag-psd upstreams (MIT) | `xtask/psd-corpus.sha256` |
 | `corpus/psd-tools/` | the complete psd-tools test set (309 files) | psd-tools upstream (MIT) | `xtask/psd-tools-corpus.sha256` |
 | `corpus/heif/` | 15 small HEIC/HEIF files (checkerboards, RGB strips, a grid-tiled photo with EXIF/XMP, each with Apple's decode as `.ref.png`; a 10-bit RGBA file with its source PNG; colour-signalling, 12-bit and 4:4:4 files with HM-derived RGB references), for the `heif` feature | heic-rs, heic-decoder (MIT OR Apache-2.0) and pillow-heif (BSD-3-Clause) upstreams | `xtask/heif-corpus.sha256` |
 | `corpus/exr/` | the 5 deep OpenEXR test images (scanline deep data with half colour and u32 ID channels; 2.3 MB), checked against the ID manifests of their upstream sidecars | OpenEXR upstream at v3.5.2 (BSD-3-Clause) | `xtask/exr-corpus.sha256` |
 | `corpus/affinity/` | 21 public Affinity documents and the 18 Affinity 3 samples for #1606, with exported PNG references | vector-art and affinity-samples (CC0), AFDesignLoad, Jac21/Branding and AssetStoreTemplate (MIT) upstreams | `xtask/affinity-corpus.sha256` |
+| `corpus/atn/` | 16 Photoshop Actions sets from seven public repositories (frequency separation, adjustments, Save for Web, generative workflows…), the real-file oracles of the `.atn` parser and import | sbaril, bjango, BKWLD, atntools, trimmer, alpha-utility, gif-creator upstreams (MIT, BSD, Unlicense) | `xtask/atn-corpus.sha256` |
 | `corpus/pngsuite/` | PngSuite | schaik.com release archive (public domain) | (fixed archive) |
 
 ```sh
@@ -507,13 +546,13 @@ scripts/fetch-corpus.sh            # the same as cargo xtask corpus --all
   and push there.
 - **Consuming copy:** `corpus/photoshop/` here. It is a plain directory: the pinned snapshot
   (downloaded as the codeload tarball of the pinned commit, then verified).
-- **Local mode:** `cargo xtask corpus --photoshop --local` copies `photoshop/` from
+- **Local mode:** `cargo xtask corpus --photoshop --local` copies `photoshop/` (and `--gimp --local` `gimp/`) from
   `../photocraft-corpus` (or `PHOTOCRAFT_CORPUS_REPO=<path>`) instead of downloading. It warns when
   the clone's HEAD isn't the pin or its files differ from the manifest. Use it to test regenerated
   files before pushing: `cargo xtask test-corpus --local` copies them and runs every corpus test.
 - **Bumping the pin:** commit and push in photocraft-corpus, then in a PR here set
-  `PHOTOCRAFT_CORPUS_COMMIT` in `corpus_pins.rs`, run
-  `cargo xtask corpus --photoshop --update-manifest`, commit the manifest diff, run
+  `PHOTOCRAFT_CORPUS_COMMIT` in `corpus_pins.rs` (`PHOTOCRAFT_CORPUS_GIMP_COMMIT` for `gimp/`), run
+  `cargo xtask corpus --photoshop --update-manifest` (or `--gimp --update-manifest`), commit the manifest diff, run
   `cargo xtask test-corpus`, and raise floors that improved.
 - **Not a submodule or a subtree:** a subtree would put the binaries back into this repository's
   history, and submodules cause init and detached-HEAD friction for every contributor. A pin plus a
@@ -549,3 +588,22 @@ stroke is drawn above its clipped layers; linked effect patterns tile from the l
 reference point; stroke distances follow a 5 × 5 chamfer metric (1, √2, √5) seeded at sub-pixel
 edge offsets; interior effects keep the layer's alpha; outside strokes blend onto the backdrop with
 their own modes, an upper stroke covering lower ones.
+
+## System printing
+
+`file.print` and `file.printOneCopy` keep PDF layout, scaling, marks and ICC conversion in
+PhotoCraft and submit the rendered bytes through `craft-print` at the Git revision pinned in
+`Cargo.toml`. CUPS streams the PDF on macOS/Linux; Windows uses the shared Windows PDF backend.
+The driver receives exact physical sheet size so it does not scale PhotoCraft's layout twice.
+Windows raster printing does not establish physical-printer colour fidelity; test critical
+photo output with the actual printer and its profile.
+
+Desktop commands run composition and submission on a background worker. The UI reports success
+only when the spooler accepts the job; remove submitted jobs in the system print queue. Headless
+`Session::execute` stays synchronous. The returned `pdf` is `null` for a spool-only job, and
+`command` is a diagnostic preview, not an executable command with a PDF path. Supplying `output`
+keeps a PDF at that path and defaults `send` to false. `dryRun` renders the PDF and reports the
+backend command without submitting; it writes a PDF only when `output` is explicit. `send: false`
+without an output requires `dryRun: true`. Remembered print settings omit `output`, `dryRun` and
+`send`, so Print One Copy derives submission from its own output choice. Shared spooler transport
+files are automatically removed on Windows; CUPS needs none.

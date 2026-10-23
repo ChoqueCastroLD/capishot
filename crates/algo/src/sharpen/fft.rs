@@ -297,7 +297,7 @@ fn run(surface: &Surface, area: Rect, amount: f32, radius: f32, selection: Optio
                     }
                 }
                 if let Some(sel) = selection {
-                    crate::mix_selection(&mut result, rect, sel, &Image { rect, ch: n, data: original });
+                    crate::mix_selection(&mut result, rect, sel, &Image { rect, ch: n, data: original }, alpha);
                 }
                 Some((rect, result))
             })

@@ -17,7 +17,7 @@ impl photocraft_ops::ArchivedDocument for Moved {
         }
         let mut doc = (*self.source).clone();
         let moves: Vec<_> = self.layers.iter().map(|id| (*id, self.dx, self.dy)).collect();
-        crate::layer_multi_cmds::move_layers(&mut doc, &moves).map_err(|e| e.to_string())?;
+        crate::layer_multi_cmds::move_layers(&mut doc, &self.source, &moves).map_err(|e| e.to_string())?;
         Ok(Arc::new(doc))
     }
     fn metadata_bytes(&self) -> usize {

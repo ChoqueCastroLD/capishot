@@ -233,6 +233,7 @@ const STRINGS: &[&str] = &[
     "Rough fills on any device, even without a GPU.",
     "Good fills with a smaller download.",
     "Detailed fills from a prompt, three variants in seconds on a GPU.",
+    "The most detail: many steps with guidance, slow, for a strong GPU.",
 ];
 
 #[test]

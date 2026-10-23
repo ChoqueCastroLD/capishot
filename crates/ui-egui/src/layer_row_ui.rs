@@ -42,6 +42,8 @@ pub enum Indicator {
 pub struct RowRects {
     pub layer: u64,
     pub row: Rect,
+    /// Visible layer thumbnail; None when thumbnails are disabled.
+    pub thumbnail: Option<Rect>,
     /// The name as painted (after truncation); `None` when there was no room for it.
     pub name: Option<Rect>,
     pub indicators: Vec<(Indicator, Rect)>,
@@ -71,7 +73,7 @@ pub fn layout(row: Rect, name_left: f32, items: &[(Indicator, f32)]) -> (Vec<(In
 /// Width the always-shown indicators of `l` take at the row's right (blend label excluded).
 pub fn reserved_width(l: &Layer) -> f32 {
     let mut w = RIGHT_PAD;
-    if l.locks.transparency || l.locks.position || l.locks.all {
+    if l.locks.any() {
         w += ICON_W + GAP;
     }
     if !l.effects.items.is_empty() {
@@ -94,10 +96,23 @@ pub fn truncated(painter: &Painter, text: &str, font: FontId, color: egui::Color
     if max_width < 8.0 {
         return None;
     }
-    let mut job = egui::text::LayoutJob::default();
-    job.append(text, 0.0, egui::TextFormat { font_id: font, color, italics, ..Default::default() });
-    job.wrap = egui::text::TextWrapping { max_width, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
-    Some(painter.layout_job(job))
+    let format = egui::text::TextFormat { font_id: font, color, italics, ..Default::default() };
+    let layout = |s: &str, wrap: bool| {
+        let mut job = egui::text::LayoutJob::default();
+        job.append(s, 0.0, format.clone());
+        if wrap {
+            job.wrap = egui::text::TextWrapping { max_width, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+        }
+        painter.layout_job(job)
+    };
+    // A right-to-left name (Arabic, Hebrew) too long for the row is cut at its logical end and
+    // then put in display order, so its start stays and "…" is at the left (`bidi_text::elide`).
+    if let Some(shown) = crate::bidi_text::elide(text, |s| layout(s, false).size().x <= max_width) {
+        return Some(layout(&shown, false));
+    }
+    // Right-to-left names in display order: egui lays words out left to right. Left-to-right
+    // names are cut at their right end by egui.
+    Some(layout(&crate::bidi_text::visual(text), true))
 }
 
 /// Paint `l`'s right-hand indicators in `row` and handle the effects triangle. Returns the
@@ -113,7 +128,7 @@ pub fn indicators(
     actions: &mut Vec<(String, Value)>,
 ) -> (f32, Vec<(Indicator, Rect)>, bool) {
     let t = Tokens::get(ui.ctx());
-    let locked = l.locks.transparency || l.locks.position || l.locks.all;
+    let locked = l.locks.any();
     let fx_font = theme::semibold(11.0);
     let blend_font = FontId::proportional(10.5);
     let has_fx = !l.effects.items.is_empty();
@@ -193,11 +208,71 @@ pub fn label(painter: &Painter, x: f32, cy: f32, right: f32, text: &str, font: F
     Some(r)
 }
 
-/// The Layers panel's own items at the top of its panel menu (Photoshop's flyout).
+/// Photoshop-style Layers flyout commands. The dock owns tab-group controls, not this menu.
 pub fn panel_menu(app: &mut crate::PhotocraftApp, ui: &mut egui::Ui) {
-    let can = app.session.is_enabled("layer.setExpanded");
-    if ui.add_enabled(can, egui::Button::new(tl!("Collapse All Groups"))).clicked() {
+    use crate::layers_panel_ui::run_menu_command;
+    use crate::state::LayersPanelDialog;
+
+    let has_doc = app.session.active().is_some();
+    if ui.add_enabled(has_doc, egui::Button::new(tl!("New Layer…"))).clicked() {
+        app.ui.layers_panel_dialog = Some(LayersPanelDialog::NewLayer(String::new()));
+        ui.close();
+    }
+    if ui.add_enabled(has_doc, egui::Button::new(tl!("New Group…"))).clicked() {
+        app.ui.layers_panel_dialog = Some(LayersPanelDialog::NewGroup(String::new()));
+        ui.close();
+    }
+    ui.separator();
+    run_menu_command(app, ui, tl!("Flatten Image"), "layer.flattenImage");
+    ui.separator();
+    if ui.add_enabled(app.session.is_enabled("layer.lockLayers"), egui::Button::new(tl!("Lock Layers…"))).clicked() {
+        app.ui.layers_panel_dialog = Some(LayersPanelDialog::LockLayers { transparency: false, pixels: false, position: false, artboard: false, all: true });
+        ui.close();
+    }
+    run_menu_command(app, ui, tl!("Rename Layer…"), "layer.renameLayer");
+    let any_hidden = app.session.active().is_some_and(|st| st.selected_layers().iter().any(|id| st.doc.layer(*id).is_some_and(|l| !l.visible)));
+    if any_hidden {
+        run_menu_command(app, ui, tl!("Show Layers"), "layer.showLayers");
+    } else {
+        run_menu_command(app, ui, tl!("Hide Layers"), "layer.hideLayers");
+    }
+    ui.separator();
+    run_menu_command(app, ui, tl!("New Artboard…"), "layer.new.artboard");
+    ui.separator();
+    ui.menu_button(tl!("Filter Options"), |ui| {
+        let mut show = app.ui.layers_panel_options.show_filters;
+        if ui.checkbox(&mut show, tl!("Show")).changed() {
+            app.ui.layers_panel_options.show_filters = show;
+            crate::layers_panel_ui::persist_options(app);
+            ui.close();
+        }
+    });
+    // Animation Options control Photoshop's frame-unification buttons. Capishot's Layers
+    // panel does not expose those buttons; do not offer nonfunctional toggles.
+    ui.add_enabled_ui(false, |ui| {
+        ui.menu_button(tl!("Animation Options"), |_ui| {});
+    });
+    if ui.button(tl!("Panel Options…")).clicked() {
+        let mut options = app.ui.layers_panel_options.clone();
+        options.thumbnail_contents = crate::layers_panel_ui::thumbnail_contents(app);
+        app.ui.layers_panel_dialog = Some(LayersPanelDialog::PanelOptions(options));
+        ui.close();
+    }
+    ui.separator();
+    // Preserve Capishot's existing group disclosure action when expanding the flyout.
+    let can_collapse = app.session.is_enabled("layer.setExpanded");
+    if ui.add_enabled(can_collapse, egui::Button::new(tl!("Collapse All Groups"))).clicked() {
         if let Err(e) = app.run("layer.setExpanded", json!({"all": true, "expanded": false})) {
+            app.ui.status = e;
+            app.ui.status_error = true;
+        }
+        ui.close();
+    }
+    ui.separator();
+    // Photoshop's Clip Thumbnails to Layer Bounds: frame each layer's pixels, not the canvas (#4281).
+    let mut clip = app.session.prefs().interface.clip_thumbnails_to_layer_bounds;
+    if crate::widgets::checkbox(ui, &mut clip, tl!("Clip Thumbnails to Layer Bounds")).changed() {
+        if let Err(e) = app.run("prefs.set", json!({"path": "interface.clipThumbnailsToLayerBounds", "value": clip})) {
             app.ui.status = e;
             app.ui.status_error = true;
         }
@@ -295,8 +370,20 @@ pub fn end_rename(ctx: &egui::Context, commit: bool) -> Option<(String, Value)> 
     if commit { r.commit_action() } else { None }
 }
 
+/// Where Tab or ⇧Tab sends a rename: the layer it left and whether the next one is above.
+fn next_rename_id() -> egui::Id {
+    egui::Id::new("layer-rename-next")
+}
+
+/// The rename that Tab (`up` false) or ⇧Tab (`up` true) just left on `layer`, for the Layers panel
+/// to continue on the layer below or above, as Photoshop does. Taken once.
+pub fn take_next_rename(ctx: &egui::Context) -> Option<(u64, bool)> {
+    ctx.data_mut(|d| d.remove_temp::<(u64, bool)>(next_rename_id()))
+}
+
 /// Draw the rename field of `layer` in `rect` when it is the one being renamed, and handle its
-/// keys and focus. Returns the rename command when it was committed this frame.
+/// keys and focus. Returns the rename command when it was committed this frame. Tab and ⇧Tab
+/// commit too and ask for the next rename ([`take_next_rename`]).
 pub fn rename_field(ui: &mut egui::Ui, layer: u64, rect: Rect) -> Option<(String, Value)> {
     let ctx = ui.ctx().clone();
     let mut r = rename(&ctx).filter(|r| r.layer == layer)?;
@@ -316,6 +403,10 @@ pub fn rename_field(ui: &mut egui::Ui, layer: u64, rect: Rect) -> Option<(String
         return None;
     }
     let (enter, tab, esc) = ctx.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Tab), i.key_pressed(egui::Key::Escape)));
+    if tab {
+        let up = ctx.input(|i| i.modifiers.shift);
+        ctx.data_mut(|d| d.insert_temp(next_rename_id(), (layer, up)));
+    }
     if esc {
         store(&ctx, None);
         None

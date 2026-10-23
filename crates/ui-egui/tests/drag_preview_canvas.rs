@@ -185,6 +185,7 @@ fn edges(h: &Harness, a: [f32; 2], b: [f32; 2]) -> [(Pos2, Pos2); 4] {
 
 #[test]
 fn marquee_previews_show_while_dragging_on_white_and_black_at_1x_and_2x() {
+    let _gpu = photocraft_testkit::gpu_lock();
     for ppp in [1.0, 2.0] {
         let Some(mut h) = harness(ppp) else { return };
         h.run_steps(4);
@@ -240,6 +241,7 @@ fn marquee_previews_show_while_dragging_on_white_and_black_at_1x_and_2x() {
 
 #[test]
 fn lasso_and_crop_previews_show_while_dragging() {
+    let _gpu = photocraft_testkit::gpu_lock();
     for ppp in [1.0, 2.0] {
         let Some(mut h) = harness(ppp) else { return };
         h.run_steps(4);
@@ -272,6 +274,7 @@ fn lasso_and_crop_previews_show_while_dragging() {
 
 #[test]
 fn a_held_marquee_drag_keeps_requesting_frames() {
+    let _gpu = photocraft_testkit::gpu_lock();
     let Some(mut h) = harness(1.0) else { return };
     h.run_steps(4);
     setup(&mut h, "white", "rectMarquee");
@@ -291,4 +294,62 @@ fn a_held_marquee_drag_keeps_requesting_frames() {
     let d = still_frame(&mut h);
     assert!(d.is_some_and(|d| d <= Duration::from_millis(100)), "mid-drag repaint request: {d:?}");
     button(&mut h, 300.0, 220.0, false);
+}
+
+#[test]
+fn the_spot_healing_trail_is_a_dark_half_opaque_tint() {
+    // #7342: the trail was white at a quarter opacity, invisible on white and faint elsewhere.
+    // Photoshop shows the area to heal in half-opaque dark grey.
+    let _gpu = photocraft_testkit::gpu_lock();
+    let Some(mut h) = harness(1.0) else { return };
+    h.run_steps(4);
+    for bg in ["white", "#808080"] {
+        setup(&mut h, bg, "spotHealing");
+        let app = h.state_mut();
+        app.session.tools.brush.size = 40.0;
+        app.session.tools.brush.hardness = 1.0;
+        let before = render(&mut h);
+        drag_to(&mut h, [80.0, 150.0], [320.0, 150.0]);
+        let img = render(&mut h);
+        let p = screen(&h, 200.0, 150.0);
+        let (was, now) = (before.luma(p.x as i64, p.y as i64).unwrap_or(0), img.luma(p.x as i64, p.y as i64).unwrap_or(0));
+        assert!(f32::from(now) < f32::from(was) * 0.6, "spot healing trail on {bg}: luma {was} -> {now}, not dark enough");
+        assert!(f32::from(now) > f32::from(was) * 0.4, "spot healing trail on {bg}: luma {was} -> {now}, should stay see-through");
+        button(&mut h, 320.0, 150.0, false);
+        h.run_steps(2);
+    }
+}
+
+/// A Move drag on the GPU canvas draws the layer from its own pixels at the offset (no moved
+/// copy, `Translated::in_place`): mid-drag the red square shows where the pointer took it and
+/// not where it was, and release leaves the same picture.
+#[test]
+fn move_drag_shows_the_layer_at_the_pointer() {
+    let Some(mut h) = harness(1.0) else { return };
+    setup(&mut h, "white", "move");
+    {
+        let app = h.state_mut();
+        app.run("layer.new.layer", json!({"name": "red"})).expect("layer");
+        app.run("select.rect", json!({"x": 40, "y": 40, "width": 60, "height": 60})).expect("select");
+        app.run("edit.fill", json!({"contents": "color", "color": "#ff0000", "opacity": 100})).expect("fill");
+        app.run("select.deselect", json!({})).expect("deselect");
+    }
+    h.run_steps(4);
+    let red = |img: &Image, x: f32, y: f32, h: &Harness| {
+        let p = screen(h, x, y);
+        let i = (p.y.round() as usize * img.w as usize + p.x.round() as usize) * 4;
+        img.px.get(i..i + 3).is_some_and(|q| q[0] > 200 && q[1] < 60 && q[2] < 60)
+    };
+    let start = render(&mut h);
+    assert!(red(&start, 50.0, 50.0, &h), "the square is drawn before the drag");
+    drag_to(&mut h, [70.0, 70.0], [270.0, 170.0]);
+    h.run_steps(3);
+    let mid = render(&mut h);
+    // Away from the pointer (its cursor is drawn there): the square spans 240..300 × 140..200.
+    assert!(red(&mid, 250.0, 190.0, &h), "the square shows at the pointer while dragging");
+    assert!(!red(&mid, 50.0, 50.0, &h), "and not where it was");
+    button(&mut h, 270.0, 170.0, false);
+    h.run_steps(4);
+    let done = render(&mut h);
+    assert!(red(&done, 250.0, 190.0, &h) && !red(&done, 50.0, 50.0, &h), "release keeps it there");
 }
