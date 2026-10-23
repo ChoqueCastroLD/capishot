@@ -102,7 +102,7 @@ if [ -n "${PHOTOCRAFT_AI_MODELS_URL:-}" ]; then
   tags="$tags<meta name=\"capishot-ai-models\" content=\"$PHOTOCRAFT_AI_MODELS_URL\">"
 fi
 sed -i -e 's|<meta name="capishot-ai-[a-z-]*" content="[^"]*">||g' -e "s|</head>|$tags</head>|" "$SITE/index.html"
-max="${PHOTOCRAFT_WASM_MAX_BYTES:-25165824}" # 24 MiB, as the main module
+max="${PHOTOCRAFT_WASM_MAX_BYTES:-33554432}" # 32 MiB, as the main module
 for w in "$SITE/ai/$hash"/*_bg.wasm; do
   raw=$(wc -c <"$w" | tr -d ' ')
   gz=$(wc -c <"$w.gz" | tr -d ' ')
