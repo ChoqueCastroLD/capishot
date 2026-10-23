@@ -2,7 +2,7 @@
 //! compensation, soft-proofing chains, and fast lookup-table evaluation of pixel buffers.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 
 use crate::clut::{Clut, MAX_CHANNELS};
 use crate::curve::Curve;
@@ -711,7 +711,7 @@ type Key = (u64, u64, TransformOptions);
 
 /// Process-wide cache of transforms keyed by profile content and options.
 pub fn cached(src: &Profile, dst: &Profile, opts: TransformOptions) -> Result<Arc<Transform>, CmsError> {
-    static CACHE: OnceLock<Mutex<HashMap<Key, Arc<Transform>>>> = OnceLock::new();
+    static CACHE: OnceLock<wasm_sync::Mutex<HashMap<Key, Arc<Transform>>>> = OnceLock::new();
     let key = (src.content_hash(), dst.content_hash(), opts);
     let cache = CACHE.get_or_init(Default::default);
     if let Some(t) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {

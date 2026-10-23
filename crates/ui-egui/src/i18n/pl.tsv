@@ -4231,3 +4231,6 @@ curves	Smooth	Wygładź
 @plural	{n} hour ago|{n} hours ago	{n} godzinę temu|{n} godziny temu|{n} godzin temu
 @plural	{n} day ago|{n} days ago	{n} dzień temu|{n} dni temu|{n} dni temu
 @plural	Recover {n} document|Recover {n} documents	Odzyskaj {n} dokument|Odzyskaj {n} dokumenty|Odzyskaj {n} dokumentów
+# Background exports (jobs_ui::produce_files)
+	Exporting {name}	Eksportowanie {name}
+	Compiling {name}	Kompilowanie {name}

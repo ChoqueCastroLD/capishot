@@ -244,23 +244,28 @@ fn image_size(s: &mut Session, p: &Value) -> Result<Value> {
         let (sx, sy) = (f64::from(nw) / f64::from(ow.max(1)), f64::from(nh) / f64::from(oh.max(1)));
         s.set_sampler_map(photocraft_geom::Affine { m: [sx, 0.0, 0.0, sy, 0.0, 0.0] });
     }
-    s.edit("Image Size", |doc, _| {
-        if let Some(r) = dpi {
-            // Type keeps its pixel size; resampling below then scales it with the pixels.
-            crate::canvas_geom::set_resolution(doc, r.clamp(1.0, 10_000.0));
-        }
-        let filter = match resample {
-            Method::None => return Ok(()),
-            Method::Filter(f) => f,
-            Method::Automatic if nw > ow || nh > oh => Resample::PreserveDetails,
-            Method::Automatic => Resample::BicubicSharper,
-        };
-        resample_doc(doc, nw, nh, filter);
-        Ok(())
-    })?;
-    // The size the document has now: without resampling `width`/`height` are ignored (#1815).
-    let size = s.active().ok_or(EngineError::NoDocument)?.doc.size;
-    Ok(json!({ "width": size.width, "height": size.height }))
+    // A background job when started with `Session::start`: resampling every layer of a big page
+    // takes seconds, and in the browser the page must keep drawing meanwhile.
+    crate::jobs::edit_job(
+        s,
+        "Image Size",
+        move |doc, _, _| {
+            if let Some(r) = dpi {
+                // Type keeps its pixel size; resampling below then scales it with the pixels.
+                crate::canvas_geom::set_resolution(doc, r.clamp(1.0, 10_000.0));
+            }
+            let filter = match resample {
+                Method::None => return Ok(doc.size),
+                Method::Filter(f) => f,
+                Method::Automatic if nw > ow || nh > oh => Resample::PreserveDetails,
+                Method::Automatic => Resample::BicubicSharper,
+            };
+            resample_doc(doc, nw, nh, filter);
+            Ok(doc.size)
+        },
+        // The size the document has now: without resampling `width`/`height` are ignored (#1815).
+        |size| json!({ "width": size.width, "height": size.height }),
+    )
 }
 
 /// Refuses to resample `doc` to `nw` x `nh` px when the raster alone would pass the budget, before

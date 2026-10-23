@@ -1240,7 +1240,10 @@ fn front(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &Value)
                 app.refocus(doc)?;
                 let linked = linked.then(|| name.clone());
                 let result = app.place_bytes(&name, bytes, linked)?;
-                crate::transform_tool::begin_placed(app, &ctx)?;
+                // A place decoding on a worker starts Free Transform when it lands.
+                if result.get("pending").is_none() {
+                    crate::transform_tool::begin_placed(app, &ctx)?;
+                }
                 Ok(result)
             }))
         }
@@ -1508,16 +1511,40 @@ fn save_a_copy(app: &mut PhotocraftApp) -> Result<Value, String> {
 
 /// Writes `doc` to `path` as a copy (Save a Copy, and its replayed action step): the document's
 /// path and saved state are untouched. `choices` are the Targa and DDS answers, when there are any.
+/// Encoded in the background ([`crate::jobs_ui::produce_files`]): a big page doesn't freeze the
+/// window.
 pub(crate) fn write_copy(app: &mut PhotocraftApp, doc: &photocraft_doc::Document, path: &str, choices: crate::FormatChoices) -> Result<Value, String> {
     let settings = choices.apply(app.save_settings());
-    let export = app.services.export.as_ref().ok_or("no exporter configured")?;
-    let (bytes, warnings) = export(doc, path, &settings)?;
-    let write = app.services.write.as_mut().ok_or("no writer configured")?;
-    write(path, &bytes)?;
+    if !crate::jobs_ui::exports_in_background(app) {
+        let export = app.services.export.as_ref().ok_or("no exporter configured")?;
+        let (bytes, warnings) = export(doc, path, &settings)?;
+        let write = app.services.write.as_mut().ok_or("no writer configured")?;
+        write(path, &bytes)?;
+        return saved_copy(app, path.to_string(), warnings);
+    }
+    let (doc, target) = (doc.clone(), path.to_string());
+    let label = crate::i18n::fmt(tl!("Saving {name}"), &[("name", &crate::file_open::display_name(path))]);
+    crate::jobs_ui::produce_files(
+        app,
+        "file.saveACopy",
+        &label,
+        move |ctx| {
+            let r = ctx.stage(0.0, 1.0, "", |ctl| photocraft_io::export_with(&doc, &target, &settings.io_options(), ctl)).map_err(|e| e.to_string())?;
+            Ok(vec![crate::jobs_ui::Produced { path: target, bytes: r.bytes, warnings: r.warnings }])
+        },
+        |app, written| {
+            let Some((path, _, warnings)) = written.into_iter().next() else { return Ok(Value::Null) };
+            saved_copy(app, path, warnings)
+        },
+    )
+}
+
+/// A copy was written: say so, and show its warnings.
+fn saved_copy(app: &mut PhotocraftApp, path: String, warnings: Vec<String>) -> Result<Value, String> {
     let template = "Saved a copy as {path}";
-    app.ui.status = crate::i18n::fmt(tl!(template), &[("path", path)]);
+    app.ui.status = crate::i18n::fmt(tl!(template), &[("path", &path)]);
     app.ui.status_error = false;
-    let what = crate::i18n::fmt(tl!(template), &[("path", &crate::file_open::display_name(path))]);
+    let what = crate::i18n::fmt(tl!(template), &[("path", &crate::file_open::display_name(&path))]);
     crate::notices::io_warnings(app, &what, &warnings);
     Ok(json!({"path": path, "warnings": warnings}))
 }

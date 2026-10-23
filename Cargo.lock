@@ -7396,6 +7396,7 @@ version = "0.12.0"
 dependencies = [
  "moxcms",
  "rayon",
+ "wasm_sync",
 ]
 
 [[package]]
@@ -7440,6 +7441,7 @@ dependencies = [
  "photocraft-vector",
  "proptest",
  "rayon",
+ "wasm_sync",
 ]
 
 [[package]]
@@ -7491,6 +7493,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+ "wasm_sync",
  "wat",
  "winsafe",
 ]
@@ -7595,6 +7598,7 @@ dependencies = [
  "roxmltree 0.20.0",
  "serde_json",
  "thiserror 2.0.21",
+ "wasm_sync",
 ]
 
 [[package]]
@@ -7712,6 +7716,7 @@ dependencies = [
  "serde",
  "serde_json",
  "skrifa",
+ "wasm_sync",
 ]
 
 [[package]]
@@ -7815,6 +7820,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-bindgen-rayon",
+ "wasm_sync",
  "web-sys",
 ]
 

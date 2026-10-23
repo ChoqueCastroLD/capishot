@@ -39,8 +39,7 @@ fn compile_psd(app: &mut PhotocraftApp, params: &Value, web: bool) -> Option<Res
         if !web {
             return None;
         }
-        let r = compile_to_writer(app, params);
-        return Some(finish(app, r));
+        return Some(compile_to_writer(app, params));
     }
     let Some(st) = app.session.active() else { return Some(Err("no document".into())) };
     let doc = st.doc.id;
@@ -51,17 +50,39 @@ fn compile_psd(app: &mut PhotocraftApp, params: &Value, web: bool) -> Option<Res
         app.with_document(doc, |app| {
             let mut p = base;
             p["path"] = json!(path);
-            let r = if web { compile_to_writer(app, &p) } else { app.run(COMPILE, p) };
+            if web {
+                return compile_to_writer(app, &p);
+            }
+            let r = app.run(COMPILE, p);
             finish(app, r)
         })
     }))
 }
 
-/// The active document compiled and handed to the platform writer (the browser's download).
+/// The active document compiled in the background and handed to the platform writer (the
+/// browser's download): psd-compiler takes seconds on a big page.
 fn compile_to_writer(app: &mut PhotocraftApp, p: &Value) -> Result<Value, String> {
-    let write = app.services.write.as_mut().ok_or("no download service")?;
-    capishot_cmds::compile_active_with_writer(&mut app.session, p, &mut |path, bytes| write(path, bytes).map_err(photocraft_engine::EngineError::Other))
-        .map_err(|e| e.to_string())
+    let job = match capishot_cmds::prepare_compile_active(&mut app.session, p) {
+        Ok(job) => job,
+        Err(e) => return finish(app, Err(e.to_string())),
+    };
+    let result: std::sync::Arc<std::sync::Mutex<Value>> = std::sync::Arc::default();
+    let out = std::sync::Arc::clone(&result);
+    let label = crate::i18n::fmt(tl!("Compiling {name}"), &[("name", &crate::file_open::display_name(p.get("path").and_then(Value::as_str).unwrap_or("")))]);
+    crate::jobs_ui::produce_files(
+        app,
+        COMPILE,
+        &label,
+        move |_| {
+            let (path, bytes, r) = job.run().map_err(|e| e.to_string())?;
+            *out.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = r;
+            Ok(vec![crate::jobs_ui::Produced { path, bytes, warnings: Vec::new() }])
+        },
+        move |app, _| {
+            let r = std::mem::take(&mut *result.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+            finish(app, Ok(r))
+        },
+    )
 }
 
 /// Compile Folder: the desktop form, or (web) a pick of PSD files compiled into a ZIP download.

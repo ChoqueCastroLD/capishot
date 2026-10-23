@@ -3642,3 +3642,6 @@ curves	Smooth	Lisser
 @plural	{n} hour ago|{n} hours ago	il y a {n} heure|il y a {n} heures
 @plural	{n} day ago|{n} days ago	il y a {n} jour|il y a {n} jours
 @plural	Recover {n} document|Recover {n} documents	Récupérer {n} document|Récupérer {n} documents
+# Background exports (jobs_ui::produce_files)
+	Exporting {name}	Exportation de {name}
+	Compiling {name}	Compilation de {name}

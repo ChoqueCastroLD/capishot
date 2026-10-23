@@ -3629,3 +3629,6 @@ curves	Smooth	Haluskan
 @plural	{n} hour ago|{n} hours ago	{n} jam lalu
 @plural	{n} day ago|{n} days ago	{n} hari lalu
 @plural	Recover {n} document|Recover {n} documents	Pulihkan {n} dokumen
+# Background exports (jobs_ui::produce_files)
+	Exporting {name}	Mengekspor {name}
+	Compiling {name}	Mengompilasi {name}

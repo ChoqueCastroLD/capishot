@@ -612,61 +612,140 @@ pub const PLACE_EMBEDDED: &str = "Place Embedded";
 /// With Preferences ▸ General ▸ Always Create Smart Objects When Placing off, an embedded place
 /// lands as a plain pixel layer instead (an explicit `"smartObject": false` asks for one).
 pub fn place_bytes(s: &mut Session, name: &str, bytes: Vec<u8>, linked: Option<String>, p: &Value) -> Result<Value> {
-    let d = s.active().ok_or(EngineError::NoDocument)?;
-    let (cw, ch) = (d.doc.size.width as f64, d.doc.size.height as f64);
-    let fmt = d.doc.pixel_format();
-    let vector = photocraft_io::svg::is_svg(&bytes);
-    let max_svg_group_depth = s.prefs().file_handling.rasterize_svg_groups_deeper_than as usize;
-    let imported = photocraft_io::import_with_svg_group_depth(name, &bytes, max_svg_group_depth).map_err(|e| EngineError::Other(format!("{name}: {e}")))?;
-    if imported.preview_only {
-        return Err(EngineError::Other(format!(
-            "{name}: only this Affinity file's embedded preview could be read; open it with File › Open to see the warning, or export PSD or PNG from Affinity before using it here"
-        )));
-    }
-    let src = imported.document;
-    let (w, h) = (src.size.width as f64, src.size.height as f64);
-    // The implicit `fit` is Preferences ▸ General ▸ Resize Image During Place (on by default).
-    let fit = p.get("fit").and_then(Value::as_bool).unwrap_or(s.prefs().general.resize_image_during_place);
-    let scale = match f64_param(p, "scale") {
-        Some(k) => (k / 100.0).max(1e-4),
-        None if fit && (w > cw || h > ch) => (cw / w).min(ch / h),
-        None => 1.0,
-    };
-    let center = match p.get("center").and_then(Value::as_array) {
-        Some(c) if c.len() == 2 => (c[0].as_f64().unwrap_or(cw / 2.0), c[1].as_f64().unwrap_or(ch / 2.0)),
-        _ => (cw / 2.0, ch / 2.0),
-    };
-    let (dx, dy) = ((center.0 - w * scale / 2.0).round(), (center.1 - h * scale / 2.0).round());
-    let mut px = flattened(&src, fmt);
-    if (scale - 1.0).abs() > 1e-9 {
-        px = resize_surface(&px, scale, scale, Resample::Bicubic);
-    }
-    let px = translate_surface(&px, dx as i32, dy as i32);
-    // Preferences ▸ General ▸ Always Create Smart Objects When Placing (on by default): off, an
-    // embedded place lands as a plain pixel layer. A linked place is always a smart object.
-    let smart = linked.is_some() || p.get("smartObject").and_then(Value::as_bool).unwrap_or(s.prefs().general.always_create_smart_objects_when_placing);
-    let source = match linked {
-        Some(path) => SmartSource::Linked { path },
-        None => SmartSource::Embedded { file_name: file_name(name), bytes: Arc::new(bytes) },
-    };
-    let layer_name = stem(name);
-    let label = if matches!(&source, SmartSource::Linked { .. }) { "Place Linked" } else { PLACE_EMBEDDED };
-    let id = s.edit(label, |doc, active| {
-        let layer = if smart {
-            let mut so = SmartObject::new(source, Affine { m: [scale, 0.0, 0.0, scale, dx, dy] }, Some(px));
-            // A vector source (SVG) renders at its placement scale instead of as a resampled raster.
-            if vector && let Some(sharp) = crate::smart_cmds::render(doc, &so)? {
-                so.cache = Some(sharp);
-            }
-            Layer::new(layer_name, LayerContent::Smart(so))
-        } else {
-            Layer::new(layer_name, LayerContent::Raster(px))
+    let plan = PlacePlan::new(s, name, linked, p)?;
+    let placed = plan.decode(bytes)?;
+    placed.apply(s)
+}
+
+/// Place Embedded/Linked as a background job: the file is decoded and scaled on a worker (the
+/// threads build's pool in the browser), then placed as one history step on this thread. The
+/// result is [`place_bytes`]'s.
+pub fn start_place_bytes(s: &mut Session, name: &str, bytes: Vec<u8>, linked: Option<String>, p: &Value) -> Result<crate::jobs::Started> {
+    let plan = PlacePlan::new(s, name, linked, p)?;
+    let label = format!("Placing {}", file_name(name));
+    s.start_job_in_worker(
+        "file.placeEmbedded",
+        json!({"name": file_name(name)}),
+        &label,
+        true,
+        move |ctx| {
+            ctx.progress(0.0, "Decoding");
+            let placed = plan.decode(bytes)?;
+            ctx.check()?;
+            Ok(placed)
+        },
+        |s, placed: Placed| placed.apply(s),
+    )
+}
+
+/// What a place needs from the session, taken up front so the decoding can run anywhere.
+struct PlacePlan {
+    name: String,
+    linked: Option<String>,
+    canvas: (f64, f64),
+    fmt: photocraft_color::PixelFormat,
+    max_svg_group_depth: usize,
+    fit: bool,
+    scale: Option<f64>,
+    center: Option<(f64, f64)>,
+    smart_object: bool,
+}
+
+/// A decoded place, ready to land as a layer ([`Placed::apply`]).
+struct Placed {
+    name: String,
+    px: photocraft_raster::Surface,
+    source: SmartSource,
+    vector: bool,
+    scale: f64,
+    offset: (f64, f64),
+    size: (f64, f64),
+    smart: bool,
+}
+
+impl PlacePlan {
+    fn new(s: &Session, name: &str, linked: Option<String>, p: &Value) -> Result<Self> {
+        let d = s.active().ok_or(EngineError::NoDocument)?;
+        let canvas = (d.doc.size.width as f64, d.doc.size.height as f64);
+        let fmt = d.doc.pixel_format();
+        // The implicit `fit` is Preferences ▸ General ▸ Resize Image During Place (on by default).
+        let fit = p.get("fit").and_then(Value::as_bool).unwrap_or(s.prefs().general.resize_image_during_place);
+        let center = match p.get("center").and_then(Value::as_array) {
+            Some(c) if c.len() == 2 => Some((c[0].as_f64().unwrap_or(canvas.0 / 2.0), c[1].as_f64().unwrap_or(canvas.1 / 2.0))),
+            _ => None,
         };
-        let id = doc.insert_above(*active, layer);
-        *active = Some(id);
-        Ok(id)
-    })?;
-    Ok(json!({"layer": id.0, "scale": scale * 100.0, "bounds": [dx, dy, dx + w * scale, dy + h * scale], "smartObject": smart}))
+        // Preferences ▸ General ▸ Always Create Smart Objects When Placing (on by default): off, an
+        // embedded place lands as a plain pixel layer. A linked place is always a smart object.
+        let smart_object = linked.is_some() || p.get("smartObject").and_then(Value::as_bool).unwrap_or(s.prefs().general.always_create_smart_objects_when_placing);
+        Ok(PlacePlan {
+            name: name.to_string(),
+            linked,
+            canvas,
+            fmt,
+            max_svg_group_depth: s.prefs().file_handling.rasterize_svg_groups_deeper_than as usize,
+            fit,
+            scale: f64_param(p, "scale"),
+            center,
+            smart_object,
+        })
+    }
+
+    /// Decodes `bytes` and scales the pixels into place.
+    fn decode(self, bytes: Vec<u8>) -> Result<Placed> {
+        let PlacePlan { name, linked, canvas: (cw, ch), fmt, max_svg_group_depth, fit, scale, center, smart_object } = self;
+        let vector = photocraft_io::svg::is_svg(&bytes);
+        let imported = photocraft_io::import_with_svg_group_depth(&name, &bytes, max_svg_group_depth).map_err(|e| EngineError::Other(format!("{name}: {e}")))?;
+        if imported.preview_only {
+            return Err(EngineError::Other(format!(
+                "{name}: only this Affinity file's embedded preview could be read; open it with File › Open to see the warning, or export PSD or PNG from Affinity before using it here"
+            )));
+        }
+        let src = imported.document;
+        let (w, h) = (src.size.width as f64, src.size.height as f64);
+        let scale = match scale {
+            Some(k) => (k / 100.0).max(1e-4),
+            None if fit && (w > cw || h > ch) => (cw / w).min(ch / h),
+            None => 1.0,
+        };
+        let center = center.unwrap_or((cw / 2.0, ch / 2.0));
+        let (dx, dy) = ((center.0 - w * scale / 2.0).round(), (center.1 - h * scale / 2.0).round());
+        let mut px = flattened(&src, fmt);
+        if (scale - 1.0).abs() > 1e-9 {
+            px = resize_surface(&px, scale, scale, Resample::Bicubic);
+        }
+        let px = translate_surface(&px, dx as i32, dy as i32);
+        let source = match linked {
+            Some(path) => SmartSource::Linked { path },
+            None => SmartSource::Embedded { file_name: file_name(&name), bytes: Arc::new(bytes) },
+        };
+        Ok(Placed { name, px, source, vector, scale, offset: (dx, dy), size: (w, h), smart: smart_object })
+    }
+}
+
+impl Placed {
+    /// Lands the placed pixels as a layer above the active one (a smart object unless turned
+    /// off), as one history step.
+    fn apply(self, s: &mut Session) -> Result<Value> {
+        let Placed { name, px, source, vector, scale, offset: (dx, dy), size: (w, h), smart } = self;
+        let layer_name = stem(&name);
+        let label = if matches!(&source, SmartSource::Linked { .. }) { "Place Linked" } else { PLACE_EMBEDDED };
+        let id = s.edit(label, |doc, active| {
+            let layer = if smart {
+                let mut so = SmartObject::new(source, Affine { m: [scale, 0.0, 0.0, scale, dx, dy] }, Some(px));
+                // A vector source (SVG) renders at its placement scale instead of as a resampled raster.
+                if vector && let Some(sharp) = crate::smart_cmds::render(doc, &so)? {
+                    so.cache = Some(sharp);
+                }
+                Layer::new(layer_name, LayerContent::Smart(so))
+            } else {
+                Layer::new(layer_name, LayerContent::Raster(px))
+            };
+            let id = doc.insert_above(*active, layer);
+            *active = Some(id);
+            Ok(id)
+        })?;
+        Ok(json!({"layer": id.0, "scale": scale * 100.0, "bounds": [dx, dy, dx + w * scale, dy + h * scale], "smartObject": smart}))
+    }
 }
 
 fn place(s: &mut Session, p: &Value, linked: bool) -> Result<Value> {

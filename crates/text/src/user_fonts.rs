@@ -16,7 +16,7 @@
 //! `served::request`), the font menus through [`families`] and [`generation`].
 
 use std::collections::BTreeSet;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, MutexGuard, PoisonError};
 
 use serde::{Deserialize, Serialize};
 use skrifa::raw::FileRef;
@@ -566,7 +566,7 @@ impl Store {
     }
 }
 
-static STORE: Mutex<Store> = Mutex::new(Store::new());
+static STORE: wasm_sync::Mutex<Store> = wasm_sync::Mutex::new(Store::new());
 
 /// The process-wide store. Never lock the shared text engine while holding it: layout (under
 /// the engine's lock) calls [`request`].

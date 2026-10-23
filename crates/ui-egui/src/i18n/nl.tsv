@@ -4383,3 +4383,6 @@ curves	Smooth	Vloeiend maken
 @plural	{n} hour ago|{n} hours ago	{n} uur geleden|{n} uur geleden
 @plural	{n} day ago|{n} days ago	{n} dag geleden|{n} dagen geleden
 @plural	Recover {n} document|Recover {n} documents	{n} document herstellen|{n} documenten herstellen
+# Background exports (jobs_ui::produce_files)
+	Exporting {name}	{name} exporteren
+	Compiling {name}	{name} compileren

@@ -7,7 +7,9 @@
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Arc, OnceLock, Weak};
+
+use wasm_sync::Mutex;
 
 use photocraft_color::{ColorMode, PixelFormat, SampleType};
 use photocraft_doc::Layer;

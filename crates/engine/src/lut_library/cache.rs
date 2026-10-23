@@ -3,7 +3,7 @@
 //! parsing the same file each time. The cache holds the parser's own result, so whatever the
 //! parser learns to report (input domain, size limits) reaches Color Lookup unchanged.
 
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, PoisonError};
 
 use photocraft_cms::lutfile::{self, LutFile};
 
@@ -14,7 +14,7 @@ const MAX_KEPT_VALUES: usize = 4_000_000;
 
 type Key = (String, u64, u64);
 
-static CACHE: Mutex<Vec<(Key, Arc<LutFile>)>> = Mutex::new(Vec::new());
+static CACHE: wasm_sync::Mutex<Vec<(Key, Arc<LutFile>)>> = wasm_sync::Mutex::new(Vec::new());
 
 fn key_of(path: &str) -> Option<Key> {
     let meta = std::fs::metadata(path).ok()?;

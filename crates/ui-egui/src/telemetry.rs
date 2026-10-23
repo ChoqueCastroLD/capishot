@@ -25,13 +25,17 @@ use std::sync::{Mutex, OnceLock};
 use serde_json::{Map, Value, json};
 
 /// Version of the batch schema the collector validates.
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 /// Events queued between flushes; later ones are dropped (and counted).
 pub const MAX_EVENTS: usize = 200;
 /// Distinct (command, source) and (command, error) keys aggregated between flushes.
 pub const MAX_KEYS: usize = 400;
 /// Slow-command samples per batch.
 pub const MAX_PERF: usize = 20;
+/// Freeze reports per batch.
+pub const MAX_FREEZES: usize = 20;
+/// A main-thread block at least this long is a freeze (`freeze`, schema v4).
+pub const FREEZE_MS: f64 = 200.0;
 /// Only commands at least this slow are sampled.
 pub const PERF_MIN_MS: f64 = 100.0;
 /// A batch's JSON stays under this (the collector accepts 64 KB; `fetch` keepalive allows 64 KB).
@@ -50,6 +54,24 @@ pub const HEARTBEAT_MS: f64 = 60_000.0;
 pub const FLUSH_MS: f64 = 30_000.0;
 /// Session times are capped at a week (the collector's limit).
 pub const MAX_SECONDS: u64 = 7 * 86_400;
+
+/// How a freeze was seen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FreezeSource {
+    /// The browser's `longtask` performance entries.
+    LongTask,
+    /// One app frame (input, logic and drawing) ran that long.
+    Frame,
+}
+
+/// What was running when the page froze: the last command, the tool, a background job.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FreezeContext {
+    pub command: Option<String>,
+    pub tool: Option<String>,
+    pub job: Option<String>,
+    pub megapixels: Option<f64>,
+}
 
 /// Where a command came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -199,6 +221,7 @@ pub struct Recorder {
     errors: BTreeMap<(String, &'static str), u32>,
     events: Vec<Value>,
     perf_queued: usize,
+    freezes_queued: usize,
     frames: BTreeMap<String, FrameHist>,
     dropped: u32,
     ended: bool,
@@ -293,6 +316,7 @@ impl Recorder {
             errors: BTreeMap::new(),
             events: Vec::new(),
             perf_queued: 0,
+            freezes_queued: 0,
             frames: BTreeMap::new(),
             dropped: 0,
             ended: false,
@@ -403,6 +427,30 @@ impl Recorder {
         self.perf_queued += 1;
         let mut e = json!({"e": "perf", "op": sanitize_command_id(op), "ms": round_ms(ms)});
         if let Some(mp) = megapixels {
+            e["mp"] = json!(mp_bucket_of(mp));
+        }
+        self.event(e);
+    }
+
+    /// The page's main thread was blocked for `ms` (`longtask`: the browser saw a long task;
+    /// `frame`: one app frame ran that long), while `ctx` ran. Only at least [`FREEZE_MS`], at
+    /// most [`MAX_FREEZES`] per batch.
+    pub fn freeze(&mut self, src: FreezeSource, ms: f64, ctx: &FreezeContext) {
+        if !ms.is_finite() || ms < FREEZE_MS || self.freezes_queued >= MAX_FREEZES {
+            return;
+        }
+        self.freezes_queued += 1;
+        let src = match src {
+            FreezeSource::LongTask => "longtask",
+            FreezeSource::Frame => "frame",
+        };
+        let mut e = json!({"e": "freeze", "src": src, "ms": round_ms(ms)});
+        for (key, value) in [("cmd", &ctx.command), ("tool", &ctx.tool), ("job", &ctx.job)] {
+            if let Some(v) = value {
+                e[key] = json!(sanitize_command_id(v));
+            }
+        }
+        if let Some(mp) = ctx.megapixels {
             e["mp"] = json!(mp_bucket_of(mp));
         }
         self.event(e);
@@ -519,6 +567,7 @@ impl Recorder {
             events.push(e);
         }
         self.perf_queued = 0;
+        self.freezes_queued = 0;
         let mut dropped = std::mem::take(&mut self.dropped);
         self.seq = self.seq.saturating_add(1);
         loop {

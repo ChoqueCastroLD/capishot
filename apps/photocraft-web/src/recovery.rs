@@ -21,7 +21,11 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, PoisonError};
+
+// Locks the worker pool also takes spin on the page's thread instead of blocking (where
+// `Atomics.wait` throws).
+use wasm_sync::Mutex;
 
 use photocraft_doc::Document;
 use photocraft_format::{ObjectAutosaver, ObjectCheckpoint, RecoveryInfo};

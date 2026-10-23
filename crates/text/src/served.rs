@@ -17,7 +17,7 @@
 //! ([`request_for_languages`]). The manifest's SHA-256 becomes the fetch's Subresource Integrity
 //! ([`ServedFont::integrity`]).
 
-use std::sync::{Mutex, PoisonError};
+use std::sync::PoisonError;
 
 /// One font file listed in a served font manifest.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -160,7 +160,7 @@ struct State {
     generation: u64,
 }
 
-static STATE: Mutex<State> = Mutex::new(State { families: Vec::new(), fallbacks: Vec::new(), requested: Vec::new(), generation: 0 });
+static STATE: wasm_sync::Mutex<State> = wasm_sync::Mutex::new(State { families: Vec::new(), fallbacks: Vec::new(), requested: Vec::new(), generation: 0 });
 
 fn state() -> std::sync::MutexGuard<'static, State> {
     STATE.lock().unwrap_or_else(PoisonError::into_inner)

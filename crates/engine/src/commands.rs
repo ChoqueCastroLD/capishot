@@ -483,14 +483,20 @@ fn destructive_adjust(s: &mut Session, label: &str, adj: Adjustment, p: &Value) 
         });
     }
     let id = layer_param(s, &Value::Null)?;
-    s.edit(label, |doc, _| {
-        let sel = doc.selection.clone();
-        let mode = doc.mode;
-        let surf = paint_surface(doc, id, &Value::Null)?;
-        pixels::adjust_surface(surf, &adj, sel.as_ref(), mode);
-        Ok(())
-    })?;
-    Ok(Value::Null)
+    // A background job when started with `Session::start`: a whole-layer adjustment of a big page
+    // takes a moment, and in the browser the page must keep drawing.
+    crate::jobs::edit_job(
+        s,
+        label,
+        move |doc, _, _| {
+            let sel = doc.selection.clone();
+            let mode = doc.mode;
+            let surf = paint_surface(doc, id, &Value::Null)?;
+            pixels::adjust_surface(surf, &adj, sel.as_ref(), mode);
+            Ok(())
+        },
+        |()| Value::Null,
+    )
 }
 
 /// Lenient adjustment from params for previews: bad params fall back to the kind's defaults.

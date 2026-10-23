@@ -933,19 +933,44 @@ pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value,
 }
 
 /// Exports `doc` to `path` with the dialog settings `f` (Export As, and its replayed action step).
+/// Rendered and encoded in the background ([`crate::jobs_ui::produce_files`]): a big page
+/// doesn't freeze the window.
 fn write_export(app: &mut PhotocraftApp, doc: &Document, f: &Map<String, Value>, path: &str) -> Result<Value, String> {
-    let out = export_document(doc, f, None)?;
-    let export = app.services.export.as_ref().ok_or("no exporter configured")?;
-    let (bytes, warnings) = export(&out, path, &settings(f))?;
-    let write = app.services.write.as_mut().ok_or("no writer configured")?;
-    write(path, &bytes)?;
+    if !crate::jobs_ui::exports_in_background(app) {
+        let out = export_document(doc, f, None)?;
+        let export = app.services.export.as_ref().ok_or("no exporter configured")?;
+        let (bytes, warnings) = export(&out, path, &settings(f))?;
+        let write = app.services.write.as_mut().ok_or("no writer configured")?;
+        write(path, &bytes)?;
+        return exported(app, path.to_string(), bytes.len(), warnings);
+    }
+    let (doc, f, target) = (doc.clone(), f.clone(), path.to_string());
+    let label = crate::i18n::fmt(tl!("Exporting {name}"), &[("name", &crate::file_open::display_name(path))]);
+    crate::jobs_ui::produce_files(
+        app,
+        COMMAND,
+        &label,
+        move |ctx| {
+            let out = export_document(&doc, &f, None)?;
+            let r = ctx.stage(0.0, 1.0, "", |ctl| photocraft_io::export_with(&out, &target, &settings(&f).io_options(), ctl)).map_err(|e| e.to_string())?;
+            Ok(vec![crate::jobs_ui::Produced { path: target, bytes: r.bytes, warnings: r.warnings }])
+        },
+        |app, written| {
+            let Some((path, size, warnings)) = written.into_iter().next() else { return Ok(Value::Null) };
+            exported(app, path, size, warnings)
+        },
+    )
+}
+
+/// An Export As file was written: say so, and show its warnings.
+fn exported(app: &mut PhotocraftApp, path: String, size: usize, warnings: Vec<String>) -> Result<Value, String> {
     let template = "Exported {path} ({size})";
-    app.ui.status = crate::i18n::fmt(tl!(template), &[("path", path), ("size", &crate::sizing::human_bytes(bytes.len() as f64))]);
+    app.ui.status = crate::i18n::fmt(tl!(template), &[("path", &path), ("size", &crate::sizing::human_bytes(size as f64))]);
     app.ui.status_error = false;
     let template = "Exported {path}";
-    let what = crate::i18n::fmt(tl!(template), &[("path", &crate::file_open::display_name(path))]);
+    let what = crate::i18n::fmt(tl!(template), &[("path", &crate::file_open::display_name(&path))]);
     crate::notices::io_warnings(app, &what, &warnings);
-    Ok(json!({"path": path, "bytes": bytes.len(), "warnings": warnings}))
+    Ok(json!({"path": path, "bytes": size, "warnings": warnings}))
 }
 
 /// Replays a recorded Export As step (#7207): the active document exported to the recorded `path`
@@ -979,23 +1004,55 @@ fn confirm_layers(app: &mut PhotocraftApp, f: &Map<String, Value>, ids: &[photoc
     let suggested = format!("{}.{}", export_name(stem), s_fmt(f));
     let (f, settings) = (f.clone(), settings(f));
     app.pick_save(&suggested, move |app, path| {
-        let mut exported = Vec::new();
-        for (doc, path) in docs.iter().zip(batch_paths(&path, &docs)) {
-            let out = export_document(doc, &f, None)?;
-            let export = app.services.export.as_ref().ok_or("no exporter configured")?;
-            let (bytes, warnings) = export(&out, &path, &settings)?;
-            let write = app.services.write.as_mut().ok_or("no writer configured")?;
-            write(&path, &bytes)?;
-            let template = "Exported {path}";
-            let what = crate::i18n::fmt(tl!(template), &[("path", &crate::file_open::display_name(&path))]);
-            crate::notices::io_warnings(app, &what, &warnings);
-            exported.push(json!({"path": path, "bytes": bytes.len(), "warnings": warnings}));
+        if !crate::jobs_ui::exports_in_background(app) {
+            let mut written = Vec::new();
+            for (doc, path) in docs.iter().zip(batch_paths(&path, &docs)) {
+                let out = export_document(doc, &f, None)?;
+                let export = app.services.export.as_ref().ok_or("no exporter configured")?;
+                let (bytes, warnings) = export(&out, &path, &settings)?;
+                let write = app.services.write.as_mut().ok_or("no writer configured")?;
+                write(&path, &bytes)?;
+                written.push((path, bytes.len(), warnings));
+            }
+            return exported_layers(app, written);
         }
-        let template = "Exported {n} files";
-        app.ui.status = crate::i18n::fmt(tl!(template), &[("n", &exported.len().to_string())]);
-        app.ui.status_error = false;
-        Ok(json!({"files": exported}))
+        // Every layer rendered and encoded in the background, as one job.
+        let paths = batch_paths(&path, &docs);
+        let label = crate::i18n::fmt(tl!("Exporting {name}"), &[("name", &crate::file_open::display_name(&path))]);
+        crate::jobs_ui::produce_files(
+            app,
+            COMMAND,
+            &label,
+            move |ctx| {
+                let n = docs.len().max(1) as f32;
+                let mut out = Vec::with_capacity(docs.len());
+                for (i, (doc, target)) in docs.iter().zip(paths).enumerate() {
+                    let rendered = export_document(doc, &f, None)?;
+                    let r = ctx
+                        .stage(i as f32 / n, (i + 1) as f32 / n, "", |ctl| photocraft_io::export_with(&rendered, &target, &settings.io_options(), ctl))
+                        .map_err(|e| e.to_string())?;
+                    out.push(crate::jobs_ui::Produced { path: target, bytes: r.bytes, warnings: r.warnings });
+                }
+                Ok(out)
+            },
+            exported_layers,
+        )
     })
+}
+
+/// [`confirm_layers`]' files were written: say so, and show their warnings.
+fn exported_layers(app: &mut PhotocraftApp, written: crate::jobs_ui::Written) -> Result<Value, String> {
+    let mut exported = Vec::with_capacity(written.len());
+    for (path, size, warnings) in written {
+        let template = "Exported {path}";
+        let what = crate::i18n::fmt(tl!(template), &[("path", &crate::file_open::display_name(&path))]);
+        crate::notices::io_warnings(app, &what, &warnings);
+        exported.push(json!({"path": path, "bytes": size, "warnings": warnings}));
+    }
+    let template = "Exported {n} files";
+    app.ui.status = crate::i18n::fmt(tl!(template), &[("n", &exported.len().to_string())]);
+    app.ui.status_error = false;
+    Ok(json!({"files": exported}))
 }
 
 /// File › Export › Quick Export as PNG: the format, quality, metadata, colour space and location

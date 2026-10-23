@@ -3640,3 +3640,6 @@ curves	Smooth	Glätten
 @plural	{n} hour ago|{n} hours ago	vor {n} Stunde|vor {n} Stunden
 @plural	{n} day ago|{n} days ago	vor {n} Tag|vor {n} Tagen
 @plural	Recover {n} document|Recover {n} documents	{n} Dokument wiederherstellen|{n} Dokumente wiederherstellen
+# Background exports (jobs_ui::produce_files)
+	Exporting {name}	{name} wird exportiert
+	Compiling {name}	{name} wird kompiliert

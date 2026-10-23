@@ -4324,3 +4324,6 @@ curves	Smooth	Εξομάλυνση
 @plural	{n} hour ago|{n} hours ago	πριν από {n} ώρα|πριν από {n} ώρες
 @plural	{n} day ago|{n} days ago	πριν από {n} ημέρα|πριν από {n} ημέρες
 @plural	Recover {n} document|Recover {n} documents	Ανάκτηση {n} εγγράφου|Ανάκτηση {n} εγγράφων
+# Background exports (jobs_ui::produce_files)
+	Exporting {name}	Εξαγωγή {name}
+	Compiling {name}	Μεταγλώττιση {name}

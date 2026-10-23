@@ -3,7 +3,9 @@
 //! compositor asks for an effect layer's bounds in every tile; the GPU planner every frame).
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Weak};
+
+use wasm_sync::Mutex;
 
 use photocraft_geom::Rect;
 use photocraft_raster::{Surface, Tile};
