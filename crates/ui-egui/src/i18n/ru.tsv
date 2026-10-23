@@ -3609,3 +3609,6 @@ curves	Smooth	Сгладить
 @plural	{n} hour ago|{n} hours ago	{n} час назад|{n} часа назад|{n} часов назад
 @plural	{n} day ago|{n} days ago	{n} день назад|{n} дня назад|{n} дней назад
 @plural	Recover {n} document|Recover {n} documents	Восстановить {n} документ|Восстановить {n} документа|Восстановить {n} документов
+# Background exports (jobs_ui::produce_files)
+	Exporting {name}	Экспорт {name}
+	Compiling {name}	Компиляция {name}

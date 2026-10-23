@@ -4233,3 +4233,6 @@ navigator	Zoom	Zvětšení
 @plural	{n} hour ago|{n} hours ago	před {n} hodinou|před {n} hodinami|před {n} hodinami
 @plural	{n} day ago|{n} days ago	před {n} dnem|před {n} dny|před {n} dny
 @plural	Recover {n} document|Recover {n} documents	Obnovit {n} dokument|Obnovit {n} dokumenty|Obnovit {n} dokumentů
+# Background exports (jobs_ui::produce_files)
+	Exporting {name}	Exportuje se {name}
+	Compiling {name}	Kompiluje se {name}

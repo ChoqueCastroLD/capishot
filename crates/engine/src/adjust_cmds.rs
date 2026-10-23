@@ -288,7 +288,9 @@ pub(crate) fn adjust_as_smart_filter(s: &mut Session, kind: &str, label: &str, p
         visible: true,
     };
     let sel = s.active().and_then(|d| d.doc.selection.clone());
-    s.edit(label, |doc, _| crate::smart_cmds::add_smart_filter(doc, id, sf, sel.as_ref()))?;
+    // A background job when started with `Session::start`: re-rendering the smart object (its
+    // source decoded again) takes a moment, and in the browser the page keeps drawing.
+    crate::jobs::edit_job(s, label, move |doc, _, _| crate::smart_cmds::add_smart_filter(doc, id, sf, sel.as_ref()), |()| Value::Null)?;
     Ok(true)
 }
 

@@ -256,6 +256,10 @@ impl Boot {
         (services.autosave, services.discard_autosave, services.poll_autosave) = (r.autosave, r.discard_autosave, r.poll_autosave);
         (services.autosave_unsaved_only, services.recovery_menu) = (r.autosave_unsaved_only, r.recovery_menu);
         let mut app = PhotocraftApp::new(session, services).with_control(control);
+        // The threads build runs commands that can be jobs (filters, adjustments, Image Size,
+        // opening and saving files…) on its worker pool, with progress and Esc to cancel, as the
+        // desktop does: the page's thread never waits for them.
+        app.background_jobs = cfg!(target_feature = "atomics");
         if app.session.prefs().file_handling.recover_on_launch && photopea.is_none() {
             recovery.discover(true);
         }
@@ -302,7 +306,7 @@ impl Boot {
         if let Some(el) = loading {
             el.remove();
         }
-        WebShell { app, inbox, places, canvas: pen_target, unsaved, served, user_fonts, database, presets, startup_frames: 0, perf, recovery, outbox, photopea }
+        WebShell { app, inbox, places, canvas: pen_target, unsaved, served, user_fonts, database, presets, startup_frames: 0, perf, recovery, outbox, photopea, watchdog: crate::watchdog::Watchdog::new(), downloads: Default::default() }
     }
 }
 
@@ -733,26 +737,64 @@ struct WebShell {
     /// Saves encoded on the worker pool, waiting to be handed to the browser.
     outbox: Outbox,
     photopea: Option<crate::embed_protocol::PhotopeaConfig>,
+    /// Reports page freezes (watchdog.rs).
+    watchdog: crate::watchdog::Watchdog,
+    /// Big downloads being copied out a slice per frame.
+    downloads: std::collections::VecDeque<PendingDownload>,
+}
+
+/// Bytes copied out of the WebAssembly memory per frame for a download.
+const DOWNLOAD_CHUNK: usize = 4 << 20;
+
+/// A download being copied out of the shared memory, [`DOWNLOAD_CHUNK`] bytes per frame.
+struct PendingDownload {
+    bytes: Vec<u8>,
+    at: usize,
+    parts: js_sys::Array,
+    save: EncodedSave,
 }
 
 impl WebShell {
     /// Hands the saves the worker pool finished to the browser (a download, or the Photopea-style
     /// host's save server), on the page's thread where its APIs live.
-    fn deliver_saves(&mut self) {
+    fn deliver_saves(&mut self, ctx: &egui::Context) {
         let saves = std::mem::take(&mut *self.outbox.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
         for s in saves {
-            let result = match s.bytes {
-                Ok(bytes) => {
-                    let r = deliver(self.photopea.as_ref(), &s.path, &bytes);
-                    if let Err(e) = &r {
-                        photocraft_ui_egui::notices::error(&mut self.app, i18n::fmt(i18n::t("Save failed: {error}"), &[("error", e)]));
-                    }
-                    r
+            let EncodedSave { path, bytes, size, layers, ms } = s;
+            let meta = EncodedSave { path, bytes: Ok(Vec::new()), size, layers, ms };
+            match bytes {
+                // A big download is copied out of the shared memory a slice per frame
+                // ([`PendingDownload`]): one copy of tens of megabytes would hold the page.
+                Ok(bytes) if bytes.len() > DOWNLOAD_CHUNK && self.photopea.as_ref().is_none_or(|c| !c.saves(&meta.path)) => {
+                    self.downloads.push_back(PendingDownload { parts: js_sys::Array::new(), at: 0, bytes, save: meta });
                 }
-                Err(e) => Err(e),
-            };
-            crate::usage_stats::doc_saved_stats(&s.path, s.size, s.layers, result.as_ref().map(|_| ()), s.ms);
+                Ok(bytes) => {
+                    let r = deliver(self.photopea.as_ref(), &meta.path, &bytes);
+                    self.saved(&meta, r);
+                }
+                Err(e) => self.saved(&meta, Err(e)),
+            }
         }
+        if let Some(d) = self.downloads.front_mut() {
+            let end = (d.at + DOWNLOAD_CHUNK).min(d.bytes.len());
+            d.parts.push(&js_sys::Uint8Array::from(&d.bytes[d.at..end]));
+            d.at = end;
+            if end >= d.bytes.len()
+                && let Some(d) = self.downloads.pop_front()
+            {
+                let r = download_parts(&d.save.path, &d.parts);
+                self.saved(&d.save, r);
+            }
+            ctx.request_repaint();
+        }
+    }
+
+    /// A save reached the browser (or failed): report it, and count it in the usage statistics.
+    fn saved(&mut self, s: &EncodedSave, r: Result<(), String>) {
+        if let Err(e) = &r {
+            photocraft_ui_egui::notices::error(&mut self.app, i18n::fmt(i18n::t("Save failed: {error}"), &[("error", e)]));
+        }
+        crate::usage_stats::doc_saved_stats(&s.path, s.size, s.layers, r.as_ref().map(|_| ()), s.ms);
     }
 
     fn save_presets(&mut self, ctx: &egui::Context) {
@@ -933,8 +975,9 @@ impl eframe::App for WebShell {
         self.serve_fonts(ctx);
         self.pump_user_fonts(ctx);
         fetch_catalogs(ctx);
+        self.watchdog.begin();
         self.recovery.tick(&mut self.app);
-        self.deliver_saves();
+        self.deliver_saves(ctx);
         self.app.logic(ctx, frame);
         crate::embed::process(&mut self.app);
         crate::usage_stats::sync(&self.app, ctx);
@@ -969,6 +1012,7 @@ impl eframe::App for WebShell {
         self.app.ui(ui, frame);
         self.save_presets(ui.ctx());
         self.perf.end_update(&self.app, ui.ctx());
+        self.watchdog.end(&self.app);
     }
 }
 
@@ -982,7 +1026,8 @@ struct EncodedSave {
     ms: f64,
 }
 
-type Outbox = Arc<Mutex<Vec<EncodedSave>>>;
+// `wasm_sync`'s lock: the worker pool pushes, the page's thread takes (where blocking throws).
+type Outbox = Arc<wasm_sync::Mutex<Vec<EncodedSave>>>;
 
 /// Where a save's bytes go: the host's save server for the documents it takes (embedded in
 /// Photopea's way), else a browser download.
@@ -1128,15 +1173,18 @@ fn local_storage() -> Option<web_sys::Storage> {
 
 /// Trigger a browser download of `bytes` named after the last component of `path`.
 fn download(path: &str, bytes: &[u8]) -> Result<(), String> {
+    download_parts(path, &js_sys::Array::of1(&js_sys::Uint8Array::from(bytes)))
+}
+
+/// [`download`] of a file already copied out in `parts` (byte arrays, in order).
+fn download_parts(path: &str, parts: &js_sys::Array) -> Result<(), String> {
     let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
     let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "photocraft".into());
     let window = web_sys::window().ok_or("no window")?;
     let document = window.document().ok_or("no document")?;
-    let view = js_sys::Uint8Array::from(bytes);
-    let parts = js_sys::Array::of1(&view);
     let opts = web_sys::BlobPropertyBag::new();
     opts.set_type(mime_for(&name));
-    let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &opts).map_err(js)?;
+    let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(parts, &opts).map_err(js)?;
     let url = web_sys::Url::create_object_url_with_blob(&blob).map_err(js)?;
     let a: web_sys::HtmlAnchorElement = document.create_element("a").map_err(js)?.dyn_into().map_err(|_| "not an anchor")?;
     a.set_href(&url);

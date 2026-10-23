@@ -4,7 +4,9 @@
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
+
+use wasm_sync::Mutex;
 
 use photocraft_color::{PixelFormat, SampleType};
 use photocraft_doc::vector::ShapeLayer;

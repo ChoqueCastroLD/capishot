@@ -10,6 +10,8 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+# The shared engine's lock spins on the browser's main thread (`SharedEngine`).
+wasm_sync = "0.1"
 photocraft-geom = { workspace = true }
 photocraft-color = { workspace = true }
 photocraft-raster = { workspace = true }

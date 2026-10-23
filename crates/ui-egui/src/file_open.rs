@@ -210,7 +210,7 @@ impl PhotocraftApp {
     }
 
     /// Log `msg` and show it as an error (status bar + notice).
-    fn failed(&mut self, msg: String) {
+    pub(crate) fn failed(&mut self, msg: String) {
         log::warn!("{msg}");
         notices::error(self, msg);
     }
@@ -304,7 +304,7 @@ impl PhotocraftApp {
     /// Place the next file dropped on the canvas and start Free Transform on it, once no other
     /// transform is in progress (so several files are placed and transformed one after another).
     pub(crate) fn place_next_dropped(&mut self, ctx: &egui::Context) {
-        while self.ui.transform.is_none() {
+        while self.ui.transform.is_none() && self.jobs.placing.is_none() {
             let Some(next) = self.drop_places.pop_front() else { return };
             let (name, placed) = match next {
                 DropPlace::File(f) if f.path().is_absolute() => {
@@ -321,6 +321,8 @@ impl PhotocraftApp {
                 }
             };
             match placed {
+                // Decoding on a worker: Free Transform starts when it lands.
+                Ok(v) if v.get("pending").is_some() => {}
                 Ok(_) => {
                     if let Err(e) = crate::transform_tool::begin_placed(self, ctx) {
                         self.ui.status = e;
@@ -352,7 +354,25 @@ impl PhotocraftApp {
 
     /// Place a file's bytes as a smart object layer (File › Place; `linked`: Place Linked, to that
     /// path), for files that weren't read from a path the command can read.
+    ///
+    /// With background jobs (and always in the browser threads build) the file is decoded on a
+    /// worker: the result is then `{"pending": true, "job"}`, and Free Transform starts on the
+    /// placed layer when the job lands ([`crate::jobs_ui::placed`]) instead of by the caller.
     pub(crate) fn place_bytes(&mut self, name: &str, bytes: Vec<u8>, linked: Option<String>) -> Result<serde_json::Value, String> {
+        if self.background_jobs || crate::jobs_ui::POOL_THREADS {
+            let started = photocraft_engine::file_cmds::start_place_bytes(&mut self.session, name, bytes, linked, &serde_json::json!({})).map_err(|e| e.to_string())?;
+            return Ok(match started {
+                photocraft_engine::jobs::Started::Done(v) => {
+                    self.sync_views();
+                    v
+                }
+                photocraft_engine::jobs::Started::Job(job) => {
+                    self.jobs.placing = Some(job);
+                    self.jobs.last_started = Some(job);
+                    serde_json::json!({"pending": true, "job": job.0})
+                }
+            });
+        }
         let r = photocraft_engine::file_cmds::place_bytes(&mut self.session, name, bytes, linked, &serde_json::json!({})).map_err(|e| e.to_string());
         self.sync_views();
         r

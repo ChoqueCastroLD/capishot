@@ -175,6 +175,134 @@ pub struct JobsUi {
     pub focus: Option<JobId>,
     /// The job the latest [`run`] started (the control channel waits on it).
     pub(crate) last_started: Option<JobId>,
+    /// Exports encoded in the background, waiting to be handed to the writer ([`produce_files`]).
+    pub(crate) files: Vec<FilesJob>,
+    /// A place decoding in the background ([`PhotocraftApp::place_bytes`]): Free Transform starts
+    /// on its layer when it lands ([`placed`]); further dropped files wait for it.
+    pub(crate) placing: Option<JobId>,
+}
+
+/// A file encoded off this thread, for the platform writer (a download in the browser).
+pub(crate) struct Produced {
+    pub path: String,
+    pub bytes: Vec<u8>,
+    pub warnings: Vec<String>,
+}
+
+/// What [`produce_files`] reports once its files are written: each one's path, size and warnings.
+pub(crate) type Written = Vec<(String, usize, Vec<String>)>;
+type FilesDone = Box<dyn FnOnce(&mut PhotocraftApp, Written) -> Result<Value, String>>;
+
+/// A background export ([`produce_files`]) still encoding.
+pub(crate) struct FilesJob {
+    job: JobId,
+    files: Arc<std::sync::Mutex<Option<Vec<Produced>>>>,
+    done: Option<FilesDone>,
+}
+
+/// Encode files in the background (a worker natively and in the browser threads build, inline in
+/// the single-threaded build), with the job's progress and Esc to cancel; then, on this thread,
+/// hand each to the platform writer ([`crate::Services::write`]) and finish with `done`. Exports
+/// and compiles that used to encode and write in one go on the UI thread go through here, so a
+/// big page never freezes the window. Returns `done`'s result when it ran at once, else
+/// `{"job", "pending"}`.
+/// Whether [`produce_files`] encodes in the background here (else callers keep their inline path
+/// through [`crate::Services::export`]).
+pub(crate) fn exports_in_background(app: &PhotocraftApp) -> bool {
+    app.background_jobs || POOL_THREADS
+}
+
+pub(crate) fn produce_files(
+    app: &mut PhotocraftApp,
+    command: &str,
+    label: &str,
+    work: impl FnOnce(&JobCtx) -> Result<Vec<Produced>, String> + Send + 'static,
+    done: impl FnOnce(&mut PhotocraftApp, Written) -> Result<Value, String> + 'static,
+) -> Result<Value, String> {
+    // Background jobs off (tests, action playback): here and now, as before.
+    if !app.background_jobs && !POOL_THREADS {
+        let files = work(&JobCtx::default())?;
+        return write_produced(app, files).and_then(|w| done(app, w));
+    }
+    let slot: Arc<std::sync::Mutex<Option<Vec<Produced>>>> = Arc::default();
+    let out = Arc::clone(&slot);
+    let started = app.session.start_job(
+        command,
+        json!({}),
+        label,
+        false,
+        move |ctx| work(ctx).map_err(|e| if ctx.check().is_err() { photocraft_engine::EngineError::Cancelled } else { photocraft_engine::EngineError::Other(e) }),
+        move |_, files: Vec<Produced>| {
+            let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+            let v = json!({"files": paths});
+            *out.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(files);
+            Ok(v)
+        },
+    );
+    match started.map_err(|e| e.to_string())? {
+        Started::Done(_) => {
+            let files = slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take().unwrap_or_default();
+            write_produced(app, files).and_then(|w| done(app, w))
+        }
+        Started::Job(job) => {
+            app.jobs.files.push(FilesJob { job, files: slot, done: Some(Box::new(done)) });
+            app.jobs.last_started = Some(job);
+            app.ui.status.clear();
+            app.ui.status_error = false;
+            Ok(json!({"job": job.0, "pending": true}))
+        }
+    }
+}
+
+/// A background place ended: Free Transform on the placed layer, as a place does at once.
+fn placed(app: &mut PhotocraftApp, ctx: &egui::Context, e: &JobEvent) -> bool {
+    if app.jobs.placing != Some(e.id) {
+        return false;
+    }
+    app.jobs.placing = None;
+    app.sync_views();
+    match &e.outcome {
+        JobOutcome::Done(_) => {
+            if let Err(err) = crate::transform_tool::begin_placed(app, ctx) {
+                app.ui.status = err;
+            }
+        }
+        JobOutcome::Failed(err) => app.failed(crate::i18n::fmt(tl!("Couldn't place {name}: {error}"), &[("name", e.label.strip_prefix("Placing ").unwrap_or(&e.label)), ("error", err)])),
+        JobOutcome::Cancelled => {}
+    }
+    true
+}
+
+fn write_produced(app: &mut PhotocraftApp, files: Vec<Produced>) -> Result<Written, String> {
+    let mut written = Vec::with_capacity(files.len());
+    for f in files {
+        let write = app.services.write.as_mut().ok_or("no writer configured")?;
+        write(&f.path, &f.bytes)?;
+        written.push((f.path, f.bytes.len(), f.warnings));
+    }
+    Ok(written)
+}
+
+/// A [`produce_files`] job ended: write its files and finish, or report why not. True when the
+/// event was one.
+fn on_files_event(app: &mut PhotocraftApp, e: &JobEvent) -> bool {
+    let Some(at) = app.jobs.files.iter().position(|f| f.job == e.id) else { return false };
+    let mut f = app.jobs.files.remove(at);
+    match &e.outcome {
+        JobOutcome::Done(_) => {
+            let files = f.files.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take().unwrap_or_default();
+            let r = write_produced(app, files).and_then(|w| f.done.take().map_or(Ok(Value::Null), |done| done(app, w)));
+            if let Err(err) = r {
+                notices::error(app, err);
+            }
+        }
+        JobOutcome::Failed(err) => notices::error(app, format!("{}: {err}", e.label)),
+        JobOutcome::Cancelled => {
+            app.ui.status = crate::i18n::fmt(tl!("Cancelled {label}"), &[("label", &e.label)]);
+            app.ui.status_error = false;
+        }
+    }
+    true
 }
 
 /// Run command `id`: in the background when background jobs are on and the command is a job
@@ -200,7 +328,7 @@ pub fn run(app: &mut PhotocraftApp, id: &str, params: Value) -> Result<Value, St
 /// [`PhotocraftApp::background_jobs`] (the browser's default): the seconds-long fills and graph
 /// cuts at pen-up would otherwise hold the page's main thread. Their results are the same.
 const POOL_COMMANDS: [&str; 4] = ["paint.spotHealing", "select.quick", "paint.remove", photocraft_engine::ai_inpaint_cmds::ID];
-const POOL_THREADS: bool = cfg!(all(target_arch = "wasm32", target_feature = "atomics"));
+pub(crate) const POOL_THREADS: bool = cfg!(all(target_arch = "wasm32", target_feature = "atomics"));
 
 /// Open a file in the background: a tab appears at once and shows the progress; the document
 /// replaces it when decoded. `path` is remembered for File › Save and Open Recent.
@@ -504,6 +632,12 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
     });
     // A Free Transform commit's session ends with its job (then reported like any job).
     crate::transform_tool::on_job_event(app, &e);
+    if on_files_event(app, &e) {
+        return;
+    }
+    if placed(app, ctx, &e) {
+        return;
+    }
     if crate::prefs_ui::on_recovery_event(app, &e) {
         return;
     }

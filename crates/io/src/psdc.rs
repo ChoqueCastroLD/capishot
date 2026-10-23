@@ -352,7 +352,7 @@ fn srgb_or_untagged(doc: &Document) -> bool {
 
 /// The encoded merged images of the last saves, by the bytes they were rendered from.
 mod cache {
-    use std::sync::{Arc, Mutex, PoisonError};
+    use std::sync::{Arc, PoisonError};
 
     use super::Merged;
 
@@ -360,13 +360,13 @@ mod cache {
     const KEEP: usize = 2;
 
     pub(super) type Key = ([u8; 32], bool);
-    type Saves = Mutex<Vec<(Key, Arc<Merged>)>>;
+    type Saves = wasm_sync::Mutex<Vec<(Key, Arc<Merged>)>>;
     #[cfg(not(test))]
-    static SAVES: Saves = Mutex::new(Vec::new());
+    static SAVES: Saves = wasm_sync::Mutex::new(Vec::new());
     // Each test thread its own: tests save in parallel.
     #[cfg(test)]
     thread_local! {
-        static SAVES: Saves = const { Mutex::new(Vec::new()) };
+        static SAVES: Saves = const { wasm_sync::Mutex::new(Vec::new()) };
     }
 
     fn with<R>(f: impl FnOnce(&mut Vec<(Key, Arc<Merged>)>) -> R) -> R {

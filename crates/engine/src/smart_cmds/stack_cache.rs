@@ -3,7 +3,7 @@
 //! stage, so editing filter `i` only reruns the filters from `i` up: hiding or tweaking the top
 //! filter of a long stack doesn't rerun the expensive filters under it.
 
-use std::sync::{Mutex, PoisonError};
+use std::sync::PoisonError;
 
 use photocraft_color::PixelFormat;
 use photocraft_doc::{SmartFilter, SmartObject};
@@ -27,7 +27,7 @@ struct Entry {
 }
 
 /// Most recently used last.
-static STAGES: Mutex<Vec<Entry>> = Mutex::new(Vec::new());
+static STAGES: wasm_sync::Mutex<Vec<Entry>> = wasm_sync::Mutex::new(Vec::new());
 const ENTRIES: usize = 64;
 /// Accounted tile bytes; a stage larger than this on its own isn't kept.
 pub const BUDGET: usize = 768 << 20;

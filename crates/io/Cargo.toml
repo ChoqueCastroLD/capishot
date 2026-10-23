@@ -20,6 +20,8 @@ default = ["camera-raw"]
 camera-raw = []
 
 [dependencies]
+# Locks shared with the browser threads build's workers spin on its main thread.
+wasm_sync = "0.1"
 photocraft-geom = { workspace = true }
 photocraft-color = { workspace = true }
 photocraft-cms = { workspace = true }

@@ -4787,3 +4787,6 @@ navigator	Zoom	Zoom
 @plural	{n} hour ago|{n} hours ago	hace {n} hora|hace {n} horas
 @plural	{n} day ago|{n} days ago	hace {n} día|hace {n} días
 @plural	Recover {n} document|Recover {n} documents	Recuperar {n} documento|Recuperar {n} documentos
+# Background exports (jobs_ui::produce_files)
+	Exporting {name}	Exportando {name}
+	Compiling {name}	Compilando {name}

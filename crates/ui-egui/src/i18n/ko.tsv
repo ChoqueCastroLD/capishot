@@ -3820,3 +3820,6 @@ curves	Smooth	매끄럽게
 @plural	{n} hour ago|{n} hours ago	{n}시간 전
 @plural	{n} day ago|{n} days ago	{n}일 전
 @plural	Recover {n} document|Recover {n} documents	문서 {n}개 복구
+# Background exports (jobs_ui::produce_files)
+	Exporting {name}	{name} 내보내는 중
+	Compiling {name}	{name} 컴파일 중

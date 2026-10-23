@@ -3256,3 +3256,6 @@ curves	Smooth	平滑
 @plural	{n} hour ago|{n} hours ago	{n} 小時前
 @plural	{n} day ago|{n} days ago	{n} 天前
 @plural	Recover {n} document|Recover {n} documents	復原 {n} 個文件
+# Background exports (jobs_ui::produce_files)
+	Exporting {name}	正在匯出 {name}
+	Compiling {name}	正在編譯 {name}

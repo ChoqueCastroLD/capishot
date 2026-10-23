@@ -232,11 +232,25 @@ type LayerFn<'a> = &'a dyn Fn(&Surface, Option<&Surface>, Rect) -> Result<Surfac
 
 fn run_on_layer(s: &mut Session, cmd: &str, label: &str, p: &Value, moves: bool, f: LayerFn, mask: MaskFn) -> Result<Value> {
     let id = target(s, p)?;
+    let params = stored_params(p);
+    s.edit(label, |doc: &mut Document, _| apply_on_layer(doc, id, cmd, label, &params, moves, f, mask))?;
+    Ok(json!({"layer": id.0, "changed": true}))
+}
+
+/// `p` without the target layer: what a smart filter stores.
+fn stored_params(p: &Value) -> Value {
     let mut params = p.clone();
     if let Value::Object(m) = &mut params {
         m.remove("layer");
     }
-    s.edit(label, |doc: &mut Document, _| {
+    params
+}
+
+/// The body of [`run_on_layer`]: deform layer `id` of `doc` with `f` (and its linked mask with
+/// `mask`), or add the smart filter on a smart object.
+#[allow(clippy::too_many_arguments)]
+fn apply_on_layer(doc: &mut Document, id: LayerId, cmd: &str, label: &str, params: &Value, moves: bool, f: LayerFn, mask: MaskFn) -> Result<()> {
+    {
         let canvas = doc.bounds();
         let selection = doc.selection.clone();
         let group = crate::transform_cmds::group_locks(doc, id);
@@ -264,8 +278,7 @@ fn run_on_layer(s: &mut Session, cmd: &str, label: &str, p: &Value, moves: bool,
             m.surface = mf(&m.surface, selection.as_ref())?;
         }
         Ok(())
-    })?;
-    Ok(json!({"layer": id.0, "changed": true}))
+    }
 }
 
 fn liquify(s: &mut Session, p: &Value) -> Result<Value> {
@@ -281,25 +294,24 @@ fn liquify(s: &mut Session, p: &Value) -> Result<Value> {
     if field.is_identity() && !smart {
         return Ok(json!({"layer": id.0, "changed": false}));
     }
-    let r = run_on_layer(
+    // A background job when started with `Session::start`: the page keeps drawing in the browser.
+    let params = stored_params(p);
+    let max_displacement = field.max_displacement();
+    crate::jobs::edit_job(
         s,
-        LIQUIFY,
         "Liquify",
-        p,
-        false,
-        &|surf, sel, _| {
-            let out = apply_liquify(surf, &field);
-            Ok(match sel {
-                Some(sel) => mix_by_selection(surf, &out, sel),
-                None => out,
-            })
+        move |doc, _, _| {
+            let f = |surf: &Surface, sel: Option<&Surface>, _: Rect| {
+                let out = apply_liquify(surf, &field);
+                Ok(match sel {
+                    Some(sel) => mix_by_selection(surf, &out, sel),
+                    None => out,
+                })
+            };
+            apply_on_layer(doc, id, LIQUIFY, "Liquify", &params, false, &f, None)
         },
-        None,
-    )?;
-    let mut r = r;
-    r["ms"] = json!(t0.ms());
-    r["maxDisplacement"] = json!(field.max_displacement());
-    Ok(r)
+        move |()| json!({"layer": id.0, "changed": true, "ms": t0.ms(), "maxDisplacement": max_displacement}),
+    )
 }
 
 /// Lifts the selected pixels (when there is a selection), deforms them with `f` and puts them

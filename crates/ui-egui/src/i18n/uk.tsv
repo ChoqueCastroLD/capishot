@@ -4340,3 +4340,6 @@ curves	Smooth	Згладити
 @plural	{n} hour ago|{n} hours ago	{n} годину тому|{n} години тому|{n} годин тому
 @plural	{n} day ago|{n} days ago	{n} день тому|{n} дні тому|{n} днів тому
 @plural	Recover {n} document|Recover {n} documents	Відновити {n} документ|Відновити {n} документи|Відновити {n} документів
+# Background exports (jobs_ui::produce_files)
+	Exporting {name}	Експорт {name}
+	Compiling {name}	Компіляція {name}

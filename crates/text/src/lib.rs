@@ -142,7 +142,12 @@ impl TextEngine {
     }
 }
 
-static SHARED: warm::Warm<std::sync::Mutex<TextEngine>> = warm::Warm::new();
+/// The shared engine's lock: `wasm_sync`'s, which spins instead of blocking on the browser's main
+/// thread (where `Atomics.wait` throws) when a worker holds it, as it does while it renders type
+/// for a background job; elsewhere it is `std`'s.
+pub type SharedEngine = wasm_sync::Mutex<TextEngine>;
+
+static SHARED: warm::Warm<SharedEngine> = warm::Warm::new();
 
 /// Whether [`shared`] scans the installed fonts (native builds, outside tests, unless
 /// `PHOTOCRAFT_NO_SYSTEM_FONTS` is set). Without the scan it is cheap to build.
@@ -150,24 +155,24 @@ fn uses_system_fonts() -> bool {
     cfg!(not(target_arch = "wasm32")) && !cfg!(test) && std::env::var_os("PHOTOCRAFT_NO_SYSTEM_FONTS").is_none()
 }
 
-fn new_shared() -> std::sync::Mutex<TextEngine> {
+fn new_shared() -> SharedEngine {
     let mut engine = if uses_system_fonts() { TextEngine::with_system_fonts() } else { TextEngine::new() };
     engine.fonts.mark_shared();
-    std::sync::Mutex::new(engine)
+    SharedEngine::new(engine)
 }
 
 /// A process-wide engine for callers without their own (bundled fonts only on the web; bundled
 /// plus system fonts elsewhere). Locking is cheap relative to layout. The first call scans the
 /// installed fonts and blocks until that is done (or until [`warm_shared`]'s scan finishes), so
 /// code that runs every UI frame uses [`try_shared`] instead.
-pub fn shared() -> &'static std::sync::Mutex<TextEngine> {
+pub fn shared() -> &'static SharedEngine {
     SHARED.get_or_init(new_shared)
 }
 
 /// [`shared`] without blocking: `None` while the system font scan is still running on its
 /// background thread (started here if [`warm_shared`] has not started it yet). Without system
 /// fonts (web, tests) the engine is cheap and this always returns it.
-pub fn try_shared() -> Option<&'static std::sync::Mutex<TextEngine>> {
+pub fn try_shared() -> Option<&'static SharedEngine> {
     SHARED.try_get(new_shared, uses_system_fonts())
 }
 
@@ -177,7 +182,7 @@ static WANT_GLYPH_PROTECTION: std::sync::atomic::AtomicU8 = std::sync::atomic::A
 /// A thread is already waiting for the font scan to apply [`WANT_GLYPH_PROTECTION`].
 static GLYPH_PROTECTION_WAITING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-fn apply_glyph_protection(engine: &std::sync::Mutex<TextEngine>) {
+fn apply_glyph_protection(engine: &SharedEngine) {
     let mut e = engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     match WANT_GLYPH_PROTECTION.load(std::sync::atomic::Ordering::SeqCst) {
         1 => e.fonts.set_missing_glyph_protection(false),

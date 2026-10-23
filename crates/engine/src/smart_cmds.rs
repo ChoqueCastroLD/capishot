@@ -23,7 +23,7 @@
 //! writes every smart object back as one: its source embedded in `lnk2` (a `.pcraft` source as a
 //! PSB), its smart filters in `filterFX` and its filter mask in `FEid`.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use photocraft_algo::resample::translate_surface;
 use photocraft_algo::transform::Homography;
@@ -144,7 +144,7 @@ struct CacheEntry {
 
 /// Decoded source composites by content hash, most recent last. Re-filtering or re-transforming
 /// a smart object never decodes its contents again.
-static SOURCE_CACHE: Mutex<Vec<CacheEntry>> = Mutex::new(Vec::new());
+static SOURCE_CACHE: wasm_sync::Mutex<Vec<CacheEntry>> = wasm_sync::Mutex::new(Vec::new());
 const CACHE_ENTRIES: usize = 32;
 const CACHE_BYTES: usize = 1 << 30;
 

@@ -968,6 +968,9 @@ pub struct PhotocraftApp {
     pub(crate) prefs_rt: prefs_ui::Runtime,
     /// Crash rescue: the recovery dialog and what the shell is asked (see `recovery_ui`).
     pub(crate) recovery: recovery_ui::RecoveryState,
+    /// The last command run and when (`gpu_canvas::now_ms`), for freeze reports
+    /// ([`Self::freeze_context`]).
+    last_command: Option<(String, f64)>,
     /// Close, Revert or Exit parked behind the unsaved-changes prompt (see `discard_ui`).
     pub(crate) discard: Option<discard_ui::Prompt>,
     /// The Open or Save dialog in progress, and the action waiting on it (see `file_dialog`).
@@ -1145,6 +1148,7 @@ impl PhotocraftApp {
             stroke_trace: stroke_trace::StrokeTrace::from_env(),
             prefs_rt: Default::default(),
             recovery: Default::default(),
+            last_command: None,
             discard: None,
             file_dialog: None,
             tiff_options: None,
@@ -1267,6 +1271,7 @@ impl PhotocraftApp {
         }
         // Anonymous usage statistics (web only, opt-out): the id is counted, never the params.
         let scope = telemetry::Scope::enter(self.automation_input);
+        self.last_command = Some((id.to_string(), gpu_canvas::now_ms()));
         let result = self.run_command(id, params);
         scope.finish(id, &result, || self.session.active().map(|st| telemetry::megapixels(st.doc.size.width, st.doc.size.height)));
         if gate.is_some() {
@@ -2038,6 +2043,18 @@ impl PhotocraftApp {
     /// A save is running in the background.
     pub(crate) fn saving(&self) -> bool {
         !self.jobs.saves.is_empty()
+    }
+
+    /// What was running when the page froze (`telemetry::Recorder::freeze`): the command run in
+    /// the last two seconds, the tool, a background job and the document's size.
+    pub fn freeze_context(&self) -> telemetry::FreezeContext {
+        let now = gpu_canvas::now_ms();
+        telemetry::FreezeContext {
+            command: self.last_command.as_ref().filter(|(_, at)| now - at <= 2_000.0).map(|(id, _)| id.clone()),
+            tool: Some(telemetry::tool_id(self.ui.tool)),
+            job: self.session.jobs().first().map(|j| j.command.clone()),
+            megapixels: self.session.active().map(|st| telemetry::megapixels(st.doc.size.width, st.doc.size.height)),
+        }
     }
 
     /// Save through the control session's capability-scoped writer. No file

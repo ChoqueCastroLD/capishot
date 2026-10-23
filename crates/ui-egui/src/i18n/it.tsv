@@ -4737,3 +4737,6 @@ shape	Appearance	Aspetto
 @plural	{n} hour ago|{n} hours ago	{n} ora fa|{n} ore fa
 @plural	{n} day ago|{n} days ago	{n} giorno fa|{n} giorni fa
 @plural	Recover {n} document|Recover {n} documents	Recupera {n} documento|Recupera {n} documenti
+# Background exports (jobs_ui::produce_files)
+	Exporting {name}	Esportazione di {name}
+	Compiling {name}	Compilazione di {name}

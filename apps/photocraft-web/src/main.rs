@@ -51,6 +51,8 @@ mod startup;
 #[cfg(target_arch = "wasm32")]
 mod usage_stats;
 #[cfg(target_arch = "wasm32")]
+mod watchdog;
+#[cfg(target_arch = "wasm32")]
 mod web;
 #[cfg(target_arch = "wasm32")]
 mod wheel_guard;

@@ -285,13 +285,26 @@ fn raw_enabled(s: &Session) -> std::result::Result<(), String> {
 
 /// Runs `f` on the target layer (pixel layer edited in place inside the selection; smart object
 /// gets a smart filter with `stored` params).
-fn run_filter(s: &mut Session, cmd: &str, label: &str, stored: Value, float_bg: bool, f: &dyn Fn(&Surface, Rect) -> Surface) -> Result<LayerId> {
+///
+/// A background job when started with `Session::start` (the page keeps drawing in the browser);
+/// `finish` makes the command's result from the layer's id.
+fn run_filter(
+    s: &mut Session,
+    cmd: &str,
+    label: &str,
+    stored: Value,
+    float_bg: bool,
+    f: impl Fn(&Surface, Rect) -> Surface + Send + 'static,
+    finish: impl FnOnce(LayerId) -> Value + Send + 'static,
+) -> Result<Value> {
     let id = target(s, &stored)?;
     let mut stored = stored;
     if let Value::Object(m) = &mut stored {
         m.remove("layer");
     }
-    s.edit(label, |doc: &mut Document, _| {
+    let (cmd, label_owned) = (cmd.to_string(), label.to_string());
+    crate::jobs::edit_job(s, label, move |doc: &mut Document, _, _| {
+        let label = label_owned.as_str();
         let canvas = doc.bounds();
         let selection = doc.selection.clone();
         let locks = doc.effective_locks(id);
@@ -302,8 +315,8 @@ fn run_filter(s: &mut Session, cmd: &str, label: &str, stored: Value, float_bg: 
             return Err(EngineError::Other(format!("layer \"{}\" is locked", l.name)));
         }
         if let LayerContent::Smart(_) = l.content {
-            let sf = SmartFilter { command: cmd.to_string(), params: stored.clone(), blend: photocraft_color::BlendMode::Normal, opacity: 1.0, visible: true };
-            return crate::smart_cmds::add_smart_filter(doc, id, sf, selection.as_ref());
+            let sf = SmartFilter { command: cmd.clone(), params: stored.clone(), blend: photocraft_color::BlendMode::Normal, opacity: 1.0, visible: true };
+            return crate::smart_cmds::add_smart_filter(doc, id, sf, selection.as_ref()).map(|()| id);
         }
         // A Background layer gains transparency when the edge mode exposes it (as in Photoshop).
         if float_bg && background {
@@ -319,9 +332,8 @@ fn run_filter(s: &mut Session, cmd: &str, label: &str, stored: Value, float_bg: 
             Some(sel) => mix_by_selection(surf, &out, sel),
             None => out,
         };
-        Ok(())
-    })?;
-    Ok(id)
+        Ok(id)
+    }, finish)
 }
 
 fn lens_correction(s: &mut Session, p: &Value) -> Result<Value> {
@@ -331,9 +343,12 @@ fn lens_correction(s: &mut Session, p: &Value) -> Result<Value> {
     let lc = lens_params(LENS, p, frame, info.as_ref())?;
     let stored = resolved_lens_params(p, &lc, profile_focal(LENS, p, info.as_ref())?);
     let t0 = Stopwatch::start();
-    let id =
-        run_filter(s, LENS, "Lens Correction", stored.clone(), matches!(lc.edge, EdgeMode::Transparency), &|surf, canvas| lens::correct(surf, canvas, &lc))?;
-    Ok(json!({"layer": id.0, "profile": lc.profile.as_ref().map(|p| p.name.clone()), "angle": lc.angle, "scale": lc.scale, "params": stored, "ms": t0.ms()}))
+    let (profile, angle, scale) = (lc.profile.as_ref().map(|p| p.name.clone()), lc.angle, lc.scale);
+    let float_bg = matches!(lc.edge, EdgeMode::Transparency);
+    let result = stored.clone();
+    run_filter(s, LENS, "Lens Correction", stored, float_bg, move |surf, canvas| lens::correct(surf, canvas, &lc), move |id| {
+        json!({"layer": id.0, "profile": profile, "angle": angle, "scale": scale, "params": result, "ms": t0.ms()})
+    })
 }
 
 fn adaptive_wide_angle(s: &mut Session, p: &Value) -> Result<Value> {
@@ -349,33 +364,44 @@ fn adaptive_wide_angle(s: &mut Session, p: &Value) -> Result<Value> {
         stored["layer"] = l.clone();
     }
     let interp = Interp::parse(p.get("interpolation").and_then(Value::as_str).unwrap_or("bicubic"));
-    let id = run_filter(s, WIDE, "Adaptive Wide Angle", stored.clone(), true, &|surf, canvas| {
-        let tris = mesh.triangles();
-        if canvas == frame {
-            photocraft_algo::warp::warp_triangles(surf, canvas, &mesh.verts, &tris, interp)
-        } else {
-            wideangle::apply(surf, canvas, &wa, interp)
-        }
-    })?;
     let model = match cam.model {
         wideangle::WideModel::Fisheye => "fisheye",
         wideangle::WideModel::Perspective => "perspective",
         wideangle::WideModel::FullSpherical => "fullSpherical",
         wideangle::WideModel::Auto => "auto",
     };
-    if let Some(m) = stored.as_object_mut() {
+    let mut result = stored.clone();
+    if let Some(m) = result.as_object_mut() {
         m.remove("layer");
     }
-    Ok(json!({
-        "layer": id.0,
-        "model": model,
-        "focalPx": cam.f,
-        "constraints": wa.constraints.len(),
-        "curves": mesh.curves,
-        "residual": mesh.residual,
-        "params": stored,
-        "ms": t0.ms(),
-    }))
+    let (focal, constraints, curves, residual) = (cam.f, wa.constraints.len(), mesh.curves.clone(), mesh.residual);
+    run_filter(
+        s,
+        WIDE,
+        "Adaptive Wide Angle",
+        stored,
+        true,
+        move |surf, canvas| {
+            let tris = mesh.triangles();
+            if canvas == frame {
+                photocraft_algo::warp::warp_triangles(surf, canvas, &mesh.verts, &tris, interp)
+            } else {
+                wideangle::apply(surf, canvas, &wa, interp)
+            }
+        },
+        move |id| {
+            json!({
+                "layer": id.0,
+                "model": model,
+                "focalPx": focal,
+                "constraints": constraints,
+                "curves": curves,
+                "residual": residual,
+                "params": result,
+                "ms": t0.ms(),
+            })
+        },
+    )
 }
 
 /// The transfer curve Camera Raw decodes `doc`'s values with ([`CameraRaw::encoding_gamma`]):
@@ -417,8 +443,16 @@ fn camera_raw_cmd(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     let t0 = Stopwatch::start();
-    let id = run_filter(s, RAW, "Camera Raw Filter", p.clone(), false, &|surf, canvas| camera_raw_surface(surf, canvas.union(&surf.content_bounds()), &cr))?;
-    Ok(json!({"layer": id.0, "identity": cr.is_identity(), "ms": t0.ms()}))
+    let identity = cr.is_identity();
+    run_filter(
+        s,
+        RAW,
+        "Camera Raw Filter",
+        p.clone(),
+        false,
+        move |surf, canvas| camera_raw_surface(surf, canvas.union(&surf.content_bounds()), &cr),
+        move |id| json!({"layer": id.0, "identity": identity, "ms": t0.ms()}),
+    )
 }
 
 fn lens_batch(s: &mut Session, p: &Value) -> Result<Value> {

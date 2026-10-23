@@ -3240,3 +3240,6 @@ fontWeight	Italic	Itálico
 @plural	{n} hour ago|{n} hours ago	há {n} hora|há {n} horas
 @plural	{n} day ago|{n} days ago	há {n} dia|há {n} dias
 @plural	Recover {n} document|Recover {n} documents	Recuperar {n} documento|Recuperar {n} documentos
+# Background exports (jobs_ui::produce_files)
+	Exporting {name}	A exportar {name}
+	Compiling {name}	A compilar {name}

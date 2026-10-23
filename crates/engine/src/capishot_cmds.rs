@@ -93,9 +93,26 @@ fn compile_active(s: &mut Session, p: &Value) -> Result<Value> {
 /// File › Export › Compile PSD… through a platform writer: a file on the desktop, a download in
 /// the browser (where `path` is the download's name).
 pub fn compile_active_with_writer(s: &mut Session, p: &Value, write: &mut dyn FnMut(&str, &[u8]) -> Result<()>) -> Result<Value> {
+    let job = prepare_compile_active(s, p)?;
+    let (path, bytes, result) = job.run()?;
+    write(&path, &bytes)?;
+    Ok(result)
+}
+
+/// Compile PSD of the active document, ready to run anywhere ([`CompileActive::run`]): checked
+/// and captured here, rendered and encoded later (on a worker, so the page keeps drawing).
+pub struct CompileActive {
+    doc: std::sync::Arc<photocraft_doc::Document>,
+    path: String,
+    ext: String,
+    quality: Option<u8>,
+    opts: photocraft_io::psdc::CompileOptions,
+}
+
+/// Checks Compile PSD's params `p` and captures the active document (its moved selection as the
+/// canvas shows it, as [`Session::execute`] does before running the command).
+pub fn prepare_compile_active(s: &mut Session, p: &Value) -> Result<CompileActive> {
     authorize(s, COMPILE, p)?;
-    // Direct platform calls compile the moved selection as the canvas shows it, as
-    // Session::execute does before running the command.
     crate::float_cmds::before_command(s, COMPILE)?;
     let path = str_param(p, "path", COMPILE)?.to_string();
     let ext = extension(&path);
@@ -103,10 +120,17 @@ pub fn compile_active_with_writer(s: &mut Session, p: &Value, write: &mut dyn Fn
     let quality = quality(p, COMPILE)?;
     let opts = options(p, false, COMPILE)?;
     let doc = s.active().ok_or(EngineError::NoDocument)?.doc.clone();
-    let c = photocraft_io::psdc::compile_document(&doc, &opts).map_err(|e| EngineError::Other(e.to_string()))?;
-    let bytes = c.encode(&ext, quality).map_err(|e| EngineError::Other(e.to_string()))?;
-    write(&path, &bytes)?;
-    Ok(json!({"path": path, "width": c.width, "height": c.height, "warnings": c.warnings}))
+    Ok(CompileActive { doc, path, ext, quality, opts })
+}
+
+impl CompileActive {
+    /// Renders and encodes: the file's path, its bytes and the command's result.
+    pub fn run(self) -> Result<(String, Vec<u8>, Value)> {
+        let c = photocraft_io::psdc::compile_document(&self.doc, &self.opts).map_err(|e| EngineError::Other(e.to_string()))?;
+        let bytes = c.encode(&self.ext, self.quality).map_err(|e| EngineError::Other(e.to_string()))?;
+        let result = json!({"path": self.path, "width": c.width, "height": c.height, "warnings": c.warnings});
+        Ok((self.path, bytes, result))
+    }
 }
 
 /// The output format of a batch compile (`format`, default png).

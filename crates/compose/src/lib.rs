@@ -2380,9 +2380,9 @@ pub fn purge_effect_cache() -> usize {
     freed
 }
 
-fn fx_cache() -> &'static std::sync::Mutex<FxCache> {
-    static C: std::sync::OnceLock<std::sync::Mutex<FxCache>> = std::sync::OnceLock::new();
-    C.get_or_init(|| std::sync::Mutex::new(FxCache { map: Default::default(), order: Default::default(), bytes: 0 }))
+fn fx_cache() -> &'static wasm_sync::Mutex<FxCache> {
+    static C: std::sync::OnceLock<wasm_sync::Mutex<FxCache>> = std::sync::OnceLock::new();
+    C.get_or_init(|| wasm_sync::Mutex::new(FxCache { map: Default::default(), order: Default::default(), bytes: 0 }))
 }
 
 /// Where `layer`'s effect maps are built (see [`effect_maps`]) and whether that is clipped to the

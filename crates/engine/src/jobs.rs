@@ -298,9 +298,6 @@ pub struct Jobs {
     next: u64,
     /// Set while [`Session::start`] runs a command: [`run`] spawns instead of running inline.
     spawn: bool,
-    /// Set while [`Session::start_job_in_worker`] runs: the browser threads build runs the job
-    /// on its rayon Web Worker pool too (other jobs stay inline there, as they always have).
-    spawn_web: bool,
     /// The job a command registered while `spawn` was set (picked up by `start`).
     pending: Option<Running>,
     running: Vec<Running>,
@@ -384,7 +381,7 @@ pub fn run<T: Send + 'static>(
     // The job's document: stored paths it follows are resolved against it on any thread.
     let document = s.active().and_then(|d| d.path.as_deref()).map(std::path::PathBuf::from);
     let _document = crate::doc_path::scope(document.as_deref());
-    if !s.jobs.spawn || (cfg!(target_arch = "wasm32") && !(SPAWNS && s.jobs.spawn_web)) {
+    if !s.jobs.spawn || !SPAWNS {
         let t = work(&s.jobs.inline.clone().unwrap_or_default())?;
         return apply(s, t);
     }
@@ -730,7 +727,8 @@ impl Session {
     /// job): `work` runs on a worker, `apply` on this thread when [`Session::poll_jobs`] or
     /// [`Session::wait_job`] picks the result up. `command` and `params` identify it in
     /// [`JobInfo`]; it is not journaled. With `lock_document` the active document is locked as
-    /// for a command. Runs inline on wasm.
+    /// for a command. Runs inline in the single-threaded browser build, on the rayon Web Worker
+    /// pool in the threads build.
     pub fn start_job<T: Send + 'static>(
         &mut self,
         command: &str,
@@ -775,10 +773,7 @@ impl Session {
         work: impl FnOnce(&JobCtx) -> Result<T> + Send + 'static,
         apply: impl FnOnce(&mut Session, T) -> Result<Value> + Send + 'static,
     ) -> Result<Started> {
-        self.jobs.spawn_web = true;
-        let r = self.start_job(command, params, label, lock_document, work, apply);
-        self.jobs.spawn_web = false;
-        r
+        self.start_job(command, params, label, lock_document, work, apply)
     }
 
     /// Apply finished background jobs (on this thread) and return every job that ended since
