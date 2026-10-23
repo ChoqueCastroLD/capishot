@@ -194,6 +194,7 @@ pub mod proxy;
 pub mod puppet_ui;
 pub mod quick_pick;
 pub mod rasterize_prompt;
+pub mod recovery_ui;
 pub mod retouch_ui;
 mod rgb_histogram;
 pub mod rotate_view;
@@ -619,6 +620,13 @@ pub struct Services {
     pub xwayland_command: Option<String>,
     /// Crash-recovery autosave (Preferences › File Handling) and recovery at launch.
     pub autosave: Option<AutosaveFn>,
+    /// Checkpoint only documents with unsaved changes, and remove a document's checkpoint once
+    /// it is saved (the browser, whose storage is small); off natively, where a saved document
+    /// keeps its checkpoint for its undo history.
+    pub autosave_unsaved_only: bool,
+    /// The shell can list its recovery checkpoints at any time (the browser): File › Recover
+    /// Documents… is enabled and asks it to (`recovery_ui`).
+    pub recovery_menu: bool,
     pub discard_autosave: Option<DiscardAutosaveFn>,
     pub poll_autosave: Option<PollAutosaveFn>,
     pub recover: Option<RecoverFn>,
@@ -958,6 +966,8 @@ pub struct PhotocraftApp {
     pub stroke_trace: stroke_trace::StrokeTrace,
     /// Preferences, autosave and snapping runtime state (see `prefs_ui`, `snap_ui`).
     pub(crate) prefs_rt: prefs_ui::Runtime,
+    /// Crash rescue: the recovery dialog and what the shell is asked (see `recovery_ui`).
+    pub(crate) recovery: recovery_ui::RecoveryState,
     /// Close, Revert or Exit parked behind the unsaved-changes prompt (see `discard_ui`).
     pub(crate) discard: Option<discard_ui::Prompt>,
     /// The Open or Save dialog in progress, and the action waiting on it (see `file_dialog`).
@@ -1134,6 +1144,7 @@ impl PhotocraftApp {
             cpu_move_split: None,
             stroke_trace: stroke_trace::StrokeTrace::from_env(),
             prefs_rt: Default::default(),
+            recovery: Default::default(),
             discard: None,
             file_dialog: None,
             tiff_options: None,
@@ -1916,7 +1927,9 @@ impl PhotocraftApp {
     /// `None` when the save went to a background job (#2017), which finishes it in
     /// [`jobs_ui::tick`].
     pub(crate) fn write_document(&mut self, path: String, settings: &ExportSettings, copy: bool) -> Result<Option<(String, Vec<String>)>, String> {
-        if self.background_jobs
+        // The browser threads build saves on its worker pool whatever the background-jobs
+        // setting: the page's thread may not block, and a big PSD takes seconds to encode.
+        if (self.background_jobs || cfg!(target_arch = "wasm32"))
             && let Some(save) = self.services.save_file.clone()
         {
             return jobs_ui::start_save(self, path, settings.clone(), copy, save, false);
@@ -1929,6 +1942,9 @@ impl PhotocraftApp {
         write(&path, &bytes)?;
         let revision = saved_revision_after_write(!self.services.write_unconfirmed, written, previous);
         self.saved(doc, revision, &path, &warnings, copy);
+        if !copy {
+            prefs_ui::document_written(self, doc, written);
+        }
         Ok(Some((path, warnings)))
     }
 
@@ -2385,6 +2401,7 @@ impl eframe::App for PhotocraftApp {
         jobs_ui::dialog(self, &ctx);
         ai_models_ui::window(self, &ctx);
         discard_ui::show(self, &ctx);
+        recovery_ui::show(self, &ctx);
         tiff_options_ui::show(self, &ctx);
         targa_options_ui::show(self, &ctx);
         dds_options_ui::show(self, &ctx);

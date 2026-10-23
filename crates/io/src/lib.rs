@@ -221,6 +221,11 @@ pub struct ExportOptions {
     /// PSD/PSB: write the merged image of 8-bit RGB documents with psd-compiler (see [`psdc`]).
     /// On by default; `false` keeps `photocraft_compose`'s composite.
     pub psdc_composite: bool,
+    /// PSD/PSB with [`Self::psdc_composite`]: documents both renderers draw alike (plain pixel and
+    /// type layers, no effects; `psdc::compose_agrees`) take photocraft-compose's composite, which
+    /// renders in bands on every core, instead of psd-compiler's. On by default; `false` always
+    /// renders with psd-compiler.
+    pub psdc_plain_compose: bool,
     /// Targa: bits per pixel of an RGB file. `None` writes 32 when the document has an alpha
     /// channel or transparency, else 24; Save As asks, starting at [`tga_default_bits`].
     pub tga_bits: Option<TgaBits>,
@@ -248,6 +253,7 @@ impl Default for ExportOptions {
             tga_bits: None,
             image_previews: true,
             psdc_composite: true,
+            psdc_plain_compose: true,
             psd_maximize_compatibility: true,
             document_path: None,
             pcraft_cache: None,
@@ -567,7 +573,7 @@ fn export_stages(doc: &Document, name_or_ext: &str, opts: &ExportOptions, ctl: &
         if !psdc {
             return Ok(ExportResult { bytes, warnings });
         }
-        let failed = match psdc::recomposite(&mut file, &bytes) {
+        let failed = match psdc::recomposite(&mut file, &bytes, doc, opts.psdc_plain_compose) {
             Ok(Some(bytes)) => return Ok(ExportResult { bytes, warnings }),
             Ok(None) => None,
             Err(e) => Some(format!("the merged image was not compiled with psd-compiler: {e}")),

@@ -45,6 +45,8 @@ mod embed_protocol;
 #[cfg(any(target_arch = "wasm32", test))]
 mod open_formats;
 #[cfg(target_arch = "wasm32")]
+mod recovery;
+#[cfg(target_arch = "wasm32")]
 mod startup;
 #[cfg(target_arch = "wasm32")]
 mod usage_stats;

@@ -383,9 +383,12 @@ impl Ex {
         // The interleaved gather is the sequential pass for full-canvas layers, so it runs
         // in row bands on all cores and the band results concatenate in order.
         let row_len = r.width() as usize;
-        let bands = crate::pixels::bands(h_of(r));
-        let parts =
-            crate::pixels::par_map(bands, |rows| s.to_interleaved(photocraft_geom::Rect::new(r.x0, r.y0 + rows.start as i32, r.x1, r.y0 + rows.end as i32)));
+        // Small layers (type, cleaning patches) are faster on this thread than on new ones.
+        let parallel = row_len * h_of(r) >= crate::pixels::PARALLEL_PIXELS;
+        let bands = if parallel { crate::pixels::bands(h_of(r)) } else { std::iter::once(0..h_of(r)).collect() };
+        let parts = crate::pixels::par_map_if(parallel, bands, |rows| {
+            s.to_interleaved(photocraft_geom::Rect::new(r.x0, r.y0 + rows.start as i32, r.x1, r.y0 + rows.end as i32))
+        });
         let mut bytes = Vec::with_capacity(row_len * h_of(r) * s.format().bytes_per_pixel());
         for part in parts {
             bytes.extend_from_slice(&part);
@@ -401,7 +404,7 @@ impl Ex {
         // Alpha (-1) first, then the colour channels; each compressed on its own thread.
         let order: Vec<(i16, &Vec<u8>)> =
             std::iter::once((-1, &planes[self.cc])).chain(planes.iter().take(self.cc).enumerate().map(|(c, p)| (c as i16, p))).collect();
-        let ch = crate::pixels::par_map(order, |(id, plane)| self.encode(id, plane, w, h));
+        let ch = crate::pixels::par_map_if(parallel, order, |(id, plane)| self.encode(id, plane, w, h));
         (to_psd_rect(r), ch, warnings)
     }
 

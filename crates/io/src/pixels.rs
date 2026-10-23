@@ -85,16 +85,16 @@ pub fn deinterleave(bytes: &[u8], ch: usize, s: SampleType, invert: &[bool]) -> 
     let bps = s.bytes();
     let n = bytes.len() / (ch * bps).max(1);
     if s == SampleType::U8 {
-        // Fast path: one plane per thread, no per-sample copies.
-        return par_map((0..ch).collect(), |c| {
+        // Fast path: one plane per thread (a small layer's on this one), no per-sample copies.
+        return par_map_if(n >= PARALLEL_PIXELS, (0..ch).collect(), |c| {
             let it = bytes.iter().skip(c).step_by(ch).take(n);
             if invert[c] { it.map(|v| 255 - v).collect() } else { it.copied().collect() }
         });
     }
     // One band of rows per core, appended in band order into pre-grown planes.
     let row = ch * bps;
-    let bs = bands(n);
-    let parts: Vec<Vec<Vec<u8>>> = par_map(bs.clone(), |band| {
+    let bs = if n >= PARALLEL_PIXELS { bands(n) } else { std::iter::once(0..n).collect() };
+    let parts: Vec<Vec<Vec<u8>>> = par_map_if(bs.len() > 1, bs.clone(), |band| {
         let mut planes = vec![Vec::with_capacity(band.len() * bps); ch];
         let mut tmp = [0u8; 4];
         for p in band {
@@ -217,6 +217,15 @@ pub fn par_map<T: Send, R: Send>(items: Vec<T>, f: impl Fn(T) -> R + Sync) -> Ve
         joined.into_iter().map(|r| r.unwrap_or_else(|p| std::panic::resume_unwind(p))).collect()
     })
 }
+
+/// [`par_map`] for `parallel` work, else `items.map(f)` here: a few small items finish before
+/// threads would have started.
+pub fn par_map_if<T: Send, R: Send>(parallel: bool, items: Vec<T>, f: impl Fn(T) -> R + Sync + Send) -> Vec<R> {
+    if parallel { par_map(items, f) } else { items.into_iter().map(f).collect() }
+}
+
+/// Pixels below which a layer's channels are gathered and packed on one thread.
+pub const PARALLEL_PIXELS: usize = 1 << 18;
 
 /// `0..n` split into about one band per core (per rayon worker in the wasm threads build).
 pub fn bands(n: usize) -> Vec<std::ops::Range<usize>> {

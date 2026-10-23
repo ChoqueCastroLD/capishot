@@ -4215,3 +4215,19 @@ curves	Smooth	Wygładź
 	1×	1×
 	1.5×	1.5×
 	2×	2×
+# Crash recovery (recovery_ui, web autosave)
+	Recover	Odzyskaj
+	Discard	Odrzuć
+	Later	Później
+	Recover Documents	Odzyskaj dokumenty
+	Recover Documents…	Odzyskaj dokumenty…
+	There are no documents to recover.	Brak dokumentów do odzyskania.
+	Capishot didn't close properly last time. These documents had unsaved changes:	Capishot nie został poprawnie zamknięty ostatnim razem. Te dokumenty miały niezapisane zmiany:
+	These documents had unsaved changes that were never saved:	Te dokumenty miały zmiany, które nigdy nie zostały zapisane:
+	Saved {when}	Zapisano {when}
+	Autosaved {when}	Autozapis {when}
+	just now	przed chwilą
+@plural	{n} min ago|{n} min ago	{n} min temu|{n} min temu|{n} min temu
+@plural	{n} hour ago|{n} hours ago	{n} godzinę temu|{n} godziny temu|{n} godzin temu
+@plural	{n} day ago|{n} days ago	{n} dzień temu|{n} dni temu|{n} dni temu
+@plural	Recover {n} document|Recover {n} documents	Odzyskaj {n} dokument|Odzyskaj {n} dokumenty|Odzyskaj {n} dokumentów

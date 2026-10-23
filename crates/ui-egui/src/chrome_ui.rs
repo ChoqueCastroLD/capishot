@@ -162,6 +162,10 @@ pub fn status_bar_pro(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
     ui.add_space(12.0);
     ui.label(RichText::new(tl!(&text)).color(t.text_dim).size(12.0));
+    if let Some(hint) = crate::prefs_ui::autosave_hint(app) {
+        ui.add_space(8.0);
+        ui.label(RichText::new(hint).color(t.text_faint).size(12.0));
+    }
     let (r, resp) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
     if resp.hovered() {
         ui.painter().rect_filled(r, t.radius_sm, t.hover);

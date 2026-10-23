@@ -499,7 +499,7 @@ impl Default for FileHandling {
             lowercase_extension: true,
             save_in_background: true,
             autosave: true,
-            autosave_minutes: 10,
+            autosave_minutes: 3,
             recover_on_launch: true,
             ignore_exif_profile_tag: false,
             exr_aces_cg: false,

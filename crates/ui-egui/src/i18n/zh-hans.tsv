@@ -3255,3 +3255,19 @@ curves	Smooth	平滑
 	1×	1×
 	1.5×	1.5×
 	2×	2×
+# Crash recovery (recovery_ui, web autosave)
+	Recover	恢复
+	Discard	丢弃
+	Later	稍后
+	Recover Documents	恢复文档
+	Recover Documents…	恢复文档…
+	There are no documents to recover.	没有可恢复的文档。
+	Capishot didn't close properly last time. These documents had unsaved changes:	Capishot 上次未正常关闭。以下文档有未保存的更改：
+	These documents had unsaved changes that were never saved:	以下文档有从未保存的更改：
+	Saved {when}	保存于 {when}
+	Autosaved {when}	自动保存于 {when}
+	just now	刚刚
+@plural	{n} min ago|{n} min ago	{n} 分钟前
+@plural	{n} hour ago|{n} hours ago	{n} 小时前
+@plural	{n} day ago|{n} days ago	{n} 天前
+@plural	Recover {n} document|Recover {n} documents	恢复 {n} 个文档

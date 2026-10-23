@@ -4217,3 +4217,19 @@ navigator	Zoom	Zvětšení
 	1×	1×
 	1.5×	1.5×
 	2×	2×
+# Crash recovery (recovery_ui, web autosave)
+	Recover	Obnovit
+	Discard	Zahodit
+	Later	Později
+	Recover Documents	Obnovit dokumenty
+	Recover Documents…	Obnovit dokumenty…
+	There are no documents to recover.	Nejsou žádné dokumenty k obnovení.
+	Capishot didn't close properly last time. These documents had unsaved changes:	Capishot se minule neukončil správně. Tyto dokumenty měly neuložené změny:
+	These documents had unsaved changes that were never saved:	Tyto dokumenty měly změny, které nebyly nikdy uloženy:
+	Saved {when}	Uloženo {when}
+	Autosaved {when}	Automaticky uloženo {when}
+	just now	právě teď
+@plural	{n} min ago|{n} min ago	před {n} min|před {n} min|před {n} min
+@plural	{n} hour ago|{n} hours ago	před {n} hodinou|před {n} hodinami|před {n} hodinami
+@plural	{n} day ago|{n} days ago	před {n} dnem|před {n} dny|před {n} dny
+@plural	Recover {n} document|Recover {n} documents	Obnovit {n} dokument|Obnovit {n} dokumenty|Obnovit {n} dokumentů

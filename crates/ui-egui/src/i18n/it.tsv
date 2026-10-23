@@ -4721,3 +4721,19 @@ shape	Appearance	Aspetto
 	1×	1×
 	1.5×	1.5×
 	2×	2×
+# Crash recovery (recovery_ui, web autosave)
+	Recover	Recupera
+	Discard	Scarta
+	Later	Più tardi
+	Recover Documents	Recupera documenti
+	Recover Documents…	Recupera documenti…
+	There are no documents to recover.	Non ci sono documenti da recuperare.
+	Capishot didn't close properly last time. These documents had unsaved changes:	L'ultima volta Capishot non si è chiuso correttamente. Questi documenti avevano modifiche non salvate:
+	These documents had unsaved changes that were never saved:	Questi documenti avevano modifiche mai salvate:
+	Saved {when}	Salvato {when}
+	Autosaved {when}	Salvataggio automatico {when}
+	just now	poco fa
+@plural	{n} min ago|{n} min ago	{n} min fa|{n} min fa
+@plural	{n} hour ago|{n} hours ago	{n} ora fa|{n} ore fa
+@plural	{n} day ago|{n} days ago	{n} giorno fa|{n} giorni fa
+@plural	Recover {n} document|Recover {n} documents	Recupera {n} documento|Recupera {n} documenti

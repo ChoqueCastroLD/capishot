@@ -4289,3 +4289,19 @@ curves	Smooth	スムーズ
 	1×	1×
 	1.5×	1.5×
 	2×	2×
+# Crash recovery (recovery_ui, web autosave)
+	Recover	復元
+	Discard	破棄
+	Later	後で
+	Recover Documents	ドキュメントを復元
+	Recover Documents…	ドキュメントを復元…
+	There are no documents to recover.	復元するドキュメントはありません。
+	Capishot didn't close properly last time. These documents had unsaved changes:	前回 Capishot は正しく終了しませんでした。以下のドキュメントには保存されていない変更がありました:
+	These documents had unsaved changes that were never saved:	以下のドキュメントには保存されなかった変更があります:
+	Saved {when}	保存: {when}
+	Autosaved {when}	自動保存: {when}
+	just now	たった今
+@plural	{n} min ago|{n} min ago	{n} 分前
+@plural	{n} hour ago|{n} hours ago	{n} 時間前
+@plural	{n} day ago|{n} days ago	{n} 日前
+@plural	Recover {n} document|Recover {n} documents	{n} 件のドキュメントを復元
