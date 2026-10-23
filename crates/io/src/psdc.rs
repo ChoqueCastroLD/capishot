@@ -310,7 +310,7 @@ fn compose_rgba8(doc: &Document, width: u32, height: u32) -> Option<Vec<u8>> {
 
 /// Whether photocraft-compose draws `doc` as psd-compiler does (within one level): 8-bit RGB with
 /// only visible-or-not pixel and type layers and plain groups, in Normal, Multiply, Screen,
-/// Darken or Lighten, with no layer effects, fill opacity, Blend If, advanced blending, clipping,
+/// Darken or Lighten, untagged or tagged sRGB, with no layer effects, fill opacity, Blend If, advanced blending, clipping,
 /// vector masks, feathered or partial-density masks, artboards, or Photoshop blocks the model
 /// doesn't read. Everything else (where the two renderers can differ) goes to psd-compiler.
 pub fn compose_agrees(doc: &Document) -> bool {
@@ -338,7 +338,16 @@ pub fn compose_agrees(doc: &Document) -> bool {
                 && l.psd_blocks.iter().all(|(key, _)| INERT.contains(&key))
         })
     }
-    renders_merged(doc) && plain(&doc.layers)
+    renders_merged(doc) && srgb_or_untagged(doc) && plain(&doc.layers)
+}
+
+/// psd-compiler converts the merged image of an RGB document with an embedded profile to sRGB
+/// (unless the profile already is sRGB); photocraft-compose leaves it in the document's colours.
+/// So only untagged documents and sRGB ones agree (a Display P3 or Adobe RGB page renders apart
+/// by up to 91 levels: `krita_psd/sources/100x100rgb8_pattern.psd`).
+fn srgb_or_untagged(doc: &Document) -> bool {
+    let Some(icc) = doc.icc_profile.as_deref() else { return true };
+    photocraft_cms::Profile::parse(icc).is_ok_and(|p| p.same_colors(photocraft_cms::Builtin::Srgb.profile()))
 }
 
 /// The encoded merged images of the last saves, by the bytes they were rendered from.
@@ -623,6 +632,33 @@ mod tests {
             assert!(!compose_agrees(&doc), "{name}");
         }
         assert!(compose_agrees(&two_layer_doc()));
+    }
+
+    /// A document tagged with a profile other than sRGB renders apart (psd-compiler converts its
+    /// merged image to sRGB): psd-compiler draws it. Untagged and sRGB-tagged documents agree.
+    #[test]
+    fn only_untagged_or_srgb_documents_take_the_compositor() {
+        use photocraft_cms::Builtin;
+        let tagged = |b: Builtin| {
+            let mut doc = two_layer_doc();
+            doc.icc_profile = Some(b.profile().to_bytes());
+            doc
+        };
+        assert!(compose_agrees(&tagged(Builtin::Srgb)));
+        for b in [Builtin::DisplayP3, Builtin::AdobeRgbCompat, Builtin::ProPhotoCompat] {
+            assert!(!compose_agrees(&tagged(b)), "{b:?}");
+        }
+        let mut junk = two_layer_doc();
+        junk.icc_profile = Some(std::sync::Arc::new(vec![1, 2, 3]));
+        assert!(!compose_agrees(&junk), "an unreadable profile goes to psd-compiler too");
+        // And with sRGB the save still lands within one level of psd-compiler's.
+        let doc = tagged(Builtin::Srgb);
+        cache::clear();
+        let fast = PsdFile::from_bytes(&crate::export(&doc, "x.psd", &Default::default()).unwrap().bytes).unwrap();
+        let slow = PsdFile::from_bytes(&crate::export(&doc, "x.psd", &crate::ExportOptions { psdc_plain_compose: false, ..Default::default() }).unwrap().bytes)
+            .unwrap();
+        let (a, b) = (fast.image_data.decode(&fast.header).unwrap(), slow.image_data.decode(&slow.header).unwrap());
+        assert!(a.iter().zip(&b).all(|(x, y)| x.abs_diff(*y) <= 1));
     }
 
     /// Saving an unchanged document again reuses the merged image: the same bytes.
