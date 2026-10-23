@@ -8239,6 +8239,51 @@ mod tests {
     }
 
     #[test]
+    fn guides_draw_over_the_transform_preview_and_under_its_box() {
+        // #5086: a guide crossing a layer under Free Transform was hidden behind the preview of
+        // the moving pixels. The preview is image content, drawn before the grid and guides like
+        // the document is; the box and handles still go over them, as in Photoshop.
+        let ctx = egui::Context::default();
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        app.run("file.new", json!({"width": 400, "height": 300})).unwrap();
+        app.run("layer.new.layer", json!({})).unwrap();
+        app.run("select.rect", json!({"x": 100, "y": 100, "width": 100, "height": 60})).unwrap();
+        app.run("edit.fill", json!({"color": "#ff0000"})).unwrap();
+        app.run("select.deselect", json!({})).unwrap();
+        app.run("view.newGuide", json!({"orientation": "vertical", "position": 150})).unwrap();
+        app.ui.extras.guides = true;
+        app.ui.extras.rulers = false;
+        app.sync_views();
+        crate::transform_tool::begin(&mut app, &ctx).expect("a transform starts");
+        let mut view = app.ui.views[0].clone();
+        view.zoom = 1.0;
+        view.center = [200.0, 150.0];
+        view.fit_pending = false;
+        view.fill_pending = false;
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(400.0, 300.0));
+        let input = egui::RawInput { screen_rect: Some(rect), ..Default::default() };
+        let mut out = ctx.run_ui(input, |ui| {
+            canvas_view(&mut app, ui, 0, rect, view.clone(), true);
+        });
+        out.textures_delta.clear();
+        // At 100 % centred on the document, screen and document coordinates coincide.
+        let layer = Rect::from_min_max(pos2(100.0, 100.0), pos2(200.0, 160.0));
+        let near = |r: Rect| (r.min - layer.min).length() < 1.0 && (r.max - layer.max).length() < 1.0;
+        let position = |pred: &dyn Fn(&egui::Shape) -> bool| out.shapes.iter().position(|s| pred(&s.shape));
+        // The moving pixels: the mesh that spans the layer's box.
+        let preview = position(&|s| matches!(s, egui::Shape::Mesh(m) if near(m.calc_bounds())));
+        // The guide: a vertical line at x = 150.
+        let guide = position(&|s| matches!(s, egui::Shape::LineSegment { points, .. } if points.iter().all(|p| (p.x - 150.0).abs() < 0.01)));
+        // The box: the closed four-point outline round the layer.
+        let frame = position(&|s| matches!(s, egui::Shape::Path(p) if p.closed && p.points.len() == 4 && near(Rect::from_points(&p.points))));
+        let (Some(preview), Some(guide), Some(frame)) = (preview, guide, frame) else {
+            panic!("all painted: preview {preview:?}, guide {guide:?}, box {frame:?}");
+        };
+        assert!(preview < guide, "the guide ({guide}) draws over the transform preview ({preview})");
+        assert!(guide < frame, "the box ({frame}) draws over the guide ({guide})");
+    }
+
+    #[test]
     fn brush_drags_paint_no_stand_in_shape_over_the_canvas() {
         // #189: v0.1 drew the stroke being dragged as a foreground-coloured egui polyline as wide
         // as the brush; zoomed in, egui tessellated it into hard black wedges fanning out from the
