@@ -1217,8 +1217,21 @@ fn rasterize_round(d: &Dab, rect: Rect, out: &mut [f32], hardness: f32, aliased:
     let w = rect.width() as usize;
     let reach = if aliased { rm } else { tip_reach(rm, hardness).max(rm) };
     let reach2 = (reach + 0.5) * (reach + 0.5);
-    for (yy, row) in out.chunks_exact_mut(w).enumerate() {
+    // `tip_falloff` with the tip's shape looked up once per dab instead of once per pixel.
+    let (r0, sw) = crate::tip_shape(rm, hardness);
+    let falloff = |dist: f32| {
+        if dist <= r0 {
+            return 1.0;
+        }
+        let x = (dist - r0) / sw;
+        crate::soft_exp(x * x)
+    };
+    let row_fill = |yy: usize, row: &mut [f32]| {
         let dy = (rect.y0 + yy as i32) as f32 + 0.5 - cy;
+        if dy * dy >= reach2 {
+            // `out` arrives zeroed; no pixel of this row is within reach.
+            return;
+        }
         if aliased {
             for (xx, dst) in row.iter_mut().enumerate() {
                 let dx = (rect.x0 + xx as i32) as f32 + 0.5 - cx;
@@ -1229,10 +1242,20 @@ fn rasterize_round(d: &Dab, rect: Rect, out: &mut [f32], hardness: f32, aliased:
             for (xx, dst) in row.iter_mut().enumerate() {
                 let dx = (rect.x0 + xx as i32) as f32 + 0.5 - cx;
                 let d2 = (dx * ro).powi(2) + dy * dy;
-                let val = if d2 >= reach2 { 0.0 } else { tip_falloff(d2.sqrt(), rm, hardness) };
+                let val = if d2 >= reach2 { 0.0 } else { falloff(d2.sqrt()) };
                 *dst = if val <= 0.0 { 0.0 } else { val * d.alpha };
             }
         }
+    };
+    // Rows are independent: a large soft dab (its reach is up to 1.7 × the radius) fills them on
+    // all cores, as the general path does.
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
+    if rect.height() >= 64 {
+        out.par_chunks_exact_mut(w).enumerate().for_each(|(yy, row)| row_fill(yy, row));
+        return;
+    }
+    for (yy, row) in out.chunks_exact_mut(w).enumerate() {
+        row_fill(yy, row);
     }
 }
 
