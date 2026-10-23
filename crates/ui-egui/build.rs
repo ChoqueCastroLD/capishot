@@ -28,33 +28,6 @@ fn main() {
         println!("cargo::warning=writing {}: {e}", out.display());
     }
     pack_catalogs();
-    deflate_egui_fonts();
-}
-
-/// Deflate egui's default fonts (the `epaint_default_fonts` crate) into `OUT_DIR/egui_fonts/` for
-/// `egui_fonts.rs`. The app builds egui without `default_fonts`, which would embed the same 1.4 MB
-/// uncompressed; deflated they take 0.78 MB (the web build's 24 MiB size gate).
-fn deflate_egui_fonts() {
-    use std::io::Write as _;
-    let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap_or_default()).join("egui_fonts");
-    let fonts = [
-        ("Hack-Regular", epaint_default_fonts::HACK_REGULAR),
-        ("NotoEmoji-Regular", epaint_default_fonts::NOTO_EMOJI_REGULAR),
-        ("Ubuntu-Light", epaint_default_fonts::UBUNTU_LIGHT),
-        ("emoji-icon-font", epaint_default_fonts::EMOJI_ICON),
-    ];
-    let result = (|| -> std::io::Result<()> {
-        std::fs::create_dir_all(&out)?;
-        for (name, bytes) in fonts {
-            let mut z = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::best());
-            z.write_all(bytes)?;
-            std::fs::write(out.join(format!("{name}.ttf.deflate")), z.finish()?)?;
-        }
-        Ok(())
-    })();
-    if let Err(e) = result {
-        println!("cargo::error=deflating egui's default fonts into {}: {e}", out.display());
-    }
 }
 
 /// Whether a catalog line is an entry (`context<TAB>source<TAB>translation`, source and

@@ -92,8 +92,6 @@ photocraft-psd = { workspace = true, features = ["testgen"] }
 [build-dependencies]
 # Deflates the translation catalogs and egui's default fonts (build.rs); already linked at run time to inflate them.
 flate2 = { workspace = true }
-# egui's default fonts, deflated by build.rs for egui_fonts.rs (the same version egui uses).
-epaint_default_fonts = "0.36"
 serde_json = { workspace = true }
 toml = "1"
 

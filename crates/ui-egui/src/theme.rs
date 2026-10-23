@@ -843,7 +843,9 @@ pub fn install_fonts(ctx: &egui::Context) {
 /// [`install_fonts`] with the CJK and other-script fallback fonts taken from `cjk` (tests swap the sources).
 pub fn install_fonts_with(ctx: &egui::Context, cjk: crate::cjk_fonts::Sources) {
     // egui's default fonts stay last in the stack, for symbols and emoji Inter lacks.
-    let mut fonts = crate::egui_fonts::definitions();
+    // egui's own default fonts only where egui is built with them (the desktop): the web build
+    // leaves out Ubuntu Light and Hack, and `add_symbol_fonts` adds the two emoji/icon fonts.
+    let mut fonts = FontDefinitions::default();
     // The bundled fonts are inflated on first use (photocraft_text::fonts). Should one ever fail
     // to inflate (empty bytes), it is left out and egui's default fonts draw that text.
     let add = |fonts: &mut FontDefinitions, name: &str, bytes: &'static [u8]| -> Option<String> {
