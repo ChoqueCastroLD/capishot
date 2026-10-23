@@ -316,8 +316,11 @@ impl Hooks for JobHooks {
 
 /// What the job hands to `apply`.
 struct Upscaled {
-    image: Planar,
-    alpha: Option<Vec<f32>>,
+    /// The upscaled image's size.
+    width: usize,
+    height: usize,
+    /// Its pixels, in the document's format ([`to_surface`]).
+    surface: Surface,
     /// The model that ran (the lite one after a GPU failure, see [`run_upscale`]).
     model: &'static ModelInfo,
 }
@@ -391,6 +394,7 @@ fn upscale_ai(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let svc = s.ai_upscaler.clone().ok_or_else(|| EngineError::Other(UNAVAILABLE.into()))?;
     let doc = s.active().ok_or(EngineError::NoDocument)?.doc.clone();
+    let fmt = doc.pixel_format();
     let (rgb, alpha) = composite(&doc);
     let input = if plan.grayscale {
         let g = mangajanai::to_gray(&rgb);
@@ -417,10 +421,20 @@ fn upscale_ai(s: &mut Session, p: &Value) -> Result<Value> {
             let retry = (!opts.cpu).then(|| CpuRetry { input: input.clone(), run, pinned });
             let req = Request { model: m, input, grayscale, allow_download: download, opts };
             let finish: UpscaleDone = Box::new(move |r| {
-                done.finish(r.map(|(image, model)| Upscaled { image, alpha: alpha.map(|a| upscale_plane(&a, w, h, scale)), model }).map_err(|e| match e {
-                    AiError::Cancelled => EngineError::Cancelled,
-                    e => EngineError::Other(e.to_string()),
-                }))
+                // The result arrives on the page's thread (an AI worker message): the layer's
+                // pixels are made on a worker, so a big upscale doesn't hold the page.
+                off_thread(move || {
+                    done.finish(
+                        r.map(|(image, model)| {
+                            let alpha = alpha.map(|a| upscale_plane(&a, w, h, scale));
+                            Upscaled { width: image.width, height: image.height, surface: to_surface(&image, alpha.as_deref(), fmt), model }
+                        })
+                        .map_err(|e| match e {
+                            AiError::Cancelled => EngineError::Cancelled,
+                            e => EngineError::Other(e.to_string()),
+                        }),
+                    );
+                });
             });
             run_upscale(svc, ctx.clone(), req, retry, finish);
         },
@@ -431,30 +445,17 @@ fn upscale_ai(s: &mut Session, p: &Value) -> Result<Value> {
 /// Puts the upscaled image in the document (one undo step) or a new document.
 fn apply(s: &mut Session, up: Upscaled, output: Output, content: &str) -> Result<Value> {
     let m = up.model;
-    let img = &up.image;
-    let (w, h) = (img.width, img.height);
+    let (w, h) = (up.width, up.height);
     let st = s.active().ok_or(EngineError::NoDocument)?;
     let (ow, oh) = (st.doc.size.width, st.doc.size.height);
-    let fmt = st.doc.pixel_format();
     if w != ow as usize * m.scale as usize || h != oh as usize * m.scale as usize {
         return Err(EngineError::Other(format!("the model returned {w} x {h} px for a {ow} x {oh} px image")));
     }
-    let n = w * h;
-    let mut vals = Vec::with_capacity(n * fmt.channels());
-    let mut px = vec![0.0f32; fmt.channels()];
-    for i in 0..n {
-        let v = |c: usize| img.data.get(c.min(img.channels.saturating_sub(1)) * n + i).copied().unwrap_or(0.0);
-        let a = up.alpha.as_ref().and_then(|a| a.get(i)).copied().unwrap_or(1.0).clamp(0.0, 1.0);
-        // Un-flatten from white where transparent.
-        let un = |x: f32| if a > 1e-4 { ((x - (1.0 - a)) / a).clamp(0.0, 1.0) } else { 0.0 };
-        let k = photocraft_raster::from_rgba_into(&fmt, [un(v(0)), un(v(1)), un(v(2)), a], &mut px);
-        vals.extend_from_slice(px.get(..k).unwrap_or(&[]));
+    if up.surface.format() != st.doc.pixel_format() {
+        return Err(EngineError::Other("the document's mode changed while it was upscaled".into()));
     }
+    let surf = up.surface;
     let (nw, nh) = (w as u32, h as u32);
-    let rect = photocraft_geom::Rect::from_xywh(0, 0, nw, nh);
-    let mut surf = Surface::new(fmt);
-    surf.write_region(rect, &vals);
-    surf.prune();
     let k = f64::from(m.scale);
     let affine = photocraft_geom::Affine { m: [k, 0.0, 0.0, k, 0.0, 0.0] };
     let result = json!({"width": nw, "height": nh, "model": m.id, "scale": m.scale, "content": content, "lite": m.lite});
@@ -481,6 +482,35 @@ fn apply(s: &mut Session, up: Upscaled, output: Output, content: &str) -> Result
             Ok(r)
         }
     }
+}
+
+/// The upscaled `img` (planar) as a surface in `fmt`, un-flattened from white where `alpha` makes
+/// it transparent.
+fn to_surface(img: &Planar, alpha: Option<&[f32]>, fmt: photocraft_color::PixelFormat) -> Surface {
+    let (w, h) = (img.width, img.height);
+    let n = w * h;
+    let mut vals = Vec::with_capacity(n * fmt.channels());
+    let mut px = vec![0.0f32; fmt.channels()];
+    for i in 0..n {
+        let v = |c: usize| img.data.get(c.min(img.channels.saturating_sub(1)) * n + i).copied().unwrap_or(0.0);
+        let a = alpha.and_then(|a| a.get(i)).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+        // Un-flatten from white where transparent.
+        let un = |x: f32| if a > 1e-4 { ((x - (1.0 - a)) / a).clamp(0.0, 1.0) } else { 0.0 };
+        let k = photocraft_raster::from_rgba_into(&fmt, [un(v(0)), un(v(1)), un(v(2)), a], &mut px);
+        vals.extend_from_slice(px.get(..k).unwrap_or(&[]));
+    }
+    let mut surf = Surface::new(fmt);
+    surf.write_region(photocraft_geom::Rect::from_xywh(0, 0, w as u32, h as u32), &vals);
+    surf.prune();
+    surf
+}
+
+/// Runs `f` on a worker where there are workers (natively, the browser threads build), else here.
+pub(crate) fn off_thread(f: impl FnOnce() + Send + 'static) {
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
+    rayon::spawn(f);
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
+    f();
 }
 
 /// `doc` as one layer holding `surf`, at `nw × nh`, its guides and other geometry scaled.

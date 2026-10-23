@@ -1526,6 +1526,7 @@ pub(crate) fn write_copy(app: &mut PhotocraftApp, doc: &photocraft_doc::Document
     let label = crate::i18n::fmt(tl!("Saving {name}"), &[("name", &crate::file_open::display_name(path))]);
     crate::jobs_ui::produce_files(
         app,
+        path,
         "file.saveACopy",
         &label,
         move |ctx| {

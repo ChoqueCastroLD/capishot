@@ -196,6 +196,7 @@ type FilesDone = Box<dyn FnOnce(&mut PhotocraftApp, Written) -> Result<Value, St
 /// A background export ([`produce_files`]) still encoding.
 pub(crate) struct FilesJob {
     job: JobId,
+    stats: SaveStats,
     files: Arc<std::sync::Mutex<Option<Vec<Produced>>>>,
     done: Option<FilesDone>,
 }
@@ -214,15 +215,17 @@ pub(crate) fn exports_in_background(app: &PhotocraftApp) -> bool {
 
 pub(crate) fn produce_files(
     app: &mut PhotocraftApp,
+    path: &str,
     command: &str,
     label: &str,
     work: impl FnOnce(&JobCtx) -> Result<Vec<Produced>, String> + Send + 'static,
     done: impl FnOnce(&mut PhotocraftApp, Written) -> Result<Value, String> + 'static,
 ) -> Result<Value, String> {
+    let stats = SaveStats::of(app, path);
     // Background jobs off (tests, action playback): here and now, as before.
     if !app.background_jobs && !POOL_THREADS {
-        let files = work(&JobCtx::default())?;
-        return write_produced(app, files).and_then(|w| done(app, w));
+        let files = work(&JobCtx::default());
+        return finish_produced(app, &stats, files).and_then(|w| done(app, w));
     }
     let slot: Arc<std::sync::Mutex<Option<Vec<Produced>>>> = Arc::default();
     let out = Arc::clone(&slot);
@@ -242,10 +245,10 @@ pub(crate) fn produce_files(
     match started.map_err(|e| e.to_string())? {
         Started::Done(_) => {
             let files = slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take().unwrap_or_default();
-            write_produced(app, files).and_then(|w| done(app, w))
+            finish_produced(app, &stats, Ok(files)).and_then(|w| done(app, w))
         }
         Started::Job(job) => {
-            app.jobs.files.push(FilesJob { job, files: slot, done: Some(Box::new(done)) });
+            app.jobs.files.push(FilesJob { job, stats, files: slot, done: Some(Box::new(done)) });
             app.jobs.last_started = Some(job);
             app.ui.status.clear();
             app.ui.status_error = false;
@@ -273,6 +276,40 @@ fn placed(app: &mut PhotocraftApp, ctx: &egui::Context, e: &JobEvent) -> bool {
     true
 }
 
+/// What the usage statistics get about a background export ([`crate::Services::file_saved`]).
+pub(crate) struct SaveStats {
+    path: String,
+    size: (u32, u32),
+    layers: usize,
+    started: f64,
+}
+
+impl SaveStats {
+    fn of(app: &PhotocraftApp, path: &str) -> Self {
+        let (size, layers) = app.session.active().map_or(((0, 0), 0), |st| ((st.doc.size.width, st.doc.size.height), st.doc.layer_count()));
+        SaveStats { path: path.to_string(), size, layers, started: crate::gpu_canvas::now_ms() }
+    }
+
+    fn report(&self, app: &mut PhotocraftApp, path: &str, result: Result<(), &String>) {
+        let ms = crate::gpu_canvas::now_ms() - self.started;
+        if let Some(saved) = app.services.file_saved.as_mut() {
+            saved(path, self.size, self.layers, result, ms);
+        }
+    }
+}
+
+/// Writes what a background export produced (or reports why it failed) and counts it.
+fn finish_produced(app: &mut PhotocraftApp, stats: &SaveStats, files: Result<Vec<Produced>, String>) -> Result<Written, String> {
+    let files = files.inspect_err(|e| stats.report(app, &stats.path, Err(e)))?;
+    let paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
+    let r = write_produced(app, files);
+    match &r {
+        Ok(_) => paths.iter().for_each(|p| stats.report(app, p, Ok(()))),
+        Err(e) => stats.report(app, &stats.path, Err(e)),
+    }
+    r
+}
+
 fn write_produced(app: &mut PhotocraftApp, files: Vec<Produced>) -> Result<Written, String> {
     let mut written = Vec::with_capacity(files.len());
     for f in files {
@@ -291,12 +328,15 @@ fn on_files_event(app: &mut PhotocraftApp, e: &JobEvent) -> bool {
     match &e.outcome {
         JobOutcome::Done(_) => {
             let files = f.files.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take().unwrap_or_default();
-            let r = write_produced(app, files).and_then(|w| f.done.take().map_or(Ok(Value::Null), |done| done(app, w)));
+            let r = finish_produced(app, &f.stats, Ok(files)).and_then(|w| f.done.take().map_or(Ok(Value::Null), |done| done(app, w)));
             if let Err(err) = r {
                 notices::error(app, err);
             }
         }
-        JobOutcome::Failed(err) => notices::error(app, format!("{}: {err}", e.label)),
+        JobOutcome::Failed(err) => {
+            f.stats.report(app, &f.stats.path, Err(err));
+            notices::error(app, format!("{}: {err}", e.label));
+        }
         JobOutcome::Cancelled => {
             app.ui.status = crate::i18n::fmt(tl!("Cancelled {label}"), &[("label", &e.label)]);
             app.ui.status_error = false;
@@ -328,6 +368,15 @@ pub fn run(app: &mut PhotocraftApp, id: &str, params: Value) -> Result<Value, St
 /// [`PhotocraftApp::background_jobs`] (the browser's default): the seconds-long fills and graph
 /// cuts at pen-up would otherwise hold the page's main thread. Their results are the same.
 const POOL_COMMANDS: [&str; 4] = ["paint.spotHealing", "select.quick", "paint.remove", photocraft_engine::ai_inpaint_cmds::ID];
+/// Runs `f` on the browser threads build's worker pool (callers check [`POOL_THREADS`]); here
+/// in the other builds.
+pub(crate) fn on_pool(f: impl FnOnce() + Send + 'static) {
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+    rayon::spawn(f);
+    #[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
+    f();
+}
+
 pub(crate) const POOL_THREADS: bool = cfg!(all(target_arch = "wasm32", target_feature = "atomics"));
 
 /// Open a file in the background: a tab appears at once and shows the progress; the document

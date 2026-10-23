@@ -16,6 +16,8 @@ all-catalogs = []
 workspace = true
 
 [dependencies]
+# Locks shared with the browser threads build's workers spin on its main thread.
+wasm_sync = "0.1"
 craft-print = { workspace = true }
 craft-ui = { workspace = true }
 photocraft-geom = { workspace = true }

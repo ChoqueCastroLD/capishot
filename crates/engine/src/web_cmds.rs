@@ -871,6 +871,56 @@ pub fn save_for_web_with_writer(s: &mut Session, p: &Value, write: &mut dyn FnMu
     save_for_web_impl(s, p, write, false)
 }
 
+/// Files a Save for Web made: path and bytes, in order.
+pub type WebFiles = Vec<(String, Vec<u8>)>;
+
+/// Save for Web of the active document, to run anywhere (a worker): checked and captured here
+/// (the moved selection as the canvas shows it), the files made by [`SaveForWeb::run`], then the
+/// session updated by [`SaveForWeb::finish`] on this thread.
+pub struct SaveForWeb {
+    doc: Document,
+    params: Value,
+}
+
+/// Prepares Save for Web of the active document with params `p` (see [`save_for_web_with_writer`]).
+pub fn prepare_save_for_web(s: &mut Session, p: &Value) -> Result<SaveForWeb> {
+    let cmd = "file.export.saveForWebLegacy";
+    if let Some(authorize) = s.authorize {
+        authorize(cmd, p)?;
+    }
+    crate::float_cmds::before_command(s, cmd)?;
+    WebSettings::from_params(p, cmd)?;
+    let doc = (*s.active().ok_or(EngineError::NoDocument)?.doc).clone();
+    Ok(SaveForWeb { doc, params: p.clone() })
+}
+
+impl SaveForWeb {
+    /// Renders and encodes: the files (path, bytes) and the command's result.
+    pub fn run(self) -> Result<(WebFiles, Value)> {
+        let mut scratch = Session::new();
+        scratch.add_document(self.doc, None);
+        let mut files = Vec::new();
+        let r = save_for_web_impl(&mut scratch, &self.params, &mut |path, bytes| {
+            files.push((path.to_string(), bytes.to_vec()));
+            Ok(())
+        }, false)?;
+        Ok((files, r))
+    }
+
+    /// The export landed: remember its settings and fire the Export script event, as an inline
+    /// export does.
+    pub fn finish(s: &mut Session, p: &Value) {
+        let cmd = "file.export.saveForWebLegacy";
+        let mut last_web = p.clone();
+        if let Some(last) = last_web.as_object_mut() {
+            last.remove("trustedSliceHtml");
+        }
+        remember_web_settings(s, cmd, &last_web);
+        s.file_menu.last_web = Some(last_web);
+        crate::automate_cmds::fire_event(s, "export");
+    }
+}
+
 /// Settings to seed the Save for Web dialog from on the next launch: `file_menu` is session
 /// state, so a complete export also writes the preferences' remembered dialog settings (like
 /// Fill, Liquify and the filter dialogs). The destination is per export, never remembered.

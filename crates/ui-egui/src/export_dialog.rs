@@ -948,6 +948,7 @@ fn write_export(app: &mut PhotocraftApp, doc: &Document, f: &Map<String, Value>,
     let label = crate::i18n::fmt(tl!("Exporting {name}"), &[("name", &crate::file_open::display_name(path))]);
     crate::jobs_ui::produce_files(
         app,
+        path,
         COMMAND,
         &label,
         move |ctx| {
@@ -1021,6 +1022,7 @@ fn confirm_layers(app: &mut PhotocraftApp, f: &Map<String, Value>, ids: &[photoc
         let label = crate::i18n::fmt(tl!("Exporting {name}"), &[("name", &crate::file_open::display_name(&path))]);
         crate::jobs_ui::produce_files(
             app,
+            &path,
             COMMAND,
             &label,
             move |ctx| {

@@ -199,6 +199,17 @@ type Page = (Vec<u8>, Vec<String>);
 /// warnings}`; an error when no page compiled.
 pub fn compile_files_to_zip(s: &Session, files: &[(String, Vec<u8>)], p: &Value) -> Result<(Vec<u8>, Value)> {
     authorize(s, COMPILE_FOLDER, p)?;
+    zip_compiled(files, p)
+}
+
+/// The authorization check of [`compile_files_to_zip`], for callers that compile elsewhere (a
+/// worker) with [`zip_compiled`].
+pub fn authorize_compile_folder(s: &Session, p: &Value) -> Result<()> {
+    authorize(s, COMPILE_FOLDER, p)
+}
+
+/// [`compile_files_to_zip`] without the session (checked first with [`authorize_compile_folder`]).
+pub fn zip_compiled(files: &[(String, Vec<u8>)], p: &Value) -> Result<(Vec<u8>, Value)> {
     let ext = batch_format(p, COMPILE_FOLDER)?;
     let quality = quality(p, COMPILE_FOLDER)?;
     let opts = options(p, true, COMPILE_FOLDER)?;

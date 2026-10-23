@@ -223,19 +223,10 @@ fn check_locks(l: &Layer, group: Locks, position: bool) -> Result<()> {
     Ok(())
 }
 
-/// Shared driver: a smart object records `cmd` as a smart filter; a pixel layer is edited in
-/// place by `f(surface, selection)`.
 /// Deforms a linked layer mask the same way, limited to the selection when there is one.
 type MaskFn<'a> = Option<&'a dyn Fn(&Surface, Option<&Surface>) -> Result<Surface>>;
 /// Deforms a layer's pixels (with the selection and canvas); an `Err` leaves the layer as it was.
 type LayerFn<'a> = &'a dyn Fn(&Surface, Option<&Surface>, Rect) -> Result<Surface>;
-
-fn run_on_layer(s: &mut Session, cmd: &str, label: &str, p: &Value, moves: bool, f: LayerFn, mask: MaskFn) -> Result<Value> {
-    let id = target(s, p)?;
-    let params = stored_params(p);
-    s.edit(label, |doc: &mut Document, _| apply_on_layer(doc, id, cmd, label, &params, moves, f, mask))?;
-    Ok(json!({"layer": id.0, "changed": true}))
-}
 
 /// `p` without the target layer: what a smart filter stores.
 fn stored_params(p: &Value) -> Value {
@@ -246,7 +237,7 @@ fn stored_params(p: &Value) -> Value {
     params
 }
 
-/// The body of [`run_on_layer`]: deform layer `id` of `doc` with `f` (and its linked mask with
+/// Deform layer `id` of `doc` with `f` (and its linked mask with
 /// `mask`), or add the smart filter on a smart object.
 #[allow(clippy::too_many_arguments)]
 fn apply_on_layer(doc: &mut Document, id: LayerId, cmd: &str, label: &str, params: &Value, moves: bool, f: LayerFn, mask: MaskFn) -> Result<()> {
@@ -341,24 +332,33 @@ fn puppet(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
         return Ok(json!({"layer": id.0, "changed": false}));
     }
     let it = interp(p);
-    let too_far = || bad(cmd, "the pins stretch the content too far: the result would cover more than 2^30 pixels");
     // A linked layer mask moves with the pixels on the same mesh (#4910): the layer's warp
     // solves the mesh once and leaves the moved mask here for the mask step.
     let linked = s.active().and_then(|d| d.doc.layer(id)).and_then(|l| l.mask.as_ref()).filter(|m| m.linked).map(|m| m.surface.clone());
-    let moved_mask: RefCell<Option<Surface>> = RefCell::new(None);
-    let layer_fn = |surf: &Surface, sel: Option<&Surface>, _: Rect| {
-        deform_selected(surf, sel, &|x| {
-            let b = x.content_bounds();
-            if b.is_empty() {
-                return Ok(x.clone());
-            }
-            let (out, mask) = puppet_warp_with_mask(x, b, &w, it, linked.as_ref()).ok_or_else(too_far)?;
-            *moved_mask.borrow_mut() = mask;
-            Ok(out)
-        })
-    };
-    let mask_fn = |m: &Surface, _: Option<&Surface>| Ok(moved_mask.borrow_mut().take().unwrap_or_else(|| m.clone()));
-    run_on_layer(s, cmd, "Puppet Warp", p, true, &layer_fn, Some(&mask_fn))
+    let (params, command) = (stored_params(p), cmd.to_string());
+    // A background job when started with `Session::start`: the page keeps drawing in the browser.
+    crate::jobs::edit_job(
+        s,
+        "Puppet Warp",
+        move |doc, _, _| {
+            let too_far = || bad(&command, "the pins stretch the content too far: the result would cover more than 2^30 pixels");
+            let moved_mask: RefCell<Option<Surface>> = RefCell::new(None);
+            let layer_fn = |surf: &Surface, sel: Option<&Surface>, _: Rect| {
+                deform_selected(surf, sel, &|x| {
+                    let b = x.content_bounds();
+                    if b.is_empty() {
+                        return Ok(x.clone());
+                    }
+                    let (out, mask) = puppet_warp_with_mask(x, b, &w, it, linked.as_ref()).ok_or_else(too_far)?;
+                    *moved_mask.borrow_mut() = mask;
+                    Ok(out)
+                })
+            };
+            let mask_fn = |m: &Surface, _: Option<&Surface>| Ok(moved_mask.borrow_mut().take().unwrap_or_else(|| m.clone()));
+            apply_on_layer(doc, id, &command, "Puppet Warp", &params, true, &layer_fn, Some(&mask_fn))
+        },
+        move |()| json!({"layer": id.0, "changed": true}),
+    )
 }
 
 fn perspective(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
@@ -369,27 +369,36 @@ fn perspective(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
         return Ok(json!({"layer": id.0, "changed": false, "planes": planes}));
     }
     let it = interp(p);
-    let map = PerspectiveMap::new(&planes);
-    let mask_fn = |m: &Surface, sel: Option<&Surface>| {
-        let Some(map) = &map else { return Ok(m.clone()) };
-        let f = |x, y| map.map(x, y);
-        let whole = |m: &Surface| Ok(warp_mesh_gray(m, &f, Interp::Bilinear));
-        match sel {
-            Some(sel) => crate::transform_cmds::move_gray_selected(m, sel, &|lifted, src| Ok(warp_mesh_surface(lifted, src, &f, Interp::Bilinear)), &whole),
-            None => whole(m),
-        }
-    };
-    let mut r = run_on_layer(
+    let (params, command) = (stored_params(p), cmd.to_string());
+    let result_planes = json!(planes);
+    // A background job when started with `Session::start`: the page keeps drawing in the browser.
+    crate::jobs::edit_job(
         s,
-        cmd,
         "Perspective Warp",
-        p,
-        true,
-        &|surf, sel, _| deform_selected(surf, sel, &|x| Ok(perspective_surface(x, &planes, it))),
-        Some(&mask_fn),
-    )?;
-    r["planes"] = json!(planes);
-    Ok(r)
+        move |doc, _, _| {
+            let map = PerspectiveMap::new(&planes);
+            let mask_fn = |m: &Surface, sel: Option<&Surface>| {
+                let Some(map) = &map else { return Ok(m.clone()) };
+                let f = |x, y| map.map(x, y);
+                let whole = |m: &Surface| Ok(warp_mesh_gray(m, &f, Interp::Bilinear));
+                match sel {
+                    Some(sel) => crate::transform_cmds::move_gray_selected(m, sel, &|lifted, src| Ok(warp_mesh_surface(lifted, src, &f, Interp::Bilinear)), &whole),
+                    None => whole(m),
+                }
+            };
+            apply_on_layer(
+                doc,
+                id,
+                &command,
+                "Perspective Warp",
+                &params,
+                true,
+                &|surf, sel, _| deform_selected(surf, sel, &|x| Ok(perspective_surface(x, &planes, it))),
+                Some(&mask_fn),
+            )
+        },
+        move |()| json!({"layer": id.0, "changed": true, "planes": result_planes}),
+    )
 }
 
 pub fn specs() -> Vec<CommandSpec> {

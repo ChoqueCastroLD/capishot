@@ -69,8 +69,10 @@ fn compile_to_writer(app: &mut PhotocraftApp, p: &Value) -> Result<Value, String
     let result: std::sync::Arc<std::sync::Mutex<Value>> = std::sync::Arc::default();
     let out = std::sync::Arc::clone(&result);
     let label = crate::i18n::fmt(tl!("Compiling {name}"), &[("name", &crate::file_open::display_name(p.get("path").and_then(Value::as_str).unwrap_or("")))]);
+    let target = p.get("path").and_then(Value::as_str).unwrap_or("").to_string();
     crate::jobs_ui::produce_files(
         app,
+        &target,
         COMPILE,
         &label,
         move |_| {
@@ -99,6 +101,32 @@ fn compile_folder(app: &mut PhotocraftApp, params: &Value, web: bool) -> Option<
 
 /// Compiles the picked files into one ZIP and hands it to the platform writer.
 fn compile_picked(app: &mut PhotocraftApp, files: &[(String, Vec<u8>)], p: &Value) -> Result<Value, String> {
+    // Compiled in the background: a chapter of pages takes a while, and the page keeps drawing.
+    if crate::jobs_ui::exports_in_background(app) {
+        if let Err(e) = capishot_cmds::authorize_compile_folder(&app.session, p) {
+            return finish(app, Err(e.to_string()));
+        }
+        let (files, p) = (files.to_vec(), p.clone());
+        let report: std::sync::Arc<std::sync::Mutex<Value>> = std::sync::Arc::default();
+        let out = std::sync::Arc::clone(&report);
+        let label = crate::i18n::fmt(tl!("Compiling {name}"), &[("name", ZIP_NAME)]);
+        return crate::jobs_ui::produce_files(
+            app,
+            ZIP_NAME,
+            COMPILE_FOLDER,
+            &label,
+            move |_| {
+                let (zip, r) = capishot_cmds::zip_compiled(&files, &p).map_err(|e| e.to_string())?;
+                *out.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = r;
+                Ok(vec![crate::jobs_ui::Produced { path: ZIP_NAME.into(), bytes: zip, warnings: Vec::new() }])
+            },
+            move |app, _| {
+                let mut r = std::mem::take(&mut *report.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+                r["path"] = json!(ZIP_NAME);
+                finish(app, Ok(r))
+            },
+        );
+    }
     let r = capishot_cmds::compile_files_to_zip(&app.session, files, p).map_err(|e| e.to_string()).and_then(|(zip, mut report)| {
         let write = app.services.write.as_mut().ok_or("no download service")?;
         write(ZIP_NAME, &zip)?;

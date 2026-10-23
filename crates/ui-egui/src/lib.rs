@@ -432,6 +432,8 @@ pub struct FileStamp {
     pub len: u64,
     pub modified: Option<std::time::SystemTime>,
 }
+/// See [`Services::file_saved`].
+pub type FileSavedFn = Box<dyn FnMut(&str, (u32, u32), usize, Result<(), &String>, f64)>;
 /// The [`FileStamp`] of the file at a path, `None` when it can't be read.
 pub type FileStampFn = Box<dyn Fn(&str) -> Option<FileStamp>>;
 /// Encode a document and write it to a path, reporting the stage to the job; returns the export
@@ -558,6 +560,10 @@ pub struct Services {
     pub file_dialog: Option<FileDialogFn>,
     /// Write bytes to a path (native) or trigger a download (web).
     pub write: Option<WriteFn>,
+    /// A file encoded in the background (Export As, Save a Copy, Compile PSD) was written or
+    /// failed: its path, the document's size and layer count, and how long it took (ms). The web
+    /// counts it in the usage statistics, as its `export` service does for inline saves.
+    pub file_saved: Option<FileSavedFn>,
     /// Size and modification time of a file (native); `None` on the web, where Save never
     /// writes back to a file.
     pub file_stamp: Option<FileStampFn>,
@@ -687,6 +693,8 @@ pub struct PhotocraftApp {
     canvases: HashMap<(DocId, u32), canvas::CanvasCache>,
     /// Navigator textures belong to open documents, not the lifetime of the egui context.
     navigator_textures: HashMap<DocId, canvas::NavigatorCache>,
+    /// Navigator images being composited on the worker pool (the browser threads build).
+    navigator_pending: HashMap<DocId, canvas::NavigatorPending>,
     /// `canvas::display_doc`'s live-adjust and Duotone documents per document: (snapshot,
     /// preview key, the document shown).
     display_memo: HashMap<DocId, (std::sync::Weak<Document>, u64, std::sync::Arc<Document>)>,
@@ -1018,6 +1026,7 @@ impl PhotocraftApp {
             services,
             canvases: HashMap::new(),
             navigator_textures: HashMap::new(),
+            navigator_pending: HashMap::new(),
             display_memo: HashMap::new(),
             navigator_gpu: HashMap::new(),
             navigator_plain: std::collections::HashSet::new(),
@@ -1537,6 +1546,7 @@ impl PhotocraftApp {
         }
         self.canvases.retain(|(doc, _), _| ids.contains(doc));
         self.navigator_textures.retain(|doc, _| ids.contains(doc));
+        self.navigator_pending.retain(|doc, _| ids.contains(doc));
         // Preferences › Units & Rulers › Show Rulers in New Documents.
         if self.session.prefs().units_and_rulers.show_rulers_in_new_documents && ids.iter().any(|id| !self.view_docs.contains(id)) {
             self.ui.extras.rulers = true;
