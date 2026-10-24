@@ -250,9 +250,9 @@ impl LangInfo {
 static NO_CATALOG: std::sync::LazyLock<Catalog> = std::sync::LazyLock::new(|| Catalog::parse(""));
 
 /// Run-time catalogs the UI has asked for and the shell hasn't fetched yet.
-static REQUESTS: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+static REQUESTS: wasm_sync::Mutex<Vec<&'static str>> = wasm_sync::Mutex::new(Vec::new());
 /// Every run-time catalog asked for so far (each is asked for once).
-static REQUESTED: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+static REQUESTED: wasm_sync::Mutex<Vec<&'static str>> = wasm_sync::Mutex::new(Vec::new());
 
 /// Without the `all-catalogs` feature only Spanish and Brazilian Portuguese are compiled in (the
 /// web build: the others would add ~0.7 MB to every download). The first time the UI needs one of

@@ -91,7 +91,7 @@ fn reduced_and_deferred_refreshes_end_like_a_full_refresh() {
     // A new texture for a view zoomed in on a corner: only that corner (and a margin) now.
     let mut doc = copy(&base);
     let key = doc.id.0;
-    let corner = ViewNeed { visible: Rect::new(0, 0, 300, 200), level: 0 };
+    let corner = ViewNeed { visible: Rect::new(0, 0, 300, 200), level: 0, focus: false };
     let r = g.refresh_for(key, &doc, None, None, Some(corner));
     assert_eq!(r.level, 0);
     assert!(r.px < 1536 * 1100 / 2, "{} px composited for a corner", r.px);
@@ -105,7 +105,7 @@ fn reduced_and_deferred_refreshes_end_like_a_full_refresh() {
     assert_eq!(max_diff(&g.read_texels(key).unwrap().2, &want), 0.0, "settled deferred refresh");
 
     // Zoomed out to a quarter: an opacity change composites at level 2, then refines.
-    let fit = ViewNeed { visible: doc.bounds(), level: 2 };
+    let fit = ViewNeed { visible: doc.bounds(), level: 2, focus: false };
     doc.layers[2].opacity = 0.5;
     let r = g.refresh_for(key, &doc, Some(doc.bounds()), None, Some(fit));
     assert_eq!(r.level, 2, "{r:?}");
@@ -123,7 +123,7 @@ fn reduced_and_deferred_refreshes_end_like_a_full_refresh() {
     assert!(mean < 0.02, "level 2 mean difference {mean}");
     let (_, _, exact) = g.read_texels(exact_doc.id.0).unwrap();
     // A view zoomed back in needs full size where it looks: that much is composited at once.
-    let zoomed = ViewNeed { visible: Rect::new(600, 400, 900, 600), level: 0 };
+    let zoomed = ViewNeed { visible: Rect::new(600, 400, 900, 600), level: 0, focus: false };
     let c = g.catch_up(key, &doc, None, zoomed, false, &egui::Context::default());
     assert!(c.px > 0 && !c.refined);
     let (_, _, now) = g.read_texels(key).unwrap();
@@ -161,4 +161,46 @@ fn view_levels_follow_the_zoom() {
     assert_eq!(gpu_canvas::interactive_level(0.2), 2);
     assert_eq!(gpu_canvas::interactive_level(1.0), 0);
     assert_eq!(gpu_canvas::interactive_level(3.0), 0);
+}
+
+/// Right after a two-finger gesture the view is sharpened first: a focused catch-up brings
+/// exactly what the view shows to the level it samples in one composite (no margin, no
+/// refinement piece), and leaves the rest of the page to the background refinement.
+#[test]
+fn a_focused_catch_up_sharpens_just_the_view_at_once() {
+    let _gpu = GPU_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some((g, _rs)) = canvas() else { return };
+    let doc = page();
+    if !g.supports(&doc) {
+        eprintln!("skipping: not on the wgpu compositor");
+        return;
+    }
+    let exact = copy(&doc);
+    g.refresh(exact.id.0, &exact, None, None);
+    let (_, _, want) = g.read_texels(exact.id.0).unwrap();
+    // Seen zoomed out: composited at level 2 only.
+    let key = doc.id.0;
+    let fit = ViewNeed { visible: doc.bounds(), level: 2, focus: false };
+    let r = g.refresh_for(key, &doc, None, None, Some(fit));
+    assert_eq!(r.level, 2, "{r:?}");
+    let view = Rect::new(600, 400, 900, 600);
+    assert!(!g.current_in(key, view, 0));
+    // Zoomed in (the fingers lifted): just the view, at full size, now.
+    let c = g.catch_up(key, &doc, None, ViewNeed { visible: view, level: 0, focus: true }, false, &egui::Context::default());
+    assert!(!c.refined, "no refinement piece in the same frame");
+    assert!(c.px > 0 && c.px <= 300 * 200 + 2 * (300 + 200) + 4, "{} px for a 300×200 view", c.px);
+    assert!(g.current_in(key, view, 0) && g.sharp_in(key, view), "the view is sharp");
+    assert!(g.has_stale(key), "the rest waits for the background refinement");
+    let (_, _, now) = g.read_texels(key).unwrap();
+    let w = 1536usize;
+    for y in 400..600 {
+        assert_eq!(max_diff(&now[y * w + 600..y * w + 900], &want[y * w + 600..y * w + 900]), 0.0, "row {y}");
+    }
+    // Unfocused, the same zoom catches up a margin around the view too.
+    let other = copy(&doc);
+    g.refresh_for(other.id.0, &other, None, None, Some(fit));
+    let wide = g.catch_up(other.id.0, &other, None, ViewNeed { visible: view, level: 0, focus: false }, false, &egui::Context::default());
+    assert!(wide.px > c.px, "{} vs {}", wide.px, c.px);
+    settle(&g, &doc, fit);
+    assert_eq!(max_diff(&g.read_texels(key).unwrap().2, &want), 0.0, "settled");
 }

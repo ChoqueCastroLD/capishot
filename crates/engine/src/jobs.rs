@@ -20,7 +20,12 @@
 
 use std::any::Any;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::sync::{Arc, PoisonError, Weak};
+
+// A job's status and notices are written by its worker and read by the page's thread every frame:
+// a std lock contended on the page's thread of the web threads build waits with `Atomics.wait`,
+// which browsers forbid there. wasm_sync's lock spins on that thread (std's everywhere else).
+use wasm_sync::Mutex;
 
 use photocraft_doc::{DocId, Document, LayerId};
 use photocraft_raster::Interrupt;
@@ -805,7 +810,30 @@ impl Session {
     pub fn wait_job(&mut self, id: JobId) -> Result<Value> {
         if let Some(i) = self.jobs.running.iter().position(|r| r.id == id) {
             let job = self.jobs.running.remove(i);
-            let r = job.rx.recv().unwrap_or_else(|_| Err(EngineError::Other(format!("`{}` stopped unexpectedly", job.label))));
+            let stopped = || Err(EngineError::Other(format!("`{}` stopped unexpectedly", job.label)));
+            // The browser's page thread may not block (`recv` waits with `Atomics.wait`, which
+            // throws there): spin on the channel instead, for at most a minute (work that needs
+            // this thread to finish, an AI worker's reply, can't arrive meanwhile; there is no
+            // clock here, so the bound is a count of tries, about a minute's worth).
+            #[cfg(target_arch = "wasm32")]
+            let r = {
+                let mut tries = 0u64;
+                loop {
+                    match job.rx.try_recv() {
+                        Ok(r) => break r,
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => break stopped(),
+                        Err(std::sync::mpsc::TryRecvError::Empty) if tries > 1_000_000_000 => {
+                            break Err(EngineError::Other(format!("`{}` is still running", job.label)));
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Empty) => {
+                            tries += 1;
+                            std::hint::spin_loop();
+                        }
+                    }
+                }
+            };
+            #[cfg(not(target_arch = "wasm32"))]
+            let r = job.rx.recv().unwrap_or_else(|_| stopped());
             self.finish_job(job, r);
         }
         match self.jobs.recent.iter().rev().find(|j| j.id == id) {

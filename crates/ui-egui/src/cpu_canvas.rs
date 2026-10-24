@@ -63,7 +63,7 @@ pub struct TileCanvas {
     tiles: HashMap<TileKey, TileTex>,
     /// The reduced layers and documents, shared with the worker pool (which builds a level the
     /// view zooms to while the frame goes on).
-    levels: Arc<std::sync::Mutex<Levels>>,
+    levels: Arc<wasm_sync::Mutex<Levels>>,
     frame: u64,
     /// Level of the last frame (tests and the perf readout).
     pub(crate) level: u32,
@@ -157,7 +157,7 @@ struct Levels {
 }
 
 /// Document `doc` reduced to `level`, from the shared [`Levels`] (the UI thread or a worker).
-fn reduced(levels: &std::sync::Mutex<Levels>, doc: &Arc<Document>, level: u32) -> Arc<Document> {
+fn reduced(levels: &wasm_sync::Mutex<Levels>, doc: &Arc<Document>, level: u32) -> Arc<Document> {
     if level == 0 {
         return doc.clone();
     }

@@ -722,7 +722,7 @@ fn download_for_web(app: &mut PhotocraftApp, mut p: Value) -> Result<Value, Stri
     // Rendered and encoded in the background: the page keeps drawing.
     if crate::jobs_ui::exports_in_background(app) {
         let job = web_cmds::prepare_save_for_web(&mut app.session, &p).map_err(|e| e.to_string())?;
-        let result: std::sync::Arc<std::sync::Mutex<Value>> = std::sync::Arc::default();
+        let result: std::sync::Arc<wasm_sync::Mutex<Value>> = std::sync::Arc::default();
         let out = std::sync::Arc::clone(&result);
         let path = p.get("path").and_then(Value::as_str).unwrap_or("").to_string();
         return crate::jobs_ui::produce_files(

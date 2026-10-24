@@ -23,7 +23,7 @@ use crate::state::DialogKind;
 use crate::theme::{ThemeKind, Tokens};
 
 #[cfg(not(target_arch = "wasm32"))]
-type DiscoveryResult = std::sync::Arc<std::sync::Mutex<Option<(Vec<crate::Recoverable>, Vec<String>)>>>;
+type DiscoveryResult = std::sync::Arc<wasm_sync::Mutex<Option<(Vec<crate::Recoverable>, Vec<String>)>>>;
 
 /// Shell runtime state for preferences, autosave and snapping (not serialised).
 #[derive(Default)]

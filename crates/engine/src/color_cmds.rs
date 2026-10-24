@@ -12,7 +12,10 @@
 //! a different CMYK profile therefore display approximately until compositing is mode-native.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Weak};
+
+// Profiles are parsed by compositing on workers and on the page's thread (see jobs.rs).
+use wasm_sync::Mutex;
 
 use photocraft_cms::{Builtin, ColorSpace, GamutCheck, Intent, Lut3d, Profile, SampleKind, Transform};
 use photocraft_color::{Color, ColorMode, PixelFormat, SampleType};

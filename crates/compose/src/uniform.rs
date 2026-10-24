@@ -8,7 +8,10 @@
 //! painted tiles cost, not a composite of every document pixel.
 
 use std::collections::HashMap;
-use std::sync::{Mutex, PoisonError};
+use std::sync::PoisonError;
+
+// Shared by the threads of a render (spins on the browser page's thread, see bounds.rs).
+use wasm_sync::Mutex;
 
 use photocraft_color::blend::BlendMode;
 use photocraft_doc::{Adjustment, Document, LayerContent};

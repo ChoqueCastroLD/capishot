@@ -182,7 +182,7 @@ impl RefinePacer {
     }
 
     /// Whether a piece is still on the GPU, and the work the next may take.
-    fn next_work(&self) -> (bool, u64) {
+    fn next_work(&self, max: u64) -> (bool, u64) {
         use std::sync::atomic::Ordering::Relaxed;
         let last = self.last.load(Relaxed);
         let mut work = self.work.load(Relaxed);
@@ -193,7 +193,7 @@ impl RefinePacer {
             let ms = f64::from_bits(last);
             // Towards the target: down at once on a slow GPU, up at most doubling per piece.
             let k = (REFINE_TARGET_MS / ms.max(0.25)).clamp(1.0 / 16.0, 2.0);
-            work = ((work as f64 * k) as u64).clamp(REFINE_WORK / 64, REFINE_WORK * 16);
+            work = ((work as f64 * k) as u64).clamp(REFINE_WORK / 64, max);
             self.work.store(work, Relaxed);
             self.last.store(Self::IDLE, Relaxed);
         }
@@ -533,6 +533,20 @@ impl GpuCanvas {
         level: u32,
         partial: bool,
     ) -> Result<photocraft_gpu::Stats, photocraft_gpu::Unsupported> {
+        self.composite_lod_with(doc, region, encode_srgb, level, partial, true)
+    }
+
+    /// [`GpuCanvas::composite_lod`]; `fill_prefix` off for the catch-up and refinement, which
+    /// draw a region once ([`photocraft_gpu::Compositor::set_fill_prefix`]).
+    fn composite_lod_with(
+        &self,
+        doc: &photocraft_doc::Document,
+        region: photocraft_geom::Rect,
+        encode_srgb: bool,
+        level: u32,
+        partial: bool,
+        fill_prefix: bool,
+    ) -> Result<photocraft_gpu::Stats, photocraft_gpu::Unsupported> {
         let (device, queue) = (&self.rs.device, &self.rs.queue);
         let size = [doc.size.width, doc.size.height];
         if size[0] == 0 || size[1] == 0 {
@@ -569,6 +583,7 @@ impl GpuCanvas {
             comp.set_composite_cache_budget(b);
         }
         comp.set_focus(res.compositor_focus);
+        comp.set_fill_prefix(fill_prefix);
         comp.set_translated(res.compositor_translated.clone());
         let key = doc.id.0;
         let format = self.format_for(doc.depth, size);
@@ -804,7 +819,7 @@ impl GpuCanvas {
             return out;
         }
         let bounds = doc.bounds();
-        let near = near_view(need.visible, bounds);
+        let near = if need.focus { need.visible.intersect(&bounds) } else { near_view(need.visible, bounds) };
         let Some((urgent, reduced_at, passes)) = self.with_doc(key, |res, d| (d.stale().needed(near, need.level), res.reduced_at, res.last_passes)) else {
             return out;
         };
@@ -817,7 +832,7 @@ impl GpuCanvas {
         }
         for r in urgent {
             let level = if area(r) >= LOD_MIN_PX { need.level } else { 0 };
-            match self.composite_lod(doc, r, encode_srgb, level, true) {
+            match self.composite_lod_with(doc, r, encode_srgb, level, true, false) {
                 Ok(st) => out.px += st.pixels,
                 Err(_) => {
                     // Not on the GPU any more: the next refresh redraws the document.
@@ -832,12 +847,16 @@ impl GpuCanvas {
         // fast one.
         #[cfg(not(target_arch = "wasm32"))]
         let _ = self.rs.device.poll(wgpu::PollType::Poll);
-        let (busy, work) = self.refine.next_work();
+        // WebGL can't tell when the GPU finished (its completion callbacks come at once), so the
+        // pieces would grow to the cap and each stall the GPU for seconds on a weak one: there
+        // they stay at a quarter of the first piece's size.
+        let max = if self.rs.adapter.get_info().backend == wgpu::Backend::Gl { REFINE_WORK / 4 } else { REFINE_WORK * 16 };
+        let (busy, work) = self.refine.next_work(max);
         if idle && wait <= 0.0 && !busy {
             let budget = (work / passes.max(1) as u64).max(128 * 128);
             if let Some(piece) = self.with_doc(key, |_, d| d.stale().next_piece(need.visible, budget)).flatten() {
                 self.rs.queue.on_submitted_work_done(self.refine.before());
-                match self.composite_lod(doc, piece, encode_srgb, 0, true) {
+                match self.composite_lod_with(doc, piece, encode_srgb, 0, true, false) {
                     Ok(st) => {
                         out.px += st.pixels;
                         out.refined = true;
@@ -873,7 +892,12 @@ impl GpuCanvas {
     /// Whether everything in `visible` is current at full size (no reduced or deferred region
     /// left there): what the view shows is sharp.
     pub fn sharp_in(&self, key: u64, visible: photocraft_geom::Rect) -> bool {
-        self.with_doc(key, |_, d| d.stale().needed(visible, 0).is_empty()).unwrap_or(true)
+        self.current_in(key, visible, 0)
+    }
+
+    /// Whether everything in `visible` is current at `level` and the levels above it.
+    pub fn current_in(&self, key: u64, visible: photocraft_geom::Rect, level: u32) -> bool {
+        self.with_doc(key, |_, d| d.stale().needed(visible, level).is_empty()).unwrap_or(true)
     }
 
     /// The finest mip level current everywhere in `visible` (0: all of it), for
@@ -1236,6 +1260,9 @@ pub struct Perf {
     pub gpu_uploads: u64,
     /// The GPU canvas shows the view at full size everywhere (nothing reduced or deferred in it).
     pub gpu_sharp: bool,
+    /// Where the canvas is with a two-finger gesture: "gesture" (holding its levels), "sharpen"
+    /// (bringing the view to full size after it), or "" (neither).
+    pub gpu_phase: &'static str,
     /// Why the last refresh fell back to the CPU compositor (None = GPU composited).
     pub gpu_fallback: Option<String>,
     /// Adapter, backend, driver and fallback state (Help › System Info).
@@ -1530,6 +1557,10 @@ fn texel_to_f32(format: wgpu::TextureFormat, b: &[u8]) -> [f32; 4] {
 pub struct ViewNeed {
     pub visible: photocraft_geom::Rect,
     pub level: u32,
+    /// Bring exactly `visible` to `level` now, before anything else ([`GpuCanvas::catch_up`]):
+    /// the view right after a two-finger gesture, sharpened first. Otherwise a margin around the
+    /// view is caught up with it.
+    pub focus: bool,
 }
 
 /// Edits smaller than this (document pixels) composite at full size even when zoomed out: a

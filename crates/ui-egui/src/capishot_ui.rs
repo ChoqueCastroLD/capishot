@@ -66,7 +66,7 @@ fn compile_to_writer(app: &mut PhotocraftApp, p: &Value) -> Result<Value, String
         Ok(job) => job,
         Err(e) => return finish(app, Err(e.to_string())),
     };
-    let result: std::sync::Arc<std::sync::Mutex<Value>> = std::sync::Arc::default();
+    let result: std::sync::Arc<wasm_sync::Mutex<Value>> = std::sync::Arc::default();
     let out = std::sync::Arc::clone(&result);
     let label = crate::i18n::fmt(tl!("Compiling {name}"), &[("name", &crate::file_open::display_name(p.get("path").and_then(Value::as_str).unwrap_or("")))]);
     let target = p.get("path").and_then(Value::as_str).unwrap_or("").to_string();
@@ -107,7 +107,7 @@ fn compile_picked(app: &mut PhotocraftApp, files: &[(String, Vec<u8>)], p: &Valu
             return finish(app, Err(e.to_string()));
         }
         let (files, p) = (files.to_vec(), p.clone());
-        let report: std::sync::Arc<std::sync::Mutex<Value>> = std::sync::Arc::default();
+        let report: std::sync::Arc<wasm_sync::Mutex<Value>> = std::sync::Arc::default();
         let out = std::sync::Arc::clone(&report);
         let label = crate::i18n::fmt(tl!("Compiling {name}"), &[("name", ZIP_NAME)]);
         return crate::jobs_ui::produce_files(

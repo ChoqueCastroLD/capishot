@@ -435,6 +435,31 @@ impl LiveStroke {
     }
 }
 
+/// A live stroke dropped without committing: document `doc` at `revision` is what it was before
+/// the stroke, so a cache that showed any step of it misses only where the stroke drew. Without
+/// this the switch back to the document redrew all of it: on a phone, the first finger of every
+/// two-finger gesture starts a stroke that the second drops, and the full redraw stalled the
+/// GPU right when the view should sharpen.
+pub(crate) struct DroppedStroke {
+    doc: photocraft_doc::DocId,
+    revision: u64,
+    key: u64,
+    steps: u64,
+    drawn: DRect,
+}
+
+impl DroppedStroke {
+    pub(crate) fn of(l: &LiveStroke) -> Self {
+        Self { doc: l.doc, revision: l.revision, key: l.key, steps: l.damage.len() as u64, drawn: l.damage.iter().fold(DRect::EMPTY, |a, r| a.union(r)) }
+    }
+
+    /// What a cache that showed raw preview `key` of the stroke misses now (`None`: it showed
+    /// something else).
+    fn since(&self, key: u64) -> Option<DRect> {
+        (key >= self.key && key <= self.key + self.steps).then_some(self.drawn)
+    }
+}
+
 /// A live stroke whose pixels its commit took over (`"fromLive"`): document `doc` at `revision`
 /// holds exactly the live stroke's last step, so a cache that showed step `n` of it only misses
 /// the steps after `n` (step 0 = the document before the stroke: everything).
@@ -1575,6 +1600,14 @@ pub(crate) fn damage_since(app: &PhotocraftApp, idx: usize, seen: (u64, u64), no
     {
         return Some(if r.is_empty() { r } else { r.inflate(effect_reach(&st.doc.layers)) });
     }
+    // Back to the document from a dropped stroke's preview: where it drew.
+    if seen.0 == now.0
+        && let Some(st) = app.session.documents().get(idx)
+        && let Some(d) = app.dropped_stroke.as_ref().filter(|d| d.doc == st.doc.id && d.revision == now.0)
+        && let Some(r) = d.since(seen.1 ^ display_key)
+    {
+        return Some(if r.is_empty() { r } else { r.inflate(effect_reach(&st.doc.layers)) });
+    }
     let l = live_stroke(app, idx).filter(|l| seen.0 == now.0 && l.display_key() == now.1)?;
     let r = l.since(seen.1 ^ display_key)?;
     Some(if r.is_empty() { r } else { r.inflate(effect_reach(&l.stroke.doc().layers)) })
@@ -1635,7 +1668,7 @@ pub(crate) fn effect_reach(layers: &[photocraft_doc::Layer]) -> i32 {
 /// large edits while zoomed out composite at that level, edits away from `visible` wait until
 /// the view gets there, and both are brought to full size once the edits pause (`catch_up`,
 /// which asks `ctx` for the frames it needs).
-fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, level: u32, ctx: &egui::Context) -> bool {
+fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, level: u32, sample_level: u32, ctx: &egui::Context) -> bool {
     let Some(gpu) = app.gpu.clone() else { return false };
     let Some((revision, last_damage, id)) = app
         .session
@@ -1677,8 +1710,29 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, level: u32, c
     // GPU, the whole page's layers) stalled the gesture for whole frames; it now happens on the
     // first frame after, then the full-size refinement as usual.
     let gesture = crate::gpu_canvas::gesture_hold() && ctx.input(|i| i.multi_touch().is_some_and(|m| m.num_touches >= 2));
-    let level = if gesture && present { level.max(gpu.view_floor(id.0, visible) as u32) } else { level };
-    let need = crate::gpu_canvas::ViewNeed { visible, level };
+    // Then, until the view is sharp again: exactly what it shows, at the level it samples
+    // (`sample_level`, not the coarser interactive one), in one composite and before any
+    // background refinement, so the view is crisp soon after the fingers lift.
+    let after_id = egui::Id::new(("pc-gpu-after-gesture", id.0));
+    if gesture {
+        ctx.data_mut(|d| d.insert_temp(after_id, true));
+    }
+    let sharpen = !gesture && ctx.data(|d| d.get_temp::<bool>(after_id)).unwrap_or(false);
+    let level = if gesture && present {
+        level.max(gpu.view_floor(id.0, visible) as u32)
+    } else if sharpen {
+        sample_level
+    } else {
+        level
+    };
+    let need = crate::gpu_canvas::ViewNeed { visible, level, focus: sharpen };
+    app.perf.gpu_phase = if gesture {
+        "gesture"
+    } else if sharpen {
+        "sharpen"
+    } else {
+        ""
+    };
 
     if present && cache.revision == revision && cache.preview_key == preview_key {
         // An adjustment preview composited where the view was: catch up where it moved to.
@@ -1693,8 +1747,14 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, level: u32, c
         }
         // Regions composited reduced or left for later: what the view shows now, then (once the
         // edits pause) the rest at full size, a piece per frame.
-        let c = gpu.catch_up(id.0, &doc, display.as_deref(), need, !gesture, ctx);
+        let c = gpu.catch_up(id.0, &doc, display.as_deref(), need, !gesture && !sharpen, ctx);
         app.perf.gpu_sharp = gpu.sharp_in(id.0, visible);
+        if sharpen && gpu.current_in(id.0, visible, sample_level) {
+            ctx.data_mut(|d| d.remove::<bool>(after_id));
+        } else if sharpen {
+            // The composite is on the GPU: look again next frame.
+            ctx.request_repaint();
+        }
         if c.px > 0 {
             app.perf.record(if c.refined { "gpu-refine" } else { "gpu-catch-up" }, c.px, c.composite_ms, 0.0);
         }
@@ -3234,7 +3294,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                 min_lod: 0.0,
             };
             paint_gpu_view(&painter, rect, params, &pattern);
-        } else if gpu_ok && ensure_gpu(app, idx, visible_doc_rect(&xf), crate::gpu_canvas::interactive_level(view.zoom), &ctx) {
+        } else if gpu_ok && ensure_gpu(app, idx, visible_doc_rect(&xf), crate::gpu_canvas::interactive_level(view.zoom), crate::gpu_canvas::lod_level(view.zoom), &ctx) {
             on_gpu = true;
             app.perf.gpu = true;
             // Shadow, checkerboard, document and pixel grid in one custom shader (gpu_canvas.rs).
@@ -3663,7 +3723,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         if t.started && primary {
             // What the first finger started is dropped, uncommitted (as Escape drops a drag).
             app.drag = None;
-            app.live_stroke = None;
+            app.dropped_stroke = app.live_stroke.take().map(|l| DroppedStroke::of(&l));
         }
         let d = xf.unmap_vec(t.pan) / (view.zoom / ppp);
         if d.is_finite() {
@@ -4768,7 +4828,7 @@ struct BeyondJob {
     snapshot: std::sync::Weak<Document>,
     key: u64,
     extent: DRect,
-    rx: std::sync::Arc<std::sync::Mutex<std::sync::mpsc::Receiver<BeyondBands>>>,
+    rx: std::sync::Arc<wasm_sync::Mutex<std::sync::mpsc::Receiver<BeyondBands>>>,
 }
 
 /// Composite the Crop tool's bands past the canvas (`beyond`, document px) of `doc` reduced by
@@ -4905,7 +4965,7 @@ fn draw_beyond_canvas(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &Vie
                         });
                     }
                     app.perf.span("crop-beyond-canvas", crate::gpu_canvas::now_ms() - t0);
-                    let j = BeyondJob { snapshot: snapshot.clone(), key: doc_key, extent, rx: std::sync::Arc::new(std::sync::Mutex::new(rx)) };
+                    let j = BeyondJob { snapshot: snapshot.clone(), key: doc_key, extent, rx: std::sync::Arc::new(wasm_sync::Mutex::new(rx)) };
                     ctx.data_mut(|d| d.insert_temp(job_key, j.clone()));
                     j
                 }
@@ -7923,6 +7983,31 @@ mod tests {
         let proxy = beyond_proxy(&doc, 2, &ring(extent, doc.bounds())).unwrap();
         assert_eq!(proxy.size, photocraft_doc::Size::new(32, 24));
         assert!(beyond_proxy(&doc, 1, &ring(extent, doc.bounds())).is_none(), "factor 1 reads the page itself");
+    }
+
+    /// A second finger drops the stroke the first one started (touch_nav): the canvas redraws
+    /// where it drew, not the whole document (that full redraw stalled the GPU right when the
+    /// view should sharpen after a pinch).
+    #[test]
+    fn a_dropped_stroke_redraws_only_where_it_drew() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        app.run("file.new", json!({"width": 400, "height": 300, "background": "white"})).unwrap();
+        app.ui.tool = Tool::Brush;
+        let m = egui::Modifiers::NONE;
+        let rev = app.session.documents()[0].revision;
+        tool_event(&mut app, ToolEvent::Down { x: 10.0, y: 30.0, pressure: 1.0 }, m);
+        tool_event(&mut app, ToolEvent::Move { x: 40.0, y: 30.0, pressure: 1.0 }, m);
+        let (_, key) = display_doc(&mut app, 0);
+        assert_ne!(key, 0);
+        let dk = canvas_display(&app, &app.session.documents()[0].doc, None).1;
+        // The gesture drops it, uncommitted.
+        app.drag = None;
+        app.dropped_stroke = app.live_stroke.take().map(|l| DroppedStroke::of(&l));
+        assert_eq!(display_doc(&mut app, 0).1, 0, "back to the document");
+        let d = damage_since(&app, 0, (rev, key ^ dk), (rev, 0), dk, None).expect("a damage rect, not a full redraw");
+        assert!(d.contains(40, 30) && d.width() < 200 && d.height() < 150, "{d:?}");
+        // A cache that showed something else still redraws everything.
+        assert_eq!(damage_since(&app, 0, (rev, 12345), (rev, 0), dk, None), None);
     }
 
     #[test]

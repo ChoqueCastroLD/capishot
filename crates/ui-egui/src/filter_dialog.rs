@@ -1147,7 +1147,7 @@ struct ProxyCache {
     proxy: Document,
 }
 
-static PROXY: std::sync::Mutex<Option<ProxyCache>> = std::sync::Mutex::new(None);
+static PROXY: wasm_sync::Mutex<Option<ProxyCache>> = wasm_sync::Mutex::new(None);
 
 /// `doc` reduced by `k` (as `proxy::proxy_document`), from [`PROXY`] when it holds this state.
 /// The reduction runs outside the lock, so the UI thread never waits for a preview worker.

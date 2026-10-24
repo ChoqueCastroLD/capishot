@@ -169,8 +169,8 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, chrome: bool, draw: impl
 
 type Load = (String, egui::TextureOptions, egui::load::SizeHint);
 
-fn recorder() -> &'static std::sync::Mutex<Option<Vec<Load>>> {
-    static R: std::sync::OnceLock<std::sync::Mutex<Option<Vec<Load>>>> = std::sync::OnceLock::new();
+fn recorder() -> &'static wasm_sync::Mutex<Option<Vec<Load>>> {
+    static R: std::sync::OnceLock<wasm_sync::Mutex<Option<Vec<Load>>>> = std::sync::OnceLock::new();
     R.get_or_init(Default::default)
 }
 

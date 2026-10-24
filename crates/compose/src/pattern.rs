@@ -6,7 +6,10 @@
 //! exactly and scaled ones stay seamless.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
+
+// Shared by the threads of a render (spins on the browser page's thread, see bounds.rs).
+use wasm_sync::Mutex;
 
 use photocraft_doc::{ColorMode, Pattern, PixelFormat, Rect, SampleType};
 

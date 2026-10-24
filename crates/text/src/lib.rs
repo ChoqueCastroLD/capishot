@@ -222,22 +222,33 @@ pub fn warm_shared() {
 }
 
 mod warm {
-    use std::sync::{Mutex, OnceLock, PoisonError};
+    use std::sync::{OnceLock, PoisonError};
     use std::thread::JoinHandle;
+
+    // The browser threads build: workers (a thumbnail of a document with type, a recovery
+    // checkpoint) and the page's thread may both want the value first. A thread arriving while
+    // another builds it waits; waiting on the OnceLock is `Atomics.wait`, which browsers forbid
+    // on the page's thread. Builds go through `build`, a wasm_sync lock that spins there instead.
+    use wasm_sync::Mutex;
 
     /// A lazily built value whose (slow) construction can run on a background thread.
     pub(crate) struct Warm<T: 'static> {
         cell: OnceLock<T>,
         scan: Mutex<Option<JoinHandle<()>>>,
+        build: Mutex<()>,
     }
 
     impl<T: Send + Sync + 'static> Warm<T> {
         pub(crate) const fn new() -> Self {
-            Self { cell: OnceLock::new(), scan: Mutex::new(None) }
+            Self { cell: OnceLock::new(), scan: Mutex::new(None), build: Mutex::new(()) }
         }
 
         /// The value, building it on this thread (or waiting for the background build).
         pub(crate) fn get_or_init(&'static self, init: fn() -> T) -> &'static T {
+            if let Some(v) = self.cell.get() {
+                return v;
+            }
+            let _building = self.build.lock().unwrap_or_else(PoisonError::into_inner);
             self.cell.get_or_init(init)
         }
 

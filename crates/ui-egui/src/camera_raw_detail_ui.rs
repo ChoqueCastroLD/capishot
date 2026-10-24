@@ -128,7 +128,7 @@ impl DetailPreview {
         {
             // A closed dialog can leave one non-interruptible engine stage finishing. Serialize
             // that work with the next dialog instead of multiplying its peak memory.
-            static WORKER: std::sync::Mutex<()> = std::sync::Mutex::new(());
+            static WORKER: wasm_sync::Mutex<()> = wasm_sync::Mutex::new(());
             match std::thread::Builder::new().name("camera-raw-preview".into()).spawn(move || {
                 let _guard = WORKER.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 work();

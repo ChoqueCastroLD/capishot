@@ -197,7 +197,7 @@ type FilesDone = Box<dyn FnOnce(&mut PhotocraftApp, Written) -> Result<Value, St
 pub(crate) struct FilesJob {
     job: JobId,
     stats: SaveStats,
-    files: Arc<std::sync::Mutex<Option<Vec<Produced>>>>,
+    files: Arc<wasm_sync::Mutex<Option<Vec<Produced>>>>,
     done: Option<FilesDone>,
 }
 
@@ -227,7 +227,7 @@ pub(crate) fn produce_files(
         let files = work(&JobCtx::default());
         return finish_produced(app, &stats, files).and_then(|w| done(app, w));
     }
-    let slot: Arc<std::sync::Mutex<Option<Vec<Produced>>>> = Arc::default();
+    let slot: Arc<wasm_sync::Mutex<Option<Vec<Produced>>>> = Arc::default();
     let out = Arc::clone(&slot);
     let started = app.session.start_job(
         command,

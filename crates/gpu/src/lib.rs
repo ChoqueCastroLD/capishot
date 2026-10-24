@@ -469,6 +469,9 @@ pub struct Compositor {
     /// What the view shows: a full refresh draws these cells last, so their pages are the
     /// ones still resident for the edits that follow.
     focus: Option<Rect>,
+    /// Render a whole chunk the lower-stack cache lacks so later edits there reuse it (on by
+    /// default; see [`Compositor::set_fill_prefix`]).
+    fill_prefix: bool,
     frame: u64,
     /// Cell visits so far (LRU clock of pages).
     stamp: u64,
@@ -730,6 +733,7 @@ impl Compositor {
             resident_budget: RESIDENT_BUDGET,
             fx_budget: (FX_BUDGET as u64).saturating_sub(prefix::MAX_BYTES),
             focus: None,
+            fill_prefix: true,
             frame: 0,
             stamp: 0,
             staged: 0,
@@ -837,6 +841,15 @@ impl Compositor {
     /// The document area the view shows (`None`: unknown). Full refreshes draw its cells last.
     pub fn set_focus(&mut self, focus: Option<Rect>) {
         self.focus = focus;
+    }
+
+    /// Whether a render whose region the lower-stack cache lacks draws the region's whole chunks
+    /// to fill it (on: brush dabs moving on then skip the lower stack). Off for renders that won't
+    /// be repeated there, the canvas's catch-up and refinement: a band of a few rows would
+    /// otherwise draw whole 1024² chunks, many times the work asked for. What the cache holds is
+    /// reused either way.
+    pub fn set_fill_prefix(&mut self, on: bool) {
+        self.fill_prefix = on;
     }
 
     /// GPU memory held by resident layer pages (bytes).
@@ -1162,7 +1175,7 @@ impl Compositor {
             let lpart = level_rect(part, level).intersect(&lbounds);
             let outs = grid_rects(lpart, self.chunk);
             let mut chunks = outs.clone();
-            if checkpoint.is_some() {
+            if checkpoint.is_some() && self.fill_prefix {
                 // A damage rect the lower-stack cache doesn't hold yet (a brush dab moving on):
                 // render its whole chunk once, so the cache holds all of it and the dabs that
                 // follow there skip the lower stack.

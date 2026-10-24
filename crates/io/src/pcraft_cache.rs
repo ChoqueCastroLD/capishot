@@ -1,6 +1,9 @@
 //! Per-document native export cache; file writes and save identity stay with the caller.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+// Background exports encode on workers while the page's thread may save (spins there).
+use wasm_sync::Mutex;
 
 use photocraft_doc::Document;
 use photocraft_format::{PcraftWriter, SaveOptions};
