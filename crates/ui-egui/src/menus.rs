@@ -1233,7 +1233,21 @@ impl ItemCache {
 /// Draws the menu bar; returns the inner edge of the menu titles, facing the rest of the title bar
 /// (the right edge of the last title, or its left edge in a right-to-left UI, where File is at the
 /// right). The bar itself fills the row.
+/// Which titles the menu bar shows.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum BarLayout {
+    /// Every menu's title; on a phone-width screen one ☰ title holding them all.
+    Auto,
+    /// These menus' titles, then "⋯" holding the others as submenus (the simple interface).
+    Split(&'static [&'static str]),
+}
+
 pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
+    menu_bar_with(app, ui, BarLayout::Auto)
+}
+
+/// [`menu_bar`] with the titles `layout` asks for.
+pub fn menu_bar_with(app: &mut PhotocraftApp, ui: &mut egui::Ui, layout: BarLayout) -> f32 {
     // Built only while a menu is open: every item's enabled/checked state scales with the
     // document (layer lookups), which cost milliseconds per frame on large layouts (#125). While
     // one stays open, the items are reused until what they depend on changes.
@@ -1267,14 +1281,34 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
             ui.spacing_mut().button_padding = egui::vec2(6.0, 3.0);
             nav.bar_bottom = Some(ui.max_rect().bottom());
             // A phone-width screen: one ☰ title holding the menus as submenus (`COMPACT_MENU`).
-            let compact = compact_menus(ui.ctx());
-            let tops: &[&str] = if compact { &[COMPACT_MENU] } else { &TOP_MENUS };
+            let compact = layout == BarLayout::Auto && compact_menus(ui.ctx());
+            let split: Vec<&str> = match layout {
+                BarLayout::Split(direct) => direct.iter().copied().chain([MORE_MENU]).collect(),
+                BarLayout::Auto => Vec::new(),
+            };
+            let tops: &[&str] = if compact {
+                &[COMPACT_MENU]
+            } else if !split.is_empty() {
+                &split
+            } else {
+                &TOP_MENUS
+            };
             let mut buttons = Vec::with_capacity(tops.len());
             for (k, top) in tops.iter().enumerate() {
                 // egui's menu_button toggles on release; these titles open on the press (one
                 // gesture can press, drag to an item and release), so each drives its popup.
+                // The title's place among all the menus (its label and mnemonic).
+                let k = TOP_MENUS.iter().position(|m| m == top).unwrap_or(k);
                 let title = if compact {
                     hamburger(ui, t.text_dim, crate::i18n::tr(lang, "Menu"))
+                } else if *top == MORE_MENU {
+                    // Three dots, drawn (the UI fonts have no "⋯").
+                    let r = ui.add(egui::Button::new("").min_size(egui::vec2(34.0, 28.0)));
+                    for dx in [-6.0, 0.0, 6.0] {
+                        ui.painter().circle_filled(r.rect.center() + egui::vec2(dx, 0.0), 1.8, t.text_dim);
+                    }
+                    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, crate::i18n::tr(lang, "More menus")));
+                    r
                 } else {
                     // The title the keyboard is on (Alt / F10) is lit like a hovered one.
                     let focused = keys.focus == Some(if rtl { TOP_MENUS.len() - 1 - k } else { k });
@@ -1321,22 +1355,23 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
                                 ItemCache { state, items }
                             })
                             .items;
-                        // The compact title holds every menu: the same items, one level down.
-                        let nested: Vec<MenuItem> = if compact {
-                            items
+                        // The compact title holds every menu, "⋯" the menus without a title of
+                        // their own: the same items, one level down.
+                        let holder = (*top == COMPACT_MENU || *top == MORE_MENU).then_some(*top);
+                        let nested: Vec<MenuItem> = match holder {
+                            Some(h) => items
                                 .iter()
                                 // Commands without a menu (shortcuts only) have no path.
-                                .filter(|i| i.path.first().is_some_and(|t| TOP_MENUS.contains(&t.as_str())))
+                                .filter(|i| i.path.first().is_some_and(|t| TOP_MENUS.contains(&t.as_str()) && (h == COMPACT_MENU || !tops.contains(&t.as_str()))))
                                 .map(|i| {
                                     let mut i = i.clone();
-                                    i.path.insert(0, COMPACT_MENU.to_string());
+                                    i.path.insert(0, h.to_string());
                                     i
                                 })
-                                .collect()
-                        } else {
-                            Vec::new()
+                                .collect(),
+                            None => Vec::new(),
                         };
-                        let source = if compact { nested.as_slice() } else { items.as_slice() };
+                        let source = if holder.is_some() { nested.as_slice() } else { items.as_slice() };
                         let mine: Vec<&MenuItem> = source.iter().filter(|i| i.path.first().map(String::as_str) == Some(*top)).collect();
                         ui.set_min_width(220.0);
                         if mine.is_empty() {
@@ -1390,6 +1425,9 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
 
 /// The one menu title on a phone-width screen.
 const COMPACT_MENU: &str = "☰";
+
+/// The simple interface's last title: the menus that have no title of their own there.
+const MORE_MENU: &str = "⋯";
 
 /// Whether the menu bar collapses into [`COMPACT_MENU`] and menu rows grow to finger size: a
 /// phone-width screen, where ten titles overflow the bar.

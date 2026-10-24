@@ -33,8 +33,8 @@ fn auto_is_on_for_phones_and_the_preference_overrides_it() {
     assert!(active(&a, &desk));
 }
 
-/// On a phone: the compact bar, no toolbar or dock, the favorites bar, and the Capi button's
-/// sheet with the tools, the panels and the way back to the full interface.
+/// On a phone: the compact bar, no toolbar or dock, the favorites and recent-tools bars with the
+/// Capi button between them, its sheet with the panels and the way back.
 #[test]
 fn a_phone_gets_the_simple_interface() {
     for (w, hh) in [(412.0, 915.0), (390.0, 844.0)] {
@@ -43,19 +43,60 @@ fn a_phone_gets_the_simple_interface() {
         a.sync_views();
         let mut h = harness(a, w, hh);
         assert!(h.state().simple);
-        assert!(h.query_by_label("Undo").is_some() && h.query_by_label_contains("Search commands").is_some(), "{w}: the compact bar");
-        assert!(h.query_by_label("Move Tool").is_some() && h.query_by_label("Gradient Tool").is_none(), "{w}: no toolbar column");
-        // The favorites bar (the last Brush Tool button: the options bar shows the tool too).
-        let brush = h.query_all_by_label("Brush Tool").last().unwrap().rect();
-        assert!(brush.width() >= 40.0 && brush.bottom() <= hh, "{w}: {brush:?}");
-        h.get_by_label("Eraser Tool").click();
+        // File, Edit and Image by name, the rest behind "⋯"; no ☰.
+        for m in ["File", "Edit", "Image", "More menus"] {
+            assert!(h.query_by_label(m).is_some(), "{w}: {m}");
+        }
+        assert!(h.query_by_label("Menu").is_none() && h.query_by_label("Filter").is_none(), "{w}: no hamburger, Filter is behind ⋯");
+        assert!(h.query_by_label("Gradient Tool").is_none(), "{w}: no toolbar column");
+        // The two bars: favorites (6) above, recent tools (6) below, Capi centred between.
+        let s = inspect(h.state(), &h.ctx);
+        let rect = |label: &str| -> egui::Rect {
+            let b = s["buttons"].as_array().unwrap().iter().find(|b| b["label"] == label).unwrap_or_else(|| panic!("{w}: no {label}"));
+            let r: [f32; 4] = serde_json::from_value(b["rect"].clone()).unwrap();
+            egui::Rect::from_min_max(egui::pos2(r[0], r[1]), egui::pos2(r[2], r[3]))
+        };
+        let favs: Vec<egui::Rect> = DEFAULT_FAVORITES.iter().map(|f| rect(&format!("slot:{f}"))).collect();
+        let recents: Vec<egui::Rect> = DEFAULT_RECENT_TOOLS.iter().map(|t| rect(&format!("slot:tool:{t:?}"))).collect();
+        let capi = rect("capi");
+        assert!((capi.center().x - w / 2.0).abs() < 1.0, "{w}: Capi centred");
+        for row in [&favs, &recents] {
+            assert!(row[..3].iter().all(|r| r.right() < capi.left()) && row[3..].iter().all(|r| r.left() > capi.right()), "{w}: 3 + 3 around Capi");
+            assert!(row.iter().all(|r| r.width() >= 40.0 && r.left() >= 0.0 && r.right() <= w && r.bottom() <= hh));
+        }
+        assert!(favs[0].bottom() < recents[0].top(), "{w}: favorites above recents");
+        assert!(capi.top() < favs[0].bottom() && capi.bottom() > recents[0].top(), "{w}: Capi overlaps both bars");
+        // Use two tools from elsewhere: they become the first recent tools.
+        h.state_mut().ui.tool = Tool::Gradient;
         h.run_steps(2);
-        assert_eq!(h.state().ui.tool, Tool::Eraser);
+        h.state_mut().ui.tool = Tool::Pen;
+        h.run_steps(2);
+        assert_eq!(recent_bar(h.state(), &h.ctx)[..2], [Tool::Pen, Tool::Gradient]);
+        // A favorite never shows among the recents.
+        h.state_mut().ui.tool = Tool::Brush;
+        h.run_steps(2);
+        assert!(!recent_bar(h.state(), &h.ctx).contains(&Tool::Brush));
+        // The options row: compact, the rest behind its button, inside the window.
+        assert!(h.query_by_label("Opacity:").is_none() && h.query_by_label_contains("Opacity").is_none(), "{w}: no Opacity in the row");
+        h.get_by_label("Tool options").click();
+        h.run_steps(3);
+        h.run_steps(3);
+        assert!(h.query_by_label_contains("pressure for opacity").is_some(), "{w}: the options are open");
+        // Nothing in the window runs past its edges: the bars, the row, the opened options.
+        for node in h.query_all_by(|n| n.label().is_some_and(|l| !l.is_empty())) {
+            let a = egui_kittest::kittest::NodeT::accesskit_node(&node);
+            let Some(b) = a.bounding_box() else { continue };
+            if b.x1 - b.x0 <= 0.0 || b.y0 as f32 > hh {
+                continue;
+            }
+            assert!(b.x0 >= -0.5 && b.x1 as f32 <= w + 0.5, "{w}: {:?} at {b:?} runs past the window", a.label());
+        }
+        h.get_by_label("Tool options").click();
+        h.run_steps(2);
         // The Capi button opens the sheet.
         h.get_by_label("Capi: tools, panels and actions").click();
         h.run_steps(3);
         assert_eq!(sheet(&h.ctx), Sheet::Master);
-        assert!(h.query_by_label("Full interface").is_some());
         for b in ["Layers", "Full interface"] {
             let r = h.get_by_label(b).rect();
             assert!(r.right() <= w && r.left() >= 0.0, "{w}: {b} at {r:?}");
@@ -76,12 +117,27 @@ fn a_phone_gets_the_simple_interface() {
 #[test]
 fn favorites_can_be_added_and_removed() {
     let mut a = app();
-    assert_eq!(favorites(&a).len(), DEFAULT_FAVORITES.len());
+    assert_eq!(favorites(&a).len(), 6);
     toggle_favorite(&mut a, "image.imageSize");
     assert!(is_favorite(&a, "image.imageSize") && is_favorite(&a, "tool:Brush"));
     toggle_favorite(&mut a, "tool:Brush");
     assert!(!is_favorite(&a, "tool:Brush"));
     assert_eq!(command_label("image.imageSize").as_deref(), Some("Image Size"));
+}
+
+/// A long press on a tool in the recent-tools bar makes it a favorite (it then leaves that bar).
+#[test]
+fn a_long_press_makes_a_recent_tool_a_favorite() {
+    let mut a = app();
+    a.run("file.new", json!({"width": 600, "height": 800})).unwrap();
+    a.sync_views();
+    let mut h = harness(a, 412.0, 915.0);
+    // A secondary click is what a mouse has for the long press (both toggle).
+    h.get_by_label("Zoom Tool").click_secondary();
+    h.run_steps(3);
+    assert!(is_favorite(h.state(), "tool:Zoom"));
+    assert_eq!(favorites(h.state()).len(), 7);
+    assert!(!recent_bar(h.state(), &h.ctx).contains(&Tool::Zoom));
 }
 
 /// The palette finds commands by their names in Spanish, Portuguese and English and by everyday

@@ -2397,9 +2397,9 @@ impl eframe::App for PhotocraftApp {
         let area = chrome_freeze::show(self, ui, chrome || tabbed_in, |app, ui| {
             if app.simple {
                 simple_ui::top_bar(app, ui);
-                // The tool's options stay with a document: one scrolling row (brush size, opacity, …).
+                // The tool's options with a document: a compact row, the rest behind its "⋯".
                 if app.ui.panels.options_bar && app.session.active().is_some() {
-                    panels::options_bar(app, ui);
+                    simple_ui::options_row(app, ui);
                 }
                 return;
             }

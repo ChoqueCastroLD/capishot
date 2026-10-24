@@ -91,7 +91,7 @@ impl PixelDensity {
 choice!(
     /// The simple interface (phones): a compact top bar, the canvas across the whole window,
     /// floating bars of favorite and recent commands, and the Capi button for everything else.
-    /// `auto` turns it on when the window's shorter side is under 600 points.
+    /// `auto` turns it on when the window is narrower than 600 points (a phone held upright).
     SimpleUi { Auto = "auto", On = "on", Off = "off" } default Auto
 );
 choice!(

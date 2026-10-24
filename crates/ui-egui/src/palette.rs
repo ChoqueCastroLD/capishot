@@ -211,6 +211,11 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             app.ui.palette_open = false;
         }
     });
+    if !app.ui.palette_open {
+        // Closed by a tap outside: the next search starts empty.
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new("palette-query"), String::new()));
+        return;
+    }
     // On a phone the palette spans the window near its top, with finger-sized two-line rows.
     let narrow = screen.width() < 600.0;
     let width = if narrow { screen.width() - 16.0 - 20.0 } else { 560.0 };
@@ -272,6 +277,10 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     sel = sel.min(hits.len().saturating_sub(1));
                     if hits.is_empty() {
                         ui.label(RichText::new(tl!("No matching commands")).color(t.text_faint));
+                    } else if q.trim().is_empty() && !recent_list(ui.ctx()).is_empty() {
+                        // An empty query lists the commands run lately.
+                        ui.label(RichText::new(tl!("Recent commands")).font(theme::semibold(12.5)).color(t.text_dim));
+                        ui.add_space(2.0);
                     }
                     let max_rows = if narrow { (((screen.height() - 52.0 - 120.0) / row_h).floor() as usize).clamp(4, 12) } else { 12 };
                     for (i, (_, id, label, detail, enabled)) in hits.iter().take(max_rows).enumerate() {
@@ -327,6 +336,8 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     }
                     if esc {
                         app.ui.palette_open = false;
+                        // The next search starts empty.
+                        q.clear();
                     }
                     if !narrow {
                         ui.add_space(4.0);
