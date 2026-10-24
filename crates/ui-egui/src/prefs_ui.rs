@@ -1367,6 +1367,40 @@ pub fn is_preferences(fields: &Map<String, Value>) -> bool {
     fields.get("__prefsui").and_then(Value::as_str) == Some("prefs")
 }
 
+/// Windows narrower than this (points) show Preferences as a full-screen sheet.
+pub const SHEET_BELOW: f32 = 600.0;
+
+/// The sheet's frame margin (points).
+pub const SHEET_MARGIN: f32 = 10.0;
+
+/// Preferences on a phone: a full-screen sheet with the section list, then the chosen section
+/// with a back button, its settings stacked (label above control) so nothing is clipped.
+pub fn is_sheet(fields: &Map<String, Value>, ctx: &egui::Context) -> bool {
+    is_preferences(fields) && ctx.content_rect().width() < SHEET_BELOW
+}
+
+/// Whether the settings rows being drawn are stacked (the phone sheet) rather than a grid.
+fn stacked(ui: &egui::Ui) -> bool {
+    ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new("prefs-stacked"))).unwrap_or(false)
+}
+
+/// Settings rows: a two-column grid (label, control), or on the phone sheet each label above its
+/// control, as wide as the sheet.
+fn rows_grid<R>(ui: &mut egui::Ui, id: impl std::hash::Hash + std::fmt::Debug, spacing_x: f32, min_col: Option<f32>, add: impl FnOnce(&mut egui::Ui) -> R) {
+    if stacked(ui) {
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 5.0;
+            add(ui);
+        });
+    } else {
+        let mut g = egui::Grid::new(id).num_columns(2).spacing([spacing_x, 7.0]);
+        if let Some(w) = min_col {
+            g = g.min_col_width(w);
+        }
+        g.show(ui, add);
+    }
+}
+
 fn preference_values(p: &prefs::Preferences) -> Map<String, Value> {
     let values = p.to_json();
     SECTIONS.iter().filter_map(|(id, _)| Some((id.to_string(), values.get(id)?.clone()))).collect()
@@ -1640,7 +1674,8 @@ fn preference_sections(values: &Value, search: &str) -> Vec<(&'static str, &'sta
         .collect()
 }
 
-/// Preferences: section list on the left, the section's settings on the right.
+/// Preferences: section list on the left, the section's settings on the right; on a phone a
+/// full-screen sheet ([`is_sheet`]): the section list, then the chosen section with a back button.
 fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui::Theme>) {
     let t = Tokens::get(ui.ctx());
     let mut section = f.get("section").and_then(Value::as_str).unwrap_or("general").to_string();
@@ -1648,7 +1683,12 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
     // The dialog follows the language being edited, so a change shows before OK.
     let lang = crate::i18n::Lang::from_pref(values.pointer("/interface/language").and_then(Value::as_str).unwrap_or("auto"));
     let mut search = f.get("__search").and_then(Value::as_str).unwrap_or("").to_string();
-    crate::widgets::text_field(ui, ui.id().with("prefs-search"), &mut search, tl!("Search settings…"), ui.available_width(), false);
+    let sheet = ui.ctx().content_rect().width() < SHEET_BELOW;
+    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("prefs-stacked"), sheet));
+    let mut open = sheet && f.get("__open").and_then(Value::as_bool) == Some(true);
+    if !open {
+        crate::widgets::text_field(ui, ui.id().with("prefs-search"), &mut search, tl!("Search settings…"), ui.available_width(), false);
+    }
     let found = preference_sections(&values, &search);
     if !found.iter().any(|(id, _)| *id == section)
         && let Some((first, _)) = found.first()
@@ -1657,91 +1697,101 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
     }
     ui.add_space(6.0);
     let mut manage_fonts = false;
-    ui.horizontal_top(|ui| {
-        // Section list.
-        ui.vertical(|ui| {
-            ui.set_width(170.0);
+    let content_height = settings_height(ui.available_height(), ui.spacing().item_spacing.y, crate::widgets::button_height(ui.ctx()));
+    if sheet && !open {
+        // The section list, finger-sized rows across the sheet.
+        egui::ScrollArea::vertical().max_height(content_height).auto_shrink([false, false]).id_salt("prefs-sheet-list").show(ui, |ui| {
             if found.is_empty() {
                 ui.label(RichText::new(tl!("No matching settings")).color(t.text_dim));
             }
             for &(id, title) in &found {
-                let sel = section == id;
                 let empty = !has_visible_fields(&values, id);
-                let (rect, resp) = ui.allocate_exact_size(vec2(170.0, 22.0), Sense::click());
-                if sel {
-                    ui.painter().rect_filled(rect, t.radius_sm, t.row_selected);
-                } else if resp.hovered() {
+                let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 44.0), Sense::click());
+                if resp.hovered() || resp.is_pointer_button_down_on() {
                     ui.painter().rect_filled(rect, t.radius_sm, t.hover);
                 }
-                let color = if sel {
-                    t.text
-                } else if empty {
-                    t.text_faint
-                } else {
-                    t.text_dim
-                };
-                // Translated section names can be longer than the column: elide them (the full
-                // name is the tooltip) instead of drawing over the settings.
-                let mut job = egui::text::LayoutJob::simple_singleline(tl!(title).to_string(), crate::theme::medium(12.5), color);
-                job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width() - 12.0);
+                let color = if empty { t.text_faint } else { t.text };
+                let mut job = egui::text::LayoutJob::simple_singleline(tl!(title).to_string(), crate::theme::medium(14.0), color);
+                job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width() - 48.0);
                 let galley = ui.painter().layout_job(job);
-                let elided = galley.elided;
-                ui.painter().galley(rect.left_center() + vec2(8.0, -galley.size().y / 2.0), galley, color);
-                let resp = if elided { resp.on_hover_text(tl!(title)) } else { resp };
+                ui.painter().galley(rect.left_center() + vec2(10.0, -galley.size().y / 2.0), galley, color);
+                let chevron = egui::Rect::from_center_size(rect.right_center() - vec2(18.0, 0.0), vec2(16.0, 16.0));
+                crate::icons::paint(ui, chevron, "chevron-right", 16.0, t.text_dim);
+                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!(title)));
                 if resp.clicked() {
                     section = id.to_string();
+                    open = true;
                 }
             }
         });
-        // The settings fill the dialog's resizable area down to the button row (#7420). Sizing them
-        // from the window instead left a resized dialog with empty space and the buttons mid-way.
-        // The area grows to fit its content, so this must never ask for more than it was given.
-        let content_height = settings_height(ui.available_height(), ui.spacing().item_spacing.y, crate::widgets::button_height(ui.ctx()));
-        crate::widgets::vline(ui, content_height);
-        ui.vertical(|ui| {
-            ui.set_width((ui.available_width() - 12.0).max(340.0));
-            let title = SECTIONS.iter().find(|(id, _)| *id == section).map_or("General", |(_, t)| *t);
-            ui.label(RichText::new(tl!(&title)).font(crate::theme::semibold(14.0)).color(t.text));
-            let show_all = search.trim().is_empty()
-                || title.to_lowercase().contains(&search.trim().to_lowercase())
-                || tl!(&title).to_lowercase().contains(&search.trim().to_lowercase());
-            let filter = if show_all { "" } else { search.trim() };
-            ui.add_space(6.0);
-            egui::ScrollArea::vertical().max_height(content_height - 30.0).id_salt("prefs-scroll").show(ui, |ui| {
-                let order: Vec<String> =
-                    f.get("__order").and_then(|o| o.get(&section)).and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
-                if !has_visible_fields(&values, &section) {
-                    ui.add_space(4.0);
-                    ui.label(RichText::new(tl!("These settings aren't available in Capishot yet.")).color(t.text_faint));
-                } else if let Some(obj) = values.get_mut(&section).and_then(Value::as_object_mut) {
-                    section_fields(ui, &section, obj, &order, lang, system, filter);
-                    if section == "fileHandling" {
-                        ui.label(
-                            RichText::new(tl!("0 turns this threshold off; SVG groups nested deeper than 100 levels are always rasterized."))
-                                .color(t.text_faint),
-                        );
-                    }
-                    if section == "performance" {
-                        gpu_status_rows(ui, f.get("__gpuInfo"), f.get("__gpuAdapters"), obj);
-                    }
-                    if section == "type" && f.get("__fonts").and_then(Value::as_bool) == Some(true) {
-                        ui.add_space(8.0);
-                        manage_fonts = crate::widgets::secondary_button(ui, tl!("Manage downloaded fonts…"), 220.0).clicked();
-                    }
-                    ui.add_space(8.0);
+    } else if sheet {
+        // One section: a back button to the list, its title, its settings stacked.
+        let back = ui
+            .horizontal(|ui| {
+                let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width().min(220.0), 40.0), Sense::click());
+                if resp.hovered() || resp.is_pointer_button_down_on() {
+                    ui.painter().rect_filled(rect, t.radius_sm, t.hover);
                 }
-                if search.trim().is_empty()
-                    && has_visible_fields(&values, &section)
-                    && crate::widgets::secondary_button(ui, tl!("Reset Section"), 110.0).clicked()
-                    && let Some(def) = prefs::Preferences::default().get(&section)
-                {
-                    values[&section] = def;
+                crate::icons::paint(ui, egui::Rect::from_center_size(rect.left_center() + vec2(14.0, 0.0), vec2(18.0, 18.0)), "chevron-left", 18.0, t.text);
+                ui.painter().text(rect.left_center() + vec2(30.0, 0.0), egui::Align2::LEFT_CENTER, tl!("All settings"), crate::theme::medium(14.0), t.text);
+                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("All settings")));
+                resp.clicked()
+            })
+            .inner;
+        if back {
+            open = false;
+        }
+        settings_column(ui, f, &mut values, &section, &search, lang, system, content_height - 46.0, &mut manage_fonts);
+    } else {
+        ui.horizontal_top(|ui| {
+            // Section list.
+            ui.vertical(|ui| {
+                ui.set_width(170.0);
+                if found.is_empty() {
+                    ui.label(RichText::new(tl!("No matching settings")).color(t.text_dim));
+                }
+                for &(id, title) in &found {
+                    let sel = section == id;
+                    let empty = !has_visible_fields(&values, id);
+                    let (rect, resp) = ui.allocate_exact_size(vec2(170.0, 22.0), Sense::click());
+                    if sel {
+                        ui.painter().rect_filled(rect, t.radius_sm, t.row_selected);
+                    } else if resp.hovered() {
+                        ui.painter().rect_filled(rect, t.radius_sm, t.hover);
+                    }
+                    let color = if sel {
+                        t.text
+                    } else if empty {
+                        t.text_faint
+                    } else {
+                        t.text_dim
+                    };
+                    // Translated section names can be longer than the column: elide them (the full
+                    // name is the tooltip) instead of drawing over the settings.
+                    let mut job = egui::text::LayoutJob::simple_singleline(tl!(title).to_string(), crate::theme::medium(12.5), color);
+                    job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width() - 12.0);
+                    let galley = ui.painter().layout_job(job);
+                    let elided = galley.elided;
+                    ui.painter().galley(rect.left_center() + vec2(8.0, -galley.size().y / 2.0), galley, color);
+                    let resp = if elided { resp.on_hover_text(tl!(title)) } else { resp };
+                    if resp.clicked() {
+                        section = id.to_string();
+                    }
                 }
             });
+            // The settings fill the dialog's resizable area down to the button row (#7420). Sizing them
+            // from the window instead left a resized dialog with empty space and the buttons mid-way.
+            // The area grows to fit its content, so this must never ask for more than it was given.
+            crate::widgets::vline(ui, content_height);
+            ui.vertical(|ui| {
+                ui.set_width((ui.available_width() - 12.0).max(340.0));
+                settings_column(ui, f, &mut values, &section, &search, lang, system, content_height, &mut manage_fonts);
+            });
         });
-    });
+    }
     f.insert("section".into(), json!(section));
     f.insert("__search".into(), json!(search));
+    f.insert("__open".into(), json!(open));
     f.insert("values".into(), values);
     // A colour swatch was clicked: open the Color Picker on that value (#2144).
     if let Some((path, name)) = ctx_take_pick(ui) {
@@ -1750,6 +1800,58 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
     if manage_fonts {
         f.insert("__manageFonts".into(), json!(true));
     }
+}
+
+/// A section's title and settings, scrolling within `content_height`.
+#[allow(clippy::too_many_arguments)]
+fn settings_column(
+    ui: &mut egui::Ui,
+    f: &Map<String, Value>,
+    values: &mut Value,
+    section: &str,
+    search: &str,
+    lang: crate::i18n::Lang,
+    system: Option<egui::Theme>,
+    content_height: f32,
+    manage_fonts: &mut bool,
+) {
+    let t = Tokens::get(ui.ctx());
+    let title = SECTIONS.iter().find(|(id, _)| *id == section).map_or("General", |(_, t)| *t);
+    ui.label(RichText::new(tl!(&title)).font(crate::theme::semibold(14.0)).color(t.text));
+    let show_all = search.trim().is_empty()
+        || title.to_lowercase().contains(&search.trim().to_lowercase())
+        || tl!(&title).to_lowercase().contains(&search.trim().to_lowercase());
+    let filter = if show_all { "" } else { search.trim() };
+    ui.add_space(6.0);
+    // On the phone sheet the settings fill the height, so OK and Cancel stay at the bottom.
+    let fill = stacked(ui);
+    egui::ScrollArea::vertical().max_height((content_height - 30.0).max(60.0)).auto_shrink([!fill, !fill]).id_salt("prefs-scroll").show(ui, |ui| {
+        let order: Vec<String> = f.get("__order").and_then(|o| o.get(section)).and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
+        if !has_visible_fields(values, section) {
+            ui.add_space(4.0);
+            ui.label(RichText::new(tl!("These settings aren't available in Capishot yet.")).color(t.text_faint));
+        } else if let Some(obj) = values.get_mut(section).and_then(Value::as_object_mut) {
+            section_fields(ui, section, obj, &order, lang, system, filter);
+            if section == "fileHandling" {
+                ui.label(RichText::new(tl!("0 turns this threshold off; SVG groups nested deeper than 100 levels are always rasterized.")).color(t.text_faint));
+            }
+            if section == "performance" {
+                gpu_status_rows(ui, f.get("__gpuInfo"), f.get("__gpuAdapters"), obj);
+            }
+            if section == "type" && f.get("__fonts").and_then(Value::as_bool) == Some(true) {
+                ui.add_space(8.0);
+                *manage_fonts = crate::widgets::secondary_button(ui, tl!("Manage downloaded fonts…"), 220.0).clicked();
+            }
+            ui.add_space(8.0);
+        }
+        if search.trim().is_empty()
+            && has_visible_fields(values, section)
+            && crate::widgets::secondary_button(ui, tl!("Reset Section"), 110.0).clicked()
+            && let Some(def) = prefs::Preferences::default().get(section)
+        {
+            values[section] = def;
+        }
+    });
 }
 
 /// Preferences › Performance: what the app renders with now, and a reset of the GPU backend
@@ -1997,10 +2099,10 @@ fn interface_groups(ui: &mut egui::Ui, obj: &mut Map<String, Value>, keys: &[Str
     // Checkboxes line up at the left edge, as in Photoshop; the other options keep a label column.
     let (checks, other): (Vec<String>, Vec<String>) = rest.cloned().partition(|k| obj.get(k).is_some_and(Value::is_boolean));
     let rows = AppearanceRows::matching(query);
-    let grid = |id: &str| egui::Grid::new(("prefs-grid", id.to_string())).num_columns(2).spacing([14.0, 7.0]).min_col_width(150.0);
+    let grid = |id: &str| ("prefs-grid", id.to_string());
     if rows.any() || !appearance.is_empty() {
         pref_group(ui, "Appearance", |ui| {
-            grid("interface-appearance").show(ui, |ui| {
+            rows_grid(ui, grid("interface-appearance"), 14.0, Some(150.0), |ui| {
                 appearance_rows(ui, obj, system, rows);
                 field_rows(ui, "interface", obj, appearance, lang);
             });
@@ -2008,13 +2110,13 @@ fn interface_groups(ui: &mut egui::Ui, obj: &mut Map<String, Value>, keys: &[Str
     }
     if !presentation.is_empty() {
         pref_group(ui, "Presentation", |ui| {
-            grid("interface-presentation").show(ui, |ui| field_rows(ui, "interface", obj, presentation, lang));
+            rows_grid(ui, grid("interface-presentation"), 14.0, Some(150.0), |ui| field_rows(ui, "interface", obj, presentation, lang));
         });
     }
     if !checks.is_empty() || !other.is_empty() {
         pref_group(ui, "Options", |ui| {
-            egui::Grid::new("prefs-grid-interface-checks").num_columns(2).spacing([0.0, 7.0]).show(ui, |ui| field_rows(ui, "interface", obj, checks, lang));
-            grid("interface-options").show(ui, |ui| field_rows(ui, "interface", obj, other, lang));
+            rows_grid(ui, "prefs-grid-interface-checks", 0.0, None, |ui| field_rows(ui, "interface", obj, checks, lang));
+            rows_grid(ui, grid("interface-options"), 14.0, Some(150.0), |ui| field_rows(ui, "interface", obj, other, lang));
         });
     }
 }
@@ -2079,7 +2181,7 @@ fn section_fields(
         memory_usage_row(ui, obj);
     }
     keys.retain(|k| field_visible(section, obj, k, &query));
-    egui::Grid::new(("prefs-grid", section)).num_columns(2).spacing([14.0, 7.0]).show(ui, |ui| field_rows(ui, section, obj, keys, lang));
+    rows_grid(ui, ("prefs-grid", section), 14.0, None, |ui| field_rows(ui, section, obj, keys, lang));
 }
 
 /// Explain the per-document RAM limit separately from the graphics-memory preference.
@@ -2117,7 +2219,9 @@ fn field_rows(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, ke
         let label = tl!(&human).to_string();
         match &v {
             Value::Bool(b) => {
-                ui.label("");
+                if !stacked(ui) {
+                    ui.label("");
+                }
                 let mut b = *b;
                 if path == "interface.systemTitleBar" && cfg!(all(not(target_arch = "wasm32"), not(target_os = "macos"))) {
                     ui.vertical(|ui| {
@@ -3420,6 +3524,58 @@ mod tests {
             assert_eq!(item("window.theme.system").checked, Some(false));
             assert_eq!(stored(&store)["interface"]["appearanceMode"], "dark");
             assert_eq!(app.session.prefs().interface.light_theme, LightTheme::Adwaita);
+        }
+    }
+
+    /// On a phone Preferences is a full-screen sheet: the section list, a section with a back
+    /// button and its settings stacked, OK and Cancel on screen, nothing wider than the window.
+    #[test]
+    fn preferences_on_a_phone_are_a_full_screen_sheet() {
+        use egui_kittest::{Harness, kittest::NodeT, kittest::Queryable};
+        for (w, h_px) in [(412.0f32, 915.0f32), (390.0, 844.0)] {
+            let (mut app, _store) = app_with_store();
+            app.run("prefs.set", json!({"values": {"interface.language": "en"}})).unwrap();
+            let mut h = Harness::builder().with_size(vec2(w, h_px)).build_eframe(move |cc| {
+                PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+                app
+            });
+            h.run_steps(4);
+            // The window behind the sheet (its own layout is another matter): only what the
+            // sheet adds is checked.
+            let rect_of = |n: &egui_kittest::Node<'_>| n.accesskit_node().bounding_box().map(|b| egui::Rect::from_min_max(egui::pos2(b.x0 as f32, b.y0 as f32), egui::pos2(b.x1 as f32, b.y1 as f32)));
+            let key = |l: Option<String>, r: egui::Rect| (l.unwrap_or_default(), r.min.x as i32, r.min.y as i32);
+            let behind: std::collections::HashSet<_> =
+                h.query_all_by(|_| true).filter_map(|n| rect_of(&n).map(|r| key(n.accesskit_node().label(), r))).collect();
+            open_preferences(h.state_mut(), "general");
+            h.run_steps(4);
+            let inside = |h: &Harness<'_, PhotocraftApp>, page: &str| {
+                for n in h.query_all_by(|n| n.label().is_some_and(|l| !l.is_empty())) {
+                    let Some(r) = rect_of(&n) else { continue };
+                    if r.width() <= 0.0 || r.top() > h_px || behind.contains(&key(n.accesskit_node().label(), r)) {
+                        continue;
+                    }
+                    assert!(r.left() >= -0.5 && r.right() <= w + 0.5, "{w}: {page}: {:?} at {r:?} is cut off", n.accesskit_node().label());
+                }
+                for b in ["OK", "Cancel"] {
+                    let r = h.get_by_label(b).rect();
+                    assert!(r.bottom() <= h_px && r.right() <= w, "{w}: {page}: {b} at {r:?} off screen");
+                }
+            };
+            // The list: every section a full-width row.
+            let row = h.get_by_label("File Handling").rect();
+            assert!(row.height() >= 40.0 && row.width() > w - 60.0, "{w}: row {row:?}");
+            inside(&h, "list");
+            h.get_by_label("File Handling").click();
+            h.run_steps(3);
+            assert!(h.query_by_label("All settings").is_some(), "{w}: a back button");
+            assert!(h.query_by_label("Autosave minutes").is_some(), "{w}: the section's settings");
+            inside(&h, "File Handling");
+            h.get_by_label("All settings").click();
+            h.run_steps(3);
+            assert!(h.query_by_label("Search settings…").is_some() || h.query_by_label("File Handling").is_some(), "{w}: back to the list");
+            h.get_by_label("Interface").click();
+            h.run_steps(3);
+            inside(&h, "Interface");
         }
     }
 

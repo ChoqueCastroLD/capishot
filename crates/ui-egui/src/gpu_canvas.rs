@@ -2195,7 +2195,26 @@ impl DocTextures {
     /// Rebuild the mip levels above `from` inside document rect `r` from level `from`, which
     /// was just written there; levels below `from` are left as they are (marked out of date).
     fn regenerate_mips_from(&self, device: &wgpu::Device, queue: &wgpu::Queue, res: &Resources, r: [u32; 4], from: u32) {
-        self.stale().mark(photocraft_geom::Rect::new(r[0] as i32, r[1] as i32, r[2] as i32, r[3] as i32), from);
+        let written = photocraft_geom::Rect::new(r[0] as i32, r[1] as i32, r[2] as i32, r[3] as i32);
+        // Sides of `r` next to pixels not current at `from` (the rest of a region waiting for its
+        // full-size refinement, or one never composited): a coarser texel straddling that edge
+        // would average in those pixels (transparent where nothing was composited: the
+        // checkerboard showed through as a dashed line until refinement finished). There the
+        // levels are rounded inward and left as they are; the neighbour's own refinement
+        // regenerates the shared texels once both sides are current.
+        let open = {
+            let st = self.stale();
+            let w = 2i32 << (photocraft_gpu::MAX_LOD + from).min(20);
+            let (x0, y0, x1, y1) = (written.x0, written.y0, written.x1, written.y1);
+            let near = |s: photocraft_geom::Rect| st.regions.iter().any(|e| e.1 > from && !e.0.intersect(&s).is_empty());
+            [
+                near(photocraft_geom::Rect::new(x0.saturating_sub(w), y0, x0, y1)),
+                near(photocraft_geom::Rect::new(x0, y0.saturating_sub(w), x1, y0)),
+                near(photocraft_geom::Rect::new(x1, y0, x1.saturating_add(w), y1)),
+                near(photocraft_geom::Rect::new(x0, y1, x1, y1.saturating_add(w))),
+            ]
+        };
+        self.stale().mark(written, from);
         let Some(mip_pipeline) = res.mip_pipeline(self.format) else { return };
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("pc_mips") });
         for t in &self.tiles {
@@ -2204,6 +2223,9 @@ impl DocTextures {
             if x0 >= x1 || y0 >= y1 {
                 continue;
             }
+            // An open side counts only where `r`'s edge is inside this tile (tile edges are on
+            // whole texels of every level).
+            let open = [open[0] && r[0] > tx, open[1] && r[1] > ty, open[2] && r[2] < tx + tw, open[3] && r[3] < ty + th];
             (x0, y0, x1, y1) = (x0 - tx, y0 - ty, x1 - tx, y1 - ty);
             // The written level's rect (rounded out like the compositor's `level_rect`).
             if from > 0 {
@@ -2213,9 +2235,15 @@ impl DocTextures {
             }
             for level in (from as usize + 1)..t.levels.len() {
                 let (lw, lh) = ((tw >> level).max(1), (th >> level).max(1));
-                // Damage at this level, padded by one texel for odd-size rounding.
-                (x0, y0) = ((x0 / 2).saturating_sub(1), (y0 / 2).saturating_sub(1));
-                (x1, y1) = ((x1.div_ceil(2) + 1).min(lw), (y1.div_ceil(2) + 1).min(lh));
+                // Damage at this level, padded by one texel for odd-size rounding; rounded inward
+                // on the open sides.
+                x0 = if open[0] { x0.div_ceil(2) } else { (x0 / 2).saturating_sub(1) };
+                y0 = if open[1] { y0.div_ceil(2) } else { (y0 / 2).saturating_sub(1) };
+                x1 = if open[2] { x1 / 2 } else { (x1.div_ceil(2) + 1).min(lw) };
+                y1 = if open[3] { y1 / 2 } else { (y1.div_ceil(2) + 1).min(lh) };
+                if x0 >= x1 || y0 >= y1 {
+                    break;
+                }
                 let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("pc_mip"),
                     layout: &res.mip_bgl,

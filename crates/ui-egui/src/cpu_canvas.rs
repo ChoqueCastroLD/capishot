@@ -755,6 +755,65 @@ mod tests {
         assert!(delta.set.iter().all(|(_, d)| d.iter().all(|d| d.pos.is_none())));
     }
 
+    /// Texture contents rebuilt from a frame's uploads (whole and partial), by texture.
+    fn apply(mirror: &mut HashMap<egui::TextureId, (usize, usize, Vec<[u8; 4]>)>, delta: &Uploads) {
+        for (id, ds) in &delta.set {
+            for d in ds {
+                let egui::ImageData::Color(img) = &d.image;
+                let px: Vec<[u8; 4]> = img.pixels.iter().map(|c| c.to_array()).collect();
+                match d.pos {
+                    None => {
+                        mirror.insert(*id, (img.size[0], img.size[1], px));
+                    }
+                    Some([x, y]) => {
+                        let (w, _, buf) = mirror.get_mut(id).expect("partial upload of a known texture");
+                        for row in 0..img.size[1] {
+                            let at = (y + row) * *w + x;
+                            buf[at..at + img.size[0]].copy_from_slice(&px[row * img.size[0]..(row + 1) * img.size[0]]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// After stroking a path on a new layer, every tile shows the exact composite: no row at the
+    /// edge of the redrawn part is left transparent (the checkerboard showed through as a dashed
+    /// line until the tile was redrawn whole).
+    #[test]
+    fn a_stroked_path_leaves_no_seam_in_the_tiles() {
+        for zoom in [1.0f32, 0.928, 0.5] {
+            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+            app.run("file.new", json!({"width": 800, "height": 800, "background": "white"})).unwrap();
+            let ctx = egui::Context::default();
+            let mut mirror = HashMap::new();
+            for _ in 0..6 {
+                let d = frame(&mut app, &ctx, zoom, [400.0, 400.0]);
+                apply(&mut mirror, &d);
+            }
+            app.run("path.set", json!({"path": {"subpaths": [{"closed": true, "knots": [[100, 100], [700, 100], [700, 600], [100, 600]]}]}})).unwrap();
+            app.run("layer.new.layer", json!({})).unwrap();
+            app.run("path.stroke", json!({"width": 5, "color": "#111111"})).unwrap();
+            for _ in 0..3 {
+                let d = frame(&mut app, &ctx, zoom, [400.0, 400.0]);
+                apply(&mut mirror, &d);
+            }
+            let doc = app.session.documents()[0].doc.clone();
+            let tc = canvas(&app);
+            let f = 1i64 << tc.level;
+            let source = (tc.level > 0).then(|| tc.reduced(&doc, tc.level));
+            for (k, t) in tc.tiles.iter().filter(|(k, _)| k.level == tc.level) {
+                let (w, h, got) = &mirror[&t.tex.id()];
+                assert_eq!((*w, *h), (t.held.width() as usize, t.held.height() as usize));
+                let want = render_level(&doc, source.as_deref(), f, &[t.held]).remove(0);
+                let want = tile_image(None, &want);
+                let want: Vec<[u8; 4]> = want.pixels.iter().map(|c| c.to_array()).collect();
+                let bad = got.iter().zip(&want).position(|(a, b)| a != b);
+                assert!(bad.is_none(), "zoom {zoom} tile {k:?} held {:?}: first wrong pixel at {:?}: {:?} vs {:?}", t.held, bad.map(|i| (i % w, i / w)), bad.map(|i| got[i]), bad.map(|i| want[i]));
+            }
+        }
+    }
+
     #[test]
     fn zoomed_out_views_composite_a_reduced_level() {
         let mut app = app(2000, 1600);

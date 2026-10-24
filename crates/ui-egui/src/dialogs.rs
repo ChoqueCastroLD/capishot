@@ -187,7 +187,10 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         let mut drag = egui::Vec2::ZERO;
         let mut close_clicked = false;
         let mut sizing = false;
+        // On a phone Preferences is a full-screen sheet (a section list, then a section).
+        let sheet = crate::prefs_ui::is_sheet(&d.fields, ctx);
         let area = match start {
+            _ if sheet => egui::Modal::default_area(id).anchor(egui::Align2::LEFT_TOP, egui::Vec2::ZERO),
             Some(offset) => egui::Modal::default_area(id).anchor(egui::Align2::LEFT_TOP, offset),
             None => egui::Modal::default_area(id),
         };
@@ -204,12 +207,15 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         if color_picker {
             modal = modal.frame(egui::Frame::popup(&ctx.global_style()).inner_margin(16));
         }
+        if sheet {
+            modal = modal.frame(egui::Frame::popup(&ctx.global_style()).inner_margin(crate::prefs_ui::SHEET_MARGIN).corner_radius(0).shadow(egui::Shadow::NONE));
+        }
         // Tab / ⇧Tab walk the topmost dialog's text fields, not every widget (field_tab.rs).
         let tab = if top == Some(d.id) && !egui::Popup::is_any_open(ctx) { crate::field_tab::take_step(ctx) } else { 0 };
         // Photoshop doesn't dim the window behind dialogs: previews must be judged at true contrast.
         let web = fields.contains_key("__web");
         let web_popup_open = web && egui::Popup::is_any_open(ctx);
-        let resizable = resizable_dialog(&fields);
+        let resizable = if sheet { None } else { resizable_dialog(&fields) };
         let modal = show_modal(modal, ctx, id, resizable, interactive, |ui| {
             sizing = ui.is_sizing_pass();
             let available = ui.available_size();
@@ -218,13 +224,13 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             let compact = d.fields.contains_key("__compact");
             // The curve editor caps its graph allocation at 300 points (#5113).
             let curves = fields.get("__adjust").and_then(Value::as_str) == Some("curves");
-            if !compact {
+            if !compact && !sheet {
                 ui.set_min_width(if curves { 300.0 } else { 380.0 });
             }
             // A resizable dialog's contents fill its resizable area (#7420), the others the window.
             let room = if resizable.is_some() { available.x } else { (ctx.content_rect().width() - 48.0).max(380.0) };
             let wide = crate::prefs_ui::width(&d.fields, room);
-            if let Some(w) = wide {
+            if let Some(w) = wide.filter(|_| !sheet) {
                 ui.set_min_width(w.min(460.0));
             }
             if d.kind == DialogKind::NewDocument {
@@ -264,6 +270,12 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             if color_picker {
                 ui.set_width(crate::color_picker_ui::CONTENT_WIDTH);
             }
+            if sheet {
+                // The whole window, inside the frame's margin.
+                let size = ctx.content_rect().size() - egui::Vec2::splat(2.0 * crate::prefs_ui::SHEET_MARGIN);
+                ui.set_min_size(size);
+                ui.set_max_size(size);
+            }
             let label = egui::Label::new(egui::RichText::new(&title).font(crate::theme::semibold(15.0))).selectable(false);
             let t = if crate::color_picker_ui::owns(&fields) { ui.add_sized(egui::vec2(ui.available_width(), 22.0), label).rect } else { ui.add(label).rect };
             // The whole title band drags (#1921): the full width plus a little of the popup's
@@ -274,6 +286,9 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             let bar_right = close_rect.map_or(ui.max_rect().right() + 7.0, |r| r.left());
             let bar = egui::Rect::from_min_max(t.min - egui::vec2(7.0, 7.0), egui::pos2(bar_right, t.bottom() + 4.0));
             drag = ui.interact(bar, id.with("title"), egui::Sense::drag()).drag_delta();
+            if sheet {
+                drag = egui::Vec2::ZERO;
+            }
             if let Some(r) = close_rect {
                 close_clicked = close_box(ui, r);
             }
@@ -523,7 +538,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         // The picker has a larger frame margin; include that whole frame in the canvas hit guard.
         shown.push(if color_picker { modal.response.rect } else { modal.inner });
         // Pin once laid out at its real size (the first frame is an invisible sizing pass).
-        if !sizing && (web || pinned.is_none() || drag != egui::Vec2::ZERO) {
+        if !sizing && !sheet && (web || pinned.is_none() || drag != egui::Vec2::ZERO) {
             let screen = ctx.content_rect();
             // Keep the whole dialog (and so its title bar) on screen.
             let room = (screen.size() - modal.response.rect.size()).max(egui::Vec2::ZERO);

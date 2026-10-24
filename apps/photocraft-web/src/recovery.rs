@@ -69,6 +69,7 @@ struct Slot {
 
 struct Job {
     doc: Arc<Document>,
+    history: photocraft_ops::HistoryCheckpoint,
     revision: u64,
     path: Option<String>,
     context: serde_json::Value,
@@ -103,6 +104,22 @@ pub struct Recovery(Rc<RefCell<Inner>>);
 thread_local! {
     /// For the panic hook, which gets no reference to the app.
     static CURRENT: RefCell<Option<std::rc::Weak<RefCell<Inner>>>> = const { RefCell::new(None) };
+}
+
+/// Undo history a checkpoint keeps: the last 20 steps, within 150 MB (50 MB on a phone, a
+/// window under 600 px on its short side), so Undo works after Recover.
+fn history_limits() -> photocraft_format::HistoryLimits {
+    static PHONE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    // Measured once, on the page's thread (`kick`).
+    let phone = *PHONE.get_or_init(|| {
+        web_sys::window()
+            .and_then(|w| Some(w.inner_width().ok()?.as_f64()?.min(w.inner_height().ok()?.as_f64()?)))
+            .is_some_and(|short| short < 600.0)
+    });
+    // Without threads a checkpoint is encoded on the page's thread: the phone's cap keeps the
+    // first one (which encodes every kept step) short there too.
+    let small = phone || cfg!(not(target_feature = "atomics"));
+    photocraft_format::HistoryLimits { max_states: 20, max_bytes: if small { 50 << 20 } else { 150 << 20 } }
 }
 
 fn now_ms() -> f64 {
@@ -147,7 +164,7 @@ impl Recovery {
     pub fn services(&self) -> Services {
         let (queue, discard, poll) = (self.clone(), self.clone(), self.clone());
         Services {
-            autosave: Some(Box::new(move |doc, _history, revision, path, key, context| queue.queue(doc, revision, path, key, context))),
+            autosave: Some(Box::new(move |doc, history, revision, path, key, context| queue.queue(doc, history, revision, path, key, context))),
             discard_autosave: Some(Box::new(move |id, key| discard.discard(id, key))),
             poll_autosave: Some(Box::new(move || poll.poll())),
             autosave_unsaved_only: true,
@@ -156,14 +173,14 @@ impl Recovery {
         }
     }
 
-    fn queue(&self, doc: &Arc<Document>, revision: u64, path: Option<&str>, key: Option<&str>, context: serde_json::Value) -> Result<(), String> {
+    fn queue(&self, doc: &Arc<Document>, history: photocraft_ops::HistoryCheckpoint, revision: u64, path: Option<&str>, key: Option<&str>, context: serde_json::Value) -> Result<(), String> {
         {
             let mut inner = self.0.borrow_mut();
             let slot = inner.claim(doc.id.0, key)?;
             if slot.retiring {
                 return Err("Recovery cleanup is still finishing".into());
             }
-            slot.pending = Some(Job { doc: doc.clone(), revision, path: path.map(str::to_string), context });
+            slot.pending = Some(Job { doc: doc.clone(), history, revision, path: path.map(str::to_string), context });
         }
         self.kick(doc.id.0);
         Ok(())
@@ -221,8 +238,14 @@ impl Recovery {
             revision: job.revision,
         };
         let revision = job.revision;
+        // On the page's thread (a worker has no window to measure).
+        let limits = history_limits();
         let encode = move || -> Result<Checkpointed, String> {
-            let checkpoint = saver.lock().unwrap_or_else(PoisonError::into_inner).checkpoint(&job.doc, info, job.context).map_err(|e| e.to_string())?;
+            let checkpoint = saver
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .checkpoint_with_history(&job.doc, Some(&job.history), limits, info, job.context)
+                .map_err(|e| e.to_string())?;
             Ok((checkpoint, thumbnail(&job.doc)))
         };
         let slot: Encoded = Arc::default();
@@ -408,7 +431,7 @@ impl Recovery {
                     path: path.clone(),
                     // Decoded by the recovery job, on a worker in the threads build.
                     load: Box::new(move || {
-                        let (document, history, context) = photocraft_format::recover_object_checkpoint(&descriptor, &objects).map_err(|e| e.to_string())?;
+                        let (document, history, context) = photocraft_format::recover_object_checkpoint(&descriptor, Arc::new(objects)).map_err(|e| e.to_string())?;
                         Ok(RecoveredDocument { key: load_key, path, document, history: Some(history), context })
                     }),
                 });
