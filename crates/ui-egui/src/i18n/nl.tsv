@@ -4388,3 +4388,8 @@ curves	Smooth	Vloeiend maken
 	Compiling {name}	{name} compileren
 # Type options bar
 	Toggle the Character and Paragraph panels	Deelvensters Teken en Alinea tonen/verbergen
+	Lines from the top of the path	Regels vanaf de bovenkant van het pad
+	Lines centered in the path	Regels gecentreerd in het pad
+	Inset	Inspringing
+	How far the text stays inside the path	Hoe ver de tekst binnen het pad blijft
+	Inset 5% of the path's smaller side	Inspringing van 5% van de kortste zijde van het pad

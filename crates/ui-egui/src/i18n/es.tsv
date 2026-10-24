@@ -4792,3 +4792,8 @@ navigator	Zoom	Zoom
 	Compiling {name}	Compilando {name}
 # Type options bar
 	Toggle the Character and Paragraph panels	Mostrar u ocultar los paneles Carácter y Párrafo
+	Lines from the top of the path	Líneas desde arriba del trazado
+	Lines centered in the path	Líneas centradas en el trazado
+	Inset	Margen interior
+	How far the text stays inside the path	Cuánto se separa el texto del borde del trazado
+	Inset 5% of the path's smaller side	Margen interior del 5 % del lado menor del trazado

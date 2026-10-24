@@ -840,7 +840,7 @@ pub(crate) fn active_type_path(app: &PhotocraftApp) -> Option<(u64, Path)> {
     let st = app.session.active()?;
     let l = st.active_layer.and_then(|id| st.doc.layer(id))?;
     let LayerContent::Text(t) = &l.content else { return None };
-    let photocraft_doc::text::TextShape::InPath { path } = &t.shape else { return None };
+    let photocraft_doc::text::TextShape::InPath { path, .. } = &t.shape else { return None };
     let sub = photocraft_doc::vector::Subpath { knots: path.knots.iter().map(|k| k.transform(&t.transform)).collect(), ..path.clone() };
     Some((l.id.0, Path { subpaths: vec![sub], ..Default::default() }))
 }

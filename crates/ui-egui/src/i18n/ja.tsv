@@ -4310,3 +4310,8 @@ curves	Smooth	スムーズ
 	Compiling {name}	{name} をコンパイル中
 # Type options bar
 	Toggle the Character and Paragraph panels	文字パネルと段落パネルの表示/非表示
+	Lines from the top of the path	パスの上端から行を配置
+	Lines centered in the path	パスの中央に行を配置
+	Inset	内側の余白
+	How far the text stays inside the path	テキストをパスの内側にどれだけ離すか
+	Inset 5% of the path's smaller side	パスの短辺の 5% の内側の余白

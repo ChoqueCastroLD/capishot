@@ -686,6 +686,11 @@ impl Ex {
                 if !raw.iter().any(|(k, _)| k == b"TySh") {
                     self.warnings.push(format!("layer \"{}\": text layer written as pixels (no TySh data)", l.name));
                 }
+                // Type in a path: our inset and vertical alignment, which Photoshop has no field for.
+                match photocraft_text::psd::in_path_meta(t) {
+                    Some(meta) => upsert(&mut raw, &photocraft_text::psd::IN_PATH_META_KEY, meta, None),
+                    None => raw.retain(|(k, _)| k != &photocraft_text::psd::IN_PATH_META_KEY),
+                }
             }
             LayerContent::Smart(sm) => {
                 let parsed = sm.psd_raw.as_deref().and_then(|d| crate::smart_map::parse_sold(d));

@@ -4620,3 +4620,8 @@ layerLabel	No Color	Sem cor
 	Compiling {name}	Compilando {name}
 # Type options bar
 	Toggle the Character and Paragraph panels	Mostrar ou ocultar os painéis Caractere e Parágrafo
+	Lines from the top of the path	Linhas a partir do topo do demarcador
+	Lines centered in the path	Linhas centralizadas no demarcador
+	Inset	Recuo interno
+	How far the text stays inside the path	Quanto o texto fica afastado da borda do demarcador
+	Inset 5% of the path's smaller side	Recuo interno de 5% do lado menor do demarcador

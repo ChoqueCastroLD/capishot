@@ -100,7 +100,10 @@ pub(crate) fn set_resolution(doc: &mut Document, dpi: f32) {
                 path.knots.iter_mut().for_each(|kn| *kn = kn.transform(&grow));
                 *start = grown(*start, k);
             }
-            photocraft_doc::text::TextShape::InPath { path } => path.knots.iter_mut().for_each(|kn| *kn = kn.transform(&grow)),
+            photocraft_doc::text::TextShape::InPath { path, inset, .. } => {
+                path.knots.iter_mut().for_each(|kn| *kn = kn.transform(&grow));
+                *inset = inset.map(|v| grown(v, k));
+            }
             photocraft_doc::text::TextShape::Point => {}
         }
         retag_text(dpi, t);

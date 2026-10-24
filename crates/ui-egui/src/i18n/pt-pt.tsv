@@ -3245,3 +3245,8 @@ fontWeight	Italic	Itálico
 	Compiling {name}	A compilar {name}
 # Type options bar
 	Toggle the Character and Paragraph panels	Mostrar ou ocultar os painéis Carácter e Parágrafo
+	Lines from the top of the path	Linhas a partir do topo do traçado
+	Lines centered in the path	Linhas centradas no traçado
+	Inset	Recuo interno
+	How far the text stays inside the path	Quanto o texto fica afastado do limite do traçado
+	Inset 5% of the path's smaller side	Recuo interno de 5% do lado menor do traçado

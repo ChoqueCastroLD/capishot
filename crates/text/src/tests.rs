@@ -2454,21 +2454,144 @@ fn a_word_wider_than_the_paragraph_box_breaks_at_the_box_edge() {
 fn type_in_an_ellipse_wraps_narrower_at_the_top_and_bottom() {
     let mut e = TextEngine::new();
     let ellipse = crate::area::tests_ellipse(200.0, 150.0, 160.0, 110.0);
-    let area = crate::area::Area::new(&ellipse).unwrap();
-    let text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.";
-    let layer = TextLayer { text: text.into(), font_family: "Inter".into(), size_pt: 14.0, shape: TextShape::InPath { path: ellipse }, ..Default::default() };
+    let area = crate::area::Area::new(&ellipse).unwrap().with_inset(None);
+    let text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation.";
+    let layer = TextLayer { text: text.into(), font_family: "Inter".into(), size_pt: 14.0, shape: TextShape::in_path(ellipse), ..Default::default() };
     let layer = with_para(layer, ParagraphStyle { align: TextAlign::Center, ..Default::default() });
     let l = e.layout(&layer, 72.0);
     assert!(l.lines.len() >= 5, "{} lines", l.lines.len());
+    assert_eq!(l.lines.last().map(|ln| ln.range.end), Some(text.len()), "all of it fits");
     let widths: Vec<f32> = l.lines.iter().map(|ln| ln.x1 - ln.x0).collect();
     for ln in &l.lines {
-        let (left, right) = area.span(ln.baseline - ln.ascent * 0.8, ln.baseline + ln.descent * 0.8).expect("the line's band is inside the ellipse");
+        let (left, right) = area.span(ln.baseline - ln.ascent, ln.baseline + ln.descent, area.inset).expect("the line's band is inside the inset ellipse");
         assert!(ln.x0 >= left - 1.0 && ln.x1 <= right + 1.0, "line {:?} outside {left}..{right}", (ln.x0, ln.x1));
         // Centred on the ellipse's vertical axis.
         assert!(((ln.x0 + ln.x1) / 2.0 - 200.0).abs() < 6.0, "{:?}", (ln.x0, ln.x1));
     }
     let widest = widths.iter().copied().fold(0.0f32, f32::max);
     assert!(widths[0] < widest * 0.8 && widths[widths.len() - 1] < widest * 0.9, "{widths:?}");
-    // The lines stay inside the ellipse's height; what doesn't fit is overflow.
-    assert!(l.lines.iter().all(|ln| ln.baseline <= 260.0 && ln.baseline >= 40.0));
+    // Centred vertically by default: the block's middle is the ellipse's.
+    let (top, bottom) = (l.lines[0].baseline - l.lines[0].ascent, l.lines[l.lines.len() - 1].baseline + l.lines[l.lines.len() - 1].descent);
+    assert!(((top + bottom) / 2.0 - 150.0).abs() < 8.0, "block {top}..{bottom}");
+    // Top (Photoshop): the first line starts at the top, inside the inset.
+    let mut top_layer = layer.clone();
+    if let TextShape::InPath { valign, .. } = &mut top_layer.shape {
+        *valign = photocraft_doc::text::InPathAlign::Top;
+    }
+    let t = e.layout(&top_layer, 72.0);
+    assert!(t.lines[0].baseline < l.lines[0].baseline - 5.0, "top {} vs centred {}", t.lines[0].baseline, l.lines[0].baseline);
+}
+
+/// The ink boxes of a layout's glyphs (text space: x0, y0, x1, y1).
+fn glyph_ink_boxes(l: &crate::layout::TextLayout) -> Vec<[f32; 4]> {
+    use skrifa::MetadataProvider;
+    l.glyphs
+        .iter()
+        .filter_map(|g| {
+            let face = &l.faces[g.face as usize];
+            let font = skrifa::FontRef::from_index(face.font.data.as_ref(), face.font.index).ok()?;
+            let coords: Vec<skrifa::instance::NormalizedCoord> = face.coords.iter().map(|&c| skrifa::instance::NormalizedCoord::from_bits(c)).collect();
+            let b = font.glyph_metrics(skrifa::instance::Size::new(face.size_px), skrifa::instance::LocationRef::new(&coords)).bounds(skrifa::GlyphId::new(g.id))?;
+            (b.x_max > b.x_min && b.y_max > b.y_min).then_some([g.x + b.x_min, g.y - b.y_max, g.x + b.x_max, g.y - b.y_min])
+        })
+        .collect()
+}
+
+/// A speech balloon: an oval body (centre about 400, 330) with a tail down to the left.
+fn tests_bubble() -> photocraft_doc::vector::Subpath {
+    use photocraft_doc::vector::{Knot, Subpath};
+    let knot = |x: f64, y: f64, ix: f64, iy: f64, ox: f64, oy: f64| Knot {
+        anchor: photocraft_geom::Point::new(x, y),
+        in_ctrl: photocraft_geom::Point::new(ix, iy),
+        out_ctrl: photocraft_geom::Point::new(ox, oy),
+        smooth: false,
+    };
+    const K: f64 = 0.5523;
+    Subpath {
+        closed: true,
+        knots: vec![
+            knot(400.0, 110.0, 400.0 - 290.0 * K, 110.0, 400.0 + 290.0 * K, 110.0),
+            knot(690.0, 330.0, 690.0, 330.0 - 220.0 * K, 690.0, 330.0 + 220.0 * K),
+            knot(420.0, 550.0, 420.0 + 270.0 * K, 550.0, 380.0, 550.0),
+            knot(320.0, 540.0, 350.0, 547.0, 320.0, 540.0),
+            knot(170.0, 740.0, 170.0, 740.0, 170.0, 740.0),
+            knot(230.0, 505.0, 230.0, 505.0, 180.0, 475.0),
+            knot(110.0, 330.0, 110.0, 330.0 + 140.0 * K, 110.0, 330.0 - 220.0 * K),
+        ],
+        op: Default::default(),
+    }
+}
+
+/// No glyph's ink comes closer to the path than the inset (nor leaves it): accents, ¿ and ¡,
+/// in an ellipse and a concave speech balloon, centred and from the top.
+#[test]
+fn no_glyph_ink_leaves_the_inset_path() {
+    use photocraft_doc::text::InPathAlign;
+    let mut e = TextEngine::new();
+    let bubble = tests_bubble();
+    let text = "¡¿ÁRBOL, ÉPICO Ñandú?! Él jamás volvió a ÍNDIGO. ¿Qué haremos ahora, Capi? ¡Ánimo, que ya casi terminamos el capítulo!";
+    for (path, size) in [(crate::area::tests_ellipse(200.0, 150.0, 160.0, 110.0), 16.0), (bubble, 34.0)] {
+        for valign in [InPathAlign::Center, InPathAlign::Top] {
+            for inset in [None, Some(12.0), Some(0.0)] {
+                let shape = TextShape::InPath { path: path.clone(), inset, valign };
+                let area = crate::area::Area::of(&shape).unwrap();
+                let layer = TextLayer { text: text.into(), font_family: "Inter".into(), size_pt: size, shape, ..Default::default() };
+                let layer = with_para(layer, ParagraphStyle { align: TextAlign::Center, ..Default::default() });
+                let l = e.layout(&layer, 72.0);
+                assert!(l.lines.len() >= 3, "{valign:?} {inset:?}: {} lines", l.lines.len());
+                let boxes = glyph_ink_boxes(&l);
+                assert!(boxes.len() > 20);
+                for [x0, y0, x1, y1] in boxes {
+                    for i in 0..=8 {
+                        let f = i as f32 / 8.0;
+                        for (x, y) in [(x0 + (x1 - x0) * f, y0), (x0 + (x1 - x0) * f, y1), (x0, y0 + (y1 - y0) * f), (x1, y0 + (y1 - y0) * f)] {
+                            assert!(area.contains(x, y), "{valign:?} {inset:?}: ink ({x}, {y}) outside the path");
+                            assert!(area.distance(x, y) >= area.inset - 0.05, "{valign:?} {inset:?}: ink ({x}, {y}) {} px from the path, inset {}", area.distance(x, y), area.inset);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A short exclamation is one line in the middle of the balloon; text too long for the middle
+/// stays from the top, with what doesn't fit left out (the overflow mark).
+#[test]
+fn short_type_sits_in_the_middle_and_long_type_falls_back_to_the_top() {
+    let mut e = TextEngine::new();
+    let ellipse = crate::area::tests_ellipse(200.0, 150.0, 160.0, 110.0);
+    let short = TextLayer { text: "¡¿Qué?!".into(), font_family: "Inter".into(), size_pt: 30.0, shape: TextShape::in_path(ellipse.clone()), ..Default::default() };
+    let short = with_para(short, ParagraphStyle { align: TextAlign::Center, ..Default::default() });
+    let l = e.layout(&short, 72.0);
+    assert_eq!(l.lines.len(), 1);
+    let boxes = glyph_ink_boxes(&l);
+    let (top, bottom) = boxes.iter().fold((f32::MAX, f32::MIN), |(t, b), r| (t.min(r[1]), b.max(r[3])));
+    let ink_mid = (top + bottom) / 2.0;
+    assert!((ink_mid - 150.0).abs() < 12.0, "ink {top}..{bottom}");
+    assert!(((l.lines[0].x0 + l.lines[0].x1) / 2.0 - 200.0).abs() < 3.0);
+    // In a balloon the middle is its body's, not the middle of body and tail together.
+    let in_bubble = TextLayer { shape: TextShape::in_path(tests_bubble()), size_pt: 72.0, ..short.clone() };
+    let l = e.layout(&in_bubble, 72.0);
+    assert_eq!(l.lines.len(), 1);
+    let (top, bottom) = glyph_ink_boxes(&l).iter().fold((f32::MAX, f32::MIN), |(t, b), r| (t.min(r[1]), b.max(r[3])));
+    assert!(((top + bottom) / 2.0 - 330.0).abs() < 20.0, "ink {top}..{bottom}, body middle 330");
+    // From the top, the word isn't split across the balloon's narrow top: it goes lower, whole.
+    let mut top_bubble = in_bubble.clone();
+    if let TextShape::InPath { valign, .. } = &mut top_bubble.shape {
+        *valign = photocraft_doc::text::InPathAlign::Top;
+    }
+    let t = e.layout(&top_bubble, 72.0);
+    assert_eq!(t.lines.len(), 1, "{:?}", t.lines.iter().map(|ln| &top_bubble.text[ln.range.clone()]).collect::<Vec<_>>());
+    assert!(t.lines[0].baseline < l.lines[0].baseline - 20.0);
+    let long = TextLayer { text: "palabra ".repeat(80), font_family: "Inter".into(), size_pt: 14.0, shape: TextShape::in_path(ellipse.clone()), ..Default::default() };
+    let centred = e.layout(&long, 72.0);
+    let mut top_layer = long.clone();
+    if let TextShape::InPath { valign, .. } = &mut top_layer.shape {
+        *valign = photocraft_doc::text::InPathAlign::Top;
+    }
+    let from_top = e.layout(&top_layer, 72.0);
+    assert!(centred.lines.last().unwrap().range.end < long.text.trim_end().len(), "overflows");
+    assert_eq!(centred.lines.len(), from_top.lines.len());
+    assert!((centred.lines[0].baseline - from_top.lines[0].baseline).abs() < 0.01);
 }

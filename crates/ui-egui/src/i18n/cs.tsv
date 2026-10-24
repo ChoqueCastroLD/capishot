@@ -4238,3 +4238,8 @@ navigator	Zoom	Zvětšení
 	Compiling {name}	Kompiluje se {name}
 # Type options bar
 	Toggle the Character and Paragraph panels	Zobrazit/skrýt panely Znaky a Odstavec
+	Lines from the top of the path	Řádky od horního okraje cesty
+	Lines centered in the path	Řádky na střed cesty
+	Inset	Vnitřní okraj
+	How far the text stays inside the path	Jak daleko text zůstává uvnitř cesty
+	Inset 5% of the path's smaller side	Vnitřní okraj 5 % kratší strany cesty

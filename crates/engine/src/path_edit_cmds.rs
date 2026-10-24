@@ -58,7 +58,7 @@ fn edit_path(s: &mut Session, cmd: &str, p: &Value, label: &str, f: impl FnOnce(
     if let Some(id) = in_path {
         let path = s.edit(label, |doc, _| {
             let Some(LayerContent::Text(mut t)) = doc.layer(id).map(|l| l.content.clone()) else { return Err(EngineError::NoLayer(id)) };
-            let photocraft_doc::text::TextShape::InPath { path: sub } = &t.shape else { return Err(EngineError::NoLayer(id)) };
+            let photocraft_doc::text::TextShape::InPath { path: sub, .. } = &t.shape else { return Err(EngineError::NoLayer(id)) };
             let inverse = t.transform.inverse().ok_or_else(|| bad(cmd, "the type layer's transform cannot be inverted"))?;
             let mut doc_path = Path { subpaths: vec![Subpath { knots: sub.knots.iter().map(|k| k.transform(&t.transform)).collect(), ..sub.clone() }], ..Default::default() };
             f(&mut doc_path).map_err(|e| bad(cmd, e))?;
@@ -67,7 +67,9 @@ fn edit_path(s: &mut Session, cmd: &str, p: &Value, label: &str, f: impl FnOnce(
                 return Err(bad(cmd, "type in a path needs a closed path with at least three anchor points"));
             }
             let json = path_json(&doc_path);
-            t.shape = photocraft_doc::text::TextShape::InPath { path: Subpath { knots: edited.knots.iter().map(|k| k.transform(&inverse)).collect(), ..edited } };
+            if let photocraft_doc::text::TextShape::InPath { path, .. } = &mut t.shape {
+                *path = Subpath { knots: edited.knots.iter().map(|k| k.transform(&inverse)).collect(), ..edited };
+            }
             crate::type_cmds::refresh(doc, &mut t);
             if let Some(l) = doc.layer_mut(id) {
                 l.content = LayerContent::Text(t);

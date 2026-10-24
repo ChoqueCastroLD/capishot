@@ -476,6 +476,59 @@ impl Layouter {
     }
 
     pub fn layout(&mut self, fonts: &mut FontDb, t: &TextLayer, dpi: f32) -> TextLayout {
+        let mut fit = Fit::default();
+        let first = self.layout_pass(fonts, t, dpi, None, &mut fit);
+        // Type in a path, centred: move the fitted block of lines until its middle is the
+        // path's middle. Lines re-wrap at every height tried; a height where the text no longer
+        // fits is not taken, so text that only fits from the top stays there (with the overflow
+        // mark when even that isn't enough).
+        if !matches!(t.shape, TextShape::InPath { valign: photocraft_doc::text::InPathAlign::Center, .. })
+            || t.orientation == Orientation::Vertical
+            || fit.overflow
+        {
+            return first;
+        }
+        let (Some(area), Some(mut band)) = (crate::area::Area::of(&t.shape), fit.band) else { return first };
+        // The middle is the path's, up and down the block's middle column: a balloon's body,
+        // not its tail.
+        let goal = |l: &TextLayout, band: (f32, f32)| {
+            let (x0, x1) = l.lines.iter().fold((f32::MAX, f32::MIN), |(a, b), ln| (a.min(ln.x0), b.max(ln.x1)));
+            let x = if x0 <= x1 { (x0 + x1) * 0.5 } else { (area.bounds[0] + area.bounds[2]) * 0.5 };
+            let mid = (band.0 + band.1) * 0.5;
+            area.column(x)
+                .into_iter()
+                .min_by(|a, b| {
+                    let off = |c: &(f32, f32)| if (c.0..=c.1).contains(&mid) { 0.0 } else { (c.0 - mid).abs().min((c.1 - mid).abs()) };
+                    off(a).total_cmp(&off(b))
+                })
+                .map_or((area.bounds[1] + area.bounds[3]) * 0.5, |(top, bottom)| (top + bottom) * 0.5)
+        };
+        let (mut best, mut start, mut fail) = (first, band.0, None::<f32>);
+        for _ in 0..8 {
+            let d = goal(&best, band) - (band.0 + band.1) * 0.5;
+            let mut cand = start + d;
+            if let Some(f) = fail
+                && (cand - start) * (f - start) > 0.0
+                && (cand - start).abs() >= (f - start).abs()
+            {
+                cand = (start + f) * 0.5;
+            }
+            if (cand - start).abs() < 0.25 {
+                break;
+            }
+            let mut fit = Fit::default();
+            let l = self.layout_pass(fonts, t, dpi, Some(cand), &mut fit);
+            match fit.band {
+                Some(b) if !fit.overflow => (best, band, start) = (l, b, cand),
+                _ => fail = Some(cand),
+            }
+        }
+        best
+    }
+
+    /// One layout; type in a path starts its first line's band at `start` (default: the path's
+    /// top) and reports in `fit` whether it overflowed and the band its lines fill.
+    fn layout_pass(&mut self, fonts: &mut FontDb, t: &TextLayer, dpi: f32, start: Option<f32>, fit: &mut Fit) -> TextLayout {
         let k = if dpi.is_finite() && dpi > 0.0 { dpi / 72.0 } else { 1.0 };
         let runs = t.char_runs();
         let paras = t.paragraph_runs();
@@ -530,7 +583,7 @@ impl Layouter {
         // Type in a path: paragraph text in the path's bounds, each line as wide as the path is
         // across its band (`area`). Vertical type in a path wraps in the bounds.
         let area = if vertical { None } else { crate::area::Area::of(&t.shape) };
-        let mut area_slots = area.as_ref().map(crate::area::Slots::new);
+        let mut area_slots = area.as_ref().map(|a| crate::area::Slots::new(a, start));
         let (box_rect, is_box) = match &t.shape {
             TextShape::Box { x, y, width, height } => ((*x, *y, *width, *height), true),
             TextShape::InPath { .. } => match crate::area::Area::of(&t.shape) {
@@ -721,7 +774,15 @@ impl Layouter {
             let mut line_slots: Vec<crate::area::Slot> = Vec::new();
             if let (Some(area), Some(slots)) = (area.as_ref(), area_slots.as_mut()) {
                 let leading = first_style.leading_pt.map_or(ps.auto_leading * first_px, |l| l * k);
-                let (ascent, descent) = (first_px * 0.8, first_px * 0.25);
+                // Every line's band holds the ink of the paragraph's tallest and deepest glyphs
+                // (accents and ¿ included), and its sides the ink sticking out past the advances.
+                layout.break_all_lines(None);
+                let (ascent, descent, overhang) = ink_extent(&layout, &out.styles, k).unwrap_or((first_px * 0.95, first_px * 0.3, 0.0));
+                // A band narrower than the longest word is skipped rather than splitting the word
+                // (a balloon's narrow top), unless no band is that wide.
+                let longest = longest_unbreakable(&layout, &ptext) * break_scale;
+                let inner = (area.bounds[2] - area.bounds[0] - 2.0 * area.inset).max(1.0);
+                let min_width = ((first_px * 1.5).max(longest.min(inner * 0.6)) + indent_start + indent_end).min(inner);
                 let extra = if slots.last.is_some() { pending_space + ps.space_before_pt * k } else { 0.0 };
                 let max = (area.bounds[2] - area.bounds[0]).max(1.0) / break_scale;
                 if first_indent != 0.0 {
@@ -731,7 +792,7 @@ impl Layouter {
                 breaker.state_mut().set_layout_max_advance(max);
                 let mut first = true;
                 loop {
-                    let slot = slots.next(area, ascent, descent, leading, if first { extra } else { 0.0 }, (first_px * 1.5).min(max));
+                    let slot = slots.next(area, ascent, descent, leading, if first { extra } else { 0.0 }, min_width, overhang);
                     first = false;
                     let width = match slot {
                         Some(slot) => {
@@ -834,8 +895,12 @@ impl Layouter {
                 let slot = line_slots.get(li).copied();
                 if area.is_some() && slot.is_none() {
                     // Type in a path: no band left for this line (overflow).
+                    fit.overflow = true;
                     stop = true;
                     break;
+                }
+                if let Some(s) = slot {
+                    fit.band = Some((fit.band.map_or(s.top, |b| b.0), s.bottom));
                 }
                 let baseline = match prev_baseline {
                     _ if slot.is_some() => slot.map_or(0.0, |s| s.baseline),
@@ -1663,6 +1728,74 @@ pub(crate) fn squeeze_punctuation(text: &str, clusters: &mut [ClusterInfo], glyp
 /// nearest face as it is (Faux Bold stays a separate, explicit style).
 pub(crate) fn synthetic_bold(matcher_says: bool, requested: u16, face_weight: f32) -> bool {
     matcher_says && requested >= 600 && face_weight <= 500.0
+}
+
+/// What a type-in-a-path pass fitted ([`Layouter::layout`]).
+#[derive(Default)]
+struct Fit {
+    /// Some text had no band left.
+    overflow: bool,
+    /// The top of the first line's band and the bottom of the last one's.
+    band: Option<(f32, f32)>,
+}
+
+/// The widest whitespace-separated word of a laid-out paragraph (`text` is what it lays out).
+fn longest_unbreakable(layout: &Layout<RunBrush>, text: &str) -> f32 {
+    let (mut best, mut word) = (0.0f32, 0.0f32);
+    for line in layout.lines() {
+        for run in line.runs() {
+            for c in run.clusters() {
+                if text.get(c.text_range()).is_none_or(|s| s.chars().any(char::is_whitespace)) {
+                    word = 0.0;
+                } else {
+                    word += c.advance();
+                    best = best.max(word);
+                }
+            }
+        }
+    }
+    best
+}
+
+/// The ink of a laid-out paragraph's glyphs: how far above and below the baseline it reaches and
+/// how far past a glyph's advance it sticks out on either side, with scale, baseline shift and
+/// faux styles. `None` without glyph ink.
+fn ink_extent(layout: &Layout<RunBrush>, styles: &[CharStyle], k: f32) -> Option<(f32, f32, f32)> {
+    use skrifa::MetadataProvider;
+    let (mut up, mut down, mut over) = (f32::NEG_INFINITY, f32::NEG_INFINITY, 0.0f32);
+    for line in layout.lines() {
+        for item in line.items() {
+            let PositionedLayoutItem::GlyphRun(gr) = item else { continue };
+            let run = gr.run();
+            let fd = run.font();
+            let Ok(font) = skrifa::FontRef::from_index(fd.data.as_ref(), fd.index) else { continue };
+            let coords: Vec<skrifa::instance::NormalizedCoord> = run.normalized_coords().iter().map(|&c| skrifa::instance::NormalizedCoord::from_bits(c)).collect();
+            let gm = font.glyph_metrics(skrifa::instance::Size::new(run.font_size()), skrifa::instance::LocationRef::new(&coords));
+            let st = styles.get(gr.style().brush.0 as usize);
+            let scale = |v: Option<f32>| v.filter(|v| *v > 0.0).unwrap_or(1.0);
+            let hs = scale(st.map(|s| s.horizontal_scale));
+            let vs = scale(st.map(|s| s.vertical_scale));
+            let synth = run.synthesis();
+            let skew_deg = if st.is_some_and(|s| s.faux_italic) { crate::render::FAUX_ITALIC_DEG } else { 0.0 } + synth.skew().unwrap_or(0.0);
+            let skew = skew_deg.to_radians().tan() * vs;
+            let shift = st.map_or(0.0, |s| s.baseline_shift_pt * k);
+            // Faux bold draws the outline again a pixel off in every direction.
+            let bold = if st.is_some_and(|s| s.faux_bold) || synth.embolden() { 1.0 } else { 0.0 };
+            for g in gr.glyphs() {
+                let Some(b) = gm.bounds(skrifa::GlyphId::new(g.id)) else { continue };
+                if b.x_max <= b.x_min || b.y_max <= b.y_min {
+                    continue;
+                }
+                up = up.max(b.y_max * vs + shift - g.y + bold);
+                down = down.max(-b.y_min * vs - shift + g.y + bold);
+                let (s0, s1) = (skew * b.y_min, skew * b.y_max);
+                let left = g.x + hs * b.x_min + s0.min(s1) - bold;
+                let right = g.x + hs * b.x_max + s0.max(s1) + bold;
+                over = over.max(-left).max(right - g.advance * hs);
+            }
+        }
+    }
+    (up.is_finite() && down.is_finite()).then_some((up.max(0.0), down.max(0.0), over))
 }
 
 /// Height of the lowercase ascender ('d') of the tallest run on the line.
