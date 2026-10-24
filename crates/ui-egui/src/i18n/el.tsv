@@ -4329,3 +4329,8 @@ curves	Smooth	Εξομάλυνση
 	Compiling {name}	Μεταγλώττιση {name}
 # Type options bar
 	Toggle the Character and Paragraph panels	Εμφάνιση/απόκρυψη των πλαισίων Χαρακτήρας και Παράγραφος
+	Lines from the top of the path	Γραμμές από την κορυφή της διαδρομής
+	Lines centered in the path	Γραμμές στο κέντρο της διαδρομής
+	Inset	Εσωτερικό περιθώριο
+	How far the text stays inside the path	Πόσο μέσα στη διαδρομή μένει το κείμενο
+	Inset 5% of the path's smaller side	Εσωτερικό περιθώριο 5% της μικρότερης πλευράς της διαδρομής

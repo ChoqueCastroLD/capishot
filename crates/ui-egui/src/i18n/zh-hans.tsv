@@ -3276,3 +3276,8 @@ curves	Smooth	平滑
 	Compiling {name}	正在编译 {name}
 # Type options bar
 	Toggle the Character and Paragraph panels	切换字符和段落面板
+	Lines from the top of the path	从路径顶部排列各行
+	Lines centered in the path	在路径中居中排列各行
+	Inset	内边距
+	How far the text stays inside the path	文字与路径边缘保持的距离
+	Inset 5% of the path's smaller side	内边距为路径较短边的 5%

@@ -3645,3 +3645,8 @@ curves	Smooth	Glätten
 	Compiling {name}	{name} wird kompiliert
 # Type options bar
 	Toggle the Character and Paragraph panels	Zeichen- und Absatzbedienfeld ein-/ausblenden
+	Lines from the top of the path	Zeilen ab dem oberen Rand des Pfads
+	Lines centered in the path	Zeilen im Pfad zentriert
+	Inset	Innenabstand
+	How far the text stays inside the path	Wie weit der Text innerhalb des Pfads bleibt
+	Inset 5% of the path's smaller side	Innenabstand 5 % der kürzeren Seite des Pfads

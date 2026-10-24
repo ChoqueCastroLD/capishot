@@ -4742,3 +4742,8 @@ shape	Appearance	Aspetto
 	Compiling {name}	Compilazione di {name}
 # Type options bar
 	Toggle the Character and Paragraph panels	Mostra/nascondi i pannelli Carattere e Paragrafo
+	Lines from the top of the path	Righe dall'alto del tracciato
+	Lines centered in the path	Righe centrate nel tracciato
+	Inset	Margine interno
+	How far the text stays inside the path	Quanto il testo resta all'interno del tracciato
+	Inset 5% of the path's smaller side	Margine interno del 5% del lato minore del tracciato

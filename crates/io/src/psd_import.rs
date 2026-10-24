@@ -390,6 +390,9 @@ impl Ctx<'_> {
                     photocraft_text::psd::apply_txt2_frame(&mut t, &block.data, txt2);
                     photocraft_text::psd::apply_txt2_path(&mut t, &block.data, txt2);
                 }
+                if let Some(meta) = rec.block(&photocraft_text::psd::IN_PATH_META_KEY) {
+                    photocraft_text::psd::apply_in_path_meta(&mut t, &meta.data);
+                }
                 // Photoshop's pixels stay until edited. Writers without type pixels are
                 // rendered by text_import::prepare instead of retaining an empty cache.
                 let cache = self.record_surface(rec, &name);

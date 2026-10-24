@@ -236,11 +236,54 @@ pub enum TextShape {
     Path { path: super::vector::Subpath, start: f32, flip: bool },
     /// Type in a path (Photoshop's area type in a shape): paragraph text whose lines wrap inside
     /// the closed `path` (text-space pixels, before the layer transform), each line as wide as the
-    /// path is across the band its glyphs fill.
-    InPath { path: super::vector::Subpath },
+    /// path is across the band its glyphs fill. `inset` keeps every glyph that far inside the
+    /// path (text-space px; `None`: 5% of the path's smaller side); `valign` places the block of
+    /// lines (centred by default, as scanlation wants; `Top` is Photoshop's).
+    InPath {
+        path: super::vector::Subpath,
+        #[serde(default)]
+        inset: Option<f32>,
+        #[serde(default)]
+        valign: InPathAlign,
+    },
 }
 
+/// Vertical placement of type in a path ([`TextShape::InPath`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InPathAlign {
+    /// The fitted lines centred in the path (scanlation balloons).
+    #[default]
+    Center,
+    /// Lines from the path's top down (Photoshop).
+    Top,
+}
+
+impl InPathAlign {
+    pub fn name(self) -> &'static str {
+        match self {
+            InPathAlign::Center => "center",
+            InPathAlign::Top => "top",
+        }
+    }
+
+    pub fn from_name(s: &str) -> Option<Self> {
+        match s {
+            "center" | "centre" | "middle" => Some(InPathAlign::Center),
+            "top" => Some(InPathAlign::Top),
+            _ => None,
+        }
+    }
+}
+
+/// The automatic inset of type in a path: 5% of the smaller side of the path's bounds.
+pub const IN_PATH_AUTO_INSET: f32 = 0.05;
+
 impl TextShape {
+    /// Type in a path from a closed `path`, with the automatic inset, centred.
+    pub fn in_path(path: super::vector::Subpath) -> Self {
+        TextShape::InPath { path, inset: None, valign: InPathAlign::Center }
+    }
+
     /// Paragraph text: wraps inside a box or a path.
     pub fn is_paragraph(&self) -> bool {
         matches!(self, TextShape::Box { .. } | TextShape::InPath { .. })

@@ -2205,6 +2205,10 @@ fn a_click_inside_a_closed_path_makes_type_in_the_path() {
     let id = LayerId(app.ui.text_edit.as_ref().unwrap().layer);
     let t = text_layer(&st.doc, id).unwrap();
     assert!(matches!(t.shape, photocraft_doc::text::TextShape::InPath { .. }), "{:?}", t.shape);
+    // The options bar's in-path controls see it: centred, automatic inset of 5% of 200 px.
+    let (_, valign, inset, shown) = super::in_path_target(&app).expect("type in a path is the target");
+    assert_eq!((valign, inset), (photocraft_doc::text::InPathAlign::Center, None));
+    assert!((shown - 10.0).abs() < 0.6, "{shown}");
     // A click inside the path while editing places the caret instead of committing.
     assert!(super::inside_box(&mut app, id, 120.0, 150.0));
     super::commit(&mut app);

@@ -1185,7 +1185,7 @@ pub fn build_txt2_at(objects: &[(i32, &TextLayer)], previous: Option<&[u8]>, dpi
     // Type in a path: the text object's frame is the path (Photoshop's text in a shape: a frame
     // of type 1 whose Bézier is the shape, in the text space of the `TySh` BoxBounds).
     for (index, layer) in objects {
-        let TextShape::InPath { path } = &layer.shape else { continue };
+        let TextShape::InPath { path, .. } = &layer.shape else { continue };
         let Ok(at) = usize::try_from(*index) else { continue };
         if !(0..=MAX_TEXT_INDEX).contains(index) {
             continue;
@@ -1363,7 +1363,13 @@ pub fn apply_txt2_path(layer: &mut TextLayer, tysh: &[u8], txt2: &E) {
     if on_box && knots.len() == 4 {
         return;
     }
-    layer.shape = TextShape::InPath { path: photocraft_doc::vector::Subpath { closed: true, knots, op: Default::default() } };
+    // Photoshop's own layout: lines from the top, no inset. Our files say otherwise in their
+    // `pcIP` block (`apply_in_path_meta`).
+    layer.shape = TextShape::InPath {
+        path: photocraft_doc::vector::Subpath { closed: true, knots, op: Default::default() },
+        inset: Some(0.0),
+        valign: photocraft_doc::text::InPathAlign::Top,
+    };
 }
 
 fn pad_frames(outer: &mut E, count: usize) {
@@ -1851,4 +1857,35 @@ mod nonfinite_tests {
         let out = String::from_utf8_lossy(&crate::engine_data::write(&build_engine_data(&layer, None, f32::INFINITY))).into_owned();
         assert!(out.contains("/FontSize 12.0"), "{out}");
     }
+}
+
+/// Our own layer block for type in a path (`pcIP`): its inset and vertical alignment, which
+/// Photoshop's text-in-shape has no field for. Photoshop skips the block; the layer's pixels hold
+/// our layout until the text is edited there.
+pub const IN_PATH_META_KEY: [u8; 4] = *b"pcIP";
+
+/// The `pcIP` block of `layer` (`None` unless it is type in a path): version 1 (u32), inset
+/// present (u8), inset px (f32), vertical alignment (u8: 0 centre, 1 top), two zero bytes; big-endian.
+pub fn in_path_meta(layer: &TextLayer) -> Option<Vec<u8>> {
+    let TextShape::InPath { inset, valign, .. } = &layer.shape else { return None };
+    let mut out = 1u32.to_be_bytes().to_vec();
+    out.push(u8::from(inset.is_some()));
+    out.extend(inset.unwrap_or(0.0).to_be_bytes());
+    out.push(match valign {
+        photocraft_doc::text::InPathAlign::Center => 0,
+        photocraft_doc::text::InPathAlign::Top => 1,
+    });
+    out.extend([0, 0]);
+    Some(out)
+}
+
+/// Reads a `pcIP` block into type in a path (anything else, or a bad block, is left alone).
+pub fn apply_in_path_meta(layer: &mut TextLayer, data: &[u8]) {
+    let TextShape::InPath { inset, valign, .. } = &mut layer.shape else { return };
+    if data.len() < 10 || data[..4] != 1u32.to_be_bytes() {
+        return;
+    }
+    let px = f32::from_be_bytes([data[5], data[6], data[7], data[8]]);
+    *inset = (data[4] != 0 && px.is_finite() && px >= 0.0).then_some(px);
+    *valign = if data[9] == 1 { photocraft_doc::text::InPathAlign::Top } else { photocraft_doc::text::InPathAlign::Center };
 }

@@ -75,7 +75,9 @@ pub(crate) fn hit_layer(app: &mut PhotocraftApp, x: f64, y: f64) -> Option<Layer
         });
         let Some((l, aff, _)) = layout(app, *id) else { return shown };
         let (tx, ty) = to_text(&aff, x, y);
-        shown || photocraft_text::text_point_inside(&l, tx, ty, slop)
+        // Type in a path: a click anywhere inside its path edits it, as in Photoshop.
+        let in_area = text_layer(&doc, *id).and_then(|t| photocraft_text::area::Area::of(&t.shape)).is_some_and(|a| a.contains(tx, ty));
+        shown || in_area || photocraft_text::text_point_inside(&l, tx, ty, slop)
     })
 }
 
@@ -265,7 +267,7 @@ pub(crate) fn inside_box(app: &mut PhotocraftApp, id: LayerId, x: f64, y: f64) -
     if let Some(area) = area {
         let Some((_, aff, _)) = layout(app, id) else { return false };
         let (tx, ty) = to_text(&aff, x, y);
-        return area.span(ty, ty).is_some_and(|(l, r)| (l..=r).contains(&tx));
+        return area.contains(tx, ty);
     }
     let Some((bx, by, w, h)) = box_shape(app, id) else { return false };
     let Some((_, aff, _)) = layout(app, id) else { return false };
@@ -474,7 +476,7 @@ pub(crate) fn in_path_at(app: &PhotocraftApp, x: f64, y: f64) -> Option<serde_js
     let st = app.session.active()?;
     let inside = |path: &photocraft_doc::vector::Path| {
         path.subpaths.iter().position(|sp| {
-            sp.closed && sp.knots.len() >= 3 && photocraft_text::area::Area::new(sp).is_some_and(|a| a.span(y as f32, y as f32).is_some_and(|(l, r)| (l..=r).contains(&(x as f32))))
+            sp.closed && sp.knots.len() >= 3 && photocraft_text::area::Area::new(sp).is_some_and(|a| a.contains(x as f32, y as f32))
         })
     };
     if let Some(i) = st.doc.work_path.as_ref().and_then(inside) {
@@ -1322,7 +1324,7 @@ pub fn draw_overlay(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewX
         }
         // Type in a path: the path is the frame; text that doesn't fit shows Photoshop's overflow
         // mark (a + in a small box) at the bottom right of the path's bounds.
-        Some(photocraft_doc::text::TextShape::InPath { path }) => {
+        Some(photocraft_doc::text::TextShape::InPath { path, .. }) => {
             let closed = photocraft_doc::vector::Subpath { closed: true, ..path.clone() };
             let mut pts: Vec<Pos2> = Vec::new();
             for [p0, c1, c2, p1] in closed.segments() {
@@ -2172,6 +2174,52 @@ pub(crate) fn toggle_type_panels(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
 }
 
+/// The type target when it is type in a path: its layer, vertical alignment, inset (`None`:
+/// automatic) and the inset in effect (px).
+pub(crate) fn in_path_target(app: &PhotocraftApp) -> Option<(u64, photocraft_doc::text::InPathAlign, Option<f32>, f32)> {
+    let (layer, _) = target(app)?;
+    let t = target_text(app)?;
+    let photocraft_doc::text::TextShape::InPath { inset, valign, .. } = &t.shape else { return None };
+    let shown = photocraft_text::area::Area::of(&t.shape).map_or(0.0, |a| a.inset);
+    Some((layer, *valign, *inset, shown))
+}
+
+/// Type in a path: where its block of lines sits and how far its glyphs stay inside the path
+/// (Photoshop has neither; scanlation balloons want both).
+fn in_path_options(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    use photocraft_doc::text::InPathAlign;
+    let Some((layer, valign, inset, shown)) = in_path_target(app) else { return };
+    crate::widgets::vline(ui, 22.0);
+    ui.spacing_mut().item_spacing.x = 2.0;
+    for (v, icon, tip) in [
+        (InPathAlign::Top, "align-vertical-justify-start", tl!("Lines from the top of the path")),
+        (InPathAlign::Center, "align-vertical-justify-center", tl!("Lines centered in the path")),
+    ] {
+        if crate::icons::button(ui, icon, 24.0, valign == v, tip).clicked() && valign != v {
+            let _ = app.run("type.edit", json!({"layer": layer, "vertical": v.name()}));
+        }
+    }
+    ui.spacing_mut().item_spacing.x = 4.0;
+    ui.label(tl!("Inset"));
+    let mut px = (shown * 10.0).round() / 10.0;
+    let resp = ui
+        .add(egui::DragValue::new(&mut px).range(0.0..=1000.0).speed(0.5).max_decimals(1).suffix(" px"))
+        .on_hover_text(tl!("How far the text stays inside the path"));
+    if resp.changed() {
+        let mut p = json!({"layer": layer, "inset": px});
+        if let Some(key) = drag_key(ui.ctx()) {
+            p["coalesce"] = json!(key);
+        }
+        let _ = app.run("type.edit", p);
+    }
+    let auto = inset.is_none();
+    if ui.selectable_label(auto, tl!("Auto")).on_hover_text(tl!("Inset 5% of the path's smaller side")).clicked() {
+        let v = if auto { json!(px) } else { json!("auto") };
+        let _ = app.run("type.edit", json!({"layer": layer, "inset": v}));
+    }
+    ui.spacing_mut().item_spacing.x = 8.0;
+}
+
 pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = crate::theme::Tokens::get(ui.ctx());
     // Show the target layer's (first-run) style, else the tool defaults.
@@ -2252,6 +2300,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         }
     }
     ui.spacing_mut().item_spacing.x = 8.0;
+    in_path_options(app, ui);
     crate::widgets::vline(ui, 22.0);
     // Text colour swatch with a picker popup.
     let c = shown

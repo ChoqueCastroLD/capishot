@@ -4236,3 +4236,8 @@ curves	Smooth	Wygładź
 	Compiling {name}	Kompilowanie {name}
 # Type options bar
 	Toggle the Character and Paragraph panels	Pokaż/ukryj panele Znak i Akapit
+	Lines from the top of the path	Wiersze od góry ścieżki
+	Lines centered in the path	Wiersze wyśrodkowane w ścieżce
+	Inset	Margines wewnętrzny
+	How far the text stays inside the path	Jak daleko tekst pozostaje wewnątrz ścieżki
+	Inset 5% of the path's smaller side	Margines wewnętrzny 5% krótszego boku ścieżki

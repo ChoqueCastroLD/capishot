@@ -843,7 +843,14 @@ pub(crate) fn new_text_layer(s: &Session, p: &Value, cmd: &str) -> Result<TextLa
             runs: vec![TextRun { len: text.len(), style }],
             paragraphs: vec![ParagraphRun { len: text.len(), style: para }],
             text,
-            shape: TextShape::InPath { path: photocraft_doc::vector::Subpath { op: Default::default(), ..path } },
+            shape: {
+                let (inset, valign) = in_path_props(p).map_err(|m| bad(cmd, m))?;
+                TextShape::InPath {
+                    path: photocraft_doc::vector::Subpath { op: Default::default(), ..path },
+                    inset: inset.flatten(),
+                    valign: valign.unwrap_or_default(),
+                }
+            },
             transform: Affine::IDENTITY,
             orientation,
             ..Default::default()
@@ -872,6 +879,24 @@ pub(crate) fn new_text_layer(s: &Session, p: &Value, cmd: &str) -> Result<TextLa
     };
     t.sync_summary();
     Ok(t)
+}
+
+/// Type in a path's `"inset"` (px, or `"auto"`: `Some(None)`) and `"vertical"` (`"center|top"`)
+/// keys, each `None` when absent.
+pub(crate) fn in_path_props(p: &Value) -> std::result::Result<(Option<Option<f32>>, Option<photocraft_doc::text::InPathAlign>), String> {
+    let inset = match p.get("inset") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(a)) if a == "auto" => Some(None),
+        Some(v) => match v.as_f64() {
+            Some(px) if px.is_finite() && (0.0..=10_000.0).contains(&px) => Some(Some(px as f32)),
+            _ => return Err("\"inset\" must be px (0..=10000) or \"auto\"".into()),
+        },
+    };
+    let valign = match p.get("vertical") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(v.as_str().and_then(photocraft_doc::text::InPathAlign::from_name).ok_or("\"vertical\" must be \"center\" or \"top\"")?),
+    };
+    Ok((inset, valign))
 }
 
 /// `type.create` (and `type.createInPath`).
@@ -904,7 +929,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "New Type Layer",
             menu: &["Layer", "New"],
             shortcut: None,
-            params: r##"{"x":px,"y":px (baseline anchor of point text),"text":str,"box":[x,y,w,h]? (paragraph text),"inPath":true|{"shape":layerId?,"subpath":n?}? (type in a path: lines wrap inside the closed work path, or the shape layer's path),"name":str?,"align":"left|center|right|justify…"?,"orientation":"horizontal|vertical"="horizontal", …character keys: "font","size":pt=12,"color",…}"##,
+            params: r##"{"x":px,"y":px (baseline anchor of point text),"text":str,"box":[x,y,w,h]? (paragraph text),"inPath":true|{"shape":layerId?,"subpath":n?}? (type in a path: lines wrap inside the closed work path, or the shape layer's path; with "inset":px|"auto"="auto" (5% of the path's smaller side) and "vertical":"center|top"="center"),"name":str?,"align":"left|center|right|justify…"?,"orientation":"horizontal|vertical"="horizontal", …character keys: "font","size":pt=12,"color",…}"##,
             enabled: has_doc,
             journal: true,
             run: create_type,
@@ -914,7 +939,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "New Type in Path",
             menu: &[],
             shortcut: None,
-            params: r##"{"shape":layerId? (default: the work path),"subpath":n?=0,"text":str,"align":"left|center|right|justify…"?, …character keys} — type.create with "inPath": the lines wrap inside the closed path, each as wide as the path across its band"##,
+            params: r##"{"shape":layerId? (default: the work path),"subpath":n?=0,"text":str,"align":"left|center|right|justify…"?,"vertical":"center|top"="center" (the block of lines centred in the path, or from its top as in Photoshop),"inset":px|"auto"="auto" (glyphs stay this far inside the path; auto: 5% of its smaller side), …character keys} — type.create with "inPath": the lines wrap inside the closed path, each as wide as the path across its band"##,
             enabled: has_doc,
             journal: true,
             run: |s, p| {
@@ -930,7 +955,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Edit Type",
             menu: &[],
             shortcut: None,
-            params: r##"{"layer":id?,"text":str? (replace all, styles kept),"replace":{"start":char,"end":char,"text":str}?,"runs":[{"start":char,"end":char,…character keys}]?,"box":[x,y,w,h]? (to paragraph text),"point":[x,y]? (to point text),"move":[dx,dy]?,"transform":[a,b,c,d,e,f]?,"antialias":"none|sharp|crisp|strong|smooth"?,"name":str?,"kerning":1/1000em|"metrics"|"optical"|"off"? (with "range":[startChar,endChar]?, default all),"kernPair":{"at":caretChar,"by":1/1000em}? (Alt+←/→: the pair before the caret becomes manual, its current kerning + by)}"##,
+            params: r##"{"layer":id?,"text":str? (replace all, styles kept),"replace":{"start":char,"end":char,"text":str}?,"runs":[{"start":char,"end":char,…character keys}]?,"box":[x,y,w,h]? (to paragraph text),"point":[x,y]? (to point text),"move":[dx,dy]?,"transform":[a,b,c,d,e,f]?,"antialias":"none|sharp|crisp|strong|smooth"?,"inset":px|"auto"? (type in a path),"vertical":"center|top"? (type in a path),"name":str?,"kerning":1/1000em|"metrics"|"optical"|"off"? (with "range":[startChar,endChar]?, default all),"kernPair":{"at":caretChar,"by":1/1000em}? (Alt+←/→: the pair before the caret becomes manual, its current kerning + by)}"##,
             enabled: has_doc,
             journal: true,
             run: |s, p| {
@@ -1027,6 +1052,18 @@ pub fn specs() -> Vec<CommandSpec> {
                     if let Some(m) = p.get("transform").and_then(Value::as_array).filter(|b| b.len() == 6) {
                         for (i, v) in m.iter().enumerate() {
                             t.transform.m[i] = v.as_f64().unwrap_or(t.transform.m[i]);
+                        }
+                    }
+                    let (new_inset, new_valign) = in_path_props(p).map_err(|m| bad("type.edit", m))?;
+                    if new_inset.is_some() || new_valign.is_some() {
+                        let TextShape::InPath { inset, valign, .. } = &mut t.shape else {
+                            return Err(bad("type.edit", "\"inset\" and \"vertical\" are for type in a path"));
+                        };
+                        if let Some(v) = new_inset {
+                            *inset = v;
+                        }
+                        if let Some(v) = new_valign {
+                            *valign = v;
                         }
                     }
                     if let Some(a) = p.get("antialias").and_then(Value::as_str) {
@@ -1198,14 +1235,17 @@ mod tests {
         s.execute("select.toWorkPath", json!({"tolerance": 1.0})).unwrap();
         s.execute("select.deselect", json!({})).unwrap();
         let text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
-        let r = s.execute("type.createInPath", json!({"text": text, "size": 16, "align": "center"})).unwrap();
+        let r = s.execute("type.createInPath", json!({"text": text, "size": 16, "align": "center", "vertical": "top", "inset": 9})).unwrap();
         let id = LayerId(r["layer"].as_u64().unwrap());
+        assert!(s.execute("type.createInPath", json!({"text": "x", "vertical": "bottom"})).is_err());
+        assert!(s.execute("type.createInPath", json!({"text": "x", "inset": -1})).is_err());
         let doc = s.active().unwrap().doc.clone();
         let l = doc.layer(id).unwrap();
         let LayerContent::Text(t) = &l.content else { panic!("not a type layer") };
-        assert!(matches!(t.shape, TextShape::InPath { .. }), "{:?}", t.shape);
+        assert!(matches!(t.shape, TextShape::InPath { inset: Some(9.0), valign: photocraft_doc::text::InPathAlign::Top, .. }), "{:?}", t.shape);
         let bounds = l.surface().unwrap().content_bounds();
-        assert!(!bounds.is_empty() && bounds.x0 >= 40 && bounds.x1 <= 360 && bounds.y0 >= 40 && bounds.y1 <= 262, "{bounds:?}");
+        // Nine pixels inside the ellipse's bounds (one more for antialiasing).
+        assert!(!bounds.is_empty() && bounds.x0 >= 48 && bounds.x1 <= 352 && bounds.y0 >= 48 && bounds.y1 <= 252, "{bounds:?}");
         let layout = photocraft_text::shared().lock().unwrap().layout(t, 72.0);
         let widths: Vec<f32> = layout.lines.iter().map(|l| l.x1 - l.x0).collect();
         let widest = widths.iter().copied().fold(0.0f32, f32::max);
@@ -1217,11 +1257,17 @@ mod tests {
             LayerContent::Text(t) => Some(t.clone()),
             _ => None,
         });
-        let (Some(TextShape::InPath { path: a }), TextShape::InPath { path: b }) = (bt.map(|t| t.shape), &t.shape) else { panic!("not type in a path after the round trip") };
+        let (Some(TextShape::InPath { path: a, .. }), TextShape::InPath { path: b, .. }) = (bt.map(|t| t.shape), &t.shape) else { panic!("not type in a path after the round trip") };
         assert_eq!(a.knots.len(), b.knots.len());
         for (ka, kb) in a.knots.iter().zip(&b.knots) {
             assert!((ka.anchor.x - kb.anchor.x).abs() < 0.01 && (ka.anchor.y - kb.anchor.y).abs() < 0.01, "{ka:?} {kb:?}");
         }
+        // Inset and vertical alignment come back from our own block.
+        let bt = back.walk().into_iter().find_map(|(_, _, l)| match &l.content {
+            LayerContent::Text(t) => Some(t.shape.clone()),
+            _ => None,
+        });
+        assert!(matches!(bt, Some(TextShape::InPath { inset: Some(9.0), valign: photocraft_doc::text::InPathAlign::Top, .. })), "{bt:?}");
         // psd-compiler renders the saved file (the stored type raster).
         let c = photocraft_io::psdc::compile(&out.bytes, &Default::default()).unwrap();
         let dark = c.rgba.as_chunks::<4>().0.iter().filter(|p| p[0] < 128).count();
@@ -1231,11 +1277,22 @@ mod tests {
         s.execute("path.moveAnchors", json!({"name": "layer", "layer": id.0, "anchors": [[0, 0], [0, 1]], "move": [-30, 0]})).unwrap();
         let after_doc = s.active().unwrap().doc.clone();
         let LayerContent::Text(moved) = &after_doc.layer(id).unwrap().content else { panic!() };
-        let TextShape::InPath { path: edited } = &moved.shape else { panic!("still type in a path") };
+        let TextShape::InPath { path: edited, .. } = &moved.shape else { panic!("still type in a path") };
         assert!((edited.knots[0].anchor.x - b.knots[0].anchor.x + 30.0).abs() < 0.01, "{:?}", edited.knots[0]);
-        assert_ne!(after_doc.layer(id).unwrap().surface().unwrap().content_bounds(), before, "re-rendered");
+        let _ = before;
+        let relaid = photocraft_text::shared().lock().unwrap().layout(moved, 72.0);
+        let starts = |l: &photocraft_text::layout::TextLayout| l.lines.iter().map(|ln| (ln.range.start, (ln.x0 * 10.0).round() as i32)).collect::<Vec<_>>();
+        assert_ne!(starts(&relaid), starts(&layout), "the lines re-wrap");
+        // type.edit sets the inset back to automatic and centres the block, lower than from the top.
+        let top_y = after_doc.layer(id).unwrap().surface().unwrap().content_bounds().y0;
+        s.execute("type.edit", json!({"layer": id.0, "inset": "auto", "vertical": "center"})).unwrap();
+        let centred = s.active().unwrap().doc.layer(id).unwrap().clone();
+        let LayerContent::Text(ct) = &centred.content else { panic!() };
+        assert!(matches!(ct.shape, TextShape::InPath { inset: None, valign: photocraft_doc::text::InPathAlign::Center, .. }), "{:?}", ct.shape);
+        assert!(centred.surface().unwrap().content_bounds().y0 > top_y + 3, "centred lower than from the top");
         // Convert to Point Text works from type in a path.
         s.execute("type.convertToPointText", json!({})).unwrap();
+        assert!(s.execute("type.edit", json!({"layer": id.0, "inset": 4})).is_err(), "inset is for type in a path");
     }
     use super::*;
 

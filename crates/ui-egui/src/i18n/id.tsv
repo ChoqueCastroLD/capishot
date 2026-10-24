@@ -3634,3 +3634,8 @@ curves	Smooth	Haluskan
 	Compiling {name}	Mengompilasi {name}
 # Type options bar
 	Toggle the Character and Paragraph panels	Tampilkan/sembunyikan panel Karakter dan Paragraf
+	Lines from the top of the path	Baris dari atas jalur
+	Lines centered in the path	Baris di tengah jalur
+	Inset	Inset
+	How far the text stays inside the path	Seberapa jauh teks tetap di dalam jalur
+	Inset 5% of the path's smaller side	Inset 5% dari sisi jalur yang lebih pendek

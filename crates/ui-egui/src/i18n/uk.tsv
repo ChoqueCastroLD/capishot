@@ -4345,3 +4345,8 @@ curves	Smooth	Згладити
 	Compiling {name}	Компіляція {name}
 # Type options bar
 	Toggle the Character and Paragraph panels	Показати/сховати панелі «Символ» і «Абзац»
+	Lines from the top of the path	Рядки від верху контуру
+	Lines centered in the path	Рядки по центру контуру
+	Inset	Внутрішній відступ
+	How far the text stays inside the path	Наскільки текст відступає від краю контуру
+	Inset 5% of the path's smaller side	Внутрішній відступ 5% меншої сторони контуру
