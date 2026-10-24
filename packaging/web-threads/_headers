@@ -17,3 +17,8 @@
 /photocraft.js
   ! Cache-Control
   Cache-Control: public, max-age=31536000, immutable
+
+# Imported as ?v=<content hash> by photocraft.js (build.sh): a new build is a new URL.
+/snippets/*
+  ! Cache-Control
+  Cache-Control: public, max-age=31536000, immutable

@@ -7,7 +7,13 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, PoisonError, Weak, mpsc};
+use std::sync::{Arc, PoisonError, Weak, mpsc};
+
+// The archive is shared by the page's thread (Undo, new steps) and workers (a recovery
+// checkpoint reads its steps): a std lock contended on the page's thread of the web threads build
+// waits with `Atomics.wait`, which browsers forbid there ("cannot be called in this context").
+// wasm_sync's lock spins on that thread instead (std's everywhere else).
+use wasm_sync::Mutex;
 
 use photocraft_doc::Document;
 

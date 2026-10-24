@@ -87,6 +87,23 @@ mod tests {
         assert!(!html.contains("<script"), "trunk injects the generated loader; the page has no script of its own");
     }
 
+    /// The threads page starts the module's download before importing the glue (on a phone
+    /// network the glue's round trip is otherwise time the module isn't downloading), and the
+    /// glue's snippet imports are versioned and cached forever, so the worker pool starts from
+    /// the cache instead of revalidating them per worker.
+    #[test]
+    fn the_threads_page_downloads_the_module_and_snippets_early() {
+        let page = include_str!("../../../packaging/web-threads/index.html");
+        let fetch = page.find("const wasm = wasmResponse(").expect("the module's fetch");
+        let import = page.find("await import(`./photocraft.js").expect("the glue's import");
+        assert!(fetch < import, "the module's fetch starts first");
+        let build = include_str!("../../../packaging/web-threads/build.sh");
+        assert!(build.contains("?v=$snip"), "snippet imports versioned");
+        let headers = include_str!("../../../packaging/web-threads/_headers");
+        let snippets = headers.split_once("/snippets/*").expect("a /snippets/* rule").1;
+        assert!(snippets.trim_start().lines().take(2).any(|l| l.contains("immutable")), "snippets cached forever");
+    }
+
     /// Every catalog the web build doesn't compile in is shipped next to the page by both builds
     /// (Trunk's index.html and packaging/web-threads/build.sh), where `fetch_catalogs` asks for it.
     #[test]

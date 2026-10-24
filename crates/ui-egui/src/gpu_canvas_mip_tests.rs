@@ -79,6 +79,7 @@ fn check_refinement_pieces(gpu: &GpuCanvas) {
     doc.layers.push(l);
     // A fresh texture set that gets the edit at level 1 only: level 0 holds nothing yet.
     gpu.composite_lod(&doc, doc.bounds(), false, 1, true).unwrap();
+    assert!(!gpu.sharp_in(doc.id.0, doc.bounds()), "reduced: not sharp");
     let mut y = 0;
     for rows in [37, 64, 99] {
         gpu.composite_lod(&doc, Rect::new(0, y, w as i32, y + rows), false, 0, true).unwrap();
@@ -100,6 +101,7 @@ fn check_refinement_pieces(gpu: &GpuCanvas) {
     for (level, pixels) in read_mips(gpu, doc.id.0).iter().enumerate() {
         assert!(pixels.iter().all(|p| p.iter().all(|c| (c - 1.0).abs() < 0.01)), "mip {level} after full refinement");
     }
+    assert!(gpu.sharp_in(doc.id.0, doc.bounds()), "all full size: sharp");
 }
 
 fn check_mips(gpu: &GpuCanvas) {

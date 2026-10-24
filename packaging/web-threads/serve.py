@@ -15,7 +15,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Cross-Origin-Opener-Policy", "same-origin")
         self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
         self.send_header("Cross-Origin-Resource-Policy", "same-origin")
-        self.send_header("Cache-Control", "no-cache")
+        # As _headers: a versioned URL (?v=<content hash>) can be cached forever, the rest revalidates.
+        versioned = "v=" in self.path.partition("?")[2]
+        self.send_header("Cache-Control", "public, max-age=31536000, immutable" if versioned else "no-cache")
         super().end_headers()
 
 

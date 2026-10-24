@@ -70,8 +70,12 @@
             'unavailable. The server must send Cross-Origin-Opener-Policy: same-origin and ' +
             'Cross-Origin-Embedder-Policy: require-corp.');
         }
+        // The module's download starts with the glue's, not after it: on a phone network the
+        // glue's round trip and bytes are otherwise time the module isn't downloading.
+        const wasm = wasmResponse(`./photocraft_bg.wasm.gz?v=${version}`);
+        wasm.catch(() => {});
         const pc = await import(`./photocraft.js?v=${version}`);
-        await pc.default({ module_or_path: await wasmResponse(`./photocraft_bg.wasm.gz?v=${version}`) });
+        await pc.default({ module_or_path: await wasm });
         const moduleReady = Math.round(performance.now());
         // One worker per core but one (the UI thread spins while it waits for them), at most 16.
         // ?threads=N overrides it (1 runs every parallel step on one worker; useful to compare).

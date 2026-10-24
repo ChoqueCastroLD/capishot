@@ -100,7 +100,19 @@ cp -R "$STAGE/." "$OUT/"
 # streaming compilation: a third of the bytes to upload and download, and far below the 25 MiB
 # per-file cap of Cloudflare Workers/Pages that the raw module (about 25 MB) is close to.
 raw=$(wc -c <"$OUT/photocraft_bg.wasm" | tr -d ' ')
-gzip -9 -n "$OUT/photocraft_bg.wasm"
+# The glue's snippet imports (the worker helper, recovery storage, watchdog) get a content version
+# too, cached forever like the glue (_headers): every worker of the pool imports them, and each
+# had to revalidate them over the network before the app could start (several round trips on a
+# phone). The import object's keys (the wasm's import module names) stay as they are.
+snip=$( (find "$OUT/snippets" -name '*.js' -type f | LC_ALL=C sort | xargs cat; cat "$OUT/photocraft_bg.wasm") | sha256sum | cut -c1-16)
+sed -i -E "/^import /s#(['\"]\./snippets/[^'\"]+\.js)(['\"])#\1?v=$snip\2#" "$OUT/photocraft.js"
+# pigz -11 is zopfli on every core: still plain gzip for every browser, about 4% (0.4 MB) less to
+# download than gzip -9, in a few seconds.
+if command -v pigz >/dev/null; then
+  pigz -11 -n "$OUT/photocraft_bg.wasm"
+else
+  gzip -9 -n "$OUT/photocraft_bg.wasm"
+fi
 # The page loads the glue and the wasm with ?v=<content hash>, so both can be cached forever.
 version=$(cat "$OUT/photocraft.js" "$OUT/photocraft_bg.wasm.gz" | sha256sum | cut -c1-16)
 sed -e "s/__PHOTOCRAFT_VERSION__/$version/g" -e "s|__PHOTOCRAFT_FALLBACK__|$FALLBACK|g" "$HERE/index.html" >"$OUT/index.html"

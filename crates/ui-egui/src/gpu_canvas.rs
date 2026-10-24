@@ -870,6 +870,12 @@ impl GpuCanvas {
         out
     }
 
+    /// Whether everything in `visible` is current at full size (no reduced or deferred region
+    /// left there): what the view shows is sharp.
+    pub fn sharp_in(&self, key: u64, visible: photocraft_geom::Rect) -> bool {
+        self.with_doc(key, |_, d| d.stale().needed(visible, 0).is_empty()).unwrap_or(true)
+    }
+
     /// The finest mip level current everywhere in `visible` (0: all of it), for
     /// [`ViewParams::min_lod`]. Deferred regions (nothing current) don't count: the view
     /// catches up on them before it draws.
@@ -1228,6 +1234,8 @@ pub struct Perf {
     pub gpu: bool,
     /// Layer tiles uploaded by the last GPU composite.
     pub gpu_uploads: u64,
+    /// The GPU canvas shows the view at full size everywhere (nothing reduced or deferred in it).
+    pub gpu_sharp: bool,
     /// Why the last refresh fell back to the CPU compositor (None = GPU composited).
     pub gpu_fallback: Option<String>,
     /// Adapter, backend, driver and fallback state (Help › System Info).
@@ -1538,6 +1546,19 @@ pub const REFINE_WORK: u64 = 2 << 20;
 pub const REFINE_DELAY_MS: f64 = 120.0;
 
 static REDUCED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+static GESTURE_HOLD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Turn off (or back on, the default) keeping the canvas's levels during two-finger gestures
+/// (`canvas::ensure_gpu`): measurements compare both in one build (the web app's `?gesturehold=0`).
+pub fn set_gesture_hold(on: bool) {
+    GESTURE_HOLD.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether [`set_gesture_hold`] left it on.
+pub fn gesture_hold() -> bool {
+    GESTURE_HOLD.load(std::sync::atomic::Ordering::Relaxed)
+}
 
 /// Turn pass fusion and level-of-detail / deferred refreshes off (or back on, the default):
 /// measurements compare both in one build (the web app's `?gpuopt=0`).

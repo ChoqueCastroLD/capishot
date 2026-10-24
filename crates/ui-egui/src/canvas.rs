@@ -1671,6 +1671,13 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, level: u32, c
     gpu.set_translated(crate::move_ui::gpu_translations(app, idx));
     let cache = app.canvases.entry((id, GPU_OUTPUT)).or_insert(CanvasCache { scale: 1.0, ..Default::default() });
     let present = cache.on_gpu && gpu.has(id.0, size);
+    // Two fingers on the glass (touch_nav): the view keeps the levels it has while they pinch or
+    // pan, a little softer when zoomed in past them, and the canvas composites nothing a finer
+    // level would need until they lift. Compositing the view at full size mid-pinch (on a phone
+    // GPU, the whole page's layers) stalled the gesture for whole frames; it now happens on the
+    // first frame after, then the full-size refinement as usual.
+    let gesture = crate::gpu_canvas::gesture_hold() && ctx.input(|i| i.multi_touch().is_some_and(|m| m.num_touches >= 2));
+    let level = if gesture && present { level.max(gpu.view_floor(id.0, visible) as u32) } else { level };
     let need = crate::gpu_canvas::ViewNeed { visible, level };
 
     if present && cache.revision == revision && cache.preview_key == preview_key {
@@ -1686,7 +1693,8 @@ fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, level: u32, c
         }
         // Regions composited reduced or left for later: what the view shows now, then (once the
         // edits pause) the rest at full size, a piece per frame.
-        let c = gpu.catch_up(id.0, &doc, display.as_deref(), need, true, ctx);
+        let c = gpu.catch_up(id.0, &doc, display.as_deref(), need, !gesture, ctx);
+        app.perf.gpu_sharp = gpu.sharp_in(id.0, visible);
         if c.px > 0 {
             app.perf.record(if c.refined { "gpu-refine" } else { "gpu-catch-up" }, c.px, c.composite_ms, 0.0);
         }
