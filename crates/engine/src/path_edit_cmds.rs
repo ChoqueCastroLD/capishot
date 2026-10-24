@@ -9,6 +9,7 @@
 //! live shape) or a layer's vector mask. Knots are addressed by `subpath` and `knot` index, as
 //! listed by `path.info`, and the result is `{name, path}` in the compact JSON form.
 
+use photocraft_doc::vector::Subpath;
 use photocraft_doc::{LayerContent, Path};
 use photocraft_geom::Point;
 use photocraft_vector::edit::{self, Handle};
@@ -16,7 +17,7 @@ use serde_json::{Value, json};
 
 use crate::commands::CommandSpec;
 use crate::vector_cmds::{bad, has_doc, layer_id, nums, path_json, path_mut, pt, with_shape};
-use crate::{Result, Session};
+use crate::{EngineError, Result, Session};
 
 /// Coordinates and offsets beyond this are mistakes (the same bound as `path.transform`).
 const MAX: f64 = 1_000_000.0;
@@ -50,6 +51,31 @@ fn edit_path(s: &mut Session, cmd: &str, p: &Value, label: &str, f: impl FnOnce(
     let name = p.get("name").and_then(Value::as_str).unwrap_or("work").to_owned();
     let layer = if name == "layer" { Some(layer_id(s, p)?) } else { None };
     let shape = layer.filter(|id| s.active().and_then(|d| d.doc.layer(*id)).is_some_and(|l| matches!(l.content, LayerContent::Shape(_))));
+    // Type in a path: its path (text space) is edited in document space, and the lines re-wrap.
+    let in_path = layer.filter(|id| {
+        s.active().and_then(|d| d.doc.layer(*id)).is_some_and(|l| matches!(&l.content, LayerContent::Text(t) if matches!(t.shape, photocraft_doc::text::TextShape::InPath { .. })))
+    });
+    if let Some(id) = in_path {
+        let path = s.edit(label, |doc, _| {
+            let Some(LayerContent::Text(mut t)) = doc.layer(id).map(|l| l.content.clone()) else { return Err(EngineError::NoLayer(id)) };
+            let photocraft_doc::text::TextShape::InPath { path: sub } = &t.shape else { return Err(EngineError::NoLayer(id)) };
+            let inverse = t.transform.inverse().ok_or_else(|| bad(cmd, "the type layer's transform cannot be inverted"))?;
+            let mut doc_path = Path { subpaths: vec![Subpath { knots: sub.knots.iter().map(|k| k.transform(&t.transform)).collect(), ..sub.clone() }], ..Default::default() };
+            f(&mut doc_path).map_err(|e| bad(cmd, e))?;
+            let edited = doc_path.subpaths.first().cloned().ok_or_else(|| bad(cmd, "the type's path can't be removed"))?;
+            if !edited.closed || edited.knots.len() < 3 {
+                return Err(bad(cmd, "type in a path needs a closed path with at least three anchor points"));
+            }
+            let json = path_json(&doc_path);
+            t.shape = photocraft_doc::text::TextShape::InPath { path: Subpath { knots: edited.knots.iter().map(|k| k.transform(&inverse)).collect(), ..edited } };
+            crate::type_cmds::refresh(doc, &mut t);
+            if let Some(l) = doc.layer_mut(id) {
+                l.content = LayerContent::Text(t);
+            }
+            Ok(json)
+        })?;
+        return Ok(json!({ "name": name, "path": path }));
+    }
     let path = match shape {
         Some(id) => with_shape(s, id, label, |sh, _| {
             f(&mut sh.path).map_err(|e| bad(cmd, e))?;

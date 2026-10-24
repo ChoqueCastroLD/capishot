@@ -4308,3 +4308,5 @@ curves	Smooth	スムーズ
 # Background exports (jobs_ui::produce_files)
 	Exporting {name}	{name} を書き出し中
 	Compiling {name}	{name} をコンパイル中
+# Type options bar
+	Toggle the Character and Paragraph panels	文字パネルと段落パネルの表示/非表示

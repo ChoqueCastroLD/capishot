@@ -834,6 +834,17 @@ pub(crate) fn active_shape_path(app: &PhotocraftApp) -> Option<(u64, Path)> {
     }
 }
 
+/// The active type layer's path when its type is in a path, in document space: Direct Selection
+/// edits it and the lines re-wrap.
+pub(crate) fn active_type_path(app: &PhotocraftApp) -> Option<(u64, Path)> {
+    let st = app.session.active()?;
+    let l = st.active_layer.and_then(|id| st.doc.layer(id))?;
+    let LayerContent::Text(t) = &l.content else { return None };
+    let photocraft_doc::text::TextShape::InPath { path } = &t.shape else { return None };
+    let sub = photocraft_doc::vector::Subpath { knots: path.knots.iter().map(|k| k.transform(&t.transform)).collect(), ..path.clone() };
+    Some((l.id.0, Path { subpaths: vec![sub], ..Default::default() }))
+}
+
 /// Does ⌫ / Delete delete the work path? With the Pen, Freeform Pen or Path Selection tool, no
 /// path being drawn and the work path the one these tools show and edit (no shape layer or
 /// targeted vector mask in front of it), as in Photoshop (#5702). It was drawn whenever one of

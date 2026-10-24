@@ -3274,3 +3274,5 @@ curves	Smooth	平滑
 # Background exports (jobs_ui::produce_files)
 	Exporting {name}	正在导出 {name}
 	Compiling {name}	正在编译 {name}
+# Type options bar
+	Toggle the Character and Paragraph panels	切换字符和段落面板

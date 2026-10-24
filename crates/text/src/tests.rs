@@ -2446,3 +2446,29 @@ fn a_word_wider_than_the_paragraph_box_breaks_at_the_box_edge() {
     assert_eq!(l.lines.len(), 2, "{:?}", l.lines);
     assert_eq!(l.lines[1].range.start, 3, "{:?}", l.lines);
 }
+
+/// Type in an ellipse (a speech balloon): every line fits inside the ellipse across its band, the
+/// lines are narrower at the top and bottom than in the middle, and centred text sits on the
+/// ellipse's axis.
+#[test]
+fn type_in_an_ellipse_wraps_narrower_at_the_top_and_bottom() {
+    let mut e = TextEngine::new();
+    let ellipse = crate::area::tests_ellipse(200.0, 150.0, 160.0, 110.0);
+    let area = crate::area::Area::new(&ellipse).unwrap();
+    let text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.";
+    let layer = TextLayer { text: text.into(), font_family: "Inter".into(), size_pt: 14.0, shape: TextShape::InPath { path: ellipse }, ..Default::default() };
+    let layer = with_para(layer, ParagraphStyle { align: TextAlign::Center, ..Default::default() });
+    let l = e.layout(&layer, 72.0);
+    assert!(l.lines.len() >= 5, "{} lines", l.lines.len());
+    let widths: Vec<f32> = l.lines.iter().map(|ln| ln.x1 - ln.x0).collect();
+    for ln in &l.lines {
+        let (left, right) = area.span(ln.baseline - ln.ascent * 0.8, ln.baseline + ln.descent * 0.8).expect("the line's band is inside the ellipse");
+        assert!(ln.x0 >= left - 1.0 && ln.x1 <= right + 1.0, "line {:?} outside {left}..{right}", (ln.x0, ln.x1));
+        // Centred on the ellipse's vertical axis.
+        assert!(((ln.x0 + ln.x1) / 2.0 - 200.0).abs() < 6.0, "{:?}", (ln.x0, ln.x1));
+    }
+    let widest = widths.iter().copied().fold(0.0f32, f32::max);
+    assert!(widths[0] < widest * 0.8 && widths[widths.len() - 1] < widest * 0.9, "{widths:?}");
+    // The lines stay inside the ellipse's height; what doesn't fit is overflow.
+    assert!(l.lines.iter().all(|ln| ln.baseline <= 260.0 && ln.baseline >= 40.0));
+}

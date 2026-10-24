@@ -4790,3 +4790,5 @@ navigator	Zoom	Zoom
 # Background exports (jobs_ui::produce_files)
 	Exporting {name}	Exportando {name}
 	Compiling {name}	Compilando {name}
+# Type options bar
+	Toggle the Character and Paragraph panels	Mostrar u ocultar los paneles Carácter y Párrafo

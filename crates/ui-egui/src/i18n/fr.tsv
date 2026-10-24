@@ -3645,3 +3645,5 @@ curves	Smooth	Lisser
 # Background exports (jobs_ui::produce_files)
 	Exporting {name}	Exportation de {name}
 	Compiling {name}	Compilation de {name}
+# Type options bar
+	Toggle the Character and Paragraph panels	Afficher/masquer les panneaux Caractère et Paragraphe

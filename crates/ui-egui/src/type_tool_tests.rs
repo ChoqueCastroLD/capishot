@@ -2185,3 +2185,37 @@ fn justify_buttons_are_greyed_on_point_text() {
     h.run_steps(4);
     assert!(h.get_by_label("Justify all").accesskit_node().is_disabled(), "one of the formatted layers is point text");
 }
+
+/// A Type tool click inside a closed work path makes type in the path (Photoshop's area type in
+/// a shape); a click outside it makes point text. The options bar's Character/Paragraph button
+/// shows the panel group, then hides it.
+#[test]
+fn a_click_inside_a_closed_path_makes_type_in_the_path() {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+    let ctx = egui::Context::default();
+    app.run("file.new", json!({"width": 400, "height": 300})).unwrap();
+    app.run("select.rect", json!({"x": 50, "y": 50, "width": 300, "height": 200, "ellipse": true})).unwrap();
+    app.run("select.toWorkPath", json!({"tolerance": 1.0})).unwrap();
+    app.run("select.deselect", json!({})).unwrap();
+    app.ui.tool = crate::state::Tool::Type;
+    assert!(super::in_path_at(&app, 200.0, 150.0).is_some());
+    assert!(super::in_path_at(&app, 10.0, 10.0).is_none());
+    super::pointer_up(&mut app, [200.0, 150.0], [200.0, 150.0]);
+    let st = app.session.active().unwrap();
+    let id = LayerId(app.ui.text_edit.as_ref().unwrap().layer);
+    let t = text_layer(&st.doc, id).unwrap();
+    assert!(matches!(t.shape, photocraft_doc::text::TextShape::InPath { .. }), "{:?}", t.shape);
+    // A click inside the path while editing places the caret instead of committing.
+    assert!(super::inside_box(&mut app, id, 120.0, 150.0));
+    super::commit(&mut app);
+    super::pointer_up(&mut app, [10.0, 290.0], [10.0, 290.0]);
+    let id = LayerId(app.ui.text_edit.as_ref().unwrap().layer);
+    let st = app.session.active().unwrap();
+    assert!(matches!(text_layer(&st.doc, id).unwrap().shape, photocraft_doc::text::TextShape::Point));
+    super::commit(&mut app);
+    let was = app.ui.panels.character;
+    super::toggle_type_panels(&mut app, &ctx);
+    assert_ne!(app.ui.panels.character, was);
+    super::toggle_type_panels(&mut app, &ctx);
+    assert_eq!(app.ui.panels.character, was);
+}

@@ -4234,3 +4234,5 @@ curves	Smooth	Wygładź
 # Background exports (jobs_ui::produce_files)
 	Exporting {name}	Eksportowanie {name}
 	Compiling {name}	Kompilowanie {name}
+# Type options bar
+	Toggle the Character and Paragraph panels	Pokaż/ukryj panele Znak i Akapit

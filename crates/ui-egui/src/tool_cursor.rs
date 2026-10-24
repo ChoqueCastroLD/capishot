@@ -88,6 +88,23 @@ pub(crate) fn close_path(painter: &Painter, at: Pos2) -> CursorIcon {
     outline(painter, at, vec![close_ring()], true)
 }
 
+/// The Type tool over a closed path (type in a path): Photoshop's I-beam inside a dotted ring.
+pub(crate) fn type_in_path(painter: &Painter, at: Pos2) -> CursorIcon {
+    // The dotted ring: eight short dashes, each a thin quad (a two-point ring doesn't paint, and
+    // a folded-back sliver paints miter spikes).
+    let at_r = |a: f32, r: f32| vec2(a.cos() * r, a.sin() * r);
+    let mut rings: Vec<Vec<Vec2>> = (0..8)
+        .map(|i| {
+            let (a0, a1) = (i as f32 / 8.0 * std::f32::consts::TAU, (i as f32 + 0.45) / 8.0 * std::f32::consts::TAU);
+            vec![at_r(a0, 10.25), at_r(a1, 10.25), at_r(a1, 9.75), at_r(a0, 9.75)]
+        })
+        .collect();
+    // The I-beam: stem and serifs as thin rectangles.
+    let bar = |x0: f32, y0: f32, x1: f32, y1: f32| vec![vec2(x0, y0), vec2(x1, y0), vec2(x1, y1), vec2(x0, y1)];
+    rings.extend([bar(-0.25, -6.0, 0.25, 6.0), bar(-3.0, -6.25, 3.0, -5.75), bar(-3.0, 5.75, 3.0, 6.25)]);
+    outline(painter, at, rings, false)
+}
+
 fn close_ring() -> Vec<Vec2> {
     (0..16).map(|i| (i as f32 / 16.0 * std::f32::consts::TAU, vec2(9.0, 9.0))).map(|(a, c)| c + vec2(a.cos(), a.sin()) * 3.5).collect()
 }

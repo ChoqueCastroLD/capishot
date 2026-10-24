@@ -3243,3 +3243,5 @@ fontWeight	Italic	Itálico
 # Background exports (jobs_ui::produce_files)
 	Exporting {name}	A exportar {name}
 	Compiling {name}	A compilar {name}
+# Type options bar
+	Toggle the Character and Paragraph panels	Mostrar ou ocultar os painéis Carácter e Parágrafo
