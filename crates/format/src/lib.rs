@@ -43,7 +43,7 @@ use photocraft_raster::Rgba8Image;
 
 pub use atomic::{atomic_write, atomic_write_progress};
 pub use autosave::{
-    AutosaveCompletion, Autosaver, ObjectAutosaver, ObjectCheckpoint, RecoveryEntry, RecoveryInfo, discard_recovery, object_checkpoint_info,
+    AutosaveCompletion, Autosaver, HistoryLimits, ObjectAutosaver, ObjectCheckpoint, RecoveryEntry, RecoveryInfo, discard_recovery, object_checkpoint_info,
     recover_object_checkpoint, list_recovery, list_recovery_checked, recover, recover_checkpoint,
     recover_checkpoint_with_context,
 };

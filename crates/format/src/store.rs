@@ -476,12 +476,21 @@ pub(crate) struct Prepared {
     stats: SaveStats,
 }
 
+#[derive(Clone)]
 pub(crate) enum Object {
     Tile(Arc<Tile>, SampleType),
     Blob(Arc<Vec<u8>>),
 }
 
 impl Object {
+    /// Bytes stored before compression (what holding the object costs at most).
+    pub(crate) fn raw_len(&self) -> u64 {
+        match self {
+            Object::Tile(tile, sample) => tile_le(tile, *sample).len() as u64,
+            Object::Blob(blob) => blob.len() as u64,
+        }
+    }
+
     pub(crate) fn compressed(&self) -> Vec<u8> {
         compress(&self.content())
     }

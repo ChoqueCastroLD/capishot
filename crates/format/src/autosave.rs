@@ -1,7 +1,7 @@
 //! Durable document/history checkpoints and bounded background autosave.
 //! A sidecar is the single atomic publication point. Immutable objects are
 //! shared across checkpoints; a failed save never replaces that descriptor.
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError, Weak, mpsc};
@@ -754,20 +754,58 @@ pub struct ObjectCheckpoint {
     pub live: Vec<String>,
 }
 
-/// Encodes recovery checkpoints of one document as [`ObjectCheckpoint`]s: the current state, no
-/// undo history (the browser keeps its storage small). Objects stored by an earlier checkpoint
-/// ([`Self::committed`]) aren't encoded again, so a checkpoint after a small edit writes a few
-/// tiles and the descriptor.
+/// How much undo history an [`ObjectCheckpoint`] keeps: the newest `max_states` steps (redo
+/// steps count too) whose own objects (tiles and blobs the current state doesn't hold) take at
+/// most `max_bytes` compressed. Older steps are left out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HistoryLimits {
+    pub max_states: usize,
+    pub max_bytes: u64,
+}
+
+impl HistoryLimits {
+    /// No history: the current state only.
+    pub const NONE: Self = Self { max_states: 0, max_bytes: 0 };
+}
+
+/// One history step as encoded for a checkpoint, kept for the next one (steps don't change).
+struct EncodedState {
+    stored: StoredState,
+    /// The objects its manifest names (handles to the step's own tiles and blobs).
+    objects: BTreeMap<String, store::Object>,
+}
+
+/// Encodes recovery checkpoints of one document as [`ObjectCheckpoint`]s: the current state and
+/// the newest undo steps within [`HistoryLimits`] (the browser keeps its storage small).
+/// Objects stored by an earlier checkpoint ([`Self::committed`]) aren't encoded again, so a
+/// checkpoint after a small edit writes a few tiles and the descriptor; a history step encoded
+/// once is reused by id.
 #[derive(Default)]
 pub struct ObjectAutosaver {
     writer: PcraftWriter,
     stored: std::collections::HashSet<String>,
+    /// History steps encoded by an earlier checkpoint, by [`HistoryState::source_key`].
+    states: HashMap<(u64, usize), EncodedState>,
 }
 
 impl ObjectAutosaver {
     /// The checkpoint of `doc` described by `info` (its key, name, time and revision) and the
-    /// view `context`.
+    /// view `context`, without history.
     pub fn checkpoint(&mut self, doc: &Document, info: RecoveryInfo, context: serde_json::Value) -> Result<ObjectCheckpoint> {
+        self.checkpoint_with_history(doc, None, HistoryLimits::NONE, info, context)
+    }
+
+    /// [`Self::checkpoint`] keeping the newest steps of `history` within `limits`, so Undo works
+    /// in the recovered document. A step costs the bytes of the objects the current state and
+    /// the newer steps kept don't already hold (uncompressed, so the cap is conservative).
+    pub fn checkpoint_with_history(
+        &mut self,
+        doc: &Document,
+        history: Option<&HistoryCheckpoint>,
+        limits: HistoryLimits,
+        info: RecoveryInfo,
+        context: serde_json::Value,
+    ) -> Result<ObjectCheckpoint> {
         if !safe_key(&info.key) {
             return Err(FormatError::corrupt("unsafe recovery key"));
         }
@@ -775,23 +813,62 @@ impl ObjectAutosaver {
             return Err(FormatError::LimitExceeded("recovery context exceeds 64 KiB".into()));
         }
         let prepared = self.writer.prepare(doc, &SaveOptions::default())?;
-        if prepared.manifest.len() as u64 > MAX_DESCRIPTOR
-            || prepared.decoded_bytes > LoadOptions::default().max_total_bytes
-            || prepared.objects.values().any(|object| matches!(object, store::Object::Blob(blob) if blob.len() > LoadOptions::default().max_blob_bytes))
-        {
+        let restorable = |p: &store::Prepared| {
+            p.manifest.len() as u64 <= MAX_DESCRIPTOR
+                && p.decoded_bytes <= LoadOptions::default().max_total_bytes
+                && !p.objects.values().any(|object| matches!(object, store::Object::Blob(blob) if blob.len() > LoadOptions::default().max_blob_bytes))
+        };
+        if !restorable(&prepared) {
             return Err(FormatError::LimitExceeded("recovery state exceeds restore limits".into()));
         }
-        let live: Vec<String> = prepared.objects.keys().cloned().collect();
-        let objects = prepared.objects.iter().filter(|(name, _)| !self.stored.contains(*name)).map(|(name, object)| (name.clone(), object.compressed())).collect();
         let current = String::from_utf8(prepared.manifest).map_err(|_| FormatError::corrupt("invalid UTF-8 manifest"))?;
-        let history = History::default().checkpoint();
+        let mut all: BTreeMap<String, store::Object> = prepared.objects;
+        // History: newest undo steps first, then the nearest redo steps, while the limits allow.
+        let empty = History::default().checkpoint();
+        let history = history.unwrap_or(&empty);
+        let (mut undo, mut redo) = (Vec::new(), Vec::new());
+        let mut spent = 0u64;
+        let mut keep = std::collections::HashSet::new();
+        let steps = history.undo.iter().rev().map(|s| (true, s)).chain(history.redo.iter().rev().map(|s| (false, s)));
+        for (is_undo, state) in steps.take(limits.max_states) {
+            if !self.states.contains_key(&state.source_key()) {
+                let Ok(d) = state.load_document() else { break };
+                let p = self.writer.prepare(&d, &SaveOptions::default())?;
+                if !restorable(&p) {
+                    break;
+                }
+                let manifest = String::from_utf8(p.manifest).map_err(|_| FormatError::corrupt("invalid UTF-8 manifest"))?;
+                let stored = StoredState { label: state.label.clone(), has_selection: state.has_selection(), manifest, layers: state.layers.clone().into() };
+                self.states.insert(state.source_key(), EncodedState { stored, objects: p.objects });
+            }
+            let e = &self.states[&state.source_key()];
+            let cost: u64 = e.objects.iter().filter(|(n, _)| !all.contains_key(*n)).map(|(_, o)| o.raw_len()).sum();
+            if spent.saturating_add(cost) > limits.max_bytes {
+                break;
+            }
+            spent += cost;
+            for (n, o) in &e.objects {
+                all.entry(n.clone()).or_insert_with(|| o.clone());
+            }
+            keep.insert(state.source_key());
+            if is_undo {
+                undo.push(e.stored.clone());
+            } else {
+                redo.push(e.stored.clone());
+            }
+        }
+        self.states.retain(|id, _| keep.contains(id));
+        undo.reverse();
+        redo.reverse();
+        let live: Vec<String> = all.keys().cloned().collect();
+        let objects = all.iter().filter(|(name, _)| !self.stored.contains(*name)).map(|(name, object)| (name.clone(), object.compressed())).collect();
         let checkpoint = Checkpoint {
             version: 1,
             current,
-            undo: Vec::new(),
-            redo: Vec::new(),
-            current_label: history.current_label,
-            current_layers: history.current_layers.into(),
+            undo,
+            redo,
+            current_label: history.current_label.clone(),
+            current_layers: history.current_layers.clone().into(),
             max_states: history.max_states,
             max_bytes: history.max_bytes,
         };
@@ -830,9 +907,38 @@ pub fn object_checkpoint_info(descriptor: &[u8]) -> Result<RecoveryInfo> {
     Ok(head.info)
 }
 
+/// A stored [`ObjectCheckpoint`]'s manifest over its objects in memory.
+struct MemorySource {
+    manifest: String,
+    objects: Arc<HashMap<String, Vec<u8>>>,
+}
+
+impl ByteSource for MemorySource {
+    fn get(&self, path: &str, max: usize) -> Result<Vec<u8>> {
+        let bytes = if path == store::MANIFEST { self.manifest.as_bytes() } else { self.objects.get(path).ok_or_else(|| FormatError::corrupt(format!("missing `{path}`")))? };
+        if bytes.len() > max {
+            return Err(FormatError::LimitExceeded(format!("`{path}` exceeds its size limit")));
+        }
+        Ok(bytes.to_vec())
+    }
+}
+
+impl std::fmt::Debug for MemorySource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MemorySource").field("objects", &self.objects.len()).finish()
+    }
+}
+
+/// A recovered history step: decoded from memory when Undo reaches it.
+impl ArchivedDocument for MemorySource {
+    fn load(&self) -> std::result::Result<Arc<Document>, String> {
+        store::load(self, &LoadOptions::default()).map(Arc::new).map_err(|e| e.to_string())
+    }
+}
+
 /// Loads the document of a stored [`ObjectCheckpoint`] from its descriptor and its objects (by
-/// name), with its history and view context.
-pub fn recover_object_checkpoint(descriptor: &[u8], objects: &HashMap<String, Vec<u8>>) -> Result<(Document, HistoryCheckpoint, serde_json::Value)> {
+/// name), with its history (the steps decoded lazily from `objects`) and view context.
+pub fn recover_object_checkpoint(descriptor: &[u8], objects: Arc<HashMap<String, Vec<u8>>>) -> Result<(Document, HistoryCheckpoint, serde_json::Value)> {
     if descriptor.len() as u64 > MAX_DESCRIPTOR {
         return Err(FormatError::LimitExceeded("recovery descriptor too large".into()));
     }
@@ -847,21 +953,33 @@ pub fn recover_object_checkpoint(descriptor: &[u8], objects: &HashMap<String, Ve
     if checkpoint.version != 1 {
         return Err(FormatError::Unsupported("newer recovery checkpoint version".into()));
     }
-    struct Memory<'a> {
-        manifest: String,
-        objects: &'a HashMap<String, Vec<u8>>,
+    if checkpoint.undo.len().saturating_add(checkpoint.redo.len()) > 10_000 {
+        return Err(FormatError::LimitExceeded("too many recovery history states".into()));
     }
-    impl ByteSource for Memory<'_> {
-        fn get(&self, path: &str, max: usize) -> Result<Vec<u8>> {
-            let bytes = if path == store::MANIFEST { self.manifest.as_bytes() } else { self.objects.get(path).ok_or_else(|| FormatError::corrupt(format!("missing `{path}`")))? };
-            if bytes.len() > max {
-                return Err(FormatError::LimitExceeded(format!("`{path}` exceeds its size limit")));
-            }
-            Ok(bytes.to_vec())
-        }
-    }
-    let doc = store::load(&Memory { manifest: checkpoint.current, objects }, &LoadOptions::default())?;
-    Ok((doc, History::default().checkpoint(), descriptor.context))
+    let doc = store::load(&MemorySource { manifest: checkpoint.current, objects: objects.clone() }, &LoadOptions::default())?;
+    let restore = |states: Vec<StoredState>| -> Result<Vec<HistoryState>> {
+        states
+            .into_iter()
+            .map(|state| {
+                let source = MemorySource { manifest: state.manifest, objects: objects.clone() };
+                // Validate the manifest now; its objects are read when Undo reaches the step.
+                store::read_manifest(&source, &LoadOptions::default())?;
+                let mut restored = HistoryState::from_archive(state.label, state.has_selection, Arc::new(source));
+                restored.layers = state.layers.into();
+                Ok(restored)
+            })
+            .collect()
+    };
+    let history = HistoryCheckpoint {
+        undo: restore(checkpoint.undo)?,
+        redo: restore(checkpoint.redo)?,
+        current_label: checkpoint.current_label,
+        current_layers: checkpoint.current_layers.into(),
+        max_states: checkpoint.max_states,
+        max_bytes: checkpoint.max_bytes,
+    };
+    History::from_checkpoint(history.clone()).map_err(FormatError::corrupt)?;
+    Ok((doc, history, descriptor.context))
 }
 
 #[cfg(test)]
@@ -894,7 +1012,7 @@ mod object_tests {
         let mut store: HashMap<String, Vec<u8>> = first.objects.into_iter().collect();
         saver.committed(first.live);
         assert_eq!(object_checkpoint_info(&first.descriptor).unwrap(), info("web-a-1", 3));
-        let (back, history, context) = recover_object_checkpoint(&first.descriptor, &store).unwrap();
+        let (back, history, context) = recover_object_checkpoint(&first.descriptor, Arc::new(store.clone())).unwrap();
         assert_eq!(back.layers.len(), 2);
         assert_eq!(back.layers[0].surface().unwrap().pixel(20, 20), d.layers[0].surface().unwrap().pixel(20, 20));
         assert!(history.undo.is_empty());
@@ -905,11 +1023,78 @@ mod object_tests {
         assert_eq!(second.objects.len(), 1, "{:?}", second.objects.iter().map(|o| &o.0).collect::<Vec<_>>());
         store.extend(second.objects);
         store.retain(|name, _| second.live.contains(name));
-        let (back, _, _) = recover_object_checkpoint(&second.descriptor, &store).unwrap();
+        let (back, _, _) = recover_object_checkpoint(&second.descriptor, Arc::new(store.clone())).unwrap();
         assert_eq!(back.layers[0].surface().unwrap().pixel(1, 1), d.layers[0].surface().unwrap().pixel(1, 1));
         // A missing object is an error, not a blank layer.
         store.clear();
-        assert!(recover_object_checkpoint(&second.descriptor, &store).is_err());
+        assert!(recover_object_checkpoint(&second.descriptor, Arc::new(store.clone())).is_err());
+    }
+
+    /// Undo history survives a checkpoint: the newest steps within the step and byte limits,
+    /// each step restored lazily and undoable; a later checkpoint reuses steps encoded before.
+    #[test]
+    fn object_checkpoints_keep_the_newest_undo_steps_within_limits() {
+        use photocraft_ops::{History, LayerTarget};
+        let mut history = History::new(50);
+        let mut page = Document::new("Page 1", Size::new(512, 512), ColorMode::Rgb, SampleType::U8);
+        page.layers.push(Layer::raster("ink", page.pixel_format()));
+        page.layers.push(Layer::raster("dabs", page.pixel_format()));
+        let mut d = Arc::new(page);
+        // 30 edits, each a dab in its own tile: every step owns one tile the others don't.
+        for i in 0..30 {
+            let before = d.clone();
+            let mut next = (*d).clone();
+            let x = (i % 8) * 64;
+            let y = (i / 8) * 64;
+            next.layers[1].surface_mut().unwrap().fill_rect(photocraft_geom::Rect::new(x, y, x + 8, y + 8), &[1.0, 0.0, 0.0, 1.0]);
+            d = Arc::new(next);
+            history.record(format!("Dab {i}"), before, LayerTarget::default());
+        }
+        let mut saver = ObjectAutosaver::default();
+        let limits = HistoryLimits { max_states: 20, max_bytes: 150 << 20 };
+        let cp = saver.checkpoint_with_history(&d, Some(&history.checkpoint()), limits, info("web-h-1", 30), serde_json::Value::Null).unwrap();
+        let store: HashMap<String, Vec<u8>> = cp.objects.iter().cloned().collect();
+        assert_eq!(store.len(), cp.live.len());
+        let (back, h, _) = recover_object_checkpoint(&cp.descriptor, Arc::new(store)).unwrap();
+        assert_eq!(h.undo.len(), 20, "the newest 20 steps");
+        // A step is labelled with the edit that made it current: the newest is before Dab 29.
+        assert_eq!(h.undo.last().unwrap().label, "Dab 28");
+        assert_eq!(h.undo.first().unwrap().label, "Dab 9");
+        // Undo works in the recovered document: each step brings back the pixels before it.
+        let mut restored = History::from_checkpoint(h).unwrap();
+        let mut cur = Arc::new(back);
+        let (prev, _) = restored.try_undo(cur.clone()).unwrap().unwrap();
+        let (x, y) = ((29 % 8) * 64, (29 / 8) * 64);
+        assert_eq!(cur.layers[1].surface().unwrap().pixel(x + 1, y + 1)[0], 1.0);
+        assert_eq!(prev.layers[1].surface().unwrap().pixel(x + 1, y + 1)[3], 0.0, "undone dab gone");
+        cur = prev;
+        for _ in 0..19 {
+            cur = restored.try_undo(cur.clone()).unwrap().unwrap().0;
+        }
+        assert!(restored.try_undo(cur).unwrap().is_none(), "only the kept steps");
+        // A byte cap keeps fewer steps: each step owns one RGBA8 storage tile.
+        let tile = (photocraft_geom::TILE_SIZE * photocraft_geom::TILE_SIZE * 4) as u64;
+        let small = HistoryLimits { max_states: 20, max_bytes: 5 * tile + tile / 2 };
+        let mut s2 = ObjectAutosaver::default();
+        let cp = s2.checkpoint_with_history(&d, Some(&history.checkpoint()), small, info("web-h-2", 30), serde_json::Value::Null).unwrap();
+        let (_, h, _) = recover_object_checkpoint(&cp.descriptor, Arc::new(cp.objects.iter().cloned().collect())).unwrap();
+        assert!((1..20).contains(&h.undo.len()), "{}", h.undo.len());
+        // The next checkpoint after one more edit encodes only the new step and the new tile.
+        saver.committed(cp_live(&d, &history, limits));
+        let before = d.clone();
+        let mut next = (*d).clone();
+        next.layers[0].surface_mut().unwrap().fill_rect(photocraft_geom::Rect::new(250, 150, 260, 160), &[0.0, 1.0, 0.0, 1.0]);
+        d = Arc::new(next);
+        history.record("Dab 30", before, LayerTarget::default());
+        let cp = saver.checkpoint_with_history(&d, Some(&history.checkpoint()), limits, info("web-h-1", 31), serde_json::Value::Null).unwrap();
+        assert!(cp.objects.len() <= 2, "{:?}", cp.objects.iter().map(|o| &o.0).collect::<Vec<_>>());
+    }
+
+    /// What a checkpoint of `d` with `history` names (objects are named by content, so any
+    /// saver's names match; to mark them stored).
+    fn cp_live(d: &Document, history: &photocraft_ops::History, limits: HistoryLimits) -> Vec<String> {
+        let mut probe = ObjectAutosaver::default();
+        probe.checkpoint_with_history(d, Some(&history.checkpoint()), limits, info("web-h-9", 1), serde_json::Value::Null).unwrap().live
     }
 
     #[test]

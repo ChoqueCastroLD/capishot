@@ -33,6 +33,8 @@ photocraft-doc = { workspace = true }
 photocraft-ui-egui = { workspace = true }
 photocraft-compose = { workspace = true }
 photocraft-raster = { workspace = true }
+# Recovery checkpoints keep the undo history (src/recovery.rs).
+photocraft-ops = { workspace = true }
 # Image › Upscale with AI: the upscaler seam the AI worker bridge implements (no inference here).
 photocraft-ai = { workspace = true }
 # Edit › Clean with AI: the Inpainter seam (tiling half only; the model runs in the AI worker).

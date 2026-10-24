@@ -55,6 +55,21 @@ impl HistoryState {
     pub fn has_selection(&self) -> bool {
         self.has_selection
     }
+
+    /// Stable id within its [`History`] (never reused there).
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// Identity of the stored document (its allocation): with [`Self::id`], tells a step a
+    /// recovery writer encoded before from another History's step of the same id.
+    pub fn source_key(&self) -> (u64, usize) {
+        let ptr = match &self.document {
+            StoredDocument::Resident(doc) => Arc::as_ptr(doc) as *const () as usize,
+            StoredDocument::Archived(source) => Arc::as_ptr(source) as *const () as usize,
+        };
+        (self.id, ptr)
+    }
 }
 
 /// Immutable handles and navigation metadata captured alongside the current
