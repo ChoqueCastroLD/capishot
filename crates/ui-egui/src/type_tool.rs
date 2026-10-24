@@ -260,6 +260,13 @@ fn resize_box(app: &mut PhotocraftApp, ed: &TextEdit, i: u8, x: f64, y: f64) {
 /// True when document point (`x`, `y`) lies inside the paragraph box of type layer `id` (false
 /// for point text).
 pub(crate) fn inside_box(app: &mut PhotocraftApp, id: LayerId, x: f64, y: f64) -> bool {
+    // Type in a path: anywhere inside the path.
+    let area = app.session.active().and_then(|s| text_layer(&s.doc, id)).and_then(|t| photocraft_text::area::Area::of(&t.shape));
+    if let Some(area) = area {
+        let Some((_, aff, _)) = layout(app, id) else { return false };
+        let (tx, ty) = to_text(&aff, x, y);
+        return area.span(ty, ty).is_some_and(|(l, r)| (l..=r).contains(&tx));
+    }
     let Some((bx, by, w, h)) = box_shape(app, id) else { return false };
     let Some((_, aff, _)) = layout(app, id) else { return false };
     let (tx, ty) = to_text(&aff, x, y);
@@ -457,6 +464,29 @@ pub fn pointer_move(app: &mut PhotocraftApp, x: f64, y: f64) {
 }
 
 /// Pointer up. `rect` is the dragged box (document px) when no edit session consumed the press.
+/// The closed path a Type tool click at (`x`, `y`) would put type in (Photoshop's area type in a
+/// shape): a closed subpath of the work path, or of the active shape layer, that contains the
+/// point. As `type.create`'s `inPath` source.
+pub(crate) fn in_path_at(app: &PhotocraftApp, x: f64, y: f64) -> Option<serde_json::Value> {
+    if app.ui.tool.is_vertical_type() {
+        return None;
+    }
+    let st = app.session.active()?;
+    let inside = |path: &photocraft_doc::vector::Path| {
+        path.subpaths.iter().position(|sp| {
+            sp.closed && sp.knots.len() >= 3 && photocraft_text::area::Area::new(sp).is_some_and(|a| a.span(y as f32, y as f32).is_some_and(|(l, r)| (l..=r).contains(&(x as f32))))
+        })
+    };
+    if let Some(i) = st.doc.work_path.as_ref().and_then(inside) {
+        return Some(json!({"subpath": i}));
+    }
+    let id = st.active_layer?;
+    match &st.doc.layer(id)?.content {
+        photocraft_doc::LayerContent::Shape(sh) => inside(&sh.path).map(|i| json!({"shape": id.0, "subpath": i})),
+        _ => None,
+    }
+}
+
 pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
     if let Some(e) = app.ui.text_edit.as_mut() {
         e.dragging = false;
@@ -482,6 +512,9 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
     });
     if w >= min && h >= min {
         p["box"] = json!([start[0].min(end[0]).round(), start[1].min(end[1]).round(), w.round(), h.round()]);
+    } else if let Some(src) = in_path_at(app, start[0], start[1]) {
+        // A click inside a closed path: type in the path, as in Photoshop.
+        p["inPath"] = src;
     } else {
         p["x"] = json!(start[0].round());
         p["y"] = json!(start[1].round());
@@ -1285,6 +1318,34 @@ pub fn draw_overlay(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewX
                     painter.rect_filled(r, 0.0, Color32::WHITE);
                     painter.rect_stroke(r, 0.0, frame, egui::StrokeKind::Inside);
                 }
+            }
+        }
+        // Type in a path: the path is the frame; text that doesn't fit shows Photoshop's overflow
+        // mark (a + in a small box) at the bottom right of the path's bounds.
+        Some(photocraft_doc::text::TextShape::InPath { path }) => {
+            let closed = photocraft_doc::vector::Subpath { closed: true, ..path.clone() };
+            let mut pts: Vec<Pos2> = Vec::new();
+            for [p0, c1, c2, p1] in closed.segments() {
+                for i in 0..16 {
+                    let t = i as f64 / 16.0;
+                    let u = 1.0 - t;
+                    let f = |a: f64, b: f64, c: f64, d: f64| u * u * u * a + 3.0 * u * u * t * b + 3.0 * u * t * t * c + t * t * t * d;
+                    pts.push(scr_t(f(p0.x, c1.x, c2.x, p1.x) as f32, f(p0.y, c1.y, c2.y, p1.y) as f32));
+                }
+            }
+            if pts.len() >= 3 {
+                painter.add(egui::Shape::closed_line(pts, frame));
+            }
+            let shown = l.clusters.iter().map(|c| c.range.end).max().unwrap_or(0);
+            if shown < text.trim_end().len()
+                && let Some(a) = photocraft_text::area::Area::new(&path)
+            {
+                let c = scr_t(a.bounds[2], a.bounds[3]);
+                let r = egui::Rect::from_center_size(c, egui::vec2(9.0, 9.0));
+                painter.rect_filled(r, 0.0, Color32::WHITE);
+                painter.rect_stroke(r, 0.0, frame, egui::StrokeKind::Inside);
+                painter.line_segment([r.center() - egui::vec2(3.0, 0.0), r.center() + egui::vec2(3.0, 0.0)], frame);
+                painter.line_segment([r.center() - egui::vec2(0.0, 3.0), r.center() + egui::vec2(0.0, 3.0)], frame);
             }
         }
         _ => {
@@ -2098,6 +2159,19 @@ pub fn foreground_changed(app: &mut PhotocraftApp) {
 }
 
 /// Photoshop's Type options bar.
+/// The options bar's Character/Paragraph button: hides the Character | Paragraph group when it
+/// shows, else opens it on the Character panel (`window.panel.character`).
+pub(crate) fn toggle_type_panels(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    if app.ui.panels.character {
+        app.ui.panels.character = false;
+        return;
+    }
+    if let Err(e) = crate::menus::invoke(app, ctx, "window.panel.character", json!({})) {
+        app.ui.status = e;
+        app.ui.status_error = true;
+    }
+}
+
 pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = crate::theme::Tokens::get(ui.ctx());
     // Show the target layer's (first-run) style, else the tool defaults.
@@ -2196,6 +2270,11 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Set the text color")));
     if resp.clicked() {
         open_color_picker(app, [c[0], c[1], c[2]]);
+    }
+    // Photoshop's button at the end of the bar: shows or hides the Character and Paragraph panels.
+    let shown = app.ui.panels.character;
+    if crate::icons::button(ui, "panels-top-left", 24.0, shown, tl!("Toggle the Character and Paragraph panels")).clicked() {
+        toggle_type_panels(app, ui.ctx());
     }
     if app.ui.text_edit.is_some() {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

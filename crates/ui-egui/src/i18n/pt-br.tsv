@@ -4618,3 +4618,5 @@ layerLabel	No Color	Sem cor
 # Background exports (jobs_ui::produce_files)
 	Exporting {name}	Exportando {name}
 	Compiling {name}	Compilando {name}
+# Type options bar
+	Toggle the Character and Paragraph panels	Mostrar ou ocultar os painéis Caractere e Parágrafo

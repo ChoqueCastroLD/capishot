@@ -259,7 +259,7 @@ pub fn apply_txt2_frame(layer: &mut TextLayer, tysh: &[u8], txt2: &E) {
             let p = arr_f(frame.get("0"));
             if p.len() == 2 && p.iter().all(|v| v.is_finite()) { Affine::translate(p[0], p[1]) } else { Affine::IDENTITY }
         }
-        TextShape::Box { .. } => Affine::IDENTITY,
+        TextShape::Box { .. } | TextShape::InPath { .. } => Affine::IDENTITY,
     };
     let to_text = matrix.mul(&at);
     if to_text == Affine::IDENTITY || to_text.determinant().abs() <= 1e-9 {
@@ -272,7 +272,7 @@ pub fn apply_txt2_frame(layer: &mut TextLayer, tysh: &[u8], txt2: &E) {
     // again would move it twice.
     let origin = match layer.shape {
         TextShape::Point | TextShape::Path { .. } => Point::new(0.0, 0.0),
-        TextShape::Box { .. } => {
+        TextShape::Box { .. } | TextShape::InPath { .. } => {
             let b = engine_data(&t.text)
                 .map(|e| {
                     arr_f(
@@ -1081,7 +1081,7 @@ pub const MAX_TEXT_INDEX: i32 = 0xFFFF;
 /// Writing Photoshop's empty `<< /0 << >> >>` stub anyway makes some readers (Photopea) fail
 /// (#3514); the export omits the block for such a document.
 pub fn needs_txt2(objects: &[(i32, &TextLayer)]) -> bool {
-    objects.iter().any(|(_, l)| l.char_runs().iter().any(|r| r.style.kerning == Kerning::Optical))
+    objects.iter().any(|(_, l)| matches!(l.shape, TextShape::InPath { .. }) || l.char_runs().iter().any(|r| r.style.kerning == Kerning::Optical))
 }
 
 /// The document's `Txt2` block for `objects`: `(TextIndex, layer)` pairs, one text object each
@@ -1182,6 +1182,26 @@ pub fn build_txt2_at(objects: &[(i32, &TextLayer)], previous: Option<&[u8]>, dpi
     // `/1` whatever it holds beside the text objects.
     let mut outer = prev.clone().unwrap_or_else(|| E::Dict(vec![("98".into(), E::Dict(vec![("0".into(), E::Int(14))])), ("0".into(), E::dict())]));
     pad_frames(&mut outer, slots.len());
+    // Type in a path: the text object's frame is the path (Photoshop's text in a shape: a frame
+    // of type 1 whose Bézier is the shape, in the text space of the `TySh` BoxBounds).
+    for (index, layer) in objects {
+        let TextShape::InPath { path } = &layer.shape else { continue };
+        let Ok(at) = usize::try_from(*index) else { continue };
+        if !(0..=MAX_TEXT_INDEX).contains(index) {
+            continue;
+        }
+        set_path_frame(&mut outer, at, path);
+        // The object's view names its frame, as Photoshop writes it.
+        if let Some(object) = slots.get_mut(at)
+            && !names_one_frame(object)
+        {
+            let view = E::Dict(vec![("0".into(), E::Array(vec![E::Dict(vec![("0".into(), E::Int(at as i64))])]))]);
+            match object.get_mut("1") {
+                Some(v @ E::Dict(_)) => v.set("0", view.get("0").cloned().unwrap_or_else(|| E::Array(Vec::new()))),
+                _ => object.set("1", view),
+            }
+        }
+    }
     if fonts.len() != fonts_before
         && let Some(list @ E::Dict(_)) = outer.get_mut("0").and_then(|v| v.get_mut("1"))
     {
@@ -1265,6 +1285,87 @@ fn is_stub(object: &E) -> bool {
 /// false >> >> >> >>`), never copies of a file's frame: the slot count reaches
 /// [`MAX_TEXT_INDEX`], and a large frame copied that often would blow up the save. A block
 /// without a frame list is left as it is.
+/// Frame `at` of `outer`'s frame list (`/0 /8 /0`) made the closed `path`: Bézier points as
+/// Photoshop lists them, four per segment (`p0 c1 c2 p1`), and frame data of type 1 with an
+/// identity frame matrix.
+fn set_path_frame(outer: &mut E, at: usize, path: &photocraft_doc::vector::Subpath) {
+    // A block without a frame list (a new document's) gets one, stub frames up to `at`.
+    if !matches!(outer.get("0"), Some(E::Dict(_))) {
+        outer.set("0", E::dict());
+    }
+    let Some(doc @ E::Dict(_)) = outer.get_mut("0") else { return };
+    if !matches!(doc.path(&["8", "0"]), Some(E::Array(_))) {
+        doc.set("8", E::Dict(vec![("0".into(), E::Array(Vec::new()))]));
+    }
+    pad_frames(outer, at + 1);
+    let Some(E::Array(frames)) = outer.get_mut("0").and_then(|v| v.get_mut("8")).and_then(|v| v.get_mut("0")) else { return };
+    let Some(frame) = frames.get_mut(at) else { return };
+    let closed = photocraft_doc::vector::Subpath { closed: true, ..path.clone() };
+    let points: Vec<E> = closed.segments().iter().flat_map(|seg| seg.iter().flat_map(|p| [real(p.x as f32), real(p.y as f32)])).collect();
+    let data = E::Dict(vec![
+        ("0".into(), E::Int(1)),
+        ("1".into(), E::Int(0)),
+        ("2".into(), E::Array([1.0, 0.0, 0.0, 1.0, 0.0, 0.0].into_iter().map(real).collect())),
+        ("6".into(), E::Array(vec![E::Real(-1.0), E::Real(-1.0)])),
+        ("11".into(), E::Dict(vec![("4".into(), E::Int(-1)), ("18".into(), E::Real(-1.0))])),
+    ]);
+    let resource = E::Dict(vec![("1".into(), E::Dict(vec![("0".into(), E::Array(points))])), ("2".into(), data)]);
+    *frame = E::Dict(vec![("0".into(), resource)]);
+}
+
+/// Reads type in a path back (see [`set_path_frame`]): box text whose `Txt2` frame is a Bézier
+/// of type 1 other than its box becomes [`TextShape::InPath`], the path in the box's text space.
+/// Only when the layer's `TextIndex` entry still holds the layer's text, as for [`apply_txt2`].
+pub fn apply_txt2_path(layer: &mut TextLayer, tysh: &[u8], txt2: &E) {
+    let TextShape::Box { x, y, width, height } = layer.shape else { return };
+    let Some(t) = parse_tysh(tysh) else { return };
+    let Some(index) = (match t.text.get("TextIndex") {
+        Some(D::Integer(i)) => usize::try_from(*i).ok(),
+        _ => None,
+    }) else {
+        return;
+    };
+    let Some(object) = txt2.path(&["1", "1"]).and_then(E::as_array).and_then(|a| a.get(index)) else { return };
+    let text = object.path(&["0", "0"]).and_then(E::as_str);
+    if text.is_none_or(|t| t.strip_suffix('\r').unwrap_or(t).replace('\r', "\n") != layer.text) {
+        return;
+    }
+    let frame_index = object
+        .path(&["1", "0"])
+        .and_then(E::as_array)
+        .and_then(|f| f.first())
+        .and_then(|f| f.get("0"))
+        .and_then(E::as_i64)
+        .and_then(|i| usize::try_from(i).ok())
+        .unwrap_or(index);
+    let Some(resource) = txt2.path(&["0", "8", "0"]).and_then(E::as_array).and_then(|f| f.get(frame_index)).and_then(|f| f.get("0")) else { return };
+    if resource.path(&["2", "0"]).and_then(E::as_i64) != Some(1) {
+        return;
+    }
+    let pts = arr_f(resource.path(&["1", "0"]));
+    if pts.len() < 8 * 3 || !pts.len().is_multiple_of(8) || pts.len() > 8 * 4096 || pts.iter().any(|v| !v.is_finite()) {
+        return;
+    }
+    let p = |i: usize| photocraft_geom::Point::new(pts[2 * i], pts[2 * i + 1]);
+    let segments = pts.len() / 8;
+    let knots: Vec<photocraft_doc::vector::Knot> = (0..segments)
+        .map(|i| {
+            let prev = (i + segments - 1) % segments;
+            photocraft_doc::vector::Knot { anchor: p(4 * i), out_ctrl: p(4 * i + 1), in_ctrl: p(4 * prev + 2), smooth: false }
+        })
+        .collect();
+    // A rectangle on the box is plain paragraph text.
+    let corners = [(x, y), (x + width, y), (x + width, y + height), (x, y + height)];
+    let on_box = knots.iter().all(|k| {
+        let near = |a: f64, b: f32| (a - f64::from(b)).abs() < 0.01;
+        corners.iter().any(|(cx, cy)| near(k.anchor.x, *cx) && near(k.anchor.y, *cy)) && k.in_ctrl == k.anchor && k.out_ctrl == k.anchor
+    });
+    if on_box && knots.len() == 4 {
+        return;
+    }
+    layer.shape = TextShape::InPath { path: photocraft_doc::vector::Subpath { closed: true, knots, op: Default::default() } };
+}
+
 fn pad_frames(outer: &mut E, count: usize) {
     let Some(E::Array(frames)) = outer.get_mut("0").and_then(|v| v.get_mut("8")).and_then(|v| v.get_mut("0")) else { return };
     let count = count.min(MAX_TEXT_INDEX as usize + 1);
@@ -1524,6 +1625,12 @@ pub fn build_engine_data(layer: &TextLayer, template: Option<E>, dpi: f32) -> E 
         // PSD path type is not written yet: the layer saves as point text.
         TextShape::Point | TextShape::Path { .. } => (0, None),
         TextShape::Box { x, y, width, height } => (1, Some([x, y, x + width, y + height])),
+        // Type in a path is paragraph text in the path's bounds; the path itself is the text
+        // object's frame in `Txt2` (`build_txt2_at`).
+        TextShape::InPath { .. } => match crate::area::Area::of(&layer.shape) {
+            Some(a) => (1, Some(a.bounds)),
+            None => (0, None),
+        },
     };
     let mut photoshop = E::Dict(vec![("ShapeType".into(), E::Int(shape_type))]);
     match box_bounds {

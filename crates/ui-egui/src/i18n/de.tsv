@@ -3643,3 +3643,5 @@ curves	Smooth	Glätten
 # Background exports (jobs_ui::produce_files)
 	Exporting {name}	{name} wird exportiert
 	Compiling {name}	{name} wird kompiliert
+# Type options bar
+	Toggle the Character and Paragraph panels	Zeichen- und Absatzbedienfeld ein-/ausblenden

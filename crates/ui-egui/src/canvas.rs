@@ -4311,6 +4311,15 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                 Tool::Hand => crate::tool_cursor::hand(ui.ctx(), false),
                 Tool::RotateView => crate::rotate_view::cursor(response.dragged()),
                 Tool::Zoom => crate::tool_cursor::zoom(ui.ctx(), zoom_out(alt)),
+                // Over a closed path, the type-in-path pointer: a click puts the type inside it.
+                Tool::Type | Tool::HorizontalTypeMask
+                    if app.ui.text_edit.is_none() && {
+                        let [x, y] = xf.to_doc(p);
+                        crate::type_tool::in_path_at(app, x, y).is_some()
+                    } =>
+                {
+                    crate::tool_cursor::type_in_path(&painter, p)
+                }
                 Tool::Type | Tool::VerticalType | Tool::HorizontalTypeMask | Tool::VerticalTypeMask => egui::CursorIcon::Text,
                 Tool::MagneticLasso => crate::magnetic_lasso_ui::cursor(app, &painter, p, xf.zoom),
                 Tool::RedEye => {

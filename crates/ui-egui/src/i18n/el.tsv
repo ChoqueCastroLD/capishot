@@ -4327,3 +4327,5 @@ curves	Smooth	Εξομάλυνση
 # Background exports (jobs_ui::produce_files)
 	Exporting {name}	Εξαγωγή {name}
 	Compiling {name}	Μεταγλώττιση {name}
+# Type options bar
+	Toggle the Character and Paragraph panels	Εμφάνιση/απόκρυψη των πλαισίων Χαρακτήρας και Παράγραφος

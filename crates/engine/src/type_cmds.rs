@@ -823,6 +823,34 @@ pub(crate) fn new_text_layer(s: &Session, p: &Value, cmd: &str) -> Result<TextLa
     style.color = Color::rgba(fg[0], fg[1], fg[2], fg[3]);
     apply_char_props(&mut style, p);
     apply_para_props(&mut para, p);
+    // Type in a path: the closed work path (or `"shape"` layer's path) holds the lines.
+    let in_path = match p.get("inPath") {
+        None | Some(Value::Null) | Some(Value::Bool(false)) => None,
+        Some(Value::Bool(true)) => Some(p.clone()),
+        Some(v @ Value::Object(_)) => Some(v.clone()),
+        Some(_) => return Err(bad(cmd, "\"inPath\" must be true or {\"shape\":layerId?,\"subpath\":n?}")),
+    };
+    if let Some(src) = in_path {
+        let doc = &s.active().ok_or(EngineError::NoDocument)?.doc;
+        let path = crate::type_extra_cmds::path_source(doc, &src)?;
+        if !path.closed || path.knots.len() < 3 {
+            return Err(bad(cmd, "type in a path needs a closed path with at least three anchor points"));
+        }
+        if photocraft_text::area::Area::new(&path).is_none() {
+            return Err(bad(cmd, "the path encloses no area"));
+        }
+        let mut t = TextLayer {
+            runs: vec![TextRun { len: text.len(), style }],
+            paragraphs: vec![ParagraphRun { len: text.len(), style: para }],
+            text,
+            shape: TextShape::InPath { path: photocraft_doc::vector::Subpath { op: Default::default(), ..path } },
+            transform: Affine::IDENTITY,
+            orientation,
+            ..Default::default()
+        };
+        t.sync_summary();
+        return Ok(t);
+    }
     let (shape, transform) = match p.get("box").and_then(Value::as_array) {
         Some(b) if b.len() == 4 => {
             let v: Vec<f32> = b.iter().map(|x| x.as_f64().unwrap_or(0.0) as f32).collect();
@@ -846,6 +874,27 @@ pub(crate) fn new_text_layer(s: &Session, p: &Value, cmd: &str) -> Result<TextLa
     Ok(t)
 }
 
+/// `type.create` (and `type.createInPath`).
+fn create_type(s: &mut Session, p: &Value) -> Result<Value> {
+    let mut t = new_text_layer(s, p, "type.create")?;
+    let name = p.get("name").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| layer_name(&t.text));
+    let id = s.edit("New Type Layer", |doc, active| {
+        refresh(doc, &mut t);
+        let id = doc.insert_above(*active, Layer::new(name, LayerContent::Text(t)));
+        *active = Some(id);
+        Ok(id)
+    })?;
+    let bounds = s.active().and_then(|d| d.doc.layer(id)).and_then(|l| l.surface()).map(|c| c.content_bounds());
+    let mut out = json!({ "layer": id.0, "bounds": bounds.map(|r| [r.x0, r.y0, r.x1, r.y1]) });
+    if let Some(LayerContent::Text(t)) = s.active().and_then(|d| d.doc.layer(id)).map(|l| &l.content) {
+        let warnings = crate::type_extra_cmds::missing_font_warnings_for_layer(t);
+        if !warnings.is_empty() {
+            out["warnings"] = json!(warnings);
+        }
+    }
+    Ok(out)
+}
+
 const CHAR_PARAMS: &str = r##""font":str,"fontStyle":str,"weight":100..900,"italic":bool,"size":0.1..=1296 pt,"color":"#rrggbb"|[r,g,b,a],"tracking":-1000..=10000 (1/1000 em),"leading":pt|"auto","baselineShift":pt,"horizontalScale":%,"verticalScale":%,"underline":bool,"strikethrough":bool,"fauxBold":bool,"fauxItalic":bool,"kerning":1/1000em (manual, after each character)|"metrics"|"optical"|"off","caps":"normal|small|all","baseline":"normal|superscript|subscript","ligatures":bool,"discretionaryLigatures":bool,"features":{"ss01":1},"variations":{"wght":650},"language":str"##;
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -855,27 +904,25 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "New Type Layer",
             menu: &["Layer", "New"],
             shortcut: None,
-            params: r##"{"x":px,"y":px (baseline anchor of point text),"text":str,"box":[x,y,w,h]? (paragraph text),"name":str?,"align":"left|center|right|justify…"?,"orientation":"horizontal|vertical"="horizontal", …character keys: "font","size":pt=12,"color",…}"##,
+            params: r##"{"x":px,"y":px (baseline anchor of point text),"text":str,"box":[x,y,w,h]? (paragraph text),"inPath":true|{"shape":layerId?,"subpath":n?}? (type in a path: lines wrap inside the closed work path, or the shape layer's path),"name":str?,"align":"left|center|right|justify…"?,"orientation":"horizontal|vertical"="horizontal", …character keys: "font","size":pt=12,"color",…}"##,
+            enabled: has_doc,
+            journal: true,
+            run: create_type,
+        },
+        CommandSpec {
+            id: "type.createInPath",
+            label: "New Type in Path",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"shape":layerId? (default: the work path),"subpath":n?=0,"text":str,"align":"left|center|right|justify…"?, …character keys} — type.create with "inPath": the lines wrap inside the closed path, each as wide as the path across its band"##,
             enabled: has_doc,
             journal: true,
             run: |s, p| {
-                let mut t = new_text_layer(s, p, "type.create")?;
-                let name = p.get("name").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| layer_name(&t.text));
-                let id = s.edit("New Type Layer", |doc, active| {
-                    refresh(doc, &mut t);
-                    let id = doc.insert_above(*active, Layer::new(name, LayerContent::Text(t)));
-                    *active = Some(id);
-                    Ok(id)
-                })?;
-                let bounds = s.active().and_then(|d| d.doc.layer(id)).and_then(|l| l.surface()).map(|c| c.content_bounds());
-                let mut out = json!({ "layer": id.0, "bounds": bounds.map(|r| [r.x0, r.y0, r.x1, r.y1]) });
-                if let Some(LayerContent::Text(t)) = s.active().and_then(|d| d.doc.layer(id)).map(|l| &l.content) {
-                    let warnings = crate::type_extra_cmds::missing_font_warnings_for_layer(t);
-                    if !warnings.is_empty() {
-                        out["warnings"] = json!(warnings);
-                    }
+                let mut q = p.clone();
+                if let Value::Object(m) = &mut q {
+                    m.insert("inPath".into(), json!({"shape": p.get("shape").cloned().unwrap_or(Value::Null), "subpath": p.get("subpath").cloned().unwrap_or(Value::Null)}));
                 }
-                Ok(out)
+                create_type(s, &q)
             },
         },
         CommandSpec {
@@ -1139,6 +1186,57 @@ fn step_size(s: &mut Session, p: &Value, up: bool, default_by: f32) -> Result<Va
 
 #[cfg(test)]
 mod tests {
+
+    /// Type in a path from an elliptical work path: a type layer whose lines wrap inside the
+    /// ellipse (narrower near its top and bottom), rendered, kept through a PSD save as Photoshop's
+    /// text in a shape, and back as type in a path.
+    #[test]
+    fn type_in_an_elliptical_path_wraps_inside_it_and_round_trips_through_psd() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 400, "height": 300})).unwrap();
+        s.execute("select.rect", json!({"x": 40, "y": 40, "width": 320, "height": 220, "ellipse": true})).unwrap();
+        s.execute("select.toWorkPath", json!({"tolerance": 1.0})).unwrap();
+        s.execute("select.deselect", json!({})).unwrap();
+        let text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
+        let r = s.execute("type.createInPath", json!({"text": text, "size": 16, "align": "center"})).unwrap();
+        let id = LayerId(r["layer"].as_u64().unwrap());
+        let doc = s.active().unwrap().doc.clone();
+        let l = doc.layer(id).unwrap();
+        let LayerContent::Text(t) = &l.content else { panic!("not a type layer") };
+        assert!(matches!(t.shape, TextShape::InPath { .. }), "{:?}", t.shape);
+        let bounds = l.surface().unwrap().content_bounds();
+        assert!(!bounds.is_empty() && bounds.x0 >= 40 && bounds.x1 <= 360 && bounds.y0 >= 40 && bounds.y1 <= 262, "{bounds:?}");
+        let layout = photocraft_text::shared().lock().unwrap().layout(t, 72.0);
+        let widths: Vec<f32> = layout.lines.iter().map(|l| l.x1 - l.x0).collect();
+        let widest = widths.iter().copied().fold(0.0f32, f32::max);
+        assert!(widths.len() >= 3 && widths[0] < widest && widths[widths.len() - 1] < widest, "{widths:?}");
+        // PSD: text in a shape, back as type in a path with the same anchors.
+        let out = photocraft_io::export(&doc, "x.psd", &Default::default()).unwrap();
+        let back = photocraft_io::import("x.psd", &out.bytes).unwrap().document;
+        let bt = back.walk().into_iter().find_map(|(_, _, l)| match &l.content {
+            LayerContent::Text(t) => Some(t.clone()),
+            _ => None,
+        });
+        let (Some(TextShape::InPath { path: a }), TextShape::InPath { path: b }) = (bt.map(|t| t.shape), &t.shape) else { panic!("not type in a path after the round trip") };
+        assert_eq!(a.knots.len(), b.knots.len());
+        for (ka, kb) in a.knots.iter().zip(&b.knots) {
+            assert!((ka.anchor.x - kb.anchor.x).abs() < 0.01 && (ka.anchor.y - kb.anchor.y).abs() < 0.01, "{ka:?} {kb:?}");
+        }
+        // psd-compiler renders the saved file (the stored type raster).
+        let c = photocraft_io::psdc::compile(&out.bytes, &Default::default()).unwrap();
+        let dark = c.rgba.as_chunks::<4>().0.iter().filter(|p| p[0] < 128).count();
+        assert!(dark > 200, "{dark} dark pixels");
+        // Direct Selection edits the path (in document space) and the lines re-wrap.
+        let before = s.active().unwrap().doc.layer(id).unwrap().surface().unwrap().content_bounds();
+        s.execute("path.moveAnchors", json!({"name": "layer", "layer": id.0, "anchors": [[0, 0], [0, 1]], "move": [-30, 0]})).unwrap();
+        let after_doc = s.active().unwrap().doc.clone();
+        let LayerContent::Text(moved) = &after_doc.layer(id).unwrap().content else { panic!() };
+        let TextShape::InPath { path: edited } = &moved.shape else { panic!("still type in a path") };
+        assert!((edited.knots[0].anchor.x - b.knots[0].anchor.x + 30.0).abs() < 0.01, "{:?}", edited.knots[0]);
+        assert_ne!(after_doc.layer(id).unwrap().surface().unwrap().content_bounds(), before, "re-rendered");
+        // Convert to Point Text works from type in a path.
+        s.execute("type.convertToPointText", json!({})).unwrap();
+    }
     use super::*;
 
     fn session() -> Session {

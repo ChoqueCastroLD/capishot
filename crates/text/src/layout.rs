@@ -527,8 +527,16 @@ impl Layouter {
         let para_style_at = |off: usize| &paras[para_starts.iter().rposition(|&s| s <= off).unwrap_or(0)].style;
 
         let text = &t.text;
-        let (box_rect, is_box) = match t.shape {
-            TextShape::Box { x, y, width, height } => ((x, y, width, height), true),
+        // Type in a path: paragraph text in the path's bounds, each line as wide as the path is
+        // across its band (`area`). Vertical type in a path wraps in the bounds.
+        let area = if vertical { None } else { crate::area::Area::of(&t.shape) };
+        let mut area_slots = area.as_ref().map(crate::area::Slots::new);
+        let (box_rect, is_box) = match &t.shape {
+            TextShape::Box { x, y, width, height } => ((*x, *y, *width, *height), true),
+            TextShape::InPath { .. } => match crate::area::Area::of(&t.shape) {
+                Some(a) => ((a.bounds[0], a.bounds[1], a.bounds[2] - a.bounds[0], a.bounds[3] - a.bounds[1]), true),
+                None => ((0.0, 0.0, 1.0, 1.0), true),
+            },
             // Path text is laid out as one point-text line, then bent onto the path.
             TextShape::Point | TextShape::Path { .. } => ((0.0, 0.0, 0.0, 0.0), false),
         };
@@ -708,8 +716,41 @@ impl Layouter {
             // settle, keep the safe layout.
             let wide = if is_box { tab_px } else { 0.0 };
             let mut layout = build(&mut self.lcx, &mut fonts.fcx, &vec![wide; tabs.len()]);
-            break_lines(&mut layout);
-            if is_box && !tabs.is_empty() {
+            // Type in a path: each line breaks at the width of the path across its band, the
+            // bands placed top to bottom a leading apart (`area::Slots`).
+            let mut line_slots: Vec<crate::area::Slot> = Vec::new();
+            if let (Some(area), Some(slots)) = (area.as_ref(), area_slots.as_mut()) {
+                let leading = first_style.leading_pt.map_or(ps.auto_leading * first_px, |l| l * k);
+                let (ascent, descent) = (first_px * 0.8, first_px * 0.25);
+                let extra = if slots.last.is_some() { pending_space + ps.space_before_pt * k } else { 0.0 };
+                let max = (area.bounds[2] - area.bounds[0]).max(1.0) / break_scale;
+                if first_indent != 0.0 {
+                    layout.set_text_indent(first_indent / break_scale, IndentOptions::default());
+                }
+                let mut breaker = layout.break_lines();
+                breaker.state_mut().set_layout_max_advance(max);
+                let mut first = true;
+                loop {
+                    let slot = slots.next(area, ascent, descent, leading, if first { extra } else { 0.0 }, (first_px * 1.5).min(max));
+                    first = false;
+                    let width = match slot {
+                        Some(slot) => {
+                            line_slots.push(slot);
+                            ((slot.width - indent_start - indent_end).max(1.0) / break_scale).min(max)
+                        }
+                        // Overflow: the rest breaks at the widest line; those lines aren't drawn.
+                        None => max,
+                    };
+                    breaker.state_mut().set_line_max_advance(width);
+                    if breaker.break_next().is_none() {
+                        break;
+                    }
+                }
+                breaker.finish();
+            } else {
+                break_lines(&mut layout);
+            }
+            if is_box && area.is_none() && !tabs.is_empty() {
                 let first = tab_widths(&layout, &tabs, &out.styles, indent_start, first_indent, tab_px);
                 let mut want: Vec<f32> = first.iter().map(|t| t.width).collect();
                 for _ in 0..4 {
@@ -727,7 +768,7 @@ impl Layouter {
             // Automatic hyphenation (paragraph text only, as in Photoshop): lines are re-broken
             // inside words; `hyphens` lists the lines that end in a drawn hyphen.
             let mut hyphens: Vec<HyphenBreak> = Vec::new();
-            if let (true, false, true, true, Some(avail)) = (is_box, vertical, ps.hyphenate, tabs.is_empty(), avail) {
+            if let (true, false, true, true, true, Some(avail)) = (is_box, vertical, ps.hyphenate, tabs.is_empty(), area.is_none(), avail) {
                 let guess = crate::hyphen::guess_language(content);
                 let styles = &out.styles;
                 let lang_at = |o: usize| -> Option<crate::hyphen::HyphLang> {
@@ -790,7 +831,14 @@ impl Layouter {
                 } else {
                     (first_px * 0.8, first_px * 0.2)
                 };
+                let slot = line_slots.get(li).copied();
+                if area.is_some() && slot.is_none() {
+                    // Type in a path: no band left for this line (overflow).
+                    stop = true;
+                    break;
+                }
                 let baseline = match prev_baseline {
+                    _ if slot.is_some() => slot.map_or(0.0, |s| s.baseline),
                     // The first column's right edge touches the box's right edge.
                     None if is_box && vertical => -(box_rect.0 + box_rect.2) + col_half,
                     // Photoshop's "first baseline: ascent": the top of the tallest ascender
@@ -805,7 +853,7 @@ impl Layouter {
                 // 91.3 pt box, the last baseline at 88). Requiring the descent to fit dropped
                 // that line.
                 let overflow = if vertical { baseline + descent > -box_rect.0 + 0.5 } else { baseline > box_rect.1 + box_rect.3 + 0.5 };
-                if is_box && overflow {
+                if is_box && area.is_none() && overflow {
                     stop = true;
                     break;
                 }
@@ -935,6 +983,11 @@ impl Layouter {
                     }
                 } else {
                     0.0
+                };
+                // Type in a path: this line's own left edge and width.
+                let (line_origin, avail) = match slot {
+                    Some(s) => (s.x, Some((s.width - indent_start - indent_end).max(1.0))),
+                    None => (line_origin, avail),
                 };
                 let dx = if is_box {
                     let base = line_origin + indent_start - kern_align;

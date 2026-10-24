@@ -3632,3 +3632,5 @@ curves	Smooth	Haluskan
 # Background exports (jobs_ui::produce_files)
 	Exporting {name}	Mengekspor {name}
 	Compiling {name}	Mengompilasi {name}
+# Type options bar
+	Toggle the Character and Paragraph panels	Tampilkan/sembunyikan panel Karakter dan Paragraf

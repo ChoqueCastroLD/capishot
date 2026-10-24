@@ -4740,3 +4740,5 @@ shape	Appearance	Aspetto
 # Background exports (jobs_ui::produce_files)
 	Exporting {name}	Esportazione di {name}
 	Compiling {name}	Compilazione di {name}
+# Type options bar
+	Toggle the Character and Paragraph panels	Mostra/nascondi i pannelli Carattere e Paragrafo

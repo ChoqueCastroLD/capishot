@@ -43,14 +43,14 @@ fn has_text(s: &Session) -> std::result::Result<(), String> {
 fn has_point_text(s: &Session) -> std::result::Result<(), String> {
     match active_text(s)?.shape {
         TextShape::Point => Ok(()),
-        TextShape::Box { .. } => Err("the type layer is already paragraph text".into()),
+        TextShape::Box { .. } | TextShape::InPath { .. } => Err("the type layer is already paragraph text".into()),
         TextShape::Path { .. } => Err("detach the type layer from its path first".into()),
     }
 }
 
 fn has_box_text(s: &Session) -> std::result::Result<(), String> {
     match active_text(s)?.shape {
-        TextShape::Box { .. } => Ok(()),
+        TextShape::Box { .. } | TextShape::InPath { .. } => Ok(()),
         TextShape::Point => Err("the type layer is already point text".into()),
         TextShape::Path { .. } => Err("the type layer is path text".into()),
     }
@@ -189,7 +189,15 @@ fn to_paragraph(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn to_point(s: &mut Session, p: &Value) -> Result<Value> {
     let r = with_text(s, p, "Convert to Point Text", |t, doc| {
-        let TextShape::Box { x, y, width, height } = t.shape else { return Err(EngineError::Other("already point text".into())) };
+        // Type in a path converts like box text in the path's bounds: each line keeps its break.
+        let (x, y, width, height) = match &t.shape {
+            TextShape::Box { x, y, width, height } => (*x, *y, *width, *height),
+            TextShape::InPath { .. } => {
+                let b = photocraft_text::area::Area::of(&t.shape).map_or([0.0; 4], |a| a.bounds);
+                (b[0], b[1], b[2] - b[0], b[3] - b[1])
+            }
+            _ => return Err(EngineError::Other("already point text".into())),
+        };
         let l = layout(doc, t);
         // Vertical type: columns run along the box height.
         let (x, width) = if l.vertical { (y, height) } else { (x, width) };
@@ -331,7 +339,7 @@ const MAX_TYPE_PATH_KNOTS: usize = 100_000;
 
 /// The subpath `type.attachToPath` follows, in document space: the work path (default) or a
 /// shape layer's path (`"shape":id`), subpath `"subpath"` (default 0).
-fn path_source(doc: &Document, p: &Value) -> Result<Subpath> {
+pub(crate) fn path_source(doc: &Document, p: &Value) -> Result<Subpath> {
     let bad = |m: &str| EngineError::BadParams { cmd: "type.attachToPath".into(), msg: m.into() };
     let path = match p.get("shape") {
         None | Some(Value::Null) => doc.work_path.as_ref().ok_or_else(|| bad("the document has no work path; draw a path or pass \"shape\":layerId"))?,

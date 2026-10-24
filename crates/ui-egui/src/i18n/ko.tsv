@@ -3823,3 +3823,5 @@ curves	Smooth	매끄럽게
 # Background exports (jobs_ui::produce_files)
 	Exporting {name}	{name} 내보내는 중
 	Compiling {name}	{name} 컴파일 중
+# Type options bar
+	Toggle the Character and Paragraph panels	문자 및 단락 패널 표시/숨기기

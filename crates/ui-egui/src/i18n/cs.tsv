@@ -4236,3 +4236,5 @@ navigator	Zoom	Zvětšení
 # Background exports (jobs_ui::produce_files)
 	Exporting {name}	Exportuje se {name}
 	Compiling {name}	Kompiluje se {name}
+# Type options bar
+	Toggle the Character and Paragraph panels	Zobrazit/skrýt panely Znaky a Odstavec

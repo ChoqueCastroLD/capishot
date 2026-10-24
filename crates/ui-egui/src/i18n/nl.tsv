@@ -4386,3 +4386,5 @@ curves	Smooth	Vloeiend maken
 # Background exports (jobs_ui::produce_files)
 	Exporting {name}	{name} exporteren
 	Compiling {name}	{name} compileren
+# Type options bar
+	Toggle the Character and Paragraph panels	Deelvensters Teken en Alinea tonen/verbergen

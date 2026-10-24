@@ -3612,3 +3612,5 @@ curves	Smooth	Сгладить
 # Background exports (jobs_ui::produce_files)
 	Exporting {name}	Экспорт {name}
 	Compiling {name}	Компиляция {name}
+# Type options bar
+	Toggle the Character and Paragraph panels	Показать/скрыть панели «Символ» и «Абзац»

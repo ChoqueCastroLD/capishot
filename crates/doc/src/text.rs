@@ -234,6 +234,17 @@ pub enum TextShape {
     /// curve. `start` is the arc-length offset (px) of the text origin along the path; `flip`
     /// puts the text on the other side of the path.
     Path { path: super::vector::Subpath, start: f32, flip: bool },
+    /// Type in a path (Photoshop's area type in a shape): paragraph text whose lines wrap inside
+    /// the closed `path` (text-space pixels, before the layer transform), each line as wide as the
+    /// path is across the band its glyphs fill.
+    InPath { path: super::vector::Subpath },
+}
+
+impl TextShape {
+    /// Paragraph text: wraps inside a box or a path.
+    pub fn is_paragraph(&self) -> bool {
+        matches!(self, TextShape::Box { .. } | TextShape::InPath { .. })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
