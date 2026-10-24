@@ -1562,6 +1562,7 @@ fn humanize(key: &str) -> String {
         "exrAcesCg" => return "Open color-less EXR as ACEScg".into(),
         "darkTheme" => return "Dark Theme".into(),
         "lightTheme" => return "Light Theme".into(),
+        "simpleUi" => return "Simple UI".into(),
         _ => {}
     }
     // These controls appear only for WebP, so reuse the existing translated labels.
@@ -2135,7 +2136,7 @@ fn ctx_take_pick(ui: &egui::Ui) -> Option<(String, String)> {
 /// by their own widgets; their stored values pass through untouched.
 fn field_visible(section: &str, obj: &Map<String, Value>, k: &str, query: &str) -> bool {
     let path = format!("{section}.{k}");
-    let drawn_elsewhere = (section == "interface" && matches!(k, "theme" | "appearanceMode" | "darkTheme" | "lightTheme" | "favoriteThemes"))
+    let drawn_elsewhere = (section == "interface" && matches!(k, "theme" | "appearanceMode" | "darkTheme" | "lightTheme" | "favoriteThemes" | "favorites"))
         // View › Rulers (⌘R) sets it, as in Photoshop.
         || path == "unitsAndRulers.showRulers"
         || (section == "performance" && matches!(k, "useGpu" | "gpuBackend" | "gpuAdapter" | "renderingMode" | "memoryUsageMb"))

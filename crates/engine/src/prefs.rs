@@ -89,6 +89,12 @@ impl PixelDensity {
 }
 
 choice!(
+    /// The simple interface (phones): a compact top bar, the canvas across the whole window,
+    /// floating bars of favorite and recent commands, and the Capi button for everything else.
+    /// `auto` turns it on when the window's shorter side is under 600 points.
+    SimpleUi { Auto = "auto", On = "on", Off = "off" } default Auto
+);
+choice!(
     /// Rendering policy, independent of the advanced graphics backend selection.
     /// CPU disables image acceleration; the native window may still need hardware graphics.
     RenderingMode { Auto = "auto", Gpu = "gpu", Cpu = "cpu" } default Auto
@@ -319,6 +325,11 @@ pub struct Interface {
     pub notification_auto_hide: bool,
     /// Seconds a notice stays on screen before it hides itself (Auto Hide Notifications).
     pub notification_duration_seconds: u32,
+    /// The simple interface for phones (Window › Simple UI).
+    pub simple_ui: SimpleUi,
+    /// The simple interface's favorites bar: tool names (`tool:Brush`) and command ids, in
+    /// order. Empty: a starter set of drawing and typesetting tools.
+    pub favorites: Vec<String>,
 }
 
 impl Default for Interface {
@@ -348,6 +359,8 @@ impl Default for Interface {
             show_file_name_in_title: true,
             notification_auto_hide: true,
             notification_duration_seconds: 6,
+            simple_ui: SimpleUi::Auto,
+            favorites: Vec::new(),
         }
     }
 }
@@ -1164,6 +1177,7 @@ pub fn choices(path: &str) -> Option<&'static [&'static str]> {
         "general.imageInterpolation" => Interpolation::NAMES,
         "interface.theme" => Theme::NAMES,
         "interface.appearanceMode" => AppearanceMode::NAMES,
+        "interface.simpleUi" => SimpleUi::NAMES,
         "interface.darkTheme" => DarkTheme::NAMES,
         "interface.lightTheme" => LightTheme::NAMES,
         "interface.canvasColor" => CanvasColor::NAMES,

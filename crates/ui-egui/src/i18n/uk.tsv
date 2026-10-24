@@ -4351,3 +4351,16 @@ curves	Smooth	Згладити
 	How far the text stays inside the path	Наскільки текст відступає від краю контуру
 	Inset 5% of the path's smaller side	Внутрішній відступ 5% меншої сторони контуру
 	All settings	Усі налаштування
+	Back	Назад
+	Brush size {px} px	Розмір пензля {px} пікс.
+	Capi: tools, panels and actions	Capi: інструменти, панелі та дії
+	Full interface	Повний інтерфейс
+	New document {w} × {h} px	Новий документ {w} × {h} пікс.
+	Open a document first	Спершу відкрийте документ
+	Quick action	Швидка дія
+	Rotate the canvas {deg}°	Повернути полотно на {deg}°
+	Set the foreground color to {hex}	Задати основний колір {hex}
+	Tap to use a tool; press and hold to add it to the favorites bar or take it out.	Торкніться, щоб вибрати інструмент; утримуйте, щоб додати його на панель вибраного або прибрати.
+	Zoom to {percent}%	Масштаб {percent}%
+	Simple UI	Простий інтерфейс
+	On	Увімк.

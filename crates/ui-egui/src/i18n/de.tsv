@@ -3651,3 +3651,16 @@ curves	Smooth	Glätten
 	How far the text stays inside the path	Wie weit der Text innerhalb des Pfads bleibt
 	Inset 5% of the path's smaller side	Innenabstand 5 % der kürzeren Seite des Pfads
 	All settings	Alle Einstellungen
+	Back	Zurück
+	Brush size {px} px	Pinselgröße {px} px
+	Capi: tools, panels and actions	Capi: Werkzeuge, Bedienfelder und Aktionen
+	Full interface	Volle Oberfläche
+	New document {w} × {h} px	Neues Dokument {w} × {h} px
+	Open a document first	Öffnen Sie zuerst ein Dokument
+	Quick action	Schnellaktion
+	Rotate the canvas {deg}°	Arbeitsfläche um {deg}° drehen
+	Set the foreground color to {hex}	Vordergrundfarbe auf {hex} setzen
+	Tap to use a tool; press and hold to add it to the favorites bar or take it out.	Tippen, um ein Werkzeug zu verwenden; gedrückt halten, um es zur Favoritenleiste hinzuzufügen oder daraus zu entfernen.
+	Zoom to {percent}%	Zoom auf {percent} %
+	Simple UI	Einfache Oberfläche
+	On	Ein

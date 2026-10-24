@@ -746,6 +746,8 @@ pub static CATALOG: &[(&[&str], &str, Option<&str>, &str)] = &[
     (&["Window", "Workspace"], "Keyboard Shortcuts…", Some("Cmd+Alt+Shift+K"), "edit.keyboardShortcuts"),
     (&["Window", "Workspace"], "Lock Workspace", None, "window.workspace.lockWorkspace"),
     (&["Window"], "---", None, "---"),
+    (&["Window"], "Simple UI", None, "view.simpleUi"),
+    (&["Window"], "---", None, "---"),
     (&["Window"], "Actions", Some("Alt+F9"), "window.panel.actions"),
     (&["Window"], "Adjustments", None, "window.panel.adjustments"),
     (&["Window"], "Brush Settings", Some("F5"), "window.panel.brushSettings"),

@@ -3282,3 +3282,16 @@ curves	Smooth	平滑
 	How far the text stays inside the path	文字与路径边缘保持的距离
 	Inset 5% of the path's smaller side	内边距为路径较短边的 5%
 	All settings	所有设置
+	Back	返回
+	Brush size {px} px	画笔大小 {px} 像素
+	Capi: tools, panels and actions	Capi：工具、面板和操作
+	Full interface	完整界面
+	New document {w} × {h} px	新建文档 {w} × {h} 像素
+	Open a document first	请先打开文档
+	Quick action	快捷操作
+	Rotate the canvas {deg}°	旋转画布 {deg}°
+	Set the foreground color to {hex}	将前景色设为 {hex}
+	Tap to use a tool; press and hold to add it to the favorites bar or take it out.	轻点使用工具；长按可将其加入或移出收藏栏。
+	Zoom to {percent}%	缩放至 {percent}%
+	Simple UI	简洁界面
+	On	开

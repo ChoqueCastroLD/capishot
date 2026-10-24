@@ -171,6 +171,8 @@ pub mod open_prompt;
 pub mod outline;
 pub mod paint_mouse;
 pub mod palette;
+pub mod palette_search;
+pub mod simple_ui;
 mod panel_docking;
 pub mod panels;
 pub mod parity;
@@ -723,6 +725,8 @@ pub struct PhotocraftApp {
     /// A live stroke dropped uncommitted (a second finger turned the touch into navigation): the
     /// caches that showed it refresh only where it drew (`canvas::damage_since`).
     dropped_stroke: Option<canvas::DroppedStroke>,
+    /// The simple interface is on this frame (`simple_ui::active`).
+    pub(crate) simple: bool,
     /// Footprint trail of a retouching drag (see `stroke_trail`).
     trail: Option<stroke_trail::Trail>,
     /// Remove tool strokes waiting to be applied together (Remove after each stroke off), the
@@ -1042,6 +1046,7 @@ impl PhotocraftApp {
             live_stroke: None,
             committed_stroke: None,
             dropped_stroke: None,
+            simple: false,
             trail: None,
             remove_pending: Vec::new(),
             remove_pending_target: None,
@@ -2386,7 +2391,18 @@ impl eframe::App for PhotocraftApp {
         let tabbed_in = !chrome && self.ui.panels.full_screen_chrome;
         // While a tool is dragged on the canvas the chrome repaints last frame's shapes instead of
         // being laid out again (chrome_freeze).
+        // Phones: the simple interface (a compact top bar; floating bars and the Capi button over
+        // the canvas, drawn after it) instead of the desktop chrome, which stays as it was.
+        self.simple = chrome && simple_ui::active(self, &ctx);
         let area = chrome_freeze::show(self, ui, chrome || tabbed_in, |app, ui| {
+            if app.simple {
+                simple_ui::top_bar(app, ui);
+                // The tool's options stay with a document: one scrolling row (brush size, opacity, …).
+                if app.ui.panels.options_bar && app.session.active().is_some() {
+                    panels::options_bar(app, ui);
+                }
+                return;
+            }
             if (chrome || tabbed_in) && app.ui.panels.menu_bar {
                 panels::title_bar(app, ui);
             }
@@ -2413,9 +2429,13 @@ impl eframe::App for PhotocraftApp {
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(backdrop)).show(&mut canvas_ui, |ui| {
             canvas::document_area(self, ui);
         });
-        panels::properties_window(self, &ctx);
-        if chrome {
-            panels::floating_groups(self, &ctx);
+        if self.simple {
+            simple_ui::overlays(self, &ctx);
+        } else {
+            panels::properties_window(self, &ctx);
+            if chrome {
+                panels::floating_groups(self, &ctx);
+            }
         }
         brush_panel::window(self, &ctx);
         preset_panels::windows(self, &ctx);

@@ -4798,3 +4798,14 @@ navigator	Zoom	Zoom
 	How far the text stays inside the path	Cuánto se separa el texto del borde del trazado
 	Inset 5% of the path's smaller side	Margen interior del 5 % del lado menor del trazado
 	All settings	Todos los ajustes
+	Brush size {px} px	Tamaño de pincel {px} px
+	Capi: tools, panels and actions	Capi: herramientas, paneles y acciones
+	Full interface	Interfaz completa
+	New document {w} × {h} px	Documento nuevo de {w} × {h} px
+	Open a document first	Abre un documento primero
+	Quick action	Acción rápida
+	Rotate the canvas {deg}°	Rotar el lienzo {deg}°
+	Set the foreground color to {hex}	Poner el color frontal en {hex}
+	Tap to use a tool; press and hold to add it to the favorites bar or take it out.	Toca para usar una herramienta; mantén pulsado para añadirla a la barra de favoritos o quitarla.
+	Zoom to {percent}%	Zoom al {percent}%
+	Simple UI	Interfaz simple

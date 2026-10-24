@@ -10,11 +10,12 @@ pub fn fuzzy_score(query: &str, text: &str) -> Option<i32> {
     if query.is_empty() {
         return Some(0);
     }
-    let t: Vec<char> = text.to_lowercase().chars().collect();
+    // Case and accents don't matter: "tamano" finds "Tamaño", "configuracoes" "Configurações".
+    let t: Vec<char> = crate::palette_search::fold(text).chars().collect();
     let mut score = 0;
     let mut ti = 0;
     let mut last = None;
-    for qc in query.to_lowercase().chars() {
+    for qc in crate::palette_search::fold(query).chars() {
         let mut found = false;
         while ti < t.len() {
             if t[ti] == qc {
@@ -63,6 +64,12 @@ pub(crate) fn note_recent(ctx: &egui::Context, id: &str) {
 /// The palette's recently run commands, newest first (for tests).
 #[cfg(test)]
 pub(crate) fn recent_ids(ctx: &egui::Context) -> Vec<String> {
+    recent_list(ctx)
+}
+
+/// The commands run lately, newest first (the palette's empty query, the simple interface's
+/// recents bar).
+pub(crate) fn recent_list(ctx: &egui::Context) -> Vec<String> {
     ctx.data(|d| d.get_temp(recent_id()).unwrap_or_default())
 }
 
@@ -101,11 +108,22 @@ fn menu_hits(menus: Vec<crate::menus::MenuItem>, q: &str, lang: crate::i18n::Lan
         .into_iter()
         .filter(|m| m.label != "---")
         .filter_map(|m| {
-            let path_en = m.path.join(" › ");
             let path = m.path.iter().map(|p| crate::i18n::tr(lang, p)).collect::<Vec<_>>().join(" › ");
             let label = crate::i18n::tr_id(lang, &m.id, &m.label);
-            // Match what is shown and the English name (commands are documented in English).
-            let s = fuzzy_score(q, &format!("{label} {path} {} {path_en}", m.label))? + exact_bonus(q, &[label, &m.label]);
+            // Match what is shown, then the same command in English, Spanish and Portuguese
+            // (people search in the language they think in, whatever the UI shows).
+            let mut s = fuzzy_score(q, &format!("{label} {path}"));
+            let mut names = vec![label];
+            for other in crate::palette_search::SEARCH_LANGS.iter().filter_map(|c| crate::i18n::Lang::from_code(c)).filter(|l| l.code() != lang.code()) {
+                let l = crate::i18n::tr_id(other, &m.id, &m.label);
+                let p = m.path.iter().map(|p| crate::i18n::tr(other, p)).collect::<Vec<_>>().join(" ");
+                if let Some(o) = fuzzy_score(q, &format!("{l} {p}")) {
+                    s = Some(s.map_or(o - 1, |v| v.max(o - 1)));
+                }
+                names.push(l);
+            }
+            names.push(&m.label);
+            let s = s? + exact_bonus(q, &names);
             Some((
                 s,
                 m.id,
@@ -115,6 +133,68 @@ fn menu_hits(menus: Vec<crate::menus::MenuItem>, q: &str, lang: crate::i18n::Lan
             ))
         })
         .collect()
+}
+
+/// A palette row: score, id (`tool:Name`, `quick:`, or a command), label, detail, enabled.
+type Hit = (i32, String, String, Option<String>, bool);
+
+/// The tools matching `q`, by their names in the UI language, English, Spanish and Portuguese.
+fn tool_hits(q: &str, lang: crate::i18n::Lang) -> Vec<Hit> {
+    let langs: Vec<crate::i18n::Lang> = crate::palette_search::SEARCH_LANGS.iter().filter_map(|c| crate::i18n::Lang::from_code(c)).collect();
+    crate::state::Tool::ALL
+        .iter()
+        .filter_map(|tool| {
+            let shown = crate::i18n::tr(lang, tool.label());
+            let others: Vec<&str> = langs.iter().map(|l| crate::i18n::tr(*l, tool.label())).collect();
+            let s = std::iter::once(shown).chain(others.iter().copied()).filter_map(|n| fuzzy_score(q, n)).max()?;
+            let mut names = others.clone();
+            names.push(shown);
+            Some((s + 2 + exact_bonus(q, &names), format!("tool:{tool:?}"), shown.to_string(), Some(format!("{}   {}", crate::i18n::tr(lang, "Tool"), tool.key())), true))
+        })
+        .collect()
+}
+
+/// The commands and tools everyday words in `q` name ([`crate::palette_search::SYNONYMS`]).
+fn synonym_hits(q: &str, menus: &[crate::menus::MenuItem], lang: crate::i18n::Lang) -> Vec<Hit> {
+    crate::palette_search::synonym_targets(q)
+        .into_iter()
+        .filter_map(|(score, target)| {
+            if let Some(name) = target.strip_prefix("tool:") {
+                let tool = crate::state::Tool::from_name(name)?;
+                return Some((score, target.to_string(), crate::i18n::tr(lang, tool.label()).to_string(), Some(crate::i18n::tr(lang, "Tool").to_string()), true));
+            }
+            let m = menus.iter().find(|m| m.id == target)?;
+            let path = m.path.iter().map(|p| crate::i18n::tr(lang, p)).collect::<Vec<_>>().join(" › ");
+            Some((score, m.id.clone(), crate::i18n::tr_id(lang, &m.id, &m.label).trim_end_matches('…').to_string(), Some(path), m.enabled))
+        })
+        .collect()
+}
+
+/// Every row for query `q`, best first.
+pub(crate) fn hits_for(app: &PhotocraftApp, ctx: &egui::Context, q: &str) -> Vec<Hit> {
+    let lang = crate::i18n::Lang::from_pref(&app.session.prefs().interface.language);
+    let menus = crate::menus::menu_items(app);
+    let empty = q.trim().is_empty();
+    // An empty query lists the recently run commands (UI-217-7); with none (or a fresh session)
+    // it falls back to the full fuzzy list, as before.
+    let mut hits: Vec<Hit> = if empty { recent_hits(&recent_list(ctx), &menus, lang) } else { Vec::new() };
+    if !empty {
+        // A quick action the query spells ("zoom 200", "nuevo 1200x1700") comes first.
+        if let Some(action) = crate::palette_search::quick(q) {
+            hits.push((5000, "quick:".into(), action.label(), Some(tl!("Quick action").to_string()), true));
+        }
+        hits.extend(synonym_hits(q, &menus, lang));
+    }
+    if !empty || hits.is_empty() {
+        hits.extend(menu_hits(menus, q, lang));
+        hits.extend(tool_hits(q, lang));
+    }
+    hits.sort_by(|a, b| b.0.cmp(&a.0).then(a.2.cmp(&b.2)));
+    // A command found both by an everyday word and by its name is listed once.
+    let mut seen = std::collections::HashSet::new();
+    hits.retain(|h| seen.insert(h.1.clone()));
+    hits.truncate(12);
+    hits
 }
 
 pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
@@ -131,12 +211,18 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             app.ui.palette_open = false;
         }
     });
-    let width = 560.0;
+    // On a phone the palette spans the window near its top, with finger-sized two-line rows.
+    let narrow = screen.width() < 600.0;
+    let width = if narrow { screen.width() - 16.0 - 20.0 } else { 560.0 };
+    let row_h = if narrow { 46.0 } else { 32.0 };
+    // The simple interface's rows have a star: tap it to put the command on the favorites bar.
+    let stars = app.simple;
     let mut run: Option<String> = None;
+    let mut star: Option<String> = None;
     egui::Area::new(egui::Id::new("palette"))
         .order(egui::Order::Tooltip)
         .pivot(Align2::CENTER_TOP)
-        .fixed_pos(egui::pos2(screen.center().x, screen.top() + 110.0))
+        .fixed_pos(egui::pos2(screen.center().x, screen.top() + if narrow { 52.0 } else { 110.0 }))
         .show(ctx, |ui| {
             egui::Frame::NONE
                 .fill(t.card)
@@ -154,7 +240,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                         let te = egui::TextEdit::singleline(&mut q)
                             .hint_text(tl!("Search commands, tools and panels…"))
                             .frame(egui::Frame::NONE)
-                            .font(egui::FontId::proportional(15.0))
+                            .font(egui::FontId::proportional(if narrow { 16.0 } else { 15.0 }))
                             .desired_width(width - 40.0);
                         let resp = ui.add(te);
                         // Only when focus is missing: every request_focus interrupts the IME, and
@@ -166,30 +252,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     ui.add_space(6.0);
                     crate::widgets::hairline(ui);
                     ui.add_space(6.0);
-                    let lang = crate::i18n::Lang::from_pref(&app.session.prefs().interface.language);
-                    let menus = crate::menus::menu_items(app);
-                    let recents: Vec<String> = ui.data(|d| d.get_temp(recent_id()).unwrap_or_default());
-                    let empty = q.trim().is_empty();
-                    // An empty query lists the recently run commands (UI-217-7); with none (or a
-                    // fresh session) it falls back to the full fuzzy list, as before.
-                    let mut hits: Vec<(i32, String, String, Option<String>, bool)> = if empty { recent_hits(&recents, &menus, lang) } else { Vec::new() };
-                    if !empty || hits.is_empty() {
-                        hits.extend(menu_hits(menus, &q, lang));
-                        for tool in crate::state::Tool::ALL {
-                            if let Some(s) = fuzzy_score(&q, &format!("{} {}", tl!(tool.label()), tool.label())) {
-                                let s = s + exact_bonus(&q, &[tl!(tool.label()).as_ref(), tool.label()]);
-                                hits.push((
-                                    s + 2,
-                                    format!("tool:{tool:?}"),
-                                    tl!(tool.label()).into(),
-                                    Some(format!("{}   {}", crate::i18n::tr(lang, "Tool"), tool.key())),
-                                    true,
-                                ));
-                            }
-                        }
-                    }
-                    hits.sort_by(|a, b| b.0.cmp(&a.0).then(a.2.cmp(&b.2)));
-                    hits.truncate(12);
+                    let hits = hits_for(app, ui.ctx(), &q);
                     let sel_id = egui::Id::new("palette-sel");
                     let mut sel: usize = ui.data_mut(|d| d.get_temp(sel_id).unwrap_or(0));
                     let (down, up, enter, esc) = ui.input(|i| {
@@ -210,17 +273,49 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     if hits.is_empty() {
                         ui.label(RichText::new(tl!("No matching commands")).color(t.text_faint));
                     }
-                    for (i, (_, id, label, detail, enabled)) in hits.iter().enumerate() {
-                        let (rect, resp) = ui.allocate_exact_size(vec2(width, 32.0), Sense::click());
+                    let max_rows = if narrow { (((screen.height() - 52.0 - 120.0) / row_h).floor() as usize).clamp(4, 12) } else { 12 };
+                    for (i, (_, id, label, detail, enabled)) in hits.iter().take(max_rows).enumerate() {
+                        let (rect, resp) = ui.allocate_exact_size(vec2(width, row_h), Sense::click());
                         if i == sel || resp.hovered() {
                             ui.painter().rect_filled(rect, t.radius_sm, if i == sel { t.accent_soft } else { t.hover });
                         }
                         let color = if *enabled { t.text } else { t.text_faint };
-                        ui.painter().text(rect.left_center() + vec2(12.0, 0.0), Align2::LEFT_CENTER, label, theme::medium(13.0), color);
-                        if let Some(d) = detail {
-                            ui.painter().text(rect.right_center() - vec2(12.0, 0.0), Align2::RIGHT_CENTER, d, egui::FontId::proportional(11.5), t.text_faint);
+                        let quick = id.starts_with("quick:");
+                        let star_rect = (stars && !quick).then(|| egui::Rect::from_center_size(rect.right_center() - vec2(20.0, 0.0), vec2(36.0, 36.0)));
+                        let text_right = star_rect.map_or(rect.right() - 12.0, |s| s.left() - 4.0);
+                        if quick {
+                            icons::paint(ui, egui::Rect::from_center_size(rect.left_center() + vec2(18.0, 0.0), vec2(18.0, 18.0)), "sparkles", 15.0, t.accent);
                         }
-                        if resp.clicked() && *enabled {
+                        let left = rect.left() + if quick { 34.0 } else { 12.0 };
+                        if narrow {
+                            // Two lines: the name, then where it lives.
+                            let mut job = egui::text::LayoutJob::simple_singleline(label.clone(), theme::medium(14.0), color);
+                            job.wrap = egui::text::TextWrapping::truncate_at_width((text_right - left).max(20.0));
+                            let g = ui.painter().layout_job(job);
+                            ui.painter().galley(egui::pos2(left, rect.top() + 6.0), g, color);
+                            if let Some(d) = detail {
+                                let mut job = egui::text::LayoutJob::simple_singleline(d.trim().to_string(), egui::FontId::proportional(11.5), t.text_faint);
+                                job.wrap = egui::text::TextWrapping::truncate_at_width((text_right - left).max(20.0));
+                                let g = ui.painter().layout_job(job);
+                                ui.painter().galley(egui::pos2(left, rect.bottom() - 6.0 - g.size().y), g, t.text_faint);
+                            }
+                        } else {
+                            ui.painter().text(egui::pos2(left, rect.center().y), Align2::LEFT_CENTER, label, theme::medium(13.0), color);
+                            if let Some(d) = detail {
+                                ui.painter().text(egui::pos2(text_right, rect.center().y), Align2::RIGHT_CENTER, d, egui::FontId::proportional(11.5), t.text_faint);
+                            }
+                        }
+                        let mut starred = false;
+                        if let Some(sr) = star_rect {
+                            let on = crate::simple_ui::is_favorite(app, id);
+                            icons::paint(ui, sr, if on { "star-filled" } else { "star" }, 17.0, if on { t.accent } else { t.text_faint });
+                            if resp.clicked() && resp.interact_pointer_pos().is_some_and(|p| sr.contains(p)) {
+                                star = Some(id.clone());
+                                starred = true;
+                            }
+                        }
+                        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, *enabled, label));
+                        if resp.clicked() && *enabled && !starred {
                             run = Some(id.clone());
                         }
                     }
@@ -233,22 +328,36 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     if esc {
                         app.ui.palette_open = false;
                     }
-                    ui.add_space(4.0);
-                    ui.label(
-                        RichText::new(crate::i18n::fmt(tl!("↑↓ navigate   {key} run   esc close"), &[("key", &crate::shortcuts::pretty("Enter"))]))
-                            .small()
-                            .color(t.text_faint),
-                    );
+                    if !narrow {
+                        ui.add_space(4.0);
+                        ui.label(
+                            RichText::new(crate::i18n::fmt(tl!("↑↓ navigate   {key} run   esc close"), &[("key", &crate::shortcuts::pretty("Enter"))]))
+                                .small()
+                                .color(t.text_faint),
+                        );
+                    }
+                    if run.as_deref() == Some("quick:") {
+                        // The quick action is the query's: read it before the query is cleared.
+                        ui.data_mut(|d| d.insert_temp(egui::Id::new("palette-quick"), q.clone()));
+                    }
                     ui.data_mut(|d| {
                         d.insert_temp(qid, q);
                         d.insert_temp(sel_id, sel);
                     });
                 });
         });
+    if let Some(id) = star {
+        crate::simple_ui::toggle_favorite(app, &id);
+    }
     if let Some(id) = run {
         app.ui.palette_open = false;
         ctx.data_mut(|d| d.insert_temp(egui::Id::new("palette-query"), String::new()));
-        if let Some(tool) = id.strip_prefix("tool:") {
+        if id == "quick:" {
+            let q: String = ctx.data(|d| d.get_temp(egui::Id::new("palette-quick")).unwrap_or_default());
+            if let Err(e) = run_quick(app, ctx, &q) {
+                app.ui.status = e;
+            }
+        } else if let Some(tool) = id.strip_prefix("tool:") {
             if let Some(t) = crate::state::Tool::from_name(tool) {
                 app.ui.tool = t;
             }
@@ -256,6 +365,24 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             app.ui.status = e;
         }
     }
+}
+
+/// Carry out the quick action query `q` spells.
+pub(crate) fn run_quick(app: &mut PhotocraftApp, ctx: &egui::Context, q: &str) -> Result<(), String> {
+    let Some(action) = crate::palette_search::quick(q) else { return Err(tl!("No matching commands").to_string()) };
+    if let crate::palette_search::Quick::Zoom(z) = action {
+        app.sync_views();
+        let i = app.session.active_index().ok_or_else(|| tl!("Open a document first").to_string())?;
+        let v = app.ui.views.get_mut(i).ok_or("no document view")?;
+        v.fit_pending = false;
+        v.fill_pending = false;
+        v.zoom = z;
+        ctx.request_repaint();
+        return Ok(());
+    }
+    // Engine commands with their parameters (the menus' File › New would open its dialog).
+    let Some((id, params)) = action.command(app.session.prefs()) else { return Ok(()) };
+    crate::telemetry::with_source(crate::telemetry::Source::Palette, || app.run(id, params)).map(|_| ()).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

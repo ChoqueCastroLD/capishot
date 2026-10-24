@@ -404,6 +404,7 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
             app.ui.palette_open = !app.ui.palette_open;
             Ok(Value::Null)
         }
+        "view.simpleUi" => crate::simple_ui::toggle(app, ctx).map(|_| Value::Null),
         "help.about" => Ok(json!({"dialog": app.ui.open_dialog(DialogKind::About, Default::default())})),
         "help.terms" => Ok(json!({"dialog": crate::genfill_ui::open_terms(app)})),
         "help.systemInfo" => {
@@ -790,7 +791,8 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
         "window.panel.activate" | "window.panel.layout" => true,
         "window.panel.group" | "window.panel.move" | "window.panel.float" | "window.panel.dock" | "window.panel.close" => !app.session.prefs().workspace_locked,
         "file.open" | "file.openDeep" | "file.exit" | "file.clearRecent" | "file.removeRecent" | "help.about" | "help.terms" | "help.systemInfo"
-        | "edit.search" => true,
+        | "edit.search"
+        | "view.simpleUi" => true,
         "type.loadFonts" | "type.loadFontFolder" | "type.manageFonts" => true,
         crate::ai_models_ui::COMMAND => true,
         crate::recovery_ui::COMMAND => crate::recovery_ui::available(app),
@@ -855,6 +857,9 @@ const MODE_CHECKS: [&str; 11] = ["rgb", "grayscale", "cmyk", "lab", "multichanne
 
 /// Is a UI-level panel toggle currently on (for checkmarks)?
 fn checked(app: &PhotocraftApp, id: &str) -> Option<bool> {
+    if id == "view.simpleUi" {
+        return Some(app.simple);
+    }
     if let Some(checked) = crate::panel_docking::checked(app, id) {
         return Some(checked);
     }

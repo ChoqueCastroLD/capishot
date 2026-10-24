@@ -3831,3 +3831,16 @@ curves	Smooth	매끄럽게
 	How far the text stays inside the path	텍스트가 패스 안쪽에서 떨어지는 거리
 	Inset 5% of the path's smaller side	패스 짧은 변의 5% 안쪽 여백
 	All settings	모든 설정
+	Back	뒤로
+	Brush size {px} px	브러시 크기 {px} px
+	Capi: tools, panels and actions	Capi: 도구, 패널 및 동작
+	Full interface	전체 인터페이스
+	New document {w} × {h} px	새 문서 {w} × {h} px
+	Open a document first	먼저 문서를 여세요
+	Quick action	빠른 동작
+	Rotate the canvas {deg}°	캔버스 {deg}° 회전
+	Set the foreground color to {hex}	전경색을 {hex}(으)로 설정
+	Tap to use a tool; press and hold to add it to the favorites bar or take it out.	탭하여 도구를 사용하고, 길게 눌러 즐겨찾기 막대에 추가하거나 제거합니다.
+	Zoom to {percent}%	{percent}%로 확대/축소
+	Simple UI	간단한 UI
+	On	켜기

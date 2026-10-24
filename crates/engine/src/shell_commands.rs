@@ -82,6 +82,7 @@ pub const SHELL_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("window.nextDocument", "Next Document", &[], Some("Ctrl+Tab")),
     ("window.previousDocument", "Previous Document", &[], Some("Ctrl+Shift+Tab")),
     ("window.theme.toggle", "Next Appearance Mode", &["Window"], None),
+    ("view.simpleUi", "Simple UI", &["Window"], None),
     ("window.theme.pro", "Pro Theme", &["Window", "Theme"], None),
     ("window.theme.proMedium", "Pro Medium Gray Theme", &["Window", "Theme"], None),
     ("window.theme.proLightGray", "Pro Light Gray Theme", &["Window", "Theme"], None),

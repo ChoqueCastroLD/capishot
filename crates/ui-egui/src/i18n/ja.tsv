@@ -4316,3 +4316,16 @@ curves	Smooth	スムーズ
 	How far the text stays inside the path	テキストをパスの内側にどれだけ離すか
 	Inset 5% of the path's smaller side	パスの短辺の 5% の内側の余白
 	All settings	すべての設定
+	Back	戻る
+	Brush size {px} px	ブラシサイズ {px} px
+	Capi: tools, panels and actions	Capi: ツール、パネル、アクション
+	Full interface	フルインターフェイス
+	New document {w} × {h} px	新規ドキュメント {w} × {h} px
+	Open a document first	先にドキュメントを開いてください
+	Quick action	クイックアクション
+	Rotate the canvas {deg}°	カンバスを {deg}° 回転
+	Set the foreground color to {hex}	描画色を {hex} に設定
+	Tap to use a tool; press and hold to add it to the favorites bar or take it out.	タップでツールを使用、長押しでお気に入りバーに追加または削除します。
+	Zoom to {percent}%	{percent}% にズーム
+	Simple UI	シンプル UI
+	On	オン

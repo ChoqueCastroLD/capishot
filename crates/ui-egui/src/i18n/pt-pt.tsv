@@ -3251,3 +3251,16 @@ fontWeight	Italic	Itálico
 	How far the text stays inside the path	Quanto o texto fica afastado do limite do traçado
 	Inset 5% of the path's smaller side	Recuo interno de 5% do lado menor do traçado
 	All settings	Todas as definições
+	Back	Voltar
+	Brush size {px} px	Tamanho do pincel {px} px
+	Capi: tools, panels and actions	Capi: ferramentas, painéis e ações
+	Full interface	Interface completa
+	New document {w} × {h} px	Novo documento de {w} × {h} px
+	Open a document first	Abra primeiro um documento
+	Quick action	Ação rápida
+	Rotate the canvas {deg}°	Rodar a tela {deg}°
+	Set the foreground color to {hex}	Definir a cor de primeiro plano como {hex}
+	Tap to use a tool; press and hold to add it to the favorites bar or take it out.	Toque para usar uma ferramenta; mantenha premido para a adicionar à barra de favoritos ou a retirar.
+	Zoom to {percent}%	Zoom a {percent}%
+	Simple UI	Interface simples
+	On	Ativado

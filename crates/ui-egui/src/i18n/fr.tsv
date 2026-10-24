@@ -3653,3 +3653,16 @@ curves	Smooth	Lisser
 	How far the text stays inside the path	Distance entre le texte et le bord du tracé
 	Inset 5% of the path's smaller side	Retrait intérieur de 5 % du plus petit côté du tracé
 	All settings	Tous les réglages
+	Back	Retour
+	Brush size {px} px	Taille de pinceau {px} px
+	Capi: tools, panels and actions	Capi : outils, panneaux et actions
+	Full interface	Interface complète
+	New document {w} × {h} px	Nouveau document {w} × {h} px
+	Open a document first	Ouvrez d’abord un document
+	Quick action	Action rapide
+	Rotate the canvas {deg}°	Faire pivoter la zone de travail de {deg}°
+	Set the foreground color to {hex}	Définir la couleur de premier plan sur {hex}
+	Tap to use a tool; press and hold to add it to the favorites bar or take it out.	Touchez pour utiliser un outil ; maintenez pour l’ajouter à la barre des favoris ou l’en retirer.
+	Zoom to {percent}%	Zoom à {percent} %
+	Simple UI	Interface simple
+	On	Activé

@@ -4626,3 +4626,14 @@ layerLabel	No Color	Sem cor
 	How far the text stays inside the path	Quanto o texto fica afastado da borda do demarcador
 	Inset 5% of the path's smaller side	Recuo interno de 5% do lado menor do demarcador
 	All settings	Todas as configurações
+	Brush size {px} px	Tamanho do pincel {px} px
+	Capi: tools, panels and actions	Capi: ferramentas, painéis e ações
+	Full interface	Interface completa
+	New document {w} × {h} px	Novo documento de {w} × {h} px
+	Open a document first	Abra um documento primeiro
+	Quick action	Ação rápida
+	Rotate the canvas {deg}°	Girar a tela {deg}°
+	Set the foreground color to {hex}	Definir a cor de primeiro plano como {hex}
+	Tap to use a tool; press and hold to add it to the favorites bar or take it out.	Toque para usar uma ferramenta; toque e segure para adicioná-la à barra de favoritos ou removê-la.
+	Zoom to {percent}%	Zoom em {percent}%
+	Simple UI	Interface simples

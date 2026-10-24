@@ -4748,3 +4748,14 @@ shape	Appearance	Aspetto
 	How far the text stays inside the path	Quanto il testo resta all'interno del tracciato
 	Inset 5% of the path's smaller side	Margine interno del 5% del lato minore del tracciato
 	All settings	Tutte le impostazioni
+	Brush size {px} px	Dimensione pennello {px} px
+	Capi: tools, panels and actions	Capi: strumenti, pannelli e azioni
+	Full interface	Interfaccia completa
+	New document {w} × {h} px	Nuovo documento {w} × {h} px
+	Open a document first	Apri prima un documento
+	Quick action	Azione rapida
+	Rotate the canvas {deg}°	Ruota l’area di lavoro di {deg}°
+	Set the foreground color to {hex}	Imposta il colore di primo piano su {hex}
+	Tap to use a tool; press and hold to add it to the favorites bar or take it out.	Tocca per usare uno strumento; tieni premuto per aggiungerlo alla barra dei preferiti o rimuoverlo.
+	Zoom to {percent}%	Zoom al {percent}%
+	Simple UI	Interfaccia semplice

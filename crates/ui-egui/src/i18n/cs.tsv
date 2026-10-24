@@ -4244,3 +4244,14 @@ navigator	Zoom	Zvětšení
 	How far the text stays inside the path	Jak daleko text zůstává uvnitř cesty
 	Inset 5% of the path's smaller side	Vnitřní okraj 5 % kratší strany cesty
 	All settings	Všechna nastavení
+	Brush size {px} px	Velikost štětce {px} px
+	Capi: tools, panels and actions	Capi: nástroje, panely a akce
+	Full interface	Úplné rozhraní
+	New document {w} × {h} px	Nový dokument {w} × {h} px
+	Open a document first	Nejprve otevřete dokument
+	Quick action	Rychlá akce
+	Rotate the canvas {deg}°	Otočit plátno o {deg}°
+	Set the foreground color to {hex}	Nastavit barvu popředí na {hex}
+	Tap to use a tool; press and hold to add it to the favorites bar or take it out.	Klepnutím použijete nástroj; podržením jej přidáte na lištu oblíbených nebo odeberete.
+	Zoom to {percent}%	Zvětšení {percent} %
+	Simple UI	Jednoduché rozhraní
