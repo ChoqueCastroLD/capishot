@@ -1,0 +1,15 @@
+name: Feature request
+description: An idea or a missing Photoshop feature
+labels: [enhancement]
+body:
+  - type: textarea
+    id: task
+    attributes:
+      label: What are you trying to do?
+      description: The scanlation task (cleaning, redrawing, typesetting, exporting, ...) and how you do it in Photoshop today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?

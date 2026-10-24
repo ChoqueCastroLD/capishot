@@ -20,7 +20,7 @@ use wasm_bindgen::{JsCast as _, JsValue};
 /// Same origin on every host below.
 const ENDPOINT: &str = "/capishot/api/t";
 /// Capishot's own deployments; anywhere else (a dev server, a fork) records nothing.
-const HOSTS: &[&str] = &["capichan.com", "capichan.com/capishot"];
+const HOSTS: &[&str] = &["capichan.com"];
 /// The random install id (localStorage).
 const INSTALL_KEY: &str = "capishot.telemetry.iid";
 

@@ -33,7 +33,7 @@ Rejected: Anything-v4 inpainting (NovelAI-leak lineage), Mistoon Anime (Civitai:
 outside Civitai), SD-Turbo (Stability Community licence, no inpainting UNet), DMD2 (CC BY-NC).
 The plain `stable-diffusion-v1-5/stable-diffusion-inpainting` stays an internal A/B reference.
 
-Conversion (`conversion scripts`, outside the repository):
+Conversion (done once, offline, with PyTorch and diffusers; the scripts are not part of this repository):
 f16 safetensors, diffusers tensor names, the UNet split into ≤ 450 MB parts, the VAE into
 encoder and decoder, LoRAs renamed from kohya to UNet names with `alpha / rank` folded into
 `lora_up`; metadata `arch`, `license`, `source`, `modified`.

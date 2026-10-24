@@ -1,0 +1,30 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. Open a PSD\n2. Select the Type tool\n3. ..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behaviour
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Where
+      description: Browser and version, or desktop OS. Web or desktop app.
+      placeholder: "Chrome 141 on Windows 11, capichan.com/capishot"
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots, files or console output
+      description: Only share files you have the right to share.

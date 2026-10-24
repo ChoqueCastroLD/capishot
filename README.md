@@ -12,15 +12,19 @@
 
 <p align="center">
   <a href="https://capichan.com/capishot/"><b>Try it in the browser</b></a> ·
-  <a href="#everything-in-the-box">Everything in the box</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#local-ai">Local AI</a> ·
   <a href="#build">Build</a> ·
   <a href="#psd-fidelity">PSD fidelity</a> ·
-  <a href="#roadmap">Roadmap</a> ·
-  <a href="#privacy">Privacy</a>
+  <a href="#privacy">Privacy</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
-> Capishot es un editor de imágenes libre pensado para scans: los mismos menús, herramientas y
-> atajos de Photoshop, PSD reales y el render fiel de psd-compiler. Funciona en escritorio y en el navegador.
+<p align="center">
+  <img src="docs/images/capishot-type-in-bubble.webp" width="820" alt="Capishot: type set inside a speech bubble">
+</p>
+
+Capishot is free and open source, and it will stay that way.
 
 ## Why
 
@@ -32,10 +36,42 @@ Capishot keeps everything where a Photoshop user's hands expect it (menus, tool 
   bars, panels and default shortcuts follow Photoshop's.
 - **PSDs that look like Photoshop's.** Saved PSDs carry a merged image rendered by psd-compiler,
   and File › Export › Compile PSD and File › Automate › Compile Folder render whole chapters.
-- **Native and fast.** Rust, a GPU compositor on wgpu (Metal, Vulkan, DX12, WebGPU), copy-on-write
-  tiles and multithreaded filters. The same code runs in the browser through WebAssembly.
+- **Built for scanlation.** A TypeR-style typesetting panel, type that wraps inside speech
+  bubbles, and local AI for cleaning, redrawing and upscaling pages.
+- **Runs anywhere.** Native on desktop, and the same Rust code in the browser through
+  WebAssembly (WebGPU or WebGL, multithreaded where the browser allows), down to phones and
+  machines without a GPU.
 - **Scriptable.** Every action is a command: drive it from the UI, `capishot-cli`, a JSON control
   channel or an MCP server.
+
+## Features
+
+### Typesetting
+
+- **TypeR panel:** paste a translated script (one line per bubble, `Page 1` markers, `##` notes,
+  `TAG:` styles), click a bubble and the line goes in, fitted and centred. Style libraries and
+  TypeR `.tpl` / JSON import. Ported from [TypeR](https://github.com/ScanR/TypeR) (MIT).
+- **Type inside a path:** click inside a closed path or shape with the Type tool and the text
+  wraps to its contour, with an inner margin and vertical centring (or Photoshop's top
+  alignment). Saved as Photoshop text-in-shape.
+- Point, paragraph and on-path type, vertical type, OpenType features, Google Fonts and your own
+  fonts, Warp Text, Character and Paragraph panels.
+
+### Reliability
+
+- **Autosave** every 3 minutes (configurable in Preferences › File Handling), on desktop and in
+  the browser (the browser's private storage).
+- **Crash recovery:** after a crash or a closed tab, Capishot offers to recover your documents,
+  with their recent undo history. File › Recover Documents… lists them at any time.
+- **Nothing freezes the page:** opening, saving, exporting, filters and AI run in the background
+  with progress and Esc to cancel.
+
+### Interface
+
+- Photoshop-style dockable panels: dock, stack as tabs, float, or collapse columns to icons.
+  Layouts are saved per workspace.
+- Phone and tablet layouts with touch gestures and palm rejection.
+- English, Spanish and Portuguese, plus 14 more interface languages.
 
 ## Everything in the box
 
@@ -72,6 +108,27 @@ Capishot keeps everything where a Photoshop user's hands expect it (menus, tool 
   </tr>
 </table>
 
+## Local AI
+
+AI runs on your machine, in the app or in the browser: no account, no server, no upload. Models
+are downloaded once from the **AI Models** window (Window › AI Models), with grouped, resumable
+downloads, and Capishot picks the tier that fits your device.
+
+<p align="center">
+  <img src="docs/images/capishot-ai-models.webp" width="720" alt="The AI Models window">
+</p>
+
+| Feature | Models | Notes |
+|---|---|---|
+| Edit › Clean with AI | Manga LaMa, MI-GAN (lite) | Erase text and SFX, redraw screentone and lines |
+| Image › Upscale with AI | MangaJaNai, IllustrationJaNai, Real-ESRGAN Compact (lite) | 2× and 4× |
+| Edit › Generative Fill | DreamShaper-8 inpainting (+ TCD), SDXS-512 | Four tiers: Ultra-light (277 MB, no GPU needed), Fast, Standard, High |
+
+The inference engine is [burn](https://github.com/tracel-ai/burn) (WebGPU / wgpu, with a CPU
+fallback). Model weights are not in this repository and keep their own licences (MangaJaNai and
+IllustrationJaNai are CC BY-NC 4.0; DreamShaper is CreativeML OpenRAIL-M, whose use restrictions
+are shown in Help › Terms of Use). See [`NOTICE`](NOTICE) for every model and its authors.
+
 ## PSD fidelity
 
 Measured on 515 Photoshop-saved files (psd-tools, ag-psd and six other open test suites),
@@ -103,7 +160,9 @@ cargo run --release -p photocraft-cli -- compile chapter/ --format png
 cargo test --workspace
 ```
 
-The web build: `cd apps/photocraft-web && trunk build --release` (static files in `dist/web`).
+The web build: `cd apps/photocraft-web && trunk build --release` (static files in `dist/web`);
+the multithreaded build: `packaging/web-threads/build.sh` (needs nightly Rust and `rust-src`); the
+AI workers: `packaging/web-ai/build.sh`.
 Crates keep their `photocraft-*` names so Capishot can keep merging PhotoCraft's work;
 `scripts/capishot-rebrand.py` re-applies the branding after each merge.
 
@@ -111,13 +170,14 @@ New contributors and AI agents: start with [`AGENTS.md`](AGENTS.md), then [`docs
 
 ## Privacy
 
-The desktop app sends nothing. The hosted web app (capichan.com/capishot and its mirrors) sends
+The desktop app sends nothing. The hosted web app (capichan.com/capishot) sends
 anonymous usage statistics to its own server, so we know how many people use it, for how long and
 which commands and tools matter: a random install id (kept in your browser) and session id, the
 command ids you run counted per batch (never their settings), tool switches, active and total
 session time, opened, saved and exported file *kinds* with coarse size buckets and timings, error
 classes (never messages), and coarse device classes (browser and OS family, GPU vendor class,
-screen size bucket, UI language, threads build). The server keeps at most the country from
+screen size bucket, UI language, threads build), and page freezes over 200 ms with the command
+or tool that was running. The server keeps at most the country from
 Cloudflare, never your IP address. Never sent: file names, paths, document content, text you type.
 Raw events are deleted after 180 days. Turn it off in **Preferences › General › Send anonymous
 usage statistics**; a browser that sends Do Not Track or Global Privacy Control is never counted.
@@ -126,13 +186,14 @@ Code: `crates/ui-egui/src/telemetry.rs` (what is recorded) and
 
 ## Roadmap
 
-1. **Fidelity:** the canvas renders with psd-compiler's calibrated models (adjustments, layer
-   effects, type), and CI runs the 734-file reference suite.
-2. **Scanlation tools:** a typesetting panel (paste the script, click a bubble, the line goes in
-   fitted to it), text styles and fonts per series, one-click bubble cleaning, chapter folders,
-   webtoon stitch/split, raw clean-up, Spanish and Portuguese spell check.
-3. **Format parity with Photopea:** PDF, AI/EPS, XCF, KRA, Sketch, XD and Figma import, animated
-   GIF frames, sprite sheets.
+Next up: the on-canvas render using psd-compiler's calibrated models, a simplified phone
+interface with a smart command search, and a Windows build. PhotoCraft's own Photoshop-parity
+assessment, which Capishot inherits, is in [`ROADMAP.md`](ROADMAP.md) and [`docs/`](docs/).
+
+## Contributing
+
+Bug reports, ideas and pull requests are welcome: see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Security issues: [`SECURITY.md`](SECURITY.md).
 
 ## Credits and license
 
