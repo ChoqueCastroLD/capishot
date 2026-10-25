@@ -3847,3 +3847,6 @@ curves	Smooth	매끄럽게
 	Recent commands	최근 명령
 	Tool options	도구 옵션
 	More menus	메뉴 더 보기
+	Capishot {version} is available	Capishot {version}을(를) 사용할 수 있습니다
+	You have {current}. Nothing is installed automatically.	현재 버전은 {current}입니다. 자동으로 설치되지 않습니다.
+	No update is available	사용 가능한 업데이트가 없습니다

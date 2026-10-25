@@ -8,7 +8,7 @@
 //!    `%APPDATA%`. The Windows portable zip ships with `portable.txt`; the MSI doesn't. If that
 //!    folder can't be written (read-only medium, Program Files), the app warns and falls back.
 //! 3. The platform convention: macOS `~/Library/Application Support/Capishot`, Windows
-//!    `%APPDATA%\Photocraft`, Linux `$XDG_CONFIG_HOME/photocraft` or `~/.config/photocraft`.
+//!    `%APPDATA%\Capishot`, Linux `$XDG_CONFIG_HOME/capishot` or `~/.config/capishot`.
 //!
 //! One exception: the platform convention keeps crash-recovery autosaves out of what is synced
 //! with the settings: the Windows roaming profile and the Linux config folder ([`recovery_dir`]).
@@ -63,6 +63,14 @@ pub fn config_dir() -> Option<PathBuf> {
     current().dir.clone()
 }
 
+/// Where the AI Model Manager keeps downloaded models ([`photocraft_ai::cache::models_dir`]):
+/// `%LOCALAPPDATA%\Capishot\models` on Windows, else beside the settings.
+#[cfg(feature = "ai")]
+pub fn models_dir() -> Option<PathBuf> {
+    let data = current();
+    data.dir.as_deref().map(|dir| photocraft_ai::cache::models_dir(dir, data.mode == Mode::Platform, |k| std::env::var_os(k)))
+}
+
 /// The crash-recovery folder's name.
 const RECOVERY: &str = "Recovery";
 
@@ -79,7 +87,7 @@ pub fn recovery_dir() -> Option<PathBuf> {
 
 /// The recovery folder for `data`. Autosaves hold whole documents and are rewritten every few
 /// minutes, so with the platform convention they stay out of what is synced with the settings:
-/// - Windows (#5648): the machine-local `%LOCALAPPDATA%\Photocraft\Recovery`; the roaming
+/// - Windows (#5648): the machine-local `%LOCALAPPDATA%\Capishot\Recovery`; the roaming
 ///   `%APPDATA%` may be synced at sign-in and sign-out or capped by policy.
 /// - Linux and other XDG systems (#6612): `$XDG_STATE_HOME/photocraft/Recovery`, by default
 ///   `~/.local/state/photocraft/Recovery`, where the XDG Base Directory spec puts state that

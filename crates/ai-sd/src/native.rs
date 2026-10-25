@@ -1,7 +1,7 @@
 //! [`NativeGenFill`]: the desktop/CLI [`GenFill`], running in the calling thread (the engine's job
 //! worker) on the GPU through wgpu when there is a real one, else on the CPU.
 //!
-//! Files come from the AI Model Manager's downloads (`<config dir>/ai-models/`), else
+//! Files come from the AI Model Manager's downloads (the app's models folder), else
 //! `CAPISHOT_SD_DIR`. A missing file reports [`ModelState::NeedsDownload`] when there is a
 //! downloads folder, else [`ModelState::Unavailable`] naming the folder.
 
@@ -30,12 +30,12 @@ impl NativeGenFill {
         Self { dirs, downloads, loaded: Mutex::new(None), device_name: Mutex::new(String::new()) }
     }
 
-    /// `<config_dir>/ai-models` (downloads) and `CAPISHOT_SD_DIR`.
-    pub fn locate(config_dir: Option<&Path>) -> Self {
+    /// `models_dir` (the AI Model Manager's downloads) and `CAPISHOT_SD_DIR`.
+    pub fn locate(models_dir: Option<&Path>) -> Self {
         let mut dirs = Vec::new();
-        let downloads = config_dir.is_some();
-        if let Some(c) = config_dir {
-            dirs.push(c.join("ai-models"));
+        let downloads = models_dir.is_some();
+        if let Some(m) = models_dir {
+            dirs.push(m.to_path_buf());
         }
         if let Some(d) = std::env::var_os("CAPISHOT_SD_DIR") {
             dirs.push(PathBuf::from(d));

@@ -2,9 +2,8 @@
 //! calling thread (the engine's job worker) on the GPU through wgpu when there is a real one,
 //! else on the CPU.
 //!
-//! The weights come from local files: the AI Model Manager's downloads
-//! (`<config dir>/ai-models/`, `photocraft-ai`'s cache) first, else `CAPISHOT_LAMA_WEIGHTS` or
-//! `<config dir>/models/manga-lama-f16.safetensors`; MI-GAN from `CAPISHOT_MIGAN_WEIGHTS`, else
+//! The weights come from local files: the AI Model Manager's downloads (the app's models
+//! folder, `photocraft-ai`'s cache) first, else `CAPISHOT_LAMA_WEIGHTS`; MI-GAN from `CAPISHOT_MIGAN_WEIGHTS`, else
 //! [`MIGAN_FILE`] next to LaMa's. A missing file reports [`ModelState::NeedsDownload`] when
 //! there is a downloads folder (the Manager fetches it), else [`ModelState::Unavailable`] with
 //! the path to put it at.
@@ -76,20 +75,20 @@ impl NativeInpainter {
         }
     }
 
-    /// `CAPISHOT_LAMA_WEIGHTS`, else `<config_dir>/models/` + [`WEIGHTS_FILE`]; `None` when
-    /// neither is known.
-    pub fn locate(config_dir: Option<&Path>) -> Option<Self> {
+    /// `CAPISHOT_LAMA_WEIGHTS`, else `models_dir` (the AI Model Manager's downloads) +
+    /// [`WEIGHTS_FILE`]; `None` when neither is known.
+    pub fn locate(models_dir: Option<&Path>) -> Option<Self> {
         let path = match std::env::var_os("CAPISHOT_LAMA_WEIGHTS") {
             Some(p) => PathBuf::from(p),
-            None => config_dir?.join("models").join(WEIGHTS_FILE),
+            None => models_dir?.join(WEIGHTS_FILE),
         };
         let migan = match std::env::var_os("CAPISHOT_MIGAN_WEIGHTS") {
             Some(p) => PathBuf::from(p),
             None => path.with_file_name(MIGAN_FILE),
         };
         let s = Self::new(path).with_migan(migan);
-        Some(match config_dir {
-            Some(c) => s.with_downloads(c.join("ai-models")),
+        Some(match models_dir {
+            Some(m) => s.with_downloads(m.to_path_buf()),
             None => s,
         })
     }

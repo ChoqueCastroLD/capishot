@@ -12,7 +12,8 @@ build = "build.rs"
 heif = ["photocraft-codecs/heif"]
 # Image › Upscale with AI (photocraft-ai) and Edit › Clean with AI / the Remove tool's AI mode
 # (photocraft-ai-lama) in-process: wgpu GPU, else the CPU. Opt-in: it adds burn to the build.
-# LaMa weights: CAPISHOT_LAMA_WEIGHTS or <config dir>/models/manga-lama-f16.safetensors.
+# Weights: the AI Model Manager downloads them (%LOCALAPPDATA%\Capishot\models on Windows,
+# <config dir>/ai-models elsewhere); CAPISHOT_LAMA_WEIGHTS points LaMa at another file.
 ai = ["dep:photocraft-ai", "photocraft-ai/gpu", "photocraft-ai/cpu", "photocraft-ai/download", "dep:photocraft-ai-lama", "dep:photocraft-ai-sd"]
 
 [lints]

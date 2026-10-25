@@ -23,7 +23,7 @@ fn main() {
     res.set_icon("../../assets/app-icon/photocraft.ico")
         .set("ProductName", "Capishot")
         .set("FileDescription", "Capishot image editor")
-        .set("CompanyName", "Learning Machines LLC")
+        .set("CompanyName", "Capishot")
         .set("LegalCopyright", "Copyright (c) the Capishot and PhotoCraft authors. MIT OR Apache-2.0.")
         .set("OriginalFilename", "capishot.exe")
         .set("InternalName", "capishot");

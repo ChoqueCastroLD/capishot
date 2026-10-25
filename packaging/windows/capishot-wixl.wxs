@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Capishot MSI for wixl (msitools), so a Linux machine can build the installer next to the
+  cross-compiled binaries (packaging/windows/package-linux.sh):
+
+    wixl -a x64 ‐‐ext ui ‐‐extdir <ui with Capishot art> -D Version=1.2.3 -D BinDir=... -D IconPath=...
+      -o capishot.msi capishot-wixl.wxs
+
+  The same package as capishot.wxs (WiX v5 on Windows): per-machine install into
+  Program Files\Capishot, a Start Menu shortcut, `.pcraft` owned by Capishot and "Open with" for
+  PSD/PSB and the image formats it reads, plus capishot-cli. Same UpgradeCode and component
+  GUIDs, so either MSI upgrades the other. wixl has no Util extension and no install-folder
+  page, so this wizard is Welcome, Ready, progress and Finish, without the "Launch" box.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="Capishot" Manufacturer="Capishot" Version="$(var.Version)"
+      UpgradeCode="C6404A76-DE51-478D-911D-6701ECA7360D" Language="1033" Codepage="1252">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine"
+        Description="Capishot image editor" Manufacturer="Capishot" Comments="Capishot $(var.DisplayVersion)" />
+    <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of Capishot is already installed." />
+    <Media Id="1" Cabinet="capishot.cab" EmbedCab="yes" />
+
+    <Icon Id="CapishotIcon.exe" SourceFile="$(var.IconPath)" />
+    <Property Id="ARPPRODUCTICON" Value="CapishotIcon.exe" />
+    <Property Id="ARPURLINFOABOUT" Value="https://capichan.com/capishot" />
+    <Property Id="ARPURLUPDATEINFO" Value="https://capichan.com/capishot" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/ChoqueCastroLD/capishot/issues" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="Capishot" />
+      </Directory>
+      <Directory Id="ProgramMenuFolder" />
+    </Directory>
+
+    <!-- An upgrade installs where the previous version was (written by CapishotApp). -->
+    <Property Id="INSTALLFOLDER">
+      <RegistrySearch Id="PreviousInstallFolder" Root="HKLM" Key="Software\Capishot" Name="InstallDir" Type="raw" Win64="yes" />
+    </Property>
+
+    <Feature Id="Main" Title="Capishot" Level="1">
+      <ComponentRef Id="CapishotApp" />
+      <ComponentRef Id="CapishotCli" />
+    </Feature>
+
+    <UIRef Id="CapishotUI" />
+    <UIRef Id="WixUI_Common" />
+  </Product>
+
+  <Fragment>
+      <!-- Welcome, Ready, progress, Finish (the dialogs come from wixl's ui extension). -->
+      <UI Id="CapishotUI">
+        <TextStyle Id="WixUI_Font_Normal" FaceName="Tahoma" Size="8" />
+        <TextStyle Id="WixUI_Font_Bigger" FaceName="Tahoma" Size="12" />
+        <TextStyle Id="WixUI_Font_Title" FaceName="Tahoma" Size="9" Bold="yes" />
+        <Property Id="DefaultUIFont" Value="WixUI_Font_Normal" />
+        <Property Id="WixUI_Mode" Value="Minimal" />
+        <DialogRef Id="ErrorDlg" />
+        <DialogRef Id="FatalError" />
+        <DialogRef Id="FilesInUse" />
+        <DialogRef Id="MsiRMFilesInUse" />
+        <DialogRef Id="PrepareDlg" />
+        <DialogRef Id="ProgressDlg" />
+        <DialogRef Id="ResumeDlg" />
+        <DialogRef Id="UserExit" />
+        <DialogRef Id="WelcomeDlg" />
+        <DialogRef Id="VerifyReadyDlg" />
+        <DialogRef Id="MaintenanceWelcomeDlg" />
+        <DialogRef Id="MaintenanceTypeDlg" />
+        <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return" Order="999">1</Publish>
+        <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg">1</Publish>
+        <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="1">NOT Installed</Publish>
+        <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="MaintenanceTypeDlg" Order="2">Installed</Publish>
+        <Publish Dialog="MaintenanceWelcomeDlg" Control="Next" Event="NewDialog" Value="MaintenanceTypeDlg">1</Publish>
+        <Publish Dialog="MaintenanceTypeDlg" Control="RepairButton" Event="NewDialog" Value="VerifyReadyDlg">1</Publish>
+        <Publish Dialog="MaintenanceTypeDlg" Control="RemoveButton" Event="NewDialog" Value="VerifyReadyDlg">1</Publish>
+        <Publish Dialog="MaintenanceTypeDlg" Control="Back" Event="NewDialog" Value="MaintenanceWelcomeDlg">1</Publish>
+        <Property Id="ARPNOMODIFY" Value="1" />
+      </UI>
+  </Fragment>
+
+  <Fragment>
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="CapishotApp" Guid="E6C74337-A933-42D7-BB51-CA8E951D5022" Win64="yes">
+        <File Id="CapishotExe" Name="capishot.exe" Source="$(var.BinDir)/capishot.exe" KeyPath="yes">
+          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="Capishot"
+              Description="Capishot image editor" WorkingDirectory="INSTALLFOLDER" Advertise="yes"
+              Icon="CapishotIcon.exe" IconIndex="0" />
+        </File>
+
+        <!-- .pcraft: Capishot's own format; Capishot is its default app. -->
+        <RegistryValue Root="HKLM" Key="Software\Classes\.pcraft" Value="Capishot.Document" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.pcraft" Name="Content Type" Value="application/x-capishot" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Capishot.Document" Value="Capishot Document" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Capishot.Document\DefaultIcon" Value="&quot;[#CapishotExe]&quot;,0" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Capishot.Document\shell\open\command" Value="&quot;[#CapishotExe]&quot; &quot;%1&quot;" Type="string" />
+        <!-- PSD/PSB and images: offered under "Open with", never forced as the default. -->
+        <RegistryValue Root="HKLM" Key="Software\Classes\Capishot.PhotoshopDocument" Value="PSD Document" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Capishot.PhotoshopDocument\DefaultIcon" Value="&quot;[#CapishotExe]&quot;,0" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Capishot.PhotoshopDocument\shell\open\command" Value="&quot;[#CapishotExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Capishot.Image" Value="Image" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Capishot.Image\DefaultIcon" Value="&quot;[#CapishotExe]&quot;,0" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Capishot.Image\shell\open\command" Value="&quot;[#CapishotExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.psd\OpenWithProgids" Name="Capishot.PhotoshopDocument" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.psb\OpenWithProgids" Name="Capishot.PhotoshopDocument" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.pdn\OpenWithProgids" Name="Capishot.Image" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.ora\OpenWithProgids" Name="Capishot.Image" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.kra\OpenWithProgids" Name="Capishot.Image" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.krz\OpenWithProgids" Name="Capishot.Image" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.png\OpenWithProgids" Name="Capishot.Image" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.jpg\OpenWithProgids" Name="Capishot.Image" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.jpeg\OpenWithProgids" Name="Capishot.Image" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.tif\OpenWithProgids" Name="Capishot.Image" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.tiff\OpenWithProgids" Name="Capishot.Image" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.webp\OpenWithProgids" Name="Capishot.Image" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.gif\OpenWithProgids" Name="Capishot.Image" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.bmp\OpenWithProgids" Name="Capishot.Image" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.tga\OpenWithProgids" Name="Capishot.Image" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.exr\OpenWithProgids" Name="Capishot.Image" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.hdr\OpenWithProgids" Name="Capishot.Image" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.avif\OpenWithProgids" Name="Capishot.Image" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.qoi\OpenWithProgids" Name="Capishot.Image" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.ico\OpenWithProgids" Name="Capishot.Image" Value="" Type="string" />
+
+        <!-- "Open with" app list and the Run dialog (Win+R "capishot"). -->
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\capishot.exe" Name="FriendlyAppName" Value="Capishot" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\capishot.exe\shell\open\command" Value="&quot;[#CapishotExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\capishot.exe\SupportedTypes" Name=".pcraft" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\capishot.exe\SupportedTypes" Name=".psd" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\capishot.exe\SupportedTypes" Name=".psb" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\capishot.exe\SupportedTypes" Name=".pdn" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\capishot.exe\SupportedTypes" Name=".ora" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\capishot.exe\SupportedTypes" Name=".kra" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\capishot.exe\SupportedTypes" Name=".krz" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\capishot.exe\SupportedTypes" Name=".png" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\capishot.exe\SupportedTypes" Name=".jpg" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\capishot.exe\SupportedTypes" Name=".jpeg" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\capishot.exe\SupportedTypes" Name=".tif" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\capishot.exe\SupportedTypes" Name=".tiff" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\capishot.exe\SupportedTypes" Name=".webp" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\capishot.exe\SupportedTypes" Name=".gif" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\capishot.exe\SupportedTypes" Name=".bmp" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\capishot.exe\SupportedTypes" Name=".tga" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\capishot.exe\SupportedTypes" Name=".exr" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\capishot.exe\SupportedTypes" Name=".hdr" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\capishot.exe\SupportedTypes" Name=".avif" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\capishot.exe\SupportedTypes" Name=".qoi" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\capishot.exe\SupportedTypes" Name=".ico" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\capishot.exe" Value="[#CapishotExe]" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Capishot" Name="InstallDir" Value="[INSTALLFOLDER]" Type="string" />
+      </Component>
+
+      <Component Id="CapishotCli" Guid="92993EE2-AD2B-4BB6-B662-8F25E2A081B2" Win64="yes">
+        <File Id="CapishotCliExe" Name="capishot-cli.exe" Source="$(var.BinDir)/capishot-cli.exe" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>

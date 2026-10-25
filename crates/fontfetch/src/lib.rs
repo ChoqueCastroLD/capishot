@@ -34,7 +34,7 @@ mod fetcher;
 mod store;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use fetcher::{Timeouts, UreqFetcher, user_agent};
+pub use fetcher::{Timeouts, UreqFetcher, get_small, user_agent};
 #[cfg(not(target_arch = "wasm32"))]
 pub use store::DirStore;
 
@@ -100,12 +100,12 @@ fn config_dir_from(env: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<P
     }
     let home = env("HOME").filter(|h| !h.is_empty()).map(PathBuf::from);
     if cfg!(target_os = "macos") {
-        return home.map(|h| h.join("Library/Application Support/Photocraft"));
+        return home.map(|h| h.join("Library/Application Support/Capishot"));
     }
     if cfg!(windows) {
-        return env("APPDATA").filter(|a| !a.is_empty()).map(|a| PathBuf::from(a).join("Photocraft"));
+        return env("APPDATA").filter(|a| !a.is_empty()).map(|a| PathBuf::from(a).join("Capishot"));
     }
-    env("XDG_CONFIG_HOME").filter(|x| !x.is_empty()).map(PathBuf::from).or_else(|| home.map(|h| h.join(".config"))).map(|c| c.join("photocraft"))
+    env("XDG_CONFIG_HOME").filter(|x| !x.is_empty()).map(PathBuf::from).or_else(|| home.map(|h| h.join(".config"))).map(|c| c.join("capishot"))
 }
 
 #[cfg(test)]

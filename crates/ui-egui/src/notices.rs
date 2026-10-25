@@ -41,6 +41,9 @@ pub struct Notice {
     /// What the notice is about, for the code that updates or removes it (`missingFonts:<doc>`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tag: Option<String>,
+    /// Stays until dismissed, even with Auto Hide Notices on (the update notice).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sticky: bool,
 }
 
 /// A notice's button: its (English) label and the command it runs.
@@ -71,6 +74,7 @@ pub fn post(app: &mut PhotocraftApp, title: impl Into<String>, lines: Vec<String
         shown_at: None,
         actions: Vec::new(),
         tag: None,
+        sticky: false,
     });
     cap_notices(app);
     id
@@ -170,6 +174,8 @@ pub fn slow_cpu_refresh(app: &mut PhotocraftApp, doc: u64, ms: f64, reason: Opti
 }
 
 fn dismiss(app: &mut PhotocraftApp, id: u64) {
+    let tag = app.ui.notices.iter().find(|notice| notice.id == id).and_then(|notice| notice.tag.clone());
+    crate::update_notice::dismissed(app, tag.as_deref());
     let dismiss_pref = app.ui.notices.iter().find(|notice| notice.id == id).and_then(|notice| notice.dismiss_pref.clone());
     app.ui.notices.retain(|notice| notice.id != id);
     if let Some(key) = dismiss_pref {
@@ -210,6 +216,9 @@ fn expire(app: &mut PhotocraftApp, now: f64, hovered: bool, just_left: bool, aut
     let mut expired = Vec::new();
     let mut next = f64::INFINITY;
     for n in &mut app.ui.notices {
+        if n.sticky {
+            continue;
+        }
         if n.shown_at.is_none() {
             n.shown_at = Some(now);
         }

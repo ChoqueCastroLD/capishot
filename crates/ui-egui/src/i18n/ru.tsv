@@ -3636,3 +3636,6 @@ curves	Smooth	Сгладить
 	Recent commands	Недавние команды
 	Tool options	Параметры инструмента
 	More menus	Другие меню
+	Capishot {version} is available	Доступен Capishot {version}
+	You have {current}. Nothing is installed automatically.	У вас версия {current}. Ничего не устанавливается автоматически.
+	No update is available	Обновлений нет

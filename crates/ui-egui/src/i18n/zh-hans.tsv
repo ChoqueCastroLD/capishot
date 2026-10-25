@@ -3298,3 +3298,6 @@ curves	Smooth	平滑
 	Recent commands	最近的命令
 	Tool options	工具选项
 	More menus	更多菜单
+	Capishot {version} is available	Capishot {version} 现已推出
+	You have {current}. Nothing is installed automatically.	你当前的版本是 {current}。不会自动安装任何内容。
+	No update is available	没有可用的更新

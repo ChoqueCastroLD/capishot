@@ -175,24 +175,32 @@ fn with_fonts(h: Headless, a: &Args) -> Headless {
 }
 
 fn with_fonts_in(mut h: Headless, allow_online: bool, config_dir: Option<PathBuf>) -> Headless {
-    // `edit.inpaintAi` and the Remove tool's AI mode: Manga LaMa on this machine's GPU or CPU,
-    // weights from CAPISHOT_LAMA_WEIGHTS or <config>/models (feature `ai`).
+    // The desktop app's models folder, so models it downloaded run here too (`PHOTOCRAFT_CONFIG_DIR`
+    // keeps everything under that folder instead).
     #[cfg(feature = "ai")]
-    if let Some(i) = photocraft_ai_lama::native::NativeInpainter::locate(config_dir.as_deref()) {
+    let models = config_dir.as_deref().map(|dir| {
+        let platform = std::env::var_os("PHOTOCRAFT_CONFIG_DIR").is_none_or(|v| v.is_empty());
+        photocraft_ai::cache::models_dir(dir, platform, |k| std::env::var_os(k))
+    });
+    // `edit.inpaintAi` and the Remove tool's AI mode: Manga LaMa on this machine's GPU or CPU,
+    // weights from the models folder or CAPISHOT_LAMA_WEIGHTS (feature `ai`).
+    #[cfg(feature = "ai")]
+    if let Some(i) = photocraft_ai_lama::native::NativeInpainter::locate(models.as_deref()) {
         h.session.set_inpainter(Some(std::sync::Arc::new(i)));
     }
     // `edit.generativeFill`: Stable Diffusion inpainting on this machine (feature `ai`), files from
-    // <config>/ai-models or CAPISHOT_SD_DIR.
+    // the models folder or CAPISHOT_SD_DIR.
     #[cfg(feature = "ai")]
-    h.session.set_genfill(Some(std::sync::Arc::new(photocraft_ai_sd::native::NativeGenFill::locate(config_dir.as_deref()))));
+    h.session.set_genfill(Some(std::sync::Arc::new(photocraft_ai_sd::native::NativeGenFill::locate(models.as_deref()))));
     if let Some(dir) = config_dir {
         photocraft_fontfetch::attach(&mut h.session, &dir);
-        // Image › Upscale with AI (`image.upscaleAi`), in-process (the `ai` feature).
-        #[cfg(feature = "ai")]
-        h.session.set_ai_upscaler(Some(std::sync::Arc::new(photocraft_ai::native::NativeUpscaler::from_env(&dir))));
-        // `ai.models.*`: downloads into the same cache.
-        #[cfg(feature = "ai")]
-        h.session.set_ai_models(Some(std::sync::Arc::new(photocraft_ai::native_store::NativeModelStore::from_env(&dir))));
+    }
+    // Image › Upscale with AI (`image.upscaleAi`), in-process, and `ai.models.*`, which download
+    // into the same folder (the `ai` feature).
+    #[cfg(feature = "ai")]
+    if let Some(dir) = &models {
+        h.session.set_ai_upscaler(Some(std::sync::Arc::new(photocraft_ai::native::NativeUpscaler::from_env(dir))));
+        h.session.set_ai_models(Some(std::sync::Arc::new(photocraft_ai::native_store::NativeModelStore::from_env(dir))));
     }
     if allow_online {
         h.session.edit_prefs(|p| p.type_.allow_online_fonts = true);

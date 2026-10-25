@@ -75,6 +75,7 @@ mod single_instance;
 // Tablet support (macOS AppKit monitor, Linux X11/Wayland, Windows barrel button).
 mod tablet;
 mod ui_state;
+mod update_check;
 mod window_frame;
 
 use photocraft_engine::Session;
@@ -720,6 +721,7 @@ fn main() -> eframe::Result {
             let automation = control.as_ref().map(|(_, _, workspace)| workspace.clone());
             let mut services = services::native(automation);
             services.preset_store = presets;
+            services.update_check = update_check::start(app_dirs::current().mode == app_dirs::Mode::Portable);
             #[cfg(target_os = "linux")]
             let display = tablet::DisplayKind::of(cc);
             #[cfg(target_os = "linux")]
@@ -747,22 +749,25 @@ fn main() -> eframe::Result {
             // disk (no network at startup; downloads need Preferences > Type > Allow Online Fonts).
             if let Some(dir) = services::config_dir() {
                 photocraft_fontfetch::attach(&mut app.session, &dir);
-                // Image › Upscale with AI, in-process (the `ai` feature).
-                #[cfg(feature = "ai")]
-                app.session.set_ai_upscaler(Some(std::sync::Arc::new(photocraft_ai::native::NativeUpscaler::from_env(&dir))));
-                // Window › AI Models… and `ai.models.*`: downloads into the same cache.
-                #[cfg(feature = "ai")]
-                app.session.set_ai_models(Some(std::sync::Arc::new(photocraft_ai::native_store::NativeModelStore::from_env(&dir))));
+            }
+            // Image › Upscale with AI, in-process (the `ai` feature), and Window › AI Models… /
+            // `ai.models.*`, which download into the same folder.
+            #[cfg(feature = "ai")]
+            let models = app_dirs::models_dir();
+            #[cfg(feature = "ai")]
+            if let Some(dir) = &models {
+                app.session.set_ai_upscaler(Some(std::sync::Arc::new(photocraft_ai::native::NativeUpscaler::from_env(dir))));
+                app.session.set_ai_models(Some(std::sync::Arc::new(photocraft_ai::native_store::NativeModelStore::from_env(dir))));
             }
             // Edit › Clean with AI: Manga LaMa on this machine (feature `ai`).
             #[cfg(feature = "ai")]
-            if let Some(i) = photocraft_ai_lama::native::NativeInpainter::locate(services::config_dir().as_deref()) {
+            if let Some(i) = photocraft_ai_lama::native::NativeInpainter::locate(models.as_deref()) {
                 app.session.set_inpainter(Some(std::sync::Arc::new(i)));
             }
             app.min_frame_ms = uncapped.then_some(1000.0 / 240.0);
             // Edit › Generative Fill: Stable Diffusion inpainting on this machine (feature `ai`).
             #[cfg(feature = "ai")]
-            app.session.set_genfill(Some(std::sync::Arc::new(photocraft_ai_sd::native::NativeGenFill::locate(services::config_dir().as_deref()))));
+            app.session.set_genfill(Some(std::sync::Arc::new(photocraft_ai_sd::native::NativeGenFill::locate(models.as_deref()))));
             app.integrated_titlebar = cfg!(target_os = "macos");
             app.custom_titlebar = custom_titlebar;
             // Only the title bar's free gap drags the window, never the menus (mac_window.rs).

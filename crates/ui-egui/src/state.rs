@@ -1494,6 +1494,9 @@ pub struct UiState {
     /// Pending GPU fallback warning, visible to automation.
     #[serde(default)]
     pub gpu_fallback_notice: Option<String>,
+    /// A newer version the update check found (`update_notice`), for Help's download command.
+    #[serde(default)]
+    pub update: Option<crate::update_notice::Update>,
     /// A keyboard shortcut set found at first launch, waiting for Import / Don't Import.
     #[serde(default)]
     pub kys_offer: Option<crate::kys_import::Offer>,
@@ -1599,6 +1602,7 @@ impl Default for UiState {
             status_error: false,
             notices: Vec::new(),
             gpu_fallback_notice: None,
+            update: None,
             kys_offer: None,
             slow_refresh_noticed: Vec::new(),
             chrome: Default::default(),

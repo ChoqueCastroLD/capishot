@@ -1,4 +1,4 @@
-//! The desktop and CLI [`ModelStore`]: the config dir's [`DiskCache`] (`<config>/ai-models/`),
+//! The desktop and CLI [`ModelStore`]: the models folder's [`DiskCache`] ([`crate::cache::models_dir`]),
 //! downloads on one background thread, one file at a time ([`Queue`]), streamed to a temporary
 //! file and hashed while they arrive (no 100 MB buffer), then renamed into place. A
 //! `<file>.sha256` sidecar records what was stored, so a file from an older catalog shows as
@@ -43,11 +43,10 @@ impl NativeModelStore {
         Self { shared: Arc::new(Shared { cache, base_url, state: Mutex::new(State::default()), wake: Condvar::new() }) }
     }
 
-    /// The shells' default: the cache under `config_dir`, downloads from
-    /// `PHOTOCRAFT_AI_MODELS_URL` (as [`crate::native::NativeUpscaler::from_env`]).
-    pub fn from_env(config_dir: &Path) -> Self {
-        let base = std::env::var("PHOTOCRAFT_AI_MODELS_URL").ok().filter(|u| !u.trim().is_empty());
-        Self::new(DiskCache::in_config_dir(config_dir), base)
+    /// The shells' default: the cache in `models_dir`, downloads from
+    /// [`crate::cache::models_url_from_env`] (as [`crate::native::NativeUpscaler::from_env`]).
+    pub fn from_env(models_dir: &Path) -> Self {
+        Self::new(DiskCache::in_dir(models_dir), Some(crate::cache::models_url_from_env()))
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {

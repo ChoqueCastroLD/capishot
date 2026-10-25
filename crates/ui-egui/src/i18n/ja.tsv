@@ -4332,3 +4332,6 @@ curves	Smooth	スムーズ
 	Recent commands	最近使ったコマンド
 	Tool options	ツールオプション
 	More menus	その他のメニュー
+	Capishot {version} is available	Capishot {version} が利用可能です
+	You have {current}. Nothing is installed automatically.	現在のバージョンは {current} です。自動でインストールされることはありません。
+	No update is available	利用可能なアップデートはありません

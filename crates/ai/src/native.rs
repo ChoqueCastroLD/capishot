@@ -55,12 +55,11 @@ impl NativeUpscaler {
         Self { cache, base_url, choice, inner: Mutex::new(Inner::default()) }
     }
 
-    /// The shells' default: the cache under `config_dir` (plus `PHOTOCRAFT_AI_MODELS` folders),
-    /// downloads from `PHOTOCRAFT_AI_MODELS_URL` (none by default: nothing is hosted publicly
-    /// until the weights' licence is cleared), the device from `PHOTOCRAFT_AI_DEVICE`.
-    pub fn from_env(config_dir: &std::path::Path) -> Self {
-        let base = std::env::var("PHOTOCRAFT_AI_MODELS_URL").ok().filter(|u| !u.trim().is_empty());
-        Self::new(DiskCache::in_config_dir(config_dir), base, DeviceChoice::from_env())
+    /// The shells' default: the cache in `models_dir` ([`crate::cache::models_dir`], plus
+    /// `PHOTOCRAFT_AI_MODELS` folders), downloads from [`crate::cache::models_url_from_env`], the
+    /// device from `PHOTOCRAFT_AI_DEVICE`.
+    pub fn from_env(models_dir: &std::path::Path) -> Self {
+        Self::new(DiskCache::in_dir(models_dir), Some(crate::cache::models_url_from_env()), DeviceChoice::from_env())
     }
 
     fn runtime(&self, inner: &mut Inner) -> Result<Runtime> {

@@ -115,6 +115,14 @@ fn download(agent: &ureq::Agent, url: &str, max: u64, stop: &AtomicBool) -> Resu
     }
 }
 
+/// One small GET (the desktop app's update manifest) on the calling thread: short timeouts, at
+/// most `max` bytes, HTTPS only except to a loopback address (a local test server).
+pub fn get_small(url: &str, max: u64) -> std::result::Result<Vec<u8>, String> {
+    let loopback = ["http://127.0.0.1:", "http://127.0.0.1/", "http://localhost:", "http://localhost/", "http://[::1]"].iter().any(|p| url.starts_with(p));
+    let f = UreqFetcher::build(Timeouts { connect: Duration::from_secs(10), overall: Duration::from_secs(20) }, !loopback);
+    download(&f.agent, url, max, &AtomicBool::new(false)).map_err(|e| e.to_string())
+}
+
 impl FontFetcher for UreqFetcher {
     fn get(&self, url: &str, max_bytes: u64, ctx: &JobCtx) -> Result<Vec<u8>> {
         ctx.check()?;

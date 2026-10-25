@@ -62,7 +62,9 @@ mod tests {
     use super::*;
 
     const ICO: &[u8] = include_bytes!("../../../assets/app-icon/photocraft.ico");
-    const WXS: &str = include_str!("../../../packaging/windows/photocraft.wxs");
+    const WXS: &str = include_str!("../../../packaging/windows/capishot.wxs");
+    /// The same package for wixl (the Linux cross-build, `package-linux.sh`).
+    const WIXL: &str = include_str!("../../../packaging/windows/capishot-wixl.wxs");
 
     fn u16_at(b: &[u8], i: usize) -> usize {
         u16::from_le_bytes([b[i], b[i + 1]]) as usize
@@ -153,25 +155,31 @@ mod tests {
     /// target's extension the shell shows a blank page on the Start Menu and the taskbar.
     #[test]
     fn msi_shortcut_icons_keep_the_exe_extension() {
-        let icons: Vec<&str> = elements(WXS, "Icon").iter().filter_map(|e| attr(e, "Id")).collect();
+        for wxs in [WXS, WIXL] {
+            shortcut_icons_keep_the_exe_extension(wxs);
+        }
+    }
+
+    fn shortcut_icons_keep_the_exe_extension(wxs: &str) {
+        let icons: Vec<&str> = elements(wxs, "Icon").iter().filter_map(|e| attr(e, "Id")).collect();
         assert!(!icons.is_empty());
         for id in &icons {
             assert!(id.ends_with(".exe") || id.ends_with(".ico"), "<Icon Id=\"{id}\"> needs an .exe or .ico extension");
         }
-        let shortcuts = elements(WXS, "Shortcut");
+        let shortcuts = elements(wxs, "Shortcut");
         assert!(!shortcuts.is_empty());
         for s in shortcuts {
             let icon = attr(s, "Icon").expect("shortcuts name their icon");
             assert!(icons.contains(&icon), "shortcut icon {icon} isn't an <Icon>");
             if attr(s, "Advertise") == Some("yes") {
-                // Every shortcut in the MSI targets photocraft.exe.
+                // Every shortcut in the MSI targets capishot.exe.
                 assert!(icon.ends_with(".exe"), "advertised shortcut icon {icon} must end in .exe like its target (ICE50)");
             }
         }
-        let arp = WXS.split("Id=\"ARPPRODUCTICON\" Value=\"").nth(1).and_then(|r| r.split('"').next()).expect("ARPPRODUCTICON");
+        let arp = wxs.split("Id=\"ARPPRODUCTICON\" Value=\"").nth(1).and_then(|r| r.split('"').next()).expect("ARPPRODUCTICON");
         assert!(icons.contains(&arp), "ARPPRODUCTICON {arp} isn't an <Icon>");
         // The Start Menu shortcut must not set its own AppUserModelID: the process keeps the
         // implicit one, and a mismatch would split the taskbar button from the shortcut.
-        assert!(!WXS.contains("System.AppUserModel.ID"));
+        assert!(!wxs.contains("System.AppUserModel.ID"));
     }
 }

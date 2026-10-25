@@ -163,6 +163,7 @@ pub mod new_doc_ui;
 pub mod new_guide_ui;
 pub mod new_layer_ui;
 pub mod notices;
+pub mod update_notice;
 pub mod nudge_bundle;
 mod numeric_expression;
 pub mod object_finder;
@@ -590,6 +591,8 @@ pub struct Services {
     pub encode_png: Option<EncodePngFn>,
     /// Open a URL in the system browser (native). Falls back to `ctx.open_url` (web) when unset.
     pub open_url: Option<OpenUrlFn>,
+    /// The desktop's launch-time update check (`update_notice`): the shell fills in the manifest.
+    pub update_check: Option<update_notice::UpdateCheck>,
     /// Preferences ▸ General ▸ Beep When Done: the platform's default beep, played when a
     /// background job finishes successfully. `None` in the web build (and in tests).
     pub beep: Option<fn()>,
@@ -2283,6 +2286,7 @@ impl eframe::App for PhotocraftApp {
         self.drop_places.extend(to_place.into_iter().map(|(name, bytes)| file_open::DropPlace::Bytes(name, bytes)));
         // Finder double-click / Open With / Dock drops (macOS open-documents events).
         self.drain_os_events(ctx);
+        update_notice::poll(self);
         // While files are dragged over the window it gets no pointer events: keep frames coming so
         // the tab strip can follow the pointer.
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {

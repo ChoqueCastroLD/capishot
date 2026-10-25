@@ -1,7 +1,7 @@
 //! Verified model files: checksums and the native on-disk cache.
 //!
 //! A model file is only ever used after its sha256 matched the catalog's. Natively the cache is
-//! a folder (`<config dir>/ai-models/`, see [`DiskCache`]); writes are atomic (temp file, then
+//! a folder ([`models_dir`], see [`DiskCache`]); writes are atomic (temp file, then
 //! rename) and a corrupt file is deleted and fetched again. In the browser the AI worker keeps
 //! files in Cache Storage under the same rule (`apps/photocraft-ai-worker`).
 
@@ -16,6 +16,34 @@ pub const WEB_CACHE: &str = "capishot-ai-models-v1";
 /// The response header holding a cached file's sha256 (written by the AI worker's downloads;
 /// files cached before it existed have none).
 pub const WEB_SHA_HEADER: &str = "x-capishot-sha256";
+
+/// Where the desktop app and the CLI download model files from unless
+/// `PHOTOCRAFT_AI_MODELS_URL` says otherwise.
+pub const DEFAULT_MODELS_URL: &str = "https://r2.capichan.com/capishot/models/";
+
+/// The download base URL: `PHOTOCRAFT_AI_MODELS_URL` when set, else [`DEFAULT_MODELS_URL`].
+#[cfg(not(target_family = "wasm"))]
+pub fn models_url_from_env() -> String {
+    std::env::var("PHOTOCRAFT_AI_MODELS_URL").ok().filter(|u| !u.trim().is_empty()).unwrap_or_else(|| DEFAULT_MODELS_URL.to_string())
+}
+
+/// The native models folder for an app whose settings live in `config_dir`.
+///
+/// With the platform's own settings folder (`platform`: not portable mode, not
+/// `PHOTOCRAFT_CONFIG_DIR`), Windows keeps models in the machine-local
+/// `%LOCALAPPDATA%\Capishot\models`: they are hundreds of megabytes and the roaming `%APPDATA%`
+/// may be synced at sign-in or capped by policy. Everywhere else they sit in
+/// `<config dir>/ai-models`, so a portable copy keeps its models beside it.
+#[cfg(not(target_family = "wasm"))]
+pub fn models_dir(config_dir: &std::path::Path, platform: bool, env: impl Fn(&str) -> Option<std::ffi::OsString>) -> std::path::PathBuf {
+    if platform
+        && cfg!(windows)
+        && let Some(local) = env("LOCALAPPDATA").filter(|l| !l.is_empty())
+    {
+        return std::path::PathBuf::from(local).join("Capishot").join("models");
+    }
+    config_dir.join("ai-models")
+}
 
 /// Lowercase hex sha256 of `bytes`.
 pub fn sha256_hex(bytes: &[u8]) -> String {
@@ -50,11 +78,11 @@ pub struct DiskCache {
 
 #[cfg(not(target_family = "wasm"))]
 impl DiskCache {
-    /// The cache under an app config dir (`<config>/ai-models`), plus `PHOTOCRAFT_AI_MODELS`
-    /// (a `:`/`;`-separated list of folders) when set.
-    pub fn in_config_dir(config_dir: &std::path::Path) -> Self {
+    /// The cache in `dir` (the app's [`models_dir`]), plus `PHOTOCRAFT_AI_MODELS` (a
+    /// `:`/`;`-separated list of folders) when set.
+    pub fn in_dir(dir: &std::path::Path) -> Self {
         let extra = std::env::var_os("PHOTOCRAFT_AI_MODELS").map(|v| std::env::split_paths(&v).collect()).unwrap_or_default();
-        Self { dir: config_dir.join("ai-models"), extra }
+        Self { dir: dir.to_path_buf(), extra }
     }
 
     fn candidates(&self, model: &ModelInfo) -> impl Iterator<Item = std::path::PathBuf> + '_ {

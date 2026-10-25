@@ -15,7 +15,7 @@ pure-Rust CPU backend (`flex`, wasm included). No Python, no ONNX Runtime.
 | `Lama::{from_safetensors, generate, generate_async, check_size, arch}` | `model` (`flex` / `wgpu`) | The generator. |
 | `Migan::{from_safetensors, generate, generate_async, resolution}` | `model` | The lite generator (MI-GAN, below): tiles up to 512 px a side, mirror-padded to a multiple of 128. |
 | `Generator` | `model` | Either one, picked by the file's `arch` metadata (`lama-ffc`, `migan`). |
-| `native::NativeInpainter` | `model`, not wasm | Desktop/CLI runner: weights from `CAPISHOT_LAMA_WEIGHTS` or `<config>/models/manga-lama-f16.safetensors` (MI-GAN: `CAPISHOT_MIGAN_WEIGHTS` or `migan-512-places2-f16.safetensors` beside it); wgpu unless the adapter is software, `CAPISHOT_AI_DEVICE=cpu` or the request asks for the CPU, else CPU. |
+| `native::NativeInpainter` | `model`, not wasm | Desktop/CLI runner: weights from `CAPISHOT_LAMA_WEIGHTS` or the app's models folder (`manga-lama-f16.safetensors`) (MI-GAN: `CAPISHOT_MIGAN_WEIGHTS` or `migan-512-places2-f16.safetensors` beside it); wgpu unless the adapter is software, `CAPISHOT_AI_DEVICE=cpu` or the request asks for the CPU, else CPU. |
 
 Without features the crate has no ML dependency: the engine (and the main web bundle) uses only
 the tiling and service halves.
