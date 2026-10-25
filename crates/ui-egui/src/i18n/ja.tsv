@@ -4335,3 +4335,15 @@ curves	Smooth	スムーズ
 	Capishot {version} is available	Capishot {version} が利用可能です
 	You have {current}. Nothing is installed automatically.	現在のバージョンは {current} です。自動でインストールされることはありません。
 	No update is available	利用可能なアップデートはありません
+	Show the interface	インターフェイスを表示
+	Brush size slider	ブラシサイズのスライダー
+	Brush opacity slider	ブラシの不透明度のスライダー
+	Paragraph alignment	段落の揃え
+	Add to selection	選択範囲に追加
+	Subtract from selection	現在の選択範囲から一部削除
+	Intersect with selection	現在の選択範囲との共通範囲
+	Touch Modifier Button	タッチ修飾キーボタン
+	Stylus	スタイラス
+	Long Press for Eyedropper (ms)	長押しでスポイト (ms)
+	Finger paints	指で描く
+	Pen only	ペンのみ

@@ -51,6 +51,10 @@ choice!(
     /// Length units for rulers, the Info panel and size dialogs.
     Unit { Pixels = "pixels", Inches = "inches", Centimeters = "cm", Millimeters = "mm", Points = "points", Picas = "picas", Percent = "percent" } default Pixels
 );
+choice!(
+    /// Which contacts paint on a touch screen: Auto leaves fingers to navigation once a pen is seen.
+    StylusInput { Auto = "auto", FingerPaints = "fingerPaints", PenOnly = "penOnly" } default Auto
+);
 choice!(TypeUnit { Points = "points", Pixels = "pixels", Millimeters = "mm" } default Points);
 choice!(PointSize { PostScript = "postScript", Traditional = "traditional" } default PostScript);
 choice!(Interpolation { BicubicAutomatic = "bicubicAutomatic", Nearest = "nearestNeighbor", Bilinear = "bilinear", Bicubic = "bicubic", BicubicSmoother = "bicubicSmoother", BicubicSharper = "bicubicSharper", PreserveDetails = "preserveDetails" } default BicubicAutomatic);
@@ -926,11 +930,25 @@ pub struct EnhancedControls {
     pub touch_gestures: bool,
     pub zoom_with_trackpad_pinch: bool,
     pub rotate_view_with_trackpad: bool,
+    /// The touch modifier button (Shift held, Alt slid out) on touch screens.
+    pub touch_shortcut: bool,
+    /// Which contacts paint on a touch screen.
+    pub stylus_input: StylusInput,
+    /// A finger resting this long on the canvas picks a color with the paint tools (ms).
+    pub long_press_ms: u32,
 }
 
 impl Default for EnhancedControls {
     fn default() -> Self {
-        Self { scrubby_slider_acceleration: true, touch_gestures: true, zoom_with_trackpad_pinch: true, rotate_view_with_trackpad: false }
+        Self {
+            scrubby_slider_acceleration: true,
+            touch_gestures: true,
+            zoom_with_trackpad_pinch: true,
+            rotate_view_with_trackpad: false,
+            touch_shortcut: true,
+            stylus_input: StylusInput::Auto,
+            long_press_ms: 400,
+        }
     }
 }
 
@@ -1207,6 +1225,7 @@ pub fn choices(path: &str) -> Option<&'static [&'static str]> {
         "performance.gpuBackend" => GpuBackend::NAMES,
         "performance.linuxDisplayServer" => LinuxDisplayServer::NAMES,
         "performance.renderingMode" => RenderingMode::NAMES,
+        "enhancedControls.stylusInput" => StylusInput::NAMES,
         "performance.maxPixelDensity" => PixelDensity::NAMES,
         _ => return None,
     })
@@ -1220,6 +1239,7 @@ pub fn range(path: &str) -> Option<(f64, f64)> {
         "tools.nudgeBundlePauseMs" => (100.0, 10_000.0),
         "fileHandling.rasterizeSvgGroupsDeeperThan" => (0.0, photocraft_doc::MAX_GROUP_DEPTH as f64),
         "interface.notificationDurationSeconds" => (1.0, 120.0),
+        "enhancedControls.longPressMs" => (200.0, 1500.0),
         "export.jpegQuality" | "export.webpQuality" => (1.0, 100.0),
         "performance.memoryUsageMb" => (256.0, 1_048_576.0),
         "performance.gpuMemoryMb" => (0.0, 1_048_576.0),

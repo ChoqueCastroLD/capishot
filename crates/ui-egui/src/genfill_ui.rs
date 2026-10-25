@@ -276,7 +276,9 @@ fn bar_visible(app: &PhotocraftApp) -> Option<photocraft_geom::Rect> {
 
 /// The contextual bar under the selection: "Generative Fill" → prompt field → Generate.
 pub fn prompt_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
-    let Some(bounds) = bar_visible(app) else {
+    // The touch interface's selection bar offers it instead (touch_ui.rs).
+    let bounds = bar_visible(app).filter(|_| !crate::touch_ui::active(app));
+    let Some(bounds) = bounds else {
         app.ui.genfill.open = false;
         return;
     };

@@ -1563,6 +1563,9 @@ fn humanize(key: &str) -> String {
         "darkTheme" => return "Dark Theme".into(),
         "lightTheme" => return "Light Theme".into(),
         "simpleUi" => return "Simple UI".into(),
+        "touchShortcut" => return "Touch Modifier Button".into(),
+        "stylusInput" => return "Stylus".into(),
+        "longPressMs" => return "Long Press for Eyedropper (ms)".into(),
         _ => {}
     }
     // These controls appear only for WebP, so reuse the existing translated labels.

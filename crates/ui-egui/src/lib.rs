@@ -244,7 +244,10 @@ mod tool_cursor;
 pub mod tool_feedback;
 pub(crate) mod tool_memory;
 mod tool_reset;
+pub mod safe_area;
+pub mod touch_input;
 pub mod touch_nav;
+pub mod touch_ui;
 mod tool_shortcuts;
 pub mod touch_twins;
 pub mod transform_fx;
@@ -1012,6 +1015,10 @@ pub struct PhotocraftApp {
     pub(crate) allow_close: bool,
     /// Pen pressure/tilt from the platform (see `stylus`).
     pub stylus: stylus::Stylus,
+    /// What each finger on a touch screen is for (touch_input.rs).
+    pub touch: touch_input::TouchInput,
+    /// Four fingers tapped: the interface is hidden, canvas only (touch_ui.rs).
+    pub ui_hidden: bool,
     /// Run long commands and file opens as background jobs with progress and Cancel (#210; see
     /// `jobs_ui`). The desktop app turns it on; off (the default), everything runs inline as
     /// before, which tests and scripts rely on.
@@ -1180,6 +1187,8 @@ impl PhotocraftApp {
             held_opens: Default::default(),
             allow_close: false,
             stylus: Default::default(),
+            touch: Default::default(),
+            ui_hidden: false,
             background_jobs: false,
             min_frame_ms: None,
             last_frame_start_ms: 0.0,
@@ -2330,6 +2339,8 @@ impl eframe::App for PhotocraftApp {
             wheel_nav::fold_legacy_pinch(ctx, raw_input);
         }
         raw_input.events.extend(self.take_synthetic_step());
+        // Fingers: the tool's, the modifier button's, navigation, taps (touch_input.rs).
+        touch_ui::route(self, ctx, raw_input);
         // A pen held still is no touch screen's press-and-hold right click (stylus.rs).
         let pen_down = self.stylus.pen_contacts.observe(&raw_input.events);
         stylus::pen_hold_is_no_right_click(ctx, pen_down);
@@ -2398,7 +2409,13 @@ impl eframe::App for PhotocraftApp {
         // Phones: the simple interface (a compact top bar; floating bars and the Capi button over
         // the canvas, drawn after it) instead of the desktop chrome, which stays as it was.
         self.simple = chrome && simple_ui::active(self, &ctx);
+        touch_ui::begin_frame(self, &ctx);
         let area = chrome_freeze::show(self, ui, chrome || tabbed_in, |app, ui| {
+            // Four fingers tapped: the canvas only (touch_ui.rs).
+            if app.ui_hidden && touch_ui::active(app) {
+                simple_ui::clear_rects(ui.ctx());
+                return;
+            }
             if app.simple {
                 simple_ui::top_bar(app, ui);
                 // The tool's options with a document: a compact row, the rest behind its "⋯".
@@ -2434,8 +2451,10 @@ impl eframe::App for PhotocraftApp {
             canvas::document_area(self, ui);
         });
         if self.simple {
-            simple_ui::overlays(self, &ctx);
-        } else {
+            if !self.ui_hidden {
+                simple_ui::overlays(self, &ctx);
+            }
+        } else if !(self.ui_hidden && touch_ui::active(self)) {
             panels::properties_window(self, &ctx);
             if chrome {
                 panels::floating_groups(self, &ctx);
@@ -2464,6 +2483,7 @@ impl eframe::App for PhotocraftApp {
         camera_raw_ui::show(self, &ctx);
         wide_angle_ui::show(self, &ctx);
         canvas::extra_windows(self, &ctx);
+        touch_ui::overlays(self, &ctx);
         notices::show(self, &ctx);
         gpu_status::show_fallback(self, &ctx);
         kys_import::show_offer(self, &ctx);
@@ -2933,6 +2953,11 @@ impl PhotocraftApp {
 
     /// The active view's zoom in egui points per document pixel: the unit every screen-space
     /// distance, tolerance and texture-level choice on the canvas is measured in.
+    /// The simple interface is on this frame (`simple_ui::active`).
+    pub fn is_simple(&self) -> bool {
+        self.simple
+    }
+
     pub fn point_zoom(&self) -> f32 {
         self.current_zoom() / self.canvas_ppp()
     }

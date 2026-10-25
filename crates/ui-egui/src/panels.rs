@@ -3430,6 +3430,8 @@ fn layer_row(
     let t = Tokens::get(ctx);
     // The Layers Panel Options thumbnail size controls rows and both layer/mask thumbnails.
     let (base, row_h) = crate::layers_panel_ui::thumbnail_geometry(app.ui.layers_panel_options.thumbnail_size, t.pro);
+    // A finger's row: 48 pt on a touch screen.
+    let row_h = if crate::touch_ui::active(app) { row_h.max(48.0) } else { row_h };
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click_and_drag());
     // With thumbnails off no mask thumbnail is drawn, so none may keep catching drags from older frames.
     if base == 0.0 {

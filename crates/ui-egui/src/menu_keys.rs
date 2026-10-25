@@ -222,7 +222,8 @@ impl Keys {
 
     /// Underline the mnemonics this frame?
     pub fn show_underlines(&self, ctx: &egui::Context) -> bool {
-        self.underline || self.focus.is_some() || self.alt_down || ctx.input(|i| i.modifiers.alt)
+        // The touch modifier button's Alt is no keyboard: no underlines for it.
+        self.underline || self.focus.is_some() || self.alt_down || (ctx.input(|i| i.modifiers.alt) && !crate::touch_ui::flagged(ctx))
     }
 
     /// A menu just opened from the keyboard: light its first row (once, when it is drawn).

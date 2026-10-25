@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
   <title>Capishot</title>
   <link data-trunk rel="icon" href="../../assets/app-icon/hicolor/64x64/apps/ai.storyteller.photocraft.png" />
   <!-- Translation catalogs not compiled in (photocraft-ui-egui `all-catalogs`), fetched when chosen. -->
@@ -23,6 +23,8 @@
   <link data-trunk rel="copy-file" href="../../crates/ui-egui/src/i18n/LICENSE-translations.txt" data-target-path="i18n" />
   <link data-trunk rel="rust" data-bin="photocraft-web" data-cargo-profile="wasm-release" data-wasm-opt="z" data-weak-refs />
   <style>
+    /* The notch and home indicator (viewport-fit=cover): the app keeps its bars inside these (safe_area.rs). */
+    :root { --sat: env(safe-area-inset-top, 0px); --sar: env(safe-area-inset-right, 0px); --sab: env(safe-area-inset-bottom, 0px); --sal: env(safe-area-inset-left, 0px); }
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #262626; }
     #photocraft_canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
     #photocraft_loading { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -37,6 +39,17 @@
 </head>
 <body>
   <canvas id="photocraft_canvas"></canvas>
+  <script>
+    // The on-screen keyboard: Android Chrome shrinks the page (interactive-widget above); iOS
+    // Safari shrinks only the visual viewport, so fit the page to it and the app's bars stay above
+    // the keyboard.
+    if (window.visualViewport) {
+      const vv = window.visualViewport;
+      const fit = () => { document.documentElement.style.height = vv.height + 'px'; document.body.style.height = vv.height + 'px'; if (window.scrollY) window.scrollTo(0, 0); };
+      vv.addEventListener('resize', fit);
+      vv.addEventListener('scroll', fit);
+    }
+  </script>
   <div id="photocraft_loading">
     <p>Loading Capishot&hellip;</p>
     <p id="photocraft_stalled">This is taking longer than usual. If Capishot doesn't start, its files may have failed to

@@ -71,7 +71,12 @@ fn a_phone_gets_the_simple_interface() {
         h.run_steps(2);
         h.state_mut().ui.tool = Tool::Pen;
         h.run_steps(2);
-        assert_eq!(recent_bar(h.state(), &h.ctx)[..2], [Tool::Pen, Tool::Gradient]);
+        let bar = recent_bar(h.state(), &h.ctx);
+        assert!(bar.contains(&Tool::Pen) && bar.contains(&Tool::Gradient), "{bar:?}");
+        // Using a tool already in the bar leaves every slot where it was.
+        h.state_mut().ui.tool = Tool::Gradient;
+        h.run_steps(2);
+        assert_eq!(recent_bar(h.state(), &h.ctx), bar, "no shuffling under the finger");
         // A favorite never shows among the recents.
         h.state_mut().ui.tool = Tool::Brush;
         h.run_steps(2);
@@ -161,4 +166,32 @@ fn the_palette_searches_three_languages_and_runs_quick_actions() {
     crate::palette::run_quick(&mut a, &ctx, "rotar 90").unwrap();
     let d = &a.session.active().unwrap().doc;
     assert_eq!((d.size.width, d.size.height), (200, 300));
+}
+
+/// A tool tapped in the Capi sheet becomes the tool (and the sheet closes).
+#[test]
+fn a_tool_tapped_in_the_sheet_is_picked() {
+    let mut a = app();
+    a.run("file.new", json!({"width": 600, "height": 800})).unwrap();
+    a.sync_views();
+    let mut h = harness(a, 412.0, 915.0);
+    h.state_mut().ui.tool = Tool::CloneStamp;
+    h.run_steps(2);
+    // The scrim closed a sheet once: egui raises a tapped area, and it then sat above the next
+    // sheet and took every tap there (the tool never changed).
+    h.get_by_label("Capi: tools, panels and actions").click();
+    h.run_steps(3);
+    let screen = h.ctx.content_rect();
+    h.event(egui::Event::PointerMoved(egui::pos2(screen.center().x, screen.top() + 60.0)));
+    h.event(egui::Event::PointerButton { pos: egui::pos2(screen.center().x, screen.top() + 60.0), button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: egui::pos2(screen.center().x, screen.top() + 60.0), button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() });
+    h.run_steps(3);
+    assert_eq!(sheet(&h.ctx), Sheet::Closed, "the scrim closes the sheet");
+    h.get_by_label("Capi: tools, panels and actions").click();
+    h.run_steps(3);
+    h.get_by_label("Pencil Tool").click();
+    h.run_steps(3);
+    assert_eq!(h.state().ui.tool, Tool::Pencil);
+    assert_eq!(sheet(&h.ctx), Sheet::Closed);
 }

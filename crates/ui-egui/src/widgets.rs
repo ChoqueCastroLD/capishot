@@ -168,7 +168,12 @@ pub const FOOTER_BAR: f32 = 30.0;
 /// The height a [`panel_footer`] takes from the panel body: its line, and its bar down to the
 /// body's bottom margin (the bar runs on over the margin).
 pub fn footer_height(ui: &Ui) -> f32 {
-    1.0 + FOOTER_BAR - body_margin(Tokens::get(ui.ctx()).pro).bottom as f32
+    1.0 + footer_bar(ui.ctx()) - body_margin(Tokens::get(ui.ctx()).pro).bottom as f32
+}
+
+/// The footer bar's height: [`FOOTER_BAR`], or a finger's 44 pt with the touch interface.
+fn footer_bar(ctx: &egui::Context) -> f32 {
+    if crate::touch_ui::flagged(ctx) { 44.0 } else { FOOTER_BAR }
 }
 
 /// A panel footer as in Photoshop's Layers and History panels: a bar of buttons under a line that
@@ -181,10 +186,15 @@ pub fn panel_footer<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), footer_height(ui)), Sense::hover());
     let y = r.top() + 0.5;
     ui.painter().line_segment([pos2(r.left() - m.left as f32, y), pos2(r.right() + m.right as f32, y)], Stroke::new(1.0, t.separator));
-    let bar = Rect::from_min_size(pos2(r.left(), r.top() + 1.0), vec2(r.width(), FOOTER_BAR));
+    let bar = Rect::from_min_size(pos2(r.left(), r.top() + 1.0), vec2(r.width(), footer_bar(ui.ctx())));
     let mut bar_ui = ui.new_child(egui::UiBuilder::new().max_rect(bar).layout(egui::Layout::right_to_left(egui::Align::Center)));
     bar_ui.spacing_mut().item_spacing.x = 2.0;
-    add(&mut bar_ui)
+    // Touch: the footer's icon buttons grow to finger size (icons.rs reads this).
+    let touch = crate::touch_ui::flagged(ui.ctx());
+    crate::icons::set_min_box(ui.ctx(), if touch { 42.0 } else { 0.0 });
+    let out = add(&mut bar_ui);
+    crate::icons::set_min_box(ui.ctx(), 0.0);
+    out
 }
 
 /// Photoshop-grammar panel group: dark tab strip with flat tabs, flat body, hamburger menu.

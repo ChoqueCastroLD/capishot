@@ -53,6 +53,11 @@ const LONG_PRESS_SLOP: f32 = 8.0;
 /// fingers off the tools until they lift (`frame` reports the hold), so the press that opened the
 /// menu does nothing else.
 pub fn long_press(ctx: &Context, id: Id, area: egui::Rect) -> Option<egui::Pos2> {
+    long_press_after(ctx, id, area, LONG_PRESS_S)
+}
+
+/// [`long_press`] after `secs` (Preferences › Enhanced Controls › Long Press for Eyedropper).
+pub fn long_press_after(ctx: &Context, id: Id, area: egui::Rect, secs: f64) -> Option<egui::Pos2> {
     let fired_id = id.with("long-press");
     let (touching, multi, down, origin, start, now, pos) = ctx.input(|i| {
         (
@@ -65,18 +70,31 @@ pub fn long_press(ctx: &Context, id: Id, area: egui::Rect) -> Option<egui::Pos2>
             i.pointer.latest_pos(),
         )
     });
+    let wandered_id = id.with("long-press-wandered");
     if !touching {
-        ctx.data_mut(|d| d.remove::<bool>(fired_id));
+        ctx.data_mut(|d| {
+            d.remove::<bool>(fired_id);
+            d.remove::<bool>(wandered_id);
+        });
         return None;
     }
     let fired = ctx.data(|d| d.get_temp::<bool>(fired_id)).unwrap_or(false);
     let (Some(origin), Some(start), Some(pos)) = (origin, start, pos) else { return None };
-    if fired || multi || !down || !area.contains(origin) || (pos - origin).length() > LONG_PRESS_SLOP {
+    // A finger that moved away is no long press, even back where it started (a closed lasso
+    // loop ends at its start: that opened the context menu).
+    if down && (pos - origin).length() > LONG_PRESS_SLOP {
+        ctx.data_mut(|d| d.insert_temp(wandered_id, true));
+    }
+    let wandered = ctx.data(|d| d.get_temp::<bool>(wandered_id)).unwrap_or(false);
+    if fired || wandered || multi || !down || !area.contains(origin) || (pos - origin).length() > LONG_PRESS_SLOP {
+        if !down {
+            ctx.data_mut(|d| d.remove::<bool>(wandered_id));
+        }
         return None;
     }
     let held = now - start;
-    if held < LONG_PRESS_S {
-        ctx.request_repaint_after(std::time::Duration::from_secs_f64((LONG_PRESS_S - held).max(0.0) + 0.01));
+    if held < secs {
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64((secs - held).max(0.0) + 0.01));
         return None;
     }
     ctx.data_mut(|d| {
@@ -184,6 +202,26 @@ mod tests {
             full.textures_delta.clear();
         }
         assert!(!fired);
+    }
+
+    /// A finger that leaves and comes back (a closed lasso loop) is no long press.
+    #[test]
+    fn a_finger_that_came_back_is_no_long_press() {
+        let ctx = Context::default();
+        let area = egui::Rect::from_min_size(Pos2::ZERO, Vec2::splat(1000.0));
+        let mut fired = false;
+        let path = [(100.0, 100.0), (180.0, 100.0), (180.0, 180.0), (100.0, 180.0), (101.0, 101.0), (101.0, 101.0), (101.0, 101.0)];
+        for (k, (x, y)) in path.into_iter().enumerate() {
+            let p = Pos2::new(x, y);
+            let mut events = vec![touch(1, if k == 0 { TouchPhase::Start } else { TouchPhase::Move }, x, y), Event::PointerMoved(p)];
+            if k == 0 {
+                events.push(Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
+            }
+            let t = 1.0 + 0.15 * k as f64;
+            let mut full = ctx.run_ui(RawInput { events, time: Some(t), ..Default::default() }, |ui| fired |= long_press(ui.ctx(), Id::new("b"), area).is_some());
+            full.textures_delta.clear();
+        }
+        assert!(!fired, "the loop's end at its start opened the context menu");
     }
 
     #[test]

@@ -3523,7 +3523,16 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     let _ = touch_gestures;
     let wheel =
         crate::wheel_nav::read(&ctx, app.session.prefs().general.zoom_with_scroll_wheel, app.session.prefs().enhanced_controls.zoom_with_trackpad_pinch);
-    if nav_hovered {
+    // Touch: a pinch that starts inside the Free Transform box scales and turns what it holds
+    // (and moves it with the fingers) instead of the view (touch_ui::transform_pinch).
+    let box_pinch = primary && touch_gestures && crate::touch_ui::transform_pinch(app, &ctx, &xf);
+    // Touch: a two-finger twist turns the view (with or without Rotate View with Trackpad), and
+    // snaps upright when let go near 0°.
+    let touch_turn = crate::touch_ui::active(app) && touch_gestures;
+    if touch_turn && primary {
+        crate::touch_ui::snap_rotation(&ctx, &mut view.rotation);
+    }
+    if nav_hovered && !box_pinch {
         let pointer = ui.input(|i| i.multi_touch().map(|t| t.center_pos).or_else(|| i.pointer.hover_pos()));
         match (wheel, pointer) {
             (Some(crate::wheel_nav::Wheel::Zoom(f)), Some(p)) => {
@@ -3543,7 +3552,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             }
             _ => {}
         }
-        let rotate_trackpad = app.session.prefs().enhanced_controls.rotate_view_with_trackpad;
+        let rotate_trackpad = app.session.prefs().enhanced_controls.rotate_view_with_trackpad || touch_turn;
         if let Some(delta) = crate::rotate_view::trackpad_delta(&ctx, rotate_trackpad, touch_gestures) {
             let next = view.rotation + crate::rotate_view::screen_delta(delta, xf.flip);
             if next.is_finite() {
@@ -3716,17 +3725,41 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     let nav_id = egui::Id::new(("pc-touch-nav", idx, primary, ctx.viewport_id()));
     let touch = crate::touch_nav::frame(&ctx, nav_id, rect, touch_gestures);
     // A finger held still is a right-click (context menus), for tools a press doesn't paint with.
-    let long_press = (primary && touch_gestures && touch.is_none() && !strokes_live(tool)).then(|| crate::touch_nav::long_press(&ctx, nav_id, rect)).flatten();
+    // With the touch interface, a painting tool's long press picks a color instead (the Clone
+    // Stamp's and the Healing Brush's, their source), with a loupe, until the finger lifts.
+    let pick_tool = crate::touch_ui::active(app) && tool.is_brushlike();
+    // Only a press on the canvas itself: under a sheet, a bar or a menu it belongs to them.
+    let on_canvas = response.contains_pointer() || app.drag.is_some();
+    let long_press = if primary && touch_gestures && touch.is_none() && pick_tool && on_canvas && !crate::touch_ui::picking(&ctx) {
+        let secs = f64::from(app.session.prefs().enhanced_controls.long_press_ms) / 1000.0;
+        let fired = crate::touch_nav::long_press_after(&ctx, nav_id, rect, secs);
+        if fired.is_some() {
+            app.drag = None;
+            app.dropped_stroke = app.live_stroke.take().map(|l| DroppedStroke::of(&l));
+            crate::touch_ui::start_pick(app, &ctx);
+        }
+        None
+    } else {
+        (primary && touch_gestures && touch.is_none() && on_canvas && !strokes_live(tool)).then(|| crate::touch_nav::long_press(&ctx, nav_id, rect)).flatten()
+    };
     if long_press.is_some() {
         app.drag = None;
     }
     if let Some(t) = touch {
+        let t = if box_pinch { crate::touch_nav::Step { pan: egui::Vec2::ZERO, ..t } } else { t };
         if t.started && primary {
             // What the first finger started is dropped, uncommitted (as Escape drops a drag).
             app.drag = None;
             app.dropped_stroke = app.live_stroke.take().map(|l| DroppedStroke::of(&l));
         }
         let d = xf.unmap_vec(t.pan) / (view.zoom / ppp);
+        if d.is_finite() {
+            view.center[0] -= d.x;
+            view.center[1] -= d.y;
+        }
+    } else if let Some(pan) = (primary && !stroke_dismissal).then(|| app.touch.take_pan()).filter(|p| *p != egui::Vec2::ZERO) {
+        // A pen is in use (Preferences › Enhanced Controls › Stylus): one finger pans (touch_input.rs).
+        let d = xf.unmap_vec(pan) / (view.zoom / ppp);
         if d.is_finite() {
             view.center[0] -= d.x;
             view.center[1] -= d.y;
@@ -4438,7 +4471,9 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     // Scrollbars (scrollbars.rs): drawn over the canvas edges, they take the pointer there.
     let t0 = crate::gpu_canvas::now_ms();
     let before = view.center;
+    // The touch interface pans with fingers: scrollbars there only cover the canvas's edges.
     let over_bars = app.ui.view.shows_scrollbars()
+        && !crate::touch_ui::active(app)
         && crate::scrollbars::show(ui, rect, &mut view, flip, aspect, app.session.prefs().tools.overscroll, egui::Id::new(("pc-canvas", idx)));
     ctx.data_mut(|d| d.insert_temp(bars_id, over_bars));
     if view.center != before {
@@ -5457,7 +5492,7 @@ fn alt_eyedropper(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
     true
 }
 
-fn sample_eyedropper(app: &mut PhotocraftApp, x: f64, y: f64, mods: egui::Modifiers) {
+pub(crate) fn sample_eyedropper(app: &mut PhotocraftApp, x: f64, y: f64, mods: egui::Modifiers) {
     if let Some([r, g, b]) = eyedropper_color(app, x, y) {
         let key = if mods.alt { "background" } else { "foreground" };
         let _ = app.run("tools.setColors", json!({ key: [r, g, b, 1.0] }));

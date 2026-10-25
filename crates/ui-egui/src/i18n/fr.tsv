@@ -3672,3 +3672,15 @@ curves	Smooth	Lisser
 	Capishot {version} is available	Capishot {version} est disponible
 	You have {current}. Nothing is installed automatically.	Vous avez la {current}. Rien n'est installé automatiquement.
 	No update is available	Aucune mise à jour disponible
+	Show the interface	Afficher l'interface
+	Brush size slider	Curseur de taille du pinceau
+	Brush opacity slider	Curseur d'opacité du pinceau
+	Paragraph alignment	Alignement du paragraphe
+	Add to selection	Ajouter à la sélection
+	Subtract from selection	Soustraire de la sélection
+	Intersect with selection	Intersection avec la sélection
+	Touch Modifier Button	Bouton modificateur tactile
+	Stylus	Stylet
+	Long Press for Eyedropper (ms)	Appui long pour la pipette (ms)
+	Finger paints	Les doigts peignent
+	Pen only	Stylet uniquement

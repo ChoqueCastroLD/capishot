@@ -3301,3 +3301,15 @@ curves	Smooth	平滑
 	Capishot {version} is available	Capishot {version} 现已推出
 	You have {current}. Nothing is installed automatically.	你当前的版本是 {current}。不会自动安装任何内容。
 	No update is available	没有可用的更新
+	Show the interface	显示界面
+	Brush size slider	画笔大小滑块
+	Brush opacity slider	画笔不透明度滑块
+	Paragraph alignment	段落对齐
+	Add to selection	添加到选区
+	Subtract from selection	从选区减去
+	Intersect with selection	与选区交叉
+	Touch Modifier Button	触控修饰键按钮
+	Stylus	触控笔
+	Long Press for Eyedropper (ms)	长按使用吸管 (毫秒)
+	Finger paints	手指绘画
+	Pen only	仅限触控笔

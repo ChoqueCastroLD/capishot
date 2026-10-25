@@ -254,12 +254,22 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let mut dismiss_id = None;
     let mut run: Option<String> = None;
     // Clear the status bar (~24 px) and leave the dock's edge some air.
+    // The simple interface: under its top bars, the window's width (bottom right, they covered
+    // the Capi button and the tool bars).
+    let simple = app.simple;
+    let width = if simple { (ctx.content_rect().width() - 16.0).min(360.0) } else { 360.0 };
+    let (align, offset) = if simple {
+        // Below the row where the selection's action bar and the transform's Done sit.
+        (egui::Align2::CENTER_TOP, egui::vec2(0.0, crate::safe_area::get(ctx).top + 44.0 + 44.0 + 68.0))
+    } else {
+        (egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -36.0))
+    };
     let area = egui::Area::new(egui::Id::new("photocraft-notices"))
         .order(egui::Order::Foreground)
-        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -36.0))
+        .anchor(align, offset)
         .interactable(true)
         .show(ctx, |ui| {
-            ui.set_max_width(360.0);
+            ui.set_max_width(width);
             for n in &app.ui.notices {
                 egui::Frame::NONE
                     .fill(t.card)
@@ -268,7 +278,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     .inner_margin(egui::Margin::same(10))
                     .shadow(egui::Shadow { offset: [0, 2], blur: 8, spread: 0, color: t.shadow })
                     .show(ui, |ui| {
-                        ui.set_width(340.0);
+                        ui.set_width(width - 20.0);
                         ui.horizontal(|ui| {
                             let title = egui::RichText::new(n.text(&n.title)).strong().color(if n.error { t.warning } else { t.text });
                             ui.add(egui::Label::new(title).wrap());

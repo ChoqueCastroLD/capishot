@@ -183,7 +183,11 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         // effects, extends down and right instead of re-centring.
         let pinned: Option<egui::Vec2> = ctx.data(|m| m.get_temp(id));
         let place = place_id(&d);
-        let start = pinned.or_else(|| ctx.data_mut(|m| m.get_persisted::<egui::Vec2>(place))).or_else(|| crate::blur_pins::first_place(&d.fields, ctx));
+        // A phone: dialogs fit the window's width and open centred (a place remembered on a wider
+        // window could leave one half off the screen).
+        let narrow = ctx.content_rect().width() < crate::simple_ui::PHONE_BELOW;
+        let cap = if narrow { (ctx.content_rect().width() - 40.0).max(220.0) } else { f32::INFINITY };
+        let start = if narrow { pinned } else { pinned.or_else(|| ctx.data_mut(|m| m.get_persisted::<egui::Vec2>(place))).or_else(|| crate::blur_pins::first_place(&d.fields, ctx)) };
         let mut drag = egui::Vec2::ZERO;
         let mut close_clicked = false;
         let mut sizing = false;
@@ -225,23 +229,23 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             // The curve editor caps its graph allocation at 300 points (#5113).
             let curves = fields.get("__adjust").and_then(Value::as_str) == Some("curves");
             if !compact && !sheet {
-                ui.set_min_width(if curves { 300.0 } else { 380.0 });
+                ui.set_min_width(f32::min(if curves { 300.0 } else { 380.0 }, cap));
             }
             // A resizable dialog's contents fill its resizable area (#7420), the others the window.
             let room = if resizable.is_some() { available.x } else { (ctx.content_rect().width() - 48.0).max(380.0) };
             let wide = crate::prefs_ui::width(&d.fields, room);
             if let Some(w) = wide.filter(|_| !sheet) {
-                ui.set_min_width(w.min(460.0));
+                ui.set_min_width((w.min(460.0)).min(cap));
             }
             if d.kind == DialogKind::NewDocument {
-                ui.set_min_width(800.0);
+                ui.set_min_width(f32::min(800.0, cap));
             }
             // The About window: room for the contributor table, the same width on every tab.
             let about_tabs = d.kind == DialogKind::About && d.fields.get("systemInfo").and_then(Value::as_bool) != Some(true);
             if about_tabs {
-                ui.set_min_width(700.0);
+                ui.set_min_width(f32::min(700.0, cap));
             }
-            ui.set_max_width(wide.unwrap_or(if d.kind == DialogKind::NewDocument {
+            ui.set_max_width((wide.unwrap_or(if d.kind == DialogKind::NewDocument {
                 800.0
             } else if about_tabs {
                 700.0
@@ -253,19 +257,19 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 300.0
             } else {
                 440.0
-            }));
+            })).min(cap));
             if web {
-                ui.set_max_width(available.x);
+                ui.set_max_width((available.x).min(cap));
                 ui.set_min_size(available);
             } else if let Some(w) = crate::file_ui::dialog_width(&d.fields) {
-                ui.set_min_width(w);
-                ui.set_max_width(w);
+                ui.set_min_width((w).min(cap));
+                ui.set_max_width((w).min(cap));
             }
             // Duplicate Layer… is a fixed small grid (labels + 260 pt fields ≈ 352 pt):
             // the generic 380 pt minimum left a dead strip on its right.
             if crate::duplicate_layer_ui::owns(&d.fields) {
-                ui.set_min_width(360.0);
-                ui.set_max_width(360.0);
+                ui.set_min_width(f32::min(360.0, cap));
+                ui.set_max_width(f32::min(360.0, cap));
             }
             if color_picker {
                 ui.set_width(crate::color_picker_ui::CONTENT_WIDTH);

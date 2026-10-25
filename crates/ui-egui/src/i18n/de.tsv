@@ -3670,3 +3670,15 @@ curves	Smooth	Glätten
 	Capishot {version} is available	Capishot {version} ist verfügbar
 	You have {current}. Nothing is installed automatically.	Sie haben {current}. Es wird nichts automatisch installiert.
 	No update is available	Kein Update verfügbar
+	Show the interface	Oberfläche einblenden
+	Brush size slider	Regler für die Pinselgröße
+	Brush opacity slider	Regler für die Pinseldeckkraft
+	Paragraph alignment	Absatzausrichtung
+	Add to selection	Der Auswahl hinzufügen
+	Subtract from selection	Von der Auswahl subtrahieren
+	Intersect with selection	Schnittmenge mit Auswahl bilden
+	Touch Modifier Button	Touch-Modifikatortaste
+	Stylus	Stift
+	Long Press for Eyedropper (ms)	Langes Drücken für die Pipette (ms)
+	Finger paints	Finger malen
+	Pen only	Nur Stift

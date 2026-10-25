@@ -4370,3 +4370,15 @@ curves	Smooth	Згладити
 	Capishot {version} is available	Доступний Capishot {version}
 	You have {current}. Nothing is installed automatically.	У вас версія {current}. Нічого не встановлюється автоматично.
 	No update is available	Оновлень немає
+	Show the interface	Показати інтерфейс
+	Brush size slider	Повзунок розміру пензля
+	Brush opacity slider	Повзунок непрозорості пензля
+	Paragraph alignment	Вирівнювання абзацу
+	Add to selection	Додати до виділення
+	Subtract from selection	Відняти від виділення
+	Intersect with selection	Перетнути з виділенням
+	Touch Modifier Button	Сенсорна кнопка-модифікатор
+	Stylus	Стилус
+	Long Press for Eyedropper (ms)	Довге натискання для піпетки (мс)
+	Finger paints	Пальці малюють
+	Pen only	Лише стилус

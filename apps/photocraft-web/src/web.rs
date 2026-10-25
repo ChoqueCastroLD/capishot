@@ -284,6 +284,9 @@ impl Boot {
         }
         listen_pen(&pen_target, app.stylus.feed.clone());
         reject_palms();
+    track_stylus_touches();
+    keyboard_on_type_tap();
+    track_active_touches();
         crate::clipboard::install(ctx);
         listen_drag_position();
         app.set_theme(ctx, ThemeKind::Pro);
@@ -310,7 +313,7 @@ impl Boot {
         if let Some(el) = loading {
             el.remove();
         }
-        WebShell { app, inbox, places, canvas: pen_target, unsaved, served, user_fonts, database, presets, startup_frames: 0, perf, recovery, outbox, photopea, watchdog: crate::watchdog::Watchdog::new(), downloads: Default::default() }
+        WebShell { app, safe_area_size: None, inbox, places, canvas: pen_target, unsaved, served, user_fonts, database, presets, startup_frames: 0, perf, recovery, outbox, photopea, watchdog: crate::watchdog::Watchdog::new(), downloads: Default::default() }
     }
 }
 
@@ -514,6 +517,114 @@ fn reject_palms() {
         let _ = window.add_event_listener_with_callback_and_add_event_listener_options(kind, touch.as_ref().unchecked_ref(), &opts);
     }
     touch.forget();
+}
+
+thread_local! {
+    /// Touch contacts that are a stylus (an Apple Pencil's `touchType`), for the app's touch router.
+    static STYLUS_TOUCHES: std::cell::RefCell<Vec<i32>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Keep [`STYLUS_TOUCHES`] (the touch router paints with these, never navigates with them).
+fn track_stylus_touches() {
+    use wasm_bindgen::closure::Closure;
+    let Some(window) = web_sys::window() else { return };
+    let opts = web_sys::AddEventListenerOptions::new();
+    opts.set_capture(true);
+    opts.set_passive(true);
+    let cb = Closure::<dyn FnMut(web_sys::TouchEvent)>::new(|e: web_sys::TouchEvent| {
+        let changed = e.changed_touches();
+        let start = e.type_() == "touchstart";
+        STYLUS_TOUCHES.with(|s| {
+            let mut s = s.borrow_mut();
+            for t in (0..changed.length()).filter_map(|i| changed.get(i)) {
+                let id = t.identifier();
+                if start {
+                    let stylus = js_sys::Reflect::get(&t, &wasm_bindgen::JsValue::from_str("touchType")).ok().and_then(|v| v.as_string()).as_deref() == Some("stylus");
+                    if stylus && !s.contains(&id) {
+                        s.push(id);
+                    }
+                } else {
+                    s.retain(|x| *x != id);
+                }
+            }
+        });
+    });
+    for kind in ["touchstart", "touchend", "touchcancel"] {
+        let _ = window.add_event_listener_with_callback_and_add_event_listener_options(kind, cb.as_ref().unchecked_ref(), &opts);
+    }
+    cb.forget();
+}
+
+thread_local! {
+    /// Where a finger lifted on the page brings up the on-screen keyboard (client CSS pixels):
+    /// the canvas while the Type tool is active. `None`: nowhere.
+    static KEYBOARD_ZONE: std::cell::Cell<Option<[f64; 4]>> = const { std::cell::Cell::new(None) };
+}
+
+/// iOS Safari opens the keyboard only for a focus made inside a touch's own event handler, and
+/// the app starts typing a frame later. So a tap with the Type tool focuses eframe's text input
+/// right in the `touchend` (Android needs nothing: it follows the app's focus).
+fn keyboard_on_type_tap() {
+    use wasm_bindgen::closure::Closure;
+    let Some(window) = web_sys::window() else { return };
+    let opts = web_sys::AddEventListenerOptions::new();
+    opts.set_capture(true);
+    opts.set_passive(true);
+    let cb = Closure::<dyn FnMut(web_sys::TouchEvent)>::new(|e: web_sys::TouchEvent| {
+        let Some(zone) = KEYBOARD_ZONE.with(std::cell::Cell::get) else { return };
+        let changed = e.changed_touches();
+        let inside = (0..changed.length()).filter_map(|i| changed.get(i)).any(|t| {
+            let (x, y) = (f64::from(t.client_x()), f64::from(t.client_y()));
+            x >= zone[0] && y >= zone[1] && x <= zone[2] && y <= zone[3]
+        });
+        if !inside {
+            return;
+        }
+        let input = web_sys::window().and_then(|w| w.document()).and_then(|d| d.query_selector("input[autocapitalize=off]").ok().flatten());
+        if let Some(input) = input.and_then(|i| i.dyn_into::<web_sys::HtmlElement>().ok()) {
+            let _ = input.focus();
+        }
+    });
+    let _ = window.add_event_listener_with_callback_and_add_event_listener_options("touchend", cb.as_ref().unchecked_ref(), &opts);
+    cb.forget();
+}
+
+thread_local! {
+    /// The contacts down after the latest touch event (`TouchEvent.touches`), when it changed.
+    static ACTIVE_TOUCHES: std::cell::RefCell<Option<Vec<i32>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Keep [`ACTIVE_TOUCHES`]: the touch router lets go of a finger whose end never arrived.
+fn track_active_touches() {
+    use wasm_bindgen::closure::Closure;
+    let Some(window) = web_sys::window() else { return };
+    let opts = web_sys::AddEventListenerOptions::new();
+    opts.set_capture(true);
+    opts.set_passive(true);
+    let cb = Closure::<dyn FnMut(web_sys::TouchEvent)>::new(|e: web_sys::TouchEvent| {
+        let list = e.touches();
+        let ids: Vec<i32> = (0..list.length()).filter_map(|i| list.get(i)).map(|t| t.identifier()).collect();
+        ACTIVE_TOUCHES.with(|a| *a.borrow_mut() = Some(ids));
+    });
+    for kind in ["touchstart", "touchmove", "touchend", "touchcancel"] {
+        let _ = window.add_event_listener_with_callback_and_add_event_listener_options(kind, cb.as_ref().unchecked_ref(), &opts);
+    }
+    cb.forget();
+}
+
+/// The stylus contacts down now, as egui's touch ids.
+fn stylus_touch_ids() -> Vec<egui::TouchId> {
+    STYLUS_TOUCHES.with(|s| s.borrow().iter().map(|id| egui::TouchId::from(*id)).collect())
+}
+
+/// The safe area (`env(safe-area-inset-*)`, read through the page's `--sa*` properties) in points.
+fn safe_area(ctx: &egui::Context) -> Option<photocraft_ui_egui::safe_area::Insets> {
+    let window = web_sys::window()?;
+    let root = window.document()?.document_element()?;
+    let style = window.get_computed_style(&root).ok()??;
+    let zoom = ctx.zoom_factor().max(0.01);
+    let px = |k: &str| style.get_property_value(k).ok().and_then(|v| v.trim().trim_end_matches("px").parse::<f32>().ok()).unwrap_or(0.0) / zoom;
+    Some(photocraft_ui_egui::safe_area::Insets { top: px("--sat"), right: px("--sar"), bottom: px("--sab"), left: px("--sal") })
 }
 
 /// Whether a finger at `now` (`Event.timeStamp`) counts as a palm: the pen is down or was just used.
@@ -721,6 +832,8 @@ async fn fetch_bytes(url: &str, integrity: Option<&str>) -> Result<Vec<u8>, Stri
 /// so the app's own drop path can't handle them) and feed them through the inboxes.
 struct WebShell {
     app: PhotocraftApp,
+    /// The window size the safe area was last read at.
+    safe_area_size: Option<egui::Vec2>,
     /// Dropped files to open as documents.
     inbox: Inbox,
     /// Files dropped on the canvas, read: placed as layers, like the desktop's canvas drops.
@@ -930,6 +1043,13 @@ impl eframe::App for WebShell {
         // A tap reaches eframe as Pointer Events and Touch Events: keep one press per tap, or the
         // twin press closes the menu the first one opened (#2095).
         photocraft_ui_egui::touch_twins::drop_twins(ctx, raw_input);
+        // An Apple Pencil's contacts paint; the touch router must not take them for fingers.
+        self.app.touch.pen_ids = stylus_touch_ids();
+        // A finger whose touchend was lost is let go (touch_input.rs).
+        if let Some(ids) = ACTIVE_TOUCHES.with(|a| a.borrow_mut().take()) {
+            let ids: Vec<egui::TouchId> = ids.into_iter().map(egui::TouchId::from).collect();
+            self.app.touch.sync_active(raw_input, &ids);
+        }
         crate::wheel_guard::restore(raw_input);
         // The app's own hook (clipboard keys, synthetic automation input), around the browser's
         // clipboard (clipboard.rs).
@@ -949,6 +1069,24 @@ impl eframe::App for WebShell {
             }
         }
         self.perf.begin(frame.info().cpu_usage);
+        // A tap on the canvas with the Type tool opens the keyboard (keyboard_on_type_tap).
+        let zone = (self.app.ui.tool.is_type() && photocraft_ui_egui::touch_ui::active(&self.app) && photocraft_ui_egui::simple_ui::sheet(ctx) == photocraft_ui_egui::simple_ui::Sheet::Closed)
+            .then(|| {
+                let r = self.app.last_canvas_rect;
+                let z = f64::from(ctx.zoom_factor());
+                // Above the simple interface's floating bars.
+                let bottom = if self.app.is_simple() { r.bottom() - 130.0 } else { r.bottom() };
+                [f64::from(r.left()) * z, f64::from(r.top()) * z, f64::from(r.right()) * z, f64::from(bottom) * z]
+            });
+        KEYBOARD_ZONE.with(|k| k.set(zone));
+        // The notch and home indicator, re-read when the window changes size (rotation).
+        let size = ctx.content_rect().size();
+        if self.safe_area_size != Some(size) {
+            self.safe_area_size = Some(size);
+            if let Some(i) = safe_area(ctx) {
+                photocraft_ui_egui::safe_area::set(ctx, i);
+            }
+        }
         let dropped = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
         // Dropped on the canvas of an open document: placed as layers; elsewhere opened.
         let on_canvas = !dropped.is_empty() && self.app.drop_places_on_canvas(ctx, drop_position(&self.canvas, ctx));

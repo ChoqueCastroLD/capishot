@@ -89,6 +89,11 @@ pub fn inspect(app: &PhotocraftApp, ctx: &egui::Context) -> serde_json::Value {
     json!({"active": app.simple, "sheet": sheet, "buttons": rects.into_iter().map(|(l, r)| json!({"label": l, "rect": r})).collect::<Vec<_>>()})
 }
 
+/// Forget where the buttons were (the interface is hidden this frame).
+pub fn clear_rects(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.remove::<Vec<(String, [f32; 4])>>(rects_id()));
+}
+
 pub fn sheet(ctx: &egui::Context) -> Sheet {
     ctx.data(|d| d.get_temp(sheet_id())).unwrap_or_default()
 }
@@ -157,6 +162,11 @@ pub fn top_bar(app: &mut PhotocraftApp, ui: &mut Ui) {
     // The first of the simple interface's pieces each frame: a fresh list of where its buttons are.
     ui.ctx().data_mut(|d| d.remove::<Vec<(String, [f32; 4])>>(rects_id()));
     let t = Tokens::get(ui.ctx());
+    // The notch and status bar (the safe area's top inset) above the bar, in its colour.
+    let inset = crate::safe_area::get(ui.ctx()).top;
+    if inset > 0.5 {
+        egui::Panel::top("simple_safe_top").exact_size(inset).frame(egui::Frame::NONE.fill(t.chrome)).show(ui, |_| {});
+    }
     egui::Panel::top("simple_top_bar")
         .exact_size(TOP_BAR)
         .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin { left: 8, right: 6, top: 0, bottom: 0 }))
@@ -231,19 +241,37 @@ pub fn note_tool(ctx: &egui::Context, tool: Tool) {
 }
 
 /// The recent-tools bar: the tools used lately that aren't favorites, filled up with
-/// [`DEFAULT_RECENT_TOOLS`], six of them.
+/// [`DEFAULT_RECENT_TOOLS`], six of them. A tool already in the bar keeps its slot: a tool
+/// newly used takes the slot of the one used longest ago, so the bar never shuffles under a
+/// finger that is about to tap it.
 pub fn recent_bar(app: &PhotocraftApp, ctx: &egui::Context) -> Vec<Tool> {
     let favs = favorites(app);
     let fav = |t: &Tool| favs.iter().any(|f| f.strip_prefix("tool:") == Some(&format!("{t:?}")));
-    let mut out: Vec<Tool> = Vec::with_capacity(SLOTS);
-    for t in recent_tools(ctx).into_iter().chain(DEFAULT_RECENT_TOOLS) {
-        if out.len() == SLOTS {
+    let recent = recent_tools(ctx);
+    let bar_id = Id::new("simple-ui-recent-bar");
+    let mut out: Vec<Tool> = ctx.data(|d| d.get_temp::<Vec<Tool>>(bar_id)).unwrap_or_default();
+    out.retain(|t| !fav(t));
+    out.dedup();
+    for t in recent.iter().copied().chain(DEFAULT_RECENT_TOOLS) {
+        if out.len() >= SLOTS {
             break;
         }
         if !fav(&t) && !out.contains(&t) {
             out.push(t);
         }
     }
+    // Tools used lately that the bar lacks, newest last: each replaces the stalest slot.
+    let rank = |t: &Tool| recent.iter().position(|r| r == t).unwrap_or(usize::MAX);
+    for t in recent.iter().take(SLOTS).rev().copied() {
+        if fav(&t) || out.contains(&t) {
+            continue;
+        }
+        if let Some((k, _)) = out.iter().enumerate().filter(|(_, o)| rank(o) > rank(&t)).max_by_key(|(_, o)| rank(o)) {
+            out[k] = t;
+        }
+    }
+    out.truncate(SLOTS);
+    ctx.data_mut(|d| d.insert_temp(bar_id, out.clone()));
     out
 }
 
@@ -267,7 +295,14 @@ pub fn options_row(app: &mut PhotocraftApp, ui: &mut Ui) {
                 let tool = app.ui.tool;
                 let (icon, _) = ui.allocate_exact_size(Vec2::splat(30.0), Sense::hover());
                 crate::icons::paint(ui, icon, crate::icons::tool_icon(tool), 20.0, t.text);
-                ui.label(RichText::new(crate::i18n::t(tool.label())).color(t.text_dim).size(13.0));
+                if app.ui.transform.is_some() {
+                    ui.label(RichText::new(crate::i18n::t("Free Transform")).color(t.text_dim).size(13.0));
+                } else if selection_modes(tool) {
+                    // New, Add, Subtract, Intersect as chips, in place of the name.
+                    mode_chips(app, ui);
+                } else {
+                    ui.label(RichText::new(crate::i18n::t(tool.label())).color(t.text_dim).size(13.0));
+                }
                 // With the options open the brush is there (its chip is one widget per frame).
                 if !open && (tool.is_brushlike() || matches!(tool, Tool::Brush | Tool::Pencil | Tool::Eraser | Tool::MixerBrush)) {
                     crate::paint_mouse::sync_tool_brush(app);
@@ -296,7 +331,7 @@ pub fn options_row(app: &mut PhotocraftApp, ui: &mut Ui) {
         return;
     }
     // The options, wrapped across the window under the row; a tap outside closes them.
-    let screen = ctx.content_rect();
+    let screen = crate::safe_area::rect(&ctx);
     let top = row.response.rect.bottom() + 4.0;
     let area = egui::Area::new(Id::new("simple-options")).order(egui::Order::Foreground).fixed_pos(pos2(screen.left() + 8.0, top)).show(&ctx, |ui| {
         float_frame(&t).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
@@ -318,6 +353,59 @@ pub fn options_row(app: &mut PhotocraftApp, ui: &mut Ui) {
     let outside = ctx.input(|i| i.pointer.primary_clicked() && i.pointer.interact_pos().is_some_and(|p| !area.response.rect.contains(p) && !row.response.rect.contains(p)));
     if outside && !egui::Popup::is_any_open(&ctx) {
         ctx.data_mut(|d| d.insert_temp(options_open_id(), false));
+    }
+}
+
+/// The selection tools whose options bar has New, Add, Subtract and Intersect.
+pub fn selection_modes(tool: Tool) -> bool {
+    matches!(tool, Tool::RectMarquee | Tool::EllipseMarquee | Tool::SingleRowMarquee | Tool::SingleColumnMarquee | Tool::Lasso | Tool::PolygonLasso | Tool::MagneticLasso | Tool::MagicWand)
+}
+
+/// The selection mode chips: touch screens have no Shift or Alt to add or subtract (the touch
+/// modifier button does it too).
+fn mode_chips(app: &mut PhotocraftApp, ui: &mut Ui) {
+    let t = Tokens::get(ui.ctx());
+    for (k, label) in [(0u8, "New selection"), (1, "Add to selection"), (2, "Subtract from selection"), (3, "Intersect with selection")] {
+        let (rect, resp) = ui.allocate_exact_size(Vec2::splat(38.0), Sense::click());
+        let on = app.ui.selection_mode == k;
+        let p = ui.painter();
+        let bg = if on { t.accent } else if resp.hovered() { t.hover } else { t.chrome };
+        p.rect(rect.shrink(2.0), CornerRadius::same(10), bg, Stroke::new(1.0, t.card_border), egui::StrokeKind::Inside);
+        paint_mode_glyph(p, rect.shrink(9.0), k, if on { Color32::WHITE } else { t.text }, bg);
+        let resp = resp.on_hover_text(crate::i18n::t(label));
+        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, crate::i18n::t(label)));
+        note(ui.ctx(), &format!("mode:{k}"), rect);
+        if resp.clicked() {
+            app.ui.selection_mode = k;
+        }
+    }
+}
+
+/// Two squares drawn as the selection mode: one (New), joined (Add), the second cut out of the
+/// first (Subtract), or only their overlap (Intersect).
+fn paint_mode_glyph(p: &egui::Painter, r: Rect, mode: u8, c: Color32, bg: Color32) {
+    let s = r.width() * 0.62;
+    let a = Rect::from_min_size(r.min, Vec2::splat(s));
+    let b = Rect::from_min_size(r.max - Vec2::splat(s), Vec2::splat(s));
+    let stroke = Stroke::new(1.5, c);
+    match mode {
+        0 => {
+            p.rect_stroke(Rect::from_center_size(r.center(), Vec2::splat(s * 1.1)), 1.0, stroke, egui::StrokeKind::Middle);
+        }
+        1 => {
+            p.rect_filled(a, 1.0, c);
+            p.rect_filled(b, 1.0, c);
+        }
+        2 => {
+            p.rect_filled(a, 1.0, c);
+            p.rect_filled(a.intersect(b), 0.0, bg);
+            p.rect_stroke(b, 1.0, stroke, egui::StrokeKind::Middle);
+        }
+        _ => {
+            p.rect_stroke(a, 1.0, stroke, egui::StrokeKind::Middle);
+            p.rect_stroke(b, 1.0, stroke, egui::StrokeKind::Middle);
+            p.rect_filled(a.intersect(b), 0.0, c);
+        }
     }
 }
 
@@ -380,7 +468,11 @@ fn paint_options(app: &mut PhotocraftApp, ui: &mut Ui) {
 /// Capi button between both, and whatever sheet it has open.
 pub fn overlays(app: &mut PhotocraftApp, ctx: &egui::Context) {
     note_tool(ctx, app.ui.tool);
-    let screen = ctx.content_rect();
+    // Typing: the keyboard and the type bar take the bottom (touch_ui::type_bar).
+    if app.ui.text_edit.is_some() && sheet(ctx) == Sheet::Closed {
+        return;
+    }
+    let screen = crate::safe_area::rect(ctx);
     let has_doc = app.session.active().is_some();
     let open = sheet(ctx);
     let lower = Rect::from_min_size(pos2(screen.left() + MARGIN, screen.bottom() - MARGIN - BAR), vec2(screen.width() - 2.0 * MARGIN, BAR));
@@ -572,6 +664,10 @@ fn bottom_sheet(ctx: &egui::Context, screen: Rect, id: &str, height: f32, add: i
                 add(ui);
             });
     });
+    // egui raises an area that was tapped: once the scrim had closed a sheet it stayed above the
+    // next one and took its taps. The sheet and the Capi button always go over the scrim.
+    ctx.move_to_top(egui::LayerId::new(egui::Order::Foreground, Id::new(id)));
+    ctx.move_to_top(egui::LayerId::new(egui::Order::Foreground, Id::new("simple-capi")));
 }
 
 fn heading(ui: &mut Ui, text: &str) {

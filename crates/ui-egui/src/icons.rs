@@ -182,7 +182,13 @@ pub fn button_with_icon_size(ui: &mut egui::Ui, name: &str, box_size: f32, icon_
 
 /// [`button_with_icon_size`] whose tooltip shows only when `show_tip`; the tooltip text still
 /// names the button (for screen readers and tests) when it is hidden.
+/// Smallest icon button box for what is drawn next (0: none); a touch panel footer sets it.
+pub fn set_min_box(ctx: &egui::Context, side: f32) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("icons-min-box"), side));
+}
+
 pub fn button_with_icon_size_tip(ui: &mut egui::Ui, name: &str, box_size: f32, icon_size: f32, selected: bool, tooltip: &str, show_tip: bool) -> Response {
+    let box_size = box_size.max(ui.ctx().data(|d| d.get_temp::<f32>(egui::Id::new("icons-min-box"))).unwrap_or(0.0));
     let t = Tokens::get(ui.ctx());
     let style = IconButtonStyle {
         normal: ButtonVisuals { fill: Color32::TRANSPARENT, stroke: egui::Stroke::NONE, icon: t.icon },

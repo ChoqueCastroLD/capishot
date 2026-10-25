@@ -672,7 +672,12 @@ pub(crate) fn panel_window(app: &PhotocraftApp, ctx: &egui::Context, id: &str, t
         .min_width(width)
         .max_width(width)
         .frame(float_frame(&t))
-        .default_pos(pos2((canvas.right() - width - 16.0 + offset.x).max(canvas.left() + 8.0), canvas.top() + offset.y));
+        // A phone: centred, so the panel (with its frame) stays on the screen.
+        .default_pos(if canvas.width() < crate::simple_ui::PHONE_BELOW {
+            pos2(canvas.left() + ((canvas.width() - width - 24.0) / 2.0).max(4.0), canvas.top() + offset.y)
+        } else {
+            pos2((canvas.right() - width - 16.0 + offset.x).max(canvas.left() + 8.0), canvas.top() + offset.y)
+        });
     let width = host.map_or(width, |h| h.width(width));
     let add = |ui: &mut egui::Ui| {
         ui.set_width(width);

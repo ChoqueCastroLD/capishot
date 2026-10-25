@@ -2346,6 +2346,75 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
 }
 
+/// The type bar above a phone's keyboard while text is edited: font, size, color, alignment and
+/// Done, each a finger-sized control (touch_ui.rs places it).
+pub fn touch_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    let t = crate::theme::Tokens::get(ui.ctx());
+    let shown = target(app).and_then(|(id, _)| {
+        let st = app.session.active()?;
+        let tl = text_layer(&st.doc, LayerId(id))?;
+        let size = styles_at(app).map_or(tl.size_pt, |(c, _)| c.size_pt) * shown_scale(app);
+        Some((tl.font_family.clone(), size, styles_at(app).map_or(tl.color, |(c, _)| c.color)))
+    });
+    let o = app.ui.tool_options.clone();
+    let (mut fam, size) = match &shown {
+        Some((f, z, _)) => (f.clone(), *z),
+        None => (o.type_font.clone(), o.type_size),
+    };
+    ui.spacing_mut().item_spacing.x = 6.0;
+    let room = ui.available_width();
+    let font_w = (room - 64.0 - 44.0 - 44.0 - 70.0 - 4.0 * 6.0).clamp(80.0, 200.0);
+    if fonts_ready(ui, font_w) {
+        let preview = app.session.prefs().type_.font_preview;
+        if font_picker(app, ui, &mut fam, font_w, preview) {
+            app.ui.tool_options.type_font = fam.clone();
+            apply(app, ui.ctx(), json!({"font": fam}));
+        }
+    }
+    let (unit, label) = type_unit(app);
+    let mut display = size * unit;
+    if crate::widgets::value_field(ui, &mut display, unit..=1296.0 * unit, label, 64.0).changed() {
+        let size = display / unit;
+        app.ui.tool_options.type_size = size;
+        apply(app, ui.ctx(), json!({"size": size, "metricsAsShown": true}));
+    }
+    let c = shown
+        .as_ref()
+        .map(|s| {
+            let v = s.2.to_rgb();
+            [v[0], v[1], v[2], 1.0]
+        })
+        .unwrap_or(app.session.tools.foreground);
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(44.0, 44.0), egui::Sense::click());
+    let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    ui.painter().circle(rect.center(), 15.0, Color32::from_rgb(q(c[0]), q(c[1]), q(c[2])), Stroke::new(1.5, t.card_border));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Set the text color")));
+    crate::touch_ui::note_rect(ui.ctx(), "typeColor", rect);
+    if resp.clicked() {
+        open_color_picker(app, [c[0], c[1], c[2]]);
+    }
+    // Alignment: one button that steps left → centre → right.
+    let (next, icon) = match o.type_align.as_str() {
+        "center" => ("right", "align-center"),
+        "right" => ("left", "align-right"),
+        _ => ("center", "align-left"),
+    };
+    let r = crate::icons::button(ui, icon, 44.0, false, tl!("Paragraph alignment"));
+    crate::touch_ui::note_rect(ui.ctx(), "typeAlign", r.rect);
+    if r.clicked() {
+        app.ui.tool_options.type_align = next.into();
+        apply(app, ui.ctx(), json!({"align": next}));
+    }
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(70.0, 44.0), egui::Sense::click());
+    ui.painter().rect_filled(rect.shrink2(egui::vec2(0.0, 4.0)), egui::CornerRadius::same(18), t.accent);
+    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, tl!("Done"), crate::theme::semibold(14.0), Color32::WHITE);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Done")));
+    crate::touch_ui::note_rect(ui.ctx(), "typeDone", rect);
+    if resp.clicked() {
+        commit(app);
+    }
+}
+
 /// Character and paragraph style at the target (selection start, else the layer's first run).
 pub(crate) fn styles_at(app: &PhotocraftApp) -> Option<(photocraft_doc::text::CharStyle, photocraft_doc::text::ParagraphStyle)> {
     let (layer, range) = target(app)?;
