@@ -226,7 +226,7 @@ pub fn plan(s: &Session, p: &Value) -> Result<Plan> {
 }
 
 fn is_upscaler(m: &ModelInfo) -> bool {
-    matches!(m.arch, catalog::Arch::Esrgan | catalog::Arch::Compact)
+    matches!(m.arch, catalog::Arch::Esrgan | catalog::Arch::Compact | catalog::Arch::Fdat)
 }
 
 /// The lite upscaler for `scale`.

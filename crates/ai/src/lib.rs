@@ -49,6 +49,8 @@ pub mod weights;
 pub mod compact;
 #[cfg(feature = "runtime")]
 pub mod esrgan;
+#[cfg(feature = "runtime")]
+pub mod fdat;
 #[cfg(all(feature = "runtime", not(target_family = "wasm")))]
 pub mod native;
 #[cfg(feature = "runtime")]

@@ -229,7 +229,7 @@ pub fn advanced(app: &mut PhotocraftApp, ui: &mut egui::Ui, kind: Kind, f: &mut 
         // Automatic: Quality and Device decide (MangaJaNai's page-height rules for the full model).
         let auto = tl!("Automatic");
         let wanted = |m: &&ModelInfo| match kind {
-            Kind::Upscale => matches!(m.arch, Arch::Esrgan | Arch::Compact),
+            Kind::Upscale => matches!(m.arch, Arch::Esrgan | Arch::Compact | Arch::Fdat),
             Kind::Inpaint => m.content == Content::Inpaint,
         };
         let models: Vec<(String, String)> = std::iter::once(("auto".to_string(), auto.to_string()))

@@ -65,6 +65,11 @@ impl Weights {
                 _ => return Err(AiError::Weights(format!("{name}: bad offsets"))),
             };
             let raw = data.get(a..b).ok_or_else(|| AiError::Weights(format!("{name}: data out of range")))?;
+            // Integer tensors are bookkeeping, not weights (spandrel's `upsampler.MetaUpsample` in
+            // the IllustrationJaNai V3 releases): skip them.
+            if matches!(dtype, "U8" | "I8" | "U16" | "I16" | "U32" | "I32" | "U64" | "I64" | "BOOL") {
+                continue;
+            }
             let count = shape.iter().try_fold(1usize, |n, &d| n.checked_mul(d)).ok_or_else(|| AiError::Weights(format!("{name}: shape overflow")))?;
             let (size, values): (usize, Vec<f32>) = match dtype {
                 "F32" => (4, raw.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect()),
