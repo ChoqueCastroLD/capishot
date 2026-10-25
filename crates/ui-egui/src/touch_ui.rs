@@ -109,6 +109,9 @@ pub fn inspect(app: &PhotocraftApp, ctx: &egui::Context) -> serde_json::Value {
         "button": {"center": b.center.map(|c| [c.x, c.y]), "held": b.held, "alt": b.alt, "moving": b.moving, "enabled": app.touch.button_enabled},
         "modifiers": {"shift": app.touch.held_modifiers().shift, "alt": app.touch.held_modifiers().alt},
         "lastFinger": app.touch.last_start,
+        "fingers": app.touch.finger_count(),
+        "eguiTouches": ctx.input(|i| i.any_touches()),
+        "pointerDown": ctx.input(|i| i.pointer.primary_down()),
         "rects": rects.into_iter().map(|(l, r)| json!({"label": l, "rect": r})).collect::<Vec<_>>(),
     })
 }
@@ -192,37 +195,57 @@ fn round_button(ui: &mut egui::Ui, rect: Rect, icon: Option<&str>, text: &str, s
     resp
 }
 
-/// The selection's action bar: what a phone does next with a selection, one tap away.
-const SELECTION_ACTIONS: [(&str, &str, Option<&str>); 9] = [
-    ("select.deselect", "Deselect", Some("x")),
-    ("select.inverse", "Invert", Some("contrast")),
-    ("edit.fill", "Fill", Some("paint-bucket")),
-    ("edit.inpaintAi", "Clean with AI", Some("sparkles")),
-    ("edit.copy", "Copy", Some("copy")),
-    ("edit.cut", "Cut", Some("scissors")),
-    ("edit.freeTransform", "Transform", Some("scaling")),
-    ("select.modify.feather", "Feather", Some("circle-dashed")),
-    ("edit.generativeFill", "Generative Fill", Some("wand-sparkles")),
+/// The selection's action bar: what a phone does next with a selection, one tap away. Each
+/// button has its name (short) under the icon; the full name is its accessible label.
+const SELECTION_ACTIONS: [(&str, &str, &str, &str); 9] = [
+    ("select.deselect", "Deselect", "Deselect", "x"),
+    ("select.inverse", "Invert", "Invert", "contrast"),
+    ("edit.fill", "Fill", "Fill", "paint-bucket"),
+    ("edit.inpaintAi", "Clean with AI", "AI clean", "sparkles"),
+    ("edit.copy", "Copy", "Copy", "copy"),
+    ("edit.cut", "Cut", "Cut", "scissors"),
+    ("edit.freeTransform", "Transform", "Transform", "scaling"),
+    ("select.modify.feather", "Feather", "Feather", "circle-dashed"),
+    ("edit.generativeFill", "Generative Fill", "Gen. Fill", "wand-sparkles"),
 ];
+
+/// A selection bar button: the icon in a circle over its name (two short lines at most).
+const SEL_CELL: Vec2 = vec2(60.0, 66.0);
 
 fn selection_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let t = Tokens::get(ctx);
     let area = canvas_area(app, ctx);
-    let side = 44.0;
-    let gap = 4.0;
+    let gap = 2.0;
     let n = SELECTION_ACTIONS.len() as f32;
-    let width = (n * side + (n - 1.0) * gap + 16.0).min(area.width() - 16.0);
-    let r = Rect::from_min_size(pos2(area.center().x - width / 2.0, area.top() + 8.0), vec2(width, side + 12.0));
+    let full = n * SEL_CELL.x + (n - 1.0) * gap + 12.0;
+    let width = full.min(area.width() - 16.0);
+    let r = Rect::from_min_size(pos2(area.center().x - width / 2.0, area.top() + 8.0), vec2(width, SEL_CELL.y + 12.0));
     let mut run = None;
     egui::Area::new(Id::new("touch-selection-bar")).order(egui::Order::Middle).fixed_pos(r.min).show(ctx, |ui| {
         egui::Frame::NONE.fill(t.card).stroke(Stroke::new(1.0, t.card_border)).corner_radius(CornerRadius::same(18)).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
             ui.set_width(width - 12.0);
-            egui::ScrollArea::horizontal().id_salt("touch-selection-scroll").scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
+            let out = egui::ScrollArea::horizontal().id_salt("touch-selection-scroll").scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = gap;
-                    for (id, label, icon) in SELECTION_ACTIONS {
-                        let (rect, _) = ui.allocate_exact_size(Vec2::splat(side), Sense::hover());
-                        let resp = round_button(ui, rect, icon, crate::i18n::t(label), false).on_hover_text(crate::i18n::t(label));
+                    for (id, name, short, icon) in SELECTION_ACTIONS {
+                        let (rect, resp) = ui.allocate_exact_size(SEL_CELL, Sense::click());
+                        let name = crate::i18n::t(name);
+                        let p = ui.painter();
+                        let c = pos2(rect.center().x, rect.top() + 20.0);
+                        p.circle(c, 19.0, if resp.is_pointer_button_down_on() { t.hover } else { t.chrome }, Stroke::new(1.0, t.card_border));
+                        crate::icons::paint(ui, Rect::from_center_size(c, Vec2::splat(30.0)), icon, 19.0, t.text);
+                        // One line, a little smaller for a long word ("Deseleccionar"), else two.
+                        let text = crate::i18n::t(short).to_string();
+                        let room = SEL_CELL.x - 2.0;
+                        let one = ui.painter().layout_no_wrap(text.clone(), crate::theme::medium(10.0), t.text_dim).size().x;
+                        let size = if one > room { (10.0 * room / one).max(8.0) } else { 10.0 };
+                        let mut job = egui::text::LayoutJob::simple(text, crate::theme::medium(size), t.text_dim, room);
+                        job.wrap.max_rows = 2;
+                        job.halign = egui::Align::Center;
+                        let g = ui.painter().layout_job(job);
+                        ui.painter().galley(pos2(rect.center().x, rect.top() + 42.0), g, t.text_dim);
+                        let resp = resp.on_hover_text(name);
+                        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
                         note(ctx, &format!("sel:{id}"), rect);
                         if resp.clicked() {
                             run = Some(id);
@@ -230,6 +253,29 @@ fn selection_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     }
                 });
             });
+            // More buttons than room: a fade at the edge that has more, so the bar reads as one
+            // that scrolls.
+            let view = out.inner_rect;
+            let x = out.state.offset.x;
+            let more_right = x + view.width() < out.content_size.x - 1.0;
+            let more_left = x > 1.0;
+            let fade = |ui: &egui::Ui, right: bool| {
+                let steps = 12;
+                let w = 28.0;
+                for k in 0..steps {
+                    let a = ((k + 1) as f32 / steps as f32 * 230.0) as u8;
+                    let xk = if right { view.right() - w + w * k as f32 / steps as f32 } else { view.left() + w - w * (k + 1) as f32 / steps as f32 };
+                    let col = Color32::from_rgba_unmultiplied(t.card.r(), t.card.g(), t.card.b(), a);
+                    ui.painter().rect_filled(Rect::from_min_max(pos2(xk, view.top()), pos2(xk + w / steps as f32 + 0.5, view.bottom())), 0.0, col);
+                }
+            };
+            if more_right {
+                fade(ui, true);
+                note(ctx, "selectionBarMore", Rect::from_min_max(pos2(view.right() - 28.0, view.top()), view.right_bottom()));
+            }
+            if more_left {
+                fade(ui, false);
+            }
         });
     });
     note(ctx, "selectionBar", r);

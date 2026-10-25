@@ -260,7 +260,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let width = if simple { (ctx.content_rect().width() - 16.0).min(360.0) } else { 360.0 };
     let (align, offset) = if simple {
         // Below the row where the selection's action bar and the transform's Done sit.
-        (egui::Align2::CENTER_TOP, egui::vec2(0.0, crate::safe_area::get(ctx).top + 44.0 + 44.0 + 68.0))
+        (egui::Align2::CENTER_TOP, egui::vec2(0.0, crate::safe_area::get(ctx).top + 44.0 + 44.0 + 84.0))
     } else {
         (egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -36.0))
     };

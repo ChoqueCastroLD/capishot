@@ -84,7 +84,10 @@ const TAP_LAND_S: f64 = 0.25;
 /// How long a finger's press waits for a second finger (a gesture) before the tool gets it.
 pub const PRESS_WAIT_S: f64 = 0.1;
 /// Two or three fingers held still: undo or redo repeats after this, then every [`REPEAT_S`].
-pub const REPEAT_AFTER_S: f64 = 0.6;
+pub const REPEAT_AFTER_S: f64 = 0.7;
+/// Fingers held for the repeat stay within this (points): the start of a pinch or a twist moves
+/// more.
+pub const HOLD_SLOP: f32 = 6.0;
 pub const REPEAT_S: f64 = 0.16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -112,6 +115,9 @@ struct Tap {
     most: usize,
     /// Every later finger landed within [`TAP_LAND_S`] and none moved past [`TAP_SLOP`].
     still: bool,
+    /// No finger moved past [`HOLD_SLOP`]: held, the fingers repeat undo or redo (a pinch or a
+    /// twist, however slow, never does).
+    resting: bool,
     /// Repeats fired while held (the release then fires nothing).
     repeats: u32,
     next_repeat: f64,
@@ -178,6 +184,11 @@ pub struct TouchInput {
 }
 
 impl TouchInput {
+    /// How many contacts the router holds (diagnostics).
+    pub fn finger_count(&self) -> usize {
+        self.fingers.len()
+    }
+
     /// Fingers paint right now (not navigation only).
     pub fn fingers_paint(&self) -> bool {
         match self.mode {
@@ -309,7 +320,7 @@ impl TouchInput {
                 if !pen {
                     // Taps: the first finger opens a touch, later ones join it if they land soon.
                     if others == 0 {
-                        self.tap = Tap { active: true, start: now, most: 1, still: true, repeats: 0, next_repeat: now + REPEAT_AFTER_S };
+                        self.tap = Tap { active: true, start: now, most: 1, still: true, resting: true, repeats: 0, next_repeat: now + REPEAT_AFTER_S };
                         self.drew = false;
                     } else if self.tap.active {
                         if now - self.tap.start > TAP_LAND_S || self.drew {
@@ -354,6 +365,9 @@ impl TouchInput {
                 let prev = self.fingers[k].pos;
                 self.fingers[k].pos = pos;
                 let f = self.fingers[k];
+                if !f.pen && ((pos - f.start).length() > HOLD_SLOP || self.pair_turned()) {
+                    self.tap.resting = false;
+                }
                 if !f.pen && (pos - f.start).length() > TAP_SLOP {
                     self.tap.still = false;
                     if f.role == Role::Tool && !self.frozen {
@@ -464,6 +478,17 @@ impl TouchInput {
         let _ = now;
     }
 
+    /// The first two fingers on the glass have pinched or twisted since they landed (their
+    /// distance by more than [`HOLD_SLOP`], their angle by more than 3°): no held undo.
+    fn pair_turned(&self) -> bool {
+        let mut two = self.fingers.iter().filter(|f| f.role != Role::Modifier && !f.pen);
+        let (Some(a), Some(b)) = (two.next(), two.next()) else { return false };
+        let (d0, d1) = (b.start - a.start, b.pos - a.pos);
+        let turn = (d1.angle() - d0.angle()).abs().to_degrees();
+        let turn = turn.min(360.0 - turn);
+        (d1.length() - d0.length()).abs() > HOLD_SLOP || turn > 3.0
+    }
+
     /// Send the tool finger's waiting press.
     fn flush(&mut self, out: &mut Vec<Event>) {
         if let Some((p, _)) = self.pending.take() {
@@ -547,7 +572,7 @@ impl TouchInput {
             self.button.moving = true;
             self.modifiers = Modifiers::NONE;
         }
-        if self.gestures && self.tap.active && self.tap.still && !self.drew && matches!(self.tap.most, 2 | 3) && self.nav_count() == self.tap.most && now >= self.tap.next_repeat {
+        if self.gestures && self.tap.active && self.tap.still && self.tap.resting && !self.drew && matches!(self.tap.most, 2 | 3) && self.nav_count() == self.tap.most && now >= self.tap.next_repeat {
             if let Some(a) = tap_action(self.tap.most) {
                 self.actions.push(a);
             }

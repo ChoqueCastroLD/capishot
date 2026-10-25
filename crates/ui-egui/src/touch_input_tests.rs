@@ -142,12 +142,12 @@ fn two_fingers_held_still_repeat_undo() {
     let mut t = router();
     frame(&mut t, [browser(1, TouchPhase::Start, 100.0, 100.0, true), browser(2, TouchPhase::Start, 200.0, 100.0, false)].concat(), 1.0);
     let mut fired = 0;
-    for k in 1..=12 {
+    for k in 1..=16 {
         frame(&mut t, vec![], 1.0 + 0.1 * f64::from(k));
         fired += t.take_actions().iter().filter(|a| **a == TouchAction::Undo).count();
     }
     assert!(fired >= 4, "repeats: {fired}");
-    frame(&mut t, [browser(1, TouchPhase::End, 100.0, 100.0, true), browser(2, TouchPhase::End, 200.0, 100.0, false)].concat(), 2.3);
+    frame(&mut t, [browser(1, TouchPhase::End, 100.0, 100.0, true), browser(2, TouchPhase::End, 200.0, 100.0, false)].concat(), 2.7);
     assert!(t.take_actions().is_empty(), "the release after repeats adds none");
 }
 
@@ -251,4 +251,18 @@ fn a_lost_touch_end_does_not_leave_fingers_held() {
     frame(&mut t, browser(3, TouchPhase::Start, 50.0, 50.0, true), 4.0);
     let out = frame(&mut t, vec![], 4.0 + PRESS_WAIT_S + 0.01);
     assert_eq!(presses(&out).len(), 1, "a new finger paints again");
+}
+
+/// A slow, small two-finger twist (a slow phone takes long over it) is no held undo.
+#[test]
+fn a_slow_small_twist_does_not_repeat_undo() {
+    let mut t = router();
+    frame(&mut t, [browser(1, TouchPhase::Start, 140.0, 300.0, true), browser(2, TouchPhase::Start, 260.0, 300.0, false)].concat(), 1.0);
+    for k in 1..=12 {
+        // Each finger moves 8 pt over 1.2 s: the twist of a rotation, too slow for egui's eye.
+        let d = 8.0 * k as f32 / 12.0;
+        frame(&mut t, [browser(1, TouchPhase::Move, 140.0, 300.0 + d, true), browser(2, TouchPhase::Move, 260.0, 300.0 - d, false)].concat(), 1.0 + 0.1 * f64::from(k));
+    }
+    frame(&mut t, [browser(1, TouchPhase::End, 140.0, 308.0, true), browser(2, TouchPhase::End, 260.0, 292.0, false)].concat(), 2.4);
+    assert!(t.take_actions().is_empty());
 }

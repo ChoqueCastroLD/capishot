@@ -430,3 +430,28 @@ fn a_pinch_centred_on_a_small_box_scales_it() {
     let q1 = h.state().ui.transform.as_ref().expect("still transforming").quad;
     assert!(q1[1][0] - q1[0][0] > (q0[1][0] - q0[0][0]) * 1.5, "{q0:?} -> {q1:?}");
 }
+
+/// The action bar's buttons have names under their icons, and at 390 pt the bar scrolls with a
+/// fade at the edge that has more.
+#[test]
+fn the_selection_bar_names_its_buttons_and_hints_that_it_scrolls() {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    app.run("prefs.set", json!({"values": {"interface.language": "es", "interface.simpleUi": "on"}})).unwrap();
+    app.run("file.new", json!({"width": 600, "height": 800, "background": "white"})).unwrap();
+    app.run("select.rect", json!({"x": 50, "y": 50, "width": 200, "height": 200})).unwrap();
+    app.sync_views();
+    let mut h = Harness::builder().with_size(vec2(390.0, 844.0)).with_max_steps(64).build_eframe(move |cc| {
+        PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+        app
+    });
+    h.run_steps(4);
+    let t = crate::touch_ui::inspect(h.state(), &h.ctx);
+    let rects = t["rects"].as_array().unwrap();
+    assert!(rects.iter().any(|r| r["label"] == "selectionBarMore"), "a fade says there is more");
+    for r in rects.iter().filter(|r| r["label"].as_str().is_some_and(|l| l.starts_with("sel:"))) {
+        let r: [f32; 4] = serde_json::from_value(r["rect"].clone()).unwrap();
+        assert!(r[2] - r[0] >= 44.0 && r[3] - r[1] >= 44.0);
+    }
+    use egui_kittest::kittest::Queryable;
+    assert!(h.query_by_label("Invertir").is_some(), "names in the UI language");
+}
