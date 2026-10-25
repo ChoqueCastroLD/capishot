@@ -12,6 +12,7 @@
 
 <p align="center">
   <a href="https://capichan.com/capishot/"><b>Try it in the browser</b></a> ·
+  <a href="https://capichan.com/capishot/desktop/"><b>Download for Windows</b></a> ·
   <a href="#features">Features</a> ·
   <a href="#local-ai">Local AI</a> ·
   <a href="#build">Build</a> ·
