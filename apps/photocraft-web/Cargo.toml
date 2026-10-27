@@ -43,7 +43,7 @@ photocraft-ai-sd = { workspace = true }
 egui = { workspace = true }
 log = { workspace = true }
 # Inline `data:` images in copied HTML (src/clipboard_data.rs).
-base64 = "0.22"
+base64 = "0.23"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # `wgpu` pulls egui-wgpu's defaults: WebGPU plus the WebGL2 fallback.
