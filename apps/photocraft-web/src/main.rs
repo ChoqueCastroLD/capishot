@@ -54,12 +54,22 @@ mod usage_stats;
 mod watchdog;
 #[cfg(target_arch = "wasm32")]
 mod web;
+
+// The versioned embedding API for host apps such as Capistudio (`embed/README.md`).
+#[cfg(target_arch = "wasm32")]
+mod embed_api;
+#[cfg(any(target_arch = "wasm32", test))]
+mod embed_api_core;
+
 #[cfg(target_arch = "wasm32")]
 mod wheel_guard;
 
 #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
 fn main() {
-    web::start();
+    // A host page that loads the module to embed it has no app canvas: it calls `init`.
+    if web::own_page() {
+        web::start();
+    }
 }
 
 /// The threads build (`atomics`, packaging/web-threads) starts from its page instead: it first

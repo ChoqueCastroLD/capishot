@@ -39,17 +39,6 @@
 </head>
 <body>
   <canvas id="photocraft_canvas"></canvas>
-  <script>
-    // The on-screen keyboard: Android Chrome shrinks the page (interactive-widget above); iOS
-    // Safari shrinks only the visual viewport, so fit the page to it and the app's bars stay above
-    // the keyboard.
-    if (window.visualViewport) {
-      const vv = window.visualViewport;
-      const fit = () => { document.documentElement.style.height = vv.height + 'px'; document.body.style.height = vv.height + 'px'; if (window.scrollY) window.scrollTo(0, 0); };
-      vv.addEventListener('resize', fit);
-      vv.addEventListener('scroll', fit);
-    }
-  </script>
   <div id="photocraft_loading">
     <p>Loading Capishot&hellip;</p>
     <p id="photocraft_stalled">This is taking longer than usual. If Capishot doesn't start, its files may have failed to

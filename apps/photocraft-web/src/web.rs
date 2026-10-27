@@ -128,84 +128,103 @@ pub fn start() {
             log::error!("missing <canvas id=\"{CANVAS_ID}\">");
             return;
         };
-        let q = query();
-        // The Photopea-compatible config in the URL hash (crate::embed).
-        let photopea = crate::embed::photopea_config();
-        let embed_query = q.clone();
-        let force_cpu = q.contains("cpu");
-        let perf_debug = q.split(['?', '&']).any(|kv| kv == "perf=1" || kv == "perf");
-        if q.split(['?', '&']).any(|kv| kv == "gpuopt=0") {
-            // Measurements: the GPU canvas as before pass fusion and level-of-detail refreshes.
-            photocraft_ui_egui::gpu_canvas::set_reduced_refreshes(false);
-        }
-        if q.split(['?', '&']).any(|kv| kv == "gesturehold=0") {
-            // Measurements: the canvas composites finer levels mid-pinch, as before.
-            photocraft_ui_egui::gpu_canvas::set_gesture_hold(false);
-        }
-        if q.split(['?', '&']).any(|kv| kv == "movecopy=1") {
-            photocraft_ui_egui::move_ui::set_move_in_place(false);
-        }
-        let mut options = eframe::WebOptions::default();
-        photocraft_ui_egui::gpu_canvas::use_adapter_limits(&mut options.wgpu_options.wgpu_setup);
-        if q.contains("webgl")
-            && let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup
-        {
-            create.instance_descriptor.backends = eframe::wgpu::Backends::GL;
-        }
-        // Hydrate before constructing an interactive session: a late load must never undo a
-        // user deletion/reorder. Storage denial or timeout still opens a usable session.
-        let (database, presets, preset_warnings) = match crate::indexed_presets::load().await {
-            Ok((db, bridge, warnings)) => (Some(db), bridge, warnings),
-            Err(e) => {
-                let bridge = crate::preset_bridge::Bridge::default();
-                bridge.unavailable(e);
-                (None, bridge, Vec::new())
-            }
-        };
-        crate::startup::mark("presets loaded");
-        // Before eframe installs its listeners: real Ctrl + wheel, and no browser page zoom.
-        crate::wheel_guard::install();
-        cap_pixel_density();
-        cap_memory();
-        let pen_target = canvas.clone();
-        let perf = crate::frame_perf::FramePerf::new(&canvas, perf_debug);
-        let boot = Boot {
-            presets,
-            preset_warnings,
-            database,
-            embed_query,
-            photopea,
-            pen_target,
-            force_cpu,
-            perf,
-            loading: document.get_element_by_id("photocraft_loading"),
-        };
-        let result = eframe::WebRunner::new()
-            .start(
-                canvas,
-                options,
-                Box::new(move |cc| {
-                    crate::startup::mark("graphics ready");
-                    PhotocraftApp::setup_context(&cc.egui_ctx, ThemeKind::Pro);
-                    crate::startup::mark("fonts and theme");
-                    // The threads build may get here before its worker pool is up (the page starts
-                    // both together): the app, the first thing to use rayon, is built once it is.
-                    Ok(Box::new(WebRoot::Booting(Some(Box::new((boot, cc.wgpu_render_state.clone()))))))
-                }),
-            )
-            .await;
+        let result = run(canvas, None).await;
         if let Err(e) = result
             && let Some(el) = document.get_element_by_id("photocraft_loading")
         {
             // No WebGPU adapter and no WebGL2 context (no GPU and the browser refuses software
             // WebGL, or hardware acceleration is off): nothing can draw the interface.
             el.set_inner_html(&format!(
-                "<p>Capishot failed to start: {e:?}</p><p>A browser with WebGPU or WebGL2 is required. If this computer has no graphics \
+                "<p>Capishot failed to start: {e}</p><p>A browser with WebGPU or WebGL2 is required. If this computer has no graphics \
                  acceleration, turn on hardware acceleration in the browser settings (Chrome: Settings › System › Use graphics \
                  acceleration) or try another browser.</p>"
             ));
         }
     });
+}
+
+/// Whether this page is the app's own (it has the `<canvas id="photocraft_canvas">` of
+/// `index.html`). A page that loads the module to embed it has none and starts it with
+/// `crate::embed_api` instead.
+pub fn own_page() -> bool {
+    web_sys::window().and_then(|w| w.document()).and_then(|d| d.get_element_by_id(CANVAS_ID)).is_some()
+}
+
+/// Runs the app on `canvas`. `hosted` is set when another page embeds it (`crate::embed_api`):
+/// its options replace the URL flags, the page keeps its own unload prompt and globals, and the
+/// embedding API drives the app every frame. Returns the runner (kept alive by its listeners).
+pub async fn run(canvas: web_sys::HtmlCanvasElement, hosted: Option<crate::embed_api::Hosted>) -> Result<eframe::WebRunner, String> {
+    let q = if hosted.is_some() { String::new() } else { query() };
+    // The Photopea-compatible config in the URL hash (crate::embed).
+    let photopea = if hosted.is_some() { None } else { crate::embed::photopea_config() };
+    let embed_query = q.clone();
+    let force_cpu = q.contains("cpu") || hosted.as_ref().is_some_and(|h| h.force_cpu);
+    let force_webgl = q.contains("webgl") || hosted.as_ref().is_some_and(|h| h.force_webgl);
+    let perf_debug = q.split(['?', '&']).any(|kv| kv == "perf=1" || kv == "perf");
+    if q.split(['?', '&']).any(|kv| kv == "gpuopt=0") {
+        // Measurements: the GPU canvas as before pass fusion and level-of-detail refreshes.
+        photocraft_ui_egui::gpu_canvas::set_reduced_refreshes(false);
+    }
+    if q.split(['?', '&']).any(|kv| kv == "gesturehold=0") {
+        // Measurements: the canvas composites finer levels mid-pinch, as before.
+        photocraft_ui_egui::gpu_canvas::set_gesture_hold(false);
+    }
+    if q.split(['?', '&']).any(|kv| kv == "movecopy=1") {
+        photocraft_ui_egui::move_ui::set_move_in_place(false);
+    }
+    let mut options = eframe::WebOptions::default();
+    photocraft_ui_egui::gpu_canvas::use_adapter_limits(&mut options.wgpu_options.wgpu_setup);
+    if force_webgl
+        && let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup
+    {
+        create.instance_descriptor.backends = eframe::wgpu::Backends::GL;
+    }
+    // Hydrate before constructing an interactive session: a late load must never undo a
+    // user deletion/reorder. Storage denial or timeout still opens a usable session.
+    let (database, presets, preset_warnings) = match crate::indexed_presets::load().await {
+        Ok((db, bridge, warnings)) => (Some(db), bridge, warnings),
+        Err(e) => {
+            let bridge = crate::preset_bridge::Bridge::default();
+            bridge.unavailable(e);
+            (None, bridge, Vec::new())
+        }
+    };
+    crate::startup::mark("presets loaded");
+    // Before eframe installs its listeners: real Ctrl + wheel, and no browser page zoom.
+    crate::wheel_guard::install();
+    cap_pixel_density();
+    cap_memory();
+    let pen_target = canvas.clone();
+    let perf = crate::frame_perf::FramePerf::new(&canvas, perf_debug);
+    let boot = Boot {
+        presets,
+        preset_warnings,
+        database,
+        embed_query,
+        photopea,
+        pen_target,
+        force_cpu,
+        perf,
+        loading: web_sys::window().and_then(|w| w.document()).and_then(|d| d.get_element_by_id("photocraft_loading")),
+        hosted: hosted.is_some(),
+    };
+    let runner = eframe::WebRunner::new();
+    runner
+        .start(
+            canvas,
+            options,
+            Box::new(move |cc| {
+                crate::startup::mark("graphics ready");
+                PhotocraftApp::setup_context(&cc.egui_ctx, ThemeKind::Pro);
+                crate::startup::mark("fonts and theme");
+                // The threads build may get here before its worker pool is up (the page starts
+                // both together): the app, the first thing to use rayon, is built once it is.
+                Ok(Box::new(WebRoot::Booting(Some(Box::new((boot, cc.wgpu_render_state.clone()))))))
+            }),
+        )
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    Ok(runner)
 }
 
 /// Is rayon's worker pool up? The single-threaded build has none to wait for; the threads page
@@ -235,11 +254,13 @@ struct Boot {
     perf: crate::frame_perf::FramePerf,
     /// The page's "Loading Capishot…", removed once the app is built.
     loading: Option<web_sys::Element>,
+    /// Embedded by another page (`crate::embed_api`), which drives it every frame.
+    hosted: bool,
 }
 
 impl Boot {
     fn build(self, ctx: &egui::Context, wgpu: Option<eframe::egui_wgpu::RenderState>) -> WebShell {
-        let Boot { presets, mut preset_warnings, database, embed_query, photopea, pen_target, force_cpu, perf, loading } = self;
+        let Boot { presets, mut preset_warnings, database, embed_query, photopea, pen_target, force_cpu, perf, loading, hosted } = self;
         let inbox: Inbox = Arc::default();
         let places: Inbox = Arc::default();
         let served: Served = Arc::default();
@@ -249,7 +270,7 @@ impl Boot {
         let (session, warnings) = crate::preset_bridge::session(presets.clone());
         preset_warnings.extend(warnings);
         crate::startup::mark("session");
-        let control = crate::embed::install(&embed_query, ctx.clone());
+        let control = if hosted { crate::embed_api::install(ctx.clone()) } else { crate::embed::install(&embed_query, ctx.clone()) };
         // Crash recovery: this page's session, its autosave services and the panic hook that
         // marks it crashed (recovery.rs).
         let recovery = crate::recovery::Recovery::start();
@@ -264,7 +285,7 @@ impl Boot {
         // opening and saving files…) on its worker pool, with progress and Esc to cancel, as the
         // desktop does: the page's thread never waits for them.
         app.background_jobs = cfg!(target_feature = "atomics");
-        if app.session.prefs().file_handling.recover_on_launch && photopea.is_none() {
+        if app.session.prefs().file_handling.recover_on_launch && photopea.is_none() && !hosted {
             recovery.discover(true);
         }
         // Image › Upscale with AI…: the AI worker module, loaded on first use (ai_bridge.rs).
@@ -284,9 +305,12 @@ impl Boot {
         }
         listen_pen(&pen_target, app.stylus.feed.clone());
         reject_palms();
-    track_stylus_touches();
-    keyboard_on_type_tap();
-    track_active_touches();
+        track_stylus_touches();
+        keyboard_on_type_tap();
+        if !hosted {
+            fit_to_visual_viewport();
+        }
+        track_active_touches();
         crate::clipboard::install(ctx);
         listen_drag_position();
         app.set_theme(ctx, ThemeKind::Pro);
@@ -307,13 +331,19 @@ impl Boot {
             app.set_wgpu(rs);
         }
         crate::startup::mark("canvas");
-        crate::usage_stats::init(gpu.0, gpu.1);
+        // An embedding host's sessions aren't the standalone app's: no usage statistics, and the
+        // host decides about unsaved changes when its page unloads.
+        if !hosted {
+            crate::usage_stats::init(gpu.0, gpu.1);
+        }
         let unsaved = Arc::new(AtomicBool::new(false));
-        guard_unload(unsaved.clone());
+        if !hosted {
+            guard_unload(unsaved.clone());
+        }
         if let Some(el) = loading {
             el.remove();
         }
-        WebShell { app, safe_area_size: None, inbox, places, canvas: pen_target, unsaved, served, user_fonts, database, presets, startup_frames: 0, perf, recovery, outbox, photopea, watchdog: crate::watchdog::Watchdog::new(), downloads: Default::default() }
+        WebShell { app, safe_area_size: None, inbox, places, canvas: pen_target, unsaved, served, user_fonts, database, presets, startup_frames: 0, perf, recovery, outbox, photopea, watchdog: crate::watchdog::Watchdog::new(), downloads: Default::default(), hosted }
     }
 }
 
@@ -559,6 +589,36 @@ thread_local! {
     /// Where a finger lifted on the page brings up the on-screen keyboard (client CSS pixels):
     /// the canvas while the Type tool is active. `None`: nowhere.
     static KEYBOARD_ZONE: std::cell::Cell<Option<[f64; 4]>> = const { std::cell::Cell::new(None) };
+}
+
+/// The on-screen keyboard: Android Chrome shrinks the page (`interactive-widget` in index.html);
+/// iOS Safari shrinks only the visual viewport, so the page is fitted to it and the app's bars stay
+/// above the keyboard.
+fn fit_to_visual_viewport() {
+    use wasm_bindgen::closure::Closure;
+    let Some(window) = web_sys::window() else { return };
+    let Ok(vv) = js_sys::Reflect::get(&window, &"visualViewport".into()) else { return };
+    let Ok(vv) = vv.dyn_into::<web_sys::EventTarget>() else { return };
+    let target = vv.clone();
+    let fit = Closure::<dyn FnMut()>::new(move || {
+        let Some(window) = web_sys::window() else { return };
+        let Some(h) = js_sys::Reflect::get(&target, &"height".into()).ok().and_then(|h| h.as_f64()) else { return };
+        let Some(document) = window.document() else { return };
+        let px = format!("{h}px");
+        if let Some(root) = document.document_element().and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok()) {
+            root.style().set_property("height", &px).ok();
+        }
+        if let Some(body) = document.body() {
+            body.style().set_property("height", &px).ok();
+        }
+        if window.scroll_y().unwrap_or(0.0) != 0.0 {
+            window.scroll_to_with_x_and_y(0.0, 0.0);
+        }
+    });
+    for ev in ["resize", "scroll"] {
+        vv.add_event_listener_with_callback(ev, fit.as_ref().unchecked_ref()).ok();
+    }
+    fit.forget();
 }
 
 /// iOS Safari opens the keyboard only for a focus made inside a touch's own event handler, and
@@ -846,6 +906,8 @@ struct WebShell {
     user_fonts: UserFontStore,
     database: Option<web_sys::IdbDatabase>,
     presets: crate::preset_bridge::Bridge,
+    /// Embedded by another page (`crate::embed_api`), which drives it every frame.
+    hosted: bool,
     /// Frames begun so far, counted up to 2 (for the startup timings).
     startup_frames: u8,
     perf: crate::frame_perf::FramePerf,
@@ -1121,7 +1183,11 @@ impl eframe::App for WebShell {
         self.recovery.tick(&mut self.app);
         self.deliver_saves(ctx);
         self.app.logic(ctx, frame);
-        crate::embed::process(&mut self.app);
+        if self.hosted {
+            crate::embed_api::process(&mut self.app, ctx);
+        } else {
+            crate::embed::process(&mut self.app);
+        }
         crate::usage_stats::sync(&self.app, ctx);
         self.save_presets(ctx);
         self.perf.end_logic();
