@@ -34,8 +34,10 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
   rotation (hand tool, touch gestures, the wheel, View commands, `zoom()`/`fit()`), and when another
   document becomes active. `zoom` is device pixels per document pixel (1 = 100%), `center` the
   document point (document pixels) at the canvas centre, `rotation` degrees in (−180, 180]. A
-  view whose fit is still pending reports nothing until it settles. `zoom` `{id, zoom}` comes
-  before it when the factor itself changed (feature `events.viewChanged`).
+  view whose fit is still pending reports nothing until it settles. The view is reported on the
+  browser's next animation frame, with the latest values, so a gesture sends at most one
+  `viewChanged` per frame however many app frames it ran. `zoom` `{id, zoom}` comes before it when
+  the factor changed since the last report (feature `events.viewChanged`).
 
 - Type layers through `execute` (`docs/control-protocol.md`): `type.frame {layer}` gives a layer's
   frame without its layout (`shape` point/box/path/inPath with its geometry, `transform`, `bounds`),

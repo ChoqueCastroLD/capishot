@@ -68,9 +68,31 @@ fn redraws_for(t: &TextLayer, families: &[String]) -> bool {
 /// Does the layer use one of `families`, by name or through the PostScript name a PSD gave?
 fn uses_family(t: &TextLayer, families: &[String]) -> bool {
     t.char_runs().iter().any(|r| {
-        families.contains(&r.style.font_family)
-            || r.style.postscript_name.as_deref().is_some_and(|ps| families.contains(&photocraft_text::fonts::guess_from_postscript(ps).family))
+        let ps: Vec<String> = r.style.postscript_name.iter().cloned().collect();
+        families.iter().any(|f| names_match(f, &r.style.font_family, &ps))
     })
+}
+
+/// A family name without case, spaces or punctuation: a PSD that names "FreeMono" by its
+/// PostScript name comes back as "Free Mono", and a manifest may list either.
+fn loose(name: &str) -> String {
+    name.chars().filter(char::is_ascii_alphanumeric).map(|c| c.to_ascii_lowercase()).collect::<String>()
+}
+
+/// Is `served` (a family the manifest lists) the font a run asks for as `family`, or by one of
+/// its PostScript names (`Lato-Bold` asks for Lato)?
+fn names_match(served: &str, family: &str, postscript: &[String]) -> bool {
+    let want = loose(served);
+    !want.is_empty()
+        && (loose(family) == want
+            || postscript.iter().any(|ps| loose(ps) == want || loose(&photocraft_text::fonts::guess_from_postscript(ps).family) == want))
+}
+
+/// The family the host serves (`fonts/manifest.txt`, as it spells it) for a run that asks for
+/// `family` or one of `postscript`, if it serves one.
+pub fn served_family(family: &str, postscript: &[String]) -> Option<String> {
+    let served = photocraft_text::served::families();
+    served.iter().find(|f| *f == family).or_else(|| served.iter().find(|f| names_match(f, family, postscript))).cloned()
 }
 
 #[cfg(test)]
@@ -88,6 +110,15 @@ mod tests {
             style: photocraft_doc::text::CharStyle { font_family: "Inter".into(), postscript_name: Some("Lato-Bold".into()), ..Default::default() },
         }];
         assert!(uses_family(&psd, &["Lato".into()]));
+    }
+
+    #[test]
+    fn served_names_match_without_spaces_case_or_style_suffixes() {
+        assert!(names_match("FreeMono", "Free Mono", &[]));
+        assert!(names_match("Free Mono", "x", &["FreeMono".into()]));
+        assert!(names_match("Lato", "x", &["Lato-Bold".into()]));
+        assert!(!names_match("Lato", "Latino", &[]));
+        assert!(!names_match("", "", &[]));
     }
 
     #[test]

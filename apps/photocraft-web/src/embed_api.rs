@@ -90,6 +90,11 @@ thread_local! {
     static WAITING: RefCell<Vec<(Receiver<ControlResponse>, Settle)>> = const { RefCell::new(Vec::new()) };
     static LISTENER: RefCell<Option<js_sys::Function>> = const { RefCell::new(None) };
     static LOGGER: Cell<bool> = const { Cell::new(false) };
+    /// The view last reported, the latest one not reported yet, and the animation-frame
+    /// callback that reports it (`viewChanged` at most once per frame).
+    static VIEW: RefCell<(Option<core::ViewSnap>, Option<core::ViewSnap>)> = const { RefCell::new((None, None)) };
+    static VIEW_FRAME: RefCell<Option<wasm_bindgen::closure::Closure<dyn FnMut()>>> = const { RefCell::new(None) };
+    static VIEW_FRAME_ASKED: Cell<bool> = const { Cell::new(false) };
 }
 
 fn to_js(v: &Value) -> JsValue {
@@ -248,6 +253,43 @@ pub fn report(app: &PhotocraftApp) {
     for e in events {
         emit(&e);
     }
+    let Some(view) = HOST.with(|h| h.borrow().last.as_ref().and_then(|s| s.view.clone())) else { return };
+    let changed = VIEW.with(|v| {
+        let mut v = v.borrow_mut();
+        let changed = v.0.as_ref() != Some(&view);
+        v.1 = changed.then_some(view);
+        changed
+    });
+    if changed && !VIEW_FRAME_ASKED.with(|a| a.replace(true)) {
+        ask_view_frame();
+    }
+}
+
+/// Reports the latest view on the next animation frame: a gesture that runs several app frames
+/// in one browser frame still sends one `viewChanged`.
+fn ask_view_frame() {
+    let Some(window) = web_sys::window() else { return };
+    VIEW_FRAME.with(|f| {
+        let mut f = f.borrow_mut();
+        let cb = f.get_or_insert_with(|| {
+            wasm_bindgen::closure::Closure::new(|| {
+                VIEW_FRAME_ASKED.with(|a| a.set(false));
+                let events = VIEW.with(|v| {
+                    let mut v = v.borrow_mut();
+                    let Some(next) = v.1.take() else { return Vec::new() };
+                    let events = core::view_events(v.0.as_ref(), &next);
+                    v.0 = Some(next);
+                    events
+                });
+                for e in events {
+                    emit(&e);
+                }
+            })
+        });
+        if window.request_animation_frame(cb.as_ref().unchecked_ref()).is_err() {
+            VIEW_FRAME_ASKED.with(|a| a.set(false));
+        }
+    });
 }
 
 fn first_frame(app: &mut PhotocraftApp, ctx: &egui::Context) {
@@ -466,6 +508,7 @@ pub fn destroy() {
     }
     CONTROL.with(|c| *c.borrow_mut() = None);
     CTX.with(|c| *c.borrow_mut() = None);
+    VIEW.with(|v| *v.borrow_mut() = (None, None));
 }
 
 /// Sets the one event listener (`null` removes it). Events: `ready`, `documents`,

@@ -317,13 +317,22 @@ pub fn events(prev: Option<&Snapshot>, next: &Snapshot) -> Vec<Value> {
     if let Some(e) = next.error.as_ref().filter(|e| prev.error.as_ref() != Some(*e)) {
         out.push(json!({ "type": "error", "message": e, "source": "status", "fatal": false }));
     }
-    if let Some(v) = next.view.as_ref().filter(|v| prev.view.as_ref() != Some(*v)) {
-        // `zoom` only when the factor changed (or another document's view shows).
-        if prev.view.as_ref().is_none_or(|p| p.doc != v.doc || p.zoom != v.zoom) {
-            out.push(json!({ "type": "zoom", "id": v.doc, "zoom": v.zoom }));
-        }
-        out.push(json!({ "type": "viewChanged", "id": v.doc, "zoom": v.zoom, "center": v.center, "rotation": v.rotation }));
+    out
+}
+
+/// The view events from the view last reported (`prev`) to `next`: `viewChanged` when anything
+/// moved, after `zoom` when the factor changed (or another document's view shows). The host
+/// glue calls it at most once per animation frame with the latest view, so a gesture's frames
+/// coalesce.
+pub fn view_events(prev: Option<&ViewSnap>, next: &ViewSnap) -> Vec<Value> {
+    if prev == Some(next) {
+        return Vec::new();
     }
+    let mut out = Vec::new();
+    if prev.is_none_or(|p| p.doc != next.doc || p.zoom != next.zoom) {
+        out.push(json!({ "type": "zoom", "id": next.doc, "zoom": next.zoom }));
+    }
+    out.push(json!({ "type": "viewChanged", "id": next.doc, "zoom": next.zoom, "center": next.center, "rotation": next.rotation }));
     out
 }
 
@@ -448,26 +457,23 @@ mod tests {
     #[test]
     fn view_changes_are_reported_once_per_change() {
         let view = ViewSnap { doc: 1, zoom: 0.5, center: [400.0, 600.0], rotation: 0.0 };
-        let a = Snapshot { active: Some(1), view: Some(view.clone()), ..Default::default() };
-        assert!(events(Some(&a), &a).is_empty(), "nothing moved");
+        assert!(view_events(Some(&view), &view).is_empty(), "nothing moved");
         // A pan: only viewChanged.
-        let mut b = a.clone();
-        b.view = Some(ViewSnap { center: [420.0, 610.0], ..view.clone() });
-        assert_eq!(events(Some(&a), &b), [json!({"type": "viewChanged", "id": 1, "zoom": 0.5, "center": [420.0, 610.0], "rotation": 0.0})]);
+        let panned = ViewSnap { center: [420.0, 610.0], ..view.clone() };
+        assert_eq!(view_events(Some(&view), &panned), [json!({"type": "viewChanged", "id": 1, "zoom": 0.5, "center": [420.0, 610.0], "rotation": 0.0})]);
         // A zoom: the zoom event as well, then viewChanged.
-        let mut c = b.clone();
-        c.view = Some(ViewSnap { zoom: 2.0, center: [420.0, 610.0], ..view.clone() });
-        let e = events(Some(&b), &c);
+        let zoomed = ViewSnap { zoom: 2.0, ..panned.clone() };
+        let e = view_events(Some(&panned), &zoomed);
         assert_eq!(e[0], json!({"type": "zoom", "id": 1, "zoom": 2.0}));
-        assert_eq!(e[1]["type"], "viewChanged");
-        assert_eq!(e.len(), 2);
-        // A rotation.
-        let mut d = c.clone();
-        d.view = Some(ViewSnap { rotation: 15.0, zoom: 2.0, center: [420.0, 610.0], ..view.clone() });
-        assert_eq!(events(Some(&c), &d)[0]["rotation"], json!(15.0));
-        // A view that hasn't settled (fit pending) reports nothing until it has.
-        let mut pending = d.clone();
-        pending.view = None;
-        assert!(events(Some(&d), &pending).is_empty());
+        assert_eq!((e[1]["type"].as_str(), e.len()), (Some("viewChanged"), 2));
+        // A rotation; the first view reported, or another document's, says its zoom too.
+        let turned = ViewSnap { rotation: 15.0, ..zoomed.clone() };
+        assert_eq!(view_events(Some(&zoomed), &turned)[0]["rotation"], json!(15.0));
+        assert_eq!(view_events(None, &turned).len(), 2);
+        assert_eq!(view_events(Some(&turned), &ViewSnap { doc: 2, ..turned.clone() }).len(), 2);
+        // The view isn't part of the per-frame events.
+        let a = Snapshot { active: Some(1), view: Some(view.clone()), ..Default::default() };
+        let b = Snapshot { view: Some(turned), ..a.clone() };
+        assert!(events(Some(&a), &b).is_empty());
     }
 }

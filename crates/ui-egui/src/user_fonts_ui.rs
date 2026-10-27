@@ -514,7 +514,7 @@ pub fn after_open(app: &mut PhotocraftApp) {
     let names = photocraft_engine::type_extra_cmds::missing_font_names(&st.doc);
     let mut still = Vec::new();
     for (family, ps) in names {
-        if let Some(served) = served_family(&family, &ps) {
+        if let Some(served) = crate::served_fonts::served_family(&family, &ps) {
             photocraft_text::served::request(&served);
             continue;
         }
@@ -538,21 +538,11 @@ pub fn after_open(app: &mut PhotocraftApp) {
     }
 }
 
-/// The family the host serves for a missing `family` (or for one of the PostScript names its runs
-/// ask for), if it serves one.
-fn served_family(family: &str, postscript: &[String]) -> Option<String> {
-    let served = photocraft_text::served::families();
-    if served.iter().any(|f| f == family) {
-        return Some(family.to_string());
-    }
-    postscript.iter().map(|ps| photocraft_text::fonts::guess_from_postscript(ps).family).find(|f| served.contains(f))
-}
-
 /// `doc`'s missing families, without those the host serves (being fetched).
 fn still_missing(doc: &photocraft_doc::Document) -> Vec<String> {
     photocraft_engine::type_extra_cmds::missing_font_names(doc)
         .into_iter()
-        .filter(|(family, ps)| served_family(family, ps).is_none())
+        .filter(|(family, ps)| crate::served_fonts::served_family(family, ps).is_none())
         .map(|(family, _)| family)
         .collect()
 }
@@ -565,7 +555,7 @@ pub fn served_fonts_changed(app: &mut PhotocraftApp) {
     for doc in tagged {
         let Some(d) = app.session.documents().iter().find(|d| d.doc.id.0 == doc) else { continue };
         for (family, ps) in photocraft_engine::type_extra_cmds::missing_font_names(&d.doc) {
-            if let Some(served) = served_family(&family, &ps) {
+            if let Some(served) = crate::served_fonts::served_family(&family, &ps) {
                 photocraft_text::served::request(&served);
             }
         }
