@@ -799,6 +799,42 @@ fn info(s: &Session, p: &Value) -> Result<Value> {
     Ok(out)
 }
 
+/// `type.frame`: a type layer's frame without laying it out (no runs, paragraphs or lines):
+/// its shape with the geometry in text space (paths also in document space), the transform
+/// (text space → document px) and the rendered bounds in document px.
+fn frame(s: &Session, p: &Value) -> Result<Value> {
+    let id = layer_id(s, p)?;
+    let d = s.active().ok_or(EngineError::NoDocument)?;
+    let l = d.doc.layer(id).ok_or(EngineError::NoLayer(id))?;
+    let LayerContent::Text(t) = &l.content else {
+        return Err(EngineError::Other(format!("layer {} is not a type layer", id.0)));
+    };
+    let paths = |sub: &photocraft_doc::vector::Subpath| {
+        let doc: Vec<_> = sub
+            .knots
+            .iter()
+            .map(|k| photocraft_doc::vector::Knot { anchor: t.transform.apply(k.anchor), in_ctrl: t.transform.apply(k.in_ctrl), out_ctrl: t.transform.apply(k.out_ctrl), smooth: k.smooth })
+            .collect();
+        let doc = photocraft_doc::vector::Subpath { knots: doc, ..sub.clone() };
+        let json = |s: photocraft_doc::vector::Subpath| crate::vector_cmds::path_json(&photocraft_doc::vector::Path::new(vec![s]));
+        (json(sub.clone()), json(doc))
+    };
+    let shape = match &t.shape {
+        TextShape::Point => json!({ "kind": "point", "anchor": [t.transform.m[4], t.transform.m[5]] }),
+        TextShape::Box { x, y, width, height } => json!({ "kind": "box", "box": [x, y, width, height] }),
+        TextShape::Path { path, start, flip } => {
+            let (path, document) = paths(path);
+            json!({ "kind": "path", "path": path, "documentPath": document, "start": start, "flip": flip })
+        }
+        TextShape::InPath { path, inset, valign } => {
+            let (path, document) = paths(path);
+            json!({ "kind": "inPath", "path": path, "documentPath": document, "inset": inset.map_or(json!("auto"), |v| json!(v)), "vertical": valign.name() })
+        }
+    };
+    let bounds = t.cache.as_ref().map(|c| c.content_bounds()).filter(|r| !r.is_empty()).map(|r| json!([r.x0, r.y0, r.x1, r.y1]));
+    Ok(json!({ "layer": id.0, "shape": shape, "transform": t.transform.m, "orientation": t.orientation, "bounds": bounds }))
+}
+
 /// A type layer (not yet rendered or added) from `type.create`'s params: text, point `x`/`y` or
 /// paragraph `box`, `orientation`, character and paragraph keys, starting from the default type
 /// styles in the foreground colour. Shared with the Type Mask tools' `type.createSelection`.
@@ -832,13 +868,8 @@ pub(crate) fn new_text_layer(s: &Session, p: &Value, cmd: &str) -> Result<TextLa
     };
     if let Some(src) = in_path {
         let doc = &s.active().ok_or(EngineError::NoDocument)?.doc;
-        let path = crate::type_extra_cmds::path_source(doc, &src)?;
-        if !path.closed || path.knots.len() < 3 {
-            return Err(bad(cmd, "type in a path needs a closed path with at least three anchor points"));
-        }
-        if photocraft_text::area::Area::new(&path).is_none() {
-            return Err(bad(cmd, "the path encloses no area"));
-        }
+        let path = crate::type_extra_cmds::path_source(doc, &src, cmd)?;
+        check_in_path(&path, cmd)?;
         let mut t = TextLayer {
             runs: vec![TextRun { len: text.len(), style }],
             paragraphs: vec![ParagraphRun { len: text.len(), style: para }],
@@ -881,6 +912,45 @@ pub(crate) fn new_text_layer(s: &Session, p: &Value, cmd: &str) -> Result<TextLa
     Ok(t)
 }
 
+/// Can `path` hold type in a path?
+fn check_in_path(path: &photocraft_doc::vector::Subpath, cmd: &str) -> Result<()> {
+    if !path.closed || path.knots.len() < 3 {
+        return Err(bad(cmd, "type in a path needs a closed path with at least three anchor points"));
+    }
+    if photocraft_text::area::Area::new(path).is_none() {
+        return Err(bad(cmd, "the path encloses no area"));
+    }
+    Ok(())
+}
+
+/// `type.edit`'s new path for type in a path, in document space: `"path"` (the compact path form,
+/// its subpath `"subpath"`, default 0) or `"inPath"` (`true`: the work path; `{"shape":id?,
+/// "subpath":n?}`). `None` when neither is given.
+fn edit_in_path_source(s: &Session, p: &Value) -> Result<Option<photocraft_doc::vector::Subpath>> {
+    const CMD: &str = "type.edit";
+    let path = match (p.get("path"), p.get("inPath")) {
+        (None | Some(Value::Null), None | Some(Value::Null) | Some(Value::Bool(false))) => return Ok(None),
+        (Some(_), Some(v)) if !v.is_null() && *v != Value::Bool(false) => return Err(bad(CMD, "pass \"path\" or \"inPath\", not both")),
+        (Some(v), _) => {
+            let path = crate::vector_cmds::parse_path(v).map_err(|m| bad(CMD, format!("path: {m}")))?;
+            let index = match p.get("subpath") {
+                None | Some(Value::Null) => 0,
+                Some(v) => v.as_u64().and_then(|n| usize::try_from(n).ok()).ok_or_else(|| bad(CMD, "\"subpath\" must be a non-negative index"))?,
+            };
+            let sub = path.subpaths.into_iter().nth(index).ok_or_else(|| bad(CMD, "the path has no such subpath"))?;
+            if !sub.knots.iter().all(|k| [k.anchor, k.in_ctrl, k.out_ctrl].iter().all(|q| q.x.is_finite() && q.y.is_finite())) {
+                return Err(bad(CMD, "path: coordinates must be finite"));
+            }
+            sub
+        }
+        (_, Some(Value::Bool(true))) => crate::type_extra_cmds::path_source(&s.active().ok_or(EngineError::NoDocument)?.doc, &json!({}), CMD)?,
+        (_, Some(v @ Value::Object(_))) => crate::type_extra_cmds::path_source(&s.active().ok_or(EngineError::NoDocument)?.doc, v, CMD)?,
+        (_, Some(_)) => return Err(bad(CMD, "\"inPath\" must be true or {\"shape\":layerId?,\"subpath\":n?}")),
+    };
+    check_in_path(&path, CMD)?;
+    Ok(Some(photocraft_doc::vector::Subpath { op: Default::default(), ..path }))
+}
+
 /// Type in a path's `"inset"` (px, or `"auto"`: `Some(None)`) and `"vertical"` (`"center|top"`)
 /// keys, each `None` when absent.
 pub(crate) fn in_path_props(p: &Value) -> std::result::Result<(Option<Option<f32>>, Option<photocraft_doc::text::InPathAlign>), String> {
@@ -899,9 +969,14 @@ pub(crate) fn in_path_props(p: &Value) -> std::result::Result<(Option<Option<f32
     Ok((inset, valign))
 }
 
-/// `type.create` (and `type.createInPath`).
+/// `type.create`.
 fn create_type(s: &mut Session, p: &Value) -> Result<Value> {
-    let mut t = new_text_layer(s, p, "type.create")?;
+    create_type_as(s, p, "type.create")
+}
+
+/// `type.create` and `type.createInPath` (`cmd`, as errors name it).
+fn create_type_as(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
+    let mut t = new_text_layer(s, p, cmd)?;
     let name = p.get("name").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| layer_name(&t.text));
     let id = s.edit("New Type Layer", |doc, active| {
         refresh(doc, &mut t);
@@ -947,7 +1022,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 if let Value::Object(m) = &mut q {
                     m.insert("inPath".into(), json!({"shape": p.get("shape").cloned().unwrap_or(Value::Null), "subpath": p.get("subpath").cloned().unwrap_or(Value::Null)}));
                 }
-                create_type(s, &q)
+                create_type_as(s, &q, "type.createInPath")
             },
         },
         CommandSpec {
@@ -955,7 +1030,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Edit Type",
             menu: &[],
             shortcut: None,
-            params: r##"{"layer":id?,"text":str? (replace all, styles kept),"replace":{"start":char,"end":char,"text":str}?,"runs":[{"start":char,"end":char,…character keys}]?,"box":[x,y,w,h]? (to paragraph text),"point":[x,y]? (to point text),"move":[dx,dy]?,"transform":[a,b,c,d,e,f]?,"antialias":"none|sharp|crisp|strong|smooth"?,"inset":px|"auto"? (type in a path),"vertical":"center|top"? (type in a path),"name":str?,"kerning":1/1000em|"metrics"|"optical"|"off"? (with "range":[startChar,endChar]?, default all),"kernPair":{"at":caretChar,"by":1/1000em}? (Alt+←/→: the pair before the caret becomes manual, its current kerning + by)}"##,
+            params: r##"{"layer":id?,"text":str? (replace all, styles kept),"replace":{"start":char,"end":char,"text":str}?,"runs":[{"start":char,"end":char,…character keys}]?,"box":[x,y,w,h]? (to paragraph text),"point":[x,y]? (to point text),"move":[dx,dy]?,"transform":[a,b,c,d,e,f]?,"antialias":"none|sharp|crisp|strong|smooth"?,"path":{"subpaths":[…]}? (type in a path: its new closed path, document px; with "subpath":n?=0),"inPath":true|{"shape":layerId?,"subpath":n?}? (or the work path's or a shape layer's path),"inset":px|"auto"? (type in a path),"vertical":"center|top"? (type in a path),"name":str?,"kerning":1/1000em|"metrics"|"optical"|"off"? (with "range":[startChar,endChar]?, default all),"kernPair":{"at":caretChar,"by":1/1000em}? (Alt+←/→: the pair before the caret becomes manual, its current kerning + by)}"##,
             enabled: has_doc,
             journal: true,
             run: |s, p| {
@@ -988,6 +1063,7 @@ pub fn specs() -> Vec<CommandSpec> {
                         Some((at as usize, by))
                     }
                 };
+                let new_path = edit_in_path_source(s, p)?;
                 let label = if kern_pair.is_some() { "Kerning" } else { "Edit Type" };
                 with_text_layer(s, p, label, |t, doc, rename| {
                     if let Some((at, by)) = kern_pair {
@@ -1053,6 +1129,14 @@ pub fn specs() -> Vec<CommandSpec> {
                         for (i, v) in m.iter().enumerate() {
                             t.transform.m[i] = v.as_f64().unwrap_or(t.transform.m[i]);
                         }
+                    }
+                    if let Some(sub) = &new_path {
+                        // Same layer, its inset and placement kept; the lines re-wrap in the new path.
+                        let path = crate::type_extra_cmds::into_text_space(sub, &t.transform)?;
+                        t.shape = match std::mem::take(&mut t.shape) {
+                            TextShape::InPath { inset, valign, .. } => TextShape::InPath { path, inset, valign },
+                            _ => TextShape::in_path(path),
+                        };
                     }
                     let (new_inset, new_valign) = in_path_props(p).map_err(|m| bad("type.edit", m))?;
                     if new_inset.is_some() || new_valign.is_some() {
@@ -1157,6 +1241,16 @@ pub fn specs() -> Vec<CommandSpec> {
             run: |s, p| info(s, p),
         },
         CommandSpec {
+            id: "type.frame",
+            label: "Type Layer Frame",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"layer":id?} → {"layer","shape":{"kind":"point","anchor":[x,y]} | {"kind":"box","box":[x,y,w,h]} | {"kind":"path","path","documentPath","start":px,"flip":bool} | {"kind":"inPath","path","documentPath","inset":px|"auto","vertical":"center|top"},"transform":[a,b,c,d,e,f] (text space → document px),"orientation","bounds":[x0,y0,x1,y1]|null (document px)} — type.info's frame without laying the text out: no runs, paragraphs or lines. "path" is in text space, "documentPath" in document px (both the compact path form)"##,
+            enabled: has_doc,
+            journal: false,
+            run: |s, p| frame(s, p),
+        },
+        CommandSpec {
             id: "type.fonts",
             label: "List Fonts",
             menu: &[],
@@ -1223,6 +1317,91 @@ fn step_size(s: &mut Session, p: &Value, up: bool, default_by: f32) -> Result<Va
 
 #[cfg(test)]
 mod tests {
+
+    /// `type.edit` gives a type-in-path layer a new path (document px, as a host edits a vertex):
+    /// the same layer, one undo step, the lines re-wrapped; or the path of a shape layer.
+    #[test]
+    fn type_edit_changes_the_path_of_type_in_a_path() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 400, "height": 300})).unwrap();
+        let rect = |x1: f64| json!({"subpaths": [{"closed": true, "knots": [[40, 40], [x1, 40], [x1, 260], [40, 260]]}]});
+        let shape = s.execute("shape.create", json!({"kind": "path", "path": rect(360.0), "fill": "#ff0000"})).unwrap()["layer"].as_u64().unwrap();
+        let text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
+        let id = s.execute("type.createInPath", json!({"shape": shape, "text": text, "size": 16, "inset": 4})).unwrap()["layer"].as_u64().unwrap();
+        // Moved first, so text space isn't document space.
+        s.execute("type.edit", json!({"layer": id, "move": [10, 0]})).unwrap();
+        let shape_of = |s: &Session| match &s.active().unwrap().doc.layer(LayerId(id)).unwrap().content {
+            LayerContent::Text(t) => (t.shape.clone(), t.transform),
+            _ => panic!("not a type layer"),
+        };
+        let lines = |s: &mut Session| s.execute("type.info", json!({"layer": id})).unwrap()["lines"].as_array().unwrap().len();
+        let (before, _) = shape_of(&s);
+        let (wide_lines, steps) = (lines(&mut s), s.active().unwrap().history.past_len());
+        // The right edge moves in: a narrower path, more lines.
+        let r = s.execute("type.edit", json!({"layer": id, "path": rect(200.0), "vertical": "top"})).unwrap();
+        assert_eq!(r["layer"], json!(id), "the same layer");
+        assert_eq!(s.active().unwrap().history.past_len(), steps + 1, "one history step");
+        let (after, transform) = shape_of(&s);
+        let TextShape::InPath { path, inset, valign } = &after else { panic!("still type in a path: {after:?}") };
+        assert_eq!((*inset, *valign), (Some(4.0), photocraft_doc::text::InPathAlign::Top), "inset kept, vertical set");
+        let doc_x: Vec<f64> = path.knots.iter().map(|k| transform.apply(k.anchor).x).collect();
+        assert_eq!(doc_x, [40.0, 200.0, 200.0, 40.0], "the path lands where it was drawn");
+        let narrow_lines = lines(&mut s);
+        assert!(narrow_lines > wide_lines, "re-wrapped: {narrow_lines} lines, were {wide_lines}");
+        s.execute("edit.undo", json!({})).unwrap();
+        assert_eq!(shape_of(&s).0, before, "one undo restores it");
+        // From a shape layer's path, by id.
+        s.execute("type.edit", json!({"layer": id, "inPath": {"shape": shape}})).unwrap();
+        let TextShape::InPath { path, .. } = shape_of(&s).0 else { panic!() };
+        assert_eq!(path.knots.len(), 4);
+        // Bad paths change nothing.
+        let steps = s.active().unwrap().history.past_len();
+        for bad in [
+            json!({"layer": id, "path": {"subpaths": [{"closed": false, "knots": [[0, 0], [10, 0], [10, 10]]}]}}),
+            json!({"layer": id, "path": rect(360.0), "inPath": true}),
+            json!({"layer": id, "path": rect(360.0), "subpath": 3}),
+            json!({"layer": id, "inPath": {"shape": id}}),
+        ] {
+            assert!(s.execute("type.edit", bad.clone()).is_err(), "{bad}");
+        }
+        assert_eq!(s.active().unwrap().history.past_len(), steps);
+    }
+
+    /// `type.frame`: the shape and its geometry, transform and bounds, without the layout.
+    #[test]
+    fn type_frame_reports_each_shape_without_the_layout() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 300, "height": 200})).unwrap();
+        let point = s.execute("type.create", json!({"x": 20, "y": 40, "text": "Hi", "size": 20})).unwrap()["layer"].as_u64().unwrap();
+        let f = s.execute("type.frame", json!({"layer": point})).unwrap();
+        assert_eq!(f["shape"], json!({"kind": "point", "anchor": [20.0, 40.0]}));
+        assert_eq!(f["transform"], json!([1.0, 0.0, 0.0, 1.0, 20.0, 40.0]));
+        assert!(f["bounds"].as_array().is_some_and(|b| b.len() == 4));
+        assert!(f.get("runs").is_none() && f.get("lines").is_none() && f.get("paragraphs").is_none());
+        let boxed = s.execute("type.create", json!({"box": [10, 20, 120, 60], "text": "Hello there", "size": 12})).unwrap()["layer"].as_u64().unwrap();
+        assert_eq!(s.execute("type.frame", json!({"layer": boxed})).unwrap()["shape"], json!({"kind": "box", "box": [0.0, 0.0, 120.0, 60.0]}));
+        let square = json!({"subpaths": [{"closed": true, "knots": [[50, 50], [250, 50], [250, 150], [50, 150]]}]});
+        let shape = s.execute("shape.create", json!({"kind": "path", "path": square, "fill": "#00ff00"})).unwrap()["layer"].as_u64().unwrap();
+        let area = s.execute("type.createInPath", json!({"shape": shape, "text": "In the path", "vertical": "top"})).unwrap()["layer"].as_u64().unwrap();
+        s.execute("type.edit", json!({"layer": area, "move": [5, 0]})).unwrap();
+        let f = s.execute("type.frame", json!({"layer": area})).unwrap();
+        assert_eq!((&f["shape"]["kind"], &f["shape"]["inset"], &f["shape"]["vertical"]), (&json!("inPath"), &json!("auto"), &json!("top")));
+        assert_eq!(f["shape"]["path"]["subpaths"][0]["knots"][1]["anchor"], json!([250.0, 50.0]), "text space");
+        assert_eq!(f["shape"]["documentPath"]["subpaths"][0]["knots"][1]["anchor"], json!([255.0, 50.0]), "document px");
+        // What type.frame reports goes back into type.edit unchanged.
+        let doc_path = f["shape"]["documentPath"].clone();
+        s.execute("type.edit", json!({"layer": area, "path": doc_path})).unwrap();
+        assert_eq!(s.execute("type.frame", json!({"layer": area})).unwrap()["shape"], f["shape"]);
+        assert!(s.execute("type.frame", json!({"layer": shape})).is_err(), "not a type layer");
+    }
+
+    #[test]
+    fn type_create_in_path_errors_name_itself() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 40, "height": 30})).unwrap();
+        let e = s.execute("type.createInPath", json!({"text": "x"})).unwrap_err().to_string();
+        assert!(e.contains("type.createInPath") && !e.contains("attachToPath"), "{e}");
+    }
 
     /// Type in a path from an elliptical work path: a type layer whose lines wrap inside the
     /// ellipse (narrower near its top and bottom), rendered, kept through a PSD save as Photoshop's

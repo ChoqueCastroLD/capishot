@@ -37,6 +37,12 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
   view whose fit is still pending reports nothing until it settles. `zoom` `{id, zoom}` comes
   before it when the factor itself changed (feature `events.viewChanged`).
 
+- Type layers through `execute` (`docs/control-protocol.md`): `type.frame {layer}` gives a layer's
+  frame without its layout (`shape` point/box/path/inPath with its geometry, `transform`, `bounds`),
+  and `type.edit {layer, path | inPath, vertical?, inset?}` gives type in a path a new path (document
+  pixels: `type.frame`'s `documentPath`, a vertex moved), keeping the layer id, in one undo step
+  (features `type.frame`, `type.edit.path`).
+
 ## Versioning rules
 
 `EMBED_API_VERSION` (in `embed_api_core.rs`) is the contract hosts check. Adding a function, an

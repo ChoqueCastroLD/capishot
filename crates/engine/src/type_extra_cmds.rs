@@ -337,10 +337,10 @@ fn convert_to_shape(s: &mut Session, p: &Value) -> Result<Value> {
 /// layout walk millions of segments).
 const MAX_TYPE_PATH_KNOTS: usize = 100_000;
 
-/// The subpath `type.attachToPath` follows, in document space: the work path (default) or a
-/// shape layer's path (`"shape":id`), subpath `"subpath"` (default 0).
-pub(crate) fn path_source(doc: &Document, p: &Value) -> Result<Subpath> {
-    let bad = |m: &str| EngineError::BadParams { cmd: "type.attachToPath".into(), msg: m.into() };
+/// The subpath type follows or fills (`cmd` names the command in errors), in document space: the
+/// work path (default) or a shape layer's path (`"shape":id`), subpath `"subpath"` (default 0).
+pub(crate) fn path_source(doc: &Document, p: &Value, cmd: &str) -> Result<Subpath> {
+    let bad = |m: &str| EngineError::BadParams { cmd: cmd.into(), msg: m.into() };
     let path = match p.get("shape") {
         None | Some(Value::Null) => doc.work_path.as_ref().ok_or_else(|| bad("the document has no work path; draw a path or pass \"shape\":layerId"))?,
         Some(v) => {
@@ -381,21 +381,28 @@ fn attach_to_path(s: &mut Session, p: &Value) -> Result<Value> {
     if doc.effective_locks(id).all {
         return Err(EngineError::Other("the type layer is locked".into()));
     }
-    let sub = path_source(doc, p)?;
+    let sub = path_source(doc, p, "type.attachToPath")?;
     with_text(s, p, "Type on a Path", |t, _| {
         // The path lives in document space; the type layer keeps it in its own text space, so
         // the type lands on the path where it is drawn.
-        let inv = t.transform.inverse().ok_or_else(|| EngineError::Other("the type layer's transform cannot be inverted".into()))?;
-        let map = |q: Point| inv.apply(q);
-        let knots = sub.knots.iter().map(|k| Knot { anchor: map(k.anchor), in_ctrl: map(k.in_ctrl), out_ctrl: map(k.out_ctrl), smooth: k.smooth }).collect();
-        let path = Subpath { closed: sub.closed, knots, op: PathOp::Combine };
-        if !path.knots.iter().all(|k| [k.anchor, k.in_ctrl, k.out_ctrl].iter().all(|q| q.x.is_finite() && q.y.is_finite())) {
-            return Err(EngineError::Other("the path cannot be mapped into the type layer".into()));
-        }
+        let path = into_text_space(&sub, &t.transform)?;
         t.shape = TextShape::Path { path, start, flip };
         Ok(())
     })?;
     Ok(json!({"layer": id.0, "start": start, "flip": flip}))
+}
+
+/// A document-space subpath in a type layer's own text space (the layer keeps its paths there,
+/// so the type lands where the path is drawn).
+pub(crate) fn into_text_space(sub: &Subpath, transform: &photocraft_doc::Affine) -> Result<Subpath> {
+    let inv = transform.inverse().ok_or_else(|| EngineError::Other("the type layer's transform cannot be inverted".into()))?;
+    let map = |q: Point| inv.apply(q);
+    let knots = sub.knots.iter().map(|k| Knot { anchor: map(k.anchor), in_ctrl: map(k.in_ctrl), out_ctrl: map(k.out_ctrl), smooth: k.smooth }).collect();
+    let path = Subpath { closed: sub.closed, knots, op: PathOp::Combine };
+    if !path.knots.iter().all(|k| [k.anchor, k.in_ctrl, k.out_ctrl].iter().all(|q| q.x.is_finite() && q.y.is_finite())) {
+        return Err(EngineError::Other("the path cannot be mapped into the type layer".into()));
+    }
+    Ok(path)
 }
 
 fn is_path_text(s: &Session) -> std::result::Result<(), String> {

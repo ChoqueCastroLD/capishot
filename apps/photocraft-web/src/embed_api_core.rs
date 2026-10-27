@@ -30,6 +30,8 @@ pub const FEATURES: &[&str] = &[
     "viewport.fit",
     "viewport.zoom",
     "events.viewChanged",
+    "type.frame",
+    "type.edit.path",
     "history",
     "events",
 ];

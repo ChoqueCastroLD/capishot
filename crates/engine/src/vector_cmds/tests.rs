@@ -1070,3 +1070,19 @@ fn combine_shapes_fails_gracefully() {
     assert!(s.execute("layer.combineShapes.unite", json!({})).is_err());
     assert_eq!(*doc(&s), before);
 }
+
+/// `"fill": "none"` (as in SVG) is no fill, like `null`; a stroke alone draws the outline.
+#[test]
+fn shape_fill_none_means_no_fill() {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 60, "height": 60, "background": "transparent"})).unwrap();
+    let id = s.execute("shape.create", json!({"kind": "rect", "rect": [10, 10, 40, 40], "fill": "none", "stroke": {"width": 2, "color": "#ff0000"}})).unwrap()["layer"].as_u64().unwrap();
+    let doc = &s.active().unwrap().doc;
+    let LayerContent::Shape(sh) = &doc.layer(LayerId(id)).unwrap().content else { panic!("a shape layer") };
+    assert!(sh.fill.is_none() && sh.stroke.is_some());
+    let id = s.execute("shape.create", json!({"kind": "rect", "rect": [10, 10, 40, 40], "fill": "#00ff00"})).unwrap()["layer"].as_u64().unwrap();
+    s.execute("shape.edit", json!({"layer": id, "fill": "None"})).unwrap();
+    let LayerContent::Shape(sh) = &s.active().unwrap().doc.layer(LayerId(id)).unwrap().content else { panic!() };
+    assert!(sh.fill.is_none());
+    assert!(s.execute("shape.create", json!({"kind": "rect", "rect": [1, 1, 5, 5], "fill": "nothing"})).is_err());
+}

@@ -257,7 +257,8 @@ fn fill_json(f: &Fill) -> Value {
 /// `"#rrggbb"` / `[r,g,b,a]` / `{"gradient":{"stops":[[t,"#hex"],…],"angle","scale","style","reverse"}}` /
 /// `{"pattern":name,"scale"}`. `null` → `Ok(None)` (no fill).
 fn parse_fill(v: &Value) -> std::result::Result<Option<Fill>, String> {
-    if v.is_null() {
+    // `null`, `"none"` (as in SVG and CSS) and `false`: no fill.
+    if v.is_null() || v.as_bool() == Some(false) || v.as_str().is_some_and(|s| s.eq_ignore_ascii_case("none")) {
         return Ok(None);
     }
     if let Some(c) = color(v) {
@@ -307,7 +308,7 @@ fn stroke_json(s: &ShapeStroke) -> Value {
 
 /// Applies stroke keys onto `base` (`null` → no stroke).
 pub fn parse_stroke(v: &Value, base: Option<ShapeStroke>, fg: Color) -> std::result::Result<Option<ShapeStroke>, String> {
-    if v.is_null() || v.as_bool() == Some(false) {
+    if v.is_null() || v.as_bool() == Some(false) || v.as_str().is_some_and(|s| s.eq_ignore_ascii_case("none")) {
         return Ok(None);
     }
     if !v.is_object() {
@@ -1725,7 +1726,7 @@ pub(crate) fn leak(s: String) -> &'static str {
 
 pub fn specs() -> Vec<CommandSpec> {
     let stroke = r##""stroke":{"width":px,"color":"#rrggbb"|fill,"opacity":0..100,"align":"inside|center|outside","cap":"butt|round|square","join":"miter|round|bevel","miterLimit":n,"dashes":[multiples of width],"dashOffset":n}|null"##;
-    let fill = r##""fill":"#rrggbb"|[r,g,b,a]|{"gradient":{"stops":[[t,"#hex"]],"angle":deg,"scale":%,"style":"linear|radial|angle|reflected|diamond","reverse":bool}}|{"pattern":name}|null (no fill)"##;
+    let fill = r##""fill":"#rrggbb"|[r,g,b,a]|{"gradient":{"stops":[[t,"#hex"]],"angle":deg,"scale":%,"style":"linear|radial|angle|reflected|diamond","reverse":bool}}|{"pattern":name}|null|"none" (no fill)"##;
     vec![
         spec!(
             "shape.create",
