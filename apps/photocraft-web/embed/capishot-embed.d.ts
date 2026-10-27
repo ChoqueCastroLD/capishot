@@ -124,6 +124,15 @@ export type EmbedEvent =
   | { type: 'selectionChanged'; id: DocumentId; bounds: [x: number, y: number, width: number, height: number] | null }
   | { type: 'toolChanged'; tool: string }
   | { type: 'modeChanged'; mode: EmbedMode }
+  /** The active document's zoom factor changed (device pixels per document pixel, 1 = 100%). */
+  | { type: 'zoom'; id: DocumentId; zoom: number }
+  /**
+   * The active document's view moved: any pan, zoom or rotation (hand tool, touch gestures, the
+   * wheel, View commands, `zoom()`/`fit()`), or another document became active. At most one per
+   * frame, only on change; not while a fit is still pending. `center` is the document point
+   * (document pixels) at the canvas centre; `rotation` is in degrees, (−180, 180].
+   */
+  | { type: 'viewChanged'; id: DocumentId; zoom: number; center: [x: number, y: number]; rotation: number }
   | { type: 'error'; message: string; source: 'init' | 'status'; fatal: boolean };
 
 /** The embedding API version (sync). */

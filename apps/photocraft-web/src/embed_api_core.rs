@@ -29,6 +29,7 @@ pub const FEATURES: &[&str] = &[
     "modes.live",
     "viewport.fit",
     "viewport.zoom",
+    "events.viewChanged",
     "history",
     "events",
 ];
@@ -263,6 +264,20 @@ pub struct Snapshot {
     pub tool: String,
     /// The status bar's error, if it shows one.
     pub error: Option<String>,
+    /// The active document's view, once it has settled (not while a fit is pending).
+    pub view: Option<ViewSnap>,
+}
+
+/// The active document's camera: what `viewChanged` reports.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ViewSnap {
+    pub doc: u64,
+    /// Device pixels per document pixel (1 = 100%).
+    pub zoom: f32,
+    /// The document point (document pixels) at the canvas centre.
+    pub center: [f32; 2],
+    /// The view's rotation, degrees in (−180, 180].
+    pub rotation: f32,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -299,6 +314,13 @@ pub fn events(prev: Option<&Snapshot>, next: &Snapshot) -> Vec<Value> {
     }
     if let Some(e) = next.error.as_ref().filter(|e| prev.error.as_ref() != Some(*e)) {
         out.push(json!({ "type": "error", "message": e, "source": "status", "fatal": false }));
+    }
+    if let Some(v) = next.view.as_ref().filter(|v| prev.view.as_ref() != Some(*v)) {
+        // `zoom` only when the factor changed (or another document's view shows).
+        if prev.view.as_ref().is_none_or(|p| p.doc != v.doc || p.zoom != v.zoom) {
+            out.push(json!({ "type": "zoom", "id": v.doc, "zoom": v.zoom }));
+        }
+        out.push(json!({ "type": "viewChanged", "id": v.doc, "zoom": v.zoom, "center": v.center, "rotation": v.rotation }));
     }
     out
 }
@@ -405,7 +427,7 @@ mod tests {
 
     #[test]
     fn events_follow_what_changed() {
-        let a = Snapshot { active: Some(1), docs: vec![DocSnap { id: 1, revision: 3, dirty: false, selection: None }], tool: "brush".into(), error: None };
+        let a = Snapshot { active: Some(1), docs: vec![DocSnap { id: 1, revision: 3, dirty: false, selection: None }], tool: "brush".into(), error: None, view: None };
         assert!(events(None, &a).is_empty(), "the first frame is the baseline");
         assert!(events(Some(&a), &a).is_empty());
         let mut b = a.clone();
@@ -419,5 +441,31 @@ mod tests {
         c.active = Some(2);
         let e = events(Some(&b), &c);
         assert_eq!(e, [json!({"type": "documents", "documents": [1, 2], "active": 2})], "the same error isn't repeated");
+    }
+
+    #[test]
+    fn view_changes_are_reported_once_per_change() {
+        let view = ViewSnap { doc: 1, zoom: 0.5, center: [400.0, 600.0], rotation: 0.0 };
+        let a = Snapshot { active: Some(1), view: Some(view.clone()), ..Default::default() };
+        assert!(events(Some(&a), &a).is_empty(), "nothing moved");
+        // A pan: only viewChanged.
+        let mut b = a.clone();
+        b.view = Some(ViewSnap { center: [420.0, 610.0], ..view.clone() });
+        assert_eq!(events(Some(&a), &b), [json!({"type": "viewChanged", "id": 1, "zoom": 0.5, "center": [420.0, 610.0], "rotation": 0.0})]);
+        // A zoom: the zoom event as well, then viewChanged.
+        let mut c = b.clone();
+        c.view = Some(ViewSnap { zoom: 2.0, center: [420.0, 610.0], ..view.clone() });
+        let e = events(Some(&b), &c);
+        assert_eq!(e[0], json!({"type": "zoom", "id": 1, "zoom": 2.0}));
+        assert_eq!(e[1]["type"], "viewChanged");
+        assert_eq!(e.len(), 2);
+        // A rotation.
+        let mut d = c.clone();
+        d.view = Some(ViewSnap { rotation: 15.0, zoom: 2.0, center: [420.0, 610.0], ..view.clone() });
+        assert_eq!(events(Some(&c), &d)[0]["rotation"], json!(15.0));
+        // A view that hasn't settled (fit pending) reports nothing until it has.
+        let mut pending = d.clone();
+        pending.view = None;
+        assert!(events(Some(&d), &pending).is_empty());
     }
 }

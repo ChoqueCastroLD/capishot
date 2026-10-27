@@ -1218,6 +1218,10 @@ impl eframe::App for WebShell {
             });
         }
         self.app.ui(ui, frame);
+        if self.hosted {
+            // After the frame's UI: a pan, zoom or rotation made this frame is reported now.
+            crate::embed_api::report(&self.app);
+        }
         self.save_presets(ui.ctx());
         self.perf.end_update(&self.app, ui.ctx());
         self.watchdog.end(&self.app);

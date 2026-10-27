@@ -27,8 +27,15 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
   zoom, pan, the tool cursor and floating windows the user opens still work. `setMode('full')`
   restores the chrome as it was. Both are live on the same session.
 - Events (`onEvent`): `ready`, `documents`, `documentChanged`, `dirty`, `selectionChanged`,
-  `toolChanged`, `modeChanged`, `error`. Derived per frame from the session; selection bounds are
-  measured once per document revision.
+  `toolChanged`, `modeChanged`, `zoom`, `viewChanged`, `error`. Derived once per frame, after the
+  frame's UI, from the session; each kind at most once per frame and only on change. Selection
+  bounds are measured once per document revision.
+- `viewChanged` `{id, zoom, center, rotation}`: the active document's view after any pan, zoom or
+  rotation (hand tool, touch gestures, the wheel, View commands, `zoom()`/`fit()`), and when another
+  document becomes active. `zoom` is device pixels per document pixel (1 = 100%), `center` the
+  document point (document pixels) at the canvas centre, `rotation` degrees in (−180, 180]. A
+  view whose fit is still pending reports nothing until it settles. `zoom` `{id, zoom}` comes
+  before it when the factor itself changed (feature `events.viewChanged`).
 
 ## Versioning rules
 

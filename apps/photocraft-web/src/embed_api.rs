@@ -184,8 +184,8 @@ pub fn install(ctx: egui::Context) -> Receiver<ControlRequest> {
     rx
 }
 
-/// Every frame of a hosted app: first-frame setup, queued calls, control replies, the mode, and
-/// the events since the last frame.
+/// Every frame of a hosted app, before its UI: first-frame setup, queued calls, control replies
+/// and the mode. The events go out after the UI ([`report`]).
 pub fn process(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let first = HOST.with(|h| std::mem::replace(&mut h.borrow_mut().first_frame, false));
     if first {
@@ -218,16 +218,6 @@ pub fn process(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if HOST.with(|h| h.borrow().mode) == Mode::Embedded {
         core::hide_chrome(&mut app.ui.panels, &mut app.ui.view);
     }
-    let snap = snapshot(app);
-    let events = HOST.with(|h| {
-        let mut h = h.borrow_mut();
-        let events = core::events(h.last.as_ref(), &snap);
-        h.last = Some(snap);
-        events
-    });
-    for e in events {
-        emit(&e);
-    }
     if first {
         let ready = HOST.with(|h| {
             let mut h = h.borrow_mut();
@@ -239,6 +229,24 @@ pub fn process(app: &mut PhotocraftApp, ctx: &egui::Context) {
             resolve.call1(&JsValue::NULL, &info).ok();
         }
         emit(&json!({ "type": "ready", "version": core::version() }));
+    }
+}
+
+/// The events of this frame, at most one of each kind: called once per frame, after the frame's
+/// UI (where pans, zooms and rotations happen) and the calls [`process`] ran before it.
+pub fn report(app: &PhotocraftApp) {
+    let snap = snapshot(app);
+    let events = HOST.with(|h| {
+        let mut h = h.borrow_mut();
+        if h.last.as_ref() == Some(&snap) {
+            return Vec::new();
+        }
+        let events = core::events(h.last.as_ref(), &snap);
+        h.last = Some(snap);
+        events
+    });
+    for e in events {
+        emit(&e);
     }
 }
 
@@ -302,7 +310,11 @@ fn snapshot(app: &PhotocraftApp) -> Snapshot {
         h.selections = cache;
         snaps
     });
-    Snapshot { active, docs, tool: core::tool_id(app.ui.tool), error: app.ui.status_error.then(|| app.ui.status.clone()) }
+    let view = app.session.active_index().zip(active).and_then(|(i, doc)| {
+        let v = app.ui.views.get(i).filter(|v| !v.fit_pending && !v.fill_pending)?;
+        Some(core::ViewSnap { doc, zoom: v.zoom, center: v.center, rotation: v.rotation })
+    });
+    Snapshot { active, docs, tool: core::tool_id(app.ui.tool), error: app.ui.status_error.then(|| app.ui.status.clone()), view }
 }
 
 fn index_of(app: &PhotocraftApp, id: Option<u64>) -> Result<usize, String> {
@@ -457,7 +469,8 @@ pub fn destroy() {
 }
 
 /// Sets the one event listener (`null` removes it). Events: `ready`, `documents`,
-/// `documentChanged`, `dirty`, `selectionChanged`, `toolChanged`, `modeChanged`, `error`.
+/// `documentChanged`, `dirty`, `selectionChanged`, `toolChanged`, `modeChanged`, `zoom`,
+/// `viewChanged`, `error`.
 #[wasm_bindgen(js_name = onEvent)]
 pub fn on_event(listener: JsValue) {
     let f = listener.dyn_into::<js_sys::Function>().ok();
