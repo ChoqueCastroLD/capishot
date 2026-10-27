@@ -504,15 +504,20 @@ pub fn take_loads(idle: bool) -> Vec<String> {
 
 // ------------------------------------------------------------------ missing fonts notice
 
-/// After a document opened: its missing fonts. The user's stored fonts that provide them are read
-/// (they re-render the layers when they arrive); for the others a notice offers Load Fonts… and
-/// Resolve Missing Fonts…
+/// After a document opened: its missing fonts. Families the host serves (`fonts/manifest.txt`,
+/// the web build) are fetched and not listed: they re-render the layers when they arrive. The
+/// user's stored fonts that provide the others are read too; for the rest a notice offers Load
+/// Fonts… and Resolve Missing Fonts…
 pub fn after_open(app: &mut PhotocraftApp) {
     let Some(st) = app.session.active() else { return };
     let doc = st.doc.id;
     let names = photocraft_engine::type_extra_cmds::missing_font_names(&st.doc);
     let mut still = Vec::new();
     for (family, ps) in names {
+        if let Some(served) = served_family(&family, &ps) {
+            photocraft_text::served::request(&served);
+            continue;
+        }
         let mut stored = user_fonts::request(&family);
         for p in &ps {
             stored |= user_fonts::request(p);
@@ -533,6 +538,43 @@ pub fn after_open(app: &mut PhotocraftApp) {
     }
 }
 
+/// The family the host serves for a missing `family` (or for one of the PostScript names its runs
+/// ask for), if it serves one.
+fn served_family(family: &str, postscript: &[String]) -> Option<String> {
+    let served = photocraft_text::served::families();
+    if served.iter().any(|f| f == family) {
+        return Some(family.to_string());
+    }
+    postscript.iter().map(|ps| photocraft_text::fonts::guess_from_postscript(ps).family).find(|f| served.contains(f))
+}
+
+/// `doc`'s missing families, without those the host serves (being fetched).
+fn still_missing(doc: &photocraft_doc::Document) -> Vec<String> {
+    photocraft_engine::type_extra_cmds::missing_font_names(doc)
+        .into_iter()
+        .filter(|(family, ps)| served_family(family, ps).is_none())
+        .map(|(family, _)| family)
+        .collect()
+}
+
+/// The served fonts changed (the manifest arrived, or font files did): the families each missing
+/// fonts notice lists that the host serves are fetched, and the notices list what is still missing
+/// (or go). The shell calls it (`served_fonts::install`); the layers re-render there.
+pub fn served_fonts_changed(app: &mut PhotocraftApp) {
+    let tagged: Vec<u64> = app.ui.notices.iter().filter_map(|n| n.tag.as_deref()?.strip_prefix(MISSING_TAG)?.parse::<u64>().ok()).collect();
+    for doc in tagged {
+        let Some(d) = app.session.documents().iter().find(|d| d.doc.id.0 == doc) else { continue };
+        for (family, ps) in photocraft_engine::type_extra_cmds::missing_font_names(&d.doc) {
+            if let Some(served) = served_family(&family, &ps) {
+                photocraft_text::served::request(&served);
+            }
+        }
+    }
+    crate::type_tool::invalidate_families();
+    crate::fonts_ui::refresh_missing_dialogs(app);
+    refresh_missing_notices(app);
+}
+
 fn names_lines(names: &[String]) -> Vec<String> {
     let mut lines: Vec<String> = names.iter().take(MAX_NAMES).cloned().collect();
     if names.len() > MAX_NAMES {
@@ -546,8 +588,7 @@ fn refresh_missing_notices(app: &mut PhotocraftApp) {
     let tagged: Vec<(u64, u64)> =
         app.ui.notices.iter().filter_map(|n| Some((n.id, n.tag.as_deref()?.strip_prefix(MISSING_TAG)?.parse::<u64>().ok()?))).collect();
     for (id, doc) in tagged {
-        let missing =
-            app.session.documents().iter().find(|d| d.doc.id.0 == doc).map(|d| photocraft_engine::type_extra_cmds::missing_fonts(&d.doc)).unwrap_or_default();
+        let missing = app.session.documents().iter().find(|d| d.doc.id.0 == doc).map(|d| still_missing(&d.doc)).unwrap_or_default();
         if missing.is_empty() {
             app.ui.notices.retain(|n| n.id != id);
         } else if let Some(n) = app.ui.notices.iter_mut().find(|n| n.id == id) {

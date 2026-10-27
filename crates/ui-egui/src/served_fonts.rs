@@ -2,6 +2,7 @@
 //! see `photocraft_text::served`): reading the manifest, the families to fetch, and installing
 //! what arrived, which registers the files and re-renders the type layers drawn without them.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use photocraft_doc::{DocId, LayerContent, LayerId, TextLayer};
@@ -12,12 +13,19 @@ use crate::PhotocraftApp;
 /// Layers whose document was busy with a background job when their font arrived.
 static PENDING: Mutex<Vec<(DocId, LayerId)>> = Mutex::new(Vec::new());
 
+/// The served families' generation last seen by [`install`] (the manifest arriving changes it).
+static SEEN: AtomicU64 = AtomicU64::new(0);
+
 /// Registers delivered font files (`(family, bytes)`, the family as the manifest lists it) and
 /// re-renders the type layers that use those families, or whose text falls back to them (a script
 /// fallback, e.g. Arabic set in Inter), and show our own layout. A PSD layer still
 /// showing Photoshop's pixels (not edited yet) keeps them, as it does when its font is installed
-/// from the start. Call it every frame: it also retries the layers of a document that was busy.
+/// from the start. Call it every frame: it also retries the layers of a document that was busy, and
+/// when the manifest or fonts arrive, the missing fonts notices drop what is served now.
 pub fn install(app: &mut PhotocraftApp, delivered: Vec<(String, Vec<u8>)>) {
+    let generation = photocraft_text::served::generation();
+    let manifest_changed = SEEN.swap(generation, Ordering::Relaxed) != generation;
+    let arrived = !delivered.is_empty();
     let mut layers = std::mem::take(&mut *PENDING.lock().unwrap_or_else(PoisonError::into_inner));
     if !delivered.is_empty() {
         let families: Vec<String> = delivered.iter().map(|(f, _)| f.clone()).collect();
@@ -45,6 +53,9 @@ pub fn install(app: &mut PhotocraftApp, delivered: Vec<(String, Vec<u8>)>) {
     if !layers.is_empty() {
         let busy = app.session.refresh_type_layers(&layers);
         PENDING.lock().unwrap_or_else(PoisonError::into_inner).extend(busy);
+    }
+    if manifest_changed || arrived {
+        crate::user_fonts_ui::served_fonts_changed(app);
     }
 }
 
