@@ -6,6 +6,7 @@ use burn::tensor::Tensor;
 use crate::catalog::{Arch, ModelInfo};
 use crate::compact::Compact;
 use crate::esrgan::Esrgan;
+use crate::fdat::Fdat;
 use crate::runtime::{Network, Runtime, run_tiled};
 use crate::tile::TileOptions;
 use crate::weights::Weights;
@@ -19,6 +20,7 @@ pub use crate::tile::default_tiles;
 pub enum Net {
     Esrgan(Esrgan),
     Compact(Compact),
+    Fdat(Fdat),
 }
 
 impl Net {
@@ -26,6 +28,7 @@ impl Net {
         match self {
             Self::Esrgan(n) => n,
             Self::Compact(n) => n,
+            Self::Fdat(n) => n,
         }
     }
 }
@@ -59,9 +62,12 @@ impl Loaded {
     /// Parses and uploads `bytes` (already verified) for `model`.
     pub fn new(rt: &Runtime, model: &'static ModelInfo, bytes: &[u8], grayscale: bool) -> Result<Self> {
         let w = Weights::from_safetensors(bytes)?;
+        // FDAT always takes RGB: a grayscale page goes in as gray RGB and comes out as RGB.
+        let grayscale = grayscale && model.arch != Arch::Fdat;
         let net = match model.arch {
             Arch::Esrgan => Net::Esrgan(Esrgan::load(rt, &w, grayscale)?),
             Arch::Compact => Net::Compact(Compact::load(rt, &w, model.scale as usize, grayscale)?),
+            Arch::Fdat => Net::Fdat(Fdat::load(rt, &w)?),
             Arch::Lama | Arch::Migan | Arch::Generative => return Err(crate::AiError::UnknownModel(format!("{} is not an upscaler", model.id))),
         };
         Ok(Self { id: model.id, grayscale, net })

@@ -3615,6 +3615,7 @@ curves	Smooth	Glätten
 	A small cleaner for phones and computers without a GPU.	Ein kleiner Bereiniger für Handys und PCs ohne GPU.
 	Sharp 2× and 4× upscaling of black-and-white manga pages.	Scharfes 2×- und 4×-Hochskalieren von S/W-Mangaseiten.
 	2× and 4× upscaling of colour pages and covers.	2×- und 4×-Hochskalieren von Farbseiten und Covern.
+	2× and 4× upscaling of colour pages that keeps linework and screen texture.	2×- und 4×-Hochskalieren von Farbseiten, das Linien und Raster erhält.
 	Fast upscaling that runs well on any device.	Schnelles Hochskalieren für jedes Gerät.
 	Rough fills on any device, even without a GPU.	Einfache Füllungen auf jedem Gerät, auch ohne GPU.
 	Good fills with a smaller download.	Gute Füllungen mit kleinerem Download.

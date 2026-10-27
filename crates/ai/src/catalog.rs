@@ -16,6 +16,9 @@ pub enum Arch {
     Lama,
     /// Real-ESRGAN Compact (SRVGGNetCompact): the lite upscaler ([`crate::compact`]).
     Compact,
+    /// FDAT (Fast Dual Aggregation Transformer): the IllustrationJaNai V3 models ([`crate::fdat`]).
+    /// The 2x release pixel-unshuffles its input.
+    Fdat,
     /// MI-GAN: the lite inpainter, run by `photocraft-ai-lama`.
     Migan,
     /// A Generative Fill file (Stable Diffusion 1.5 inpainting parts, TAESD, few-step LoRA), run
@@ -75,6 +78,7 @@ impl ModelInfo {
 }
 
 const MJ_SRC: &str = "https://github.com/the-database/MangaJaNai/releases/tag/1.0.0";
+const IJ3_SRC: &str = "https://github.com/the-database/MangaJaNai/releases/tag/3.0.0";
 const LICENSE: &str = "CC-BY-NC-4.0";
 const AUTHOR: &str = "the-database";
 const B2: u64 = 33_472_214;
@@ -303,6 +307,38 @@ pub const MODELS: &[ModelInfo] = &[
         license: LICENSE,
         author: AUTHOR,
         source: MJ_SRC,
+        lite: false,
+    },
+    // IllustrationJaNai V3 detail (FDAT M): keeps linework and screen texture; the release files as
+    // they are (fp16 safetensors, spandrel key names).
+    ModelInfo {
+        id: "illustrationjanai-v3-detail-4x",
+        title: "IllustrationJaNai V3 detail 4x (colour)",
+        file: "4x_IllustrationJaNai_V3detail_FDAT_M_40k_fp16.safetensors",
+        arch: Arch::Fdat,
+        scale: 4,
+        content: Content::Color,
+        height: None,
+        bytes: 16_160_075,
+        sha256: "87badd2462ec4fe9a4d6a1e971d27cabb17540961ac588a534a7f6e0b9e135cd",
+        license: LICENSE,
+        author: AUTHOR,
+        source: IJ3_SRC,
+        lite: false,
+    },
+    ModelInfo {
+        id: "illustrationjanai-v3-detail-2x",
+        title: "IllustrationJaNai V3 detail 2x (colour)",
+        file: "2x_IllustrationJaNai_V3detail_FDAT_M_unshuffle_40k_fp16.safetensors",
+        arch: Arch::Fdat,
+        scale: 2,
+        content: Content::Color,
+        height: None,
+        bytes: 16_198_963,
+        sha256: "8ff2ba0b970e6939f3711077f5260fcded16b8388a939a27f153c687ff5da3e0",
+        license: LICENSE,
+        author: AUTHOR,
+        source: IJ3_SRC,
         lite: false,
     },
     ModelInfo {

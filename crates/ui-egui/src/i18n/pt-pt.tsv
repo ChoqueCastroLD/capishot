@@ -3213,6 +3213,7 @@ fontWeight	Italic	Itálico
 	A small cleaner for phones and computers without a GPU.	Um limpador pequeno para telemóveis e PCs sem GPU.
 	Sharp 2× and 4× upscaling of black-and-white manga pages.	Amplia 2× e 4× páginas de manga a preto e branco com nitidez.
 	2× and 4× upscaling of colour pages and covers.	Amplia 2× e 4× páginas a cores e capas.
+	2× and 4× upscaling of colour pages that keeps linework and screen texture.	Amplia 2× e 4× páginas a cores mantendo o traço e a retícula.
 	Fast upscaling that runs well on any device.	Ampliação rápida que corre bem em qualquer dispositivo.
 	Rough fills on any device, even without a GPU.	Preenchimentos simples em qualquer dispositivo, mesmo sem GPU.
 	Good fills with a smaller download.	Bons preenchimentos com uma transferência menor.

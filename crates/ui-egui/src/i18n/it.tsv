@@ -4712,6 +4712,7 @@ shape	Appearance	Aspetto
 	A small cleaner for phones and computers without a GPU.	Un piccolo pulitore per telefoni e PC senza GPU.
 	Sharp 2× and 4× upscaling of black-and-white manga pages.	Ingrandimento nitido 2× e 4× di pagine manga in bianco e nero.
 	2× and 4× upscaling of colour pages and covers.	Ingrandimento 2× e 4× di pagine a colori e copertine.
+	2× and 4× upscaling of colour pages that keeps linework and screen texture.	Ingrandimento 2× e 4× di pagine a colori che conserva linee e retini.
 	Fast upscaling that runs well on any device.	Ingrandimento veloce che va bene su ogni dispositivo.
 	Rough fills on any device, even without a GPU.	Riempimenti semplici su ogni dispositivo, anche senza GPU.
 	Good fills with a smaller download.	Buoni riempimenti con un download più piccolo.

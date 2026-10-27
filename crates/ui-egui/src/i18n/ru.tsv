@@ -3584,6 +3584,7 @@ curves	Smooth	Сгладить
 	A small cleaner for phones and computers without a GPU.	Небольшая очистка для телефонов и ПК без GPU.
 	Sharp 2× and 4× upscaling of black-and-white manga pages.	Чёткое увеличение ч/б страниц манги в 2× и 4×.
 	2× and 4× upscaling of colour pages and covers.	Увеличение цветных страниц и обложек в 2× и 4×.
+	2× and 4× upscaling of colour pages that keeps linework and screen texture.	Увеличение цветных страниц в 2× и 4× с сохранением линий и растра.
 	Fast upscaling that runs well on any device.	Быстрое увеличение для любого устройства.
 	Rough fills on any device, even without a GPU.	Простые заливки на любом устройстве, даже без GPU.
 	Good fills with a smaller download.	Хорошие заливки при меньшей загрузке.

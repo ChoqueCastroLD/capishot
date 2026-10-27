@@ -4588,6 +4588,7 @@ layerLabel	No Color	Sem cor
 	A small cleaner for phones and computers without a GPU.	Um limpador pequeno para celulares e PCs sem GPU.
 	Sharp 2× and 4× upscaling of black-and-white manga pages.	Amplia 2× e 4× páginas de mangá em preto e branco com nitidez.
 	2× and 4× upscaling of colour pages and covers.	Amplia 2× e 4× páginas coloridas e capas.
+	2× and 4× upscaling of colour pages that keeps linework and screen texture.	Amplia 2× e 4× páginas coloridas mantendo o traço e a retícula.
 	Fast upscaling that runs well on any device.	Ampliação rápida que roda bem em qualquer dispositivo.
 	Rough fills on any device, even without a GPU.	Preenchimentos simples em qualquer dispositivo, mesmo sem GPU.
 	Good fills with a smaller download.	Bons preenchimentos com download menor.

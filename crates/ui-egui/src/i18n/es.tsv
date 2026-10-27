@@ -4760,6 +4760,7 @@ navigator	Zoom	Zoom
 	A small cleaner for phones and computers without a GPU.	Un limpiador pequeño para móviles y equipos sin GPU.
 	Sharp 2× and 4× upscaling of black-and-white manga pages.	Amplía 2× y 4× páginas de manga en blanco y negro con nitidez.
 	2× and 4× upscaling of colour pages and covers.	Amplía 2× y 4× páginas a color y portadas.
+	2× and 4× upscaling of colour pages that keeps linework and screen texture.	Amplía 2× y 4× páginas a color conservando el lineart y la trama.
 	Fast upscaling that runs well on any device.	Ampliación rápida que va bien en cualquier dispositivo.
 	Rough fills on any device, even without a GPU.	Rellenos sencillos en cualquier dispositivo, incluso sin GPU.
 	Good fills with a smaller download.	Buenos rellenos con una descarga menor.

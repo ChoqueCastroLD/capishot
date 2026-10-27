@@ -3231,6 +3231,7 @@ curves	Smooth	平滑
 	A small cleaner for phones and computers without a GPU.	適合手機和無 GPU 電腦的小型清理模型。
 	Sharp 2× and 4× upscaling of black-and-white manga pages.	黑白漫畫頁面清晰放大 2 倍與 4 倍。
 	2× and 4× upscaling of colour pages and covers.	彩色頁面與封面放大 2 倍與 4 倍。
+	2× and 4× upscaling of colour pages that keeps linework and screen texture.	彩色頁面放大 2 倍與 4 倍，保留線稿與網點質感。
 	Fast upscaling that runs well on any device.	在任何裝置上都流暢的快速放大。
 	Rough fills on any device, even without a GPU.	任何裝置都能進行粗略填色，無需 GPU。
 	Good fills with a smaller download.	下載更小，填色效果良好。

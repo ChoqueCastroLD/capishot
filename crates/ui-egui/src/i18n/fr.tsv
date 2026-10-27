@@ -3617,6 +3617,7 @@ curves	Smooth	Lisser
 	A small cleaner for phones and computers without a GPU.	Un petit nettoyeur pour mobiles et ordinateurs sans GPU.
 	Sharp 2× and 4× upscaling of black-and-white manga pages.	Agrandissement net 2× et 4× des pages manga en noir et blanc.
 	2× and 4× upscaling of colour pages and covers.	Agrandissement 2× et 4× des pages couleur et couvertures.
+	2× and 4× upscaling of colour pages that keeps linework and screen texture.	Agrandissement 2× et 4× des pages couleur qui préserve le trait et la trame.
 	Fast upscaling that runs well on any device.	Agrandissement rapide, fluide sur tout appareil.
 	Rough fills on any device, even without a GPU.	Remplissages simples sur tout appareil, même sans GPU.
 	Good fills with a smaller download.	De bons remplissages pour un téléchargement plus léger.

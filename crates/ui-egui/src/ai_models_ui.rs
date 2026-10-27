@@ -169,6 +169,7 @@ fn card_text(c: &Card) -> &'static str {
         "migan" => tl!("A small cleaner for phones and computers without a GPU."),
         "mangajanai" => tl!("Sharp 2× and 4× upscaling of black-and-white manga pages."),
         "illustrationjanai" => tl!("2× and 4× upscaling of colour pages and covers."),
+        "illustrationjanai-v3-detail" => tl!("2× and 4× upscaling of colour pages that keeps linework and screen texture."),
         "realesr-compact" => tl!("Fast upscaling that runs well on any device."),
         cards::GENFILL_ULTRA_CARD => tl!("Rough fills on any device, even without a GPU."),
         cards::GENFILL_FAST_CARD => tl!("Good fills with a smaller download."),

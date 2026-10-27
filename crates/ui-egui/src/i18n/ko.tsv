@@ -3795,6 +3795,7 @@ curves	Smooth	매끄럽게
 	A small cleaner for phones and computers without a GPU.	휴대폰과 GPU 없는 컴퓨터용 소형 정리 모델.
 	Sharp 2× and 4× upscaling of black-and-white manga pages.	흑백 만화 페이지를 2배·4배 선명하게 확대.
 	2× and 4× upscaling of colour pages and covers.	컬러 페이지와 표지를 2배·4배 확대.
+	2× and 4× upscaling of colour pages that keeps linework and screen texture.	선화와 스크린톤 질감을 살려 컬러 페이지를 2배·4배 확대.
 	Fast upscaling that runs well on any device.	어떤 기기에서도 잘 도는 빠른 확대.
 	Rough fills on any device, even without a GPU.	GPU 없이도 어떤 기기에서나 간단한 채우기.
 	Good fills with a smaller download.	더 작은 다운로드로 좋은 채우기.

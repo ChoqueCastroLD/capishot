@@ -165,7 +165,7 @@ pub fn group(model: &ModelInfo) -> Group {
 pub fn tools(model: &ModelInfo) -> &'static [&'static str] {
     match model.arch {
         Arch::Lama | Arch::Migan => &["edit.inpaintAi", "paint.remove"],
-        Arch::Esrgan | Arch::Compact => &["image.upscaleAi"],
+        Arch::Esrgan | Arch::Compact | Arch::Fdat => &["image.upscaleAi"],
         Arch::Generative => &["edit.generativeFill"],
     }
 }

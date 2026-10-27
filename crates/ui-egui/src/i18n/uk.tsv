@@ -4315,6 +4315,7 @@ curves	Smooth	Згладити
 	A small cleaner for phones and computers without a GPU.	Невелике очищення для телефонів і ПК без GPU.
 	Sharp 2× and 4× upscaling of black-and-white manga pages.	Чітке збільшення ч/б сторінок манги у 2× і 4×.
 	2× and 4× upscaling of colour pages and covers.	Збільшення кольорових сторінок і обкладинок у 2× і 4×.
+	2× and 4× upscaling of colour pages that keeps linework and screen texture.	Збільшення кольорових сторінок у 2× і 4× зі збереженням ліній і растру.
 	Fast upscaling that runs well on any device.	Швидке збільшення для будь-якого пристрою.
 	Rough fills on any device, even without a GPU.	Прості заливки на будь-якому пристрої, навіть без GPU.
 	Good fills with a smaller download.	Добрі заливки при меншому завантаженні.

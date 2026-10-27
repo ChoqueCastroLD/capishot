@@ -4208,6 +4208,7 @@ navigator	Zoom	Zvětšení
 	A small cleaner for phones and computers without a GPU.	Malý čistič pro telefony a počítače bez GPU.
 	Sharp 2× and 4× upscaling of black-and-white manga pages.	Ostré zvětšení černobílých stran mangy 2× a 4×.
 	2× and 4× upscaling of colour pages and covers.	Zvětšení barevných stran a obálek 2× a 4×.
+	2× and 4× upscaling of colour pages that keeps linework and screen texture.	Zvětšení barevných stran 2× a 4× se zachováním linek a rastru.
 	Fast upscaling that runs well on any device.	Rychlé zvětšení pro každé zařízení.
 	Rough fills on any device, even without a GPU.	Hrubé výplně na každém zařízení, i bez GPU.
 	Good fills with a smaller download.	Dobré výplně s menším stahováním.

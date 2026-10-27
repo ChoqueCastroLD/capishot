@@ -3604,6 +3604,7 @@ curves	Smooth	Haluskan
 	A small cleaner for phones and computers without a GPU.	Pembersih kecil untuk ponsel dan komputer tanpa GPU.
 	Sharp 2× and 4× upscaling of black-and-white manga pages.	Pembesaran tajam 2× dan 4× halaman manga hitam putih.
 	2× and 4× upscaling of colour pages and covers.	Pembesaran 2× dan 4× halaman berwarna dan sampul.
+	2× and 4× upscaling of colour pages that keeps linework and screen texture.	Pembesaran 2× dan 4× halaman berwarna yang menjaga garis dan tekstur raster.
 	Fast upscaling that runs well on any device.	Pembesaran cepat yang lancar di perangkat apa pun.
 	Rough fills on any device, even without a GPU.	Isian kasar di perangkat apa pun, bahkan tanpa GPU.
 	Good fills with a smaller download.	Isian bagus dengan unduhan lebih kecil.

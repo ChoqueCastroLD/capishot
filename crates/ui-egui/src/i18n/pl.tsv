@@ -4206,6 +4206,7 @@ curves	Smooth	Wygładź
 	A small cleaner for phones and computers without a GPU.	Mały model do telefonów i komputerów bez GPU.
 	Sharp 2× and 4× upscaling of black-and-white manga pages.	Ostre powiększanie 2× i 4× czarno-białych stron mangi.
 	2× and 4× upscaling of colour pages and covers.	Powiększanie 2× i 4× kolorowych stron i okładek.
+	2× and 4× upscaling of colour pages that keeps linework and screen texture.	Powiększanie 2× i 4× kolorowych stron z zachowaniem linii i rastra.
 	Fast upscaling that runs well on any device.	Szybkie powiększanie na każdym urządzeniu.
 	Rough fills on any device, even without a GPU.	Proste wypełnienia na każdym urządzeniu, nawet bez GPU.
 	Good fills with a smaller download.	Dobre wypełnienia przy mniejszym pobieraniu.

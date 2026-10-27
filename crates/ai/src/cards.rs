@@ -116,6 +116,18 @@ pub const CARDS: &[Card] = &[
         memory_mb: 1500,
     },
     Card {
+        id: "illustrationjanai-v3-detail",
+        section: Section::Upscale,
+        title: "IllustrationJaNai V3 detail",
+        description: "2× and 4× upscaling of colour pages that keeps linework and screen texture.",
+        files: &["illustrationjanai-v3-detail-2x", "illustrationjanai-v3-detail-4x"],
+        quality: 5,
+        speed: 3,
+        gpu: true,
+        precision: "f16",
+        memory_mb: 1200,
+    },
+    Card {
         id: "realesr-compact",
         section: Section::Upscale,
         title: "Real-ESRGAN Compact (lite)",

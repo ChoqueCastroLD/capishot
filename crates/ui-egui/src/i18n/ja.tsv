@@ -4280,6 +4280,7 @@ curves	Smooth	スムーズ
 	A small cleaner for phones and computers without a GPU.	スマホやGPUなしのPC向けの小型クリーナー。
 	Sharp 2× and 4× upscaling of black-and-white manga pages.	白黒マンガのページを2倍・4倍に鮮明に拡大。
 	2× and 4× upscaling of colour pages and covers.	カラーページや表紙を2倍・4倍に拡大。
+	2× and 4× upscaling of colour pages that keeps linework and screen texture.	線画とトーンの質感を保ったまま、カラーページを2倍・4倍に拡大。
 	Fast upscaling that runs well on any device.	どの端末でも軽快な高速拡大。
 	Rough fills on any device, even without a GPU.	GPUがなくても、どの端末でも簡易な塗りつぶし。
 	Good fills with a smaller download.	小さなダウンロードで良好な塗りつぶし。
