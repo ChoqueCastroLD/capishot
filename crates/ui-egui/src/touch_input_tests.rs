@@ -266,3 +266,20 @@ fn a_slow_small_twist_does_not_repeat_undo() {
     frame(&mut t, [browser(1, TouchPhase::End, 140.0, 308.0, true), browser(2, TouchPhase::End, 260.0, 292.0, false)].concat(), 2.4);
     assert!(t.take_actions().is_empty());
 }
+
+/// A double tap whose taps reach one frame (frames running late): the second tap waits for the
+/// next frame, so the canvas and egui see two clicks, one per frame.
+#[test]
+fn a_double_tap_in_one_frame_clicks_twice() {
+    let mut t = router();
+    let mut events = browser(1, TouchPhase::Start, 200.0, 200.0, true);
+    events.extend(browser(1, TouchPhase::End, 200.0, 200.0, true));
+    events.extend(browser(2, TouchPhase::Start, 201.0, 200.0, true));
+    events.extend(browser(2, TouchPhase::End, 201.0, 200.0, true));
+    let out = frame(&mut t, events, 1.0);
+    assert_eq!(presses(&out), vec![(true, pos2(200.0, 200.0)), (false, pos2(200.0, 200.0))]);
+    assert!(t.wants_repaint() && t.has_carry());
+    let out = frame(&mut t, vec![], 1.016);
+    assert_eq!(presses(&out), vec![(true, pos2(201.0, 200.0)), (false, pos2(201.0, 200.0))]);
+    assert!(!t.has_carry());
+}

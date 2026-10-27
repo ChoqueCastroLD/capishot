@@ -138,6 +138,9 @@ pub struct ButtonState {
 #[derive(Clone, Debug, Default)]
 pub struct TouchInput {
     fingers: Vec<Finger>,
+    /// Input held for the next frame: a new touch that began after a tap's click in the same
+    /// frame (a quick double tap when frames run late), so each click gets a frame of its own.
+    carry: Vec<Event>,
     /// The tool finger is down as the pointer (a press was sent and no release yet).
     pointer_down: bool,
     /// The pointer stops following the tool finger (a second finger landed).
@@ -234,6 +237,11 @@ impl TouchInput {
         if pen_down {
             self.pen_seen = true;
         }
+        if !self.carry.is_empty() {
+            let mut events = std::mem::take(&mut self.carry);
+            events.append(&mut raw.events);
+            raw.events = events;
+        }
         let has_touch = raw.events.iter().any(|e| matches!(e, Event::Touch { .. }));
         if !has_touch && self.fingers.is_empty() {
             self.modifiers = Modifiers::NONE;
@@ -249,12 +257,23 @@ impl TouchInput {
         let derived = touch_derived(&raw.events, &known);
         let events = std::mem::take(&mut raw.events);
         let mut out = Vec::with_capacity(events.len() + 4);
-        for (i, e) in events.into_iter().enumerate() {
+        let mut events = events.into_iter().enumerate();
+        while let Some((i, e)) = events.next() {
             if derived.get(i).copied().unwrap_or(false) {
                 continue;
             }
             match e {
                 Event::Touch { device_id, id, phase, pos, force } => {
+                    // A new touch after a click this frame waits for the next frame: the canvas
+                    // and egui take one click per frame (a double tap's second tap was lost).
+                    if phase == TouchPhase::Start
+                        && self.fingers.is_empty()
+                        && out.iter().any(|o| matches!(o, Event::PointerButton { pressed: false, .. }))
+                    {
+                        self.carry.push(Event::Touch { device_id, id, phase, pos, force });
+                        self.carry.extend(events.filter(|(i, _)| !derived.get(*i).copied().unwrap_or(false)).map(|(_, e)| e));
+                        break;
+                    }
                     if phase == TouchPhase::Start {
                         let canvas = on_canvas(pos);
                         self.landed_on_canvas = canvas;
@@ -581,9 +600,15 @@ impl TouchInput {
         }
     }
 
-    /// Something the frame must keep drawing for: a held repeat or the move hold is due.
+    /// Something the frame must keep drawing for: input held for the next frame, a held repeat or
+    /// the move hold is due.
     pub fn wants_repaint(&self) -> bool {
-        self.pending.is_some() || self.mod_start.is_some() || (self.tap.active && self.tap.still && self.tap.most >= 2)
+        !self.carry.is_empty() || self.pending.is_some() || self.mod_start.is_some() || (self.tap.active && self.tap.still && self.tap.most >= 2)
+    }
+
+    /// Input is held for the next frame ([`Self::route_with`]): draw it at once.
+    pub fn has_carry(&self) -> bool {
+        !self.carry.is_empty()
     }
 
     /// Put the button at its default place when it has none, or back on the screen.

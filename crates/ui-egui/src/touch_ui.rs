@@ -27,7 +27,9 @@ pub fn route(app: &mut PhotocraftApp, ctx: &egui::Context, raw: &mut egui::RawIn
     let canvas = app.last_canvas_rect;
     let on_canvas = |p: Pos2| canvas.contains(p) && ctx.layer_id_at(p).is_none_or(|l| l.order == egui::Order::Background) && !covers(ctx, p);
     app.touch.route_with(raw, pen_down, &on_canvas);
-    if app.touch.wants_repaint() {
+    if app.touch.has_carry() {
+        ctx.request_repaint();
+    } else if app.touch.wants_repaint() {
         ctx.request_repaint_after(std::time::Duration::from_millis(30));
     }
 }
