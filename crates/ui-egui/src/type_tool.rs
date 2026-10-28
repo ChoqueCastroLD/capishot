@@ -2371,7 +2371,7 @@ pub fn phone_form(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             apply(app, &ctx, json!({"size": size, "metricsAsShown": true}));
         }
         ui.end_row();
-        ui.label(tl!("Anti-aliasing"));
+        ui.label(tl!("Anti-alias"));
         let mut aa = target(app)
             .and_then(|(id, _)| app.session.active().and_then(|st| text_layer(&st.doc, LayerId(id))))
             .map(|t| photocraft_engine::type_extra_cmds::aa_name(t.antialias).to_string())

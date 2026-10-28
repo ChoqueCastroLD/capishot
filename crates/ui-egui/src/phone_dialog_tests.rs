@@ -74,8 +74,8 @@ fn every_dialog_keeps_ok_and_cancel_on_a_phone() {
         // Dialogs whose only button closes them (About, alerts) have no Cancel.
         let ok = on_screen(&h, &OK);
         let cancel = on_screen(&h, &CANCEL);
-        if ok.is_err() && cancel.is_err() {
-            bad.push(format!("{id}: {} / {}", ok.unwrap_err(), cancel.unwrap_err()));
+        if let (Err(a), Err(b)) = (&ok, &cancel) {
+            bad.push(format!("{id}: {a} / {b}"));
         } else if let (Err(e), Ok(())) | (Ok(()), Err(e)) = (&ok, &cancel)
             && e.contains("off the screen")
         {
