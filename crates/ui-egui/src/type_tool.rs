@@ -536,6 +536,8 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
     if bubble && let Err(e) = &created {
         if e.contains("noBubble") {
             crate::notices::post(app, tl!("No bubble found here"), Vec::new(), false, None);
+            app.ui.status = tl!("No bubble found here").to_string();
+            app.ui.status_error = false;
         } else {
             app.ui.status = e.clone();
             app.ui.status_error = true;
@@ -2360,10 +2362,20 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
     crate::widgets::vline(ui, 22.0);
     ui.spacing_mut().item_spacing.x = 2.0;
+    // The alignment shown: the target text's first paragraph, else the tool's (Bubble Type
+    // centres its text).
+    let shown_align = match target_text(app).and_then(|t| t.paragraph_runs().into_iter().next()).map(|r| r.style.align) {
+        Some(photocraft_doc::text::TextAlign::Left) => "left",
+        Some(photocraft_doc::text::TextAlign::Center) => "center",
+        Some(photocraft_doc::text::TextAlign::Right) => "right",
+        Some(_) => "",
+        None if app.ui.tool == crate::state::Tool::BubbleType => "center",
+        None => o.type_align.as_str(),
+    };
     for (align, icon, tip) in
         [("left", "align-left", tl!("Left align text")), ("center", "align-center", tl!("Center text")), ("right", "align-right", tl!("Right align text"))]
     {
-        if crate::icons::button(ui, icon, 24.0, o.type_align == align, tip).clicked() {
+        if crate::icons::button(ui, icon, 24.0, shown_align == align, tip).clicked() {
             app.ui.tool_options.type_align = align.into();
             apply(app, ui.ctx(), json!({"align": align}));
         }
