@@ -983,6 +983,7 @@ mod tests {
                 | "type.createInPath"
                 | "type.edit"
                 | "type.frame"
+                | "type.createInBubble"
                 | "select.toWorkPath"
                 | "layer.vectorMask.add"
                 | "layer.vectorMask.edit"

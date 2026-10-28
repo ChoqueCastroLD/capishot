@@ -2223,3 +2223,82 @@ fn a_click_inside_a_closed_path_makes_type_in_the_path() {
     super::toggle_type_panels(&mut app, &ctx);
     assert_eq!(app.ui.panels.character, was);
 }
+
+/// A white page with an outlined oval bubble (a shape layer: the page scan sees its pixels).
+fn bubble_page() -> PhotocraftApp {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    app.run("file.new", json!({"width": 1600, "height": 900, "background": "white"})).unwrap();
+    app.run("shape.create", json!({"kind": "ellipse", "rect": [500, 200, 500, 300], "fill": "#ffffff", "stroke": {"width": 4, "color": "#000000"}})).unwrap();
+    app.sync_views();
+    app.ui.extras.rulers = false;
+    app.ui.tool = crate::state::Tool::BubbleType;
+    app
+}
+
+/// The Bubble Type tool: a click in a bubble makes centred type in its shape, ready to type, as one
+/// history step; a click on the page around it makes nothing and says so.
+#[test]
+fn bubble_type_click_makes_type_in_the_bubble() {
+    use crate::canvas::{ToolEvent, tool_event};
+    let mut app = bubble_page();
+    let steps = app.session.active().unwrap().history.entries().len();
+    tool_event(&mut app, ToolEvent::Down { x: 750.0, y: 350.0, pressure: 1.0 }, Modifiers::NONE);
+    tool_event(&mut app, ToolEvent::Up { x: 750.0, y: 350.0 }, Modifiers::NONE);
+    let ed = app.ui.text_edit.clone().expect("editing the new bubble text");
+    super::insert(&mut app, "Hello from inside the bubble, wrapped to its oval shape.");
+    super::commit(&mut app);
+    let t = text(&app, LayerId(ed.layer));
+    let photocraft_doc::text::TextShape::InPath { inset, valign, .. } = &t.shape else { panic!("type in a path: {:?}", t.shape) };
+    assert_eq!((*inset, *valign), (None, photocraft_doc::text::InPathAlign::Center));
+    assert_eq!(app.session.active().unwrap().history.entries().len(), steps + 1, "one history step");
+    let b = app.session.active().unwrap().doc.layer(LayerId(ed.layer)).unwrap().surface().unwrap().content_bounds();
+    let (cx, cy) = (f64::from(b.x0 + b.x1) / 2.0, f64::from(b.y0 + b.y1) / 2.0);
+    assert!((cx - 750.0).abs() < 30.0 && (cy - 350.0).abs() < 30.0, "centred in the bubble: {b:?}");
+    // A click inside it again edits it instead of making another.
+    let layers = app.session.active().unwrap().doc.walk().len();
+    tool_event(&mut app, ToolEvent::Down { x: 620.0, y: 350.0, pressure: 1.0 }, Modifiers::NONE);
+    tool_event(&mut app, ToolEvent::Up { x: 620.0, y: 350.0 }, Modifiers::NONE);
+    assert_eq!(app.ui.text_edit.as_ref().map(|e| e.layer), Some(ed.layer));
+    super::commit(&mut app);
+    assert_eq!(app.session.active().unwrap().doc.walk().len(), layers);
+    // Outside the bubble: nothing, and the notice.
+    let steps = app.session.active().unwrap().history.entries().len();
+    tool_event(&mut app, ToolEvent::Down { x: 100.0, y: 100.0, pressure: 1.0 }, Modifiers::NONE);
+    tool_event(&mut app, ToolEvent::Up { x: 100.0, y: 100.0 }, Modifiers::NONE);
+    assert!(app.ui.text_edit.is_none());
+    assert_eq!((app.session.active().unwrap().doc.walk().len(), app.session.active().unwrap().history.entries().len()), (layers, steps));
+    assert!(app.ui.notices.iter().any(|n| n.title == "No bubble found here"), "{:?}", app.ui.notices.iter().map(|n| &n.title).collect::<Vec<_>>());
+}
+
+/// The options bar's Margin applies to the next bubble and, live, to the selected bubble text.
+#[test]
+fn bubble_type_margin_rewraps_the_selected_bubble() {
+    use crate::canvas::{ToolEvent, tool_event};
+    let mut app = bubble_page();
+    app.ui.tool_options.type_size = 18.0;
+    tool_event(&mut app, ToolEvent::Down { x: 750.0, y: 350.0, pressure: 1.0 }, Modifiers::NONE);
+    tool_event(&mut app, ToolEvent::Up { x: 750.0, y: 350.0 }, Modifiers::NONE);
+    let id = app.ui.text_edit.as_ref().unwrap().layer;
+    super::insert(&mut app, "A sentence long enough to wrap over several lines inside the oval bubble here.");
+    super::commit(&mut app);
+    let lines = |app: &mut PhotocraftApp| app.run("type.info", json!({"layer": id})).unwrap()["lines"].as_array().unwrap().len();
+    let before = lines(&mut app);
+    let mut h = egui_kittest::Harness::builder().with_size(vec2(1600.0, 60.0)).build_ui_state(
+        |ui, app: &mut PhotocraftApp| {
+            ui.horizontal(|ui| crate::type_tool::options_bar(app, ui));
+        },
+        app,
+    );
+    PhotocraftApp::setup_context(&h.ctx, Default::default());
+    h.run_steps(2);
+    h.get_by_label("Margin");
+    // Auto off: the margin becomes the pixels it showed; then a wider one re-wraps.
+    h.get_by_label("Auto").click();
+    h.run_steps(2);
+    let mut app = h.into_state();
+    let t = text(&app, LayerId(id));
+    let photocraft_doc::text::TextShape::InPath { inset: Some(px), .. } = t.shape else { panic!("a fixed margin now: {:?}", t.shape) };
+    assert!(!app.ui.tool_options.bubble_auto_margin && (app.ui.tool_options.bubble_margin - px).abs() < 0.11);
+    app.run("type.edit", json!({"layer": id, "inset": px + 60.0})).unwrap();
+    assert!(lines(&mut app) > before, "a wider margin, more lines");
+}

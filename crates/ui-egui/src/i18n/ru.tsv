@@ -3654,3 +3654,9 @@ curves	Smooth	Сгладить
 	Pen only	Только стилус
 	AI clean	Очистка ИИ
 	Gen. Fill	Ген. заливка
+	Bubble Type Tool	Текст в пузыре
+	No bubble found here	Здесь не найден пузырь
+	Lines from the top of the bubble	Строки от верха пузыря
+	Lines centered in the bubble	Строки по центру пузыря
+	How far the text stays inside the bubble	Отступ текста от края пузыря
+	A margin of 5% of the bubble's smaller side	Отступ 5 % меньшей стороны пузыря

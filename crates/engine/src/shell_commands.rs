@@ -142,6 +142,7 @@ pub const TOOLS: &[(&str, &str, Option<&str>)] = &[
     ("tools.select.verticalType", "Vertical Type Tool", Some("T")),
     ("tools.select.horizontalTypeMask", "Horizontal Type Mask Tool", Some("T")),
     ("tools.select.verticalTypeMask", "Vertical Type Mask Tool", Some("T")),
+    ("tools.select.bubbleType", "Bubble Type Tool", Some("T")),
     ("tools.select.hand", "Hand Tool", Some("H")),
     ("tools.select.rotateView", "Rotate View Tool", Some("R")),
     ("tools.select.zoom", "Zoom Tool", Some("Z")),

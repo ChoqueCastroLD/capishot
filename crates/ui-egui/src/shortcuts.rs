@@ -837,7 +837,12 @@ mod tests {
         app.session.edit_prefs(|p| p.tools.use_shift_key_for_tool_switch = true);
         press(&mut app, Key::B, Modifiers::NONE);
         press(&mut app, Key::L, Modifiers::NONE);
-        assert_eq!(app.ui.tool, Tool::MagneticLasso);
+        assert_eq!(app.ui.tool, Tool::MagneticLasso);        // ⇧T cycles the Type group through the Bubble Type tool and back.
+        app.ui.tool = Tool::VerticalTypeMask;
+        press(&mut app, Key::T, Modifiers::SHIFT);
+        assert_eq!(app.ui.tool, Tool::BubbleType);
+        press(&mut app, Key::T, Modifiers::SHIFT);
+        assert_eq!(app.ui.tool, Tool::Type);
     }
 
     /// #3296: by default T keeps the current type tool and only Shift+T cycles, as in Photoshop.

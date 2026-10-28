@@ -3685,3 +3685,9 @@ curves	Smooth	Glätten
 	Pen only	Nur Stift
 	AI clean	KI-Reinigen
 	Gen. Fill	Gen. Füllen
+	Bubble Type Tool	Sprechblasen-Text-Werkzeug
+	No bubble found here	Hier wurde keine Sprechblase gefunden
+	Lines from the top of the bubble	Zeilen ab dem oberen Rand der Sprechblase
+	Lines centered in the bubble	Zeilen in der Sprechblase zentriert
+	How far the text stays inside the bubble	Abstand des Texts vom Rand der Sprechblase
+	A margin of 5% of the bubble's smaller side	Ein Rand von 5 % der kürzeren Seite der Sprechblase

@@ -164,6 +164,8 @@ pub enum Tool {
     /// Horizontal Type Mask: types a selection in the shape of the glyphs, no type layer.
     HorizontalTypeMask,
     VerticalTypeMask,
+    /// Bubble Type: a click in a speech bubble makes type in the bubble's shape.
+    BubbleType,
     Hand,
     RotateView,
     Zoom,
@@ -206,7 +208,7 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Tool; 67] = [
+    pub const ALL: [Tool; 68] = [
         Tool::Move,
         Tool::Artboard,
         Tool::RectMarquee,
@@ -237,6 +239,7 @@ impl Tool {
         Tool::VerticalType,
         Tool::HorizontalTypeMask,
         Tool::VerticalTypeMask,
+        Tool::BubbleType,
         Tool::Hand,
         Tool::RotateView,
         Tool::Zoom,
@@ -311,6 +314,7 @@ impl Tool {
             Tool::VerticalType => "Vertical Type Tool",
             Tool::HorizontalTypeMask => "Horizontal Type Mask Tool",
             Tool::VerticalTypeMask => "Vertical Type Mask Tool",
+            Tool::BubbleType => "Bubble Type Tool",
             Tool::Hand => "Hand Tool",
             Tool::RotateView => "Rotate View Tool",
             Tool::Zoom => "Zoom Tool",
@@ -348,7 +352,7 @@ impl Tool {
         }
     }
     pub fn is_type(self) -> bool {
-        matches!(self, Self::Type | Self::VerticalType | Self::HorizontalTypeMask | Self::VerticalTypeMask)
+        matches!(self, Self::Type | Self::VerticalType | Self::HorizontalTypeMask | Self::VerticalTypeMask | Self::BubbleType)
     }
     /// The Type Mask tools: their text becomes a selection on commit.
     pub fn is_type_mask(self) -> bool {
@@ -396,7 +400,7 @@ impl Tool {
             Tool::Crop | Tool::PerspectiveCrop | Tool::Slice | Tool::SliceSelect => 'C',
             Tool::Frame => 'K',
             Tool::Gradient | Tool::PaintBucket => 'G',
-            Tool::Type | Tool::VerticalType | Tool::HorizontalTypeMask | Tool::VerticalTypeMask => 'T',
+            Tool::Type | Tool::VerticalType | Tool::HorizontalTypeMask | Tool::VerticalTypeMask | Tool::BubbleType => 'T',
             Tool::Hand => 'H',
             Tool::RotateView => 'R',
             Tool::Zoom => 'Z',
@@ -428,7 +432,7 @@ impl Tool {
             Tool::MagicWand => "W",
             Tool::Crop => "C",
             Tool::Gradient | Tool::PaintBucket => "G",
-            Tool::Type | Tool::VerticalType | Tool::HorizontalTypeMask | Tool::VerticalTypeMask => "T",
+            Tool::Type | Tool::VerticalType | Tool::HorizontalTypeMask | Tool::VerticalTypeMask | Tool::BubbleType => "T",
             Tool::Hand => "✋",
             Tool::RotateView => "🧭",
             Tool::Zoom => "🔍",
@@ -629,6 +633,12 @@ pub struct ToolOptions {
     pub type_size: f32,
     pub type_aa: String,
     pub type_align: String,
+    /// Bubble Type: the margin inside the bubble is automatic (5% of its smaller side)…
+    pub bubble_auto_margin: bool,
+    /// …or this many pixels.
+    pub bubble_margin: f32,
+    /// Bubble Type: lines from the bubble's top instead of centred in it.
+    pub bubble_top: bool,
     /// Clone Stamp / Healing Brush.
     pub clone_aligned: bool,
     /// Pattern Stamp: lock the tile origin in document space across strokes.
@@ -942,6 +952,9 @@ impl Default for ToolOptions {
             type_size: 48.0,
             type_aa: "sharp".into(),
             type_align: "left".into(),
+            bubble_auto_margin: true,
+            bubble_margin: 12.0,
+            bubble_top: false,
             clone_aligned: true,
             pattern_stamp_aligned: true,
             pattern_stamp_impressionist: false,
@@ -1693,7 +1706,10 @@ mod tests {
         assert!(!Tool::RedEye.is_brushlike());
         assert_eq!(Tool::from_name("patternStamp"), Some(Tool::PatternStamp));
         assert_eq!(Tool::from_name("Pattern Stamp Tool"), Some(Tool::PatternStamp));
-        assert_eq!(Tool::ALL.len(), 67);
+        assert_eq!(Tool::ALL.len(), 68);
+        assert_eq!(Tool::from_name("Bubble Type Tool"), Some(Tool::BubbleType));
+        assert_eq!(Tool::from_name("bubbleType"), Some(Tool::BubbleType));
+        assert!(Tool::BubbleType.is_type() && !Tool::BubbleType.is_type_mask() && Tool::BubbleType.key() == 'T');
         assert_eq!(Tool::from_name("Vertical Type Mask Tool"), Some(Tool::VerticalTypeMask));
         assert_eq!(Tool::from_name("addAnchorPoint"), Some(Tool::AddAnchorPoint));
         assert_eq!(Tool::from_name("Delete Anchor Point Tool"), Some(Tool::DeleteAnchorPoint));

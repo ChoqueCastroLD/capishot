@@ -132,6 +132,7 @@ pub mod symmetry_cmds;
 mod timeline_cmds;
 pub mod transform_cmds;
 mod trap_cmds;
+pub mod type_bubble_cmds;
 pub mod type_caret_cmds;
 pub mod type_cmds;
 pub mod type_extra_cmds;

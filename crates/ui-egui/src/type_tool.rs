@@ -512,8 +512,16 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
         "align": o.type_align,
         "color": hex(app.session.tools.foreground),
     });
+    let bubble = app.ui.tool == crate::state::Tool::BubbleType;
     if w >= min && h >= min {
         p["box"] = json!([start[0].min(end[0]).round(), start[1].min(end[1]).round(), w.round(), h.round()]);
+    } else if bubble {
+        // Bubble Type: type in the bubble under the click, or nothing.
+        p["x"] = json!(start[0].floor());
+        p["y"] = json!(start[1].floor());
+        p["align"] = json!("center");
+        p["inset"] = if o.bubble_auto_margin { json!("auto") } else { json!(o.bubble_margin) };
+        p["vertical"] = json!(if o.bubble_top { "top" } else { "center" });
     } else if let Some(src) = in_path_at(app, start[0], start[1]) {
         // A click inside a closed path: type in the path, as in Photoshop.
         p["inPath"] = src;
@@ -523,7 +531,17 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
     }
     let key = session_key(app);
     p["coalesce"] = json!(key);
-    if let Ok(v) = app.run("type.create", p)
+    let command = if bubble && p.get("box").is_none() { "type.createInBubble" } else { "type.create" };
+    let created = app.run(command, p);
+    if bubble && let Err(e) = &created {
+        if e.contains("noBubble") {
+            crate::notices::post(app, tl!("No bubble found here"), Vec::new(), false, None);
+        } else {
+            app.ui.status = e.clone();
+            app.ui.status_error = true;
+        }
+    }
+    if let Ok(v) = created
         && let Some(id) = v.get("layer").and_then(serde_json::Value::as_u64)
     {
         if o.type_aa != "sharp" {
@@ -2220,6 +2238,57 @@ fn in_path_options(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     ui.spacing_mut().item_spacing.x = 8.0;
 }
 
+/// Bubble Type: where the lines sit in the bubble and the margin inside it, for the next bubble
+/// (tool options, kept with the tool) and, live, for the selected bubble text.
+fn bubble_options(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    use photocraft_doc::text::InPathAlign;
+    let target = in_path_target(app);
+    let o = app.ui.tool_options.clone();
+    let (top, auto, shown) = match target {
+        Some((_, v, inset, shown)) => (v == InPathAlign::Top, inset.is_none(), shown),
+        None => (o.bubble_top, o.bubble_auto_margin, o.bubble_margin),
+    };
+    crate::widgets::vline(ui, 22.0);
+    ui.spacing_mut().item_spacing.x = 2.0;
+    for (want_top, icon, tip) in [
+        (true, "align-vertical-justify-start", tl!("Lines from the top of the bubble")),
+        (false, "align-vertical-justify-center", tl!("Lines centered in the bubble")),
+    ] {
+        if crate::icons::button(ui, icon, 24.0, top == want_top, tip).clicked() && top != want_top {
+            app.ui.tool_options.bubble_top = want_top;
+            if let Some((layer, ..)) = target {
+                let _ = app.run("type.edit", json!({"layer": layer, "vertical": if want_top { "top" } else { "center" }}));
+            }
+        }
+    }
+    ui.spacing_mut().item_spacing.x = 4.0;
+    ui.label(tl!("Margin"));
+    let mut px = (shown * 10.0).round() / 10.0;
+    let resp = ui
+        .add(egui::DragValue::new(&mut px).range(0.0..=1000.0).speed(0.5).max_decimals(1).suffix(" px"))
+        .on_hover_text(tl!("How far the text stays inside the bubble"));
+    if resp.changed() {
+        app.ui.tool_options.bubble_margin = px;
+        app.ui.tool_options.bubble_auto_margin = false;
+        if let Some((layer, ..)) = target {
+            let mut p = json!({"layer": layer, "inset": px});
+            if let Some(key) = drag_key(ui.ctx()) {
+                p["coalesce"] = json!(key);
+            }
+            let _ = app.run("type.edit", p);
+        }
+    }
+    if ui.selectable_label(auto, tl!("Auto")).on_hover_text(tl!("A margin of 5% of the bubble's smaller side")).clicked() {
+        app.ui.tool_options.bubble_auto_margin = !auto;
+        app.ui.tool_options.bubble_margin = px;
+        if let Some((layer, ..)) = target {
+            let v = if auto { json!(px) } else { json!("auto") };
+            let _ = app.run("type.edit", json!({"layer": layer, "inset": v}));
+        }
+    }
+    ui.spacing_mut().item_spacing.x = 8.0;
+}
+
 pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = crate::theme::Tokens::get(ui.ctx());
     // Show the target layer's (first-run) style, else the tool defaults.
@@ -2300,7 +2369,11 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         }
     }
     ui.spacing_mut().item_spacing.x = 8.0;
-    in_path_options(app, ui);
+    if app.ui.tool == crate::state::Tool::BubbleType {
+        bubble_options(app, ui);
+    } else {
+        in_path_options(app, ui);
+    }
     crate::widgets::vline(ui, 22.0);
     // Text colour swatch with a picker popup.
     let c = shown

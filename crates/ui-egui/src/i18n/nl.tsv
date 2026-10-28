@@ -4426,3 +4426,9 @@ curves	Smooth	Vloeiend maken
 	Pen only	Alleen pen
 	AI clean	AI opschonen
 	Gen. Fill	Gen. vullen
+	Bubble Type Tool	Tekstballon-tekstgereedschap
+	No bubble found here	Hier is geen tekstballon gevonden
+	Lines from the top of the bubble	Regels vanaf de bovenkant van de ballon
+	Lines centered in the bubble	Regels gecentreerd in de ballon
+	How far the text stays inside the bubble	Afstand van de tekst tot de rand van de ballon
+	A margin of 5% of the bubble's smaller side	Een marge van 5% van de kortste zijde van de ballon

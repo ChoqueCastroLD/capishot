@@ -116,6 +116,7 @@ pub fn tool_icon(t: Tool) -> &'static str {
         Tool::Type | Tool::VerticalType => "type",
         Tool::HorizontalTypeMask => "type-mask",
         Tool::VerticalTypeMask => "type-mask-vertical",
+        Tool::BubbleType => "type-bubble",
         Tool::Hand => "hand",
         Tool::RotateView => "compass",
         Tool::Zoom => "zoom-in",

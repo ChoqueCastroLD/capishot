@@ -3301,3 +3301,9 @@ curves	Smooth	平滑
 	Pen only	僅限觸控筆
 	AI clean	AI 清理
 	Gen. Fill	生成填色
+	Bubble Type Tool	氣泡文字工具
+	No bubble found here	此處未找到氣泡
+	Lines from the top of the bubble	從氣泡頂端排行
+	Lines centered in the bubble	在氣泡中置中排行
+	How far the text stays inside the bubble	文字與氣泡邊緣的距離
+	A margin of 5% of the bubble's smaller side	氣泡短邊 5% 的邊距

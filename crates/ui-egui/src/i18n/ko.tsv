@@ -3865,3 +3865,9 @@ curves	Smooth	매끄럽게
 	Pen only	펜만
 	AI clean	AI 정리
 	Gen. Fill	생성 채우기
+	Bubble Type Tool	말풍선 문자 도구
+	No bubble found here	여기에서 말풍선을 찾지 못했습니다
+	Lines from the top of the bubble	말풍선 위쪽부터 줄 배치
+	Lines centered in the bubble	말풍선 가운데에 줄 배치
+	How far the text stays inside the bubble	글자와 말풍선 테두리 사이의 거리
+	A margin of 5% of the bubble's smaller side	말풍선 짧은 변의 5% 여백

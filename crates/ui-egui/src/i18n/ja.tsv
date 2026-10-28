@@ -4350,3 +4350,9 @@ curves	Smooth	スムーズ
 	Pen only	ペンのみ
 	AI clean	AI クリーン
 	Gen. Fill	生成塗り
+	Bubble Type Tool	吹き出し文字ツール
+	No bubble found here	ここに吹き出しが見つかりません
+	Lines from the top of the bubble	吹き出しの上から行を配置
+	Lines centered in the bubble	吹き出しの中央に行を配置
+	How far the text stays inside the bubble	文字と吹き出しの縁との距離
+	A margin of 5% of the bubble's smaller side	吹き出しの短辺の 5% の余白

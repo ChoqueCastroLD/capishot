@@ -38,7 +38,7 @@ const TOOL_SECTIONS: &[&[&[Tool]]] = &[
     ],
     &[
         &[Tool::Pen, Tool::FreeformPen, Tool::CurvaturePen, Tool::AddAnchorPoint, Tool::DeleteAnchorPoint, Tool::ConvertPoint],
-        &[Tool::Type, Tool::VerticalType, Tool::VerticalTypeMask, Tool::HorizontalTypeMask],
+        &[Tool::Type, Tool::VerticalType, Tool::VerticalTypeMask, Tool::HorizontalTypeMask, Tool::BubbleType],
         &[Tool::PathSelection, Tool::DirectSelection],
         &[Tool::Rectangle, Tool::EllipseShape, Tool::Triangle, Tool::Polygon, Tool::Line, Tool::CustomShape],
     ],
@@ -1492,7 +1492,7 @@ pub(crate) fn tool_options_contents(app: &mut PhotocraftApp, ui: &mut egui::Ui) 
                 });
             }
             // Every theme gets the font, style and size controls (#1387), as with Auto-Select (#1275).
-            Tool::Type | Tool::VerticalType | Tool::HorizontalTypeMask | Tool::VerticalTypeMask => crate::type_tool::options_bar(app, ui),
+            Tool::Type | Tool::VerticalType | Tool::HorizontalTypeMask | Tool::VerticalTypeMask | Tool::BubbleType => crate::type_tool::options_bar(app, ui),
             Tool::Move if t.pro => {
                 let o = &mut app.ui.tool_options;
                 widgets::checkbox(ui, &mut o.move_auto_select, tl!("Auto-Select:"));

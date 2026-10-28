@@ -4367,3 +4367,9 @@ curves	Smooth	Εξομάλυνση
 	Pen only	Μόνο γραφίδα
 	AI clean	Καθαρ. AI
 	Gen. Fill	Γεν. γέμισμα
+	Bubble Type Tool	Κείμενο σε συννεφάκι
+	No bubble found here	Δεν βρέθηκε συννεφάκι εδώ
+	Lines from the top of the bubble	Γραμμές από την κορυφή του συννεφάκιου
+	Lines centered in the bubble	Γραμμές στο κέντρο του συννεφάκιου
+	How far the text stays inside the bubble	Απόσταση του κειμένου από την άκρη του συννεφάκιου
+	A margin of 5% of the bubble's smaller side	Περιθώριο 5% της μικρότερης πλευράς του συννεφάκιου

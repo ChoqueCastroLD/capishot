@@ -45,6 +45,9 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
   pixels: `type.frame`'s `documentPath`, a vertex moved), keeping the layer id, in one undo step
   (features `type.frame`, `type.edit.path`).
 
+- `execute('type.createInBubble', {x, y, inset?})` puts type in the speech bubble at a document
+  point (the Bubble Type tool): `{layer, bounds, path}`, or an error starting `noBubble`.
+
 ## Versioning rules
 
 `EMBED_API_VERSION` (in `embed_api_core.rs`) is the contract hosts check. Adding a function, an

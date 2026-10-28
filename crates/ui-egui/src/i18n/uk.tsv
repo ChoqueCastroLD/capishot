@@ -4385,3 +4385,9 @@ curves	Smooth	Згладити
 	Pen only	Лише стилус
 	AI clean	Очищення ШІ
 	Gen. Fill	Ген. заливка
+	Bubble Type Tool	Інструмент «Текст у бульбашці»
+	No bubble found here	Тут не знайдено бульбашки
+	Lines from the top of the bubble	Рядки від верху бульбашки
+	Lines centered in the bubble	Рядки по центру бульбашки
+	How far the text stays inside the bubble	Відступ тексту від краю бульбашки
+	A margin of 5% of the bubble's smaller side	Відступ 5 % меншої сторони бульбашки
