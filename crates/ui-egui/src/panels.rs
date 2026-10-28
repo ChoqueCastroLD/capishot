@@ -1009,6 +1009,11 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 /// interface's "⋯" popover, where they wrap instead of scrolling).
 pub(crate) fn tool_options_contents(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
+    // The phone's form has no home button, tool icon or presets: the row above shows the tool.
+    if widgets::phone_form(ui.ctx()) {
+        tool_options_body(app, ui, &t);
+        return;
+    }
         if t.pro {
             crate::chrome_ui::home_button(app, ui);
             widgets::vline(ui, 22.0);
@@ -1036,6 +1041,11 @@ pub(crate) fn tool_options_contents(app: &mut PhotocraftApp, ui: &mut egui::Ui) 
             icons::paint(ui, r, "chevron-down", 10.0, t.text_faint);
         }
         widgets::vline(ui, 22.0);
+        tool_options_body(app, ui, &t);
+}
+
+/// [`tool_options_contents`] after the tool icon: the active tool's own options.
+fn tool_options_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, t: &Tokens) {
         if app.ui.transform.is_some() {
             crate::transform_tool::options_bar(app, ui);
             return;
@@ -1492,6 +1502,9 @@ pub(crate) fn tool_options_contents(app: &mut PhotocraftApp, ui: &mut egui::Ui) 
                 });
             }
             // Every theme gets the font, style and size controls (#1387), as with Auto-Select (#1275).
+            Tool::Type | Tool::VerticalType | Tool::HorizontalTypeMask | Tool::VerticalTypeMask | Tool::BubbleType if widgets::phone_form(ui.ctx()) => {
+                crate::type_tool::phone_form(app, ui)
+            }
             Tool::Type | Tool::VerticalType | Tool::HorizontalTypeMask | Tool::VerticalTypeMask | Tool::BubbleType => crate::type_tool::options_bar(app, ui),
             Tool::Move if t.pro => {
                 let o = &mut app.ui.tool_options;

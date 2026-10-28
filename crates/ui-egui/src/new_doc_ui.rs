@@ -560,10 +560,13 @@ pub fn body(app: &mut crate::PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<Strin
         })
         .collect();
     let chosen = get_s(f, "__preset", "");
-    ui.horizontal_top(|ui| {
+    // A phone: the presets above their details, each as wide as the window.
+    let narrow = ui.ctx().content_rect().width() < crate::simple_ui::PHONE_BELOW;
+    let layout = if narrow { egui::Layout::top_down(egui::Align::Min) } else { egui::Layout::left_to_right(egui::Align::Min) };
+    ui.with_layout(layout, |ui| {
         // Left: preset grid.
         ui.vertical(|ui| {
-            ui.set_width(520.0);
+            ui.set_width(if narrow { ui.available_width().min(520.0) } else { 520.0 });
             if cat == "Saved" {
                 create |= saved_presets(app, ui, f);
                 return;
@@ -634,7 +637,7 @@ pub fn body(app: &mut crate::PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<Strin
         ui.add_space(10.0);
         // Right: Preset Details.
         ui.vertical(|ui| {
-            ui.set_width(260.0);
+            ui.set_width(if narrow { ui.available_width().min(260.0) } else { 260.0 });
             ui.label(RichText::new(tl!("PRESET DETAILS")).size(11.0).color(t.text_faint));
             ui.add_space(4.0);
             // Keep the canonical English default in state; only the TextEdit shows a translation.

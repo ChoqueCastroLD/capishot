@@ -1427,6 +1427,10 @@ pub fn hairline(ui: &mut Ui) {
 
 /// Vertical hairline for horizontal layouts.
 pub fn vline(ui: &mut Ui, height: f32) {
+    // The phone's options popover is a form: no separators between its rows.
+    if phone_form(ui.ctx()) {
+        return;
+    }
     let t = Tokens::get(ui.ctx());
     let (r, _) = ui.allocate_exact_size(vec2(9.0, height), Sense::hover());
     ui.painter().line_segment([r.center_top(), r.center_bottom()], Stroke::new(1.0, t.separator));
@@ -2796,3 +2800,18 @@ mod screen_color_tests {
 #[cfg(test)]
 #[path = "widgets/numeric_input_tests.rs"]
 mod numeric_input_tests;
+
+/// Whether the tool options are being drawn as the phone's compact form (the simple interface's
+/// options popover) rather than the options bar's row.
+pub fn phone_form(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(egui::Id::new("phone-form"))).unwrap_or(false)
+}
+
+/// Draw `add` as the phone's compact form ([`phone_form`]).
+pub fn in_phone_form<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let id = egui::Id::new("phone-form");
+    ui.ctx().data_mut(|d| d.insert_temp(id, true));
+    let r = add(ui);
+    ui.ctx().data_mut(|d| d.insert_temp(id, false));
+    r
+}

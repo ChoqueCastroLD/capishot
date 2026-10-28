@@ -330,30 +330,67 @@ pub fn options_row(app: &mut PhotocraftApp, ui: &mut Ui) {
         }
         return;
     }
-    // The options, wrapped across the window under the row; a tap outside closes them.
+    // A dialog the options opened (the text colour's Color Picker) takes over: the options close.
+    if !app.ui.dialogs.is_empty() {
+        ctx.data_mut(|d| d.insert_temp(options_open_id(), false));
+        return;
+    }
+    // The options, a form under the row as wide as the window, scrolling when taller than it;
+    // a tap outside, the × or Esc (the phone's Back) closes them.
     let screen = crate::safe_area::rect(&ctx);
     let top = row.response.rect.bottom() + 4.0;
+    let max_h = (screen.bottom() - top - 16.0).max(120.0);
+    let mut close = false;
     let area = egui::Area::new(Id::new("simple-options")).order(egui::Order::Foreground).fixed_pos(pos2(screen.left() + 8.0, top)).show(&ctx, |ui| {
         float_frame(&t).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
             let width = screen.width() - 16.0 - 20.0;
             ui.set_width(width);
+            ui.set_max_width(width);
             let tool = app.ui.tool;
-            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-            if matches!(tool, Tool::Brush | Tool::Pencil | Tool::Eraser | Tool::MixerBrush) {
-                paint_options(app, ui);
-            } else {
-                // Any other tool: its options one under the other, nothing running sideways.
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 8.0;
-                    crate::panels::tool_options_contents(app, ui);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(crate::i18n::t(tool.label())).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let x = crate::icons::button(ui, "x", 32.0, false, tl!("Close"));
+                    note(ui.ctx(), "options-close", x.rect);
+                    if x.clicked() {
+                        close = true;
+                    }
                 });
-            }
+            });
+            ui.add_space(4.0);
+            // Taller than the room scrolls; a control wider than the window scrolls sideways
+            // instead of widening the form past the screen.
+            egui::ScrollArea::both().id_salt("simple-options-scroll").max_height(max_h - 50.0).max_width(width).auto_shrink([false, true]).show(ui, |ui| {
+                ui.set_width(width - 4.0);
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                if matches!(tool, Tool::Brush | Tool::Pencil | Tool::Eraser | Tool::MixerBrush) {
+                    paint_options(app, ui);
+                } else {
+                    // Any other tool: its options as a form, rows filling the width (no
+                    // separators, home button or tool icon: the row above has the tool).
+                    crate::widgets::in_phone_form(ui, |ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(10.0, 10.0);
+                        if tool.is_type() {
+                            crate::panels::tool_options_contents(app, ui);
+                        } else {
+                            ui.horizontal_wrapped(|ui| crate::panels::tool_options_contents(app, ui));
+                        }
+                    });
+                }
+            });
         });
     });
+    note(&ctx, "options-popover", area.response.rect);
     let outside = ctx.input(|i| i.pointer.primary_clicked() && i.pointer.interact_pos().is_some_and(|p| !area.response.rect.contains(p) && !row.response.rect.contains(p)));
-    if outside && !egui::Popup::is_any_open(&ctx) {
+    let back = !egui::Popup::is_any_open(&ctx) && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+    if close || back || (outside && !egui::Popup::is_any_open(&ctx)) {
         ctx.data_mut(|d| d.insert_temp(options_open_id(), false));
     }
+}
+
+/// Whether the phone's tool options popover is open.
+pub fn options_open(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(options_open_id())).unwrap_or(false)
 }
 
 /// The selection tools whose options bar has New, Add, Subtract and Intersect.
@@ -471,6 +508,10 @@ pub fn overlays(app: &mut PhotocraftApp, ctx: &egui::Context) {
     // Typing: the keyboard and the type bar take the bottom (touch_ui::type_bar).
     if app.ui.text_edit.is_some() && sheet(ctx) == Sheet::Closed {
         return;
+    }
+    // Esc (the phone's Back) closes the open sheet.
+    if sheet(ctx) != Sheet::Closed && app.ui.dialogs.is_empty() && !egui::Popup::is_any_open(ctx) && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        set_sheet(ctx, Sheet::Closed);
     }
     let screen = crate::safe_area::rect(ctx);
     let has_doc = app.session.active().is_some();
@@ -813,3 +854,15 @@ fn panel_sheet(app: &mut PhotocraftApp, ctx: &egui::Context, screen: Rect, g: Gr
 #[cfg(test)]
 #[path = "simple_ui_tests.rs"]
 mod tests;
+
+/// Something the phone's Back button should close (a dialog, the options, a sheet): the web
+/// shell keeps a history entry while there is one, and a Back sends Esc, which closes it.
+pub fn back_target(app: &PhotocraftApp, ctx: &egui::Context) -> bool {
+    !app.ui.dialogs.is_empty() || options_open(ctx) || sheet(ctx) != Sheet::Closed
+}
+
+/// Where the button `label` was drawn (the last time this frame), as `ui.inspect` reports it.
+pub fn noted_rect(ctx: &egui::Context, label: &str) -> Option<Rect> {
+    let rects: Vec<(String, [f32; 4])> = ctx.data(|d| d.get_temp(rects_id())).unwrap_or_default();
+    rects.iter().rev().find(|(l, _)| l == label).map(|(_, r)| Rect::from_min_max(pos2(r[0], r[1]), pos2(r[2], r[3])))
+}

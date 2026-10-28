@@ -2278,8 +2278,13 @@ fn in_path_options(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 /// Bubble Type: the style chip and the Styles popover; for selected bubble text, where its lines
 /// sit and the margin inside it, applied live.
 fn bubble_options(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
-    use photocraft_doc::text::InPathAlign;
     crate::bubble_type_ui::options(app, ui);
+    bubble_target_options(app, ui);
+}
+
+/// For selected bubble text: where its lines sit and the margin inside it, applied live.
+fn bubble_target_options(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    use photocraft_doc::text::InPathAlign;
     let Some((layer, valign, inset, shown)) = in_path_target(app) else { return };
     crate::widgets::vline(ui, 22.0);
     ui.spacing_mut().item_spacing.x = 2.0;
@@ -2310,6 +2315,140 @@ fn bubble_options(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         let _ = app.run("type.edit", json!({"layer": layer, "inset": v}));
     }
     ui.spacing_mut().item_spacing.x = 8.0;
+}
+
+/// The Type tools' options on a phone (the simple interface's options popover): a labelled form,
+/// each control on its row, alignment as one segmented row, the colour inline.
+pub fn phone_form(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    let t = crate::theme::Tokens::get(ui.ctx());
+    let shown = target(app).and_then(|(id, _)| {
+        let st = app.session.active()?;
+        let tl = text_layer(&st.doc, LayerId(id))?;
+        let run = tl.char_runs().into_iter().next().map(|r| r.style);
+        let size = styles_at(app).map_or(tl.size_pt, |(c, _)| c.size_pt) * shown_scale(app);
+        Some((tl.font_family.clone(), run.as_ref().map(selected_style).unwrap_or_default(), size, styles_at(app).map_or(tl.color, |(c, _)| c.color)))
+    });
+    let o = app.ui.tool_options.clone();
+    let (mut fam, mut style, size) = match &shown {
+        Some((f, s, z, _)) => (f.clone(), if s.is_empty() { "Regular".into() } else { s.clone() }, *z),
+        None => (o.type_font.clone(), o.type_style.clone(), o.type_size),
+    };
+    let ctx = ui.ctx().clone();
+    // The controls take what is left of the row after the labels.
+    let field = (ui.available_width() - 110.0).max(140.0);
+    egui::Grid::new("type-phone-form").num_columns(2).spacing([12.0, 10.0]).min_col_width(90.0).show(ui, |ui| {
+        if app.ui.tool == crate::state::Tool::BubbleType {
+            ui.label(tl!("Styles"));
+            ui.horizontal(|ui| crate::bubble_type_ui::options(app, ui));
+            ui.end_row();
+        }
+        ui.label(tl!("Font"));
+        if fonts_ready(ui, field) {
+            let preview = app.session.prefs().type_.font_preview;
+            if font_picker(app, ui, &mut fam, field, preview) {
+                app.ui.tool_options.type_font = fam.clone();
+                let st = styles(&fam);
+                style = if st.contains(&style) { style.clone() } else { st.first().cloned().unwrap_or_else(|| "Regular".into()) };
+                app.ui.tool_options.type_style = style.clone();
+                apply(app, &ctx, json!({"font": fam}));
+            }
+        }
+        ui.end_row();
+        ui.label(tl!("Style"));
+        let opts: Vec<(String, String)> = styles(&fam).into_iter().map(|s| (s.clone(), style_label(&s))).collect();
+        let opts_ref: Vec<(String, &str)> = opts.iter().map(|(a, b)| (a.clone(), b.as_str())).collect();
+        if crate::widgets::dropdown(ui, "type-style-phone", &mut style, &opts_ref, field) {
+            app.ui.tool_options.type_style = style.clone();
+            apply(app, &ctx, json!({"fontStyle": style}));
+        }
+        ui.end_row();
+        ui.label(tl!("Size"));
+        let (unit, label) = type_unit(app);
+        let mut display = size * unit;
+        if crate::widgets::value_field(ui, &mut display, unit..=1296.0 * unit, label, 90.0).changed() {
+            let size = display / unit;
+            app.ui.tool_options.type_size = size;
+            apply(app, &ctx, json!({"size": size, "metricsAsShown": true}));
+        }
+        ui.end_row();
+        ui.label(tl!("Anti-aliasing"));
+        let mut aa = target(app)
+            .and_then(|(id, _)| app.session.active().and_then(|st| text_layer(&st.doc, LayerId(id))))
+            .map(|t| photocraft_engine::type_extra_cmds::aa_name(t.antialias).to_string())
+            .unwrap_or_else(|| o.type_aa.clone());
+        let aa_opts = [
+            ("none".to_string(), tl!("None")),
+            ("sharp".to_string(), tl!("Sharp")),
+            ("crisp".to_string(), tl!("Crisp")),
+            ("strong".to_string(), tl!("Strong")),
+            ("smooth".to_string(), tl!("Smooth")),
+        ];
+        if crate::widgets::dropdown(ui, "type-aa-phone", &mut aa, &aa_opts, field) {
+            app.ui.tool_options.type_aa = aa.clone();
+            if let Some(params) = formatting_params(app) {
+                let _ = app.run(&format!("type.antiAlias.{aa}"), params);
+            }
+        }
+        ui.end_row();
+        ui.label(tl!("Alignment"));
+        let shown_align = match target_text(app).and_then(|t| t.paragraph_runs().into_iter().next()).map(|r| r.style.align) {
+            Some(photocraft_doc::text::TextAlign::Left) => "left",
+            Some(photocraft_doc::text::TextAlign::Center) => "center",
+            Some(photocraft_doc::text::TextAlign::Right) => "right",
+            Some(_) => "",
+            None if app.ui.tool == crate::state::Tool::BubbleType => "center",
+            None => o.type_align.as_str(),
+        }
+        .to_string();
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            for (align, icon, tip) in [("left", "align-left", tl!("Left align text")), ("center", "align-center", tl!("Center text")), ("right", "align-right", tl!("Right align text"))] {
+                if crate::icons::button(ui, icon, 36.0, shown_align == align, tip).clicked() {
+                    app.ui.tool_options.type_align = align.into();
+                    apply(app, &ctx, json!({"align": align}));
+                }
+            }
+        });
+        ui.end_row();
+        ui.label(tl!("Color"));
+        let c = shown
+            .as_ref()
+            .map(|s| s.3)
+            .map(|c| {
+                let v = c.to_rgb();
+                [v[0], v[1], v[2], 1.0]
+            })
+            .unwrap_or(app.session.tools.foreground);
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(56.0, 30.0), egui::Sense::click());
+        let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+        ui.painter().rect_filled(rect, 6.0, Color32::from_rgb(q(c[0]), q(c[1]), q(c[2])));
+        ui.painter().rect_stroke(rect, 6.0, Stroke::new(1.0, t.field_border), egui::StrokeKind::Outside);
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Set the text color")));
+        if resp.clicked() {
+            open_color_picker(app, [c[0], c[1], c[2]]);
+        }
+        ui.end_row();
+        ui.label(tl!("Orientation"));
+        if ui.add(egui::Button::new(tl!("Toggle text orientation")).min_size(egui::vec2(0.0, 32.0))).clicked()
+            && let Some((layer, _)) = target(app)
+            && let Some(params) = formatting_params(app)
+        {
+            let to = if is_vertical(app, LayerId(layer)) { "horizontal" } else { "vertical" };
+            if let Err(e) = app.run(&format!("type.orientation.{to}"), params) {
+                app.ui.status = e;
+                app.ui.status_error = true;
+            }
+        }
+        ui.end_row();
+    });
+    // Type in a path (bubble text): where its lines sit and its margin.
+    ui.horizontal_wrapped(|ui| {
+        if app.ui.tool == crate::state::Tool::BubbleType {
+            bubble_target_options(app, ui);
+        } else {
+            in_path_options(app, ui);
+        }
+    });
 }
 
 pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {

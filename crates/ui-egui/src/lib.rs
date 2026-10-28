@@ -3268,6 +3268,8 @@ impl PhotocraftApp {
 
 #[cfg(test)]
 mod navigator_gpu_tests;
+#[cfg(test)]
+mod phone_dialog_tests;
 
 #[cfg(test)]
 mod color_swatch_tests;

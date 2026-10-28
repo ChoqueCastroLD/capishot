@@ -411,6 +411,9 @@ const VALUE_W: f32 = 42.0;
 
 /// Draw the picker and its top-right actions. `Some(true)` confirms, `Some(false)` cancels.
 pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) -> Option<bool> {
+    if ui.ctx().content_rect().width() < crate::simple_ui::PHONE_BELOW {
+        return body_narrow(ui, f);
+    }
     ui.set_width(CONTENT_WIDTH);
     ui.spacing_mut().item_spacing.y = 4.0;
     let mut outcome = None;
@@ -419,7 +422,7 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) -> Option<bool> {
         ui.vertical(|ui| {
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
-                color_field(ui, f);
+                color_field(ui, f, FIELD);
             });
             ui.add_space(8.0);
             let mut web = f.get("__webOnly").and_then(Value::as_bool).unwrap_or(false);
@@ -462,15 +465,52 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) -> Option<bool> {
     outcome
 }
 
+/// The picker on a phone: as wide as the window allows, stacked (OK and Cancel first, so they are
+/// never off the screen; then the field and its slider, the swatches, the values).
+fn body_narrow(ui: &mut egui::Ui, f: &mut Map<String, Value>) -> Option<bool> {
+    let w = ui.available_width().min(CONTENT_WIDTH);
+    ui.set_width(w);
+    ui.spacing_mut().item_spacing.y = 6.0;
+    let mut outcome = None;
+    ui.horizontal(|ui| {
+        if widgets::primary_button(ui, tl!("OK"), 84.0).clicked() {
+            outcome = Some(true);
+        }
+        if widgets::secondary_button(ui, tl!("Cancel"), 84.0).clicked() {
+            outcome = Some(false);
+        }
+    });
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        color_field(ui, f, (w - 40.0).clamp(120.0, FIELD));
+    });
+    ui.horizontal_top(|ui| {
+        swatches(ui, f);
+        ui.vertical(|ui| {
+            if widgets::secondary_button(ui, tl!("Add to Swatches"), 0.0).clicked() {
+                f.insert("__addSwatch".into(), json!(true));
+            }
+            let mut web = f.get("__webOnly").and_then(Value::as_bool).unwrap_or(false);
+            if widgets::checkbox(ui, &mut web, tl!("Only Web Colors")).changed() {
+                f.insert("__webOnly".into(), json!(web));
+                set_rgb(f, current(f).rgb, Keep::Nothing);
+            }
+        });
+    });
+    let mode = f.get("__mode").and_then(Value::as_str).unwrap_or("h").to_string();
+    egui::ScrollArea::horizontal().id_salt("cp-values").show(ui, |ui| fields(ui, f, &mode, &current(f)));
+    outcome
+}
+
 /// The Color Picker's colour field and component slider, editing the colour in f.
-fn color_field(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
+fn color_field(ui: &mut egui::Ui, f: &mut Map<String, Value>, side: f32) {
     let t = Tokens::get(ui.ctx());
     let mode = f.get("__mode").and_then(Value::as_str).unwrap_or("h").to_string();
     let now = current(f);
     let (rgb, hsv, lab) = (now.rgb, now.hsv, now.lab);
     let (fx, fy, fz) = locate(&mode, hsv, rgb, lab);
     // Colour field.
-    let (field, resp) = ui.allocate_exact_size(vec2(FIELD, FIELD), Sense::click_and_drag());
+    let (field, resp) = ui.allocate_exact_size(vec2(side, side), Sense::click_and_drag());
     let web_only = f.get("__webOnly").and_then(Value::as_bool).unwrap_or(false);
     // Only Web Colors bands the field to the 216 web-safe colours, as in Photoshop (#4107).
     let mesh = |rect: Rect, color: &dyn Fn(f32, f32) -> [f32; 3]| {
@@ -492,7 +532,7 @@ fn color_field(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
         set_rgb(f, c, keep);
     }
     // Component slider (hue runs 360° at the top to 0° at the bottom, like Photoshop).
-    let (strip, sresp) = ui.allocate_exact_size(vec2(18.0, FIELD), Sense::click_and_drag());
+    let (strip, sresp) = ui.allocate_exact_size(vec2(18.0, side), Sense::click_and_drag());
     ui.painter().add(mesh(strip, &|_, y| slider_color(&mode, 1.0 - y, hsv, rgb, lab)));
     let sy = strip.top() + (1.0 - fz) * strip.height();
     for (x, dir) in [(strip.left() - 1.0, 1.0f32), (strip.right() + 1.0, -1.0)] {

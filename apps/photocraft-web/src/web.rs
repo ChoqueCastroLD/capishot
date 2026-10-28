@@ -1113,6 +1113,13 @@ impl eframe::App for WebShell {
             self.app.touch.sync_active(raw_input, &ids);
         }
         crate::wheel_guard::restore(raw_input);
+        // The phone's Back closed what was open: Esc, which every dialog, the options and the
+        // sheets take as close.
+        if back_history::take_back() {
+            for pressed in [true, false] {
+                raw_input.events.push(egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::NONE });
+            }
+        }
         // The app's own hook (clipboard keys, synthetic automation input), around the browser's
         // clipboard (clipboard.rs).
         let typing = ctx.text_edit_focused() || self.app.ui.text_edit.is_some();
@@ -1122,6 +1129,7 @@ impl eframe::App for WebShell {
     }
 
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        back_history::sync(photocraft_ui_egui::simple_ui::back_target(&self.app, ctx), ctx);
         // Startup timings: the first frame starts, and the second starts once it is drawn.
         if self.startup_frames < 2 {
             self.startup_frames += 1;
@@ -1497,4 +1505,71 @@ fn screen_color_service() -> Option<photocraft_ui_egui::screen_picker::Service> 
         }
         Pending { receiver: rx, cancelled }
     }))
+}
+
+/// The phone's Back button (Android, and the browser's own back): while a dialog, the tool
+/// options or a sheet is open, a history entry is kept for it, and going back from it closes
+/// that instead of leaving the page. Closing it any other way takes the entry back out.
+mod back_history {
+    use std::cell::Cell;
+
+    use wasm_bindgen::JsCast as _;
+    use wasm_bindgen::closure::Closure;
+
+    thread_local! {
+        /// Our entry is on the history stack.
+        static PUSHED: Cell<bool> = const { Cell::new(false) };
+        /// We went back ourselves: the next popstate is ours.
+        static IGNORE: Cell<bool> = const { Cell::new(false) };
+        /// The user went back: close what is open (taken by the next frame).
+        static BACK: Cell<bool> = const { Cell::new(false) };
+        static LISTENING: Cell<bool> = const { Cell::new(false) };
+    }
+
+    fn history() -> Option<wasm_bindgen::JsValue> {
+        let window: wasm_bindgen::JsValue = web_sys::window()?.into();
+        js_sys::Reflect::get(&window, &"history".into()).ok()
+    }
+
+    fn call(method: &str, args: &js_sys::Array) {
+        if let Some(h) = history()
+            && let Ok(f) = js_sys::Reflect::get(&h, &method.into()).and_then(|f| f.dyn_into::<js_sys::Function>())
+        {
+            let _ = f.apply(&h, args);
+        }
+    }
+
+    /// Every frame: an entry while something closable is open, none otherwise.
+    pub fn sync(open: bool, ctx: &egui::Context) {
+        if !LISTENING.with(|l| l.replace(true))
+            && let Some(window) = web_sys::window()
+        {
+            let ctx = ctx.clone();
+            let cb = Closure::<dyn FnMut()>::new(move || {
+                if IGNORE.with(|i| i.replace(false)) {
+                    return;
+                }
+                if PUSHED.with(|p| p.replace(false)) {
+                    BACK.with(|b| b.set(true));
+                    ctx.request_repaint();
+                }
+            });
+            let _ = window.add_event_listener_with_callback("popstate", cb.as_ref().unchecked_ref());
+            cb.forget();
+        }
+        let pushed = PUSHED.with(Cell::get);
+        if open && !pushed && !BACK.with(Cell::get) {
+            call("pushState", &js_sys::Array::of3(&"capishot-close".into(), &"".into(), &wasm_bindgen::JsValue::UNDEFINED));
+            PUSHED.with(|p| p.set(true));
+        } else if !open && pushed {
+            PUSHED.with(|p| p.set(false));
+            IGNORE.with(|i| i.set(true));
+            call("back", &js_sys::Array::new());
+        }
+    }
+
+    /// The user went back since the last frame.
+    pub fn take_back() -> bool {
+        BACK.with(|b| b.replace(false))
+    }
 }
