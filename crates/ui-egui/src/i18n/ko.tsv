@@ -3871,3 +3871,14 @@ curves	Smooth	매끄럽게
 	Lines centered in the bubble	말풍선 가운데에 줄 배치
 	How far the text stays inside the bubble	글자와 말풍선 테두리 사이의 거리
 	A margin of 5% of the bubble's smaller side	말풍선 짧은 변의 5% 여백
+	Bubble text	말풍선 텍스트
+	Narration text	내레이션 텍스트
+	Floating text	자유 텍스트
+	Bubble	말풍선
+	Narration	내레이션
+	Floating	자유
+	The text styles for bubbles, narration boxes and floating text	말풍선, 내레이션 상자, 자유 텍스트의 문자 스타일
+	Back to this style's defaults	이 스타일을 기본값으로 되돌리기
+	Case	대소문자
+	ALL CAPS	모두 대문자
+	Sample text	샘플 텍스트

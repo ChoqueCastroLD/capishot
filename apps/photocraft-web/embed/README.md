@@ -45,8 +45,9 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
   pixels: `type.frame`'s `documentPath`, a vertex moved), keeping the layer id, in one undo step
   (features `type.frame`, `type.edit.path`).
 
-- `execute('type.createInBubble', {x, y, inset?})` puts type in the speech bubble at a document
-  point (the Bubble Type tool): `{layer, bounds, path}`, or an error starting `noBubble`.
+- `execute('type.createInBubble', {x, y, style?, styles?})` puts type at a document point as the
+  Bubble Type tool does: in the speech bubble or narration box there, else floating text
+  (`style` in the result: `bubble`, `narration` or `floating`).
 
 ## Versioning rules
 

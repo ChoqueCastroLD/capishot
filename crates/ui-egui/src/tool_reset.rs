@@ -192,7 +192,7 @@ pub fn option_keys(tool: Tool) -> &'static [&'static str] {
         Tool::Gradient => reset!(gradient_style, gradient_reverse, gradient_dither, gradient_classic, gradient_blend_mode, fill_opacity),
         Tool::PaintBucket => reset!(bucket_fill_pattern, bucket_mode, fill_opacity, tolerance, anti_alias, contiguous),
         Tool::Type | Tool::VerticalType | Tool::HorizontalTypeMask | Tool::VerticalTypeMask => reset!(type_font, type_style, type_size, type_aa, type_align),
-        Tool::BubbleType => reset!(type_font, type_style, type_size, type_aa, type_align, bubble_auto_margin, bubble_margin, bubble_top),
+        Tool::BubbleType => reset!(type_aa, bubble_styles, bubble_pick),
         Tool::Zoom => reset!(zoom_scrubby),
         Tool::SpotHealing => reset!(spot_type, spot_mode),
         Tool::Healing => reset!(clone_aligned, clone_sample, healing_mode),

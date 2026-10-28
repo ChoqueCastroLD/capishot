@@ -3307,3 +3307,14 @@ curves	Smooth	平滑
 	Lines centered in the bubble	在氣泡中置中排行
 	How far the text stays inside the bubble	文字與氣泡邊緣的距離
 	A margin of 5% of the bubble's smaller side	氣泡短邊 5% 的邊距
+	Bubble text	氣泡文字
+	Narration text	旁白文字
+	Floating text	浮動文字
+	Bubble	氣泡
+	Narration	旁白
+	Floating	浮動
+	The text styles for bubbles, narration boxes and floating text	氣泡、旁白框與浮動文字的文字樣式
+	Back to this style's defaults	還原此樣式的預設值
+	Case	大小寫
+	ALL CAPS	全部大寫
+	Sample text	範例文字

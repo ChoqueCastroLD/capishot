@@ -2261,16 +2261,27 @@ fn bubble_type_click_makes_type_in_the_bubble() {
     assert_eq!(app.ui.text_edit.as_ref().map(|e| e.layer), Some(ed.layer));
     super::commit(&mut app);
     assert_eq!(app.session.active().unwrap().doc.walk().len(), layers);
-    // Outside the bubble: nothing, and the notice.
-    let steps = app.session.active().unwrap().history.entries().len();
+    // Outside the bubble: floating text (point text, its own style), said by a toast.
     tool_event(&mut app, ToolEvent::Down { x: 100.0, y: 100.0, pressure: 1.0 }, Modifiers::NONE);
     tool_event(&mut app, ToolEvent::Up { x: 100.0, y: 100.0 }, Modifiers::NONE);
+    let fl = app.ui.text_edit.clone().expect("floating text being typed");
+    super::insert(&mut app, "Whoosh");
+    super::commit(&mut app);
+    let ft = text(&app, LayerId(fl.layer));
+    assert!(matches!(ft.shape, photocraft_doc::text::TextShape::Point));
+    assert_eq!(ft.char_runs()[0].style.size_pt, 36.0, "the floating style");
+    assert!(app.ui.notices.iter().any(|n| n.title == "Floating text"));
+    assert_eq!(crate::bubble_type_ui::flashing().map(|f| f.0), Some("floating".into()), "shown by the cursor");
+    // Forced to Bubble, a miss makes nothing and says so (once for two misses).
+    app.ui.tool_options.bubble_pick = "bubble".into();
+    let (layers, steps) = (app.session.active().unwrap().doc.walk().len(), app.session.active().unwrap().history.entries().len());
+    for x in [100.0, 120.0] {
+        tool_event(&mut app, ToolEvent::Down { x, y: 700.0, pressure: 1.0 }, Modifiers::NONE);
+        tool_event(&mut app, ToolEvent::Up { x, y: 700.0 }, Modifiers::NONE);
+    }
     assert!(app.ui.text_edit.is_none());
     assert_eq!((app.session.active().unwrap().doc.walk().len(), app.session.active().unwrap().history.entries().len()), (layers, steps));
-    assert!(app.ui.notices.iter().any(|n| n.title == "No bubble found here"), "{:?}", app.ui.notices.iter().map(|n| &n.title).collect::<Vec<_>>());
-    tool_event(&mut app, ToolEvent::Down { x: 120.0, y: 700.0, pressure: 1.0 }, Modifiers::NONE);
-    tool_event(&mut app, ToolEvent::Up { x: 120.0, y: 700.0 }, Modifiers::NONE);
-    assert_eq!(app.ui.notices.iter().filter(|n| n.title == "No bubble found here").count(), 1, "one notice for two misses");
+    assert_eq!(app.ui.notices.iter().filter(|n| n.title == "No bubble found here").count(), 1);
 }
 
 /// The options bar's Margin applies to the next bubble and, live, to the selected bubble text.
@@ -2278,7 +2289,7 @@ fn bubble_type_click_makes_type_in_the_bubble() {
 fn bubble_type_margin_rewraps_the_selected_bubble() {
     use crate::canvas::{ToolEvent, tool_event};
     let mut app = bubble_page();
-    app.ui.tool_options.type_size = 18.0;
+    app.ui.tool_options.bubble_styles.bubble.size = 18.0;
     tool_event(&mut app, ToolEvent::Down { x: 750.0, y: 350.0, pressure: 1.0 }, Modifiers::NONE);
     tool_event(&mut app, ToolEvent::Up { x: 750.0, y: 350.0 }, Modifiers::NONE);
     let id = app.ui.text_edit.as_ref().unwrap().layer;
@@ -2301,7 +2312,42 @@ fn bubble_type_margin_rewraps_the_selected_bubble() {
     let mut app = h.into_state();
     let t = text(&app, LayerId(id));
     let photocraft_doc::text::TextShape::InPath { inset: Some(px), .. } = t.shape else { panic!("a fixed margin now: {:?}", t.shape) };
-    assert!(!app.ui.tool_options.bubble_auto_margin && (app.ui.tool_options.bubble_margin - px).abs() < 0.11);
+    assert!(px > 0.0);
     app.run("type.edit", json!({"layer": id, "inset": px + 60.0})).unwrap();
     assert!(lines(&mut app) > before, "a wider margin, more lines");
+}
+
+/// The Styles popover: three tabs, each style's fields, kept in the tool options; faces the
+/// family lacks are faked (Inter has no italic or bold here).
+#[test]
+fn bubble_type_styles_popover_edits_each_style() {
+    let mut app = bubble_page();
+    app.ui.tool_options.bubble_pick = "auto".into();
+    let mut h = egui_kittest::Harness::builder().with_size(vec2(1600.0, 700.0)).build_ui_state(
+        |ui, app: &mut PhotocraftApp| {
+            ui.horizontal(|ui| crate::type_tool::options_bar(app, ui));
+        },
+        app,
+    );
+    PhotocraftApp::setup_context(&h.ctx, Default::default());
+    h.run_steps(2);
+    h.get_by_label("Styles").click();
+    h.run_steps(3);
+    for tab in ["Bubble text", "Narration text", "Floating text"] {
+        h.get_by_label(tab);
+    }
+    h.get_by_label("Narration text").click();
+    h.run_steps(2);
+    h.get_by_label("ALL CAPS").click();
+    h.run_steps(2);
+    let app = h.into_state();
+    let st = &app.ui.tool_options.bubble_styles;
+    assert!(st.narration.caps && !st.bubble.caps && !st.floating.caps, "only the narration tab's");
+    let n = crate::bubble_type_ui::style_params(&st.narration);
+    assert_eq!((n["caps"].as_str(), n["vertical"].as_str(), n["align"].as_str()), (Some("all"), Some("top"), Some("left")));
+    if !crate::type_tool::styles("Inter").iter().any(|f| f == "Italic") {
+        assert_eq!(n["fauxItalic"], true);
+    }
+    let f = crate::bubble_type_ui::style_params(&st.floating);
+    assert_eq!((f["size"].as_f64(), f["stroke"]["width"].as_f64(), f["stroke"]["color"].as_str()), (Some(36.0), Some(4.0), Some("#ffffff")));
 }

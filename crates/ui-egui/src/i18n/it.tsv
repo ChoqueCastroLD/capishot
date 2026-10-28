@@ -4786,3 +4786,14 @@ shape	Appearance	Aspetto
 	Lines centered in the bubble	Righe centrate nel fumetto
 	How far the text stays inside the bubble	Distanza del testo dal bordo del fumetto
 	A margin of 5% of the bubble's smaller side	Un margine del 5% del lato minore del fumetto
+	Bubble text	Testo fumetto
+	Narration text	Testo narrazione
+	Floating text	Testo libero
+	Bubble	Fumetto
+	Narration	Narrazione
+	Floating	Libero
+	The text styles for bubbles, narration boxes and floating text	Gli stili di testo per fumetti, didascalie e testo libero
+	Back to this style's defaults	Torna ai valori predefiniti di questo stile
+	Case	Maiuscole
+	ALL CAPS	TUTTO MAIUSCOLO
+	Sample text	Testo di esempio

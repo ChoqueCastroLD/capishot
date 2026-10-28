@@ -3660,3 +3660,14 @@ curves	Smooth	Сгладить
 	Lines centered in the bubble	Строки по центру пузыря
 	How far the text stays inside the bubble	Отступ текста от края пузыря
 	A margin of 5% of the bubble's smaller side	Отступ 5 % меньшей стороны пузыря
+	Bubble text	Текст в пузыре
+	Narration text	Текст повествования
+	Floating text	Свободный текст
+	Bubble	Пузырь
+	Narration	Повествование
+	Floating	Свободный
+	The text styles for bubbles, narration boxes and floating text	Стили текста для пузырей, рамок повествования и свободного текста
+	Back to this style's defaults	Вернуть значения этого стиля по умолчанию
+	Case	Регистр
+	ALL CAPS	ВСЕ ПРОПИСНЫЕ
+	Sample text	Пример текста

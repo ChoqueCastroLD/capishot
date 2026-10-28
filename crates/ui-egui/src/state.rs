@@ -594,6 +594,81 @@ pub struct DocWindow {
     pub position: Option<[f32; 2]>,
 }
 
+/// One of the Bubble Type tool's text styles ("Texto globo", "Texto narración", "Texto flotante").
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BubbleTextStyle {
+    pub font: String,
+    /// The face (`Regular`, `Italic`, `Bold`…); a face the family lacks is faked (faux italic
+    /// or bold).
+    pub style: String,
+    /// Points.
+    pub size: f32,
+    /// Points; `None`: auto.
+    pub leading: Option<f32>,
+    /// 1/1000 em.
+    pub tracking: f32,
+    /// `#rrggbb`.
+    pub color: String,
+    /// `left`, `center` or `right`.
+    pub align: String,
+    /// ALL CAPS.
+    pub caps: bool,
+    pub stroke: bool,
+    pub stroke_color: String,
+    /// Pixels.
+    pub stroke_width: f32,
+    /// The margin inside the bubble is automatic (5% of its smaller side)…
+    pub auto_margin: bool,
+    /// …or this many pixels.
+    pub margin: f32,
+    /// Lines from the top instead of centred.
+    pub top: bool,
+}
+
+impl Default for BubbleTextStyle {
+    fn default() -> Self {
+        Self {
+            font: "Inter".into(),
+            style: "Regular".into(),
+            size: 30.0,
+            leading: None,
+            tracking: 0.0,
+            color: "#000000".into(),
+            align: "center".into(),
+            caps: false,
+            stroke: false,
+            stroke_color: "#ffffff".into(),
+            stroke_width: 4.0,
+            auto_margin: true,
+            margin: 12.0,
+            top: false,
+        }
+    }
+}
+
+/// The Bubble Type tool's three styles, chosen by what a click hits.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BubbleStyles {
+    /// "Texto globo": type in a speech bubble.
+    pub bubble: BubbleTextStyle,
+    /// "Texto narración": type in a narration box.
+    pub narration: BubbleTextStyle,
+    /// "Texto flotante": point text where no bubble or box is.
+    pub floating: BubbleTextStyle,
+}
+
+impl Default for BubbleStyles {
+    fn default() -> Self {
+        Self {
+            bubble: BubbleTextStyle::default(),
+            narration: BubbleTextStyle { style: "Italic".into(), size: 26.0, align: "left".into(), top: true, ..BubbleTextStyle::default() },
+            floating: BubbleTextStyle { style: "Bold".into(), size: 36.0, stroke: true, ..BubbleTextStyle::default() },
+        }
+    }
+}
+
 /// Options-bar state for tools (Photoshop keeps these per tool).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -633,12 +708,11 @@ pub struct ToolOptions {
     pub type_size: f32,
     pub type_aa: String,
     pub type_align: String,
-    /// Bubble Type: the margin inside the bubble is automatic (5% of its smaller side)…
-    pub bubble_auto_margin: bool,
-    /// …or this many pixels.
-    pub bubble_margin: f32,
-    /// Bubble Type: lines from the bubble's top instead of centred in it.
-    pub bubble_top: bool,
+    /// Bubble Type: its three text styles (bubble, narration box, floating text).
+    pub bubble_styles: BubbleStyles,
+    /// Bubble Type: which style a click uses: `auto` (by what it hits), `bubble`, `narration`
+    /// or `floating`.
+    pub bubble_pick: String,
     /// Clone Stamp / Healing Brush.
     pub clone_aligned: bool,
     /// Pattern Stamp: lock the tile origin in document space across strokes.
@@ -952,9 +1026,8 @@ impl Default for ToolOptions {
             type_size: 48.0,
             type_aa: "sharp".into(),
             type_align: "left".into(),
-            bubble_auto_margin: true,
-            bubble_margin: 12.0,
-            bubble_top: false,
+            bubble_styles: BubbleStyles::default(),
+            bubble_pick: "auto".into(),
             clone_aligned: true,
             pattern_stamp_aligned: true,
             pattern_stamp_impressionist: false,

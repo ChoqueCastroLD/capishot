@@ -39,7 +39,11 @@ pub fn no_bubble(miss: Miss) -> EngineError {
 pub fn bubble_path(s: &mut Session, x: i32, y: i32) -> Result<Subpath> {
     let page = crate::typer_place_cmds::page_image(s)?;
     let found = bubble_find::find(&page.img, page.area, (x, y)).map_err(no_bubble)?;
-    let m = &found.body;
+    traced(&found.body)
+}
+
+/// A mask's outline, smoothed and fitted with Béziers into a closed path.
+fn traced(m: &photocraft_typer::bubble::Mask) -> Result<Subpath> {
     let values: Vec<f32> = m.px.iter().map(|p| if *p { 1.0 } else { 0.0 }).collect();
     let rect = photocraft_geom::Rect::new(m.x0, m.y0, m.x0 + m.width as i32, m.y0 + m.height as i32);
     // The outer loop (the body has no holes; a stray piece would be smaller).
@@ -64,27 +68,143 @@ pub fn bubble_path(s: &mut Session, x: i32, y: i32) -> Result<Subpath> {
     Ok(Subpath { op: Default::default(), ..sub })
 }
 
+/// What a click makes: type in a bubble, in a narration box, or floating point text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Bubble,
+    Narration,
+    Floating,
+}
+
+impl Kind {
+    pub fn name(self) -> &'static str {
+        match self {
+            Kind::Bubble => "bubble",
+            Kind::Narration => "narration",
+            Kind::Floating => "floating",
+        }
+    }
+
+    fn parse(v: Option<&Value>) -> Result<Option<Kind>> {
+        match v.and_then(Value::as_str) {
+            None if v.is_none_or(Value::is_null) => Ok(None),
+            Some("auto") => Ok(None),
+            Some("bubble") => Ok(Some(Kind::Bubble)),
+            Some("narration") => Ok(Some(Kind::Narration)),
+            Some("floating") => Ok(Some(Kind::Floating)),
+            _ => Err(bad("\"style\" must be \"auto\", \"bubble\", \"narration\" or \"floating\"")),
+        }
+    }
+}
+
+/// The keys of one style (`styles.<kind>`) over the command's own: character keys, "align",
+/// "inset", "vertical" and "stroke".
+fn style_params(p: &Value, kind: Kind) -> Result<Value> {
+    let mut q = p.clone();
+    if let Value::Object(m) = &mut q {
+        for k in ["x", "y", "style", "styles"] {
+            m.remove(k);
+        }
+        match p.get("styles").and_then(|st| st.get(kind.name())) {
+            None | Some(Value::Null) => {}
+            Some(Value::Object(o)) => m.extend(o.clone()),
+            Some(_) => return Err(bad(format!("\"styles.{}\" must be an object", kind.name()))),
+        }
+        m.entry("align").or_insert(json!(if kind == Kind::Narration { "left" } else { "center" }));
+    }
+    Ok(q)
+}
+
+/// A style's `"stroke"`: `{"width": px, "color": "#rrggbb"}` (an outside layer-style stroke), or
+/// `null`/`false`/absent for none.
+fn stroke_param(q: &Value) -> Result<Option<photocraft_typer::psjson::Stroke>> {
+    let v = match q.get("stroke") {
+        None | Some(Value::Null) | Some(Value::Bool(false)) => return Ok(None),
+        Some(v) => v,
+    };
+    let width = v.get("width").and_then(Value::as_f64).filter(|w| w.is_finite() && (0.0..=250.0).contains(w)).ok_or_else(|| bad("\"stroke.width\" must be 0..=250 px"))?;
+    let hex = v.get("color").and_then(Value::as_str).unwrap_or("#ffffff");
+    let c = hex.strip_prefix('#').filter(|h| h.len() == 6).and_then(|h| u32::from_str_radix(h, 16).ok()).ok_or_else(|| bad("\"stroke.color\" must be \"#rrggbb\""))?;
+    if width <= 0.0 {
+        return Ok(None);
+    }
+    Ok(Some(photocraft_typer::psjson::Stroke { size: width, opacity: 100.0, color: [(c >> 16) as u8, (c >> 8) as u8, c as u8] }))
+}
+
+/// The narration box's path: the minimum-area rectangle around the box's inside.
+fn box_path(mask: &photocraft_typer::bubble::Mask) -> Result<Subpath> {
+    let (_, corners) = bubble_find::rectangularity(mask).ok_or_else(|| no_bubble(Miss::TooSmall))?;
+    let knots = corners.iter().map(|&(x, y)| photocraft_doc::vector::Knot::corner(x, y)).collect();
+    Ok(Subpath { closed: true, knots, op: Default::default() })
+}
+
+/// The bubble's path and kind at `(x, y)`: a box (rectangularity above
+/// [`bubble_find::BOX_RECTANGULARITY`]) is narration, anything else a bubble. `want` forces one.
+fn region_at(s: &mut Session, x: i32, y: i32, want: Option<Kind>) -> Result<(Kind, Subpath, f64)> {
+    let page = crate::typer_place_cmds::page_image(s)?;
+    let found = bubble_find::find(&page.img, page.area, (x, y)).map_err(no_bubble)?;
+    let rect = bubble_find::rectangularity(&found.interior).map_or(0.0, |(r, _)| r);
+    let kind = want.unwrap_or(if rect > bubble_find::BOX_RECTANGULARITY { Kind::Narration } else { Kind::Bubble });
+    let path = if kind == Kind::Narration { box_path(&found.interior)? } else { traced(&found.body)? };
+    Ok((kind, path, rect))
+}
+
 fn create_in_bubble(s: &mut Session, p: &Value) -> Result<Value> {
-    let coord = |k: &str| p.get(k).and_then(Value::as_f64).filter(|v| v.is_finite() && v.abs() < 1e9).map(|v| v.floor() as i32).ok_or_else(|| bad("\"x\" and \"y\" must be document pixels"));
-    let (x, y) = (coord("x")?, coord("y")?);
-    let (inset, valign) = crate::type_cmds::in_path_props(p).map_err(bad)?;
+    let coord = |k: &str| p.get(k).and_then(Value::as_f64).filter(|v| v.is_finite() && v.abs() < 1e9).ok_or_else(|| bad("\"x\" and \"y\" must be document pixels"));
+    let (fx, fy) = (coord("x")?, coord("y")?);
+    let (x, y) = (fx.floor() as i32, fy.floor() as i32);
+    let want = Kind::parse(p.get("style"))?;
     if p.get("inPath").is_some_and(|v| !v.is_null()) || p.get("box").is_some_and(|v| !v.is_null()) {
         return Err(bad("the bubble is the path: no \"inPath\" or \"box\""));
     }
-    let path = bubble_path(s, x, y)?;
-    // The layer's style from the usual keys (point text at the click), then the bubble's shape.
-    let mut q = p.clone();
-    if let Value::Object(m) = &mut q {
-        m.remove("inset");
-        m.remove("vertical");
-        m.entry("align").or_insert(json!("center"));
+    // Every style is checked first, so a bad one fails whatever the click hits.
+    for k in [Kind::Bubble, Kind::Narration, Kind::Floating] {
+        let q = style_params(p, k)?;
+        crate::type_cmds::in_path_props(&q).map_err(bad)?;
+        stroke_param(&q)?;
     }
-    let mut t = crate::type_cmds::new_text_layer(s, &q, CMD)?;
-    t.shape = TextShape::InPath { path: path.clone(), inset: inset.flatten(), valign: valign.unwrap_or(InPathAlign::Center) };
-    t.transform = Affine::IDENTITY;
+    let region = match want {
+        Some(Kind::Floating) => None,
+        _ => match region_at(s, x, y, want) {
+            Ok(r) => Some(r),
+            // Auto: nothing to fill is floating text.
+            Err(_) if want.is_none() => None,
+            Err(e) => return Err(e),
+        },
+    };
+    let kind = region.as_ref().map_or(Kind::Floating, |r| r.0);
+    let q = style_params(p, kind)?;
+    let stroke = stroke_param(&q)?;
+    let (inset, valign) = crate::type_cmds::in_path_props(&q).map_err(bad)?;
+    let mut base = q.clone();
+    if let Value::Object(m) = &mut base {
+        for k in ["inset", "vertical", "stroke"] {
+            m.remove(k);
+        }
+        m.insert("x".into(), json!(fx));
+        m.insert("y".into(), json!(fy));
+    }
+    let mut t = crate::type_cmds::new_text_layer(s, &base, CMD)?;
+    match &region {
+        Some((_, path, _)) => {
+            t.shape = TextShape::InPath { path: path.clone(), inset: inset.flatten(), valign: valign.unwrap_or(InPathAlign::Center) };
+            t.transform = Affine::IDENTITY;
+        }
+        None => {
+            // Floating: point text whose line is centred on the click (the baseline a third of
+            // the size below it).
+            let dpi = s.active().map_or(72.0, |d| f64::from(d.doc.resolution_dpi));
+            let px = f64::from(t.size_pt) * dpi / 72.0;
+            t.transform = Affine::translate(fx, fy + px * 0.35);
+        }
+    }
     t.sync_summary();
-    let mut out = crate::type_cmds::add_type_layer(s, &q, t)?;
-    out["path"] = crate::vector_cmds::path_json(&photocraft_doc::vector::Path::new(vec![path]));
+    let mut out = crate::type_cmds::add_type_layer_with(s, &base, t, |layer, mode| crate::typer_place_cmds::set_stroke(layer, stroke.as_ref(), mode))?;
+    out["style"] = json!(kind.name());
+    if let Some((_, path, rect)) = region {
+        out["path"] = crate::vector_cmds::path_json(&photocraft_doc::vector::Path::new(vec![path]));
+        out["rectangularity"] = json!((rect * 1000.0).round() / 1000.0);
+    }
     Ok(out)
 }
 
@@ -94,7 +214,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: "New Type in Bubble",
         menu: &[],
         shortcut: None,
-        params: r##"{"x":px,"y":px (a point inside a speech bubble),"inset":px|"auto"="auto" (the margin: glyphs stay this far inside the bubble; auto: 5% of its smaller side),"vertical":"center|top"="center","text":str?,"align":"center"…, …character keys} → {"layer","bounds","path" (the bubble's body, document px)}. The bubble is the light area around the point, found on the page without its type layers: its outline may have small gaps, its tail is left out. No bubble (an area reaching the page edge, too large or small, art without an outline) is an error starting "noBubble" and creates nothing"##,
+        params: r##"{"x":px,"y":px (the click),"style":"auto|bubble|narration|floating"="auto","styles":{"bubble":{…},"narration":{…},"floating":{…}}? (each: character keys, "align", "inset":px|"auto", "vertical":"center|top", "stroke":{"width":px,"color":"#rrggbb"}|null; over the command's own keys),"text":str?, …character keys} → {"layer","bounds","style" (what was made),"path"? (the bubble's or box's path, document px),"rectangularity"?}. Auto: the light area around the point (found on the page without its type layers, outline gaps closed, a click on lettering or the outline still finds it) becomes type in a narration box when it is rectangular (area over its minimum rectangle above 0.92: a rectangle fit), else type in the bubble's traced body (the tail left out); with no bubble there, floating point text centred on the point. A forced "bubble" or "narration" with no bubble there is an error starting "noBubble" and creates nothing. One undo step"##,
         enabled: |s| s.active().map(|_| ()).ok_or_else(|| "no document".into()),
         journal: true,
         run: create_in_bubble,
@@ -154,6 +274,7 @@ mod tests {
         outlined(&mut s, "ellipse", [100, 80, 400, 240], json!({}));
         let steps = s.active().unwrap().history.past_len();
         let r = s.execute(CMD, json!({"x": 300, "y": 200, "text": "Hello there, this is a speech bubble.", "size": 18})).unwrap();
+        assert_eq!(r["style"], "bubble");
         assert_eq!(s.active().unwrap().history.past_len(), steps + 1, "one undo step");
         let id = r["layer"].as_u64().unwrap();
         let TextShape::InPath { path, inset, valign } = shape_of(&s, id) else { panic!("type in a path") };
@@ -215,15 +336,64 @@ mod tests {
         outlined(&mut s, "ellipse", [100, 80, 400, 240], json!({}));
         let layers = |s: &Session| s.active().unwrap().doc.walk().len();
         let (n, steps) = (layers(&s), s.active().unwrap().history.past_len());
-        let e = s.execute(CMD, json!({"x": 20, "y": 20})).unwrap_err().to_string();
-        assert!(e.contains("noBubble") && e.contains("no bubble found here"), "{e}");
+        // A forced bubble or box with none there: an error, nothing made.
+        for style in ["bubble", "narration"] {
+            let e = s.execute(CMD, json!({"x": 20, "y": 20, "style": style})).unwrap_err().to_string();
+            assert!(e.contains("noBubble") && e.contains("no bubble found here"), "{e}");
+        }
+        assert_eq!((layers(&s), s.active().unwrap().history.past_len()), (n, steps), "nothing created");
         // Mid-grey art with a light patch and no outline (text over art).
         let mut art = Session::new();
         art.execute("file.new", json!({"width": 400, "height": 300, "background": "#b4b4b4"})).unwrap();
         art.execute("shape.create", json!({"kind": "ellipse", "rect": [120, 90, 160, 120], "fill": "#fafafa"})).unwrap();
-        assert!(art.execute(CMD, json!({"x": 200, "y": 150})).unwrap_err().to_string().contains("noBubble"));
-        assert_eq!((layers(&s), s.active().unwrap().history.past_len()), (n, steps), "nothing created");
+        assert!(art.execute(CMD, json!({"x": 200, "y": 150, "style": "bubble"})).unwrap_err().to_string().contains("noBubble"));
+        // Auto there: floating point text centred on the click, in the floating style.
+        let r = art
+            .execute(CMD, json!({"x": 200, "y": 150, "text": "Fwoosh", "styles": {"floating": {"size": 36, "stroke": {"width": 4, "color": "#ffffff"}}}}))
+            .unwrap();
+        assert_eq!(r["style"], "floating");
+        assert!(r.get("path").is_none());
+        let id = LayerId(r["layer"].as_u64().unwrap());
+        let doc = &art.active().unwrap().doc;
+        let l = doc.layer(id).unwrap();
+        let LayerContent::Text(t) = &l.content else { panic!() };
+        assert!(matches!(t.shape, TextShape::Point));
+        assert!(l.effects.items.iter().any(|e| matches!(e, photocraft_doc::Effect::Stroke(_))), "the white stroke");
+        let b = r["bounds"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect::<Vec<_>>();
+        assert!(((b[0] + b[2]) / 2.0 - 200.0).abs() < 12.0 && ((b[1] + b[3]) / 2.0 - 150.0).abs() < 14.0, "centred on the click: {b:?}");
         assert!(s.execute(CMD, json!({"x": "a", "y": 2})).is_err());
+        assert!(s.execute(CMD, json!({"x": 1, "y": 2, "style": "huge"})).is_err());
+        assert!(s.execute(CMD, json!({"x": 1, "y": 2, "styles": {"floating": {"stroke": {"width": -1}}}})).is_err());
+    }
+
+    /// A box is narration: type in its rectangle, in the narration style (left, from the top);
+    /// a rounded box with small corners too; an oval and a spiky bubble are bubbles.
+    #[test]
+    fn boxes_are_narration_and_bubbles_are_bubbles() {
+        let mut s = page();
+        outlined(&mut s, "rect", [40, 40, 240, 120], json!({}));
+        outlined(&mut s, "rect", [320, 40, 240, 120], json!({"radius": 10}));
+        outlined(&mut s, "ellipse", [40, 200, 240, 160], json!({}));
+        outlined(&mut s, "star", [330, 190, 230, 200], json!({"sides": 14, "starRatio": 0.75}));
+        let styles = json!({"narration": {"align": "left", "vertical": "top", "caps": "all", "inset": 6}, "bubble": {"size": 14}});
+        let make = |s: &mut Session, x: i32, y: i32| s.execute(CMD, json!({"x": x, "y": y, "text": "Some words here", "size": 12, "styles": styles.clone()})).unwrap();
+        let boxed = make(&mut s, 160, 100);
+        assert_eq!(boxed["style"], "narration", "{boxed}");
+        let ks = boxed["path"]["subpaths"][0]["knots"].as_array().unwrap();
+        assert_eq!(ks.len(), 4, "a rectangle fit");
+        let b = knots_box(&boxed["path"]);
+        assert!((b[0] - 43.0).abs() < 3.0 && (b[2] - 277.0).abs() < 3.0 && (b[1] - 43.0).abs() < 3.0 && (b[3] - 157.0).abs() < 3.0, "{b:?}");
+        let TextShape::InPath { inset, valign, .. } = shape_of(&s, boxed["layer"].as_u64().unwrap()) else { panic!() };
+        assert_eq!((inset, valign), (Some(6.0), InPathAlign::Top));
+        let info = s.execute("type.info", json!({"layer": boxed["layer"]})).unwrap();
+        assert_eq!(info["paragraphs"][0]["style"]["align"], "Left");
+        assert_eq!(info["runs"][0]["style"]["caps"], "AllCaps", "{}", info["runs"][0]["style"]);
+        assert_eq!(make(&mut s, 440, 100)["style"], "narration", "a rounded box");
+        assert_eq!(make(&mut s, 160, 280)["style"], "bubble", "an oval");
+        assert_eq!(make(&mut s, 445, 290)["style"], "bubble", "a spiky bubble");
+        // Forced: the oval as narration gets its rectangle.
+        let forced = s.execute(CMD, json!({"x": 160, "y": 280, "style": "narration", "text": "x"})).unwrap();
+        assert_eq!((forced["style"].as_str(), forced["path"]["subpaths"][0]["knots"].as_array().map(Vec::len)), (Some("narration"), Some(4)));
     }
 
     /// Real pages (never committed): `CAPISHOT_BUBBLE_PAGES=<folder>` holding `<name>.png` (or any

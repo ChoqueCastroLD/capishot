@@ -4356,3 +4356,14 @@ curves	Smooth	スムーズ
 	Lines centered in the bubble	吹き出しの中央に行を配置
 	How far the text stays inside the bubble	文字と吹き出しの縁との距離
 	A margin of 5% of the bubble's smaller side	吹き出しの短辺の 5% の余白
+	Bubble text	吹き出しテキスト
+	Narration text	ナレーションテキスト
+	Floating text	フリーテキスト
+	Bubble	吹き出し
+	Narration	ナレーション
+	Floating	フリー
+	The text styles for bubbles, narration boxes and floating text	吹き出し、ナレーション枠、フリーテキストの文字スタイル
+	Back to this style's defaults	このスタイルを初期設定に戻す
+	Case	大文字/小文字
+	ALL CAPS	すべて大文字
+	Sample text	サンプルテキスト

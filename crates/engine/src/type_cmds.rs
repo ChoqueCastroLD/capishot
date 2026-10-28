@@ -982,11 +982,18 @@ fn create_type_as(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
 
 /// Adds the type layer `t` (named from `"name"` or its text) above the active layer, in one
 /// history step → `{layer, bounds, warnings?}`.
-pub(crate) fn add_type_layer(s: &mut Session, p: &Value, mut t: TextLayer) -> Result<Value> {
+pub(crate) fn add_type_layer(s: &mut Session, p: &Value, t: TextLayer) -> Result<Value> {
+    add_type_layer_with(s, p, t, |_, _| {})
+}
+
+/// [`add_type_layer`], with `dress` called on the new layer before it goes in (a layer style).
+pub(crate) fn add_type_layer_with(s: &mut Session, p: &Value, mut t: TextLayer, dress: impl FnOnce(&mut Layer, photocraft_color::ColorMode)) -> Result<Value> {
     let name = p.get("name").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| layer_name(&t.text));
     let id = s.edit("New Type Layer", |doc, active| {
         refresh(doc, &mut t);
-        let id = doc.insert_above(*active, Layer::new(name, LayerContent::Text(t)));
+        let mut layer = Layer::new(name, LayerContent::Text(t));
+        dress(&mut layer, doc.mode);
+        let id = doc.insert_above(*active, layer);
         *active = Some(id);
         Ok(id)
     })?;
