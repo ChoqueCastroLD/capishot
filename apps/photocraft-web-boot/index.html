@@ -2,10 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
   <title>Capishot</title>
+  <!-- Translation catalogs not compiled in (photocraft-ui-egui `all-catalogs`), fetched when chosen. -->
   <link data-trunk rel="rust" data-bin="photocraft-web-boot" data-cargo-profile="wasm-release" data-wasm-opt="z" data-wasm-opt-params="--converge" data-weak-refs />
   <style>
+    /* The notch and home indicator (viewport-fit=cover): the app keeps its bars inside these (safe_area.rs). */
+    :root { --sat: env(safe-area-inset-top, 0px); --sar: env(safe-area-inset-right, 0px); --sab: env(safe-area-inset-bottom, 0px); --sal: env(safe-area-inset-left, 0px); }
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #262626; }
     #photocraft_canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
     #photocraft_loading { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;

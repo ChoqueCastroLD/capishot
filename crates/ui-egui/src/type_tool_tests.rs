@@ -2271,7 +2271,7 @@ fn bubble_type_click_makes_type_in_the_bubble() {
     assert!(matches!(ft.shape, photocraft_doc::text::TextShape::Point));
     assert_eq!(ft.char_runs()[0].style.size_pt, 36.0, "the floating style");
     assert!(app.ui.notices.iter().any(|n| n.title == "Floating text"));
-    assert_eq!(crate::bubble_type_ui::flashing().map(|f| f.0), Some("floating".into()), "shown by the cursor");
+    assert_eq!(crate::bubble_type_ui::flashing(&app).map(|f| f.0), Some("floating".into()), "shown by the cursor");
     // Forced to Bubble, a miss makes nothing and says so (once for two misses).
     app.ui.tool_options.bubble_pick = "bubble".into();
     let (layers, steps) = (app.session.active().unwrap().doc.walk().len(), app.session.active().unwrap().history.entries().len());

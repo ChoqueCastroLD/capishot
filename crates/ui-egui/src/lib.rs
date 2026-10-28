@@ -956,6 +956,9 @@ pub struct PhotocraftApp {
     pub(crate) type_clicks: type_tool::Clicks,
     /// A font hovered in the Type tool's font picker, shown live (`type_font_preview`).
     pub(crate) type_font_preview: Option<type_font_preview::TypeFontPreview>,
+    /// Bubble Type: the style a click just used, where (document px) and since when (s; < 0: the
+    /// next frame starts the clock), shown by the cursor (`bubble_type_ui`).
+    pub(crate) bubble_flash: Option<(String, [f64; 2], f64)>,
     /// Channel thumbnails for one document snapshot; view-only revisions reuse their pixels.
     channel_thumbs: Option<(DocId, std::sync::Weak<Document>, bool, Vec<egui::TextureHandle>)>,
     /// Channels panel overlays / channel views drawn over the canvas, per document id.
@@ -1132,6 +1135,7 @@ impl PhotocraftApp {
             type_transform_preview: None,
             type_clicks: Default::default(),
             type_font_preview: None,
+            bubble_flash: None,
             guide_drag: None,
             layer_box: None,
             crop: Default::default(),

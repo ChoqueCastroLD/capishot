@@ -540,7 +540,7 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
     let created = app.run(command, p);
     if bubble && let Ok(v) = &created {
         let kind = v.get("style").and_then(serde_json::Value::as_str).unwrap_or("bubble");
-        crate::bubble_type_ui::flash(kind, start, -1.0);
+        crate::bubble_type_ui::flash(app, kind, start);
         app.ui.notices.retain(|n| n.tag.as_deref() != Some("noBubble"));
         if kind == "floating" {
             // Nothing to fill there: floating text, said once however many clicks.
@@ -1313,7 +1313,7 @@ pub fn end_if_left(app: &mut PhotocraftApp) {
 
 /// Selection highlight, caret and text frame over the canvas.
 pub fn draw_overlay(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewXform) {
-    crate::bubble_type_ui::draw_flash(painter, xf);
+    crate::bubble_type_ui::draw_flash(app, painter, xf);
     let Some(ed) = app.ui.text_edit.clone() else { return };
     // Until it commits, an edit in a document no longer active draws nothing over this one.
     if edit_home(app, &ed) != app.session.active_index() {

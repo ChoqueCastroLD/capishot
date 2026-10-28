@@ -3,8 +3,6 @@
 //! bar's chip; edited in the "Estilos" popover with a live preview; the chosen one shown for a
 //! moment by the cursor.
 
-use std::sync::{Mutex, PoisonError};
-
 use egui::{Color32, Pos2, Stroke, vec2};
 use serde_json::{Value, json};
 
@@ -69,21 +67,19 @@ pub fn styles_params(s: &BubbleStyles) -> Value {
 
 // ------------------------------------------------------------------ the chosen style, by the cursor
 
-/// The style just used, where (document px) and when (seconds).
-static FLASH: Mutex<Option<(String, [f64; 2], f64)>> = Mutex::new(None);
-
 /// How long the chosen style shows by the cursor (s).
 const FLASH_SECONDS: f64 = 1.4;
 
-pub fn flash(kind: &str, at: [f64; 2], now: f64) {
-    *FLASH.lock().unwrap_or_else(PoisonError::into_inner) = Some((kind.to_string(), at, now));
+/// Show `kind` by the click at `at` (document px) from the next frame.
+pub fn flash(app: &mut PhotocraftApp, kind: &str, at: [f64; 2]) {
+    app.bubble_flash = Some((kind.to_string(), at, -1.0));
 }
 
 /// Draws the chosen style's name by the click for a moment.
-pub fn draw_flash(painter: &egui::Painter, xf: &crate::canvas::ViewXform) {
+pub fn draw_flash(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &crate::canvas::ViewXform) {
     let ctx = painter.ctx();
     let now = ctx.input(|i| i.time);
-    let mut f = FLASH.lock().unwrap_or_else(PoisonError::into_inner);
+    let f = &mut app.bubble_flash;
     let Some((kind, at, start)) = f.clone() else { return };
     // The first frame after the click starts the clock (the click's time is the app's).
     let start = if start < 0.0 {
@@ -97,7 +93,6 @@ pub fn draw_flash(painter: &egui::Painter, xf: &crate::canvas::ViewXform) {
         *f = None;
         return;
     }
-    drop(f);
     let alpha = if age > FLASH_SECONDS - 0.3 { ((FLASH_SECONDS - age) / 0.3) as f32 } else { 1.0 };
     let t = crate::theme::Tokens::get(ctx);
     let p = xf.to_screen(at[0] as f32, at[1] as f32) + vec2(16.0, 18.0);
@@ -338,7 +333,7 @@ fn render_sample(st: &BubbleTextStyle) -> Option<egui::ColorImage> {
     Some(egui::ColorImage::new([area.width() as usize, area.height() as usize], px))
 }
 
-/// The point a click hit, as the flash shows it (`Pos2` for tests).
-pub fn flashing() -> Option<(String, Pos2)> {
-    FLASH.lock().unwrap_or_else(PoisonError::into_inner).as_ref().map(|(k, at, _)| (k.clone(), Pos2::new(at[0] as f32, at[1] as f32)))
+/// The style shown by the cursor and the point it was used at.
+pub fn flashing(app: &PhotocraftApp) -> Option<(String, Pos2)> {
+    app.bubble_flash.as_ref().map(|(k, at, _)| (k.clone(), Pos2::new(at[0] as f32, at[1] as f32)))
 }
