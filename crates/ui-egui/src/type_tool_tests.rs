@@ -2268,6 +2268,9 @@ fn bubble_type_click_makes_type_in_the_bubble() {
     assert!(app.ui.text_edit.is_none());
     assert_eq!((app.session.active().unwrap().doc.walk().len(), app.session.active().unwrap().history.entries().len()), (layers, steps));
     assert!(app.ui.notices.iter().any(|n| n.title == "No bubble found here"), "{:?}", app.ui.notices.iter().map(|n| &n.title).collect::<Vec<_>>());
+    tool_event(&mut app, ToolEvent::Down { x: 120.0, y: 700.0, pressure: 1.0 }, Modifiers::NONE);
+    tool_event(&mut app, ToolEvent::Up { x: 120.0, y: 700.0 }, Modifiers::NONE);
+    assert_eq!(app.ui.notices.iter().filter(|n| n.title == "No bubble found here").count(), 1, "one notice for two misses");
 }
 
 /// The options bar's Margin applies to the next bubble and, live, to the selected bubble text.

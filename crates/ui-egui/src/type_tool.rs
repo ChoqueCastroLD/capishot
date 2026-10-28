@@ -535,7 +535,12 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
     let created = app.run(command, p);
     if bubble && let Err(e) = &created {
         if e.contains("noBubble") {
-            crate::notices::post(app, tl!("No bubble found here"), Vec::new(), false, None);
+            // One notice, however many clicks missed.
+            app.ui.notices.retain(|n| n.tag.as_deref() != Some("noBubble"));
+            let id = crate::notices::post(app, tl!("No bubble found here"), Vec::new(), false, None);
+            if let Some(n) = app.ui.notices.iter_mut().find(|n| n.id == id) {
+                n.tag = Some("noBubble".into());
+            }
             app.ui.status = tl!("No bubble found here").to_string();
             app.ui.status_error = false;
         } else {
