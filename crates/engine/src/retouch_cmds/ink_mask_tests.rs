@@ -101,7 +101,8 @@ fn ink_that_runs_past_the_reach_is_not_taken_on_screentone_too() {
 fn the_fill_takes_the_papers_white_where_the_hole_meets_paper() {
     // A white page, a hole (60..120 × 30..90) the model filled a shade grey with a dark blob in
     // the middle (art it drew), and screentone to the right of x = 140.
-    let mut orig = vec![1.0f32; W * H * 3];
+    // Below y = 100, a light grey that is as flat (a fine screentone), with a hole of its own.
+    let mut orig: Vec<f32> = (0..W * H * 3).map(|k| if k / 3 / W >= 100 { 0.8 } else { 1.0 }).collect();
     for y in 0..H {
         for x in 140..W {
             if x % 3 == 0 && y % 3 == 0 {
@@ -110,7 +111,9 @@ fn the_fill_takes_the_papers_white_where_the_hole_meets_paper() {
         }
     }
     let hole: Vec<bool> = (0..W * H).map(|i| (60..120).contains(&(i % W)) && (30..90).contains(&(i / W))).collect();
-    let tone_hole: Vec<bool> = (0..W * H).map(|i| (160..180).contains(&(i % W)) && (30..90).contains(&(i / W))).collect();
+    let tone_hole: Vec<bool> = (0..W * H)
+        .map(|i| ((160..180).contains(&(i % W)) && (30..90).contains(&(i / W))) || ((20..40).contains(&(i % W)) && (105..115).contains(&(i / W))))
+        .collect();
     let mut generated = orig.clone();
     for i in 0..W * H {
         let (x, y) = (i % W, i / W);
@@ -125,6 +128,7 @@ fn the_fill_takes_the_papers_white_where_the_hole_meets_paper() {
     assert_eq!((g(60, 30), g(70, 40), g(119, 89)), (1.0, 1.0, 1.0), "the paper's white");
     assert_eq!(g(90, 60), 0.1, "what the model drew stays");
     assert_eq!(g(170, 60), 0.93, "on screentone the model's fill stays");
+    assert_eq!(g(30, 110), 0.93, "on a light grey too: it isn't paper");
 }
 
 #[test]

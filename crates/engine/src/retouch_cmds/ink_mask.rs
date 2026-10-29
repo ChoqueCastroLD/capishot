@@ -225,9 +225,10 @@ pub(crate) fn expand(w: usize, h: usize, lum: &[f32], painted: &[bool], g: Grow)
     Hole { mask, weight, hide }
 }
 
-/// Flat paper: its neighbourhood (2 px) varies by at most this, and it is at least this light.
+/// Flat paper: its neighbourhood (2 px) varies by at most this, and it is at least this light
+/// (a fine, light screentone is flat at 2 px too, but darker).
 const FLAT: f32 = 0.06;
-const PAPER: f32 = 0.75;
+const PAPER: f32 = 0.9;
 /// How far the fill may be from the paper's tone and still be paper.
 const NEAR_PAPER: f32 = 0.12;
 
