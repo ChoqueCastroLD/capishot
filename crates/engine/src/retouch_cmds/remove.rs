@@ -29,6 +29,10 @@ const MAX_PIXELS: u64 = 16 << 20;
 /// Cap on the sampling margin around the stroke (the window grows with the stroke).
 const MAX_MARGIN: i32 = 512;
 
+/// The least margin around Remove with AI's strokes: the model's context (128 px) past the
+/// farthest the hole grows.
+const AI_CONTEXT: i32 = 256;
+
 /// How far the hole grows beyond the stroke, in pixels.
 const GROW: usize = 2;
 
@@ -55,6 +59,9 @@ struct Plan {
     new_layer: bool,
     /// `ai`: fill with Manga LaMa through the injected service instead of patch completion.
     ai: Option<(std::sync::Arc<dyn photocraft_ai_lama::service::Inpainter>, crate::ai_inpaint_cmds::AiOptions)>,
+    /// Remove with AI: the hole grows over the ink the strokes touch, and the fill feathers in
+    /// ([`super::ink_mask`]) instead of the plain [`GROW`].
+    ink: bool,
 }
 
 /// The stroke's bounding box (points ± the brush radius), before any coverage is rendered.
@@ -96,7 +103,7 @@ fn parse_strokes(s: &Session, p: &Value) -> Result<(Vec<Stroke>, Option<LayerId>
     Ok((strokes, id))
 }
 
-fn plan(s: &Session, p: &Value) -> Result<Plan> {
+fn plan(s: &Session, p: &Value, ink: bool) -> Result<Plan> {
     let (strokes, id) = parse_strokes(s, p)?;
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let canvas = d.doc.bounds();
@@ -109,7 +116,8 @@ fn plan(s: &Session, p: &Value) -> Result<Plan> {
     if area.is_empty() {
         return Err(bad(CMD, "the stroke is outside the canvas"));
     }
-    let window = area.inflate(sampling_margin(area).min(MAX_MARGIN)).intersect(&canvas);
+    let margin = if ink { sampling_margin(area).max(AI_CONTEXT) } else { sampling_margin(area) };
+    let window = area.inflate(margin.min(MAX_MARGIN)).intersect(&canvas);
     let close_loops = flag(p, "closeLoops", true);
     let all_layers = flag(p, "sampleAllLayers", false) && targets_pixels(p);
     // A mask or channel has no "above": the fill goes where the stroke went.
@@ -120,12 +128,11 @@ fn plan(s: &Session, p: &Value) -> Result<Plan> {
     } else {
         None
     };
-    Ok(Plan { id, strokes, window, close_loops, all_layers, new_layer, ai })
+    Ok(Plan { id, strokes, window, close_loops, all_layers, new_layer, ai, ink })
 }
 
-/// The hole over the plan's window: the strokes' footprints, their enclosed areas and a margin,
-/// limited to the selection. Empty when nothing would change.
-fn hole(plan: &Plan, sel: Option<&Surface>) -> Result<Vec<bool>> {
+/// The strokes' footprints and their enclosed areas over the plan's window.
+fn painted(plan: &Plan) -> Result<Vec<bool>> {
     let win = plan.window;
     let (w, h) = (win.width() as usize, win.height() as usize);
     let mut m = vec![false; w * h];
@@ -145,13 +152,38 @@ fn hole(plan: &Plan, sel: Option<&Surface>) -> Result<Vec<bool>> {
     if plan.close_loops {
         m = photocraft_algo::remove::close_loops(w, h, &m);
     }
-    m = photocraft_algo::remove::dilate(w, h, &m, GROW);
-    if let Some(sel) = sel {
-        for (v, c) in m.iter_mut().zip(coverage(sel, win)) {
-            *v &= c > 0.0;
+    Ok(m)
+}
+
+/// The hole and its paste-back weights (`None`: all 1) over the plan's window: the painted area
+/// grown by [`GROW`] (or by the ink it touches, see [`Plan::ink`]), limited to the selection.
+/// Empty when nothing would change.
+#[allow(clippy::type_complexity)]
+fn hole(plan: &Plan, doc: &Document, img: &Region, fmt: &photocraft_color::PixelFormat) -> Result<(Vec<bool>, Option<Vec<f32>>, Option<Vec<bool>>)> {
+    let win = plan.window;
+    let (w, h) = (win.width() as usize, win.height() as usize);
+    let painted = painted(plan)?;
+    let (mut m, mut weight, hide) = if plan.ink {
+        let page = doc.bounds();
+        let brush = plan.strokes.iter().map(|s| s.brush.size).fold(0.0, f32::max);
+        let g = super::ink_mask::Grow::for_page(page.width().min(page.height()), brush);
+        let lum = super::ink_mask::luminance(&crate::ai_inpaint_cmds::to_rgb(fmt, &img.data));
+        let hole = super::ink_mask::expand(w, h, &lum, &painted, g);
+        (hole.mask, Some(hole.weight), Some(hole.hide))
+    } else {
+        (photocraft_algo::remove::dilate(w, h, &painted, GROW), None, None)
+    };
+    if let Some(sel) = doc.selection.as_ref() {
+        for (i, c) in coverage(sel, win).into_iter().enumerate() {
+            if c <= 0.0 {
+                m[i] = false;
+                if let Some(wt) = weight.as_mut() {
+                    wt[i] = 0.0;
+                }
+            }
         }
     }
-    Ok(m)
+    Ok((m, weight, hide))
 }
 
 /// The window's pixels and the hole, read on `doc` (a snapshot) before the fill.
@@ -159,18 +191,15 @@ struct Prepared {
     img: Region,
     fmt: photocraft_color::PixelFormat,
     hole: Vec<bool>,
+    /// The paste-back weights over the hole (`None`: a hard edge).
+    weight: Option<Vec<f32>>,
+    /// What the model doesn't see besides the hole (Remove with AI: the letters around it).
+    hide: Option<Vec<bool>>,
 }
 
 /// Reads what the fill needs. `None` when the layer's own window is fully transparent: nothing to
 /// remove and nothing to fill from.
 fn prepare(doc: &mut Document, plan: &Plan, p: &Value) -> Result<Option<Prepared>> {
-    let hole = hole(plan, doc.selection.as_ref())?;
-    if !hole.iter().any(|m| *m) {
-        return Err(bad(CMD, "the stroke doesn't cover anything that can change (check the selection)"));
-    }
-    if hole.iter().all(|m| *m) {
-        return Err(bad(CMD, "nothing is left around the stroke to fill it from"));
-    }
     let win = plan.window;
     let (img, fmt) = {
         let (surf, _) = crate::channel_cmds::target_surface(doc, plan.id, p)?;
@@ -178,16 +207,23 @@ fn prepare(doc: &mut Document, plan: &Plan, p: &Value) -> Result<Option<Prepared
         let img = if plan.all_layers { composite_region(doc, None, SampleLayers::All, win, fmt) } else { Region::read(surf, win) };
         (img, fmt)
     };
+    let (hole, weight, hide) = hole(plan, doc, &img, &fmt)?;
+    if !hole.iter().any(|m| *m) {
+        return Err(bad(CMD, "the stroke doesn't cover anything that can change (check the selection)"));
+    }
+    if hole.iter().all(|m| *m) {
+        return Err(bad(CMD, "nothing is left around the stroke to fill it from"));
+    }
     // A no-op without the fill or a history step, as the other retouch tools on an empty layer.
     if !plan.all_layers && alpha_index(&fmt).is_some_and(|a| img.data.chunks_exact(img.ch).all(|px| px.get(a).is_none_or(|v| *v <= 0.0))) {
         return Ok(None);
     }
-    Ok(Some(Prepared { img, fmt, hole }))
+    Ok(Some(Prepared { img, fmt, hole, weight, hide }))
 }
 
 /// The filled window and the hole it fills, by patch-based completion on `doc` (a snapshot).
 fn run_remove(doc: &mut Document, plan: &Plan, p: &Value, ctx: &crate::jobs::JobCtx, label: &str) -> Result<Option<(Region, Vec<bool>)>> {
-    let Some(Prepared { img, fmt, hole }) = prepare(doc, plan, p)? else { return Ok(None) };
+    let Some(Prepared { img, fmt, hole, .. }) = prepare(doc, plan, p)? else { return Ok(None) };
     ctx.check()?;
     let win = plan.window;
     let (w, h) = (win.width() as usize, win.height() as usize);
@@ -227,20 +263,33 @@ fn fill_to_new_layer(doc: &mut Document, id: Option<LayerId>, out: &Region, hole
     Ok((out.rect, nid))
 }
 
-/// The window with the AI's RGB `generated` in the hole (alpha kept), in the layer's format.
+/// The window with the AI's RGB `generated` in the hole (alpha kept), in the layer's format,
+/// blended by the hole's paste-back weights.
 fn encode_ai(prep: Prepared, rect: Rect, generated: &[f32]) -> Result<(Region, Vec<bool>)> {
-    let Prepared { img, fmt, hole } = prep;
+    let Prepared { img, fmt, hole, weight, .. } = prep;
     let n = fmt.channels().max(1);
     if generated.len() != hole.len() * 3 || img.data.len() != hole.len() * n {
         return Err(EngineError::Other("AI fill: window size mismatch".into()));
     }
+    // Remove with AI: a bubble's fill takes the bubble's white exactly.
+    let settled;
+    let generated = if weight.is_some() {
+        let mut g = generated.to_vec();
+        super::ink_mask::settle_paper(rect.width() as usize, rect.height() as usize, &crate::ai_inpaint_cmds::to_rgb(&fmt, &img.data), &hole, &mut g);
+        settled = g;
+        &settled[..]
+    } else {
+        generated
+    };
     let mut data = img.data.clone();
     let mut enc = [0.0f32; 8];
     for (i, m) in hole.iter().enumerate() {
         if *m {
-            let a = to_rgba(&fmt, &img.data[i * n..(i + 1) * n])[3];
+            let orig = to_rgba(&fmt, &img.data[i * n..(i + 1) * n]);
             let g = &generated[i * 3..i * 3 + 3];
-            from_rgba_into(&fmt, [g[0], g[1], g[2], a], &mut enc);
+            let k = weight.as_ref().and_then(|wt| wt.get(i)).copied().unwrap_or(1.0);
+            let mix = |c: usize| orig[c] + (g[c] - orig[c]) * k;
+            from_rgba_into(&fmt, [mix(0), mix(1), mix(2), orig[3]], &mut enc);
             data[i * n..(i + 1) * n].copy_from_slice(&enc[..n]);
         }
     }
@@ -271,12 +320,17 @@ fn apply_fill(s: &mut Session, label: &'static str, id: Option<LayerId>, p: &Val
 }
 
 pub(super) fn remove(s: &mut Session, p: &Value) -> Result<Value> {
-    remove_labelled(s, p, "Remove")
+    run_labelled(s, p, "Remove", false)
 }
 
-/// [`remove`] as one undo step named `label` (Remove with AI's strokes).
-pub(crate) fn remove_labelled(s: &mut Session, p: &Value, label: &'static str) -> Result<Value> {
-    let mut plan = plan(s, p)?;
+/// Remove with AI's strokes: [`remove`] (in its AI mode) as one undo step named `label`, the hole
+/// grown over the ink the strokes touch and feathered in ([`super::ink_mask`]).
+pub(crate) fn remove_ink_labelled(s: &mut Session, p: &Value, label: &'static str) -> Result<Value> {
+    run_labelled(s, p, label, true)
+}
+
+fn run_labelled(s: &mut Session, p: &Value, label: &'static str, ink: bool) -> Result<Value> {
+    let mut plan = plan(s, p, ink)?;
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let doc = d.doc.clone();
     let p = p.clone();
@@ -292,6 +346,7 @@ pub(crate) fn remove_labelled(s: &mut Session, p: &Value, label: &'static str) -
         let (w, h) = (win.width() as usize, win.height() as usize);
         let rgb = crate::ai_inpaint_cmds::to_rgb(&prep.fmt, &prep.img.data);
         let cover: Vec<f32> = prep.hole.iter().map(|m| if *m { 1.0 } else { 0.0 }).collect();
+        let hidden = prep.hide.as_ref().map(|hide| prep.hole.iter().zip(hide).map(|(m, x)| if *m || *x { 1.0 } else { 0.0 }).collect());
         return crate::jobs::run_async(
             s,
             label,
@@ -303,6 +358,7 @@ pub(crate) fn remove_labelled(s: &mut Session, p: &Value, label: &'static str) -
                     ctx.clone(),
                     rgb,
                     cover,
+                    hidden,
                     w,
                     h,
                     opts,

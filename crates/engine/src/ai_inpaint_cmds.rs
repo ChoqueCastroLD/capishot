@@ -171,7 +171,9 @@ impl Hooks for JobHooks {
 /// Receives the generated RGB and the model that made it.
 pub(crate) type FillDone = Box<dyn FnOnce(Result<(Vec<f32>, &'static ModelInfo)>) + Send>;
 
-/// The AI fill of a `w×h` region (`rgb` interleaved RGB 0..=1, `cover` the hole's coverage),
+/// The AI fill of a `w×h` region (`rgb` interleaved RGB 0..=1, `cover` the hole's coverage,
+/// `hidden` what the model doesn't see when more than the hole: [`super::retouch_cmds`]'s letters
+/// around it),
 /// without blocking: each tile's request starts from the previous one's `done`, and `finish`
 /// gets the generated RGB for every pixel (equal to `rgb` outside the hole) and the model that
 /// made it (another than `opts.model` after a GPU failure, see [`gpu_fallback`]). Works with an
@@ -184,6 +186,7 @@ pub(crate) fn ai_fill_rgb_async(
     ctx: JobCtx,
     rgb: Vec<f32>,
     cover: Vec<f32>,
+    hidden: Option<Vec<f32>>,
     w: usize,
     h: usize,
     opts: AiOptions,
@@ -196,7 +199,8 @@ pub(crate) fn ai_fill_rgb_async(
     };
     let binary: Vec<f32> = cover.iter().map(|c| if *c > 0.0 { 1.0 } else { 0.0 }).collect();
     let generated = rgb.clone();
-    let state = FillState { svc, ctx, rgb, cover, binary, generated, w, h, opts, plan, next: 0, finish };
+    let input = hidden.filter(|m| m.len() == cover.len()).unwrap_or_else(|| cover.clone());
+    let state = FillState { svc, ctx, rgb, cover, input, binary, generated, w, h, opts, plan, next: 0, finish };
     fill_step(state);
 }
 
@@ -205,6 +209,8 @@ struct FillState {
     ctx: JobCtx,
     rgb: Vec<f32>,
     cover: Vec<f32>,
+    /// The model's input mask: `cover`, or more (hidden from the model, not filled).
+    input: Vec<f32>,
     binary: Vec<f32>,
     generated: Vec<f32>,
     w: usize,
@@ -223,7 +229,7 @@ fn fill_step(mut st: FillState) {
     if let Err(e) = st.ctx.check() {
         return (st.finish)(Err(e));
     }
-    let input = match tiles::extract(&st.rgb, &st.cover, st.w, st.h, &t) {
+    let input = match tiles::extract(&st.rgb, &st.input, st.w, st.h, &t) {
         Ok(i) => i,
         Err(e) => return (st.finish)(Err(bad(e.to_string()))),
     };
@@ -400,6 +406,7 @@ pub(crate) fn inpaint_ai_labelled(s: &mut Session, p: &Value, label: &'static st
                 ctx.clone(),
                 rgb,
                 cover,
+                None,
                 w,
                 h,
                 opts,

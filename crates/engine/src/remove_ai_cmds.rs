@@ -4,7 +4,9 @@
 //! side on a GPU, 768 on a CPU, 512, LaMa's own working size, on phones and machines of 4 GB or
 //! less, one crop at a time, so a run stays within a phone's memory cap), with a wide context
 //! margin. The GPU runs it when there is one, the CPU otherwise or
-//! when the GPU fails mid-run (still Manga LaMa). One undo step, "Remove with AI", on the target
+//! when the GPU fails mid-run (still Manga LaMa). A stroke's hole grows first so nothing of what
+//! it touched is left for the model to rebuild from, and the model doesn't see the letters around
+//! it (`retouch_cmds::ink_mask`). One undo step, "Remove with AI", on the target
 //! layer. A background job, cancellable.
 
 use serde_json::{Value, json};
@@ -53,7 +55,7 @@ fn remove_ai(s: &mut Session, p: &Value) -> Result<Value> {
         q.insert("ai".into(), json!(true));
         q.insert("newLayer".into(), json!(false));
         q.entry("closeLoops").or_insert(json!(true));
-        return crate::retouch_cmds::remove::remove_labelled(s, &Value::Object(q), LABEL);
+        return crate::retouch_cmds::remove::remove_ink_labelled(s, &Value::Object(q), LABEL);
     }
     q.insert("output".into(), json!("current"));
     crate::ai_inpaint_cmds::inpaint_ai_labelled(s, &Value::Object(q), LABEL)
@@ -72,7 +74,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: LABEL,
         menu: &[],
         shortcut: None,
-        params: r#"{"strokes"?: [[[x,y,pressure?],…],…] or "points"?: [[x,y],…] (what was painted, with "size": px, as paint.remove; a stroke around an object removes what it encloses), else the selection, "sampleAllLayers"?: bool, "layer"?: id, "allowDownload"?: bool (fetch Manga LaMa, about 100 MB, when it isn't on this device), "device"?: "auto"|"gpu"|"cpu"} -> {"damage"|"region", …}. Erases it and fills it with Manga LaMa at its best (never the lite model; crops at full resolution up to 1024 px on a GPU, 768 on a CPU, 512 on phones; 128 px of context), on the target layer, as one undo step ("Remove with AI"). A background job; the GPU's failure retries on the CPU."#,
+        params: r#"{"strokes"?: [[[x,y,pressure?],…],…] or "points"?: [[x,y],…] (what was painted, with "size": px, as paint.remove; a stroke around an object removes what it encloses), else the selection, "sampleAllLayers"?: bool, "layer"?: id, "allowDownload"?: bool (fetch Manga LaMa, about 100 MB, when it isn't on this device), "device"?: "auto"|"gpu"|"cpu"} -> {"damage"|"region", …}. Erases it and fills it with Manga LaMa at its best (a stroke's hole grows over the ink it touches, nearby letters are hidden from the model, a fill meeting flat paper takes its tone, the edge feathers in; never the lite model; crops at full resolution up to 1024 px on a GPU, 768 on a CPU, 512 on phones; 128 px of context), on the target layer, as one undo step ("Remove with AI"). A background job; the GPU's failure retries on the CPU."#,
         enabled,
         run: remove_ai,
         journal: true,
@@ -126,6 +128,48 @@ mod tests {
         let id = s.active().unwrap().active_layer.unwrap();
         let v = s.active().unwrap().doc.layer(id).unwrap().surface().unwrap().pixel(x, y);
         v[0] > 0.9 && v[1] < 0.1
+    }
+
+    fn grey_at(s: &Session, x: i32, y: i32) -> f32 {
+        let id = s.active().unwrap().active_layer.unwrap();
+        s.active().unwrap().doc.layer(id).unwrap().surface().unwrap().pixel(x, y)[0]
+    }
+
+    /// A white page with a word of two letters (60..72 and 76..88 × 40..70), a letter of the next
+    /// word (120..132) and a long line under them (y 73..75).
+    fn lettered(fake: Arc<FakeInpainter>) -> Session {
+        let mut s = page(fake, true);
+        s.execute("file.new", json!({"width": 240, "height": 120, "background": "white"})).unwrap();
+        s.edit("letters", |doc, active| {
+            let surf = doc.layer_mut(active.unwrap()).unwrap().surface_mut().unwrap();
+            for r in [Rect::new(60, 40, 72, 70), Rect::new(76, 40, 88, 70), Rect::new(120, 40, 132, 70), Rect::new(0, 73, 240, 75)] {
+                surf.fill_rect(r, &[0.0, 0.0, 0.0, 1.0]);
+            }
+            Ok(())
+        })
+        .unwrap();
+        s
+    }
+
+    #[test]
+    fn a_rough_stroke_over_a_word_leaves_nothing_of_it_and_nothing_else_changes() {
+        // The stroke covers the word's middle only (y 47..63, x 50..86): its tops and bottoms and
+        // the second letter's right edge are outside it.
+        let stroke = json!({"strokes": [[[58, 55], [78, 55]]], "size": 16});
+        let mut s = lettered(Arc::new(FakeInpainter::default()));
+        s.execute(ID, stroke.clone()).unwrap();
+        for (x, y) in [(61, 41), (66, 69), (87, 41), (87, 55), (80, 69)] {
+            assert_eq!(grey_at(&s, x, y), 1.0, "the word is gone, its paper white, at {x},{y}");
+        }
+        assert_eq!(grey_at(&s, 126, 55), 0.0, "the next word stays");
+        assert_eq!(grey_at(&s, 30, 74), 0.0, "the line stays");
+        assert_eq!(grey_at(&s, 74, 74), 0.0, "also under the word");
+        // The Remove tool's AI mode with the same stroke leaves the word's edges.
+        let mut s = lettered(Arc::new(FakeInpainter::default()));
+        let mut old = stroke;
+        old["ai"] = json!(true);
+        s.execute("paint.remove", old).unwrap();
+        assert!(grey_at(&s, 61, 41) < 0.5 && grey_at(&s, 87, 41) < 0.5, "paint.remove keeps its own hole");
     }
 
     #[test]
