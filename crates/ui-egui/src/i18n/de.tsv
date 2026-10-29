@@ -3711,3 +3711,6 @@ curves	Smooth	Glätten
 	Starting the download…	Download wird gestartet …
 	The download failed: {reason}	Der Download ist fehlgeschlagen: {reason}
 	Couldn't write the file, downloaded it instead: {error}	Die Datei konnte nicht geschrieben werden, sie wurde stattdessen heruntergeladen: {error}
+	Line spacing (leading)	Zeilenabstand
+	Line spacing of 120% of the size	Zeilenabstand von 120 % der Größe
+	Auto leading	Automatischer Zeilenabstand

@@ -2317,6 +2317,87 @@ fn bubble_type_margin_rewraps_the_selected_bubble() {
     assert!(lines(&mut app) > before, "a wider margin, more lines");
 }
 
+fn leading_of(app: &PhotocraftApp, id: u64) -> Option<f32> {
+    text(app, LayerId(id)).char_runs().first().and_then(|r| r.style.leading_pt)
+}
+
+/// Line spacing from the options bar: Auto leading off sets the bubble's spacing to what Auto
+/// gave (120% of the size), on again goes back to Auto, live on the selected bubble text.
+#[test]
+fn options_bar_line_spacing_sets_the_selected_bubble_text() {
+    use crate::canvas::{ToolEvent, tool_event};
+    let mut app = bubble_page();
+    app.ui.tool_options.bubble_styles.bubble.size = 20.0;
+    tool_event(&mut app, ToolEvent::Down { x: 750.0, y: 350.0, pressure: 1.0 }, Modifiers::NONE);
+    tool_event(&mut app, ToolEvent::Up { x: 750.0, y: 350.0 }, Modifiers::NONE);
+    let id = app.ui.text_edit.as_ref().unwrap().layer;
+    super::insert(&mut app, "Two lines\nof text");
+    super::commit(&mut app);
+    assert_eq!(leading_of(&app, id), None, "the bubble style's Auto");
+    let mut h = egui_kittest::Harness::builder().with_size(vec2(1600.0, 60.0)).build_ui_state(
+        |ui, app: &mut PhotocraftApp| {
+            ui.horizontal(|ui| crate::type_tool::options_bar(app, ui));
+        },
+        app,
+    );
+    PhotocraftApp::setup_context(&h.ctx, Default::default());
+    h.run_steps(2);
+    h.get_by_label("Auto leading").click();
+    h.run_steps(2);
+    let l = leading_of(h.state(), id).expect("a set leading now");
+    assert!((l - 24.0).abs() < 0.01, "{l}");
+    h.get_by_label("Auto leading").click();
+    h.run_steps(2);
+    assert_eq!(leading_of(h.state(), id), None);
+}
+
+/// The phone type bar's line spacing: a button opens Auto, a point either way and spacings of
+/// the size; each applies to the edited layer at once.
+#[test]
+fn touch_bar_line_spacing_applies_live() {
+    use crate::canvas::{ToolEvent, tool_event};
+    let mut app = bubble_page();
+    app.ui.tool = crate::state::Tool::Type;
+    app.ui.tool_options.type_size = 30.0;
+    tool_event(&mut app, ToolEvent::Down { x: 200.0, y: 200.0, pressure: 1.0 }, Modifiers::NONE);
+    tool_event(&mut app, ToolEvent::Up { x: 200.0, y: 200.0 }, Modifiers::NONE);
+    let id = app.ui.text_edit.as_ref().unwrap().layer;
+    super::insert(&mut app, "One\nTwo");
+    let mut h = egui_kittest::Harness::builder().with_size(vec2(420.0, 300.0)).build_ui_state(
+        |ui, app: &mut PhotocraftApp| {
+            // The app's fonts are set up after the harness's first frame and bound a frame later.
+            let frames = egui::Id::new("frames-before-fonts");
+            let n = ui.data(|d| d.get_temp::<u32>(frames).unwrap_or(0));
+            if n < 2 {
+                if n == 0 {
+                    PhotocraftApp::setup_context(ui.ctx(), Default::default());
+                }
+                ui.data_mut(|d| d.insert_temp(frames, n + 1));
+                ui.ctx().request_repaint();
+                return;
+            }
+            ui.add_space(220.0);
+            ui.horizontal(|ui| crate::type_tool::touch_bar(app, ui));
+        },
+        app,
+    );
+    PhotocraftApp::setup_context(&h.ctx, Default::default());
+    h.run_steps(4);
+    h.get_by_label("Line spacing (leading)").click();
+    // The popup takes a frame to size itself and settle.
+    h.run_steps(4);
+    h.get_by_label("150%").click();
+    h.run_steps(2);
+    assert_eq!(leading_of(h.state(), id), Some(45.0));
+    h.get_by_label("+").click();
+    h.run_steps(2);
+    assert_eq!(leading_of(h.state(), id), Some(46.0));
+    h.get_by_label("Auto").click();
+    h.run_steps(2);
+    assert_eq!(leading_of(h.state(), id), None);
+    assert!(h.state().ui.text_edit.is_some(), "still typing");
+}
+
 /// The Styles popover: three tabs, each style's fields, kept in the tool options; faces the
 /// family lacks are faked (Inter has no italic or bold here).
 #[test]

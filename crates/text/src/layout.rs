@@ -788,6 +788,7 @@ impl Layouter {
                 if first_indent != 0.0 {
                     layout.set_text_indent(first_indent / break_scale, IndentOptions::default());
                 }
+                let before = slots.last;
                 let mut breaker = layout.break_lines();
                 breaker.state_mut().set_layout_max_advance(max);
                 let mut first = true;
@@ -808,6 +809,11 @@ impl Layouter {
                     }
                 }
                 breaker.finish();
+                // The loop takes a band before it learns the paragraph has no more lines: that
+                // last band is no line's, and the next paragraph goes a leading from the last
+                // real one (it went two, doubling the gap at every paragraph break).
+                line_slots.truncate(layout.len());
+                slots.last = line_slots.last().map(|s| s.baseline).or(before);
             } else {
                 break_lines(&mut layout);
             }

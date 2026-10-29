@@ -3700,3 +3700,6 @@ curves	Smooth	Haluskan
 	Starting the download…	Memulai unduhan…
 	The download failed: {reason}	Unduhan gagal: {reason}
 	Couldn't write the file, downloaded it instead: {error}	Tidak dapat menulis file, file diunduh sebagai gantinya: {error}
+	Line spacing (leading)	Spasi baris
+	Line spacing of 120% of the size	Spasi baris 120% dari ukuran
+	Auto leading	Spasi baris otomatis

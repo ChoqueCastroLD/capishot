@@ -4806,3 +4806,6 @@ shape	Appearance	Aspetto
 	Starting the download…	Avvio del download…
 	The download failed: {reason}	Il download non è riuscito: {reason}
 	Couldn't write the file, downloaded it instead: {error}	Impossibile scrivere il file; è stato scaricato: {error}
+	Line spacing (leading)	Interlinea
+	Line spacing of 120% of the size	Interlinea del 120% della dimensione
+	Auto leading	Interlinea automatica

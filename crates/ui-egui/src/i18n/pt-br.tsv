@@ -4684,3 +4684,5 @@ layerLabel	No Color	Sem cor
 	Starting the download…	Iniciando o download…
 	The download failed: {reason}	O download falhou: {reason}
 	Couldn't write the file, downloaded it instead: {error}	Não foi possível gravar o arquivo; ele foi baixado: {error}
+	Line spacing (leading)	Entrelinha
+	Line spacing of 120% of the size	Entrelinha de 120% do tamanho

@@ -3312,3 +3312,5 @@ fontWeight	Italic	Itálico
 	Starting the download…	A iniciar a transferência…
 	The download failed: {reason}	A transferência falhou: {reason}
 	Couldn't write the file, downloaded it instead: {error}	Não foi possível escrever o ficheiro; foi transferido: {error}
+	Line spacing (leading)	Entrelinha
+	Line spacing of 120% of the size	Entrelinha de 120% do tamanho

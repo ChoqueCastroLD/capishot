@@ -713,6 +713,8 @@ pub struct ToolOptions {
     pub type_size: f32,
     pub type_aa: String,
     pub type_align: String,
+    /// Type tool: line spacing (leading) of new type, in points; `None` is Auto (120% of the size).
+    pub type_leading: Option<f32>,
     /// Bubble Type: its three text styles (bubble, narration box, floating text).
     pub bubble_styles: BubbleStyles,
     /// Bubble Type: which style a click uses: `auto` (by what it hits), `bubble`, `narration`
@@ -1034,6 +1036,7 @@ impl Default for ToolOptions {
             type_size: 48.0,
             type_aa: "sharp".into(),
             type_align: "left".into(),
+            type_leading: None,
             bubble_styles: BubbleStyles::default(),
             bubble_pick: "auto".into(),
             clone_aligned: true,

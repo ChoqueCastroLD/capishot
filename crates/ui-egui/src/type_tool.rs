@@ -512,6 +512,9 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
         "align": o.type_align,
         "color": hex(app.session.tools.foreground),
     });
+    if let Some(l) = o.type_leading {
+        p["leading"] = json!(l);
+    }
     let bubble = app.ui.tool == crate::state::Tool::BubbleType;
     if w >= min && h >= min {
         p["box"] = json!([start[0].min(end[0]).round(), start[1].min(end[1]).round(), w.round(), h.round()]);
@@ -519,7 +522,7 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
         // Bubble Type: type in the bubble or narration box under the click, else floating text,
         // each in its own style (the tool's Styles).
         if let serde_json::Value::Object(m) = &mut p {
-            for k in ["font", "fontStyle", "size", "align", "color"] {
+            for k in ["font", "fontStyle", "size", "align", "color", "leading"] {
                 m.remove(k);
             }
         }
@@ -2277,6 +2280,118 @@ fn in_path_options(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 
 /// Bubble Type: the style chip and the Styles popover; for selected bubble text, where its lines
 /// sit and the margin inside it, applied live.
+/// The line spacing (leading) shown: of the type target (its layer's points: `None` is Auto),
+/// the size it's relative to and the paragraph's auto factor; without a target, the tool's for
+/// new type.
+fn shown_leading(app: &PhotocraftApp) -> (Option<f32>, f32, f32) {
+    match styles_at(app) {
+        Some((c, p)) => (c.leading_pt, c.size_pt, p.auto_leading.max(0.01)),
+        None => (app.ui.tool_options.type_leading, app.ui.tool_options.type_size, 1.2),
+    }
+}
+
+/// Set the line spacing in the target layer's points (`None`: Auto, 120% of the size), live on
+/// the type target and for new type.
+fn set_leading(app: &mut PhotocraftApp, ctx: &egui::Context, pt: Option<f32>) {
+    app.ui.tool_options.type_leading = pt.map(|v| v.clamp(0.1, 5000.0));
+    if target(app).is_some() {
+        apply(app, ctx, json!({ "leading": pt.map_or(json!("auto"), |v| json!(v.clamp(0.1, 5000.0))) }));
+    }
+}
+
+/// The options bar's line spacing (Type and Bubble Type): the leading in the type unit, and Auto.
+fn leading_options(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    let (lead, size, auto_k) = shown_leading(app);
+    let k = shown_scale(app);
+    let (u, unit) = type_unit(app);
+    crate::widgets::vline(ui, 22.0);
+    ui.spacing_mut().item_spacing.x = 4.0;
+    let (r, resp) = ui.allocate_exact_size(egui::vec2(18.0, 22.0), egui::Sense::hover());
+    crate::icons::paint(ui, r, "line-height", 16.0, crate::theme::Tokens::get(ui.ctx()).text_dim);
+    resp.on_hover_text(tl!("Line spacing (leading)"));
+    let mut shown = lead.unwrap_or(size * auto_k) * k * u;
+    if crate::widgets::value_field(ui, &mut shown, 0.1 * u..=5000.0 * u, unit, 56.0).on_hover_text(tl!("Line spacing (leading)")).changed() {
+        set_leading(app, ui.ctx(), Some(shown / u / k));
+    }
+    let auto = lead.is_none();
+    if ui.selectable_label(auto, tl!("Auto leading")).on_hover_text(tl!("Line spacing of 120% of the size")).clicked() {
+        set_leading(app, ui.ctx(), if auto { Some(size * auto_k) } else { None });
+    }
+    ui.spacing_mut().item_spacing.x = 8.0;
+}
+
+/// The phone type bar's line spacing button and its popup: Auto, a step of a point either way,
+/// and spacings relative to the size; applied to the edited layer as they're chosen.
+fn touch_leading(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    let open_id = egui::Id::new("type-leading-open");
+    let open = ui.data(|d| d.get_temp::<bool>(open_id).unwrap_or(false));
+    let button = crate::icons::button(ui, "line-height", 44.0, open, tl!("Line spacing (leading)"));
+    crate::touch_ui::note_rect(ui.ctx(), "typeLeading", button.rect);
+    if button.clicked() {
+        ui.data_mut(|d| d.insert_temp(open_id, !open));
+    }
+    if !ui.data(|d| d.get_temp::<bool>(open_id).unwrap_or(false)) {
+        return;
+    }
+    let (lead, size, auto_k) = shown_leading(app);
+    let k = shown_scale(app);
+    let (u, unit) = type_unit(app);
+    let t = crate::theme::Tokens::get(ui.ctx());
+    let screen = crate::safe_area::rect(ui.ctx());
+    let x = button.rect.center().x.clamp(screen.left() + 150.0, (screen.right() - 150.0).max(screen.left() + 150.0));
+    let area = egui::Area::new(egui::Id::new("type-leading"))
+        .order(egui::Order::Foreground)
+        .pivot(egui::Align2::CENTER_BOTTOM)
+        .fixed_pos(egui::pos2(x, button.rect.top() - 8.0))
+        .show(ui.ctx(), |ui| {
+            egui::Frame::popup(ui.style()).fill(t.chrome).show(ui, |ui| {
+                ui.set_width(280.0);
+                ui.label(egui::RichText::new(tl!("Line spacing (leading)")).font(crate::theme::semibold(14.0)));
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    let auto = lead.is_none();
+                    let r = ui.add_sized([72.0, 40.0], egui::Button::new(tl!("Auto")).selected(auto));
+                    crate::touch_ui::note_rect(ui.ctx(), "typeLeadingAuto", r.rect);
+                    if r.clicked() && !auto {
+                        set_leading(app, ui.ctx(), None);
+                    }
+                    let current = lead.unwrap_or(size * auto_k);
+                    let r = ui.add_sized([40.0, 40.0], egui::Button::new("−"));
+                    crate::touch_ui::note_rect(ui.ctx(), "typeLeadingMinus", r.rect);
+                    if r.clicked() {
+                        set_leading(app, ui.ctx(), Some((current - 1.0 / k).max(0.1)));
+                    }
+                    let shown = current * k * u;
+                    ui.add_sized([80.0, 40.0], egui::Label::new(egui::RichText::new(format!("{shown:.1} {unit}")).size(15.0)));
+                    let r = ui.add_sized([40.0, 40.0], egui::Button::new("+"));
+                    crate::touch_ui::note_rect(ui.ctx(), "typeLeadingPlus", r.rect);
+                    if r.clicked() {
+                        set_leading(app, ui.ctx(), Some(current + 1.0 / k));
+                    }
+                });
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    for pct in [100, 120, 150, 200] {
+                        let v = size * pct as f32 / 100.0;
+                        let on = lead.is_some_and(|l| (l - v).abs() < 0.05);
+                        let r = ui.add_sized([60.0, 36.0], egui::Button::new(format!("{pct}%")).selected(on));
+                        crate::touch_ui::note_rect(ui.ctx(), &format!("typeLeading{pct}"), r.rect);
+                        if r.clicked() {
+                            set_leading(app, ui.ctx(), Some(v));
+                        }
+                    }
+                });
+            });
+        });
+    let outside = ui.input(|i| i.pointer.any_pressed())
+        && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| !area.response.rect.contains(p) && !button.rect.contains(p));
+    if outside || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        ui.data_mut(|d| d.insert_temp(open_id, false));
+    }
+}
+
 fn bubble_options(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     crate::bubble_type_ui::options(app, ui);
     bubble_target_options(app, ui);
@@ -2541,6 +2656,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         }
     }
     ui.spacing_mut().item_spacing.x = 8.0;
+    leading_options(app, ui);
     if app.ui.tool == crate::state::Tool::BubbleType {
         bubble_options(app, ui);
     } else {
@@ -2608,7 +2724,7 @@ pub fn touch_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     };
     ui.spacing_mut().item_spacing.x = 6.0;
     let room = ui.available_width();
-    let font_w = (room - 64.0 - 44.0 - 44.0 - 70.0 - 4.0 * 6.0).clamp(80.0, 200.0);
+    let font_w = (room - 64.0 - 44.0 - 44.0 - 44.0 - 70.0 - 5.0 * 6.0).clamp(80.0, 200.0);
     if fonts_ready(ui, font_w) {
         let preview = app.session.prefs().type_.font_preview;
         if font_picker(app, ui, &mut fam, font_w, preview) {
@@ -2650,6 +2766,7 @@ pub fn touch_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         app.ui.tool_options.type_align = next.into();
         apply(app, ui.ctx(), json!({"align": next}));
     }
+    touch_leading(app, ui);
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(70.0, 44.0), egui::Sense::click());
     ui.painter().rect_filled(rect.shrink2(egui::vec2(0.0, 4.0)), egui::CornerRadius::same(18), t.accent);
     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, tl!("Done"), crate::theme::semibold(14.0), Color32::WHITE);
@@ -3029,6 +3146,14 @@ fn type_sections(app: &mut PhotocraftApp, ui: &mut egui::Ui, character: bool, pa
             let lead = c.leading_pt.unwrap_or(c.size_pt * para.auto_leading.max(0.01)) * k;
             if let Some(v) = num_field(ui, "A↕", "Leading (set to the font size × auto-leading when Auto)", lead * u, 0.1 * u..=5000.0 * u, unit, w) {
                 apply(app, ui.ctx(), json!({"leading": v / u, "metricsAsShown": true}));
+            }
+        });
+        // Auto leading (Photoshop's "(Auto)" in the leading menu): 120% of the size.
+        ui.horizontal(|ui| {
+            let auto = c.leading_pt.is_none();
+            if ui.selectable_label(auto, tl!("Auto leading")).on_hover_text(tl!("Line spacing of 120% of the size")).clicked() {
+                let lead = c.size_pt * para.auto_leading.max(0.01);
+                set_leading(app, ui.ctx(), if auto { Some(lead) } else { None });
             }
         });
         row(ui, &mut |ui| {

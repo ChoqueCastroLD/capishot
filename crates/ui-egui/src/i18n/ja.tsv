@@ -4376,3 +4376,6 @@ curves	Smooth	スムーズ
 	Starting the download…	ダウンロードを開始しています…
 	The download failed: {reason}	ダウンロードに失敗しました: {reason}
 	Couldn't write the file, downloaded it instead: {error}	ファイルに書き込めなかったため、代わりにダウンロードしました: {error}
+	Line spacing (leading)	行送り
+	Line spacing of 120% of the size	サイズの 120% の行送り
+	Auto leading	自動行送り

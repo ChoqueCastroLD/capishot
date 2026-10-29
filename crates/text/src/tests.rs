@@ -2595,3 +2595,36 @@ fn short_type_sits_in_the_middle_and_long_type_falls_back_to_the_top() {
     assert_eq!(centred.lines.len(), from_top.lines.len());
     assert!((centred.lines[0].baseline - from_top.lines[0].baseline).abs() < 0.01);
 }
+
+/// Auto leading is 120% of the size (Photoshop's), between the lines of point text and of type
+/// in a path, across a paragraph break too (a path's paragraphs were two leadings apart); a set
+/// leading moves the lines and re-wraps type in a path.
+#[test]
+fn auto_leading_is_120_percent_in_point_and_in_path_text() {
+    let mut e = TextEngine::new();
+    let gaps = |l: &crate::TextLayout| l.lines.windows(2).map(|w| w[1].baseline - w[0].baseline).collect::<Vec<_>>();
+    let l = e.layout(&point("HELLO THERE\nSECOND LINE", 30.0), 72.0);
+    assert_eq!(gaps(&l), vec![36.0]);
+    let ellipse = crate::area::tests_ellipse(200.0, 150.0, 170.0, 120.0);
+    let in_path = |text: &str, leading: Option<f32>| {
+        let style = CharStyle { font_family: "Inter".into(), size_pt: 30.0, leading_pt: leading, ..Default::default() };
+        let t = TextLayer { text: text.into(), runs: vec![TextRun { len: text.len(), style }], shape: TextShape::in_path(ellipse.clone()), ..Default::default() };
+        with_para(t, ParagraphStyle { align: TextAlign::Center, ..Default::default() })
+    };
+    for text in ["HELLO THERE\nSECOND LINE", "HELLO\nTHERE\nTHIRD", "A LONGER LINE OF TYPE THAT WRAPS IN THE BALLOON"] {
+        let l = e.layout(&in_path(text, None), 72.0);
+        assert!(l.lines.len() >= 2, "{text}");
+        for g in gaps(&l) {
+            assert!((g - 36.0).abs() < 0.01, "{text}: {:?}", gaps(&l));
+        }
+    }
+    // A set leading: the lines that far apart, and fewer of them fit (re-wrapped).
+    let long = "A LONGER LINE OF TYPE THAT WRAPS IN THE BALLOON AND GOES ON A WHILE LONGER STILL";
+    let auto = e.layout(&in_path(long, None), 72.0);
+    let wide = e.layout(&in_path(long, Some(60.0)), 72.0);
+    for g in gaps(&wide) {
+        assert!((g - 60.0).abs() < 0.01, "{:?}", gaps(&wide));
+    }
+    let breaks = |l: &crate::TextLayout| l.lines.iter().map(|x| x.range.end).collect::<Vec<_>>();
+    assert_ne!(breaks(&auto), breaks(&wide), "re-wrapped to the bands at the new leading");
+}

@@ -3342,3 +3342,6 @@ curves	Smooth	平滑
 	Starting the download…	正在开始下载…
 	The download failed: {reason}	下载失败：{reason}
 	Couldn't write the file, downloaded it instead: {error}	无法写入文件，已改为下载：{error}
+	Line spacing (leading)	行距
+	Line spacing of 120% of the size	字号 120% 的行距
+	Auto leading	自动行距

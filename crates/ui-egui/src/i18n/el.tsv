@@ -4393,3 +4393,6 @@ curves	Smooth	Εξομάλυνση
 	Starting the download…	Έναρξη λήψης…
 	The download failed: {reason}	Η λήψη απέτυχε: {reason}
 	Couldn't write the file, downloaded it instead: {error}	Δεν ήταν δυνατή η εγγραφή του αρχείου· έγινε λήψη του: {error}
+	Line spacing (leading)	Διάστιχο
+	Line spacing of 120% of the size	Διάστιχο 120% του μεγέθους
+	Auto leading	Αυτόματο διάστιχο

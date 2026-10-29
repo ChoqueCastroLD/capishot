@@ -4856,3 +4856,5 @@ navigator	Zoom	Zoom
 	Starting the download…	Iniciando la descarga…
 	The download failed: {reason}	La descarga falló: {reason}
 	Couldn't write the file, downloaded it instead: {error}	No se pudo escribir el archivo; se descargó en su lugar: {error}
+	Line spacing (leading)	Interlineado
+	Line spacing of 120% of the size	Interlineado del 120% del tamaño

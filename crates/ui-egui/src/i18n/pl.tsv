@@ -4302,3 +4302,6 @@ curves	Smooth	Wygładź
 	Starting the download…	Rozpoczynanie pobierania…
 	The download failed: {reason}	Pobieranie nie powiodło się: {reason}
 	Couldn't write the file, downloaded it instead: {error}	Nie udało się zapisać pliku; zamiast tego został pobrany: {error}
+	Line spacing (leading)	Interlinia
+	Line spacing of 120% of the size	Interlinia 120% rozmiaru
+	Auto leading	Automatyczna interlinia

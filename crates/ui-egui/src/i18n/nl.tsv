@@ -4452,3 +4452,6 @@ curves	Smooth	Vloeiend maken
 	Starting the download…	Download wordt gestart…
 	The download failed: {reason}	Het downloaden is mislukt: {reason}
 	Couldn't write the file, downloaded it instead: {error}	Het bestand kon niet worden geschreven; het is gedownload: {error}
+	Line spacing (leading)	Regelafstand
+	Line spacing of 120% of the size	Regelafstand van 120% van de grootte
+	Auto leading	Automatische regelafstand

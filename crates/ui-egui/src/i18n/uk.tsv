@@ -4411,3 +4411,6 @@ curves	Smooth	Згладити
 	Starting the download…	Починається завантаження…
 	The download failed: {reason}	Завантаження не вдалося: {reason}
 	Couldn't write the file, downloaded it instead: {error}	Не вдалося записати файл, натомість його завантажено: {error}
+	Line spacing (leading)	Інтерліньяж
+	Line spacing of 120% of the size	Інтерліньяж 120% від розміру
+	Auto leading	Автоматичний інтерліньяж

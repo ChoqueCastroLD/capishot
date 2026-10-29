@@ -366,6 +366,28 @@ mod tests {
         assert!(s.execute(CMD, json!({"x": 1, "y": 2, "styles": {"floating": {"stroke": {"width": -1}}}})).is_err());
     }
 
+    /// The styles' line spacing applies: a set leading spaces the bubble's lines that far apart,
+    /// Auto 120% of the size (across a paragraph break too).
+    #[test]
+    fn bubble_styles_line_spacing_applies() {
+        let mut s = page();
+        outlined(&mut s, "ellipse", [40, 40, 320, 240], json!({}));
+        let gaps = |s: &Session, id: u64| {
+            let st = s.active().unwrap();
+            let LayerContent::Text(t) = &st.doc.layer(LayerId(id)).unwrap().content else { panic!("not a type layer") };
+            let l = photocraft_text::shared().lock().unwrap().layout(t, st.doc.resolution_dpi);
+            l.lines.windows(2).map(|w| w[1].baseline - w[0].baseline).collect::<Vec<_>>()
+        };
+        for (leading, want) in [(json!(40), 40.0f32), (json!("auto"), 24.0)] {
+            let styles = json!({"bubble": {"size": 20, "leading": leading}});
+            let r = s.execute(CMD, json!({"x": 200, "y": 160, "text": "One line\nAnother", "styles": styles})).unwrap();
+            assert_eq!(r["style"], "bubble");
+            let g = gaps(&s, r["layer"].as_u64().unwrap());
+            assert!(!g.is_empty() && g.iter().all(|v| (v - want).abs() < 0.01), "{leading}: {g:?}");
+            s.undo();
+        }
+    }
+
     /// A box is narration: type in its rectangle, in the narration style (left, from the top);
     /// a rounded box with small corners too; an oval and a spiky bubble are bubbles.
     #[test]
