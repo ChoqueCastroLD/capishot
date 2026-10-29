@@ -3311,3 +3311,4 @@ fontWeight	Italic	Itálico
 	Downloading… {pct}%	A transferir… {pct}%
 	Starting the download…	A iniciar a transferência…
 	The download failed: {reason}	A transferência falhou: {reason}
+	Couldn't write the file, downloaded it instead: {error}	Não foi possível escrever o ficheiro; foi transferido: {error}

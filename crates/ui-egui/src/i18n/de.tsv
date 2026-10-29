@@ -3710,3 +3710,4 @@ curves	Smooth	Glätten
 	Downloading… {pct}%	Wird heruntergeladen … {pct} %
 	Starting the download…	Download wird gestartet …
 	The download failed: {reason}	Der Download ist fehlgeschlagen: {reason}
+	Couldn't write the file, downloaded it instead: {error}	Die Datei konnte nicht geschrieben werden, sie wurde stattdessen heruntergeladen: {error}

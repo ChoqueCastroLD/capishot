@@ -197,12 +197,12 @@ fn request(method: String, params: Value) -> js_sys::Promise {
 
 /// The bytes of an ArrayBuffer, a typed array or a Blob.
 async fn bytes_of(data: JsValue) -> Result<Vec<u8>, String> {
+    // A slice at a time: a big file copied in one go held the page (see `web::read_blob`).
     if let Some(blob) = data.dyn_ref::<web_sys::Blob>() {
-        let buf = JsFuture::from(blob.array_buffer()).await.map_err(|e| format!("{e:?}"))?;
-        return Ok(js_sys::Uint8Array::new(&buf).to_vec());
+        return crate::web::read_blob(blob).await;
     }
     if data.is_instance_of::<js_sys::ArrayBuffer>() || js_sys::ArrayBuffer::is_view(&data) {
-        return Ok(js_sys::Uint8Array::new(&data).to_vec());
+        return Ok(crate::web::read_array(&js_sys::Uint8Array::new(&data)).await);
     }
     Err("open takes an ArrayBuffer, a typed array or a Blob".into())
 }

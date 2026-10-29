@@ -4451,3 +4451,4 @@ curves	Smooth	Vloeiend maken
 	Downloading… {pct}%	Downloaden… {pct}%
 	Starting the download…	Download wordt gestart…
 	The download failed: {reason}	Het downloaden is mislukt: {reason}
+	Couldn't write the file, downloaded it instead: {error}	Het bestand kon niet worden geschreven; het is gedownload: {error}

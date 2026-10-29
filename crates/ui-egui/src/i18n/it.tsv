@@ -4805,3 +4805,4 @@ shape	Appearance	Aspetto
 	Downloading… {pct}%	Download in corso… {pct}%
 	Starting the download…	Avvio del download…
 	The download failed: {reason}	Il download non è riuscito: {reason}
+	Couldn't write the file, downloaded it instead: {error}	Impossibile scrivere il file; è stato scaricato: {error}

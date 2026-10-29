@@ -15,6 +15,10 @@
 //! frame rate (intervals between painted frames), dropped frames, the layer-count bucket, the
 //! number of gestures and the split of the worst frame (input wait, app logic, UI layout, paint
 //! and GPU submission; see [`FrameSample`]).
+//! Schema 4 adds `freeze` (the page's main thread blocked for 200 ms or more, with the command,
+//! tool and background job running) and `unclean_exit`; schema 5 adds to `freeze` the part of the
+//! frame that took longest (`phase`, a [`crate::perf_span`] id) and the user's last action
+//! (`action`, a command id or `tool.<Name>`), so no freeze is anonymous.
 //! Never: file names, paths, document content, typed text, error messages.
 
 use std::cell::Cell;
@@ -25,7 +29,7 @@ use std::sync::{Mutex, OnceLock};
 use serde_json::{Map, Value, json};
 
 /// Version of the batch schema the collector validates.
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 /// Events queued between flushes; later ones are dropped (and counted).
 pub const MAX_EVENTS: usize = 200;
 /// Distinct (command, source) and (command, error) keys aggregated between flushes.
@@ -64,13 +68,17 @@ pub enum FreezeSource {
     Frame,
 }
 
-/// What was running when the page froze: the last command, the tool, a background job.
+/// What was running when the page froze: the last command, the tool, a background job, the part
+/// of the frame that took longest (`phase`, a [`crate::perf_span`] id) and the last action the user
+/// took however long ago (`action`: a command or a tool switch).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FreezeContext {
     pub command: Option<String>,
     pub tool: Option<String>,
     pub job: Option<String>,
     pub megapixels: Option<f64>,
+    pub phase: Option<&'static str>,
+    pub action: Option<String>,
 }
 
 /// Where a command came from.
@@ -445,10 +453,16 @@ impl Recorder {
             FreezeSource::Frame => "frame",
         };
         let mut e = json!({"e": "freeze", "src": src, "ms": round_ms(ms)});
-        for (key, value) in [("cmd", &ctx.command), ("tool", &ctx.tool), ("job", &ctx.job)] {
+        for (key, value) in [("cmd", &ctx.command), ("job", &ctx.job), ("action", &ctx.action)] {
             if let Some(v) = value {
-                e[key] = json!(sanitize_command_id(v));
+                e[key] = json!(sanitize_action_id(v));
             }
+        }
+        if let Some(tool) = &ctx.tool {
+            e["tool"] = json!(sanitize_tool_id(tool));
+        }
+        if let Some(phase) = ctx.phase.and_then(|p| sanitize_token(p, 40)) {
+            e["phase"] = json!(phase);
         }
         if let Some(mp) = ctx.megapixels {
             e["mp"] = json!(mp_bucket_of(mp));
@@ -648,6 +662,16 @@ pub fn error_kind(message: &str) -> &'static str {
 
 /// A known command id as is; anything else is reduced to its first segment (`plugin.other`),
 /// so an id can never carry a name the user typed.
+/// A tool's id ([`tool_id`]) as it is, anything else `tool.other`.
+pub fn sanitize_tool_id(id: &str) -> String {
+    if crate::state::Tool::ALL.iter().any(|t| tool_id(*t) == id) { id.to_string() } else { "tool.other".into() }
+}
+
+/// A command id ([`sanitize_command_id`]) or a tool switch ([`sanitize_tool_id`]).
+pub fn sanitize_action_id(id: &str) -> String {
+    if id.starts_with("tool.") && !is_known_command(id) { sanitize_tool_id(id) } else { sanitize_command_id(id) }
+}
+
 pub fn sanitize_command_id(id: &str) -> String {
     if is_known_command(id) {
         return id.to_string();

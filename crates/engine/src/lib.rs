@@ -610,6 +610,9 @@ pub fn move_item<T>(v: &mut Vec<T>, i: usize, to: usize) -> Option<usize> {
 
 impl Session {
     pub fn new() -> Self {
+        // History keeps type layers' text without their pixels (`type_cmds::strip_rebuildable`),
+        // also in states a recovery brings back: whatever comes out of it is rendered again.
+        photocraft_ops::set_rebuild(type_cmds::rebuild_text_caches);
         Self::default()
     }
 
@@ -958,6 +961,7 @@ impl Session {
         st.history.clear_current_archive();
         if key.is_none() || st.coalesce != key || !st.history.can_undo() {
             st.history.set_current_layers(prior);
+            let before = type_cmds::strip_rebuildable(&before, &st.doc);
             st.history.record(label, before, layers);
             st.trim_history();
         } else {

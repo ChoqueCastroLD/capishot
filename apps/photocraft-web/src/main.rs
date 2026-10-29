@@ -56,6 +56,8 @@ mod watchdog;
 mod breadcrumb;
 #[cfg(target_arch = "wasm32")]
 mod web;
+#[cfg(target_arch = "wasm32")]
+mod save_handles;
 
 // The versioned embedding API for host apps such as Capistudio (`embed/README.md`).
 #[cfg(target_arch = "wasm32")]

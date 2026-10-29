@@ -3712,3 +3712,4 @@ curves	Smooth	Lisser
 	Downloading… {pct}%	Téléchargement… {pct} %
 	Starting the download…	Démarrage du téléchargement…
 	The download failed: {reason}	Le téléchargement a échoué : {reason}
+	Couldn't write the file, downloaded it instead: {error}	Impossible d'écrire le fichier ; il a été téléchargé à la place : {error}

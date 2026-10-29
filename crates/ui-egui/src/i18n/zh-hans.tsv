@@ -3341,3 +3341,4 @@ curves	Smooth	平滑
 	Downloading… {pct}%	正在下载… {pct}%
 	Starting the download…	正在开始下载…
 	The download failed: {reason}	下载失败：{reason}
+	Couldn't write the file, downloaded it instead: {error}	无法写入文件，已改为下载：{error}

@@ -28,6 +28,7 @@ impl Watchdog {
     /// A frame begins (the shell's `logic`).
     pub fn begin(&mut self) {
         self.frame_start = Some(crate::frame_perf::now_ms());
+        photocraft_ui_egui::perf_span::begin_frame();
     }
 
     /// The frame ended (the shell's `ui`): report it if it froze the page, and any long tasks
@@ -38,9 +39,18 @@ impl Watchdog {
         if frame.is_none_or(|ms| ms < telemetry::FREEZE_MS) && long.is_empty() {
             return;
         }
-        let ctx = app.freeze_context();
+        let mut ctx = app.freeze_context();
+        // Most of the frame outside every span: say so rather than name a small part of it.
+        if let Some(ms) = frame {
+            let spans = photocraft_ui_egui::perf_span::frame();
+            let covered: f64 = spans.iter().map(|s| s.1).sum();
+            if ms - covered > spans.first().map_or(0.0, |s| s.1) {
+                ctx.phase = Some("other");
+            }
+        }
         if let Some(ms) = frame.filter(|ms| *ms >= telemetry::FREEZE_MS) {
-            log::warn!("frame took {ms:.0} ms ({ctx:?})");
+            let spans: Vec<String> = photocraft_ui_egui::perf_span::frame().iter().take(8).map(|(n, t)| format!("{n} {t:.0}")).collect();
+            log::warn!("frame took {ms:.0} ms ({ctx:?}) spans: {}", spans.join(", "));
             telemetry::with(|r| r.freeze(FreezeSource::Frame, ms, &ctx));
         }
         for ms in long {

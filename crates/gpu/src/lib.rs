@@ -143,6 +143,15 @@ pub fn level_rect(r: Rect, level: u32) -> Rect {
     Rect::new(r.x0.div_euclid(s), r.y0.div_euclid(s), r.x1.saturating_add(s - 1).div_euclid(s), r.y1.saturating_add(s - 1).div_euclid(s))
 }
 
+/// `r` (pixels at level of detail `level`) in document pixels: what its reduced pixels cover.
+fn unlevel_rect(r: Rect, level: u32) -> Rect {
+    if level == 0 || r.is_empty() {
+        return r;
+    }
+    let s = level.min(MAX_LOD);
+    Rect::new(r.x0 << s, r.y0 << s, r.x1.saturating_mul(1 << s), r.y1.saturating_mul(1 << s))
+}
+
 /// The pixels of a `canvas` document at level of detail `level` (the size of mip level `level`).
 pub fn level_bounds(canvas: Rect, level: u32) -> Rect {
     let l = level.min(MAX_LOD);
@@ -326,7 +335,12 @@ impl FxEntry {
 /// Pipelines and layouts, shared by cheap clones (wgpu handles are reference counted).
 #[derive(Clone)]
 struct Kit {
-    pipelines: HashMap<(Kernel, wgpu::TextureFormat), wgpu::RenderPipeline>,
+    /// Built the first time a render needs them ([`Kit::pipeline`]), shared by the clones.
+    pipelines: Arc<std::sync::Mutex<HashMap<(Kernel, wgpu::TextureFormat), wgpu::RenderPipeline>>>,
+    module: wgpu::ShaderModule,
+    layout: wgpu::PipelineLayout,
+    /// [`Kernel::Layers`]'s.
+    layout_m: wgpu::PipelineLayout,
     bgl0: wgpu::BindGroupLayout,
     bgl1: wgpu::BindGroupLayout,
     /// [`Kernel::Layers`]: uniforms (chunk, op, member ops) and textures ([`LAYERS_BINDINGS`]).
@@ -350,6 +364,41 @@ struct MapDraw {
 }
 
 impl Kit {
+    /// The pipeline of kernel `k` drawing to `format`, built the first time a render needs it:
+    /// building every kernel's (about fifty) when the compositor was made held the page for most
+    /// of a second on a phone's first document (on WebGL each is a shader translation and a
+    /// synchronous link), while a page uses a handful. A driver that can't build one is an
+    /// `Err`, and the render falls back to the CPU compositor as before.
+    fn pipeline(&self, device: &wgpu::Device, k: Kernel, format: wgpu::TextureFormat) -> Result<wgpu::RenderPipeline, Unsupported> {
+        if let Some(p) = self.pipelines.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&(k, format)) {
+            return Ok(p.clone());
+        }
+        let entry = k.entry().ok_or_else(|| Unsupported(format!("kernel {k:?} draws nothing")))?;
+        let (p, error) = first_error(device, || {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(entry),
+                layout: Some(if k == Kernel::Layers { &self.layout_m } else { &self.layout }),
+                vertex: wgpu::VertexState { module: &self.module, entry_point: Some("vs"), buffers: &[], compilation_options: Default::default() },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &self.module,
+                    entry_point: Some(entry),
+                    targets: &[Some(wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+                    compilation_options: Default::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        });
+        if let Some(e) = error {
+            return Err(Unsupported(format!("couldn't build the compositor's pipelines ({entry}): {e}")));
+        }
+        self.pipelines.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert((k, format), p.clone());
+        Ok(p)
+    }
+
     /// Record `draws` (each its own render pass) into `encoder`.
     fn run(&self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, draws: &[MapDraw]) {
         if draws.is_empty() {
@@ -393,7 +442,8 @@ impl Kit {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_pipeline(&self.pipelines[&(d.kernel, d.format)]);
+            let Ok(pipeline) = self.pipeline(device, d.kernel, d.format) else { continue };
+            pass.set_pipeline(&pipeline);
             pass.set_scissor_rect(d.scissor[0], d.scissor[1], d.scissor[2], d.scissor[3]);
             pass.set_bind_group(0, &bg0, &[(2 * i as u64 * STRIDE) as u32, ((2 * i + 1) as u64 * STRIDE) as u32]);
             pass.set_bind_group(1, &bg1, &[]);
@@ -477,10 +527,19 @@ pub struct Compositor {
     stamp: u64,
     /// Bytes staged by uploads since the last submit.
     staged: u64,
+    /// The document area the render being encoded reads layer pixels in (its cell's part and
+    /// the chunks it renders, whose level-of-detail blocks cover it): a layer page uploads only the tiles there,
+    /// the rest when a render reaches them. Kernels read layer pixels at the pixel they compute
+    /// (`compose.wgsl`), so nothing outside is sampled. A first refresh of a big page in pieces
+    /// then uploads a piece's worth of tiles at a time instead of whole pages.
+    want: Rect,
     acc_format: wgpu::TextureFormat,
     /// Whether the effect-map pipelines could be built (else documents with layer effects are
     /// [`Unsupported`] and use the CPU compositor).
     effect_maps: bool,
+    /// The effect-map pipelines were built (or found impossible): on the first plan with layer
+    /// effects ([`Compositor::ensure_pipelines`]).
+    maps_built: bool,
     /// `CmykSpace::id` of the document being encoded (0: built-in coated CMYK).
     cmyk: u64,
     /// The device's health (see [`Compositor::set_health`]); `None` = assumed healthy.
@@ -613,6 +672,21 @@ fn field_reaches(progs: &[fx::MapProgram]) -> HashMap<FieldKind, i32> {
 /// Runs `f` inside validation and internal-error scopes and returns the first error raised.
 /// Native wgpu reports errors synchronously; where they only arrive asynchronously (WebGPU) none
 /// is reported.
+/// Profiling: a named span of the compositor's work, timed by the app (`perf_span` in the UI)
+/// until the returned guard drops. Installed once with [`set_span_hook`].
+pub type SpanFn = fn(&'static str) -> Box<dyn std::any::Any>;
+
+static SPAN: std::sync::OnceLock<SpanFn> = std::sync::OnceLock::new();
+
+/// Install the [`SpanFn`] (once).
+pub fn set_span_hook(f: SpanFn) {
+    let _ = SPAN.set(f);
+}
+
+fn span(name: &'static str) -> Option<Box<dyn std::any::Any>> {
+    SPAN.get().map(|f| f(name))
+}
+
 fn first_error<T>(device: &wgpu::Device, f: impl FnOnce() -> T) -> (T, Option<wgpu::Error>) {
     let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
     let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
@@ -647,10 +721,16 @@ impl Compositor {
     /// to the CPU compositor. Where errors only arrive asynchronously (WebGPU), creation is assumed
     /// to have worked.
     pub fn try_new_with_format(device: &wgpu::Device, acc_format: wgpu::TextureFormat) -> Result<Self, Unsupported> {
-        match first_error(device, || Self::new_with_format(device, acc_format)) {
-            (comp, None) => Ok(comp),
-            (_, Some(e)) => Err(Unsupported(format!("couldn't build the compositor's pipelines: {e}"))),
+        let comp = match first_error(device, || Self::new_with_format(device, acc_format)) {
+            (comp, None) => comp,
+            (_, Some(e)) => return Err(Unsupported(format!("couldn't build the compositor's pipelines: {e}"))),
+        };
+        // The pipelines every page draws with (the rest are built as renders need them, see
+        // [`Kit::pipeline`]): a driver that can't build these keeps the canvas on the CPU.
+        for k in [Kernel::Content, Kernel::Blend, Kernel::LayerBlend] {
+            comp.kit.pipeline(device, k, acc_format)?;
         }
+        Ok(comp)
     }
 
     /// Create a compositor whose accumulation/render-target format is `acc_format`. Pass
@@ -684,40 +764,10 @@ impl Compositor {
             bind_group_layouts: &[Some(&bgl0m), Some(&bgl1m)],
             immediate_size: 0,
         });
-        // `None` only for kernels without a fragment entry point, which are never drawn.
-        let pipeline = |k: Kernel, format: wgpu::TextureFormat| {
-            let entry = k.entry()?;
-            Some(device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(entry),
-                layout: Some(if k == Kernel::Layers { &layout_m } else { &layout }),
-                vertex: wgpu::VertexState { module: &module, entry_point: Some("vs"), buffers: &[], compilation_options: Default::default() },
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &module,
-                    entry_point: Some(entry),
-                    targets: &[Some(wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::ALL })],
-                    compilation_options: Default::default(),
-                }),
-                multiview_mask: None,
-                cache: None,
-            }))
-        };
-        let mut pipelines: HashMap<_, _> =
-            Kernel::DRAWN.iter().filter(|k| !k.is_map()).filter_map(|&k| Some(((k, acc_format), pipeline(k, acc_format)?))).collect();
-        // Effect maps render to R32Float / R16Float, which some adapters (e.g. GL without float
-        // render targets) can't: then layer effects use the CPU compositor and the rest stays here.
-        let maps = Kernel::DRAWN.iter().filter(|k| k.is_map()).flat_map(|&k| [(k, MAP32), (k, MAP16)]);
-        let (maps, map_error) = first_error(device, || maps.filter_map(|key| Some((key, pipeline(key.0, key.1)?))).collect::<Vec<_>>());
-        if let Some(e) = &map_error {
-            log::info!("GPU compositor: no effect-map pipelines ({e}); layer effects use the CPU");
-        } else {
-            pipelines.extend(maps);
-        }
         let dummy = Tex::new(device, "pc_compose_dummy", 1, 1, wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureUsages::TEXTURE_BINDING).view;
+        let kit = Kit { pipelines: Arc::default(), module, layout, layout_m, bgl0, bgl1, bgl0m, bgl1m, dummy };
         Self {
-            kit: Kit { pipelines, bgl0, bgl1, bgl0m, bgl1m, dummy },
+            kit,
             pools: HashMap::new(),
             residents: HashMap::new(),
             fx: HashMap::new(),
@@ -737,8 +787,10 @@ impl Compositor {
             frame: 0,
             stamp: 0,
             staged: 0,
+            want: Rect::EMPTY,
             acc_format,
-            effect_maps: map_error.is_none(),
+            effect_maps: true,
+            maps_built: false,
             cmyk: 0,
             health: None,
             translated: Vec::new(),
@@ -886,6 +938,35 @@ impl Compositor {
         progs.iter().map(|p| p.reach(&|k| want.get(&k).copied().unwrap_or(0))).max().unwrap_or(0).saturating_add(2)
     }
 
+    /// Builds the pipelines `plan` draws with that aren't built yet: its kernels, and the first
+    /// time it has layer effects every effect-map kernel (R32Float and R16Float targets, which
+    /// some adapters, e.g. GL without float render targets, can't draw: then layer effects use the
+    /// CPU compositor and the rest stays here).
+    fn ensure_pipelines(&mut self, device: &wgpu::Device, plan: &Plan<'_>) -> Result<(), Unsupported> {
+        let mut kernels: Vec<Kernel> = plan.passes.iter().flat_map(|p| std::iter::once(p.kernel).chain(p.members.iter().map(|m| m.kernel))).collect();
+        kernels.sort_by_key(|k| *k as u32);
+        kernels.dedup();
+        for k in kernels.into_iter().filter(|k| k.entry().is_some()) {
+            self.kit.pipeline(device, k, self.acc_format)?;
+        }
+        if !plan.fx.is_empty() && !self.maps_built {
+            self.maps_built = true;
+            // One kernel per target format tells whether the adapter can draw effect maps; the
+            // others are built when an effect first runs them.
+            let probe = Kernel::DRAWN.iter().copied().find(|k| k.is_map());
+            for format in [MAP32, MAP16] {
+                if let Some(k) = probe
+                    && let Err(e) = self.kit.pipeline(device, k, format)
+                {
+                    log::info!("GPU compositor: no effect-map pipelines ({}); layer effects use the CPU", e.0);
+                    self.effect_maps = false;
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Effect maps must fit in textures (per page cell when the region exceeds the limit), and
     /// patterns in one texture.
     fn check_fx(&self, doc: &Document, p: &Plan<'_>) -> Result<(), Unsupported> {
@@ -999,7 +1080,13 @@ impl Compositor {
             return self.sync(device, queue, encoder, doc, key, surface, region, stats);
         };
         let back = tile_grid(Rect::new(region.x0.saturating_sub(dx), region.y0.saturating_sub(dy), region.x1.saturating_sub(dx), region.y1.saturating_sub(dy)));
-        let (k, [x, y, w, h]) = self.sync(device, queue, encoder, doc, key, &source, back, stats)?;
+        let want = self.want;
+        if !want.is_empty() {
+            self.want = want.translate(-dx, -dy);
+        }
+        let synced = self.sync(device, queue, encoder, doc, key, &source, back, stats);
+        self.want = want;
+        let (k, [x, y, w, h]) = synced?;
         Some((k, [x.saturating_add(dx), y.saturating_add(dy), w, h]))
     }
 
@@ -1102,7 +1189,14 @@ impl Compositor {
         let canvas = doc.bounds();
         let region = region.intersect(&canvas);
         let (moved, moved_masks) = self.moved_in_place(doc);
-        let plan = plan::plan_moved(doc, Some(&moved))?;
+        let plan = {
+            let _s = span("gpu.plan");
+            plan::plan_moved(doc, Some(&moved))?
+        };
+        {
+            let _s = span("gpu.pipelines.build");
+            self.ensure_pipelines(device, &plan)?;
+        }
         self.check_fx(doc, &plan)?;
         self.pattern_mode = doc.pixel_format().mode;
         let mut stats = Stats { passes: plan.passes.len(), slots: plan.slots, level, ..Default::default() };
@@ -1133,6 +1227,7 @@ impl Compositor {
         let aprons: Vec<i32> = plan.fx.iter().zip(&paged).map(|(f, &pg)| if pg { Self::fx_apron(doc, f) } else { 0 }).collect();
         for (f, &pg) in plan.fx.iter().zip(&paged) {
             if !pg {
+                let _s = span("gpu.fx");
                 self.sync_fx(device, queue, encoder, doc, f, (f.layer.id, None), f.region, &mut stats);
             }
         }
@@ -1191,7 +1286,16 @@ impl Compositor {
             stats.chunks += chunks.len();
             stats.pixels += lpart.width() as u64 * lpart.height() as u64;
             work += lpart.width() as u64 * lpart.height() as u64 * plan.passes.len() as u64;
+            // The chunks render whole (`fill_prefix` grows them to chunk squares).
+            let read = chunks.iter().fold(Rect::EMPTY, |a, c| {
+                let d = unlevel_rect(*c, level);
+                if a.is_empty() { d } else { a.union(&d) }
+            });
+            self.want = read.union(&part);
+            let record = span("gpu.record");
             self.run_cell(device, queue, encoder, doc.id, &plan, &paged, cell, &fr, &chunks, &outs, checkpoint, level, &mut stats, sink);
+            drop(record);
+            self.want = Rect::EMPTY;
             let (evicted, bytes) = self.evict();
             stats.evicted += evicted;
             freed += bytes;
@@ -1614,7 +1718,8 @@ impl Compositor {
                 if clear {
                     continue;
                 }
-                pass.set_pipeline(&self.kit.pipelines[&(p.kernel, self.acc_format)]);
+                let Ok(pipeline) = self.kit.pipeline(device, p.kernel, self.acc_format) else { continue };
+                pass.set_pipeline(&pipeline);
                 pass.set_scissor_rect(scissor.x0 as u32, scissor.y0 as u32, scissor.width(), scissor.height());
                 match (member_slot[i], &bg0m) {
                     (Some(members), Some(bg)) => {
@@ -1656,6 +1761,7 @@ impl Compositor {
         if region.is_empty() {
             return None;
         }
+        let _s = span("gpu.upload");
         let format = surface.format();
         let kind = TexKind::for_surface(key.1, format);
         let cmyk = if format.mode == photocraft_color::ColorMode::Cmyk { self.cmyk } else { 0 };
@@ -1689,8 +1795,11 @@ impl Compositor {
             // date below, like those of a resident that didn't move.
             let mut present = Vec::new();
             let mut missing = Vec::new();
+            let want = self.want;
             for c in region.tiles().filter(|c| !kept.contains_rect(&c.rect())) {
                 match surface.tile(c) {
+                    // Outside the render's area: uploaded when a render reaches it (below).
+                    Some(_) if !want.is_empty() && want.intersect(&c.rect()).is_empty() => {}
                     Some(t) => present.push((c, t.clone())),
                     None if default_nonzero => missing.push(c),
                     None => {}
@@ -1718,7 +1827,8 @@ impl Compositor {
         r.doc = doc;
         let mut changed = Vec::new();
         let mut gone = Vec::new();
-        for c in region.tiles() {
+        let want = self.want;
+        for c in region.tiles().filter(|c| want.is_empty() || !want.intersect(&c.rect()).is_empty()) {
             match surface.tile(c) {
                 Some(t) => {
                     if !r.tiles.get(&c).is_some_and(|old| Arc::ptr_eq(old, t)) {

@@ -3699,3 +3699,4 @@ curves	Smooth	Haluskan
 	Downloading… {pct}%	Mengunduh… {pct}%
 	Starting the download…	Memulai unduhan…
 	The download failed: {reason}	Unduhan gagal: {reason}
+	Couldn't write the file, downloaded it instead: {error}	Tidak dapat menulis file, file diunduh sebagai gantinya: {error}

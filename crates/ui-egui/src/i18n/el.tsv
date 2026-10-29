@@ -4392,3 +4392,4 @@ curves	Smooth	Εξομάλυνση
 	Downloading… {pct}%	Λήψη… {pct}%
 	Starting the download…	Έναρξη λήψης…
 	The download failed: {reason}	Η λήψη απέτυχε: {reason}
+	Couldn't write the file, downloaded it instead: {error}	Δεν ήταν δυνατή η εγγραφή του αρχείου· έγινε λήψη του: {error}

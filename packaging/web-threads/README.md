@@ -94,3 +94,10 @@ Chromium in `CHROME`):
   the build whose `index.html` sets `self.__wasmExports` to what `pc.default(…)` returns.
 - `e2e/recovery-crash.mjs`: a page killed in the middle of an autosave must still recover its last
   good checkpoint.
+- `e2e/no-freeze.mjs`: the phone tour, a type session, saving and exporting (and, when the pages
+  folder `CAPISHOT_FREEZE_PAGES` holds a `page.psd`, opening and saving a 12-24 MP layered page)
+  with no long task over 500 ms. It prints each step's longest task and the app's slow frames
+  with the part of the frame that took longest. `CAPISHOT_E2E_WEBGPU=1` runs the canvas on WebGPU
+  (SwiftShader) instead of the CPU canvas headless Chrome falls back to.
+- `e2e/save-to-device.mjs`: where the browser can save to a picked file, Save As asks once and
+  File › Save writes that file again in place (no download); elsewhere saves download.

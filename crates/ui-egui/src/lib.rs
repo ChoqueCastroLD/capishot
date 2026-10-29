@@ -208,6 +208,7 @@ mod scrub_wrap;
 pub mod select_mask_view;
 pub mod served_fonts;
 pub mod remove_ai_ui;
+pub mod perf_span;
 pub mod bubble_type_ui;
 pub mod shape_dialog;
 pub(crate) mod shape_fill_ui;
@@ -551,6 +552,9 @@ pub type CaptionStyleFn = Box<dyn Fn(&egui::Context) -> CaptionStyle>;
 /// Physical right mouse button or stylus barrel button down (Windows; read for brush resize).
 pub type RightButtonDownFn = Box<dyn Fn() -> bool + Send + Sync>;
 
+/// Whether `write` writes the file at a path ([`Services::writes_in_place`]).
+pub type WritesInPlaceFn = Box<dyn Fn(&str) -> bool + Send + Sync>;
+
 /// Platform services injected by the app binary (file dialogs, codecs), keeping this crate free of
 /// I/O dependencies.
 #[derive(Default)]
@@ -579,6 +583,9 @@ pub struct Services {
     /// cancel and which reports nothing back), so a save through it names the document but
     /// leaves its changes unsaved and the leave-page guard armed (#4962).
     pub write_unconfirmed: bool,
+    /// Paths `write` does write (with `write_unconfirmed`): on the web, a file picked with Save
+    /// As that the browser writes in place. A save there leaves the document saved.
+    pub writes_in_place: Option<WritesInPlaceFn>,
     /// Encode and write in one step on a worker thread, so a large save doesn't freeze the
     /// window (#2017). With background jobs on, saves use it instead of `export` and `write`.
     pub save_file: Option<SaveFileFn>,
@@ -619,6 +626,11 @@ pub struct Services {
     /// the web (see `prefs_ui`).
     pub load_prefs: Option<LoadTextFn>,
     pub save_prefs: Option<SaveTextFn>,
+    /// Seconds to wait after a preference change before writing (a burst writes once); 0 writes
+    /// in the frame of the change. The web waits: its storage write blocks the page.
+    pub prefs_debounce_s: f64,
+    /// Write preferences as compact JSON (browser storage) instead of indented (a file).
+    pub prefs_compact: bool,
     /// The TypeR workspace (script, cursor, style library, settings; `typer::persist`): a file
     /// in the config directory on native, browser storage on the web.
     pub load_typer: Option<LoadTextFn>,
@@ -999,6 +1011,10 @@ pub struct PhotocraftApp {
     /// The last command run and when (`gpu_canvas::now_ms`), for freeze reports
     /// ([`Self::freeze_context`]).
     last_command: Option<(String, f64)>,
+    /// The last command run or tool picked, however long ago (freeze reports' `action`).
+    last_action: Option<String>,
+    /// The tool when [`Self::last_action`] last looked: a switch is an action too.
+    action_tool: Option<state::Tool>,
     /// Close, Revert or Exit parked behind the unsaved-changes prompt (see `discard_ui`).
     pub(crate) discard: Option<discard_ui::Prompt>,
     /// The Open or Save dialog in progress, and the action waiting on it (see `file_dialog`).
@@ -1186,6 +1202,8 @@ impl PhotocraftApp {
             prefs_rt: Default::default(),
             recovery: Default::default(),
             last_command: None,
+            last_action: None,
+            action_tool: None,
             discard: None,
             file_dialog: None,
             tiff_options: None,
@@ -1311,7 +1329,11 @@ impl PhotocraftApp {
         // Anonymous usage statistics (web only, opt-out): the id is counted, never the params.
         let scope = telemetry::Scope::enter(self.automation_input);
         self.last_command = Some((id.to_string(), gpu_canvas::now_ms()));
-        let result = self.run_command(id, params);
+        self.last_action = Some(id.to_string());
+        let result = {
+            let _s = perf_span::span("cmd.run");
+            self.run_command(id, params)
+        };
         scope.finish(id, &result, || self.session.active().map(|st| telemetry::megapixels(st.doc.size.width, st.doc.size.height)));
         if gate.is_some() {
             self.session.authorize = None;
@@ -1985,7 +2007,7 @@ impl PhotocraftApp {
         let (bytes, warnings) = export(&st.doc, &path, settings)?;
         let write = self.services.write.as_mut().ok_or("no writer configured")?;
         write(&path, &bytes)?;
-        let revision = saved_revision_after_write(!self.services.write_unconfirmed, written, previous);
+        let revision = saved_revision_after_write(self.write_confirmed(&path), written, previous);
         self.saved(doc, revision, &path, &warnings, copy);
         if !copy {
             prefs_ui::document_written(self, doc, written);
@@ -2085,6 +2107,11 @@ impl PhotocraftApp {
         !self.jobs.saves.is_empty()
     }
 
+    /// A save to `path` is known to be written (not a download the user may cancel).
+    pub(crate) fn write_confirmed(&self, path: &str) -> bool {
+        !self.services.write_unconfirmed || self.services.writes_in_place.as_ref().is_some_and(|f| f(path))
+    }
+
     /// What was running when the page froze (`telemetry::Recorder::freeze`): the command run in
     /// the last two seconds, the tool, a background job and the document's size.
     pub fn freeze_context(&self) -> telemetry::FreezeContext {
@@ -2094,6 +2121,8 @@ impl PhotocraftApp {
             tool: Some(telemetry::tool_id(self.ui.tool)),
             job: self.session.jobs().first().map(|j| j.command.clone()),
             megapixels: self.session.active().map(|st| telemetry::megapixels(st.doc.size.width, st.doc.size.height)),
+            phase: perf_span::top(50.0),
+            action: self.last_action.clone(),
         }
     }
 
@@ -2242,20 +2271,32 @@ impl eframe::App for PhotocraftApp {
         }
         self.frame += 1;
         self.perf_counters.frames += 1;
+        if self.action_tool.replace(self.ui.tool).is_some_and(|t| t != self.ui.tool) {
+            self.last_action = Some(telemetry::tool_id(self.ui.tool));
+        }
         let now = ctx.input(|i| i.time);
         let dt = (now - self.last_frame_time) as f32;
         if dt > 0.0 {
             self.fps = self.fps * 0.9 + (1.0 / dt).min(240.0) * 0.1;
         }
         self.last_frame_time = now;
-        self.sync_views();
+        {
+            let _s = perf_span::span("logic.sync_views");
+            self.sync_views();
+        }
         crate::type_font_preview::follow_hover(self, ctx);
-        self.check_gpu(ctx);
+        {
+            let _s = perf_span::span("logic.check_gpu");
+            self.check_gpu(ctx);
+        }
         #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
         if self.live_tokens.poll(ctx, self.ui.theme) {
             self.checker = None;
         }
-        self.drain_control(ctx);
+        {
+            let _s = perf_span::span("logic.control");
+            self.drain_control(ctx);
+        }
         native_menu::run(self, ctx);
         // Switching tools commits, also between the Type and Type Mask tools.
         if self.ui.text_edit.as_ref().is_some_and(|ed| !self.ui.tool.is_type() || ed.mask != self.ui.tool.is_type_mask()) {
@@ -2270,7 +2311,10 @@ impl eframe::App for PhotocraftApp {
         shape_stroke_ui::sync_editor(self, ctx);
         self.collect_screenshots(ctx);
         self.issue_screenshots(ctx);
-        prefs_ui::tick(self, ctx);
+        {
+            let _s = perf_span::span("prefs.tick");
+            prefs_ui::tick(self, ctx);
+        }
         monitor_status::poll_frame(self, ctx, frame);
         // Control requests and persisted preferences can change the language in this frame.
         i18n::sync_context(ctx, &self.session.prefs().interface.language);
@@ -2282,17 +2326,24 @@ impl eframe::App for PhotocraftApp {
         // Background jobs: apply finished ones, keep frames coming, Esc cancels (before the
         // shortcuts see Esc).
         if !screen_picker::tick(self, ctx) {
-            jobs_ui::tick(self, ctx);
+            {
+                let _s = perf_span::span("jobs.tick");
+                jobs_ui::tick(self, ctx);
+            }
             #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
             filter_preview_worker::discard_closed(self);
             #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
             if !filter_dialog::previewing(self) {
                 filter_dialog::release_proxy();
             }
-            shortcuts::handle(self, ctx);
+            {
+                let _s = perf_span::span("shortcuts");
+                shortcuts::handle(self, ctx);
+            }
         }
         let arrived: Vec<(String, Vec<u8>)> =
             self.services.inbox.as_ref().map(|q| std::mem::take(&mut *q.lock().unwrap_or_else(|e| e.into_inner()))).unwrap_or_default();
+        let _open_span = (!arrived.is_empty()).then(|| perf_span::span("open.bytes"));
         for (name, bytes) in arrived {
             if let Err(e) = self.open_bytes(&name, &bytes) {
                 self.open_failed(&name, &e);
@@ -2320,13 +2371,19 @@ impl eframe::App for PhotocraftApp {
         }
         self.place_next_dropped(ctx);
         // Fonts picked, dropped or read back from the browser's store.
-        user_fonts_ui::tick(self, Some(ctx));
+        {
+            let _s = perf_span::span("fonts.tick");
+            user_fonts_ui::tick(self, Some(ctx));
+        }
         // The control transport wakes the UI on arrival (ctx.request_repaint); only poll while a
         // screenshot is pending. (Polling every 50 ms here made idle apps render at 20 fps.)
         if !self.pending_screenshots.is_empty() {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
-        self.poll_file_dialog(ctx, Some(frame));
+        {
+            let _s = perf_span::span("file_dialog");
+            self.poll_file_dialog(ctx, Some(frame));
+        }
     }
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
@@ -2419,6 +2476,7 @@ impl eframe::App for PhotocraftApp {
         // the canvas, drawn after it) instead of the desktop chrome, which stays as it was.
         self.simple = chrome && simple_ui::active(self, &ctx);
         touch_ui::begin_frame(self, &ctx);
+        let chrome_span = perf_span::span("ui.chrome");
         let area = chrome_freeze::show(self, ui, chrome || tabbed_in, |app, ui| {
             // Four fingers tapped: the canvas only (touch_ui.rs).
             if app.ui_hidden && touch_ui::active(app) {
@@ -2426,9 +2484,13 @@ impl eframe::App for PhotocraftApp {
                 return;
             }
             if app.simple {
-                simple_ui::top_bar(app, ui);
+                {
+                    let _s = perf_span::span("ui.top_bar");
+                    simple_ui::top_bar(app, ui);
+                }
                 // The tool's options with a document: a compact row, the rest behind its "⋯".
                 if app.ui.panels.options_bar && app.session.active().is_some() {
+                    let _s = perf_span::span("ui.options");
                     simple_ui::options_row(app, ui);
                 }
                 return;
@@ -2437,6 +2499,7 @@ impl eframe::App for PhotocraftApp {
                 panels::title_bar(app, ui);
             }
             if (chrome && app.ui.panels.options_bar) || tabbed_in {
+                let _s = perf_span::span("ui.options");
                 panels::options_bar(app, ui);
             }
             if chrome && app.ui.panels.status_bar {
@@ -2446,6 +2509,7 @@ impl eframe::App for PhotocraftApp {
                 panels::toolbar(app, ui);
             }
             if (chrome && app.ui.panels.dock) || tabbed_in {
+                let _s = perf_span::span("ui.dock");
                 panels::right_dock(app, ui);
             }
             // The panel column beside the toolbar (after the right dock, which settles drops).
@@ -2453,10 +2517,12 @@ impl eframe::App for PhotocraftApp {
                 panels::left_dock(app, ui);
             }
         });
+        drop(chrome_span);
         let t = theme::Tokens::get(&ctx);
         let backdrop = if chrome { prefs_ui::pasteboard_color(self).unwrap_or(t.canvas) } else { egui::Color32::BLACK };
         let mut canvas_ui = chrome_freeze::canvas_ui(ui, area);
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(backdrop)).show(&mut canvas_ui, |ui| {
+            let _s = perf_span::span("canvas");
             canvas::document_area(self, ui);
         });
         if self.simple {
@@ -2469,6 +2535,7 @@ impl eframe::App for PhotocraftApp {
                 panels::floating_groups(self, &ctx);
             }
         }
+        let windows_span = perf_span::span("ui.windows");
         brush_panel::window(self, &ctx);
         preset_panels::windows(self, &ctx);
         gradient_ui::editor_window(self, &ctx);
@@ -2504,10 +2571,12 @@ impl eframe::App for PhotocraftApp {
             titlebar::resize_zones(ui);
         }
         // A device lost while drawing this frame: switch to the CPU canvas before the next one.
+        drop(windows_span);
         gpu_status::check(self, &ctx);
         // The Brush Preset picker's view (its gear's card parts and the footer scale) is
         // remembered once the pointer is up. Here, after every panel, rather than in the
         // picker's own code: the control channel can set it while the picker is closed.
+        let persist_span = perf_span::span("persist.tools");
         brush_picker::persist(self, &ctx);
         // The tool's brush (settings and tip references) is remembered the same way. Like the
         // picker's view, in the frame loop, so the control channel can set it with the panels
@@ -2516,9 +2585,16 @@ impl eframe::App for PhotocraftApp {
         // Tool options are remembered between launches the same way (#2814).
         tool_memory::persist(self, &ctx);
         // The TypeR workspace: restored once at startup, saved shortly after it changes.
-        typer::persist(self, &ctx);
+        drop(persist_span);
+        {
+            let _s = perf_span::span("persist.typer");
+            typer::persist(self, &ctx);
+        }
         // So are View › Extras, Show and Snap To (#3762).
-        view_cmds::persist(self, &ctx);
+        {
+            let _s = perf_span::span("persist.view");
+            view_cmds::persist(self, &ctx);
+        }
         self.automation_input = false;
         shape_stroke_ui::finish_frame(self, &ctx);
         native_menu::sync(self, &ctx);
@@ -2701,6 +2777,7 @@ impl PhotocraftApp {
     /// Cached 64px thumbnail of a pixel-ish layer, letterboxed in a square, and the document
     /// area it frames: the canvas, or with Clip Thumbnails to Layer Bounds the layer's pixels.
     pub fn layer_thumb(&mut self, ctx: &egui::Context, doc: &Document, layer: &photocraft_doc::Layer) -> (egui::TextureId, photocraft_geom::Rect) {
+        let _s = perf_span::span("layers.thumb");
         let clip = self.session.prefs().interface.clip_thumbnails_to_layer_bounds;
         // Key by content, not document revision: COW tiles change pointer only when their pixels
         // change, so unrelated edits (e.g. painting another layer) don't rebuild this thumbnail.

@@ -33,6 +33,19 @@ pub struct Runtime {
     saved_rev: u64,
     /// This instance's preferences as of `saved_rev`: the base of the three-way merge on save.
     saved_value: Option<Value>,
+    /// The text storage held after this instance's last load or write: while storage still
+    /// holds it, nothing else wrote there and a save needs no merge (no parse of the stored text).
+    saved_text: Option<String>,
+    /// `saved_text` as a tree (what storage holds, keys this version doesn't know included): the
+    /// next write merges into it in place instead of parsing the stored text again.
+    saved_tree: Option<Value>,
+    /// Debounce (`Services::prefs_debounce_s`): the revision last seen, when it changed, and
+    /// when the oldest unsaved change was seen.
+    seen_rev: u64,
+    changed_at: f64,
+    pending_since: Option<f64>,
+    /// The TypeR workspace as last saved (`typer::persist`): an unchanged one is not serialised.
+    pub(crate) typer_saved: Option<photocraft_typer::State>,
     save_retry: SaveRetry,
     next_autosave_ms: f64,
     recovery_started: bool,
@@ -292,6 +305,8 @@ pub fn load(app: &mut PhotocraftApp) {
     app.prefs_rt.loaded = true;
     let mut invalid = Vec::new();
     if let Some(text) = app.services.load_prefs.as_mut().and_then(|f| f()) {
+        app.prefs_rt.saved_text = Some(text.clone());
+        app.prefs_rt.saved_tree = serde_json::from_str(&text).ok();
         match app.session.load_prefs_json(&text) {
             Ok(found) => invalid = found,
             Err(e) => {
@@ -710,9 +725,42 @@ struct SaveRetry {
 /// change retries sooner); the status bar reports the first failure and a notice a persistent
 /// one. Returns the seconds until the next retry while one is pending.
 fn persist(app: &mut PhotocraftApp, now: f64) -> Option<f64> {
+    persist_at(app, now, false)
+}
+
+/// Wait this long after the last change before writing, at most [`MAX_WAIT_FACTOR`] times it
+/// after the first unsaved one (with a debounce set in `Services::prefs_debounce_s`).
+const MAX_WAIT_FACTOR: f64 = 4.0;
+
+/// Write pending preference changes now (the page is being hidden, the app closes).
+pub fn flush_prefs(app: &mut PhotocraftApp, now: f64) {
+    let _ = persist_at(app, now, true);
+}
+
+/// Whether preference changes wait to be written.
+pub fn prefs_pending(app: &PhotocraftApp) -> bool {
+    app.prefs_rt.loaded && app.session.prefs.rev() != app.prefs_rt.saved_rev
+}
+
+fn persist_at(app: &mut PhotocraftApp, now: f64, force: bool) -> Option<f64> {
     let rev = app.session.prefs.rev();
     if rev == app.prefs_rt.saved_rev {
+        app.prefs_rt.pending_since = None;
         return None;
+    }
+    // A burst of changes (a slider, a panel drag, the tool memory) is written once, after it.
+    let debounce = app.services.prefs_debounce_s;
+    if debounce > 0.0 && !force {
+        let rt = &mut app.prefs_rt;
+        if rt.seen_rev != rev {
+            rt.seen_rev = rev;
+            rt.changed_at = now;
+            rt.pending_since.get_or_insert(now);
+        }
+        let due = (rt.changed_at + debounce).min(rt.pending_since.unwrap_or(now) + debounce * MAX_WAIT_FACTOR);
+        if now < due {
+            return Some(due - now);
+        }
     }
     let r = &app.prefs_rt.save_retry;
     if r.failures > 0 {
@@ -728,6 +776,7 @@ fn persist(app: &mut PhotocraftApp, now: f64) -> Option<f64> {
         Ok(()) => {
             app.prefs_rt.saved_rev = rev;
             app.prefs_rt.saved_value = Some(ours);
+            app.prefs_rt.pending_since = None;
             let r = std::mem::take(&mut app.prefs_rt.save_retry);
             if r.failures > 0 {
                 let message = "Preferences saved";
@@ -763,17 +812,31 @@ fn persist(app: &mut PhotocraftApp, now: f64) -> Option<f64> {
 /// Write `ours` over the stored preferences, keeping what another instance (a second browser
 /// tab, another app window) changed there since this one last loaded or saved them.
 fn write_prefs(app: &mut PhotocraftApp, ours: &Value) -> Result<(), String> {
-    let Some(save) = app.services.save_prefs.as_mut() else { return Ok(()) };
-    let stored = app.services.load_prefs.as_mut().and_then(|load| load()).and_then(|t| serde_json::from_str::<Value>(&t).ok());
-    let text = match (stored, &app.prefs_rt.saved_value) {
+    if app.services.save_prefs.is_none() {
+        return Ok(());
+    }
+    let compact = app.services.prefs_compact;
+    let to_text = |v: &Value| if compact { serde_json::to_string(v) } else { serde_json::to_string_pretty(v) };
+    let stored_text = app.services.load_prefs.as_mut().and_then(|load| load());
+    // Storage still holds what this instance last wrote (or loaded): merge into that tree as it
+    // is held, rather than parsing the text again.
+    let unchanged = stored_text.is_some() && stored_text == app.prefs_rt.saved_text;
+    let held = app.prefs_rt.saved_tree.take();
+    let stored = if unchanged && held.is_some() { held } else { stored_text.and_then(|t| serde_json::from_str::<Value>(&t).ok()) };
+    let (tree, text) = match (stored, &app.prefs_rt.saved_value) {
         (Some(mut theirs @ Value::Object(_)), Some(base)) => {
             merge_changes(base, ours, &mut theirs);
-            serde_json::to_string_pretty(&theirs)
+            let text = to_text(&theirs);
+            (theirs, text)
         }
-        _ => serde_json::to_string_pretty(ours),
-    }
-    .map_err(|e| e.to_string())?;
-    save(&text)
+        _ => (ours.clone(), to_text(ours)),
+    };
+    let text = text.map_err(|e| e.to_string())?;
+    let Some(save) = app.services.save_prefs.as_mut() else { return Ok(()) };
+    save(&text)?;
+    app.prefs_rt.saved_text = Some(text);
+    app.prefs_rt.saved_tree = Some(tree);
+    Ok(())
 }
 
 /// Three-way merge of preference trees: whatever `ours` changed since `base` goes over `theirs`
@@ -3798,6 +3861,63 @@ mod tests {
         tick(&mut next, &ctx);
         assert!(next.ui.notices.iter().all(|n| n.title != "Some preferences were reset"));
         assert_eq!(next.session.prefs().file_handling.autosave_minutes, 5);
+    }
+
+    /// The web's preferences (`prefs_debounce_s`, `prefs_compact`): a burst of changes is written
+    /// once after it, compact; a steady stream at most every four debounces; a hidden page flushes
+    /// at once; and another tab's write is still merged, while the usual write skips re-reading it.
+    #[test]
+    fn web_preferences_are_written_once_per_burst_compact_and_flushed_when_hidden() {
+        let store: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let writes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (a, b, n) = (store.clone(), store.clone(), writes.clone());
+        let services = crate::Services {
+            load_prefs: Some(Box::new(move || a.lock().unwrap().clone())),
+            save_prefs: Some(Box::new(move |s: &str| {
+                n.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                *b.lock().unwrap() = Some(s.to_string());
+                Ok(())
+            })),
+            prefs_debounce_s: 1.0,
+            prefs_compact: true,
+            ..Default::default()
+        };
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);
+        tick(&mut app, &egui::Context::default());
+        let count = || writes.load(std::sync::atomic::Ordering::Relaxed);
+        let base = count();
+        let set = |app: &mut PhotocraftApp, n: u32| app.session.prefs.edit(|p| p.file_handling.recent_file_count = n);
+        // A burst: written once, a debounce after its last change.
+        set(&mut app, 11);
+        assert!(persist_at(&mut app, 10.0, false).is_some());
+        set(&mut app, 12);
+        assert!(persist_at(&mut app, 10.5, false).is_some());
+        assert!(persist_at(&mut app, 11.2, false).is_some());
+        assert_eq!(count(), base, "not during the burst");
+        assert!(persist_at(&mut app, 11.6, false).is_none());
+        assert_eq!(count(), base + 1, "once after it");
+        let text = store.lock().unwrap().clone().unwrap();
+        assert!(!text.contains('\n'), "compact");
+        assert_eq!(stored(&store)["fileHandling"]["recentFileCount"], 12);
+        // A change every half second: still written within four debounces of the first.
+        for i in 0..9 {
+            set(&mut app, 20 + i);
+            persist_at(&mut app, 20.0 + f64::from(i) * 0.5, false);
+        }
+        assert_eq!(count(), base + 2, "written at 24 s");
+        // The page is hidden: written now.
+        set(&mut app, 40);
+        flush_prefs(&mut app, 30.0);
+        assert_eq!(count(), base + 3);
+        assert_eq!(stored(&store)["fileHandling"]["recentFileCount"], 40);
+        // Another tab wrote in between: its change is kept.
+        let mut theirs = stored(&store);
+        theirs["futureSection"] = json!({"kept": true});
+        *store.lock().unwrap() = Some(theirs.to_string());
+        set(&mut app, 41);
+        flush_prefs(&mut app, 31.0);
+        let v = stored(&store);
+        assert_eq!((v["fileHandling"]["recentFileCount"].clone(), v["futureSection"]["kept"].clone()), (json!(41), json!(true)));
     }
 
     #[test]

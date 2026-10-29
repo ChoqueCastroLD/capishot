@@ -3679,3 +3679,4 @@ curves	Smooth	Сгладить
 	Downloading… {pct}%	Загрузка… {pct}%
 	Starting the download…	Начинается загрузка…
 	The download failed: {reason}	Загрузка не удалась: {reason}
+	Couldn't write the file, downloaded it instead: {error}	Не удалось записать файл, вместо этого он загружен: {error}

@@ -458,3 +458,28 @@ fn missed_frames_follow_the_display_period() {
     let e = events(&b, "frames")[0];
     assert_eq!(e["drop"], 1, "{e}");
 }
+
+/// A freeze says what ran: the tool as it is (tools aren't command ids: every one used to read
+/// `tool.other`), the part of the frame that took longest and the user's last action, all from
+/// fixed lists; anything else is reduced as command ids are.
+#[test]
+fn freezes_name_the_tool_the_phase_and_the_last_action() {
+    let mut r = Recorder::new("a", "s", 0.0);
+    let ctx = FreezeContext {
+        command: None,
+        tool: Some(tool_id(crate::state::Tool::RemoveAi)),
+        job: Some("file.open".into()),
+        megapixels: Some(16.6),
+        phase: Some("gpu.composite"),
+        action: Some(tool_id(crate::state::Tool::Type)),
+    };
+    r.freeze(FreezeSource::Frame, 9_180.0, &ctx);
+    r.freeze(FreezeSource::LongTask, 250.0, &FreezeContext { tool: Some("tool.Secret".into()), action: Some("layer.rename.Chapter 12".into()), ..Default::default() });
+    r.freeze(FreezeSource::LongTask, 120.0, &ctx);
+    let b = batch(&mut r);
+    let f = events(&b, "freeze");
+    assert_eq!(f.len(), 2, "only blocks of at least 200 ms");
+    assert_eq!((f[0]["tool"].as_str(), f[0]["phase"].as_str(), f[0]["action"].as_str(), f[0]["job"].as_str()), (Some("tool.RemoveAi"), Some("gpu.composite"), Some("tool.Type"), Some("file.open")));
+    assert_eq!((f[1]["tool"].as_str(), f[1]["action"].as_str()), (Some("tool.other"), Some("layer.other")));
+    assert_eq!(b["v"], 5);
+}

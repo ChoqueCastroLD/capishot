@@ -510,9 +510,14 @@ pub fn persist(app: &mut PhotocraftApp, ctx: &egui::Context) {
         st.saved = if app.services.save_typer.is_some() { text_hash(&workspace_text(&app.session.typer)) } else { 0 };
     } else if app.services.save_typer.is_some() && now - st.last_check >= SAVE_EVERY && !ctx.input(|i| i.pointer.any_down()) {
         st.last_check = now;
-        let text = workspace_text(&app.session.typer);
+        // Serialised only when it changed since the last save (a compare, no JSON every second).
+        let changed = app.prefs_rt.typer_saved.as_ref() != Some(&app.session.typer.state);
+        let text = if changed { workspace_text(&app.session.typer) } else { String::new() };
+        if changed {
+            app.prefs_rt.typer_saved = Some(app.session.typer.state.clone());
+        }
         let hash = text_hash(&text);
-        if hash != st.saved {
+        if changed && hash != st.saved {
             // Remembered even on failure, so a full storage reports once rather than every second.
             st.saved = hash;
             if let Some(save) = app.services.save_typer.as_mut()

@@ -236,6 +236,8 @@ fn reduced_renders_reuse_the_reduced_lower_stack() {
             d.layers[top].opacity = op;
             let (got, st) = render_to_vec_lod(&mut g.comp, &g.device, &g.queue, &d, d.bounds(), level).unwrap();
             let mut fresh = Compositor::try_new_with_format(&g.device, wgpu::TextureFormat::Rgba32Float).unwrap();
+        // As the canvas composites a refresh it splits (and its catch-up): no whole-chunk fill.
+        fresh.set_fill_prefix(false);
             fresh.set_composite_cache_budget(0);
             let (want, _) = render_to_vec_lod(&mut fresh, &g.device, &g.queue, &d, d.bounds(), level).unwrap();
             assert!(diffs(&got, &want).0 <= 1e-5, "level {level} edit {k}: cached differs");
@@ -254,5 +256,47 @@ fn reduced_renders_reuse_the_reduced_lower_stack() {
                 }
             }
         }
+    }
+}
+
+/// The canvas's first refresh of a big page goes in pieces: each piece uploads only the layer
+/// tiles it reads (not every tile of the pages it touches), and the pieces composite exactly
+/// what one render of the whole does, at full size and reduced.
+#[test]
+fn pieces_upload_as_they_reach_tiles_and_match_one_render() {
+    let Some(g) = gpu() else { return };
+    // A page three chunks wide: the mixed page's layers, and noise across all of it.
+    let mut doc = mixed_doc();
+    doc.size = Size::new(1536, 1024);
+    let fmt = doc.pixel_format();
+    doc.layers.insert(1, noise("wide", fmt, Rect::new(0, 0, 1536, 1024), 61));
+    let mut right = noise("right", fmt, Rect::new(1100, 600, 1500, 1000), 71);
+    right.blend = BlendMode::Multiply;
+    doc.layers.push(right);
+    for level in [0, 1] {
+        let mut one = Compositor::try_new_with_format(&g.device, wgpu::TextureFormat::Rgba32Float).unwrap();
+        let (whole, all) = render_to_vec_lod(&mut one, &g.device, &g.queue, &doc, doc.bounds(), level).unwrap();
+        let lb = level_bounds(doc.bounds(), level);
+        let mut fresh = Compositor::try_new_with_format(&g.device, wgpu::TextureFormat::Rgba32Float).unwrap();
+        // As the canvas composites a refresh it splits (and its catch-up): no whole-chunk fill.
+        fresh.set_fill_prefix(false);
+        let mut uploaded = Vec::new();
+        for y in (0..doc.size.height as i32).step_by(512) {
+            for x in (0..doc.size.width as i32).step_by(512) {
+                let piece = Rect::new(x, y, x + 512, y + 512).intersect(&doc.bounds());
+                let (v, st) = render_to_vec_lod(&mut fresh, &g.device, &g.queue, &doc, piece, level).unwrap();
+                uploaded.push(st.tiles_uploaded);
+                let lr = level_rect(piece, level).intersect(&lb);
+                for (i, px) in v.iter().enumerate() {
+                    let (px_x, px_y) = (lr.x0 as usize + i % lr.width() as usize, lr.y0 as usize + i / lr.width() as usize);
+                    let w = whole[px_y * lb.width() as usize + px_x];
+                    for c in 0..4 {
+                        assert!((px[c] - w[c]).abs() < 1e-5, "level {level}, piece {piece:?} at {px_x},{px_y}: {px:?} vs {w:?}");
+                    }
+                }
+            }
+        }
+        assert!(uploaded[0] < all.tiles_uploaded, "level {level}: the first piece uploaded {} of {} tiles", uploaded[0], all.tiles_uploaded);
+        assert_eq!(uploaded.iter().sum::<usize>(), all.tiles_uploaded, "level {level}: every tile once over the pieces");
     }
 }

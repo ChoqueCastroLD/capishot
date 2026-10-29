@@ -235,6 +235,8 @@ pub fn supports_f16_canvas(adapter: &wgpu::Adapter) -> bool {
 impl GpuCanvas {
     /// Create pipelines and register resources with the egui renderer.
     pub fn new(rs: &RenderState) -> Self {
+        // The compositor's work shows in the frame's spans (freeze reports name it).
+        photocraft_gpu::set_span_hook(|name| Box::new(crate::perf_span::span(name)));
         Self::with_tile(rs, None)
     }
 
@@ -547,6 +549,7 @@ impl GpuCanvas {
         partial: bool,
         fill_prefix: bool,
     ) -> Result<photocraft_gpu::Stats, photocraft_gpu::Unsupported> {
+        let _s = crate::perf_span::span("gpu.composite");
         let (device, queue) = (&self.rs.device, &self.rs.queue);
         let size = [doc.size.width, doc.size.height];
         if size[0] == 0 || size[1] == 0 {
@@ -564,9 +567,15 @@ impl GpuCanvas {
         if let Some(e) = &res.compositor_failed {
             return Err(e.clone());
         }
+        let built = if res.compositor.is_none() {
+            let _s = crate::perf_span::span("gpu.pipelines");
+            Some(photocraft_gpu::Compositor::try_new_with_format(device, photocraft_gpu::Compositor::preferred_acc_format(&self.rs.adapter)))
+        } else {
+            None
+        };
         let mut comp = match res.compositor.take() {
             Some(c) => c,
-            None => match photocraft_gpu::Compositor::try_new_with_format(device, photocraft_gpu::Compositor::preferred_acc_format(&self.rs.adapter)) {
+            None => match built.unwrap_or_else(|| Err(photocraft_gpu::Unsupported("no GPU compositor".into()))) {
                 Ok(c) => c,
                 Err(e) => {
                     log::warn!("{e}; using the CPU compositor");
@@ -718,6 +727,7 @@ impl GpuCanvas {
         display: Option<&photocraft_engine::display_color::CanvasDisplay>,
         need: Option<ViewNeed>,
     ) -> Refresh {
+        let _s = crate::perf_span::span("canvas.refresh");
         if let Some(f) = self.fault() {
             // Nothing reaches the GPU any more; the app switches to the CPU canvas.
             return Refresh { kind: "lost", fallback: Some(f.to_string()), ..Default::default() };
@@ -750,7 +760,33 @@ impl GpuCanvas {
             let now = region.intersect(&near);
             let later = subtract(region, near);
             let level = if area(now) >= LOD_MIN_PX { n.level } else { 0 };
-            let r = self.composite_lod(doc, now, encode_srgb, level, true);
+            // A big refresh (a document just opened, a change to the whole canvas) goes in pieces,
+            // the view's centre first, for as long as the frame's work allows; the rest is
+            // deferred and `catch_up` continues it on the next frames. One frame used to composite
+            // (and upload every layer of) a whole 16-50 MP page: seconds on a phone.
+            let mut later = later;
+            let mut r: Result<photocraft_gpu::Stats, photocraft_gpu::Unsupported> = Ok(photocraft_gpu::Stats { level, ..Default::default() });
+            let parts = pieces(now, n.visible);
+            // A split refresh draws each piece once, as the catch-up does: no whole-chunk fill
+            // of the lower-stack cache (it would read, and upload, far more than the piece).
+            let whole = parts.len() <= 1;
+            for (i, p) in parts.into_iter().enumerate() {
+                if i > 0 && now_ms() - t0 >= FRAME_WORK_MS {
+                    later.push(p);
+                    continue;
+                }
+                match self.composite_lod_with(doc, p, encode_srgb, level, true, whole) {
+                    Ok(st) => {
+                        if let Ok(total) = &mut r {
+                            add_stats(total, &st);
+                        }
+                    }
+                    Err(e) => {
+                        r = Err(e);
+                        break;
+                    }
+                }
+            }
             if let Ok(stats) = &r {
                 self.with_doc(key, |res, d| {
                     let mut stale = d.stale();
@@ -783,7 +819,10 @@ impl GpuCanvas {
                 out.kind = "rect";
                 return out;
             }
-            let buf = photocraft_compose::render(doc, r);
+            let buf = {
+                let _s = crate::perf_span::span("canvas.cpu_rect");
+                photocraft_compose::render(doc, r)
+            };
             let t1 = now_ms();
             if self.upload_buffer_rect(key, &texture_buffer(display, &buf)) {
                 out.kind = "rect";
@@ -814,6 +853,7 @@ impl GpuCanvas {
         idle: bool,
         ctx: &egui::Context,
     ) -> CatchUp {
+        let _s = crate::perf_span::span("canvas.catch_up");
         let mut out = CatchUp::default();
         if key != doc.id.0 || self.fault().is_some() || !self.has(key, [doc.size.width, doc.size.height]) {
             return out;
@@ -830,16 +870,30 @@ impl GpuCanvas {
             self.wake_when_done(ctx);
             return out;
         }
-        for r in urgent {
+        // What the view needs, in pieces within the frame's work (a big deferred refresh comes
+        // back here frame after frame until it's done).
+        let mut more = false;
+        'urgent: for r in urgent {
             let level = if area(r) >= LOD_MIN_PX { need.level } else { 0 };
-            match self.composite_lod_with(doc, r, encode_srgb, level, true, false) {
-                Ok(st) => out.px += st.pixels,
-                Err(_) => {
-                    // Not on the GPU any more: the next refresh redraws the document.
-                    self.forget_doc(key);
-                    return out;
+            for p in pieces(r, need.visible) {
+                if out.px > 0 && now_ms() - t0 >= FRAME_WORK_MS {
+                    more = true;
+                    break 'urgent;
+                }
+                match self.composite_lod_with(doc, p, encode_srgb, level, true, false) {
+                    Ok(st) => out.px += st.pixels.max(1),
+                    Err(_) => {
+                        // Not on the GPU any more: the next refresh redraws the document.
+                        self.forget_doc(key);
+                        return out;
+                    }
                 }
             }
+        }
+        if more {
+            out.composite_ms = now_ms() - t0;
+            out.again_ms = Some(0.0);
+            return out;
         }
         let wait = REFINE_DELAY_MS - (now_ms() - reduced_at);
         // One refinement piece on the GPU at a time, sized from how long the last one took
@@ -954,6 +1008,7 @@ impl GpuCanvas {
     /// band (each band converted and uploaded before the next is rendered), so a huge document
     /// never needs a full-size float composite or texture-format copy in memory.
     pub fn upload_composite(&self, key: u64, doc: &photocraft_doc::Document, display: Option<&photocraft_engine::display_color::CanvasDisplay>) {
+        let _s = crate::perf_span::span("canvas.cpu_full");
         let size = [doc.size.width, doc.size.height];
         if size[0] == 0 || size[1] == 0 || !self.health.is_ok() {
             return;
@@ -1166,6 +1221,53 @@ pub struct CatchUp {
     /// Out-of-date regions remain: call again after this many milliseconds (`None` with a piece
     /// on the GPU: its completion requests the repaint).
     pub again_ms: Option<f64>,
+}
+
+/// The canvas work (compositing, uploading layer tiles) one frame does for a big refresh before
+/// it defers the rest to the next frames, in milliseconds. At least one piece always goes.
+pub const FRAME_WORK_MS: f64 = 24.0;
+
+/// Side of a piece of a big refresh, in document pixels: a quarter of a compositor page, so a
+/// piece uploads a few hundred tiles at most.
+const PIECE: i32 = 1024;
+
+/// `r` cut on a [`PIECE`] grid, the pieces nearest the centre of `visible` first.
+fn pieces(r: photocraft_geom::Rect, visible: photocraft_geom::Rect) -> Vec<photocraft_geom::Rect> {
+    if r.is_empty() {
+        return Vec::new();
+    }
+    if area(r) <= (PIECE as u64) * (PIECE as u64) {
+        return vec![r];
+    }
+    let (cx, cy) = ((i64::from(visible.x0) + i64::from(visible.x1)) / 2, (i64::from(visible.y0) + i64::from(visible.y1)) / 2);
+    let mut out = Vec::new();
+    let mut y = r.y0.div_euclid(PIECE) * PIECE;
+    while y < r.y1 {
+        let mut x = r.x0.div_euclid(PIECE) * PIECE;
+        while x < r.x1 {
+            let p = photocraft_geom::Rect::new(x, y, x.saturating_add(PIECE), y.saturating_add(PIECE)).intersect(&r);
+            if !p.is_empty() {
+                out.push(p);
+            }
+            x = x.saturating_add(PIECE);
+        }
+        y = y.saturating_add(PIECE);
+    }
+    let dist = |p: &photocraft_geom::Rect| {
+        let (px, py) = ((i64::from(p.x0) + i64::from(p.x1)) / 2, (i64::from(p.y0) + i64::from(p.y1)) / 2);
+        (px - cx).pow(2) + (py - cy).pow(2)
+    };
+    out.sort_by_key(dist);
+    out
+}
+
+/// `total` with the work of another piece of the same refresh.
+fn add_stats(total: &mut photocraft_gpu::Stats, st: &photocraft_gpu::Stats) {
+    total.pixels += st.pixels;
+    total.tiles_uploaded += st.tiles_uploaded;
+    total.bytes_uploaded += st.bytes_uploaded;
+    total.passes = total.passes.max(st.passes);
+    total.level = st.level;
 }
 
 fn area(r: photocraft_geom::Rect) -> u64 {

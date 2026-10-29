@@ -3890,3 +3890,4 @@ curves	Smooth	매끄럽게
 	Downloading… {pct}%	내려받는 중… {pct}%
 	Starting the download…	내려받기를 시작하는 중…
 	The download failed: {reason}	내려받기에 실패했습니다: {reason}
+	Couldn't write the file, downloaded it instead: {error}	파일을 쓸 수 없어 대신 다운로드했습니다: {error}

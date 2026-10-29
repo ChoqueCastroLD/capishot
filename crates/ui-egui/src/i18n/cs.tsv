@@ -4301,3 +4301,4 @@ navigator	Zoom	Zvětšení
 	Downloading… {pct}%	Stahování… {pct} %
 	Starting the download…	Zahajuje se stahování…
 	The download failed: {reason}	Stahování selhalo: {reason}
+	Couldn't write the file, downloaded it instead: {error}	Soubor nelze zapsat, byl místo toho stažen: {error}

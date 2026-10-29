@@ -4301,3 +4301,4 @@ curves	Smooth	Wygładź
 	Downloading… {pct}%	Pobieranie… {pct}%
 	Starting the download…	Rozpoczynanie pobierania…
 	The download failed: {reason}	Pobieranie nie powiodło się: {reason}
+	Couldn't write the file, downloaded it instead: {error}	Nie udało się zapisać pliku; zamiast tego został pobrany: {error}

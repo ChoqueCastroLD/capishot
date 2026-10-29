@@ -4410,3 +4410,4 @@ curves	Smooth	Згладити
 	Downloading… {pct}%	Завантаження… {pct}%
 	Starting the download…	Починається завантаження…
 	The download failed: {reason}	Завантаження не вдалося: {reason}
+	Couldn't write the file, downloaded it instead: {error}	Не вдалося записати файл, натомість його завантажено: {error}

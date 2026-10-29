@@ -14,6 +14,25 @@ use std::sync::Arc;
 
 use photocraft_doc::{DocId, Document, LayerId};
 
+/// Rebuilds what a stored state left out to save memory: type layers' rendered pixels, which the
+/// engine renders again from their text and style (installed by the engine, [`set_rebuild`]).
+/// `None`: nothing was left out.
+pub type RebuildFn = fn(&Document) -> Option<Document>;
+
+static REBUILD: std::sync::OnceLock<RebuildFn> = std::sync::OnceLock::new();
+
+/// Install the [`RebuildFn`] every document handed out of the history goes through (once).
+pub fn set_rebuild(f: RebuildFn) {
+    let _ = REBUILD.set(f);
+}
+
+fn rebuilt(doc: Arc<Document>) -> Arc<Document> {
+    match REBUILD.get().and_then(|f| f(&doc)) {
+        Some(d) => Arc::new(d),
+        None => doc,
+    }
+}
+
 /// The layers a state targeted when it was created: the active ("key") layer and every selected
 /// layer. Undo and redo bring them back with the state's document, as the reference app does;
 /// selecting layers is not a step of its own, so it doesn't change a state's target.
@@ -336,7 +355,7 @@ impl History {
             return Ok(Some((current, self.current_layers.clone())));
         }
         let Some(prev) = self.undo.back() else { return Ok(None) };
-        let restored = prev.document.load()?;
+        let restored = rebuilt(prev.document.load()?);
         let Some(prev) = self.undo.pop_back() else { return Ok(None) };
         let label = std::mem::replace(&mut self.current_label, prev.label);
         let layers = std::mem::replace(&mut self.current_layers, prev.layers.clone());
@@ -354,7 +373,7 @@ impl History {
 
     pub fn try_redo(&mut self, current: Arc<Document>) -> Result<Option<(Arc<Document>, LayerTarget)>, String> {
         let Some(next) = self.redo.last() else { return Ok(None) };
-        let restored = next.document.load()?;
+        let restored = rebuilt(next.document.load()?);
         let Some(next) = self.redo.pop() else { return Ok(None) };
         let label = std::mem::replace(&mut self.current_label, next.label);
         let layers = std::mem::replace(&mut self.current_layers, next.layers.clone());
@@ -418,7 +437,7 @@ impl History {
         match i.checked_sub(past) {
             None => self.state(i),
             Some(0) => Some(current.clone()),
-            Some(k) => self.redo.iter().rev().nth(k - 1).and_then(|s| s.document.load().ok()),
+            Some(k) => self.redo.iter().rev().nth(k - 1).and_then(|s| s.document.load().ok()).map(rebuilt),
         }
     }
 
@@ -489,7 +508,7 @@ impl History {
     }
 
     pub fn try_state(&self, i: usize) -> Result<Option<Arc<Document>>, String> {
-        self.undo.get(i).map(|state| state.document.load()).transpose()
+        self.undo.get(i).map(|state| state.document.load().map(rebuilt)).transpose()
     }
 
     /// Resident snapshots only; this never reads scratch storage.

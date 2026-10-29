@@ -4855,3 +4855,4 @@ navigator	Zoom	Zoom
 	Downloading… {pct}%	Descargando… {pct} %
 	Starting the download…	Iniciando la descarga…
 	The download failed: {reason}	La descarga falló: {reason}
+	Couldn't write the file, downloaded it instead: {error}	No se pudo escribir el archivo; se descargó en su lugar: {error}

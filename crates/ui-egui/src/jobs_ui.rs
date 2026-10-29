@@ -528,7 +528,7 @@ fn finish_save(app: &mut PhotocraftApp, ctx: &egui::Context, save: SaveJob, labe
             // A browser download is only a request the user can cancel: the document stays unsaved
             // at the revision it was last confirmed saved at (#4962).
             let previous = app.session.documents().iter().find(|st| st.doc.id == save.doc).map_or(save.revision, |st| st.saved_revision);
-            let revision = crate::saved_revision_after_write(!app.services.write_unconfirmed, save.revision, previous);
+            let revision = crate::saved_revision_after_write(app.write_confirmed(&save.path), save.revision, previous);
             if save.automation {
                 app.saved_automation(save.doc, revision, &save.path, &warnings_of(&v), save.copy);
             } else {
@@ -567,7 +567,10 @@ fn close_after_saves(app: &mut PhotocraftApp, ctx: &egui::Context) {
 /// Per frame: apply finished jobs and react to them; keep frames coming while jobs run; Esc
 /// cancels the job in view.
 pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
-    app.session.poll_history_cache();
+    {
+        let _s = crate::perf_span::span("history.cache");
+        app.session.poll_history_cache();
+    }
     if let Some(message) = app.session.take_history_cache_notice() {
         app.ui.status = message;
         app.ui.status_error = true;
@@ -575,7 +578,12 @@ pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if app.session.history_cache_busy() {
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
     }
-    for e in app.session.poll_jobs() {
+    let events = {
+        let _s = crate::perf_span::span("jobs.apply");
+        app.session.poll_jobs()
+    };
+    for e in events {
+        let _s = crate::perf_span::span("jobs.event");
         on_event(app, ctx, e);
     }
     // A focused open tab that ended (or was cancelled elsewhere) gives way to the documents.
@@ -805,6 +813,7 @@ fn job_notices(app: &mut PhotocraftApp, command: &str, v: &Value) {
 /// What [`crate::PhotocraftApp::open_bytes`] does after decoding, for a background open's result
 /// (`{document, warnings, color}`).
 fn finish_open(app: &mut PhotocraftApp, name: &str, path: Option<&str>, v: &Value, slot: Option<usize>) -> Result<(), String> {
+    let _s = crate::perf_span::span("open.finish");
     let warnings: Vec<String> =
         v.get("warnings").and_then(Value::as_array).map(|a| a.iter().filter_map(|w| w.as_str().map(str::to_string)).collect()).unwrap_or_default();
     let held = |doc, read_only, question, policy_applied| crate::open_prompt::Held {
@@ -853,7 +862,10 @@ pub(crate) fn after_open(app: &mut PhotocraftApp, name: &str, path: Option<&str>
     }
     app.sync_views();
     // Fonts the document's type uses that aren't installed join the import warnings (#4559).
-    let warnings = crate::file_open::with_missing_fonts(app, warnings.to_vec());
+    let warnings = {
+        let _s = crate::perf_span::span("open.missing_fonts");
+        crate::file_open::with_missing_fonts(app, warnings.to_vec())
+    };
     let warnings = warnings.as_slice();
     let opened = crate::i18n::fmt(tl!("Opened {name}"), &[("name", name)]);
     app.ui.status = opened.clone();
@@ -865,7 +877,10 @@ pub(crate) fn after_open(app: &mut PhotocraftApp, name: &str, path: Option<&str>
     } else {
         notices::io_warnings(app, &opened, warnings);
     }
-    crate::user_fonts_ui::after_open(app);
+    {
+        let _s = crate::perf_span::span("open.user_fonts");
+        crate::user_fonts_ui::after_open(app);
+    }
     // Script events bound to "Open Document".
     photocraft_engine::automate_cmds::document_opened(&mut app.session);
     app.sync_views();

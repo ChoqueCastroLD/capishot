@@ -4375,3 +4375,4 @@ curves	Smooth	スムーズ
 	Downloading… {pct}%	ダウンロード中… {pct}%
 	Starting the download…	ダウンロードを開始しています…
 	The download failed: {reason}	ダウンロードに失敗しました: {reason}
+	Couldn't write the file, downloaded it instead: {error}	ファイルに書き込めなかったため、代わりにダウンロードしました: {error}

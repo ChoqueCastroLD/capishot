@@ -593,8 +593,100 @@ pub fn refresh(doc: &Document, t: &mut TextLayer) {
     let dpi = doc.resolution_dpi;
     let mut eng = photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner());
     let (layout, r) = eng.render(t, dpi, doc.pixel_format());
+    rendered::mark(&r.surface);
     t.cache = Some(r.surface);
     t.psd_raw = Some(Arc::new(photocraft_text::psd::build_tysh(t, dpi, layout.bounds())));
+}
+
+/// Type layer pixels this engine rendered (and so can render again), by their first tile: a
+/// cache read from a file (Photoshop's own rendering) is never dropped from history.
+mod rendered {
+    use std::sync::{Arc, Mutex, Weak};
+
+    static TILES: Mutex<Vec<Weak<photocraft_raster::Tile>>> = Mutex::new(Vec::new());
+
+    fn first(s: &photocraft_raster::Surface) -> Option<&Arc<photocraft_raster::Tile>> {
+        s.tiles().next().map(|(_, t)| t)
+    }
+
+    pub(super) fn mark(s: &photocraft_raster::Surface) {
+        let Some(t) = first(s) else { return };
+        let mut v = TILES.lock().unwrap_or_else(|e| e.into_inner());
+        if v.len() >= 512 {
+            v.retain(|w| w.strong_count() > 0);
+        }
+        v.push(Arc::downgrade(t));
+    }
+
+    pub(super) fn ours(s: &photocraft_raster::Surface) -> bool {
+        let Some(t) = first(s) else { return false };
+        TILES.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|w| std::ptr::eq(w.as_ptr(), Arc::as_ptr(t)))
+    }
+
+    pub(super) fn same(a: &photocraft_raster::Surface, b: &photocraft_raster::Surface) -> bool {
+        match (first(a), first(b)) {
+            (Some(x), Some(y)) => Arc::ptr_eq(x, y),
+            (None, None) => true,
+            _ => false,
+        }
+    }
+}
+
+/// `before` as history keeps it: type layers whose pixels this engine rendered and the edit
+/// replaced (so `before` alone holds them) keep their text and style but not their pixels, which
+/// [`rebuild_text_caches`] renders again when the state comes back. A type session's history
+/// then holds text, not a raster per edit. Unchanged layers share their pixels with the current
+/// document and stay as they are.
+pub(crate) fn strip_rebuildable(before: &Arc<Document>, now: &Document) -> Arc<Document> {
+    let ids: Vec<photocraft_doc::LayerId> = before
+        .walk()
+        .into_iter()
+        .filter_map(|(_, _, l)| match &l.content {
+            LayerContent::Text(t) => {
+                let cache = t.cache.as_ref()?;
+                let kept = match now.layer(l.id).map(|n| &n.content) {
+                    Some(LayerContent::Text(n)) => n.cache.as_ref().is_some_and(|c| rendered::same(c, cache)),
+                    _ => false,
+                };
+                (!kept && rendered::ours(cache)).then_some(l.id)
+            }
+            _ => None,
+        })
+        .collect();
+    if ids.is_empty() {
+        return before.clone();
+    }
+    photocraft_ops::set_rebuild(rebuild_text_caches);
+    let mut doc = (**before).clone();
+    for id in ids {
+        if let Some(Layer { content: LayerContent::Text(t), .. }) = doc.layer_mut(id) {
+            t.cache = None;
+        }
+    }
+    Arc::new(doc)
+}
+
+/// `doc` with every type layer that has no pixels rendered ([`strip_rebuildable`]); `None` when
+/// none is missing.
+pub fn rebuild_text_caches(doc: &Document) -> Option<Document> {
+    let missing: Vec<photocraft_doc::LayerId> =
+        doc.walk().into_iter().filter(|(_, _, l)| matches!(&l.content, LayerContent::Text(t) if t.cache.is_none())).map(|(_, _, l)| l.id).collect();
+    if missing.is_empty() {
+        return None;
+    }
+    let snapshot = doc.clone();
+    let mut out = doc.clone();
+    for id in missing {
+        if let Some(Layer { content: LayerContent::Text(t), .. }) = out.layer_mut(id) {
+            let psd_raw = t.psd_raw.clone();
+            refresh(&snapshot, t);
+            // The state as it was saved: the type data stays what it was.
+            if psd_raw.is_some() {
+                t.psd_raw = psd_raw;
+            }
+        }
+    }
+    Some(out)
 }
 
 /// Refuses to change a type layer under Lock All (its own or an enclosing group's), with
@@ -1575,6 +1667,56 @@ mod tests {
             Err(EngineError::BadParams { cmd, .. }) if cmd == "type.setStyle"
         ));
         assert_eq!(text_layer(&s, id).runs, before.runs);
+    }
+
+    fn stored_cache(s: &Session, state: usize, id: u64) -> Option<photocraft_raster::Surface> {
+        let doc = s.active().unwrap().history.resident_state(state).unwrap();
+        match &doc.layer(LayerId(id)).unwrap().content {
+            LayerContent::Text(t) => t.cache.clone(),
+            other => panic!("{}", other.kind_name()),
+        }
+    }
+
+    /// A type session's history holds text, not a raster per edit: a state whose type pixels the
+    /// edit replaced keeps the layer's text and style without them, and Undo renders them again.
+    #[test]
+    fn type_edits_keep_text_in_history_and_undo_renders_it_again() {
+        let mut s = session();
+        let id = s.execute("type.create", json!({"text": "Hello", "size": 24})).unwrap()["layer"].as_u64().unwrap();
+        for text in ["Hello there", "Hello there, Capi"] {
+            s.execute("type.edit", json!({"layer": id, "text": text})).unwrap();
+        }
+        let past = s.active().unwrap().history.past_len();
+        // The states before the two edits: the text is there, its pixels are not.
+        for state in [past - 2, past - 1] {
+            assert!(stored_cache(&s, state, id).is_none(), "state {state} keeps no type pixels");
+        }
+        s.undo();
+        let back = text_layer(&s, id);
+        assert_eq!(back.text, "Hello there");
+        let pixels = back.cache.expect("Undo renders the type again");
+        assert!(!pixels.tile_bounds().is_empty(), "the line's pixels");
+        s.redo();
+        assert_eq!(text_layer(&s, id).text, "Hello there, Capi");
+        assert!(text_layer(&s, id).cache.is_some());
+    }
+
+    /// Type pixels read from a file (Photoshop's own rendering) are never dropped from history:
+    /// the engine couldn't render them the same again.
+    #[test]
+    fn type_pixels_from_a_file_stay_in_history() {
+        let mut s = session();
+        let id = s.execute("type.create", json!({"text": "Hello", "size": 24})).unwrap()["layer"].as_u64().unwrap();
+        {
+            let st = s.active_mut().unwrap();
+            let Some(Layer { content: LayerContent::Text(t), .. }) = Arc::make_mut(&mut st.doc).layer_mut(LayerId(id)) else { panic!("not a type layer") };
+            let mut file = photocraft_raster::Surface::new(photocraft_color::PixelFormat::RGBA8);
+            file.fill_rect(photocraft_geom::Rect::new(0, 0, 40, 20), &[0.5, 0.5, 0.5, 1.0]);
+            t.cache = Some(file);
+        }
+        s.execute("type.edit", json!({"layer": id, "text": "Hello there"})).unwrap();
+        let past = s.active().unwrap().history.past_len();
+        assert!(stored_cache(&s, past - 1, id).is_some(), "the file's pixels stay");
     }
 
     /// A font that arrives after the layer was drawn (served fonts on the web) re-renders it with

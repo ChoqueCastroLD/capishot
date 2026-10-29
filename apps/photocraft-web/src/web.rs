@@ -942,11 +942,14 @@ struct WebShell {
 /// Bytes copied out of the WebAssembly memory per frame for a download.
 const DOWNLOAD_CHUNK: usize = 4 << 20;
 
-/// A download being copied out of the shared memory, [`DOWNLOAD_CHUNK`] bytes per frame.
+/// A download being copied out of the shared memory, [`DOWNLOAD_CHUNK`] bytes per frame, into a
+/// Blob that grows a chunk at a time (a Blob of a Blob and a chunk references the first, so no
+/// frame copies more than a chunk: building one Blob of every part at the end held the page for
+/// hundreds of milliseconds on a phone).
 struct PendingDownload {
     bytes: Vec<u8>,
     at: usize,
-    parts: js_sys::Array,
+    blob: Option<web_sys::Blob>,
     save: EncodedSave,
 }
 
@@ -962,7 +965,7 @@ impl WebShell {
                 // A big download is copied out of the shared memory a slice per frame
                 // ([`PendingDownload`]): one copy of tens of megabytes would hold the page.
                 Ok(bytes) if bytes.len() > DOWNLOAD_CHUNK && self.photopea.as_ref().is_none_or(|c| !c.saves(&meta.path)) => {
-                    self.downloads.push_back(PendingDownload { parts: js_sys::Array::new(), at: 0, bytes, save: meta });
+                    self.downloads.push_back(PendingDownload { blob: None, at: 0, bytes, save: meta });
                 }
                 Ok(bytes) => {
                     let r = deliver(self.photopea.as_ref(), &meta.path, &bytes);
@@ -973,12 +976,30 @@ impl WebShell {
         }
         if let Some(d) = self.downloads.front_mut() {
             let end = (d.at + DOWNLOAD_CHUNK).min(d.bytes.len());
-            d.parts.push(&js_sys::Uint8Array::from(&d.bytes[d.at..end]));
+            let parts = js_sys::Array::new();
+            if let Some(b) = d.blob.take() {
+                parts.push(&b);
+            }
+            parts.push(&js_sys::Uint8Array::from(&d.bytes[d.at..end]));
+            let grown = blob_of(&d.save.path, &parts);
             d.at = end;
+            match grown {
+                Ok(b) => d.blob = Some(b),
+                Err(e) => {
+                    if let Some(d) = self.downloads.pop_front() {
+                        self.saved(&d.save, Err(e));
+                    }
+                    ctx.request_repaint();
+                    return;
+                }
+            }
             if end >= d.bytes.len()
                 && let Some(d) = self.downloads.pop_front()
             {
-                let r = download_parts(&d.save.path, &d.parts);
+                let r = match &d.blob {
+                    Some(b) => deliver_blob(&d.save.path, b),
+                    None => Err("nothing was encoded".into()),
+                };
                 self.saved(&d.save, r);
             }
             ctx.request_repaint();
@@ -1156,6 +1177,7 @@ impl eframe::App for WebShell {
             }
         }
         self.perf.begin(frame.info().cpu_usage);
+        self.watchdog.begin();
         // A tap on the canvas with the Type tool opens the keyboard (keyboard_on_type_tap).
         let zone = (self.app.ui.tool.is_type() && photocraft_ui_egui::touch_ui::active(&self.app) && photocraft_ui_egui::simple_ui::sheet(ctx) == photocraft_ui_egui::simple_ui::Sheet::Closed)
             .then(|| {
@@ -1193,7 +1215,11 @@ impl eframe::App for WebShell {
         }
         let placed = std::mem::take(&mut *self.places.lock().unwrap_or_else(|e| e.into_inner()));
         for (name, bytes) in placed {
+            let _s = photocraft_ui_egui::perf_span::span("place.bytes");
             self.app.place_dropped_bytes(name, bytes);
+        }
+        for e in take_write_failures() {
+            photocraft_ui_egui::notices::error(&mut self.app, i18n::fmt(i18n::t("Couldn't write the file, downloaded it instead: {error}"), &[("error", &e)]));
         }
         for (title, lines, error) in crate::clipboard::take_notices() {
             photocraft_ui_egui::notices::post(&mut self.app, i18n::t(&title), lines, error, None);
@@ -1201,22 +1227,44 @@ impl eframe::App for WebShell {
         if crate::clipboard::take_finished() {
             let _ = self.app.resume_clipboard_paste(ctx);
         }
-        self.serve_fonts(ctx);
-        self.pump_user_fonts(ctx);
-        fetch_catalogs(ctx);
-        self.watchdog.begin();
-        self.recovery.tick(&mut self.app);
-        self.deliver_saves(ctx);
-        self.app.logic(ctx, frame);
-        if self.hosted {
-            crate::embed_api::process(&mut self.app, ctx);
-        } else {
-            crate::embed::process(&mut self.app);
+        {
+            let _s = photocraft_ui_egui::perf_span::span("fonts.serve");
+            self.serve_fonts(ctx);
+            self.pump_user_fonts(ctx);
         }
-        crate::breadcrumb::tick(&self.app);
-        crate::breadcrumb::tick(&self.app);
-        crate::usage_stats::sync(&self.app, ctx);
-        self.save_presets(ctx);
+        fetch_catalogs(ctx);
+        {
+            let _s = photocraft_ui_egui::perf_span::span("recovery.tick");
+            self.recovery.tick(&mut self.app);
+        }
+        {
+            let _s = photocraft_ui_egui::perf_span::span("save.deliver");
+            self.deliver_saves(ctx);
+        }
+        self.app.logic(ctx, frame);
+        // The page is being hidden (another app, the tab switcher, closing): pending preference
+        // changes are written now rather than after the debounce, which a frozen tab never ends.
+        if photocraft_ui_egui::prefs_ui::prefs_pending(&self.app) && web_sys::window().and_then(|w| w.document()).is_some_and(|d| d.hidden()) {
+            let _s = photocraft_ui_egui::perf_span::span("prefs.flush");
+            photocraft_ui_egui::prefs_ui::flush_prefs(&mut self.app, ctx.input(|i| i.time));
+        }
+        {
+            let _s = photocraft_ui_egui::perf_span::span("embed.process");
+            if self.hosted {
+                crate::embed_api::process(&mut self.app, ctx);
+            } else {
+                crate::embed::process(&mut self.app);
+            }
+        }
+        {
+            let _s = photocraft_ui_egui::perf_span::span("stats.sync");
+            crate::breadcrumb::tick(&self.app);
+            crate::usage_stats::sync(&self.app, ctx);
+        }
+        {
+            let _s = photocraft_ui_egui::perf_span::span("presets.save");
+            self.save_presets(ctx);
+        }
         self.perf.end_logic();
     }
 
@@ -1249,7 +1297,10 @@ impl eframe::App for WebShell {
             // After the frame's UI: a pan, zoom or rotation made this frame is reported now.
             crate::embed_api::report(&self.app);
         }
-        self.save_presets(ui.ctx());
+        {
+            let _s = photocraft_ui_egui::perf_span::span("presets.save");
+            self.save_presets(ui.ctx());
+        }
         self.perf.end_update(&self.app, ui.ctx());
         self.watchdog.end(&self.app);
     }
@@ -1354,7 +1405,7 @@ fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig
                         Some(picked) if !picked.is_empty() => {
                             let mut files = Vec::with_capacity(picked.len());
                             for file in picked {
-                                files.push((file.file_name(), file.read().await));
+                                files.push((file.file_name(), read_file(&file).await));
                             }
                             Some(FileDialogAnswer::ContentsMany(files))
                         }
@@ -1362,7 +1413,7 @@ fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig
                     }
                 } else {
                     match dialog.pick_file().await {
-                        Some(file) => Some(FileDialogAnswer::Contents(file.file_name(), file.read().await)),
+                        Some(file) => Some(FileDialogAnswer::Contents(file.file_name(), read_file(&file).await)),
                         None => None,
                     }
                 };
@@ -1370,10 +1421,23 @@ fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig
             }),
             // Browser folder handles cannot be represented as filesystem paths for engine commands.
             FileDialogRequest::Folder { .. } => reply.send(None),
-            // No save dialog on the web: the suggested name becomes the download name.
+            // Where the browser can write files, Save As asks for one (and later saves of the
+            // document write it in place, `save_handles`); elsewhere the suggested name becomes
+            // the download name.
             FileDialogRequest::Save { suggested } => {
                 let name = std::path::Path::new(&suggested).file_name().map_or_else(|| suggested.clone(), |n| n.to_string_lossy().to_string());
-                reply.send(Some(FileDialogAnswer::SaveTo(name)));
+                if crate::save_handles::supported() {
+                    wasm_bindgen_futures::spawn_local(async move {
+                        let answer = match crate::save_handles::pick(&name).await {
+                            crate::save_handles::Picked::Name(n) => Some(FileDialogAnswer::SaveTo(n)),
+                            crate::save_handles::Picked::Cancelled => None,
+                            crate::save_handles::Picked::Unavailable => Some(FileDialogAnswer::SaveTo(name)),
+                        };
+                        reply.send(answer);
+                    });
+                } else {
+                    reply.send(Some(FileDialogAnswer::SaveTo(name)));
+                }
             }
         })),
         // Embedded in Photopea's way with a save server: documents in its formats go there.
@@ -1382,6 +1446,8 @@ fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig
         file_saved: Some(Box::new(crate::usage_stats::doc_saved_stats)),
         // A download may be cancelled and never reports back: it doesn't save the document.
         write_unconfirmed: true,
+        // ... except a file picked with Save As, written in place.
+        writes_in_place: Some(Box::new(crate::save_handles::has)),
         encode_png: Some(Box::new(|w, h, rgba| {
             let img = Image::from_u8(w, h, ChannelLayout::Rgba, rgba.to_vec()).map_err(|e| e.to_string())?;
             photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &EncodeOptions::default()).map_err(|e| e.to_string())
@@ -1395,6 +1461,10 @@ fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig
         pick_fonts: Some(Box::new(crate::font_files::pick)),
         load_prefs: Some(Box::new(|| local_storage()?.get_item(PREFS_KEY).ok().flatten())),
         save_prefs: Some(Box::new(|text: &str| local_storage().ok_or("no localStorage")?.set_item(PREFS_KEY, text).map_err(|e| format!("{e:?}")))),
+        // localStorage writes block the page: a burst of changes is written once, compact, and
+        // whatever is pending goes when the page is hidden (`WebShell::logic`).
+        prefs_debounce_s: 1.0,
+        prefs_compact: true,
         // The TypeR workspace (script, cursor, style library, settings) too, under its own key.
         load_typer: Some(Box::new(|| local_storage()?.get_item(TYPER_KEY).ok().flatten())),
         save_typer: Some(Box::new(|text: &str| local_storage().ok_or("no localStorage")?.set_item(TYPER_KEY, text).map_err(|e| format!("{e:?}")))),
@@ -1414,19 +1484,117 @@ fn local_storage() -> Option<web_sys::Storage> {
 
 /// Trigger a browser download of `bytes` named after the last component of `path`.
 fn download(path: &str, bytes: &[u8]) -> Result<(), String> {
-    download_parts(path, &js_sys::Array::of1(&js_sys::Uint8Array::from(bytes)))
+    deliver_blob(path, &blob_of(path, &js_sys::Array::of1(&js_sys::Uint8Array::from(bytes)))?)
 }
 
-/// [`download`] of a file already copied out in `parts` (byte arrays, in order).
-fn download_parts(path: &str, parts: &js_sys::Array) -> Result<(), String> {
+/// Bytes copied into the app's memory per task when a file is read: a 70 MB page copied in one go
+/// held a phone's page for over half a second.
+const READ_CHUNK: usize = 8 << 20;
+
+/// A picked file's bytes, read a slice at a time ([`read_blob`]).
+async fn read_file(file: &rfd::FileHandle) -> Vec<u8> {
+    match read_blob(file.inner()).await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            log::warn!("reading {} in slices failed ({e}); reading it whole", file.file_name());
+            file.read().await
+        }
+    }
+}
+
+/// The bytes of `blob`, read [`READ_CHUNK`] at a time: each slice arrives in its own task, so a big
+/// file never holds the page while it is copied in (nor sits whole in JavaScript memory).
+pub(crate) async fn read_blob(blob: &web_sys::Blob) -> Result<Vec<u8>, String> {
+    let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
+    let n = blob.size() as usize;
+    let mut out = Vec::new();
+    out.try_reserve_exact(n).map_err(|_| "not enough memory to read the file".to_string())?;
+    let mut at = 0;
+    while at < n {
+        let end = (at + READ_CHUNK).min(n);
+        let part = blob.slice_with_f64_and_f64(at as f64, end as f64).map_err(js)?;
+        let buf = wasm_bindgen_futures::JsFuture::from(part.array_buffer()).await.map_err(js)?;
+        let bytes = js_sys::Uint8Array::new(&buf);
+        let start = out.len();
+        out.resize(start + bytes.length() as usize, 0);
+        bytes.copy_to(&mut out[start..]);
+        at = end;
+    }
+    Ok(out)
+}
+
+/// The bytes of a typed array, copied [`READ_CHUNK`] at a time with a task between slices.
+pub(crate) async fn read_array(data: &js_sys::Uint8Array) -> Vec<u8> {
+    let n = data.length() as usize;
+    // Grown a slice at a time (no zero fill of the whole size in one task).
+    let mut out = Vec::new();
+    if out.try_reserve_exact(n).is_err() {
+        return data.to_vec();
+    }
+    let mut at = 0;
+    while at < n {
+        let end = (at + READ_CHUNK).min(n);
+        out.extend_from_slice(&data.subarray(at as u32, end as u32).to_vec());
+        at = end;
+        if at < n {
+            next_task().await;
+        }
+    }
+    out
+}
+
+/// Resolves in a later task (`setTimeout(0)`), letting the page draw and take input in between.
+async fn next_task() {
+    let p = js_sys::Promise::new(&mut |resolve, _| {
+        if let Some(w) = web_sys::window() {
+            let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, 0);
+        }
+    });
+    let _ = wasm_bindgen_futures::JsFuture::from(p).await;
+}
+
+/// A Blob of `parts` (byte arrays and Blobs, in order) typed for `path`.
+fn blob_of(path: &str, parts: &js_sys::Array) -> Result<web_sys::Blob, String> {
+    let opts = web_sys::BlobPropertyBag::new();
+    opts.set_type(mime_for(path));
+    web_sys::Blob::new_with_blob_sequence_and_options(parts, &opts).map_err(|e| format!("{e:?}"))
+}
+
+/// A download of `blob`, or, for a file picked with Save As where the browser can write files
+/// (`save_handles`), a write in place. A failed write downloads instead and says why in a notice
+/// ([`take_write_failures`]).
+fn deliver_blob(path: &str, blob: &web_sys::Blob) -> Result<(), String> {
+    if !crate::save_handles::has(path) {
+        return download_blob(path, blob);
+    }
+    let (path, blob) = (path.to_string(), blob.clone());
+    wasm_bindgen_futures::spawn_local(async move {
+        if let Err(e) = crate::save_handles::write(&path, &js_sys::Array::of1(&blob)).await {
+            WRITE_FAILURES.with(|f| f.borrow_mut().push(e));
+            if let Err(e) = download_blob(&path, &blob) {
+                WRITE_FAILURES.with(|f| f.borrow_mut().push(e));
+            }
+        }
+    });
+    Ok(())
+}
+
+thread_local! {
+    static WRITE_FAILURES: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Writes to a picked file that failed since the last call (each downloaded instead).
+fn take_write_failures() -> Vec<String> {
+    WRITE_FAILURES.with(|f| std::mem::take(&mut *f.borrow_mut()))
+}
+
+/// A download of `blob`, named after `path`.
+fn download_blob(path: &str, blob: &web_sys::Blob) -> Result<(), String> {
     let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
     let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "photocraft".into());
     let window = web_sys::window().ok_or("no window")?;
     let document = window.document().ok_or("no document")?;
-    let opts = web_sys::BlobPropertyBag::new();
-    opts.set_type(mime_for(&name));
-    let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(parts, &opts).map_err(js)?;
-    let url = web_sys::Url::create_object_url_with_blob(&blob).map_err(js)?;
+    let url = web_sys::Url::create_object_url_with_blob(blob).map_err(js)?;
     let a: web_sys::HtmlAnchorElement = document.create_element("a").map_err(js)?.dyn_into().map_err(|_| "not an anchor")?;
     a.set_href(&url);
     a.set_download(&name);
@@ -1443,7 +1611,7 @@ fn download_parts(path: &str, parts: &js_sys::Array) -> Result<(), String> {
     Ok(())
 }
 
-fn mime_for(name: &str) -> &'static str {
+pub(crate) fn mime_for(name: &str) -> &'static str {
     match name.rsplit('.').next().map(str::to_ascii_lowercase).as_deref() {
         Some("png") => "image/png",
         Some("jpg" | "jpeg") => "image/jpeg",
