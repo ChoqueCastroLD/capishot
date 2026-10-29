@@ -30,7 +30,7 @@ pub const SLOTS: usize = 6;
 
 /// Height of the top bar and the options row, of each floating bar, the Capi button's side, the
 /// margin around the bars and the gap between them (points).
-const TOP_BAR: f32 = 44.0;
+pub(crate) const TOP_BAR: f32 = 44.0;
 const BAR: f32 = 54.0;
 const CAPI: f32 = 66.0;
 const MARGIN: f32 = 8.0;
@@ -75,7 +75,9 @@ fn rects_id() -> Id {
 /// Where a button of the simple interface was drawn this frame (for `ui.inspect`: automation
 /// and tests tap it there).
 fn note(ctx: &egui::Context, label: &str, rect: Rect) {
-    ctx.data_mut(|d| d.get_temp_mut_or_default::<Vec<(String, [f32; 4])>>(rects_id()).push((label.to_string(), [rect.min.x, rect.min.y, rect.max.x, rect.max.y])));
+    ctx.data_mut(|d| {
+        d.get_temp_mut_or_default::<Vec<(String, [f32; 4])>>(rects_id()).push((label.to_string(), [rect.min.x, rect.min.y, rect.max.x, rect.max.y]))
+    });
 }
 
 /// `ui.inspect`'s `simpleUi`: whether it is on, the open sheet, and the buttons' rects by label.
@@ -510,7 +512,12 @@ pub fn overlays(app: &mut PhotocraftApp, ctx: &egui::Context) {
         return;
     }
     // Esc (the phone's Back) closes the open sheet.
-    if sheet(ctx) != Sheet::Closed && app.ui.dialogs.is_empty() && !egui::Popup::is_any_open(ctx) && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+    if sheet(ctx) != Sheet::Closed
+        && help_open(ctx).is_none()
+        && app.ui.dialogs.is_empty()
+        && !egui::Popup::is_any_open(ctx)
+        && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    {
         set_sheet(ctx, Sheet::Closed);
     }
     let screen = crate::safe_area::rect(ctx);
@@ -530,6 +537,111 @@ pub fn overlays(app: &mut PhotocraftApp, ctx: &egui::Context) {
         Sheet::Closed => {}
         Sheet::Master => master_sheet(app, ctx, screen),
         Sheet::Panel(g, tab) => panel_sheet(app, ctx, screen, g, tab),
+    }
+    help_card(app, ctx, screen);
+}
+
+fn help_id() -> Id {
+    Id::new("simple-help")
+}
+
+/// The long-press card for `entry` (a tool or command), pressed at `rect`.
+fn open_help(ctx: &egui::Context, entry: &str, rect: Rect) {
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data_mut(|d| d.insert_temp(help_id(), (entry.to_string(), [rect.min.x, rect.min.y, rect.max.x, rect.max.y], frame)));
+}
+
+/// A long press on `entry`'s button (a finger resting half a second; a right click with a mouse).
+/// Frames keep coming while the finger rests, so it fires without waiting for the lift.
+fn held(resp: &Response, entry: &str) -> bool {
+    resp.long_touched() || resp.secondary_clicked() || crate::touch_nav::long_press(&resp.ctx, Id::new(("simple-hold", entry)), resp.rect).is_some()
+}
+
+/// The finger lifting after a long press on `entry` (whose card it opened) is no tap.
+fn long_pressed(ctx: &egui::Context, entry: &str) -> bool {
+    help_open(ctx).as_deref() == Some(entry)
+}
+
+/// The entry whose long-press card is open.
+pub fn help_open(ctx: &egui::Context) -> Option<String> {
+    ctx.data(|d| d.get_temp::<(String, [f32; 4], u64)>(help_id())).map(|h| h.0)
+}
+
+fn close_help(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.remove::<(String, [f32; 4], u64)>(help_id()));
+}
+
+/// The long-press card: what the tool or command does (the palette's description), the "Which
+/// one should I use?" hint of its family, and the favorites bar's add or remove. A press
+/// anywhere else, or Back, closes it.
+fn help_card(app: &mut PhotocraftApp, ctx: &egui::Context, screen: Rect) {
+    let Some((id, r, opened)) = ctx.data(|d| d.get_temp::<(String, [f32; 4], u64)>(help_id())) else { return };
+    let anchor = Rect::from_min_max(pos2(r[0], r[1]), pos2(r[2], r[3]));
+    let t = Tokens::get(ctx);
+    let lang = crate::i18n::current();
+    let title = match id.strip_prefix("tool:").and_then(Tool::from_name) {
+        Some(tool) => crate::i18n::t(tool.label()).to_string(),
+        None => command_label(&id).unwrap_or_else(|| id.clone()),
+    };
+    let about = crate::help_text::describe(&id, lang).map(str::to_string).or_else(|| {
+        let (path, ..) = crate::menu_catalog::CATALOG.iter().find(|c| c.3 == id)?;
+        Some(path.iter().map(|p| crate::i18n::t(p)).collect::<Vec<_>>().join(" › "))
+    });
+    let which = crate::help_text::WHICH.iter().find(|w| w.members.contains(&id.as_str()));
+    let width = (screen.width() - 24.0).min(360.0);
+    // Above what was pressed (the bars are at the bottom), kept on screen.
+    let x = (anchor.center().x - width / 2.0).clamp(screen.left() + 12.0, screen.right() - 12.0 - width);
+    let below = anchor.center().y < screen.center().y;
+    let (pos, pivot) = if below { (pos2(x, anchor.bottom() + 8.0), Align2::LEFT_TOP) } else { (pos2(x, anchor.top() - 8.0), Align2::LEFT_BOTTOM) };
+    let fav = is_favorite(app, &id);
+    let mut toggle = false;
+    let mut close = false;
+    let out = egui::Area::new(Id::new("simple-help-card")).order(egui::Order::Tooltip).pivot(pivot).fixed_pos(pos).show(ctx, |ui| {
+        egui::Frame::NONE
+            .fill(t.card)
+            .stroke(Stroke::new(1.0, t.card_border))
+            .corner_radius(CornerRadius::same(14))
+            .shadow(egui::Shadow { offset: [0, 8], blur: 24, spread: 0, color: t.shadow })
+            .inner_margin(egui::Margin::same(12))
+            .show(ui, |ui| {
+                ui.set_width(width - 24.0);
+                ui.label(RichText::new(&title).font(crate::theme::semibold(14.0)).color(t.text));
+                if let Some(a) = &about {
+                    ui.add_space(2.0);
+                    ui.label(RichText::new(a).size(12.5).color(t.text_dim));
+                }
+                if let Some(w) = which {
+                    ui.add_space(6.0);
+                    ui.label(RichText::new(tl!("Which one should I use?")).font(crate::theme::semibold(12.0)).color(t.text));
+                    ui.label(RichText::new(w.text(lang)).size(11.5).color(t.text_faint));
+                }
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    let label = if fav { tl!("Remove from favorites") } else { tl!("Add to favorites") };
+                    if chip(ui, label, 34.0).clicked() {
+                        toggle = true;
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let x = crate::icons::button(ui, "x", 34.0, false, tl!("Close"));
+                        note(ui.ctx(), "help:close", x.rect);
+                        if x.clicked() {
+                            close = true;
+                        }
+                    });
+                });
+            });
+    });
+    let card = out.response.rect;
+    // A press elsewhere (not the long press that opened it) closes the card.
+    let elsewhere =
+        ctx.cumulative_frame_nr() > opened + 1 && ctx.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !card.contains(p)));
+    let back = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+    if toggle {
+        toggle_favorite(app, &id);
+        close = true;
+    }
+    if close || elsewhere || back {
+        close_help(ctx);
     }
 }
 
@@ -565,9 +677,9 @@ fn tool_bar(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, rect: Rect, 
                 let slot = Rect::from_min_size(pos2(x, y), Vec2::splat(SLOT));
                 let mut child = ui.new_child(egui::UiBuilder::new().max_rect(slot));
                 let resp = entry_button(app, &mut child, entry, SLOT);
-                if resp.long_touched() || resp.secondary_clicked() {
-                    fav = Some(entry.to_string());
-                } else if resp.clicked() {
+                if held(&resp, entry) {
+                    fav = Some((entry.to_string(), resp.rect));
+                } else if resp.clicked() && !long_pressed(ui.ctx(), entry) {
                     run = Some(entry.to_string());
                 }
             };
@@ -590,9 +702,9 @@ fn tool_bar(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, rect: Rect, 
                                     ui.add_space(CAPI + 16.0 - (step - SLOT));
                                 }
                                 let resp = entry_button(app, ui, e, SLOT);
-                                if resp.long_touched() || resp.secondary_clicked() {
-                                    fav = Some(e.clone());
-                                } else if resp.clicked() {
+                                if held(&resp, e) {
+                                    fav = Some((e.clone(), resp.rect));
+                                } else if resp.clicked() && !long_pressed(ui.ctx(), e) {
                                     run = Some(e.clone());
                                 }
                             }
@@ -602,8 +714,8 @@ fn tool_bar(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, rect: Rect, 
             }
         });
     });
-    if let Some(id) = fav {
-        toggle_favorite(app, &id);
+    if let Some((id, rect)) = fav {
+        open_help(ctx, &id, rect);
     } else if let Some(id) = run {
         run_entry(app, ctx, &id);
     }
@@ -651,14 +763,29 @@ fn chip(ui: &mut Ui, label: &str, height: f32) -> Response {
 }
 
 /// The Capi button: opens (or closes) the sheet with everything else.
-fn capi_button(_app: &mut PhotocraftApp, ctx: &egui::Context, rect: Rect) {
+fn capi_button(app: &mut PhotocraftApp, ctx: &egui::Context, rect: Rect) {
     let t = Tokens::get(ctx);
+    let busy = crate::ai_progress::busy(app);
     egui::Area::new(Id::new("simple-capi")).order(egui::Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
         let (r, resp) = ui.allocate_exact_size(rect.size(), Sense::click());
         let open = sheet(ctx) != Sheet::Closed;
         let p = ui.painter();
-        p.add(egui::epaint::CircleShape { center: r.center() + vec2(0.0, 3.0), radius: r.width() / 2.0, fill: Color32::from_black_alpha(80), stroke: Stroke::NONE });
-        p.circle(r.center(), r.width() / 2.0, if resp.is_pointer_button_down_on() { t.accent_soft } else { t.card }, Stroke::new(2.5, if open { t.accent } else { t.card_border }));
+        p.add(egui::epaint::CircleShape {
+            center: r.center() + vec2(0.0, 3.0),
+            radius: r.width() / 2.0,
+            fill: Color32::from_black_alpha(80),
+            stroke: Stroke::NONE,
+        });
+        p.circle(
+            r.center(),
+            r.width() / 2.0,
+            if resp.is_pointer_button_down_on() { t.accent_soft } else { t.card },
+            Stroke::new(2.5, if open { t.accent } else { t.card_border }),
+        );
+        // An AI run (or its model's download) in progress: the button pulses.
+        if busy {
+            crate::ai_progress::capi_ring(ui, r.center(), r.width() / 2.0);
+        }
         if open {
             crate::icons::paint(ui, r, "x", 24.0, t.text);
         } else {
@@ -733,7 +860,7 @@ fn master_sheet(app: &mut PhotocraftApp, ctx: &egui::Context, screen: Rect) {
     let height = (screen.height() * 0.78).min(screen.height() - TOP_BAR - UNDER_SHEET - 8.0);
     let mut action: Option<String> = None;
     let mut pick_tool: Option<Tool> = None;
-    let mut fav: Option<String> = None;
+    let mut fav: Option<(String, Rect)> = None;
     let mut panel: Option<Group> = None;
     bottom_sheet(ctx, screen, "simple-master", height, |ui| {
         let t = Tokens::get(ui.ctx());
@@ -772,7 +899,7 @@ fn master_sheet(app: &mut PhotocraftApp, ctx: &egui::Context, screen: Rect) {
                 }
             });
             heading(ui, tl!("Tools"));
-            ui.label(RichText::new(tl!("Tap to use a tool; press and hold to add it to the favorites bar or take it out.")).small().color(t.text_faint));
+            ui.label(RichText::new(tl!("Tap to use a tool; press and hold to see what it does and add it to the favorites bar.")).small().color(t.text_faint));
             ui.add_space(4.0);
             let side = 48.0;
             let per_row = ((ui.available_width() + 4.0) / (side + 4.0)).floor().max(1.0) as usize;
@@ -787,9 +914,9 @@ fn master_sheet(app: &mut PhotocraftApp, ctx: &egui::Context, screen: Rect) {
                             let star = Rect::from_min_size(resp.rect.right_top() + vec2(-15.0, 2.0), Vec2::splat(13.0));
                             crate::icons::paint(ui, star, "star-filled", 11.0, t.accent);
                         }
-                        if resp.long_touched() || resp.secondary_clicked() {
-                            fav = Some(id);
-                        } else if resp.clicked() {
+                        if held(&resp, &id) {
+                            fav = Some((id.clone(), resp.rect));
+                        } else if resp.clicked() && !long_pressed(ui.ctx(), &id) {
                             pick_tool = Some(tool);
                         }
                     }
@@ -797,8 +924,8 @@ fn master_sheet(app: &mut PhotocraftApp, ctx: &egui::Context, screen: Rect) {
             }
         });
     });
-    if let Some(id) = fav {
-        toggle_favorite(app, &id);
+    if let Some((id, rect)) = fav {
+        open_help(ctx, &id, rect);
     }
     if let Some(tool) = pick_tool {
         crate::tool_memory::select(app, tool);
@@ -858,7 +985,7 @@ mod tests;
 /// Something the phone's Back button should close (a dialog, the options, a sheet): the web
 /// shell keeps a history entry while there is one, and a Back sends Esc, which closes it.
 pub fn back_target(app: &PhotocraftApp, ctx: &egui::Context) -> bool {
-    !app.ui.dialogs.is_empty() || options_open(ctx) || sheet(ctx) != Sheet::Closed || crate::remove_ai_ui::is_open(app)
+    !app.ui.dialogs.is_empty() || options_open(ctx) || sheet(ctx) != Sheet::Closed || crate::remove_ai_ui::is_open(app) || help_open(ctx).is_some()
 }
 
 /// Where the button `label` was drawn (the last time this frame), as `ui.inspect` reports it.

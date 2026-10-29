@@ -3349,3 +3349,22 @@ curves	Smooth	平滑
 	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	绘制时显卡太慢或已重启。要再次使用它：首选项 › 性能 › 渲染模式。
 	Your graphics card restarted; Capishot keeps working on the CPU	显卡已重启；Capishot 继续以 CPU 模式运行
 	Unsaved documents were reopened from crash recovery.	未保存的文档已从恢复中重新打开。
+	Commands	命令
+	AI	AI
+	Downloading model {pct}%	正在下载模型 {pct}%
+	Downloading model…	正在下载模型…
+	Preparing AI…	正在准备 AI…
+	Preparing AI for this GPU (first run only)…	正在为此 GPU 准备 AI（仅首次）…
+	Processing {i}/{n}	正在处理 {i}/{n}
+	Applying…	正在应用…
+	Using the CPU, it may take longer	正在使用 CPU，可能需要更长时间
+	{tool}: done	{tool}：完成
+	Which one should I use?	该用哪个？
+	Tap to use a tool; press and hold to see what it does and add it to the favorites bar.	点按使用工具；长按查看它的作用并将其添加到收藏栏。
+	Processing…	正在处理…
+	Outline	描边
+	Outer	外部
+	Centered	居中
+	Inner	内部
+	Outline width	描边粗细
+	Color Picker (Outline)	拾色器（描边）

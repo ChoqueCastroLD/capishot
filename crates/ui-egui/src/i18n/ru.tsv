@@ -3687,3 +3687,22 @@ curves	Smooth	Сгладить
 	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	Видеокарта работала слишком медленно или перезапустилась во время рисования. Чтобы снова использовать её: Настройки › Производительность › Режим отрисовки.
 	Your graphics card restarted; Capishot keeps working on the CPU	Видеокарта перезапустилась; Capishot продолжает работу в режиме CPU
 	Unsaved documents were reopened from crash recovery.	Несохранённые документы снова открыты из восстановления.
+	Commands	Команды
+	AI	ИИ
+	Downloading model {pct}%	Загрузка модели {pct}%
+	Downloading model…	Загрузка модели…
+	Preparing AI…	Подготовка ИИ…
+	Preparing AI for this GPU (first run only)…	Подготовка ИИ для этого GPU (только в первый раз)…
+	Processing {i}/{n}	Обработка {i}/{n}
+	Applying…	Применение…
+	Using the CPU, it may take longer	Используется CPU, это может занять больше времени
+	{tool}: done	{tool}: готово
+	Which one should I use?	Что выбрать?
+	Tap to use a tool; press and hold to see what it does and add it to the favorites bar.	Нажмите, чтобы выбрать инструмент; удерживайте, чтобы узнать, что он делает, и добавить его на панель избранного.
+	Processing…	Обработка…
+	Outline	Обводка
+	Outer	Снаружи
+	Centered	По центру
+	Inner	Внутри
+	Outline width	Толщина обводки
+	Color Picker (Outline)	Палитра цветов (обводка)

@@ -83,14 +83,17 @@ pub fn is_open(app: &PhotocraftApp) -> bool {
     app.remove_ai.params.is_some()
 }
 
-fn cancel(app: &mut PhotocraftApp) {
+/// Stops waiting: the run is dropped and the download pauses (the progress card's Cancel).
+pub(crate) fn cancel(app: &mut PhotocraftApp) {
     app.remove_ai.params = None;
     if let (Some(store), Some(m)) = (app.session.ai_models(), lama()) {
         store.pause(Some(m));
     }
 }
 
-/// Every frame: the first-use download modal, and the waiting run once the model is here.
+/// Every frame while a run waits for the model: the run once the model is here, a queued or
+/// paused download started again, Esc to stop waiting. The progress card (`ai_progress`) shows
+/// the download.
 pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if !is_open(app) {
         return;
@@ -105,50 +108,31 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         return;
     }
     ctx.request_repaint_after(std::time::Duration::from_millis(200));
-    let t = crate::theme::Tokens::get(ctx);
-    let screen = crate::safe_area::rect(ctx);
-    let width = (screen.width() - 32.0).min(420.0);
-    let bytes = lama().map_or(0, |m| m.bytes);
-    let mb = format!("{} MB", (bytes as f64 / 1e6).round());
-    let mut cancelled = false;
-    let mut retry = false;
-    let modal = egui::Modal::new(egui::Id::new("remove-ai-download")).show(ctx, |ui| {
-        ui.set_width(width);
-        ui.label(egui::RichText::new(tl!("Remove with AI")).font(crate::theme::semibold(15.0)));
-        ui.add_space(6.0);
-        ui.label(crate::i18n::fmt(tl!("Remove with AI needs to download the Manga LaMa model ({size}). Only once."), &[("size", &mb)]));
-        ui.add_space(8.0);
-        let (fraction, line) = match &st {
-            Some(Status::Downloading { done, total, .. }) if *total > 0 => {
-                let f = *done as f32 / *total as f32;
-                (f, crate::i18n::fmt(tl!("Downloading… {pct}%"), &[("pct", &format!("{:.0}", f * 100.0))]))
-            }
-            Some(Status::Paused { done, total }) if *total > 0 => (*done as f32 / *total as f32, tl!("Starting the download…").to_string()),
-            Some(Status::Failed(why)) => (0.0, crate::i18n::fmt(tl!("The download failed: {reason}"), &[("reason", why)])),
-            _ => (0.0, tl!("Starting the download…").to_string()),
-        };
-        let (r, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 8.0), egui::Sense::hover());
-        crate::jobs_ui::bar(ui, r, Some(fraction), &t);
-        ui.add_space(4.0);
-        ui.label(egui::RichText::new(line).color(if matches!(st, Some(Status::Failed(_))) { t.danger } else { t.text_dim }).size(12.5));
-        ui.add_space(10.0);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-            if crate::widgets::secondary_button(ui, tl!("Cancel"), 84.0).clicked() {
-                cancelled = true;
-            }
-            if matches!(st, Some(Status::Failed(_))) && crate::widgets::primary_button(ui, tl!("Retry"), 84.0).clicked() {
-                retry = true;
-            }
-        });
-    });
     // A queued or paused download (another file was downloading, or the page closed) starts again.
-    if matches!(st, Some(Status::Paused { .. } | Status::NotDownloaded)) || retry {
+    if matches!(st, Some(Status::Paused { .. } | Status::NotDownloaded)) {
         start_download(app);
     }
-    let esc = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-    if cancelled || esc || modal.should_close() {
+    if app.ui.dialogs.is_empty() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         cancel(app);
     }
+}
+
+/// The first-use download's progress: its share and speed (bytes a second) when known, and why
+/// it failed.
+pub fn download_progress(app: &PhotocraftApp) -> (Option<f32>, Option<f64>, Option<String>) {
+    match status(app) {
+        Some(Status::Downloading { done, total, bytes_per_sec }) if total > 0 => {
+            (Some(done as f32 / total as f32), (bytes_per_sec > 1.0).then_some(bytes_per_sec), None)
+        }
+        Some(Status::Paused { done, total }) if total > 0 => (Some(done as f32 / total as f32), None, None),
+        Some(Status::Failed(why)) => (None, None, Some(why)),
+        _ => (None, None, None),
+    }
+}
+
+/// The failed download starts again (the card's Retry).
+pub fn retry_download(app: &mut PhotocraftApp) {
+    start_download(app);
 }
 
 /// The options bar: the brush size (the brush chip before this) and Sample All Layers, nothing

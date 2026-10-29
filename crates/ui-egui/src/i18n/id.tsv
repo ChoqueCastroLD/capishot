@@ -3707,3 +3707,22 @@ curves	Smooth	Haluskan
 	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	Kartu grafis terlalu lambat atau dimulai ulang saat menggambar. Untuk memakainya lagi: Preferensi › Performa › Mode Rendering.
 	Your graphics card restarted; Capishot keeps working on the CPU	Kartu grafis Anda dimulai ulang; Capishot tetap berjalan dengan CPU
 	Unsaved documents were reopened from crash recovery.	Dokumen yang belum disimpan dibuka kembali dari pemulihan.
+	Commands	Perintah
+	AI	AI
+	Downloading model {pct}%	Mengunduh model {pct}%
+	Downloading model…	Mengunduh model…
+	Preparing AI…	Menyiapkan AI…
+	Preparing AI for this GPU (first run only)…	Menyiapkan AI untuk GPU ini (hanya pertama kali)…
+	Processing {i}/{n}	Memproses {i}/{n}
+	Applying…	Menerapkan…
+	Using the CPU, it may take longer	Memakai CPU, mungkin lebih lama
+	{tool}: done	{tool}: selesai
+	Which one should I use?	Mana yang harus saya pakai?
+	Tap to use a tool; press and hold to see what it does and add it to the favorites bar.	Ketuk untuk memakai alat; tekan lama untuk melihat fungsinya dan menambahkannya ke bilah favorit.
+	Processing…	Memproses…
+	Outline	Garis tepi
+	Outer	Luar
+	Centered	Tengah
+	Inner	Dalam
+	Outline width	Tebal garis tepi
+	Color Picker (Outline)	Pemilih warna (garis tepi)

@@ -4309,3 +4309,22 @@ curves	Smooth	Wygładź
 	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	Karta graficzna była zbyt wolna lub zrestartowała się podczas rysowania. Aby znów jej używać: Preferencje › Wydajność › Tryb renderowania.
 	Your graphics card restarted; Capishot keeps working on the CPU	Karta graficzna została zrestartowana; Capishot działa dalej w trybie CPU
 	Unsaved documents were reopened from crash recovery.	Niezapisane dokumenty otwarto ponownie z odzyskiwania.
+	Commands	Polecenia
+	AI	AI
+	Downloading model {pct}%	Pobieranie modelu {pct}%
+	Downloading model…	Pobieranie modelu…
+	Preparing AI…	Przygotowywanie AI…
+	Preparing AI for this GPU (first run only)…	Przygotowywanie AI dla tego GPU (tylko za pierwszym razem)…
+	Processing {i}/{n}	Przetwarzanie {i}/{n}
+	Applying…	Stosowanie…
+	Using the CPU, it may take longer	Używany jest CPU, może to potrwać dłużej
+	{tool}: done	{tool}: gotowe
+	Which one should I use?	Którego użyć?
+	Tap to use a tool; press and hold to see what it does and add it to the favorites bar.	Stuknij, aby użyć narzędzia; przytrzymaj, aby zobaczyć, co robi, i dodać je do paska ulubionych.
+	Processing…	Przetwarzanie…
+	Outline	Kontur
+	Outer	Na zewnątrz
+	Centered	Na środku
+	Inner	Wewnątrz
+	Outline width	Grubość konturu
+	Color Picker (Outline)	Próbnik kolorów (kontur)

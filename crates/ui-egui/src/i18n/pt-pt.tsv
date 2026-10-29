@@ -3318,3 +3318,22 @@ fontWeight	Italic	Itálico
 	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	A placa gráfica foi demasiado lenta ou reiniciou enquanto desenhava. Para a voltar a usar: Preferências › Desempenho › Modo de renderização.
 	Your graphics card restarted; Capishot keeps working on the CPU	A sua placa gráfica reiniciou; o Capishot continua no modo CPU
 	Unsaved documents were reopened from crash recovery.	Os documentos não guardados foram reabertos pela recuperação.
+	Commands	Comandos
+	AI	IA
+	Downloading model {pct}%	A transferir o modelo {pct}%
+	Downloading model…	A transferir o modelo…
+	Preparing AI…	A preparar a IA…
+	Preparing AI for this GPU (first run only)…	A preparar a IA para esta GPU (só da primeira vez)…
+	Processing {i}/{n}	A processar {i}/{n}
+	Applying…	A aplicar…
+	Using the CPU, it may take longer	A usar a CPU, pode demorar mais
+	{tool}: done	{tool}: pronto
+	Which one should I use?	Qual devo usar?
+	Tap to use a tool; press and hold to see what it does and add it to the favorites bar.	Toque para usar uma ferramenta; mantenha premido para ver o que faz e adicioná-la à barra de favoritos.
+	Processing…	A processar…
+	Outline	Contorno
+	Outer	Fora
+	Centered	Centro
+	Inner	Dentro
+	Outline width	Espessura do contorno
+	Color Picker (Outline)	Seletor de cores (contorno)

@@ -134,7 +134,7 @@ impl GenFill for NativeGenFill {
             let total = p.steps.max(1) as f32;
             let h = hooks.clone();
             let out = pollster::block_on(generate(&m, &p, &mut |d, _| {
-                h.progress(0.1 + 0.85 * d as f32 / total, "Generating");
+                h.progress(0.1 + 0.85 * d as f32 / total, &format!("Generating (step {} of {})", (d + 1).min(total as usize), total as usize));
                 !h.cancelled()
             }));
             if req.unload {

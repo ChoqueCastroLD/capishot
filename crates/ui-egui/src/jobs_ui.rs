@@ -234,7 +234,9 @@ pub(crate) fn produce_files(
         json!({}),
         label,
         false,
-        move |ctx| work(ctx).map_err(|e| if ctx.check().is_err() { photocraft_engine::EngineError::Cancelled } else { photocraft_engine::EngineError::Other(e) }),
+        move |ctx| {
+            work(ctx).map_err(|e| if ctx.check().is_err() { photocraft_engine::EngineError::Cancelled } else { photocraft_engine::EngineError::Other(e) })
+        },
         move |_, files: Vec<Produced>| {
             let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
             let v = json!({"files": paths});
@@ -349,6 +351,21 @@ fn on_files_event(app: &mut PhotocraftApp, e: &JobEvent) -> bool {
 /// (the result is then `{"job": id, "pending": true}` and the edit lands when [`tick`] applies
 /// it), else synchronously like [`photocraft_engine::Session::execute`].
 pub fn run(app: &mut PhotocraftApp, id: &str, params: Value) -> Result<Value, String> {
+    // AI runs show the progress card (`ai_progress`): remember what ran, follow its job.
+    let ai = crate::ai_progress::is_ai(id, &params).then(|| params.clone());
+    if let Some(p) = &ai {
+        crate::ai_progress::note_start(app, id, p);
+    }
+    let r = run_inner(app, id, params);
+    if let (Some(p), Ok(v)) = (&ai, &r)
+        && let Some(job) = v.get("job").and_then(Value::as_u64)
+    {
+        crate::ai_progress::started(app, id, p, JobId(job));
+    }
+    r
+}
+
+fn run_inner(app: &mut PhotocraftApp, id: &str, params: Value) -> Result<Value, String> {
     if !app.background_jobs && !(POOL_THREADS && POOL_COMMANDS.contains(&id)) {
         return app.session.execute(id, params).map_err(|e| e.to_string());
     }
@@ -689,6 +706,8 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
     });
     // A Free Transform commit's session ends with its job (then reported like any job).
     crate::transform_tool::on_job_event(app, &e);
+    // An AI run's end: "Done" or its error on the progress card.
+    let ai_error = crate::ai_progress::on_event(app, ctx, &e);
     if on_files_event(app, &e) {
         return;
     }
@@ -774,7 +793,12 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
             app.ui.status = localize_label(&e.label);
             app.ui.status_error = false;
         }
-        JobOutcome::Failed(err) if crate::ai_model_gate::on_job_failed(app, &e.command, &err) => app.sync_views(),
+        JobOutcome::Failed(err) if crate::ai_model_gate::on_job_failed(app, &e.command, &err) => {
+            // The model gate asks to download it instead.
+            crate::ai_progress::dismiss(app);
+            app.sync_views()
+        }
+        JobOutcome::Failed(_) if ai_error => app.sync_views(),
         JobOutcome::Failed(err) => {
             if matches!(e.command.as_str(), "file.print" | "file.printOneCopy") {
                 app.jobs.close_after_saves = false;
@@ -999,7 +1023,8 @@ pub fn dialog(app: &mut PhotocraftApp, ctx: &egui::Context) {
         Some(j) => j,
         None => {
             let Some(j) = app.session.active_job() else { return };
-            if j.elapsed_ms < DIALOG_DELAY_MS || app.jobs.saves.iter().any(|s| s.job == j.id) {
+            // AI runs have their own card (`ai_progress`), which doesn't block the window.
+            if j.elapsed_ms < DIALOG_DELAY_MS || app.jobs.saves.iter().any(|s| s.job == j.id) || crate::ai_progress::follows(app, j.id) {
                 return;
             }
             j

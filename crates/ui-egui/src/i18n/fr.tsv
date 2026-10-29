@@ -3720,3 +3720,22 @@ curves	Smooth	Lisser
 	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	La carte graphique était trop lente ou a redémarré pendant le dessin. Pour la réutiliser : Préférences › Performances › Mode de rendu.
 	Your graphics card restarted; Capishot keeps working on the CPU	Votre carte graphique a redémarré ; Capishot continue en mode CPU
 	Unsaved documents were reopened from crash recovery.	Les documents non enregistrés ont été rouverts depuis la récupération.
+	Commands	Commandes
+	AI	IA
+	Downloading model {pct}%	Téléchargement du modèle {pct} %
+	Downloading model…	Téléchargement du modèle…
+	Preparing AI…	Préparation de l’IA…
+	Preparing AI for this GPU (first run only)…	Préparation de l’IA pour ce GPU (première fois seulement)…
+	Processing {i}/{n}	Traitement {i}/{n}
+	Applying…	Application…
+	Using the CPU, it may take longer	Utilisation du CPU, cela peut prendre plus de temps
+	{tool}: done	{tool} : terminé
+	Which one should I use?	Lequel utiliser ?
+	Tap to use a tool; press and hold to see what it does and add it to the favorites bar.	Touchez pour utiliser un outil ; maintenez appuyé pour voir ce qu’il fait et l’ajouter à la barre des favoris.
+	Processing…	Traitement…
+	Outline	Contour
+	Outer	Extérieur
+	Centered	Centré
+	Inner	Intérieur
+	Outline width	Épaisseur du contour
+	Color Picker (Outline)	Sélecteur de couleur (contour)

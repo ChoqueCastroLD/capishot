@@ -2363,7 +2363,7 @@ fn touch_bar_line_spacing_applies_live() {
     tool_event(&mut app, ToolEvent::Up { x: 200.0, y: 200.0 }, Modifiers::NONE);
     let id = app.ui.text_edit.as_ref().unwrap().layer;
     super::insert(&mut app, "One\nTwo");
-    let mut h = egui_kittest::Harness::builder().with_size(vec2(420.0, 300.0)).build_ui_state(
+    let mut h = egui_kittest::Harness::builder().with_size(vec2(640.0, 300.0)).build_ui_state(
         |ui, app: &mut PhotocraftApp| {
             // The app's fonts are set up after the harness's first frame and bound a frame later.
             let frames = egui::Id::new("frames-before-fonts");

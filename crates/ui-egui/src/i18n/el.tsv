@@ -4400,3 +4400,21 @@ curves	Smooth	Εξομάλυνση
 	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	Η κάρτα γραφικών ήταν πολύ αργή ή επανεκκινήθηκε κατά τη σχεδίαση. Για να τη χρησιμοποιήσετε ξανά: Προτιμήσεις › Επιδόσεις › Λειτουργία απόδοσης.
 	Your graphics card restarted; Capishot keeps working on the CPU	Η κάρτα γραφικών επανεκκινήθηκε· το Capishot συνεχίζει σε λειτουργία CPU
 	Unsaved documents were reopened from crash recovery.	Τα μη αποθηκευμένα έγγραφα ανοίχτηκαν ξανά από την ανάκτηση.
+	Commands	Εντολές
+	AI	ΤΝ
+	Downloading model {pct}%	Λήψη μοντέλου {pct}%
+	Downloading model…	Λήψη μοντέλου…
+	Preparing AI…	Προετοιμασία ΤΝ…
+	Preparing AI for this GPU (first run only)…	Προετοιμασία ΤΝ για αυτή την GPU (μόνο την πρώτη φορά)…
+	Processing {i}/{n}	Επεξεργασία {i}/{n}
+	Applying…	Εφαρμογή…
+	Using the CPU, it may take longer	Χρησιμοποιείται η CPU, μπορεί να αργήσει
+	{tool}: done	{tool}: έτοιμο
+	Which one should I use?	Ποιο να χρησιμοποιήσω;
+	Tap to use a tool; press and hold to see what it does and add it to the favorites bar.	Πατήστε για να χρησιμοποιήσετε ένα εργαλείο· κρατήστε πατημένο για να δείτε τι κάνει και να το προσθέσετε στη γραμμή αγαπημένων.
+	Outline	Περίγραμμα
+	Outer	Έξω
+	Centered	Κέντρο
+	Inner	Μέσα
+	Outline width	Πάχος περιγράμματος
+	Color Picker (Outline)	Επιλογέας χρώματος (περίγραμμα)

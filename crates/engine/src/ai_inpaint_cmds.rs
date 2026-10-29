@@ -156,12 +156,20 @@ struct JobHooks {
     lo: f32,
     hi: f32,
     status: String,
+    /// This tile and the count, when more than one: said after the model's own status ("Cleaning
+    /// with Manga LaMa (WebGPU) (2 of 5)"), so the progress UI can count them.
+    tile: Option<(usize, usize)>,
 }
 
 impl Hooks for JobHooks {
     fn progress(&self, fraction: f32, status: &str) {
         let f = if fraction.is_finite() { fraction.clamp(0.0, 1.0) } else { 0.0 };
-        self.ctx.progress(self.lo + (self.hi - self.lo) * f, if status.is_empty() { &self.status } else { status });
+        let message = match (status.is_empty(), self.tile) {
+            (true, _) => self.status.clone(),
+            (false, Some((i, n))) => format!("{status} ({i} of {n})"),
+            (false, None) => status.to_string(),
+        };
+        self.ctx.progress(self.lo + (self.hi - self.lo) * f, &message);
     }
     fn cancelled(&self) -> bool {
         self.ctx.cancelled()
@@ -237,7 +245,8 @@ fn fill_step(mut st: FillState) {
     let i = st.next;
     let (a, b) = (i as f32 / n, (i + 1) as f32 / n);
     let status = if st.plan.len() > 1 { format!("{LABEL} ({} of {})", i + 1, st.plan.len()) } else { LABEL.to_string() };
-    let hooks = Arc::new(JobHooks { ctx: st.ctx.clone(), lo: a, hi: b, status });
+    let tile = (st.plan.len() > 1).then_some((i + 1, st.plan.len()));
+    let hooks = Arc::new(JobHooks { ctx: st.ctx.clone(), lo: a, hi: b, status, tile });
     let svc = st.svc.clone();
     let req = st.opts.request(input);
     svc.run(
@@ -275,6 +284,7 @@ fn gpu_fallback(mut st: FillState, why: &str) {
     }
     st.opts.run = run;
     st.ctx.notice(crate::ai_cmds::GPU_FALLBACK_CLASS, crate::ai_cmds::GPU_FALLBACK_NOTICE, why);
+    st.ctx.progress(st.ctx.fraction(), crate::ai_cmds::SWITCHING_TO_CPU);
     if model.id != st.opts.model.id {
         st.opts.model = model;
         if model.arch == catalog::Arch::Migan {

@@ -4383,3 +4383,22 @@ curves	Smooth	スムーズ
 	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	描画中にグラフィックカードが遅すぎたか再起動しました。再び使うには：環境設定 › パフォーマンス › レンダリングモード。
 	Your graphics card restarted; Capishot keeps working on the CPU	グラフィックカードが再起動しました。Capishot は CPU モードで動作を続けます
 	Unsaved documents were reopened from crash recovery.	保存していない書類はリカバリーから開き直しました。
+	Commands	コマンド
+	AI	AI
+	Downloading model {pct}%	モデルをダウンロード中 {pct}%
+	Downloading model…	モデルをダウンロード中…
+	Preparing AI…	AI を準備中…
+	Preparing AI for this GPU (first run only)…	この GPU 用に AI を準備中（初回のみ）…
+	Processing {i}/{n}	処理中 {i}/{n}
+	Applying…	適用中…
+	Using the CPU, it may take longer	CPU で処理中です。時間がかかることがあります
+	{tool}: done	{tool}：完了
+	Which one should I use?	どれを使えばいい？
+	Tap to use a tool; press and hold to see what it does and add it to the favorites bar.	タップでツールを使います。長押しで説明を表示し、お気に入りバーに追加できます。
+	Processing…	処理中…
+	Outline	縁取り
+	Outer	外側
+	Centered	中央
+	Inner	内側
+	Outline width	縁取りの太さ
+	Color Picker (Outline)	カラーピッカー（縁取り）

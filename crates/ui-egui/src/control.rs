@@ -1421,6 +1421,7 @@ pub fn inspect(app: &PhotocraftApp, ctx: &egui::Context) -> Value {
         // centre, where a document point is on screen for real pointer input.
         "canvasRect": canvas_rect,
         "simpleUi": crate::simple_ui::inspect(app, ctx),
+        "aiProgress": crate::ai_progress::inspect(ctx),
         "touch": crate::touch_ui::inspect(app, ctx),
         "dialogs": dialogs,
         "windows": app.ui.windows,

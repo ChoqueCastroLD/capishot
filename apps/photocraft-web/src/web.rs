@@ -1455,6 +1455,13 @@ fn save_in_worker(_outbox: Outbox) -> Option<photocraft_ui_egui::SaveFileFn> {
 fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig>, outbox: Outbox) -> Services {
     Services {
         save_file: save_in_worker(outbox),
+        // A finished AI run taps the phone (browsers without vibration, or before a user
+        // gesture, ignore it).
+        vibrate: Some(|ms| {
+            if let Some(w) = web_sys::window() {
+                let _ = w.navigator().vibrate_with_duration(ms);
+            }
+        }),
         screen_pick: screen_color_service(),
         import: Some(Box::new(|name: &str, bytes: &[u8], max_svg_group_depth: usize| {
             let t0 = js_sys::Date::now();

@@ -23,6 +23,7 @@ pub mod adjust_ui;
 pub mod ai_model_gate;
 pub mod ai_models_ui;
 pub mod ai_options_ui;
+pub mod ai_progress;
 pub mod ai_upscale_ui;
 mod alt_grab;
 pub mod analysis_ui;
@@ -118,6 +119,7 @@ pub mod gpu_status;
 pub mod gradient_ui;
 pub mod guide_layout_ui;
 pub mod guide_select;
+pub mod help_text;
 pub mod history_menu_ui;
 pub mod hold_keys;
 pub mod i18n;
@@ -608,6 +610,9 @@ pub struct Services {
     /// Preferences ▸ General ▸ Beep When Done: the platform's default beep, played when a
     /// background job finishes successfully. `None` in the web build (and in tests).
     pub beep: Option<fn()>,
+    /// Taps the phone's vibration for this many milliseconds (the browser's `navigator.vibrate`),
+    /// when an AI run finishes.
+    pub vibrate: Option<fn(u32)>,
     /// Files delivered asynchronously (web drag-and-drop): drained every frame and opened as
     /// documents.
     pub inbox: Option<Inbox>,
@@ -974,6 +979,8 @@ pub struct PhotocraftApp {
     pub(crate) bubble_flash: Option<(String, [f64; 2], f64)>,
     /// Remove with AI: a run waiting for its first-use model download (`remove_ai_ui`).
     pub(crate) remove_ai: remove_ai_ui::Pending,
+    /// The AI progress card (`ai_progress`).
+    pub(crate) ai_progress: ai_progress::State,
     /// Channel thumbnails for one document snapshot; view-only revisions reuse their pixels.
     channel_thumbs: Option<(DocId, std::sync::Weak<Document>, bool, Vec<egui::TextureHandle>)>,
     /// Channels panel overlays / channel views drawn over the canvas, per document id.
@@ -1158,6 +1165,7 @@ impl PhotocraftApp {
             type_font_preview: None,
             bubble_flash: None,
             remove_ai: Default::default(),
+            ai_progress: Default::default(),
             guide_drag: None,
             layer_box: None,
             crop: Default::default(),
@@ -2553,6 +2561,7 @@ impl eframe::App for PhotocraftApp {
         layers_panel_ui::show_dialog(self, &ctx);
         rasterize_prompt::run_pending(self, &ctx);
         jobs_ui::dialog(self, &ctx);
+        ai_progress::show(self, &ctx);
         ai_models_ui::window(self, &ctx);
         discard_ui::show(self, &ctx);
         recovery_ui::show(self, &ctx);

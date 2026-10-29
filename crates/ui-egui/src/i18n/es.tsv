@@ -4862,3 +4862,21 @@ navigator	Zoom	Zoom
 	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	La tarjeta gráfica fue demasiado lenta o se reinició mientras dibujaba. Para volver a usarla: Preferencias › Rendimiento › Modo de renderizado.
 	Your graphics card restarted; Capishot keeps working on the CPU	Tu tarjeta gráfica se reinició; Capishot sigue en modo CPU
 	Unsaved documents were reopened from crash recovery.	Los documentos sin guardar se reabrieron desde la recuperación.
+	Commands	Comandos
+	AI	IA
+	Downloading model {pct}%	Descargando modelo {pct}%
+	Downloading model…	Descargando modelo…
+	Preparing AI…	Preparando IA…
+	Preparing AI for this GPU (first run only)…	Preparando la IA para esta GPU (solo la primera vez)…
+	Processing {i}/{n}	Procesando {i}/{n}
+	Applying…	Aplicando…
+	Using the CPU, it may take longer	Usando la CPU, puede tardar más
+	{tool}: done	{tool}: listo
+	Which one should I use?	¿Cuál uso?
+	Tap to use a tool; press and hold to see what it does and add it to the favorites bar.	Toca para usar una herramienta; mantén pulsado para ver qué hace y añadirla a la barra de favoritos.
+	Outline	Contorno
+	Outer	Fuera
+	Centered	Centro
+	Inner	Dentro
+	Outline width	Grosor del contorno
+	Color Picker (Outline)	Selector de color (contorno)

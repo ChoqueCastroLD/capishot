@@ -170,6 +170,55 @@ fn synonym_hits(q: &str, menus: &[crate::menus::MenuItem], lang: crate::i18n::La
         .collect()
 }
 
+/// The tools and commands whose plain-language description ([`crate::help_text`]) has the
+/// query's words, in the UI language, Spanish, Portuguese or English ("borrar texto" finds
+/// Remove with AI). Several words matched rank above a single everyday word; one word ranks
+/// below any name it matches.
+fn description_hits(q: &str, menus: &[crate::menus::MenuItem], lang: crate::i18n::Lang) -> Vec<Hit> {
+    let words = crate::palette_search::fold(q).split(|c: char| !c.is_alphanumeric()).filter(|w| w.chars().count() >= 3).count();
+    if words == 0 {
+        return Vec::new();
+    }
+    crate::help_text::HELP
+        .iter()
+        .filter_map(|h| {
+            let s = [h.text(lang), h.en, h.es, h.pt].iter().filter_map(|t| crate::help_text::words_score(q, t)).max()?;
+            let s = if words >= 2 { 650 + 20 * s } else { 5 + s };
+            if let Some(name) = h.id.strip_prefix("tool:") {
+                let tool = crate::state::Tool::from_name(name)?;
+                return Some((
+                    s + 2,
+                    h.id.to_string(),
+                    crate::i18n::tr(lang, tool.label()).to_string(),
+                    Some(format!("{}   {}", crate::i18n::tr(lang, "Tool"), tool.key())),
+                    true,
+                ));
+            }
+            let m = menus.iter().find(|m| m.id == h.id)?;
+            let path = m.path.iter().map(|p| crate::i18n::tr(lang, p)).collect::<Vec<_>>().join(" › ");
+            Some((s, m.id.clone(), crate::i18n::tr_id(lang, &m.id, &m.label).trim_end_matches('…').to_string(), Some(path), m.enabled))
+        })
+        .collect()
+}
+
+/// `hits` (best first) with each group's rows together: the groups in the order of their best
+/// row, a quick action first.
+fn grouped(hits: Vec<Hit>) -> Vec<Hit> {
+    let mut order: Vec<Option<crate::help_text::Group>> = Vec::new();
+    let key = |h: &Hit| (!h.1.starts_with("quick:")).then(|| crate::help_text::group_of(&h.1));
+    for h in &hits {
+        let k = key(h);
+        if !order.contains(&k) {
+            order.push(k);
+        }
+    }
+    let mut out = Vec::with_capacity(hits.len());
+    for k in order {
+        out.extend(hits.iter().filter(|h| key(h) == k).cloned());
+    }
+    out
+}
+
 /// Every row for query `q`, best first.
 pub(crate) fn hits_for(app: &PhotocraftApp, ctx: &egui::Context, q: &str) -> Vec<Hit> {
     let lang = crate::i18n::Lang::from_pref(&app.session.prefs().interface.language);
@@ -184,6 +233,7 @@ pub(crate) fn hits_for(app: &PhotocraftApp, ctx: &egui::Context, q: &str) -> Vec
             hits.push((5000, "quick:".into(), action.label(), Some(tl!("Quick action").to_string()), true));
         }
         hits.extend(synonym_hits(q, &menus, lang));
+        hits.extend(description_hits(q, &menus, lang));
     }
     if !empty || hits.is_empty() {
         hits.extend(menu_hits(menus, q, lang));
@@ -194,7 +244,7 @@ pub(crate) fn hits_for(app: &PhotocraftApp, ctx: &egui::Context, q: &str) -> Vec
     let mut seen = std::collections::HashSet::new();
     hits.retain(|h| seen.insert(h.1.clone()));
     hits.truncate(12);
-    hits
+    if empty { hits } else { grouped(hits) }
 }
 
 pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
@@ -219,7 +269,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     // On a phone the palette spans the window near its top, with finger-sized two-line rows.
     let narrow = screen.width() < 600.0;
     let width = if narrow { screen.width() - 16.0 - 20.0 } else { 560.0 };
-    let row_h = if narrow { 46.0 } else { 32.0 };
+    let row_h = if narrow { 52.0 } else { 32.0 };
     // The simple interface's rows have a star: tap it to put the command on the favorites bar.
     let stars = app.simple;
     let mut run: Option<String> = None;
@@ -282,36 +332,68 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                         ui.label(RichText::new(tl!("Recent commands")).font(theme::semibold(12.5)).color(t.text_dim));
                         ui.add_space(2.0);
                     }
-                    let max_rows = if narrow { (((screen.height() - 52.0 - 120.0) / row_h).floor() as usize).clamp(4, 12) } else { 12 };
-                    for (i, (_, id, label, detail, enabled)) in hits.iter().take(max_rows).enumerate() {
-                        let (rect, resp) = ui.allocate_exact_size(vec2(width, row_h), Sense::click());
+                    let lang = crate::i18n::Lang::from_pref(&app.session.prefs().interface.language);
+                    // Rows (and group headings) as long as they fit: a phone's window is short.
+                    let mut room = if narrow { (screen.height() - 52.0 - 140.0).max(4.0 * row_h) } else { 12.0 * 44.0 };
+                    let grouped = !q.trim().is_empty();
+                    let mut last_group = None;
+                    let mut shown: Vec<&str> = Vec::new();
+                    for (i, (_, id, label, detail, enabled)) in hits.iter().enumerate() {
+                        let quick = id.starts_with("quick:");
+                        let group = (!quick).then(|| crate::help_text::group_of(id));
+                        let heading = grouped && group.is_some() && group != last_group;
+                        let about = if quick { None } else { crate::help_text::describe(id, lang) };
+                        let h = if narrow {
+                            row_h
+                        } else if about.is_some() {
+                            44.0
+                        } else {
+                            32.0
+                        };
+                        if h + if heading { 22.0 } else { 0.0 } > room {
+                            break;
+                        }
+                        room -= h;
+                        if heading && let Some(g) = group {
+                            room -= 22.0;
+                            ui.add_space(4.0);
+                            ui.label(RichText::new(g.title()).font(theme::semibold(11.5)).color(t.text_dim));
+                            last_group = group;
+                        }
+                        shown.push(id);
+                        let (rect, resp) = ui.allocate_exact_size(vec2(width, h), Sense::click());
                         if i == sel || resp.hovered() {
                             ui.painter().rect_filled(rect, t.radius_sm, if i == sel { t.accent_soft } else { t.hover });
                         }
                         let color = if *enabled { t.text } else { t.text_faint };
-                        let quick = id.starts_with("quick:");
                         let star_rect = (stars && !quick).then(|| egui::Rect::from_center_size(rect.right_center() - vec2(20.0, 0.0), vec2(36.0, 36.0)));
                         let text_right = star_rect.map_or(rect.right() - 12.0, |s| s.left() - 4.0);
                         if quick {
                             icons::paint(ui, egui::Rect::from_center_size(rect.left_center() + vec2(18.0, 0.0), vec2(18.0, 18.0)), "sparkles", 15.0, t.accent);
                         }
                         let left = rect.left() + if quick { 34.0 } else { 12.0 };
+                        let line = |ui: &egui::Ui, text: String, font: egui::FontId, c: Color32, max: f32| {
+                            let mut job = egui::text::LayoutJob::simple_singleline(text, font, c);
+                            job.wrap = egui::text::TextWrapping::truncate_at_width(max.max(20.0));
+                            ui.painter().layout_job(job)
+                        };
                         if narrow {
-                            // Two lines: the name, then where it lives.
-                            let mut job = egui::text::LayoutJob::simple_singleline(label.clone(), theme::medium(14.0), color);
-                            job.wrap = egui::text::TextWrapping::truncate_at_width((text_right - left).max(20.0));
-                            let g = ui.painter().layout_job(job);
-                            ui.painter().galley(egui::pos2(left, rect.top() + 6.0), g, color);
-                            if let Some(d) = detail {
-                                let mut job = egui::text::LayoutJob::simple_singleline(d.trim().to_string(), egui::FontId::proportional(11.5), t.text_faint);
-                                job.wrap = egui::text::TextWrapping::truncate_at_width((text_right - left).max(20.0));
-                                let g = ui.painter().layout_job(job);
-                                ui.painter().galley(egui::pos2(left, rect.bottom() - 6.0 - g.size().y), g, t.text_faint);
+                            // Two lines: the name, then what it does (or where it lives).
+                            let g = line(ui, label.clone(), theme::medium(14.0), color, text_right - left);
+                            ui.painter().galley(egui::pos2(left, rect.top() + 7.0), g, color);
+                            if let Some(d) = about.map(str::to_string).or_else(|| detail.as_ref().map(|d| d.trim().to_string())) {
+                                let g = line(ui, d, egui::FontId::proportional(11.5), t.text_dim, text_right - left);
+                                ui.painter().galley(egui::pos2(left, rect.bottom() - 7.0 - g.size().y), g, t.text_dim);
                             }
                         } else {
-                            ui.painter().text(egui::pos2(left, rect.center().y), Align2::LEFT_CENTER, label, theme::medium(13.0), color);
+                            let name_y = if about.is_some() { rect.top() + 13.0 } else { rect.center().y };
+                            ui.painter().text(egui::pos2(left, name_y), Align2::LEFT_CENTER, label, theme::medium(13.0), color);
                             if let Some(d) = detail {
-                                ui.painter().text(egui::pos2(text_right, rect.center().y), Align2::RIGHT_CENTER, d, egui::FontId::proportional(11.5), t.text_faint);
+                                ui.painter().text(egui::pos2(text_right, name_y), Align2::RIGHT_CENTER, d, egui::FontId::proportional(11.5), t.text_faint);
+                            }
+                            if let Some(a) = about {
+                                let g = line(ui, a.to_string(), egui::FontId::proportional(11.5), t.text_dim, text_right - left);
+                                ui.painter().galley(egui::pos2(left, rect.bottom() - 7.0 - g.size().y), g, t.text_dim);
                             }
                         }
                         let mut starred = false;
@@ -327,6 +409,21 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                         if resp.clicked() && *enabled && !starred {
                             run = Some(id.clone());
                         }
+                    }
+                    // Similar tools among the results: how to choose.
+                    if grouped && let Some(w) = crate::help_text::which_for(shown.iter().copied()) {
+                        ui.add_space(6.0);
+                        egui::Frame::NONE.fill(t.chrome).corner_radius(CornerRadius::same(t.radius_sm as u8)).inner_margin(egui::Margin::same(8)).show(
+                            ui,
+                            |ui| {
+                                ui.set_width(width - 16.0);
+                                ui.label(RichText::new(tl!("Which one should I use?")).font(theme::semibold(12.5)).color(t.text));
+                                ui.label(RichText::new(w.text(lang)).size(12.0).color(t.text_dim));
+                            },
+                        );
+                        ctx.data_mut(|d| d.insert_temp(egui::Id::new("palette-which"), true));
+                    } else {
+                        ctx.data_mut(|d| d.remove::<bool>(egui::Id::new("palette-which")));
                     }
                     if enter && let Some(h) = hits.get(sel).filter(|h| h.4) {
                         run = Some(h.1.clone());
