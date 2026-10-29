@@ -416,6 +416,53 @@ impl GpuCanvas {
         r.callback_resources.get::<StoredResources>().and_then(|res| res.docs.get(&doc)).is_some_and(|d| d.size == size)
     }
 
+    /// WebGL, once a frame: builds the next of the compositor's first pipelines when it is due
+    /// ([`WarmClock`]), and hands the compositor over once they are all built. Returns whether
+    /// it is still warming up (the caller repaints soon). A pipeline over [`SLOW_PIPELINE_MS`]
+    /// keeps the canvas on the CPU ([`GpuCanvas::slow_pipelines`]).
+    pub fn warm_up(&self) -> bool {
+        let now = now_ms();
+        let mut renderer = self.rs.renderer.write();
+        let Some(res) = renderer.callback_resources.get_mut::<StoredResources>() else { return false };
+        let Some(w) = res.warming.as_mut() else { return false };
+        if !w.clock.due(now) {
+            return true;
+        }
+        let r = {
+            let _s = crate::perf_span::span("gpu.pipelines.warm");
+            w.comp.warm(&self.rs.device, w.next)
+        };
+        let end = now_ms();
+        w.clock.built(end);
+        w.next += 1;
+        let ms = end - now;
+        if let Err(e) = r {
+            log::warn!("{e}; using the CPU compositor");
+            res.warming = None;
+            res.compositor_failed = Some(e);
+            return false;
+        }
+        if ms > SLOW_PIPELINE_MS {
+            log::warn!("a GPU canvas pipeline took {ms:.0} ms to build; using the CPU canvas");
+            res.warming = None;
+            res.slow_pipelines = Some(ms);
+            res.compositor_failed = Some(photocraft_gpu::Unsupported(format!("the GPU took {ms:.0} ms to prepare the canvas")));
+            return false;
+        }
+        if w.next >= photocraft_gpu::Compositor::FIRST_PIPELINES {
+            res.compositor = res.warming.take().map(|w| w.comp);
+            return false;
+        }
+        true
+    }
+
+    /// A WebGL pipeline took this long (ms, over [`SLOW_PIPELINE_MS`]) to build: the canvas
+    /// stays on the CPU.
+    pub fn slow_pipelines(&self) -> Option<f64> {
+        let r = self.rs.renderer.read();
+        r.callback_resources.get::<StoredResources>().and_then(|res| res.slow_pipelines)
+    }
+
     /// Whether [`GpuCanvas::composite`] would draw `doc` with the wgpu compositor (rather than
     /// fall back to the CPU compositor).
     pub fn supports(&self, doc: &photocraft_doc::Document) -> bool {
@@ -424,7 +471,7 @@ impl GpuCanvas {
         }
         let r = self.rs.renderer.read();
         let Some(res) = r.callback_resources.get::<StoredResources>() else { return false };
-        if res.compositor_failed.is_some() {
+        if res.compositor_failed.is_some() || res.warming.is_some() {
             return false;
         }
         match &res.compositor {
@@ -566,6 +613,25 @@ impl GpuCanvas {
         // A driver that couldn't build the pipelines once won't later: stay on the CPU compositor.
         if let Some(e) = &res.compositor_failed {
             return Err(e.clone());
+        }
+        // WebGL builds each pipeline as a program compiled and linked on the spot (seconds on a
+        // weak GPU, and several in one frame made Chrome drop the context): they are built one
+        // at a time in later frames (`warm_up`) and the CPU compositor draws until then.
+        if res.compositor.is_none() && self.rs.adapter.get_info().backend == wgpu::Backend::Gl {
+            if res.warming.is_none() {
+                let comp = {
+                    let _s = crate::perf_span::span("gpu.pipelines");
+                    photocraft_gpu::Compositor::try_new_lazy(device, photocraft_gpu::Compositor::preferred_acc_format(&self.rs.adapter))
+                };
+                match comp {
+                    Ok(c) => res.warming = Some(Warming { comp: c, next: 0, clock: WarmClock::new(now_ms()) }),
+                    Err(e) => {
+                        res.compositor_failed = Some(e.clone());
+                        return Err(e);
+                    }
+                }
+            }
+            return Err(photocraft_gpu::Unsupported(WARMING_UP.into()));
         }
         let built = if res.compositor.is_none() {
             let _s = crate::perf_span::span("gpu.pipelines");
@@ -1806,6 +1872,48 @@ pub const MIN_GPU_BUDGET: u64 = 512 << 20;
 /// Why a full refresh whose layer pages don't fit [`memory_budget`] goes to the CPU compositor.
 pub const OVER_BUDGET: &str = "layers exceed the GPU memory budget; full refresh on the CPU";
 
+/// The canvas's GPU pipelines are still being built (WebGL): the CPU draws until then.
+pub const WARMING_UP: &str = "the GPU canvas is still getting ready; drawing on the CPU";
+
+/// A WebGL pipeline that takes longer than this to build marks the GPU too slow for the canvas.
+pub const SLOW_PIPELINE_MS: f64 = 2000.0;
+
+/// The compositor while its first pipelines are built ([`GpuCanvas::warm_up`]).
+struct Warming {
+    comp: photocraft_gpu::Compositor,
+    /// The next of [`photocraft_gpu::Compositor::FIRST_PIPELINES`] to build.
+    next: usize,
+    clock: WarmClock,
+}
+
+/// When the next pipeline may be built: not in the frame that first needed the canvas (a
+/// document just opened), and never two in one frame.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct WarmClock {
+    created: f64,
+    last: f64,
+}
+
+impl WarmClock {
+    /// After the canvas first needs the compositor (ms).
+    pub(crate) const START_MS: f64 = 400.0;
+    /// Between two pipelines (ms): longer than a frame, so at most one per frame.
+    pub(crate) const GAP_MS: f64 = 100.0;
+
+    pub(crate) fn new(now: f64) -> Self {
+        Self { created: now, last: f64::MIN }
+    }
+
+    pub(crate) fn due(&self, now: f64) -> bool {
+        now - self.created >= Self::START_MS && now - self.last >= Self::GAP_MS
+    }
+
+    /// A pipeline was built, ending at `now`.
+    pub(crate) fn built(&mut self, now: f64) {
+        self.last = now;
+    }
+}
+
 /// GPU memory the wgpu compositor may hold for layer pages and effect maps: what Memory Usage
 /// (`allowance`, Preferences › Performance) leaves after the document's pixels and History
 /// (`pixels`), at most a quarter of physical memory (`ram`; 16 GB assumed when unknown), and at
@@ -1940,6 +2048,12 @@ struct Resources {
     compositor: Option<photocraft_gpu::Compositor>,
     /// Why the wgpu compositor couldn't be created (then the CPU compositor is used).
     compositor_failed: Option<photocraft_gpu::Unsupported>,
+    /// WebGL: the compositor while its first pipelines are built, one at a time in later frames
+    /// ([`GpuCanvas::warm_up`]); the CPU compositor draws meanwhile.
+    warming: Option<Warming>,
+    /// WebGL: a pipeline took longer than [`SLOW_PIPELINE_MS`] to build (ms): the canvas stays
+    /// on the CPU, and the app keeps it there on this device.
+    slow_pipelines: Option<f64>,
     /// The device's health: the paint callback issues no GPU work once it's lost.
     health: photocraft_gpu::DeviceHealth,
     /// GPU memory the compositor may hold (`None`: its default), and the document area the
@@ -2218,6 +2332,8 @@ impl Resources {
             separate_mip_targets: false,
             compositor: None,
             compositor_failed: None,
+            warming: None,
+            slow_pipelines: None,
             health: photocraft_gpu::DeviceHealth::new(),
             compositor_budget: None,
             compositor_cache_budget: None,
@@ -2918,6 +3034,31 @@ mod mip_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// WebGL builds the canvas's pipelines one at a time: none in the frame that first needed
+    /// them, never two in one frame (however many composites the frame asks for).
+    #[test]
+    fn webgl_pipelines_are_built_one_per_frame_after_start() {
+        let mut c = WarmClock::new(1000.0);
+        assert!(!c.due(1000.0), "not in the frame a document opened");
+        assert!(!c.due(1000.0 + WarmClock::START_MS - 1.0));
+        let mut t = 1000.0 + WarmClock::START_MS;
+        let mut built = Vec::new();
+        // 60 frames of 16 ms, each asking three times.
+        for _ in 0..60 {
+            let mut this_frame = 0;
+            for _ in 0..3 {
+                if c.due(t) {
+                    c.built(t);
+                    this_frame += 1;
+                }
+            }
+            assert!(this_frame <= 1, "two pipelines in one frame");
+            built.push(this_frame);
+            t += 16.0;
+        }
+        assert!(built.iter().sum::<i32>() >= 3, "all three built within a second: {built:?}");
+    }
 
     /// The threads web build stores the canvas resources as `SendWrapper<Resources>`, so a lookup
     /// by `Resources` finds nothing there: `fits_canvas` answered false and every document was

@@ -3314,3 +3314,7 @@ fontWeight	Italic	Itálico
 	Couldn't write the file, downloaded it instead: {error}	Não foi possível escrever o ficheiro; foi transferido: {error}
 	Line spacing (leading)	Entrelinha
 	Line spacing of 120% of the size	Entrelinha de 120% do tamanho
+	Capishot will draw on the CPU on this device	O Capishot vai desenhar com a CPU neste dispositivo
+	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	A placa gráfica foi demasiado lenta ou reiniciou enquanto desenhava. Para a voltar a usar: Preferências › Desempenho › Modo de renderização.
+	Your graphics card restarted; Capishot keeps working on the CPU	A sua placa gráfica reiniciou; o Capishot continua no modo CPU
+	Unsaved documents were reopened from crash recovery.	Os documentos não guardados foram reabertos pela recuperação.

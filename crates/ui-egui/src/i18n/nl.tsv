@@ -4455,3 +4455,7 @@ curves	Smooth	Vloeiend maken
 	Line spacing (leading)	Regelafstand
 	Line spacing of 120% of the size	Regelafstand van 120% van de grootte
 	Auto leading	Automatische regelafstand
+	Capishot will draw on the CPU on this device	Capishot tekent op dit apparaat met de CPU
+	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	De grafische kaart was te traag of herstartte tijdens het tekenen. Om hem weer te gebruiken: Voorkeuren › Prestaties › Renderingmodus.
+	Your graphics card restarted; Capishot keeps working on the CPU	Je grafische kaart is herstart; Capishot werkt verder met de CPU
+	Unsaved documents were reopened from crash recovery.	Niet-opgeslagen documenten zijn heropend uit het herstel.

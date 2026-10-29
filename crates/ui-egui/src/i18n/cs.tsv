@@ -4305,3 +4305,7 @@ navigator	Zoom	Zvětšení
 	Line spacing (leading)	Řádkování
 	Line spacing of 120% of the size	Řádkování 120 % velikosti
 	Auto leading	Automatické řádkování
+	Capishot will draw on the CPU on this device	Capishot bude na tomto zařízení kreslit pomocí CPU
+	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	Grafická karta byla příliš pomalá nebo se při kreslení restartovala. Chcete-li ji znovu použít: Předvolby › Výkon › Režim vykreslování.
+	Your graphics card restarted; Capishot keeps working on the CPU	Grafická karta se restartovala; Capishot pokračuje v režimu CPU
+	Unsaved documents were reopened from crash recovery.	Neuložené dokumenty byly znovu otevřeny z obnovy.

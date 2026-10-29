@@ -144,6 +144,11 @@ fn round(ms: f64) -> u64 {
     if ms.is_finite() && ms > 0.0 { ms.min(3_600_000.0).round() as u64 } else { 0 }
 }
 
+/// Send what is waiting now (the page is about to reload).
+pub fn flush_now() {
+    flush();
+}
+
 /// Send what is waiting. Fire and forget: a failure drops the batch.
 fn flush() {
     let Some(body) = telemetry::take_batch() else { return };

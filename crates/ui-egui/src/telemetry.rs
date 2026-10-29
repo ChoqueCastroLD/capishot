@@ -470,6 +470,27 @@ impl Recorder {
         self.event(e);
     }
 
+    /// The GPU canvas gave way to the CPU one: `api` "webgl" or "webgpu" (or a native backend),
+    /// `gpu` the renderer class ([`gpu_vendor_class`]), `cause` "context_lost" (the black-canvas
+    /// class: the browser dropped the graphics context), "slow_pipelines" (a canvas pipeline took
+    /// over 2 s to build) or "weak_gpu" (the start-up check chose the CPU canvas), `phase` what
+    /// the last frame spent its time on, `n` the times it happened this session, `ms` how long
+    /// the slow step took. Each kind at most once a batch.
+    pub fn gpu_lost(&mut self, api: &str, gpu: &str, cause: &str, phase: Option<&str>, n: u32, ms: Option<f64>) {
+        let mut e = json!({"e": "gpu_lost", "api": sanitize_token(api, 16).unwrap_or_else(|| "unknown".into()), "gpu": sanitize_token(gpu, 16).unwrap_or_else(|| "unknown".into()),
+            "cause": sanitize_token(cause, 24).unwrap_or_else(|| "unknown".into()), "n": n.min(99)});
+        if let Some(phase) = phase.and_then(|p| sanitize_token(p, 40)) {
+            e["phase"] = json!(phase);
+        }
+        if let Some(ms) = ms.filter(|m| m.is_finite()) {
+            e["ms"] = json!(round_ms(ms));
+        }
+        if self.events.iter().any(|x| x.get("e") == e.get("e") && x.get("cause") == e.get("cause")) {
+            return;
+        }
+        self.event(e);
+    }
+
     /// The user pressed, moved, scrolled or typed.
     pub fn interaction(&mut self, now_ms: f64) {
         self.last_interaction_ms = Some(now_ms);

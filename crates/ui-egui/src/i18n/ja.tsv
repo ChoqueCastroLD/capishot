@@ -4379,3 +4379,7 @@ curves	Smooth	スムーズ
 	Line spacing (leading)	行送り
 	Line spacing of 120% of the size	サイズの 120% の行送り
 	Auto leading	自動行送り
+	Capishot will draw on the CPU on this device	このデバイスでは Capishot は CPU で描画します
+	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	描画中にグラフィックカードが遅すぎたか再起動しました。再び使うには：環境設定 › パフォーマンス › レンダリングモード。
+	Your graphics card restarted; Capishot keeps working on the CPU	グラフィックカードが再起動しました。Capishot は CPU モードで動作を続けます
+	Unsaved documents were reopened from crash recovery.	保存していない書類はリカバリーから開き直しました。

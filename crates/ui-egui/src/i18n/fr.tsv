@@ -3716,3 +3716,7 @@ curves	Smooth	Lisser
 	Line spacing (leading)	Interlignage
 	Line spacing of 120% of the size	Interlignage de 120 % du corps
 	Auto leading	Interlignage automatique
+	Capishot will draw on the CPU on this device	Capishot dessinera avec le processeur sur cet appareil
+	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	La carte graphique était trop lente ou a redémarré pendant le dessin. Pour la réutiliser : Préférences › Performances › Mode de rendu.
+	Your graphics card restarted; Capishot keeps working on the CPU	Votre carte graphique a redémarré ; Capishot continue en mode CPU
+	Unsaved documents were reopened from crash recovery.	Les documents non enregistrés ont été rouverts depuis la récupération.

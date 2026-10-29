@@ -3894,3 +3894,7 @@ curves	Smooth	매끄럽게
 	Line spacing (leading)	행간
 	Line spacing of 120% of the size	크기의 120% 행간
 	Auto leading	자동 행간
+	Capishot will draw on the CPU on this device	이 기기에서 Capishot은 CPU로 그립니다
+	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	그리는 중에 그래픽 카드가 너무 느리거나 다시 시작되었습니다. 다시 사용하려면: 환경 설정 › 성능 › 렌더링 모드.
+	Your graphics card restarted; Capishot keeps working on the CPU	그래픽 카드가 다시 시작되었습니다. Capishot은 CPU 모드로 계속 작동합니다
+	Unsaved documents were reopened from crash recovery.	저장하지 않은 문서를 복구에서 다시 열었습니다.

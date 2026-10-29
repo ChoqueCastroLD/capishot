@@ -4686,3 +4686,7 @@ layerLabel	No Color	Sem cor
 	Couldn't write the file, downloaded it instead: {error}	Não foi possível gravar o arquivo; ele foi baixado: {error}
 	Line spacing (leading)	Entrelinha
 	Line spacing of 120% of the size	Entrelinha de 120% do tamanho
+	Capishot will draw on the CPU on this device	O Capishot vai desenhar com a CPU neste dispositivo
+	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	A placa de vídeo ficou lenta demais ou reiniciou enquanto desenhava. Para usá-la de novo: Preferências › Desempenho › Modo de renderização.
+	Your graphics card restarted; Capishot keeps working on the CPU	Sua placa de vídeo reiniciou; o Capishot continua no modo CPU
+	Unsaved documents were reopened from crash recovery.	Os documentos não salvos foram reabertos pela recuperação.

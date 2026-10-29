@@ -121,6 +121,8 @@ cp "$HERE/_headers" "$OUT/"
 # fetches i18n/<code>.tsv when that language is chosen.
 mkdir -p "$OUT/i18n"
 cp "$ROOT"/crates/ui-egui/src/i18n/*.tsv "$ROOT/crates/ui-egui/src/i18n/LICENSE-translations.txt" "$OUT/i18n/"
+# No served fonts unless packaging adds them: an empty manifest (a missing one is a 404 in the console).
+[ -f "$OUT/fonts/manifest.txt" ] || { mkdir -p "$OUT/fonts"; cp "$ROOT/apps/photocraft-web/fonts/manifest.txt" "$OUT/fonts/"; }
 
 # Image › Upscale with AI: the AI Web Worker module, loaded on demand (PHOTOCRAFT_WEB_AI=0 skips).
 if [ "${PHOTOCRAFT_WEB_AI:-1}" != "0" ]; then

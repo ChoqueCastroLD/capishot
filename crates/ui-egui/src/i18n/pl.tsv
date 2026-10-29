@@ -4305,3 +4305,7 @@ curves	Smooth	Wygładź
 	Line spacing (leading)	Interlinia
 	Line spacing of 120% of the size	Interlinia 120% rozmiaru
 	Auto leading	Automatyczna interlinia
+	Capishot will draw on the CPU on this device	Capishot będzie rysować za pomocą CPU na tym urządzeniu
+	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	Karta graficzna była zbyt wolna lub zrestartowała się podczas rysowania. Aby znów jej używać: Preferencje › Wydajność › Tryb renderowania.
+	Your graphics card restarted; Capishot keeps working on the CPU	Karta graficzna została zrestartowana; Capishot działa dalej w trybie CPU
+	Unsaved documents were reopened from crash recovery.	Niezapisane dokumenty otwarto ponownie z odzyskiwania.

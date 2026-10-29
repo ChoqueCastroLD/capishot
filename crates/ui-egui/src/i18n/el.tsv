@@ -4396,3 +4396,7 @@ curves	Smooth	Εξομάλυνση
 	Line spacing (leading)	Διάστιχο
 	Line spacing of 120% of the size	Διάστιχο 120% του μεγέθους
 	Auto leading	Αυτόματο διάστιχο
+	Capishot will draw on the CPU on this device	Το Capishot θα σχεδιάζει με την CPU σε αυτή τη συσκευή
+	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	Η κάρτα γραφικών ήταν πολύ αργή ή επανεκκινήθηκε κατά τη σχεδίαση. Για να τη χρησιμοποιήσετε ξανά: Προτιμήσεις › Επιδόσεις › Λειτουργία απόδοσης.
+	Your graphics card restarted; Capishot keeps working on the CPU	Η κάρτα γραφικών επανεκκινήθηκε· το Capishot συνεχίζει σε λειτουργία CPU
+	Unsaved documents were reopened from crash recovery.	Τα μη αποθηκευμένα έγγραφα ανοίχτηκαν ξανά από την ανάκτηση.

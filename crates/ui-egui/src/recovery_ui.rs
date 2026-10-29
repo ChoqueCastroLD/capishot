@@ -77,6 +77,14 @@ impl PhotocraftApp {
         self.recovery.dialog = Some(RecoveryDialog { entries, skipped: HashSet::new(), crashed, textures, buttons: Vec::new() });
     }
 
+    /// Answer the open recovery dialog with every document it lists (the page reloaded on purpose
+    /// after its graphics context was lost).
+    pub fn accept_recovery_offer(&mut self) {
+        if let Some(d) = self.recovery.dialog.take() {
+            self.recovery.answer = Some(RecoveryAnswer::Recover(d.entries.iter().map(|e| e.key.clone()).collect()));
+        }
+    }
+
     /// The answer to the recovery dialog, once.
     pub fn take_recovery_answer(&mut self) -> Option<RecoveryAnswer> {
         self.recovery.answer.take()

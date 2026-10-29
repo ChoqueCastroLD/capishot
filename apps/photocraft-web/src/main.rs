@@ -28,6 +28,8 @@ mod font_files;
 #[cfg(target_arch = "wasm32")]
 mod frame_perf;
 #[cfg(target_arch = "wasm32")]
+mod gpu_lost;
+#[cfg(target_arch = "wasm32")]
 mod indexed_fonts;
 #[cfg(target_arch = "wasm32")]
 mod indexed_presets;

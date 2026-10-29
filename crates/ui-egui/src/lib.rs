@@ -988,6 +988,8 @@ pub struct PhotocraftApp {
     window_device: Option<(eframe::wgpu::Device, photocraft_gpu::DeviceHealth)>,
     /// That device was lost: frames draw nothing and the app closes once its work is saved (#3438).
     window_lost: bool,
+    /// The GPU canvas's slow pipelines were reported (`gpu_status::warm_up`).
+    pub(crate) gpu_slow_noted: bool,
     /// When (in `egui::InputState::time`) to try saving unsaved work for recovery again after a
     /// failed attempt; the app closes only once it succeeded.
     window_recovery_retry: Option<f64>,
@@ -1192,6 +1194,7 @@ impl PhotocraftApp {
             gpu: None,
             window_device: None,
             window_lost: false,
+            gpu_slow_noted: false,
             window_recovery_retry: None,
             started: None,
             perf: Default::default(),
@@ -2562,6 +2565,7 @@ impl eframe::App for PhotocraftApp {
         canvas::extra_windows(self, &ctx);
         touch_ui::overlays(self, &ctx);
         notices::show(self, &ctx);
+        gpu_status::warm_up(self, &ctx);
         gpu_status::show_fallback(self, &ctx);
         kys_import::show_offer(self, &ctx);
         if self.titlebar_modal_drag(chrome) {

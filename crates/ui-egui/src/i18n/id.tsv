@@ -3703,3 +3703,7 @@ curves	Smooth	Haluskan
 	Line spacing (leading)	Spasi baris
 	Line spacing of 120% of the size	Spasi baris 120% dari ukuran
 	Auto leading	Spasi baris otomatis
+	Capishot will draw on the CPU on this device	Capishot akan menggambar dengan CPU di perangkat ini
+	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	Kartu grafis terlalu lambat atau dimulai ulang saat menggambar. Untuk memakainya lagi: Preferensi › Performa › Mode Rendering.
+	Your graphics card restarted; Capishot keeps working on the CPU	Kartu grafis Anda dimulai ulang; Capishot tetap berjalan dengan CPU
+	Unsaved documents were reopened from crash recovery.	Dokumen yang belum disimpan dibuka kembali dari pemulihan.

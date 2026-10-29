@@ -196,6 +196,8 @@ pub async fn run(canvas: web_sys::HtmlCanvasElement, hosted: Option<crate::embed
     cap_pixel_density();
     cap_memory();
     let pen_target = canvas.clone();
+    // The graphics context lost: crash recovery, then a reload on the CPU canvas (gpu_lost.rs).
+    crate::gpu_lost::install(&canvas);
     let perf = crate::frame_perf::FramePerf::new(&canvas, perf_debug);
     let boot = Boot {
         presets,
@@ -286,7 +288,12 @@ impl Boot {
         // opening and saving files…) on its worker pool, with progress and Esc to cancel, as the
         // desktop does: the page's thread never waits for them.
         app.background_jobs = cfg!(target_feature = "atomics");
-        if app.session.prefs().file_handling.recover_on_launch && photopea.is_none() && !hosted {
+        // Reloaded after the graphics context was lost (gpu_lost.rs): what was open comes back.
+        let lost_notice = crate::gpu_lost::take_notice();
+        if (app.session.prefs().file_handling.recover_on_launch || lost_notice.is_some()) && photopea.is_none() && !hosted {
+            if lost_notice.is_some() {
+                recovery.auto_accept();
+            }
             recovery.discover(true);
         }
         // Image › Upscale with AI…: the AI worker module, loaded on first use (ai_bridge.rs).
@@ -316,8 +323,27 @@ impl Boot {
         listen_drag_position();
         app.set_theme(ctx, ThemeKind::Pro);
         let mut gpu = ("cpu", "unknown");
+        // Preferences › Performance › Rendering: CPU (set by hand, or after the graphics context
+        // was lost twice or the canvas's shaders took seconds to build: gpu_lost.rs).
+        let cpu_pref = app.session.prefs().performance.effective_rendering_mode() == photocraft_engine::prefs::RenderingMode::Cpu;
+        // A WebGL renderer too weak for the GPU canvas starts on the CPU one (`?gpu=1` skips it).
+        let mut weak: Option<String> = None;
+        if let Some(rs) = &wgpu
+            && !force_cpu
+            && !cpu_pref
+            && rs.adapter.get_info().backend == eframe::wgpu::Backend::Gl
+            && !embed_query.split(['?', '&']).any(|kv| kv == "gpu=1")
+        {
+            let (name, max) = crate::gpu_lost::webgl_renderer().unwrap_or_else(|| (rs.adapter.get_info().name, rs.adapter.limits().max_texture_dimension_2d));
+            if photocraft_ui_egui::gpu_status::weak_webgl(&name, max) {
+                log::warn!("photocraft-web: WebGL renderer {name:?} (textures up to {max} px) is too weak for the GPU canvas; using the CPU canvas");
+                weak = Some(name);
+            }
+        }
         if let Some(rs) = wgpu
             && !force_cpu
+            && !cpu_pref
+            && weak.is_none()
         {
             let info = rs.adapter.get_info();
             log::info!("photocraft-web: wgpu backend {:?}", info.backend);
@@ -336,7 +362,28 @@ impl Boot {
         // host decides about unsaved changes when its page unloads.
         if !hosted {
             crate::usage_stats::init(gpu.0, gpu.1);
+            if let Some(name) = &weak {
+                photocraft_ui_egui::telemetry::with(|r| r.gpu_lost("webgl", photocraft_ui_egui::telemetry::gpu_vendor_class(0, name), "weak_gpu", None, 0, None));
+            }
         }
+        // Reloaded after the graphics context was lost: say what happened.
+        match lost_notice {
+            Some("kept") => photocraft_ui_egui::notices::post(
+                &mut app,
+                i18n::t("Capishot will draw on the CPU on this device"),
+                vec![i18n::t("The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.").to_string()],
+                false,
+                None,
+            ),
+            Some(_) => photocraft_ui_egui::notices::post(
+                &mut app,
+                i18n::t("Your graphics card restarted; Capishot keeps working on the CPU"),
+                vec![i18n::t("Unsaved documents were reopened from crash recovery.").to_string()],
+                false,
+                None,
+            ),
+            None => 0,
+        };
         let unsaved = Arc::new(AtomicBool::new(false));
         if !hosted {
             guard_unload(unsaved.clone());
@@ -344,7 +391,7 @@ impl Boot {
         if let Some(el) = loading {
             el.remove();
         }
-        WebShell { app, safe_area_size: None, inbox, places, canvas: pen_target, unsaved, served, user_fonts, database, presets, startup_frames: 0, perf, recovery, outbox, photopea, watchdog: crate::watchdog::Watchdog::new(), downloads: Default::default(), hosted }
+        WebShell { app, safe_area_size: None, inbox, places, canvas: pen_target, unsaved, served, user_fonts, database, presets, startup_frames: 0, perf, recovery, outbox, photopea, watchdog: crate::watchdog::Watchdog::new(), downloads: Default::default(), hosted, lost_at: None }
     }
 }
 
@@ -918,6 +965,8 @@ struct WebShell {
     canvas: web_sys::HtmlCanvasElement,
     /// Read by the `beforeunload` listener ([`guard_unload`]).
     unsaved: Arc<AtomicBool>,
+    /// When the graphics context was lost (ms), while the page saves for recovery (gpu_lost.rs).
+    lost_at: Option<f64>,
     served: Served,
     /// The user's fonts in IndexedDB (`indexed_fonts`), once open.
     user_fonts: UserFontStore,
@@ -954,6 +1003,27 @@ struct PendingDownload {
 }
 
 impl WebShell {
+    /// Every frame once the graphics context is lost: unsaved documents go to crash recovery,
+    /// then the page reloads on the CPU canvas, where they reopen (gpu_lost.rs). An embedding
+    /// host's page isn't reloaded: it decides.
+    fn after_context_lost(&mut self, ctx: &egui::Context) {
+        let now = js_sys::Date::now();
+        let since = *self.lost_at.get_or_insert_with(|| {
+            crate::gpu_lost::note(&mut self.app);
+            photocraft_ui_egui::prefs_ui::flush_prefs(&mut self.app, ctx.input(|i| i.time));
+            crate::usage_stats::flush_now();
+            now
+        });
+        self.recovery.tick(&mut self.app);
+        let saved = photocraft_ui_egui::gpu_status::save_all_for_recovery(&mut self.app, ctx).is_ok();
+        if !self.hosted && photocraft_ui_egui::gpu_status::ready_to_reload(saved, since, now) {
+            self.unsaved.store(false, Ordering::Release);
+            self.recovery.mark_crashed();
+            crate::gpu_lost::reload_on_cpu();
+        }
+        ctx.request_repaint_after(std::time::Duration::from_millis(100));
+    }
+
     /// Hands the saves the worker pool finished to the browser (a download, or the Photopea-style
     /// host's save server), on the page's thread where its APIs live.
     fn deliver_saves(&mut self, ctx: &egui::Context) {
@@ -1167,6 +1237,10 @@ impl eframe::App for WebShell {
     }
 
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        if crate::gpu_lost::lost() {
+            self.after_context_lost(ctx);
+            return;
+        }
         back_history::sync(photocraft_ui_egui::simple_ui::back_target(&self.app, ctx), ctx);
         // Startup timings: the first frame starts, and the second starts once it is drawn.
         if self.startup_frames < 2 {
@@ -1269,6 +1343,10 @@ impl eframe::App for WebShell {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        // Nothing can be drawn on a lost context.
+        if crate::gpu_lost::lost() {
+            return;
+        }
         // Only while a preset change is unsaved. Storage the browser denies from the start (a
         // sandboxed iframe, blocked site data) loses nothing until the first change, and that
         // change brings the banner with the reason.

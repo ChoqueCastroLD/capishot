@@ -4414,3 +4414,7 @@ curves	Smooth	Згладити
 	Line spacing (leading)	Інтерліньяж
 	Line spacing of 120% of the size	Інтерліньяж 120% від розміру
 	Auto leading	Автоматичний інтерліньяж
+	Capishot will draw on the CPU on this device	Capishot малюватиме за допомогою CPU на цьому пристрої
+	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	Відеокарта була надто повільною або перезапустилася під час малювання. Щоб знову її використовувати: Налаштування › Продуктивність › Режим рендерингу.
+	Your graphics card restarted; Capishot keeps working on the CPU	Відеокарта перезапустилася; Capishot працює далі в режимі CPU
+	Unsaved documents were reopened from crash recovery.	Незбережені документи знову відкрито з відновлення.

@@ -3345,3 +3345,7 @@ curves	Smooth	平滑
 	Line spacing (leading)	行距
 	Line spacing of 120% of the size	字号 120% 的行距
 	Auto leading	自动行距
+	Capishot will draw on the CPU on this device	Capishot 将在此设备上使用 CPU 绘制
+	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	绘制时显卡太慢或已重启。要再次使用它：首选项 › 性能 › 渲染模式。
+	Your graphics card restarted; Capishot keeps working on the CPU	显卡已重启；Capishot 继续以 CPU 模式运行
+	Unsaved documents were reopened from crash recovery.	未保存的文档已从恢复中重新打开。

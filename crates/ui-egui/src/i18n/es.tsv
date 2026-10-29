@@ -4858,3 +4858,7 @@ navigator	Zoom	Zoom
 	Couldn't write the file, downloaded it instead: {error}	No se pudo escribir el archivo; se descargó en su lugar: {error}
 	Line spacing (leading)	Interlineado
 	Line spacing of 120% of the size	Interlineado del 120% del tamaño
+	Capishot will draw on the CPU on this device	Capishot dibujará con la CPU en este dispositivo
+	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	La tarjeta gráfica fue demasiado lenta o se reinició mientras dibujaba. Para volver a usarla: Preferencias › Rendimiento › Modo de renderizado.
+	Your graphics card restarted; Capishot keeps working on the CPU	Tu tarjeta gráfica se reinició; Capishot sigue en modo CPU
+	Unsaved documents were reopened from crash recovery.	Los documentos sin guardar se reabrieron desde la recuperación.

@@ -3714,3 +3714,7 @@ curves	Smooth	Glätten
 	Line spacing (leading)	Zeilenabstand
 	Line spacing of 120% of the size	Zeilenabstand von 120 % der Größe
 	Auto leading	Automatischer Zeilenabstand
+	Capishot will draw on the CPU on this device	Capishot zeichnet auf diesem Gerät mit der CPU
+	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	Die Grafikkarte war zu langsam oder wurde beim Zeichnen neu gestartet. Um sie wieder zu nutzen: Voreinstellungen › Leistung › Rendering-Modus.
+	Your graphics card restarted; Capishot keeps working on the CPU	Ihre Grafikkarte wurde neu gestartet; Capishot arbeitet mit der CPU weiter
+	Unsaved documents were reopened from crash recovery.	Nicht gespeicherte Dokumente wurden aus der Wiederherstellung neu geöffnet.

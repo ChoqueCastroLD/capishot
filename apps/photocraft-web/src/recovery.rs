@@ -95,6 +95,9 @@ struct Inner {
     /// Messages for the user (titles of error notices).
     errors: Vec<String>,
     persist_asked: bool,
+    /// Open what is offered without asking (the page reloaded after its graphics context was
+    /// lost: gpu_lost.rs).
+    auto_accept: bool,
 }
 
 /// The browser's recovery manager, shared by the services and the shell.
@@ -164,6 +167,17 @@ impl Recovery {
         let me = Recovery(Rc::new(RefCell::new(inner)));
         CURRENT.with(|c| *c.borrow_mut() = Some(Rc::downgrade(&me.0)));
         me
+    }
+
+    /// This page is leaving without closing cleanly (its graphics context was lost and it
+    /// reloads): the next load offers its checkpoints.
+    pub fn mark_crashed(&self) {
+        rcv_mark_crashed(&self.0.borrow().session);
+    }
+
+    /// Open the documents the next offer lists without asking.
+    pub fn auto_accept(&self) {
+        self.0.borrow_mut().auto_accept = true;
     }
 
     /// The autosave services for [`Services`].
@@ -491,6 +505,9 @@ impl Recovery {
         };
         if let Some((entries, crashed)) = offer {
             app.offer_recovery(entries, crashed);
+            if std::mem::take(&mut self.0.borrow_mut().auto_accept) {
+                app.accept_recovery_offer();
+            }
         }
         if !recovered.is_empty() {
             app.recover_documents(recovered);
