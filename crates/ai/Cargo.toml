@@ -30,7 +30,7 @@ thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 half = "2"
-sha2 = "0.10"
+sha2 = "0.11"
 burn = { version = "0.22", default-features = false, features = ["std"], optional = true }
 pollster = { version = "1", optional = true }
 rayon = { workspace = true, optional = true }
