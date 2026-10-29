@@ -3335,3 +3335,9 @@ curves	Smooth	平滑
 	Sample text	示例文字
 	{name} (damaged)	{name}（已损坏）
 	The last autosave didn't finish: the one before it was recovered.	最后一次自动保存未完成：已恢复之前的版本。
+	Remove with AI Tool	AI 移除工具
+	Remove with AI	AI 移除
+	Remove with AI needs to download the Manga LaMa model ({size}). Only once.	AI 移除需要下载 Manga LaMa 模型（{size}）。只需一次。
+	Downloading… {pct}%	正在下载… {pct}%
+	Starting the download…	正在开始下载…
+	The download failed: {reason}	下载失败：{reason}

@@ -4445,3 +4445,9 @@ curves	Smooth	Vloeiend maken
 	Sample text	Voorbeeldtekst
 	{name} (damaged)	{name} (beschadigd)
 	The last autosave didn't finish: the one before it was recovered.	De laatste automatische opslag is niet voltooid: de vorige is hersteld.
+	Remove with AI Tool	Gereedschap Verwijderen met AI
+	Remove with AI	Verwijderen met AI
+	Remove with AI needs to download the Manga LaMa model ({size}). Only once.	Verwijderen met AI moet het model Manga LaMa downloaden ({size}). Eén keer.
+	Downloading… {pct}%	Downloaden… {pct}%
+	Starting the download…	Download wordt gestart…
+	The download failed: {reason}	Het downloaden is mislukt: {reason}

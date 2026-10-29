@@ -4386,3 +4386,9 @@ curves	Smooth	Εξομάλυνση
 	Sample text	Δείγμα κειμένου
 	{name} (damaged)	{name} (κατεστραμμένο)
 	The last autosave didn't finish: the one before it was recovered.	Η τελευταία αυτόματη αποθήκευση δεν ολοκληρώθηκε: ανακτήθηκε η προηγούμενη.
+	Remove with AI Tool	Εργαλείο Αφαίρεση με ΤΝ
+	Remove with AI	Αφαίρεση με ΤΝ
+	Remove with AI needs to download the Manga LaMa model ({size}). Only once.	Η Αφαίρεση με ΤΝ χρειάζεται να κατεβάσει το μοντέλο Manga LaMa ({size}). Μόνο μία φορά.
+	Downloading… {pct}%	Λήψη… {pct}%
+	Starting the download…	Έναρξη λήψης…
+	The download failed: {reason}	Η λήψη απέτυχε: {reason}

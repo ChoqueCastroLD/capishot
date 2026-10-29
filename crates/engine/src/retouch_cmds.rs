@@ -30,7 +30,7 @@ mod patch;
 mod pattern_stamp;
 pub use pattern_stamp::live_impressionist as live_pattern_impressionist;
 mod periodic;
-mod remove;
+pub(crate) mod remove;
 pub use content_aware_move::{ContentAwarePreview, preview as content_aware_move_preview};
 pub use patch::preview as patch_preview;
 

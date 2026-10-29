@@ -4799,3 +4799,9 @@ shape	Appearance	Aspetto
 	Sample text	Testo di esempio
 	{name} (damaged)	{name} (danneggiato)
 	The last autosave didn't finish: the one before it was recovered.	L’ultimo salvataggio automatico non è terminato: è stato recuperato quello precedente.
+	Remove with AI Tool	Strumento Rimuovi con IA
+	Remove with AI	Rimuovi con IA
+	Remove with AI needs to download the Manga LaMa model ({size}). Only once.	Rimuovi con IA deve scaricare il modello Manga LaMa ({size}). Solo una volta.
+	Downloading… {pct}%	Download in corso… {pct}%
+	Starting the download…	Avvio del download…
+	The download failed: {reason}	Il download non è riuscito: {reason}

@@ -207,6 +207,7 @@ pub mod scrollbars;
 mod scrub_wrap;
 pub mod select_mask_view;
 pub mod served_fonts;
+pub mod remove_ai_ui;
 pub mod bubble_type_ui;
 pub mod shape_dialog;
 pub(crate) mod shape_fill_ui;
@@ -959,6 +960,8 @@ pub struct PhotocraftApp {
     /// Bubble Type: the style a click just used, where (document px) and since when (s; < 0: the
     /// next frame starts the clock), shown by the cursor (`bubble_type_ui`).
     pub(crate) bubble_flash: Option<(String, [f64; 2], f64)>,
+    /// Remove with AI: a run waiting for its first-use model download (`remove_ai_ui`).
+    pub(crate) remove_ai: remove_ai_ui::Pending,
     /// Channel thumbnails for one document snapshot; view-only revisions reuse their pixels.
     channel_thumbs: Option<(DocId, std::sync::Weak<Document>, bool, Vec<egui::TextureHandle>)>,
     /// Channels panel overlays / channel views drawn over the canvas, per document id.
@@ -1136,6 +1139,7 @@ impl PhotocraftApp {
             type_clicks: Default::default(),
             type_font_preview: None,
             bubble_flash: None,
+            remove_ai: Default::default(),
             guide_drag: None,
             layer_box: None,
             crop: Default::default(),
@@ -2475,6 +2479,7 @@ impl eframe::App for PhotocraftApp {
         workspace_ui::windows(self, &ctx);
         palette::show(self, &ctx);
         dialogs::show(self, &ctx);
+        remove_ai_ui::show(self, &ctx);
         layers_panel_ui::show_dialog(self, &ctx);
         rasterize_prompt::run_pending(self, &ctx);
         jobs_ui::dialog(self, &ctx);

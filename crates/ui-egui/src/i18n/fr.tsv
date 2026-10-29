@@ -3706,3 +3706,9 @@ curves	Smooth	Lisser
 	Sample text	Texte d’exemple
 	{name} (damaged)	{name} (endommagé)
 	The last autosave didn't finish: the one before it was recovered.	La dernière sauvegarde automatique n’a pas abouti : la précédente a été récupérée.
+	Remove with AI Tool	Outil Supprimer avec l’IA
+	Remove with AI	Supprimer avec l’IA
+	Remove with AI needs to download the Manga LaMa model ({size}). Only once.	Supprimer avec l’IA doit télécharger le modèle Manga LaMa ({size}). Une seule fois.
+	Downloading… {pct}%	Téléchargement… {pct} %
+	Starting the download…	Démarrage du téléchargement…
+	The download failed: {reason}	Le téléchargement a échoué : {reason}

@@ -170,6 +170,8 @@ pub enum Tool {
     RotateView,
     Zoom,
     Remove,
+    /// Remove with AI: paint over something (or select it) and Manga LaMa fills it.
+    RemoveAi,
     SpotHealing,
     Healing,
     Patch,
@@ -208,7 +210,7 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Tool; 68] = [
+    pub const ALL: [Tool; 69] = [
         Tool::Move,
         Tool::Artboard,
         Tool::RectMarquee,
@@ -244,6 +246,7 @@ impl Tool {
         Tool::RotateView,
         Tool::Zoom,
         Tool::Remove,
+        Tool::RemoveAi,
         Tool::SpotHealing,
         Tool::Healing,
         Tool::Patch,
@@ -319,6 +322,7 @@ impl Tool {
             Tool::RotateView => "Rotate View Tool",
             Tool::Zoom => "Zoom Tool",
             Tool::Remove => "Remove Tool",
+            Tool::RemoveAi => "Remove with AI Tool",
             Tool::SpotHealing => "Spot Healing Brush Tool",
             Tool::Healing => "Healing Brush Tool",
             Tool::Patch => "Patch Tool",
@@ -374,6 +378,7 @@ impl Tool {
                 | Tool::Eraser
                 | Tool::BackgroundEraser
                 | Tool::Remove
+                | Tool::RemoveAi
                 | Tool::SpotHealing
                 | Tool::Healing
                 | Tool::CloneStamp
@@ -404,7 +409,7 @@ impl Tool {
             Tool::Hand => 'H',
             Tool::RotateView => 'R',
             Tool::Zoom => 'Z',
-            Tool::Remove | Tool::SpotHealing | Tool::Healing | Tool::Patch | Tool::ContentAwareMove | Tool::RedEye => 'J',
+            Tool::Remove | Tool::RemoveAi | Tool::SpotHealing | Tool::Healing | Tool::Patch | Tool::ContentAwareMove | Tool::RedEye => 'J',
             Tool::CloneStamp | Tool::PatternStamp => 'S',
             Tool::HistoryBrush => 'Y',
             Tool::Blur | Tool::Sharpen | Tool::Smudge => '\0',
@@ -962,6 +967,8 @@ fn default_eyedropper_sample() -> String {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SampleAllLayers {
+    /// Remove with AI (its own, as every tool's).
+    pub remove_ai: bool,
     pub magic_wand: bool,
     pub quick_selection: bool,
     pub object_selection: bool,
@@ -994,6 +1001,7 @@ impl SampleAllLayers {
             Tool::Patch => &mut self.patch,
             Tool::ContentAwareMove => &mut self.content_aware_move,
             Tool::Remove => &mut self.remove,
+            Tool::RemoveAi => &mut self.remove_ai,
             Tool::Blur => &mut self.blur,
             Tool::Sharpen => &mut self.sharpen,
             Tool::Smudge => &mut self.smudge,
@@ -1779,7 +1787,9 @@ mod tests {
         assert!(!Tool::RedEye.is_brushlike());
         assert_eq!(Tool::from_name("patternStamp"), Some(Tool::PatternStamp));
         assert_eq!(Tool::from_name("Pattern Stamp Tool"), Some(Tool::PatternStamp));
-        assert_eq!(Tool::ALL.len(), 68);
+        assert_eq!(Tool::ALL.len(), 69);
+        assert_eq!(Tool::from_name("Remove with AI Tool"), Some(Tool::RemoveAi));
+        assert!(Tool::RemoveAi.is_brushlike() && Tool::RemoveAi.key() == 'J');
         assert_eq!(Tool::from_name("Bubble Type Tool"), Some(Tool::BubbleType));
         assert_eq!(Tool::from_name("bubbleType"), Some(Tool::BubbleType));
         assert!(Tool::BubbleType.is_type() && !Tool::BubbleType.is_type_mask() && Tool::BubbleType.key() == 'T');

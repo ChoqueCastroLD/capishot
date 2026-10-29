@@ -123,6 +123,10 @@ pub fn finish_stroke(app: &mut PhotocraftApp, tool: Tool, points: &[[f64; 3]], m
     let pts = json!(points);
     let (cmd, mut p): (&str, Value) = match tool {
         Tool::SpotHealing => ("paint.spotHealing", json!({"type": o.spot_type, "sampleAllLayers": o.sample_all.spot_healing})),
+        Tool::RemoveAi => {
+            crate::remove_ai_ui::finish_stroke(app, points);
+            return true;
+        }
         Tool::Remove => {
             if !o.remove_after_each_stroke {
                 remove_pending_add(app, points);
@@ -557,6 +561,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bo
             crate::widgets::vline(ui, 22.0);
             crate::widgets::checkbox(ui, &mut o.sample_all.spot_healing, tl!("Sample All Layers"));
         }
+        Tool::RemoveAi => crate::remove_ai_ui::options_bar(app, ui),
         Tool::Remove => {
             // Photoshop's options bar: Sample All Layers, Create a new layer, Remove after each
             // stroke; with strokes waiting, ✓ applies them and ⊘ drops them.
@@ -1418,7 +1423,7 @@ mod tests {
     fn j_cycles_from_remove() {
         // J from another group picks the first J tool, and repeated J goes on in this order.
         let group: Vec<Tool> = Tool::ALL.iter().copied().filter(|t| t.key() == 'J').collect();
-        assert_eq!(group, [Tool::Remove, Tool::SpotHealing, Tool::Healing, Tool::Patch, Tool::ContentAwareMove, Tool::RedEye]);
+        assert_eq!(group, [Tool::Remove, Tool::RemoveAi, Tool::SpotHealing, Tool::Healing, Tool::Patch, Tool::ContentAwareMove, Tool::RedEye]);
     }
 
     #[test]

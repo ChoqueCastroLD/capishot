@@ -250,8 +250,7 @@ fn encode_ai(prep: Prepared, rect: Rect, generated: &[f32]) -> Result<(Region, V
 
 /// Applies a filled window to the live document as one undo step (into the target, or onto a new
 /// layer above it with `new_layer`).
-fn apply_fill(s: &mut Session, id: Option<LayerId>, p: &Value, new_layer: bool, filled: Option<(Region, Vec<bool>)>) -> Result<Value> {
-    let label = "Remove";
+fn apply_fill(s: &mut Session, label: &'static str, id: Option<LayerId>, p: &Value, new_layer: bool, filled: Option<(Region, Vec<bool>)>) -> Result<Value> {
     let Some((out, hole)) = filled else { return Ok(json!({"changed": false})) };
     if new_layer {
         let (damage, nid) = s.edit(label, |doc, active| {
@@ -272,8 +271,12 @@ fn apply_fill(s: &mut Session, id: Option<LayerId>, p: &Value, new_layer: bool, 
 }
 
 pub(super) fn remove(s: &mut Session, p: &Value) -> Result<Value> {
+    remove_labelled(s, p, "Remove")
+}
+
+/// [`remove`] as one undo step named `label` (Remove with AI's strokes).
+pub(crate) fn remove_labelled(s: &mut Session, p: &Value, label: &'static str) -> Result<Value> {
     let mut plan = plan(s, p)?;
-    let label = "Remove";
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let doc = d.doc.clone();
     let p = p.clone();
@@ -306,7 +309,7 @@ pub(super) fn remove(s: &mut Session, p: &Value) -> Result<Value> {
                     Box::new(move |r| done.finish(r.and_then(|(generated, _)| encode_ai(prep, win, &generated)).map(Some))),
                 );
             },
-            move |s, filled| apply_fill(s, id, &p, new_layer, filled),
+            move |s, filled| apply_fill(s, label, id, &p, new_layer, filled),
         );
     }
     crate::jobs::run(
@@ -321,6 +324,6 @@ pub(super) fn remove(s: &mut Session, p: &Value) -> Result<Value> {
                 run_remove(&mut work, &plan, &p, ctx, label)
             }
         },
-        move |s, filled| apply_fill(s, id, &p, new_layer, filled),
+        move |s, filled| apply_fill(s, label, id, &p, new_layer, filled),
     )
 }

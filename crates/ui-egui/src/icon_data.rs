@@ -52,6 +52,7 @@ pub static ICONS: &[(&str, &[u8])] = &[
     ("ellipse-dashed", include_bytes!("../../../assets/icons/ellipse-dashed.svg")),
     ("ellipsis", include_bytes!("../../../assets/icons/ellipsis.svg")),
     ("eraser", include_bytes!("../../../assets/icons/eraser.svg")),
+    ("eraser-sparkle", include_bytes!("../../../assets/icons/eraser-sparkle.svg")),
     // Derived from Lucide's eraser (ISC): with a sparkle (Magic Eraser) / a transparency grid (Background Eraser).
     ("eraser-background", include_bytes!("../../../assets/icons/eraser-background.svg")),
     ("eraser-magic", include_bytes!("../../../assets/icons/eraser-magic.svg")),

@@ -3305,3 +3305,9 @@ fontWeight	Italic	Itálico
 	Sample text	Texto de exemplo
 	{name} (damaged)	{name} (danificado)
 	The last autosave didn't finish: the one before it was recovered.	A última gravação automática não terminou: foi recuperada a anterior.
+	Remove with AI Tool	Ferramenta Remover com IA
+	Remove with AI	Remover com IA
+	Remove with AI needs to download the Manga LaMa model ({size}). Only once.	Remover com IA precisa de transferir o modelo Manga LaMa ({size}). Só uma vez.
+	Downloading… {pct}%	A transferir… {pct}%
+	Starting the download…	A iniciar a transferência…
+	The download failed: {reason}	A transferência falhou: {reason}

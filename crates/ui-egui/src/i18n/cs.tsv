@@ -4295,3 +4295,9 @@ navigator	Zoom	Zvětšení
 	Sample text	Ukázkový text
 	{name} (damaged)	{name} (poškozený)
 	The last autosave didn't finish: the one before it was recovered.	Poslední automatické uložení nedoběhlo: byla obnovena předchozí verze.
+	Remove with AI Tool	Nástroj Odstranit pomocí AI
+	Remove with AI	Odstranit pomocí AI
+	Remove with AI needs to download the Manga LaMa model ({size}). Only once.	Odstranit pomocí AI musí stáhnout model Manga LaMa ({size}). Jen jednou.
+	Downloading… {pct}%	Stahování… {pct} %
+	Starting the download…	Zahajuje se stahování…
+	The download failed: {reason}	Stahování selhalo: {reason}

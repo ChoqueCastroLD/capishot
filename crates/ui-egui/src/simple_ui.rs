@@ -858,7 +858,7 @@ mod tests;
 /// Something the phone's Back button should close (a dialog, the options, a sheet): the web
 /// shell keeps a history entry while there is one, and a Back sends Esc, which closes it.
 pub fn back_target(app: &PhotocraftApp, ctx: &egui::Context) -> bool {
-    !app.ui.dialogs.is_empty() || options_open(ctx) || sheet(ctx) != Sheet::Closed
+    !app.ui.dialogs.is_empty() || options_open(ctx) || sheet(ctx) != Sheet::Closed || crate::remove_ai_ui::is_open(app)
 }
 
 /// Where the button `label` was drawn (the last time this frame), as `ui.inspect` reports it.

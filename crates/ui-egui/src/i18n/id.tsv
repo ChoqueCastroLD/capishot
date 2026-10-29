@@ -3693,3 +3693,9 @@ curves	Smooth	Haluskan
 	Sample text	Teks contoh
 	{name} (damaged)	{name} (rusak)
 	The last autosave didn't finish: the one before it was recovered.	Simpan otomatis terakhir tidak selesai: yang sebelumnya dipulihkan.
+	Remove with AI Tool	Alat Hapus dengan AI
+	Remove with AI	Hapus dengan AI
+	Remove with AI needs to download the Manga LaMa model ({size}). Only once.	Hapus dengan AI perlu mengunduh model Manga LaMa ({size}). Hanya sekali.
+	Downloading… {pct}%	Mengunduh… {pct}%
+	Starting the download…	Memulai unduhan…
+	The download failed: {reason}	Unduhan gagal: {reason}

@@ -806,6 +806,7 @@ pub(crate) fn freehand_tool(tool: Tool) -> bool {
             | Tool::BackgroundEraser
             | Tool::HistoryBrush
             | Tool::Remove
+            | Tool::RemoveAi
             | Tool::SpotHealing
             | Tool::Healing
             | Tool::CloneStamp
@@ -5345,7 +5346,7 @@ fn draw_drag_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &View
             let col = match t {
                 Tool::QuickSelection => Color32::from_white_alpha(40),
                 // The Remove Tool tints what it will remove, like Photoshop's.
-                Tool::Remove => crate::theme::Tokens::get(painter.ctx()).danger.gamma_multiply(0.45),
+                Tool::Remove | Tool::RemoveAi => crate::theme::Tokens::get(painter.ctx()).danger.gamma_multiply(0.45),
                 // Photoshop paints the area to heal in half-opaque dark grey while dragging; a faint
                 // white trail barely showed on light pixels (#7342). The heal itself is computed on
                 // release.

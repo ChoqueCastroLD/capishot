@@ -4295,3 +4295,9 @@ curves	Smooth	Wygładź
 	Sample text	Przykładowy tekst
 	{name} (damaged)	{name} (uszkodzony)
 	The last autosave didn't finish: the one before it was recovered.	Ostatni autozapis się nie zakończył: odzyskano poprzedni.
+	Remove with AI Tool	Narzędzie Usuń z AI
+	Remove with AI	Usuń z AI
+	Remove with AI needs to download the Manga LaMa model ({size}). Only once.	Usuń z AI musi pobrać model Manga LaMa ({size}). Tylko raz.
+	Downloading… {pct}%	Pobieranie… {pct}%
+	Starting the download…	Rozpoczynanie pobierania…
+	The download failed: {reason}	Pobieranie nie powiodło się: {reason}

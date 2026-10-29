@@ -378,15 +378,20 @@ fn plan(s: &Session, p: &Value) -> Result<Plan> {
 }
 
 fn inpaint_ai(s: &mut Session, p: &Value) -> Result<Value> {
+    inpaint_ai_labelled(s, p, LABEL)
+}
+
+/// [`inpaint_ai`] as one undo step named `label` (Remove with AI on a selection).
+pub(crate) fn inpaint_ai_labelled(s: &mut Session, p: &Value, label: &'static str) -> Result<Value> {
     let plan = plan(s, p)?;
     let svc = ready_inpainter(s, &plan.opts)?;
     let device = svc.device();
     crate::jobs::run_async(
         s,
-        LABEL,
+        label,
         true,
         move |ctx, done| {
-            ctx.progress(0.0, LABEL);
+            ctx.progress(0.0, label);
             let (w, h) = (plan.region.width() as usize, plan.region.height() as usize);
             let (rgb, cover, opts) = (plan.rgb.clone(), plan.cover.clone(), plan.opts.clone());
             let svc2 = svc.clone();
@@ -401,15 +406,15 @@ fn inpaint_ai(s: &mut Session, p: &Value) -> Result<Value> {
                 Box::new(move |r| done.finish(r.map(|(generated, model)| (plan, generated, svc2.device(), model)))),
             );
         },
-        move |s, (plan, generated, dev, model)| apply(s, plan, &generated, if dev.is_empty() { device } else { dev }, model),
+        move |s, (plan, generated, dev, model)| apply(s, label, plan, &generated, if dev.is_empty() { device } else { dev }, model),
     )
 }
 
-fn apply(s: &mut Session, plan: Plan, generated: &[f32], device: String, model: &ModelInfo) -> Result<Value> {
+fn apply(s: &mut Session, label: &str, plan: Plan, generated: &[f32], device: String, model: &ModelInfo) -> Result<Value> {
     let Plan { layer: id, fmt, region, layer_px, cover, new_layer, .. } = plan;
     let n = fmt.channels();
     let count = cover.iter().filter(|c| **c > 0.0).count();
-    let layer = s.edit(LABEL, |doc, active| {
+    let layer = s.edit(label, |doc, active| {
         if new_layer {
             let mut l = Layer::raster(doc.next_layer_name("AI Clean"), PixelFormat { alpha: true, ..fmt });
             let lf = l.surface().map(|s| s.format()).unwrap_or(PixelFormat { alpha: true, ..fmt });

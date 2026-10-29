@@ -4369,3 +4369,9 @@ curves	Smooth	スムーズ
 	Sample text	サンプルテキスト
 	{name} (damaged)	{name}（破損）
 	The last autosave didn't finish: the one before it was recovered.	最後の自動保存が完了しなかったため、その前のものを復元しました。
+	Remove with AI Tool	AI で削除ツール
+	Remove with AI	AI で削除
+	Remove with AI needs to download the Manga LaMa model ({size}). Only once.	AI で削除には Manga LaMa モデル（{size}）のダウンロードが必要です。最初の一度だけです。
+	Downloading… {pct}%	ダウンロード中… {pct}%
+	Starting the download…	ダウンロードを開始しています…
+	The download failed: {reason}	ダウンロードに失敗しました: {reason}

@@ -3884,3 +3884,9 @@ curves	Smooth	매끄럽게
 	Sample text	샘플 텍스트
 	{name} (damaged)	{name} (손상됨)
 	The last autosave didn't finish: the one before it was recovered.	마지막 자동 저장이 끝나지 않아 그 이전 것을 복구했습니다.
+	Remove with AI Tool	AI로 제거 도구
+	Remove with AI	AI로 제거
+	Remove with AI needs to download the Manga LaMa model ({size}). Only once.	AI로 제거하려면 Manga LaMa 모델({size})을 내려받아야 합니다. 한 번만 하면 됩니다.
+	Downloading… {pct}%	내려받는 중… {pct}%
+	Starting the download…	내려받기를 시작하는 중…
+	The download failed: {reason}	내려받기에 실패했습니다: {reason}

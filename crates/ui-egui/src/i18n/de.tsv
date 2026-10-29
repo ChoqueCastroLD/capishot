@@ -3704,3 +3704,9 @@ curves	Smooth	Glätten
 	Sample text	Beispieltext
 	{name} (damaged)	{name} (beschädigt)
 	The last autosave didn't finish: the one before it was recovered.	Die letzte automatische Sicherung wurde nicht beendet: Die vorherige wurde wiederhergestellt.
+	Remove with AI Tool	KI-Entfernen-Werkzeug
+	Remove with AI	Mit KI entfernen
+	Remove with AI needs to download the Manga LaMa model ({size}). Only once.	Mit KI entfernen muss das Modell Manga LaMa herunterladen ({size}). Nur einmal.
+	Downloading… {pct}%	Wird heruntergeladen … {pct} %
+	Starting the download…	Download wird gestartet …
+	The download failed: {reason}	Der Download ist fehlgeschlagen: {reason}

@@ -4404,3 +4404,9 @@ curves	Smooth	Згладити
 	Sample text	Приклад тексту
 	{name} (damaged)	{name} (пошкоджений)
 	The last autosave didn't finish: the one before it was recovered.	Останнє автозбереження не завершилося: відновлено попереднє.
+	Remove with AI Tool	Інструмент «Видалити з ШІ»
+	Remove with AI	Видалити з ШІ
+	Remove with AI needs to download the Manga LaMa model ({size}). Only once.	Для «Видалити з ШІ» потрібно завантажити модель Manga LaMa ({size}). Лише один раз.
+	Downloading… {pct}%	Завантаження… {pct}%
+	Starting the download…	Починається завантаження…
+	The download failed: {reason}	Завантаження не вдалося: {reason}

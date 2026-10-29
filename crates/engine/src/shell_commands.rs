@@ -147,6 +147,7 @@ pub const TOOLS: &[(&str, &str, Option<&str>)] = &[
     ("tools.select.rotateView", "Rotate View Tool", Some("R")),
     ("tools.select.zoom", "Zoom Tool", Some("Z")),
     ("tools.select.remove", "Remove Tool", Some("J")),
+    ("tools.select.removeAi", "Remove with AI Tool", Some("J")),
     ("tools.select.spotHealing", "Spot Healing Brush Tool", Some("J")),
     ("tools.select.healing", "Healing Brush Tool", Some("J")),
     ("tools.select.patch", "Patch Tool", Some("J")),

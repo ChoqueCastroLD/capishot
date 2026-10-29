@@ -4677,3 +4677,9 @@ layerLabel	No Color	Sem cor
 	Sample text	Texto de exemplo
 	{name} (damaged)	{name} (danificado)
 	The last autosave didn't finish: the one before it was recovered.	O último salvamento automático não terminou: o anterior foi recuperado.
+	Remove with AI Tool	Ferramenta Remover com IA
+	Remove with AI	Remover com IA
+	Remove with AI needs to download the Manga LaMa model ({size}). Only once.	Remover com IA precisa baixar o modelo Manga LaMa ({size}). Só uma vez.
+	Downloading… {pct}%	Baixando… {pct}%
+	Starting the download…	Iniciando o download…
+	The download failed: {reason}	O download falhou: {reason}
