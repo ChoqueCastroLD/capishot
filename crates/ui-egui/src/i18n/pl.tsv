@@ -4293,3 +4293,5 @@ curves	Smooth	Wygładź
 	Case	Wielkość liter
 	ALL CAPS	WIELKIE LITERY
 	Sample text	Przykładowy tekst
+	{name} (damaged)	{name} (uszkodzony)
+	The last autosave didn't finish: the one before it was recovered.	Ostatni autozapis się nie zakończył: odzyskano poprzedni.

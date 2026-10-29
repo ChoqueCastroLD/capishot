@@ -194,6 +194,9 @@ impl Session {
 
         if used > budget {
             self.history_cache.draining = true;
+            // Under memory pressure the cached page of bubble scans goes too (a page of 8-bit
+            // pixels; the next scan composites it again).
+            self.typer.place.forget_page();
         }
         let target = if self.history_cache.draining { budget.saturating_sub(budget / 10) } else { budget };
 

@@ -678,7 +678,7 @@ impl Session {
             doc.id = photocraft_doc::DocId::fresh();
         }
         let mut st = DocState::new(doc, path);
-        st.history.max_states = self.prefs.get().performance.history_states.max(1) as usize;
+        st.history.max_states = prefs::history_states_limit(self.prefs.get().performance.history_states);
         // Session-wide accounting replaces per-document trimming.
         st.history.max_bytes = 0;
         self.docs.push(st);
@@ -1186,3 +1186,21 @@ mod tests;
 
 #[cfg(test)]
 mod fx_mode_tests;
+
+impl Session {
+    /// What the session holds in memory, for diagnostics (`perf.memory`) and the crash
+    /// breadcrumbs: undo history (resident), the cached page of bubble scans, documents, layers.
+    pub fn memory_report(&self) -> serde_json::Value {
+        let layers: usize = self.docs.iter().map(|st| st.doc.walk().len()).sum();
+        let mb = |b: usize| (b as f64 / 1e5).round() / 10.0;
+        serde_json::json!({
+            "historyMB": mb(self.history_resident_bytes()),
+            "historyMetaMB": mb(self.history_metadata_bytes()),
+            "historyStates": self.docs.iter().map(|st| st.history.entries().len()).sum::<usize>(),
+            "pageCacheMB": mb(self.typer.place.page_bytes()),
+            "docs": self.docs.len(),
+            "layers": layers,
+            "budgetMB": mb(self.prefs().performance.history_budget_bytes()),
+        })
+    }
+}

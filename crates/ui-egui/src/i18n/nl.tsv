@@ -4443,3 +4443,5 @@ curves	Smooth	Vloeiend maken
 	Case	Hoofdletters
 	ALL CAPS	HOOFDLETTERS
 	Sample text	Voorbeeldtekst
+	{name} (damaged)	{name} (beschadigd)
+	The last autosave didn't finish: the one before it was recovered.	De laatste automatische opslag is niet voltooid: de vorige is hersteld.

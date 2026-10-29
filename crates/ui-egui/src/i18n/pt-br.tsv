@@ -4675,3 +4675,5 @@ layerLabel	No Color	Sem cor
 	Case	Caixa
 	ALL CAPS	TUDO MAIÚSCULAS
 	Sample text	Texto de exemplo
+	{name} (damaged)	{name} (danificado)
+	The last autosave didn't finish: the one before it was recovered.	O último salvamento automático não terminou: o anterior foi recuperado.

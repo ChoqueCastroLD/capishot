@@ -3303,3 +3303,5 @@ fontWeight	Italic	Itálico
 	Case	Caixa
 	ALL CAPS	TUDO MAIÚSCULAS
 	Sample text	Texto de exemplo
+	{name} (damaged)	{name} (danificado)
+	The last autosave didn't finish: the one before it was recovered.	A última gravação automática não terminou: foi recuperada a anterior.

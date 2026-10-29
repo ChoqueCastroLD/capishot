@@ -4847,3 +4847,5 @@ navigator	Zoom	Zoom
 	Case	Mayúsculas
 	ALL CAPS	TODO MAYÚSCULAS
 	Sample text	Texto de ejemplo
+	{name} (damaged)	{name} (dañado)
+	The last autosave didn't finish: the one before it was recovered.	El último guardado automático no terminó: se recuperó el anterior.

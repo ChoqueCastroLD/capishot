@@ -3671,3 +3671,5 @@ curves	Smooth	Сгладить
 	Case	Регистр
 	ALL CAPS	ВСЕ ПРОПИСНЫЕ
 	Sample text	Пример текста
+	{name} (damaged)	{name} (повреждён)
+	The last autosave didn't finish: the one before it was recovered.	Последнее автосохранение не завершилось: восстановлено предыдущее.

@@ -3691,3 +3691,5 @@ curves	Smooth	Haluskan
 	Case	Huruf
 	ALL CAPS	HURUF KAPITAL
 	Sample text	Teks contoh
+	{name} (damaged)	{name} (rusak)
+	The last autosave didn't finish: the one before it was recovered.	Simpan otomatis terakhir tidak selesai: yang sebelumnya dipulihkan.

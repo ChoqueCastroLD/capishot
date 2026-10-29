@@ -24,6 +24,18 @@ pub struct PlaceState {
     pub hidden_cleaning: HashMap<DocId, Vec<LayerId>>,
 }
 
+impl PlaceState {
+    /// Bytes the cached page holds (Bubble Type and TypeR's bubble scans).
+    pub fn page_bytes(&self) -> usize {
+        self.page.as_ref().map_or(0, |p| p.img.len() * 4)
+    }
+
+    /// Drop the cached page (memory pressure; the next scan composites it again).
+    pub fn forget_page(&mut self) {
+        self.page = None;
+    }
+}
+
 impl PartialEq for PlaceState {
     fn eq(&self, _: &Self) -> bool {
         true
@@ -76,6 +88,9 @@ fn without_text(doc: &Document) -> Document {
 
 /// The cached page image of the active document (recomposited only when its non-type pixels
 /// changed).
+/// Rows of the page composited at a time for [`page_image`].
+const PAGE_BAND: i32 = 256;
+
 pub fn page_image(s: &mut Session) -> Result<PageImage> {
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let stripped = without_text(&d.doc);
@@ -87,7 +102,15 @@ pub fn page_image(s: &mut Session) -> Result<PageImage> {
     }
     let area = stripped.bounds();
     let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
-    let img: Vec<[u8; 4]> = photocraft_compose::render(&stripped, area).px.iter().map(|p| p.map(q)).collect();
+    // In bands: a whole page composited at once is four floats a pixel (a 2000 x 3000 page,
+    // 96 MB) for the 8-bit copy kept here, and on the web that peak stays in the page's memory.
+    let mut img: Vec<[u8; 4]> = Vec::with_capacity(area.width() as usize * area.height() as usize);
+    let mut y = area.y0;
+    while y < area.y1 {
+        let y1 = (y + PAGE_BAND).min(area.y1);
+        img.extend(photocraft_compose::render(&stripped, photocraft_geom::Rect::new(area.x0, y, area.x1, y1)).px.iter().map(|p| p.map(q)));
+        y = y1;
+    }
     let page = PageImage { doc_id: d.doc.id, stripped: Arc::new(stripped), area, img: Arc::new(img) };
     s.typer.place.page = Some(page.clone());
     Ok(page)

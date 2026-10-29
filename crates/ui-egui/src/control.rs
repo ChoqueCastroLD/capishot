@@ -487,6 +487,16 @@ fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) 
         }
         "ui.menu.list" => ok(serde_json::to_value(crate::menus::menu_items(app)).unwrap_or_default()),
         "ui.inspect" => ok(inspect(app, ctx)),
+        // Memory diagnostics: the session's parts and the page's WebAssembly memory.
+        "perf.memory" => {
+            #[cfg_attr(not(target_arch = "wasm32"), allow(unused_mut))]
+            let mut v = app.session.memory_report();
+            #[cfg(target_arch = "wasm32")]
+            {
+                v["wasmMB"] = serde_json::json!((core::arch::wasm32::memory_size(0) as f64 * 65536.0 / 1e5).round() / 10.0);
+            }
+            ok(v)
+        }
         "ui.set" => {
             if let Some(field) = p.as_object().and_then(|o| o.keys().find(|k| !UI_SET_FIELDS.contains(&k.as_str()))) {
                 return err(format!("unknown field `{field}` (fields: {})", UI_SET_FIELDS.join(", ")));

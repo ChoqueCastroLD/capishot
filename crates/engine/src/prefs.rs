@@ -629,6 +629,20 @@ pub fn set_memory_cap(bytes: u64) {
     MEMORY_CAP.store(bytes.max(256 << 20), std::sync::atomic::Ordering::Relaxed);
 }
 
+/// The platform's cap on History States (`usize::MAX`: none).
+static HISTORY_STATES_CAP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(usize::MAX);
+
+/// Cap History States for this process, whatever the preference says (a phone: each step can
+/// hold a layer's pixels). The preference keeps its value.
+pub fn set_history_states_cap(n: usize) {
+    HISTORY_STATES_CAP.store(n.max(1), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The History States a document keeps: the preference, within the platform's cap.
+pub fn history_states_limit(pref: u32) -> usize {
+    (pref.max(1) as usize).min(HISTORY_STATES_CAP.load(std::sync::atomic::Ordering::Relaxed))
+}
+
 /// The cap [`set_memory_cap`] set (`u64::MAX` when none).
 pub fn memory_cap() -> u64 {
     MEMORY_CAP.load(std::sync::atomic::Ordering::Relaxed)
@@ -1856,7 +1870,7 @@ impl Session {
     /// Push engine-relevant preferences into live state: every document's history limit, the
     /// transform and layer-effect cache budgets and the text engine's missing-glyph protection.
     pub fn apply_prefs(&mut self) {
-        let n = self.prefs().performance.history_states.max(1) as usize;
+        let n = history_states_limit(self.prefs().performance.history_states);
         let budget = self.prefs().performance.effect_cache_mb as usize;
         for st in &mut self.docs {
             st.history.max_states = n;

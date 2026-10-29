@@ -4293,3 +4293,5 @@ navigator	Zoom	Zvětšení
 	Case	Velikost písmen
 	ALL CAPS	VELKÁ PÍSMENA
 	Sample text	Ukázkový text
+	{name} (damaged)	{name} (poškozený)
+	The last autosave didn't finish: the one before it was recovered.	Poslední automatické uložení nedoběhlo: byla obnovena předchozí verze.

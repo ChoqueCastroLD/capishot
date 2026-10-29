@@ -3704,3 +3704,5 @@ curves	Smooth	Lisser
 	Case	Casse
 	ALL CAPS	TOUT EN MAJUSCULES
 	Sample text	Texte d’exemple
+	{name} (damaged)	{name} (endommagé)
+	The last autosave didn't finish: the one before it was recovered.	La dernière sauvegarde automatique n’a pas abouti : la précédente a été récupérée.

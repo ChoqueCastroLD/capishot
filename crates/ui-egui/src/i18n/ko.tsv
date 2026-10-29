@@ -3882,3 +3882,5 @@ curves	Smooth	매끄럽게
 	Case	대소문자
 	ALL CAPS	모두 대문자
 	Sample text	샘플 텍스트
+	{name} (damaged)	{name} (손상됨)
+	The last autosave didn't finish: the one before it was recovered.	마지막 자동 저장이 끝나지 않아 그 이전 것을 복구했습니다.

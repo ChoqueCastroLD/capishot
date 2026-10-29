@@ -4384,3 +4384,5 @@ curves	Smooth	Εξομάλυνση
 	Case	Πεζά/κεφαλαία
 	ALL CAPS	ΟΛΑ ΚΕΦΑΛΑΙΑ
 	Sample text	Δείγμα κειμένου
+	{name} (damaged)	{name} (κατεστραμμένο)
+	The last autosave didn't finish: the one before it was recovered.	Η τελευταία αυτόματη αποθήκευση δεν ολοκληρώθηκε: ανακτήθηκε η προηγούμενη.

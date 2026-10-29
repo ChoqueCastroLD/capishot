@@ -83,7 +83,8 @@ pub fn find(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32)) -> R
     if w == 0 || h == 0 || img.len() != w * h || !area.contains(seed.0, seed.1) {
         return Err(Miss::Dark);
     }
-    let lum: Vec<f32> = img.iter().map(|p| luma(*p) as f32).collect();
+    // One byte a pixel (a page is millions of them).
+    let lum: Vec<u8> = img.iter().map(|p| luma(*p).round().clamp(0.0, 255.0) as u8).collect();
     let at = |x: i32, y: i32| (y - area.y0) as usize * w + (x - area.x0) as usize;
     // Light starts near the click, nearest first.
     let mut starts: Vec<(i32, (i32, i32))> = Vec::new();
@@ -106,13 +107,13 @@ pub fn find(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32)) -> R
             continue;
         }
         // The paper here: the lightest pixel right around the start.
-        let mut paper = 0.0f32;
+        let mut paper = 0u8;
         for (dx, dy) in [(0, 0), (-1, 0), (1, 0), (0, -1), (0, 1), (-2, 0), (2, 0), (0, -2), (0, 2)] {
             if area.contains(start.0 + dx, start.1 + dy) {
                 paper = paper.max(lum[at(start.0 + dx, start.1 + dy)]);
             }
         }
-        let light_min = (f64::from(paper) - LIGHT_TOLERANCE.min(0.4 * f64::from(paper))) as f32;
+        let light_min = (f64::from(paper) - LIGHT_TOLERANCE.min(0.4 * f64::from(paper))).ceil().clamp(0.0, 255.0) as u8;
         match flood_from(img, area, &lum, start, light_min) {
             Ok(found) => return Ok(found),
             // Too dark to start here (a letter's edge): not a try.
@@ -127,7 +128,7 @@ pub fn find(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32)) -> R
 }
 
 /// The flood from `start` over pixels with no pixel darker than `light_min` within the radius.
-fn flood_from(img: &[[u8; 4]], area: photocraft_geom::Rect, lum: &[f32], start: (i32, i32), light_min: f32) -> Result<Found, Miss> {
+fn flood_from(img: &[[u8; 4]], area: photocraft_geom::Rect, lum: &[u8], start: (i32, i32), light_min: u8) -> Result<Found, Miss> {
     let (w, h) = (area.width() as usize, area.height() as usize);
     let at = |x: i32, y: i32| (y - area.y0) as usize * w + (x - area.x0) as usize;
     let r = GAP_RADIUS;

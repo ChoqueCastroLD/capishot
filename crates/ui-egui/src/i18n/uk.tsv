@@ -4402,3 +4402,5 @@ curves	Smooth	Згладити
 	Case	Регістр
 	ALL CAPS	УСІ ВЕЛИКІ
 	Sample text	Приклад тексту
+	{name} (damaged)	{name} (пошкоджений)
+	The last autosave didn't finish: the one before it was recovered.	Останнє автозбереження не завершилося: відновлено попереднє.

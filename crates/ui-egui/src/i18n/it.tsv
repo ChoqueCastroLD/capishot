@@ -4797,3 +4797,5 @@ shape	Appearance	Aspetto
 	Case	Maiuscole
 	ALL CAPS	TUTTO MAIUSCOLO
 	Sample text	Testo di esempio
+	{name} (damaged)	{name} (danneggiato)
+	The last autosave didn't finish: the one before it was recovered.	L’ultimo salvataggio automatico non è terminato: è stato recuperato quello precedente.

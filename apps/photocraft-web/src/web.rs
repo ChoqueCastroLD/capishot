@@ -192,6 +192,7 @@ pub async fn run(canvas: web_sys::HtmlCanvasElement, hosted: Option<crate::embed
     crate::startup::mark("presets loaded");
     // Before eframe installs its listeners: real Ctrl + wheel, and no browser page zoom.
     crate::wheel_guard::install();
+    crate::breadcrumb::start();
     cap_pixel_density();
     cap_memory();
     let pen_target = canvas.clone();
@@ -436,13 +437,29 @@ fn cap_memory() {
     let nav = window.navigator();
     let gb = js_sys::Reflect::get(&nav, &JsValue::from_str("deviceMemory")).ok().and_then(|v| v.as_f64()).filter(|v| v.is_finite() && *v > 0.0);
     let touch = nav.max_touch_points() > 0;
+    // A phone's browser kills a tab well before a quarter of its memory: the whole page (the
+    // document, its undo history, the canvas and the browser's own share) must stay well under
+    // ~1.2 GB on a 4 GB phone, so a phone's documents and undo history get a sixteenth (256 MB
+    // there).
     let cap = match gb {
         Some(gb) => {
             let bytes = (gb * f64::from(1u32 << 30)) as u64;
             photocraft_ui_egui::gpu_canvas::set_physical_memory(bytes);
-            (bytes / 4).clamp(384 << 20, 2048 << 20)
+            // Phones and small tablets: a touch screen on a device of 4 GB or less, or a phone-sized
+            // window.
+            let short = window.inner_width().ok().and_then(|v| v.as_f64()).zip(window.inner_height().ok().and_then(|v| v.as_f64())).map_or(f64::MAX, |(w, h)| w.min(h));
+            if touch && (gb <= 4.0 || short < 600.0) {
+                // And 25 undo steps (each can hold a type layer's pixels).
+                photocraft_engine::prefs::set_history_states_cap(25);
+                (bytes / 16).clamp(192 << 20, 768 << 20)
+            } else {
+                (bytes / 4).clamp(384 << 20, 2048 << 20)
+            }
         }
-        None if touch => 1024 << 20,
+        None if touch => {
+            photocraft_engine::prefs::set_history_states_cap(25);
+            256 << 20
+        }
         None => 2048 << 20,
     };
     photocraft_engine::prefs::set_memory_cap(cap);
@@ -1196,6 +1213,8 @@ impl eframe::App for WebShell {
         } else {
             crate::embed::process(&mut self.app);
         }
+        crate::breadcrumb::tick(&self.app);
+        crate::breadcrumb::tick(&self.app);
         crate::usage_stats::sync(&self.app, ctx);
         self.save_presets(ctx);
         self.perf.end_logic();

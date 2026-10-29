@@ -90,6 +90,11 @@ fn start_session(mut env: Environment) {
     env.language = photocraft_ui_egui::i18n::current().code().to_string();
     let mut recorder = Recorder::new(&install_id(), &random_id(), js_sys::Date::now());
     recorder.event(telemetry::session_start_event(&env));
+    // The previous page died without closing (out of memory, a renderer crash): its last
+    // command, tool and memory high-water mark (breadcrumb.rs).
+    for e in crate::breadcrumb::take_events() {
+        recorder.event(e);
+    }
     telemetry::start(recorder);
 }
 

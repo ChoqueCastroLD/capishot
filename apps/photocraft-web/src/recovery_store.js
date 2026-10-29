@@ -1,7 +1,13 @@
 // Crash-recovery storage for Capishot in the browser (recovery.rs): checkpoints of unsaved
 // documents in the origin-private file system, or IndexedDB where the browser can't write files
-// there (no `createWritable`). One folder (or key prefix) per checkpoint key: its objects
-// (`tiles/<hash>`, `blobs/<hash>`), `thumb` (a PNG) and `descriptor`, written last.
+// there (no `createWritable`). One folder (or key prefix) per checkpoint key.
+//
+// A checkpoint is a generation `n`: its objects (`tiles/<hash>`, `blobs/<hash>`, shared between
+// generations), `descriptor.<n>`, `sums.<n>` (each object it needs and its CRC-32) and `thumb`
+// (a PNG). `head` names the current generation and the one before; it is written last, so a page
+// killed mid-write leaves the previous checkpoint whole and current. The previous generation's
+// files are kept until the next one is written, and a generation whose objects are missing or
+// don't match their sums is passed over for the one before (or reported damaged).
 //
 // Sessions: each page holds a Web Lock named after its session while it lives, and marks the
 // session closed cleanly on `pagehide`. Checkpoints of a session that holds no lock and didn't
@@ -86,89 +92,162 @@ export async function rcv_backend() {
   return backend();
 }
 
-// Stores one checkpoint: `names[i]` holds `datas[i]`, then the thumbnail and the descriptor;
-// then every other object of the key goes (the descriptor names `live`).
-export async function rcv_write(key, names, datas, descriptor, thumb, live) {
-  const keep = new Set(live.map(fileName));
-  keep.add('descriptor');
-  keep.add('thumb');
-  if ((await backend()) === 'opfs') {
-    const dir = await (await opfsRoot()).getDirectoryHandle(key, { create: true });
-    for (let i = 0; i < names.length; i++) await put(dir, fileName(names[i]), datas[i]);
-    if (thumb) await put(dir, 'thumb', thumb);
-    await put(dir, 'descriptor', descriptor);
-    const stale = [];
-    for await (const name of dir.keys()) if (!keep.has(name)) stale.push(name);
-    for (const name of stale) await dir.removeEntry(name).catch(() => {});
-    return;
+let CRC = null;
+function crc32(data) {
+  if (!CRC) {
+    CRC = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      CRC[n] = c >>> 0;
+    }
   }
-  if ((await backend()) !== 'idb') throw new DOMException('This browser has no storage for recovery', 'NotSupportedError');
-  // One transaction: the checkpoint lands whole or not at all.
-  await tx(true, (s) => {
-    for (let i = 0; i < names.length; i++) s.put(datas[i], key + '/' + fileName(names[i]));
-    if (thumb) s.put(thumb, key + '/thumb');
-    s.put(descriptor, key + '/descriptor');
-  });
-  const keys = await tx(false, (s) => s.getAllKeys(range(key)));
-  const stale = keys.filter((k) => !keep.has(k.slice(key.length + 1)));
-  if (stale.length) await tx(true, (s) => stale.forEach((k) => s.delete(k)));
+  let c = 0xffffffff;
+  for (let i = 0; i < data.length; i++) c = CRC[(c ^ data[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
 }
 
-// Every stored checkpoint: [key, descriptor, thumbnail or null]; keys whose descriptor is missing
-// (a first write that never finished) as [key, null, null].
+const enc = (v) => new TextEncoder().encode(JSON.stringify(v));
+const dec = (b) => { try { return JSON.parse(new TextDecoder().decode(b)); } catch (e) { return null; } };
+
+// Test hook: `self.__capishotRecoveryStop = 'objects' | 'descriptor'` stops the next write after
+// that step and never finishes it (a page killed mid-write).
+const stopAt = (step) => self.__capishotRecoveryStop === step ? new Promise(() => {}) : null;
+
+// One key's storage, the same calls over OPFS or IndexedDB.
+async function bucket(key, create) {
+  if ((await backend()) === 'opfs') {
+    const dir = await (await opfsRoot()).getDirectoryHandle(key, { create });
+    return {
+      get: async (name) => { try { return await read(dir, fileName(name)); } catch (e) { return null; } },
+      put: (name, data) => put(dir, fileName(name), data),
+      names: async () => { const out = []; for await (const n of dir.keys()) out.push(objectName(n)); return out; },
+      remove: (name) => dir.removeEntry(fileName(name)).catch(() => {}),
+    };
+  }
+  if ((await backend()) !== 'idb') throw new DOMException('This browser has no storage for recovery', 'NotSupportedError');
+  return {
+    get: async (name) => (await tx(false, (s) => s.get(key + '/' + fileName(name)))) || null,
+    put: (name, data) => tx(true, (s) => { s.put(data, key + '/' + fileName(name)); }),
+    names: async () => (await tx(false, (s) => s.getAllKeys(range(key)))).map((k) => objectName(k.slice(key.length + 1))),
+    remove: (name) => tx(true, (s) => { s.delete(key + '/' + fileName(name)); }),
+  };
+}
+
+async function headOf(b) {
+  const h = dec((await b.get('head')) || new Uint8Array());
+  return h && Number.isInteger(h.cur) ? h : null;
+}
+
+// Stores one checkpoint: `names[i]` holds `datas[i]`, then `sums` and the descriptor of a new
+// generation, then the thumbnail, then `head` pointing at it (the step that makes it current);
+// then what neither it nor the previous generation needs goes. `live` names every object the
+// descriptor needs (stored now or by an earlier write).
+export async function rcv_write(key, names, datas, descriptor, thumb, live) {
+  const b = await bucket(key, true);
+  const head = await headOf(b);
+  const gen = head ? head.cur + 1 : 1;
+  const sums = {};
+  for (let i = 0; i < names.length; i++) {
+    await b.put(names[i], datas[i]);
+    sums[names[i]] = crc32(datas[i]);
+  }
+  // Objects stored by an earlier generation keep the sums it recorded.
+  const before = head ? dec((await b.get('sums.' + head.cur)) || new Uint8Array()) || {} : {};
+  for (const n of live) if (!(n in sums)) sums[n] = n in before ? before[n] : null;
+  await (stopAt('objects') || Promise.resolve());
+  await b.put('sums.' + gen, enc(sums));
+  await b.put('descriptor.' + gen, descriptor);
+  await (stopAt('descriptor') || Promise.resolve());
+  if (thumb) await b.put('thumb', thumb);
+  await b.put('head', enc({ cur: gen, prev: head ? head.cur : null }));
+  // Keep this generation and the previous one (the fallback if this one turns out damaged).
+  const keep = new Set(['head', 'thumb', 'descriptor.' + gen, 'sums.' + gen, ...live]);
+  if (head) {
+    keep.add('descriptor.' + head.cur);
+    keep.add('sums.' + head.cur);
+    for (const n of Object.keys(before)) keep.add(n);
+  }
+  for (const n of await b.names()) if (!keep.has(n)) await b.remove(n);
+}
+
+// Whether generation `gen` of a key is whole: its descriptor and every object its sums name.
+// `deep` reads the objects and checks their CRC-32 too.
+async function check(b, gen, names, deep) {
+  const descriptor = await b.get('descriptor.' + gen);
+  const sums = dec((await b.get('sums.' + gen)) || new Uint8Array());
+  if (!descriptor || !sums) return null;
+  for (const [n, crc] of Object.entries(sums)) {
+    if (!names.has(n)) return null;
+    if (deep && crc !== null) {
+      const data = await b.get(n);
+      if (!data || crc32(data) !== crc) return null;
+    }
+  }
+  return { descriptor, sums };
+}
+
+// The generation to recover a key from: the current one if whole, else the previous; or the
+// key's own single `descriptor` (checkpoints written before generations).
+async function choose(key, deep) {
+  const b = await bucket(key, false);
+  const names = new Set(await b.names());
+  const head = await headOf(b);
+  if (!head) {
+    const descriptor = await b.get('descriptor');
+    return descriptor ? { b, gen: 0, status: 'ok', descriptor, sums: null } : { b, gen: null, status: 'incomplete', descriptor: null };
+  }
+  const cur = await check(b, head.cur, names, deep);
+  if (cur) return { b, gen: head.cur, status: 'ok', ...cur };
+  const prev = head.prev !== null ? await check(b, head.prev, names, deep) : null;
+  if (prev) return { b, gen: head.prev, status: 'previous', ...prev };
+  return { b, gen: head.cur, status: 'damaged', descriptor: await b.get('descriptor.' + head.cur), sums: null };
+}
+
+async function keys() {
+  if ((await backend()) === 'opfs') {
+    const out = [];
+    for await (const [key, h] of (await opfsRoot()).entries()) if (h.kind === 'directory') out.push(key);
+    return out;
+  }
+  if ((await backend()) !== 'idb') return [];
+  const out = new Set();
+  for (const k of await tx(false, (s) => s.getAllKeys())) {
+    const at = k.indexOf('/');
+    if (at > 0) out.add(k.slice(0, at));
+  }
+  return [...out];
+}
+
+// Every stored checkpoint: [key, descriptor or null, thumbnail or null, status], status `ok`,
+// `previous` (the newest write didn't finish or is damaged: the one before is used), `damaged`
+// (nothing whole) or `incomplete` (a first write that never finished).
 export async function rcv_list() {
   const out = [];
-  const b = await backend();
-  if (b === 'opfs') {
-    const root = await opfsRoot();
-    for await (const [key, h] of root.entries()) {
-      if (h.kind !== 'directory') continue;
-      let descriptor = null;
-      let thumb = null;
-      try { descriptor = await read(h, 'descriptor'); } catch (e) { /* unfinished */ }
-      try { thumb = await read(h, 'thumb'); } catch (e) { /* none */ }
-      out.push([key, descriptor, thumb]);
-    }
-  } else if (b === 'idb') {
-    const keys = await tx(false, (s) => s.getAllKeys());
-    const byKey = new Map();
-    for (const k of keys) {
-      const at = k.indexOf('/');
-      if (at > 0 && !byKey.has(k.slice(0, at))) byKey.set(k.slice(0, at), true);
-    }
-    for (const key of byKey.keys()) {
-      const descriptor = await tx(false, (s) => s.get(key + '/descriptor'));
-      const thumb = await tx(false, (s) => s.get(key + '/thumb'));
-      out.push([key, descriptor || null, thumb || null]);
+  for (const key of await keys()) {
+    try {
+      const c = await choose(key, false);
+      out.push([key, c.descriptor, await c.b.get('thumb'), c.status]);
+    } catch (e) {
+      out.push([key, null, null, 'damaged']);
     }
   }
   return out;
 }
 
-// One checkpoint to load: { descriptor, names, datas } (the objects by name).
+// One checkpoint to load: { descriptor, names, datas, status } (the objects its generation needs,
+// their CRC-32 checked; the previous generation if the current one fails).
 export async function rcv_read(key) {
+  const c = await choose(key, true);
+  if (!c.descriptor || c.status === 'damaged') throw new DOMException('The recovery checkpoint is damaged', 'DataError');
   const names = [];
   const datas = [];
-  let descriptor = null;
-  if ((await backend()) === 'opfs') {
-    const dir = await (await opfsRoot()).getDirectoryHandle(key);
-    for await (const [name, h] of dir.entries()) {
-      if (h.kind !== 'file' || name === 'thumb') continue;
-      const data = new Uint8Array(await (await h.getFile()).arrayBuffer());
-      if (name === 'descriptor') descriptor = data;
-      else { names.push(objectName(name)); datas.push(data); }
-    }
-  } else {
-    const keys = await tx(false, (s) => s.getAllKeys(range(key)));
-    const values = await tx(false, (s) => s.getAll(range(key)));
-    keys.forEach((k, i) => {
-      const name = k.slice(key.length + 1);
-      if (name === 'descriptor') descriptor = values[i];
-      else if (name !== 'thumb') { names.push(objectName(name)); datas.push(values[i]); }
-    });
+  const wanted = c.sums ? Object.keys(c.sums) : (await c.b.names()).filter((n) => n !== 'thumb' && n !== 'descriptor');
+  for (const n of wanted) {
+    const data = await c.b.get(n);
+    if (data) { names.push(n); datas.push(data); }
   }
-  if (!descriptor) throw new DOMException('The recovery checkpoint is incomplete', 'NotFoundError');
-  return { descriptor, names, datas };
+  return { descriptor: c.descriptor, names, datas, status: c.status };
 }
 
 export async function rcv_remove(key) {

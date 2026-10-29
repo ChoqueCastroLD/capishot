@@ -83,3 +83,14 @@ localStorage, and there is no server-side storage.
 
 Browser support: current Chrome, Edge, Firefox and Safari (Wasm threads, SIMD and cross-origin
 isolation). WebGPU is used where available, WebGL2 otherwise; `?webgl` and `?cpu` work as in the single-threaded build.
+
+## Browser checks (`e2e/`)
+
+Playwright scripts run against a build served by `serve.py` (they need `playwright-core` and a
+Chromium in `CHROME`):
+
+- `e2e/memory-flat.mjs`: a type-heavy phone session (360 × 780, 4 GB, CPU 4×) on two real pages
+  (`CAPISHOT_MEMORY_PAGES`, not committed) must keep the WebAssembly memory flat. Serve a copy of
+  the build whose `index.html` sets `self.__wasmExports` to what `pc.default(…)` returns.
+- `e2e/recovery-crash.mjs`: a page killed in the middle of an autosave must still recover its last
+  good checkpoint.

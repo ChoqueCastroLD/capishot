@@ -3333,3 +3333,5 @@ curves	Smooth	平滑
 	Case	大小写
 	ALL CAPS	全部大写
 	Sample text	示例文字
+	{name} (damaged)	{name}（已损坏）
+	The last autosave didn't finish: the one before it was recovered.	最后一次自动保存未完成：已恢复之前的版本。

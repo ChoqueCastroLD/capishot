@@ -4367,3 +4367,5 @@ curves	Smooth	スムーズ
 	Case	大文字/小文字
 	ALL CAPS	すべて大文字
 	Sample text	サンプルテキスト
+	{name} (damaged)	{name}（破損）
+	The last autosave didn't finish: the one before it was recovered.	最後の自動保存が完了しなかったため、その前のものを復元しました。

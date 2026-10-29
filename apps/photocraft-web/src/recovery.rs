@@ -106,8 +106,9 @@ thread_local! {
     static CURRENT: RefCell<Option<std::rc::Weak<RefCell<Inner>>>> = const { RefCell::new(None) };
 }
 
-/// Undo history a checkpoint keeps: the last 20 steps, within 150 MB (50 MB on a phone, a
-/// window under 600 px on its short side), so Undo works after Recover.
+/// Undo history a checkpoint keeps: the last 20 steps, within 150 MB (50 MB without threads; 5
+/// steps within 16 MB on a phone, a window under 600 px on its short side), so Undo works after
+/// Recover.
 fn history_limits() -> photocraft_format::HistoryLimits {
     static PHONE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     // Measured once, on the page's thread (`kick`).
@@ -119,6 +120,11 @@ fn history_limits() -> photocraft_format::HistoryLimits {
     // Without threads a checkpoint is encoded on the page's thread: the phone's cap keeps the
     // first one (which encodes every kept step) short there too.
     let small = phone || cfg!(not(target_feature = "atomics"));
+    // A phone keeps 5 steps within 16 MB: each checkpoint encodes and copies what it keeps, and
+    // on a phone that peak is what kills the tab.
+    if phone {
+        return photocraft_format::HistoryLimits { max_states: 5, max_bytes: 16 << 20 };
+    }
     photocraft_format::HistoryLimits { max_states: 20, max_bytes: if small { 50 << 20 } else { 150 << 20 } }
 }
 
@@ -376,19 +382,35 @@ impl Recovery {
                     continue;
                 }
                 let descriptor = item.get(1);
-                if descriptor.is_null() || descriptor.is_undefined() {
+                let status = item.get(3).as_string().unwrap_or_default();
+                if status == "incomplete" || descriptor.is_null() || descriptor.is_undefined() {
                     // A first write that never finished in a session that is gone: nothing to offer.
-                    let _ = rcv_remove(&key).await;
-                    continue;
+                    if status != "damaged" {
+                        let _ = rcv_remove(&key).await;
+                        continue;
+                    }
                 }
                 if crashed && clean.contains(&session) {
                     continue;
                 }
-                let bytes = js_sys::Uint8Array::new(&descriptor).to_vec();
-                let Ok(info) = photocraft_format::object_checkpoint_info(&bytes) else { continue };
+                // A checkpoint with nothing whole left isn't offered after a crash; File ›
+                // Recover Documents… still lists it, marked damaged.
+                let damaged = status == "damaged";
+                if damaged && crashed {
+                    continue;
+                }
+                let bytes = if descriptor.is_null() || descriptor.is_undefined() { Vec::new() } else { js_sys::Uint8Array::new(&descriptor).to_vec() };
+                let info = photocraft_format::object_checkpoint_info(&bytes).ok();
+                if info.is_none() && !damaged {
+                    continue;
+                }
                 let thumb = item.get(2);
                 let thumbnail = (!thumb.is_null() && !thumb.is_undefined()).then(|| js_sys::Uint8Array::new(&thumb).to_vec()).and_then(|png| decode_png(&png));
-                entries.push(RecoveryOfferEntry { key, name: info.document_name, saved_at_ms: info.saved_at as f64 * 1000.0, thumbnail });
+                let mut name = info.as_ref().map_or_else(|| key.clone(), |i| i.document_name.clone());
+                if damaged {
+                    name = photocraft_ui_egui::i18n::fmt(photocraft_ui_egui::i18n::t("{name} (damaged)"), &[("name", &name)]);
+                }
+                entries.push(RecoveryOfferEntry { key, name, saved_at_ms: info.map_or(0.0, |i| i.saved_at as f64 * 1000.0), thumbnail });
             }
             // Forget clean marks of sessions that left nothing behind.
             let kept: js_sys::Array = clean.iter().filter(|s| sessions_with_checkpoints.contains(*s)).map(|s| JsValue::from_str(s)).collect();
@@ -411,6 +433,9 @@ impl Recovery {
                     }
                 };
                 let get = |name: &str| js_sys::Reflect::get(&read, &name.into()).unwrap_or(JsValue::UNDEFINED);
+                if get("status").as_string().as_deref() == Some("previous") {
+                    me.0.borrow_mut().errors.push(photocraft_ui_egui::i18n::t("The last autosave didn't finish: the one before it was recovered.").to_string());
+                }
                 let descriptor = js_sys::Uint8Array::new(&get("descriptor")).to_vec();
                 let (names, datas) = (js_sys::Array::from(&get("names")), js_sys::Array::from(&get("datas")));
                 let mut objects = HashMap::with_capacity(names.length() as usize);

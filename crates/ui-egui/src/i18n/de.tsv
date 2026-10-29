@@ -3702,3 +3702,5 @@ curves	Smooth	Glätten
 	Case	Schreibweise
 	ALL CAPS	GROSSBUCHSTABEN
 	Sample text	Beispieltext
+	{name} (damaged)	{name} (beschädigt)
+	The last autosave didn't finish: the one before it was recovered.	Die letzte automatische Sicherung wurde nicht beendet: Die vorherige wurde wiederhergestellt.
