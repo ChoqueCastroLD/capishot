@@ -51,6 +51,7 @@ impl PhotocraftApp {
             let _s = perf_span::span("logic.sync_views");
             self.sync_views();
         }
+        crate::memory_warning::tick(self, now);
         crate::type_font_preview::follow_hover(self, ctx);
         {
             let _s = perf_span::span("logic.check_gpu");

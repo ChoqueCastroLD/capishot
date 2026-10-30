@@ -400,6 +400,15 @@ what an agent can't finish alone.
   launch, #5485), in-app bug report (DIST-220-3), Flathub (#173),
   starting without a GPU adapter (#2519, #2412), Windows 7 (#2310, out of scope), Intel Macs with
   OpenCore (#1859).
+- **Progress (2026-10-29):** the web build no longer freezes silently when it runs out of memory
+  (#10024). A failed allocation aborts the WebAssembly module and can't be caught, so Place, Image
+  Size, a smart-object re-render and Save first ask the allocator whether their estimated need
+  fits (`photocraft_raster::headroom`, `photocraft_engine::memory_gate`) and refuse with an error
+  that says what to do; a standing warning shows below 512 MiB; and a trap that still happens
+  shows a "PhotoCraft stopped" message with a Reload link. Still open: the decoded originals that
+  accumulate (#10030), Place decoding on the UI thread (#10031), Image Size re-rendering every
+  smart object at once (#10032), and recovering the document after a crash (#6615). Not every
+  allocation is gated, so a trap is still possible.
 - **Estimate:** 30–60 h. **Human:** signing certificates.
 
 ## Revision history

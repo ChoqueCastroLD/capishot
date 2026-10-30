@@ -82,7 +82,7 @@ pub fn post(app: &mut PhotocraftApp, title: impl Into<String>, lines: Vec<String
 
 fn cap_notices(app: &mut PhotocraftApp) {
     while app.ui.notices.len() > MAX_NOTICES {
-        let oldest_temporary = app.ui.notices.iter().position(|notice| notice.dismiss_pref.is_none()).unwrap_or(0);
+        let oldest_temporary = app.ui.notices.iter().position(|notice| notice.dismiss_pref.is_none() && !notice.sticky).unwrap_or(0);
         app.ui.notices.remove(oldest_temporary);
     }
 }

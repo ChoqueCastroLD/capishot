@@ -238,6 +238,8 @@ impl PlacePlan {
     fn decode(self, bytes: Vec<u8>) -> Result<Placed> {
         let PlacePlan { name, linked, canvas: (cw, ch), fmt, opts, fit, scale, center, smart_object } = self;
         let vector = photocraft_io::svg::is_svg(&bytes);
+        // Before decoding anything: on the web a placed file that doesn't fit would trap (#10024).
+        crate::memory_gate::ensure(&format!("place \u{201c}{}\u{201d}", file_name(&name)), crate::memory_gate::place_need(&bytes, fmt.bytes_per_pixel()))?;
         let imported = photocraft_io::import_with_options(&name, &bytes, &opts).map_err(|e| EngineError::Other(format!("{name}: {e}")))?;
         if imported.preview_only {
             return Err(EngineError::Other(format!(

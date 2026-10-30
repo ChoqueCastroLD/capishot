@@ -523,6 +523,8 @@ Any static file server works for `dist/web`, for example `python3 -m http.server
 
 URL flags: `?webgl` forces the WebGL2 backend, and `?cpu` forces the CPU canvas path.
 
+The Place and smart-object source estimates for PSD/PSB use the canvas dimensions, not the number or bounds of layers. A compressed file with many nonuniform full-canvas layers can pass the preflight even when its retained decoded layer surfaces exceed available memory; per-channel decode limits do not bound their aggregate. If decoding then traps, the stopped-page backstop is expected to appear, and unsaved work cannot be recovered. The `memory_gate` layered-PSD regression simulates the gate's budget, not an actual allocator limit or browser trap.
+
 To build and serve the web app entirely in Docker, run from the repository root:
 
 ```sh
