@@ -3710,3 +3710,52 @@ curves	Smooth	Сгладить
 	Bend	Изгиб
 	Horizontal Distortion	Искажение по горизонтали
 	Vertical Distortion	Искажение по вертикали
+	A .capiproj carries the project's settings and its font files, never pages or images.	Файл .capiproj содержит настройки проекта и его файлы шрифтов, но никогда не страницы и не изображения.
+	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Проект шрифтов хранит шрифты серии по ролям (диалог, крик, повествование…) и их настройки. Создайте проект, чтобы начать.
+	Add role	Добавить роль
+	Add tag	Добавить тег
+	Add to the current project as…	Добавить в текущий проект как…
+	Apply the role's settings too	Применить и настройки роли
+	Bubble Type styles	Стили текста в облачке
+	Current project	Текущий проект
+	Dialogue	Диалог
+	Export {name}	Экспорт {name}
+	Font Projects	Проекты шрифтов
+	Font project exported	Проект шрифтов экспортирован
+	Font project {name} imported	Проект шрифтов {name} импортирован
+	Font project: {name}	Проект шрифтов: {name}
+	Fonts by role	Шрифты по ролям
+	Include TypeR's styles and Bubble Type's styles	Включить стили TypeR и текста в облачке
+	Include fonts whose licence restricts sharing	Включить шрифты, лицензия которых ограничивает передачу
+	Install these separately: {fonts}	Установите отдельно: {fonts}
+	Leading (0: Auto)	Интерлиньяж (0: авто)
+	Missing fonts: {fonts}	Нет шрифтов: {fonts}
+	Named only (system or missing fonts): {fonts}	Только по имени (системные или отсутствующие шрифты): {fonts}
+	New project	Новый проект
+	New role	Новая роль
+	No fonts yet: right-click a font below (or press and hold) to add it.	Шрифтов пока нет: щёлкните шрифт ниже правой кнопкой (или удерживайте), чтобы добавить его.
+	No projects yet	Проектов пока нет
+	Not included, its licence doesn't allow sharing it: {fonts}. Team members will need to install it separately.	Не включён, лицензия не разрешает передачу: {fonts}. Участникам команды нужно установить его отдельно.
+	Pages that open with this project	Страницы, открывающиеся с этим проектом
+	Project:	Проект:
+	Remember pages like {name}	Запомнить страницы вида {name}
+	Remove from the project	Убрать из проекта
+	Remove this role	Удалить эту роль
+	SFX	SFX
+	Saved {file}	Сохранено {file}
+	Shout	Крик
+	TAG	ТЕГ
+	The project is large ({mb} MB): untick fonts to make it smaller.	Проект большой ({mb} МБ): снимите отметки со шрифтов, чтобы уменьшить его.
+	This font doesn't allow redistribution; team members will need to install it separately.	Этот шрифт нельзя распространять; участникам команды нужно установить его отдельно.
+	Thought	Мысль
+	TypeR tags	Теги TypeR
+	Use for this page	Использовать для этой страницы
+	e.g. the scan	напр. команда
+	folder {name}	папка {name}
+	missing	нет
+	system font: named only	системный шрифт: только по имени
+	{font} added to {project} as {role}	{font} добавлен в {project} как {role}
+	{n} font files installed	Установлено файлов шрифтов: {n}
+	Letter case	Регистр
+	Font Projects…	Проекты шрифтов…
+	Add {font} to the current project as…	Добавить {font} в текущий проект как…

@@ -367,6 +367,33 @@ impl FontDb {
         self.data.clone()
     }
 
+    /// The font files this database has for `family` that a font project can carry: the user's
+    /// fonts and the served or downloaded ones (in memory, or read from disk), not the bundled
+    /// fonts every Capishot has nor the system's. Each as (a file name, its bytes).
+    pub fn files_for_family(&self, family: &str) -> Vec<(String, Arc<Vec<u8>>)> {
+        let has = |data: &[u8]| crate::user_fonts::faces_of(data).iter().any(|f| f.family.eq_ignore_ascii_case(family));
+        let mut out: Vec<(String, Arc<Vec<u8>>)> = Vec::new();
+        for d in &self.data {
+            if let FontData::Shared(b) = d
+                && has(b)
+                && !out.iter().any(|(_, x)| Arc::ptr_eq(x, b))
+            {
+                out.push((format!("{}.ttf", family.replace(' ', "")), b.clone()));
+            }
+        }
+        for m in self.managed.values() {
+            for path in &m.files {
+                if let Ok(bytes) = std::fs::read(path)
+                    && has(&bytes)
+                {
+                    let name = path.file_name().map_or_else(|| format!("{family}.ttf"), |n| n.to_string_lossy().to_string());
+                    out.push((name, Arc::new(bytes)));
+                }
+            }
+        }
+        out
+    }
+
     /// The files of every registered downloaded-fonts store entry ([`FontDb::register_managed`]);
     /// always empty on the web.
     pub fn managed_font_files(&self) -> Vec<std::path::PathBuf> {

@@ -110,6 +110,7 @@ mod filter_preview_worker;
 pub mod flick_pan;
 pub mod floaters;
 mod font_preview;
+pub mod font_projects_ui;
 pub mod fonts_ui;
 pub mod frame_tool;
 pub mod gallery_ui;
@@ -979,6 +980,8 @@ pub struct PhotocraftApp {
     pub(crate) bubble_flash: Option<(String, [f64; 2], f64)>,
     /// Remove with AI: a run waiting for its first-use model download (`remove_ai_ui`).
     pub(crate) remove_ai: remove_ai_ui::Pending,
+    /// Window › Font Projects and the font menus' project sections (`font_projects_ui`).
+    pub(crate) font_projects: font_projects_ui::State,
     /// The AI progress card (`ai_progress`).
     pub(crate) ai_progress: ai_progress::State,
     /// Channel thumbnails for one document snapshot; view-only revisions reuse their pixels.
@@ -1165,6 +1168,7 @@ impl PhotocraftApp {
             type_font_preview: None,
             bubble_flash: None,
             remove_ai: Default::default(),
+            font_projects: font_projects_ui::State::new(),
             ai_progress: Default::default(),
             guide_drag: None,
             layer_box: None,
@@ -2563,6 +2567,7 @@ impl eframe::App for PhotocraftApp {
         jobs_ui::dialog(self, &ctx);
         ai_progress::show(self, &ctx);
         ai_models_ui::window(self, &ctx);
+        font_projects_ui::window(self, &ctx);
         discard_ui::show(self, &ctx);
         recovery_ui::show(self, &ctx);
         tiff_options_ui::show(self, &ctx);

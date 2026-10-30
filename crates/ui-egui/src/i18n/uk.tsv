@@ -4441,3 +4441,52 @@ curves	Smooth	Згладити
 	Bend	Вигин
 	Horizontal Distortion	Спотворення по горизонталі
 	Vertical Distortion	Спотворення по вертикалі
+	A .capiproj carries the project's settings and its font files, never pages or images.	Файл .capiproj містить налаштування проєкту та його файли шрифтів, але ніколи не сторінки чи зображення.
+	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Проєкт шрифтів зберігає шрифти серії за ролями (діалог, крик, оповідь…) та їхні налаштування. Створіть проєкт, щоб почати.
+	Add role	Додати роль
+	Add tag	Додати тег
+	Add to the current project as…	Додати до поточного проєкту як…
+	Apply the role's settings too	Застосувати й налаштування ролі
+	Bubble Type styles	Стилі тексту в бульбашці
+	Current project	Поточний проєкт
+	Dialogue	Діалог
+	Export {name}	Експорт {name}
+	Font Projects	Проєкти шрифтів
+	Font project exported	Проєкт шрифтів експортовано
+	Font project {name} imported	Проєкт шрифтів {name} імпортовано
+	Font project: {name}	Проєкт шрифтів: {name}
+	Fonts by role	Шрифти за ролями
+	Include TypeR's styles and Bubble Type's styles	Включити стилі TypeR і тексту в бульбашці
+	Include fonts whose licence restricts sharing	Включити шрифти, ліцензія яких обмежує поширення
+	Install these separately: {fonts}	Установіть окремо: {fonts}
+	Leading (0: Auto)	Інтерліньяж (0: авто)
+	Missing fonts: {fonts}	Бракує шрифтів: {fonts}
+	Named only (system or missing fonts): {fonts}	Лише за назвою (системні або відсутні шрифти): {fonts}
+	New project	Новий проєкт
+	New role	Нова роль
+	No fonts yet: right-click a font below (or press and hold) to add it.	Шрифтів поки немає: клацніть шрифт нижче правою кнопкою (або утримуйте), щоб додати його.
+	No projects yet	Проєктів поки немає
+	Not included, its licence doesn't allow sharing it: {fonts}. Team members will need to install it separately.	Не включено, ліцензія не дозволяє поширення: {fonts}. Учасникам команди треба встановити його окремо.
+	Pages that open with this project	Сторінки, що відкриваються з цим проєктом
+	Project:	Проєкт:
+	Remember pages like {name}	Запам'ятати сторінки на кшталт {name}
+	Remove from the project	Прибрати з проєкту
+	Remove this role	Вилучити цю роль
+	SFX	SFX
+	Saved {file}	Збережено {file}
+	Shout	Крик
+	TAG	ТЕГ
+	The project is large ({mb} MB): untick fonts to make it smaller.	Проєкт великий ({mb} МБ): зніміть позначки зі шрифтів, щоб зменшити його.
+	This font doesn't allow redistribution; team members will need to install it separately.	Цей шрифт не можна поширювати; учасникам команди треба встановити його окремо.
+	Thought	Думка
+	TypeR tags	Теги TypeR
+	Use for this page	Використати для цієї сторінки
+	e.g. the scan	напр. команда
+	folder {name}	тека {name}
+	missing	бракує
+	system font: named only	системний шрифт: лише за назвою
+	{font} added to {project} as {role}	{font} додано до {project} як {role}
+	{n} font files installed	Установлено файлів шрифтів: {n}
+	Letter case	Регістр
+	Font Projects…	Проєкти шрифтів…
+	Add {font} to the current project as…	Додати {font} до поточного проєкту як…

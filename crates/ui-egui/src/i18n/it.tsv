@@ -4832,3 +4832,52 @@ shape	Appearance	Aspetto
 	Outline width	Spessore del contorno
 	Color Picker (Outline)	Selettore colore (contorno)
 	Edit text	Modifica testo
+	A .capiproj carries the project's settings and its font files, never pages or images.	Un .capiproj contiene le impostazioni del progetto e i suoi file di font, mai pagine o immagini.
+	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Un progetto di font conserva i font di una serie per ruolo (dialogo, urlo, narrazione…) e le loro impostazioni. Creane uno per iniziare.
+	Add role	Aggiungi ruolo
+	Add tag	Aggiungi tag
+	Add to the current project as…	Aggiungi al progetto attuale come…
+	Apply the role's settings too	Applica anche le impostazioni del ruolo
+	Bubble Type styles	Stili di Testo nel fumetto
+	Current project	Progetto attuale
+	Dialogue	Dialogo
+	Export {name}	Esporta {name}
+	Font Projects	Progetti di font
+	Font project exported	Progetto di font esportato
+	Font project {name} imported	Progetto di font {name} importato
+	Font project: {name}	Progetto di font: {name}
+	Fonts by role	Font per ruolo
+	Include TypeR's styles and Bubble Type's styles	Includi gli stili di TypeR e di Testo nel fumetto
+	Include fonts whose licence restricts sharing	Includi i font la cui licenza limita la condivisione
+	Install these separately: {fonts}	Da installare a parte: {fonts}
+	Leading (0: Auto)	Interlinea (0: auto)
+	Missing fonts: {fonts}	Font mancanti: {fonts}
+	Named only (system or missing fonts): {fonts}	Solo per nome (font di sistema o mancanti): {fonts}
+	New project	Nuovo progetto
+	New role	Nuovo ruolo
+	No fonts yet: right-click a font below (or press and hold) to add it.	Ancora nessun font: clic destro su un font qui sotto (o tieni premuto) per aggiungerlo.
+	No projects yet	Ancora nessun progetto
+	Not included, its licence doesn't allow sharing it: {fonts}. Team members will need to install it separately.	Non incluso, la licenza non ne consente la condivisione: {fonts}. I membri del team dovranno installarlo a parte.
+	Pages that open with this project	Pagine che si aprono con questo progetto
+	Project:	Progetto:
+	Remember pages like {name}	Ricorda pagine come {name}
+	Remove from the project	Rimuovi dal progetto
+	Remove this role	Rimuovi questo ruolo
+	SFX	SFX
+	Saved {file}	Salvato {file}
+	Shout	Urlo
+	TAG	TAG
+	The project is large ({mb} MB): untick fonts to make it smaller.	Il progetto è grande ({mb} MB): deseleziona dei font per alleggerirlo.
+	This font doesn't allow redistribution; team members will need to install it separately.	Questo font non consente la ridistribuzione; i membri del team dovranno installarlo a parte.
+	Thought	Pensiero
+	TypeR tags	Tag di TypeR
+	Use for this page	Usa per questa pagina
+	e.g. the scan	es. lo scan
+	folder {name}	cartella {name}
+	missing	mancante
+	system font: named only	font di sistema: solo per nome
+	{font} added to {project} as {role}	{font} aggiunto a {project} come {role}
+	{n} font files installed	{n} file di font installati
+	Letter case	Maiuscole/minuscole
+	Font Projects…	Progetti di font…
+	Add {font} to the current project as…	Aggiungi {font} al progetto attuale come…

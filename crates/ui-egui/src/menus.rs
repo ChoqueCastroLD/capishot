@@ -187,6 +187,10 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
     if let Some(r) = crate::capishot_ui::invoke(app, id, &params) {
         return r;
     }
+    // Window › Font Projects….
+    if let Some(r) = crate::font_projects_ui::invoke(app, id) {
+        return r;
+    }
     // Window › AI Models… (the AI Model Manager).
     if let Some(r) = crate::ai_models_ui::invoke(app, id, &params) {
         return r;
@@ -798,6 +802,7 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
         | "view.simpleUi" => true,
         "type.loadFonts" | "type.loadFontFolder" | "type.manageFonts" => true,
         crate::ai_models_ui::COMMAND => true,
+        crate::font_projects_ui::COMMAND => true,
         crate::update_notice::COMMAND => app.ui.update.is_some(),
         crate::recovery_ui::COMMAND => crate::recovery_ui::available(app),
         i if i.starts_with("file.openRecent.") => true,

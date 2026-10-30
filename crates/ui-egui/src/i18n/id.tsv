@@ -3730,3 +3730,52 @@ curves	Smooth	Haluskan
 	Bend	Lengkungan
 	Horizontal Distortion	Distorsi horizontal
 	Vertical Distortion	Distorsi vertikal
+	A .capiproj carries the project's settings and its font files, never pages or images.	File .capiproj membawa pengaturan proyek dan file fontnya, tidak pernah halaman atau gambar.
+	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Proyek font menyimpan font sebuah seri menurut peran (dialog, teriakan, narasi…) beserta pengaturannya. Buat satu untuk memulai.
+	Add role	Tambah peran
+	Add tag	Tambah tag
+	Add to the current project as…	Tambahkan ke proyek saat ini sebagai…
+	Apply the role's settings too	Terapkan juga pengaturan peran
+	Bubble Type styles	Gaya Teks gelembung
+	Current project	Proyek saat ini
+	Dialogue	Dialog
+	Export {name}	Ekspor {name}
+	Font Projects	Proyek font
+	Font project exported	Proyek font diekspor
+	Font project {name} imported	Proyek font {name} diimpor
+	Font project: {name}	Proyek font: {name}
+	Fonts by role	Font menurut peran
+	Include TypeR's styles and Bubble Type's styles	Sertakan gaya TypeR dan Teks gelembung
+	Include fonts whose licence restricts sharing	Sertakan font yang lisensinya membatasi berbagi
+	Install these separately: {fonts}	Pasang terpisah: {fonts}
+	Leading (0: Auto)	Spasi baris (0: otomatis)
+	Missing fonts: {fonts}	Font hilang: {fonts}
+	Named only (system or missing fonts): {fonts}	Hanya nama (font sistem atau yang hilang): {fonts}
+	New project	Proyek baru
+	New role	Peran baru
+	No fonts yet: right-click a font below (or press and hold) to add it.	Belum ada font: klik kanan font di bawah (atau tekan lama) untuk menambahkannya.
+	No projects yet	Belum ada proyek
+	Not included, its licence doesn't allow sharing it: {fonts}. Team members will need to install it separately.	Tidak disertakan, lisensinya tidak mengizinkan berbagi: {fonts}. Anggota tim perlu memasangnya terpisah.
+	Pages that open with this project	Halaman yang terbuka dengan proyek ini
+	Project:	Proyek:
+	Remember pages like {name}	Ingat halaman seperti {name}
+	Remove from the project	Hapus dari proyek
+	Remove this role	Hapus peran ini
+	SFX	SFX
+	Saved {file}	Disimpan {file}
+	Shout	Teriakan
+	TAG	TAG
+	The project is large ({mb} MB): untick fonts to make it smaller.	Proyek ini besar ({mb} MB): hapus centang font agar lebih kecil.
+	This font doesn't allow redistribution; team members will need to install it separately.	Font ini tidak mengizinkan distribusi ulang; anggota tim perlu memasangnya terpisah.
+	Thought	Pikiran
+	TypeR tags	Tag TypeR
+	Use for this page	Gunakan untuk halaman ini
+	e.g. the scan	mis. grup scan
+	folder {name}	folder {name}
+	missing	hilang
+	system font: named only	font sistem: hanya nama
+	{font} added to {project} as {role}	{font} ditambahkan ke {project} sebagai {role}
+	{n} font files installed	{n} file font terpasang
+	Letter case	Huruf besar/kecil
+	Font Projects…	Proyek font…
+	Add {font} to the current project as…	Tambahkan {font} ke proyek saat ini sebagai…

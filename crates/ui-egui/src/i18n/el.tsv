@@ -4422,3 +4422,52 @@ curves	Smooth	Εξομάλυνση
 	Bend	Κάμψη
 	Horizontal Distortion	Οριζόντια παραμόρφωση
 	Vertical Distortion	Κατακόρυφη παραμόρφωση
+	A .capiproj carries the project's settings and its font files, never pages or images.	Ένα .capiproj περιέχει τις ρυθμίσεις του έργου και τα αρχεία γραμματοσειρών του, ποτέ σελίδες ή εικόνες.
+	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Ένα έργο γραμματοσειρών κρατά τις γραμματοσειρές μιας σειράς ανά ρόλο (διάλογος, κραυγή, αφήγηση…) και τις ρυθμίσεις τους. Δημιουργήστε ένα για να ξεκινήσετε.
+	Add role	Προσθήκη ρόλου
+	Add tag	Προσθήκη ετικέτας
+	Add to the current project as…	Προσθήκη στο τρέχον έργο ως…
+	Apply the role's settings too	Εφαρμογή και των ρυθμίσεων του ρόλου
+	Bubble Type styles	Στυλ κειμένου σε συννεφάκι
+	Current project	Τρέχον έργο
+	Dialogue	Διάλογος
+	Export {name}	Εξαγωγή {name}
+	Font Projects	Έργα γραμματοσειρών
+	Font project exported	Το έργο γραμματοσειρών εξήχθη
+	Font project {name} imported	Εισήχθη το έργο γραμματοσειρών {name}
+	Font project: {name}	Έργο γραμματοσειρών: {name}
+	Fonts by role	Γραμματοσειρές ανά ρόλο
+	Include TypeR's styles and Bubble Type's styles	Συμπερίληψη των στυλ TypeR και κειμένου σε συννεφάκι
+	Include fonts whose licence restricts sharing	Συμπερίληψη γραμματοσειρών με άδεια που περιορίζει την κοινοποίηση
+	Install these separately: {fonts}	Εγκαταστήστε χωριστά: {fonts}
+	Leading (0: Auto)	Διάστιχο (0: αυτόματο)
+	Missing fonts: {fonts}	Λείπουν γραμματοσειρές: {fonts}
+	Named only (system or missing fonts): {fonts}	Μόνο κατ' όνομα (γραμματοσειρές συστήματος ή που λείπουν): {fonts}
+	New project	Νέο έργο
+	New role	Νέος ρόλος
+	No fonts yet: right-click a font below (or press and hold) to add it.	Δεν υπάρχουν ακόμη γραμματοσειρές: δεξί κλικ σε μια γραμματοσειρά παρακάτω (ή παρατεταμένο πάτημα) για προσθήκη.
+	No projects yet	Δεν υπάρχουν ακόμη έργα
+	Not included, its licence doesn't allow sharing it: {fonts}. Team members will need to install it separately.	Δεν συμπεριλήφθηκε, η άδεια δεν επιτρέπει κοινοποίηση: {fonts}. Τα μέλη της ομάδας θα πρέπει να την εγκαταστήσουν χωριστά.
+	Pages that open with this project	Σελίδες που ανοίγουν με αυτό το έργο
+	Project:	Έργο:
+	Remember pages like {name}	Απομνημόνευση σελίδων όπως {name}
+	Remove from the project	Αφαίρεση από το έργο
+	Remove this role	Αφαίρεση αυτού του ρόλου
+	SFX	SFX
+	Saved {file}	Αποθηκεύτηκε {file}
+	Shout	Κραυγή
+	TAG	ΕΤΙΚΕΤΑ
+	The project is large ({mb} MB): untick fonts to make it smaller.	Το έργο είναι μεγάλο ({mb} MB): αποεπιλέξτε γραμματοσειρές για να μικρύνει.
+	This font doesn't allow redistribution; team members will need to install it separately.	Αυτή η γραμματοσειρά δεν επιτρέπει αναδιανομή· τα μέλη της ομάδας θα πρέπει να την εγκαταστήσουν χωριστά.
+	Thought	Σκέψη
+	TypeR tags	Ετικέτες TypeR
+	Use for this page	Χρήση για αυτή τη σελίδα
+	e.g. the scan	π.χ. η ομάδα
+	folder {name}	φάκελος {name}
+	missing	λείπει
+	system font: named only	γραμματοσειρά συστήματος: μόνο κατ' όνομα
+	{font} added to {project} as {role}	Η {font} προστέθηκε στο {project} ως {role}
+	{n} font files installed	Εγκαταστάθηκαν αρχεία γραμματοσειρών: {n}
+	Letter case	Πεζά/κεφαλαία
+	Font Projects…	Έργα γραμματοσειρών…
+	Add {font} to the current project as…	Προσθήκη {font} στο τρέχον έργο ως…

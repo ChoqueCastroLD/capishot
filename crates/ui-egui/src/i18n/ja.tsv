@@ -4403,3 +4403,52 @@ curves	Smooth	スムーズ
 	Outline width	縁取りの太さ
 	Color Picker (Outline)	カラーピッカー（縁取り）
 	Edit text	テキストを編集
+	A .capiproj carries the project's settings and its font files, never pages or images.	.capiproj にはプロジェクトの設定とフォントファイルが入ります。ページや画像は入りません。
+	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	フォントプロジェクトは、シリーズのフォントを役割（セリフ、叫び、ナレーション…）ごとに設定とともに保存します。まず作成してください。
+	Add role	役割を追加
+	Add tag	タグを追加
+	Add to the current project as…	現在のプロジェクトに追加：役割…
+	Apply the role's settings too	役割の設定も適用
+	Bubble Type styles	吹き出しテキストのスタイル
+	Current project	現在のプロジェクト
+	Dialogue	セリフ
+	Export {name}	{name} を書き出し
+	Font Projects	フォントプロジェクト
+	Font project exported	フォントプロジェクトを書き出しました
+	Font project {name} imported	フォントプロジェクト {name} を読み込みました
+	Font project: {name}	フォントプロジェクト：{name}
+	Fonts by role	役割ごとのフォント
+	Include TypeR's styles and Bubble Type's styles	TypeR と吹き出しテキストのスタイルも含める
+	Include fonts whose licence restricts sharing	共有が制限されたライセンスのフォントも含める
+	Install these separately: {fonts}	別途インストールしてください：{fonts}
+	Leading (0: Auto)	行送り（0：自動）
+	Missing fonts: {fonts}	不足しているフォント：{fonts}
+	Named only (system or missing fonts): {fonts}	名前のみ（システムまたは不足フォント）：{fonts}
+	New project	新規プロジェクト
+	New role	新しい役割
+	No fonts yet: right-click a font below (or press and hold) to add it.	フォントはまだありません：下のフォントを右クリック（または長押し）して追加します。
+	No projects yet	プロジェクトはまだありません
+	Not included, its licence doesn't allow sharing it: {fonts}. Team members will need to install it separately.	ライセンスで共有が許可されていないため含めていません：{fonts}。チームメンバーは別途インストールが必要です。
+	Pages that open with this project	このプロジェクトで開くページ
+	Project:	プロジェクト：
+	Remember pages like {name}	{name} のようなページを記憶
+	Remove from the project	プロジェクトから外す
+	Remove this role	この役割を削除
+	SFX	SFX
+	Saved {file}	{file} を保存しました
+	Shout	叫び
+	TAG	タグ
+	The project is large ({mb} MB): untick fonts to make it smaller.	プロジェクトが大きいです（{mb} MB）：フォントのチェックを外すと小さくなります。
+	This font doesn't allow redistribution; team members will need to install it separately.	このフォントは再配布が許可されていません。チームメンバーは別途インストールが必要です。
+	Thought	心の声
+	TypeR tags	TypeR のタグ
+	Use for this page	このページで使う
+	e.g. the scan	例：スキャングループ
+	folder {name}	フォルダー {name}
+	missing	不足
+	system font: named only	システムフォント：名前のみ
+	{font} added to {project} as {role}	{font} を {project} に {role} として追加しました
+	{n} font files installed	フォントファイルを {n} 個インストールしました
+	Letter case	大文字/小文字
+	Font Projects…	フォントプロジェクト…
+	Add {font} to the current project as…	{font} を現在のプロジェクトに追加：役割…

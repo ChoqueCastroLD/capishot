@@ -141,7 +141,8 @@ pub fn overlays(app: &mut PhotocraftApp, ctx: &egui::Context) {
         let last = d.remove_temp::<Vec<(String, [f32; 4])>>(rects_id()).unwrap_or_default();
         d.insert_temp(prev_rects_id(), last);
     });
-    if !active(app) || app.session.active().is_none() {
+    // Window › Font Projects fills a phone's screen: nothing floats over it.
+    if !active(app) || app.session.active().is_none() || app.font_projects.open {
         return;
     }
     if app.ui_hidden {

@@ -268,6 +268,19 @@ impl Boot {
         let places: Inbox = Arc::default();
         let served: Served = Arc::default();
         load_font_manifest(served.clone(), ctx.clone());
+        // A link to a font project (`?capiproj=<url>`): fetched and opened like a picked file.
+        if let Some(url) = embed_query.split(['?', '&']).find_map(|kv| kv.strip_prefix("capiproj=")).map(|u| js_sys::decode_uri_component(u).ok().and_then(|v| v.as_string()).unwrap_or_else(|| u.to_string())) {
+            let (inbox, ctx) = (inbox.clone(), ctx.clone());
+            wasm_bindgen_futures::spawn_local(async move {
+                match fetch_bytes(&url, None).await {
+                    Ok(bytes) => {
+                        inbox.lock().unwrap_or_else(|e| e.into_inner()).push(("project.capiproj".into(), bytes));
+                        ctx.request_repaint();
+                    }
+                    Err(e) => log::error!("photocraft-web: couldn't fetch the font project {url}: {e}"),
+                }
+            });
+        }
         let user_fonts = UserFontStore::default();
         open_user_fonts(user_fonts.clone(), ctx.clone());
         let (session, warnings) = crate::preset_bridge::session(presets.clone());

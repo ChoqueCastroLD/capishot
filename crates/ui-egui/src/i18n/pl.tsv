@@ -4332,3 +4332,52 @@ curves	Smooth	Wygładź
 	Bend	Wygięcie
 	Horizontal Distortion	Zniekształcenie poziome
 	Vertical Distortion	Zniekształcenie pionowe
+	A .capiproj carries the project's settings and its font files, never pages or images.	Plik .capiproj zawiera ustawienia projektu i jego pliki czcionek, nigdy strony ani obrazy.
+	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Projekt czcionek przechowuje czcionki serii według roli (dialog, krzyk, narracja…) i ich ustawienia. Utwórz go, aby zacząć.
+	Add role	Dodaj rolę
+	Add tag	Dodaj tag
+	Add to the current project as…	Dodaj do bieżącego projektu jako…
+	Apply the role's settings too	Zastosuj też ustawienia roli
+	Bubble Type styles	Style tekstu w dymku
+	Current project	Bieżący projekt
+	Dialogue	Dialog
+	Export {name}	Eksportuj {name}
+	Font Projects	Projekty czcionek
+	Font project exported	Projekt czcionek wyeksportowany
+	Font project {name} imported	Zaimportowano projekt czcionek {name}
+	Font project: {name}	Projekt czcionek: {name}
+	Fonts by role	Czcionki według roli
+	Include TypeR's styles and Bubble Type's styles	Dołącz style TypeR i tekstu w dymku
+	Include fonts whose licence restricts sharing	Dołącz czcionki, których licencja ogranicza udostępnianie
+	Install these separately: {fonts}	Zainstaluj osobno: {fonts}
+	Leading (0: Auto)	Interlinia (0: auto)
+	Missing fonts: {fonts}	Brakujące czcionki: {fonts}
+	Named only (system or missing fonts): {fonts}	Tylko z nazwy (czcionki systemowe lub brakujące): {fonts}
+	New project	Nowy projekt
+	New role	Nowa rola
+	No fonts yet: right-click a font below (or press and hold) to add it.	Jeszcze brak czcionek: kliknij prawym przyciskiem czcionkę poniżej (lub przytrzymaj), aby ją dodać.
+	No projects yet	Jeszcze brak projektów
+	Not included, its licence doesn't allow sharing it: {fonts}. Team members will need to install it separately.	Nie dołączono, licencja nie pozwala jej udostępniać: {fonts}. Członkowie zespołu muszą ją zainstalować osobno.
+	Pages that open with this project	Strony otwierane z tym projektem
+	Project:	Projekt:
+	Remember pages like {name}	Zapamiętaj strony takie jak {name}
+	Remove from the project	Usuń z projektu
+	Remove this role	Usuń tę rolę
+	SFX	SFX
+	Saved {file}	Zapisano {file}
+	Shout	Krzyk
+	TAG	TAG
+	The project is large ({mb} MB): untick fonts to make it smaller.	Projekt jest duży ({mb} MB): odznacz czcionki, aby go zmniejszyć.
+	This font doesn't allow redistribution; team members will need to install it separately.	Ta czcionka nie pozwala na redystrybucję; członkowie zespołu muszą ją zainstalować osobno.
+	Thought	Myśl
+	TypeR tags	Tagi TypeR
+	Use for this page	Użyj dla tej strony
+	e.g. the scan	np. grupa skanlacyjna
+	folder {name}	folder {name}
+	missing	brak
+	system font: named only	czcionka systemowa: tylko z nazwy
+	{font} added to {project} as {role}	Dodano {font} do {project} jako {role}
+	{n} font files installed	Zainstalowano pliki czcionek: {n}
+	Letter case	Wielkość liter
+	Font Projects…	Projekty czcionek…
+	Add {font} to the current project as…	Dodaj {font} do bieżącego projektu jako…

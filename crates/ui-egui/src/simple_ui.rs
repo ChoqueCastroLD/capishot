@@ -507,6 +507,10 @@ fn paint_options(app: &mut PhotocraftApp, ui: &mut Ui) {
 /// Capi button between both, and whatever sheet it has open.
 pub fn overlays(app: &mut PhotocraftApp, ctx: &egui::Context) {
     note_tool(ctx, app.ui.tool);
+    // Window › Font Projects fills a phone's screen: nothing floats over it.
+    if app.font_projects.open {
+        return;
+    }
     // Typing: the keyboard and the type bar take the bottom (touch_ui::type_bar); the Capi
     // button stays, above the bar, so a tool can still be chosen (which ends the typing).
     if app.ui.text_edit.is_some() && sheet(ctx) == Sheet::Closed {

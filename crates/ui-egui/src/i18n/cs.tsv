@@ -4332,3 +4332,53 @@ navigator	Zoom	Zvětšení
 	Bend	Ohyb
 	Horizontal Distortion	Vodorovné zkreslení
 	Vertical Distortion	Svislé zkreslení
+	A .capiproj carries the project's settings and its font files, never pages or images.	Soubor .capiproj nese nastavení projektu a jeho soubory písem, nikdy stránky ani obrázky.
+	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Projekt písem uchovává písma série podle role (dialog, výkřik, vyprávění…) a jejich nastavení. Pro začátek jeden vytvořte.
+	Add role	Přidat roli
+	Add tag	Přidat značku
+	Add to the current project as…	Přidat do aktuálního projektu jako…
+	Apply the role's settings too	Použít i nastavení role
+	Bubble Type styles	Styly textu v bublině
+	Current project	Aktuální projekt
+	Dialogue	Dialog
+	Export {name}	Exportovat {name}
+	Font Projects	Projekty písem
+	Font project exported	Projekt písem exportován
+	Font project {name} imported	Projekt písem {name} importován
+	Font project: {name}	Projekt písem: {name}
+	Fonts by role	Písma podle role
+	Include TypeR's styles and Bubble Type's styles	Zahrnout styly TypeR a textu v bublině
+	Include fonts whose licence restricts sharing	Zahrnout písma, jejichž licence omezuje sdílení
+	Install these separately: {fonts}	Nainstalujte zvlášť: {fonts}
+	Leading (0: Auto)	Proklad (0: auto)
+	Missing fonts: {fonts}	Chybějící písma: {fonts}
+	Named only (system or missing fonts): {fonts}	Jen jménem (systémová nebo chybějící písma): {fonts}
+	New project	Nový projekt
+	New role	Nová role
+	No fonts yet: right-click a font below (or press and hold) to add it.	Zatím žádná písma: klikněte pravým tlačítkem na písmo níže (nebo podržte) a přidejte ho.
+	No projects yet	Zatím žádné projekty
+	Not included, its licence doesn't allow sharing it: {fonts}. Team members will need to install it separately.	Nezahrnuto, licence nedovoluje sdílení: {fonts}. Členové týmu ho budou muset nainstalovat zvlášť.
+	Pages that open with this project	Stránky, které se otevírají s tímto projektem
+	Project:	Projekt:
+	Remember pages like {name}	Pamatovat stránky jako {name}
+	Remove from the project	Odebrat z projektu
+	Remove this role	Odebrat tuto roli
+	SFX	SFX
+	Saved {file}	Uloženo {file}
+	Shout	Výkřik
+	TAG	ZNAČKA
+	The project is large ({mb} MB): untick fonts to make it smaller.	Projekt je velký ({mb} MB): odškrtněte písma, aby byl menší.
+	This font doesn't allow redistribution; team members will need to install it separately.	Toto písmo nedovoluje další šíření; členové týmu ho budou muset nainstalovat zvlášť.
+	Thought	Myšlenka
+	TypeR tags	Značky TypeR
+	Use for this page	Použít pro tuto stránku
+	e.g. the scan	např. skupina
+	folder {name}	složka {name}
+	missing	chybí
+	system font: named only	systémové písmo: jen jménem
+	{font} added to {project} as {role}	{font} přidáno do {project} jako {role}
+	{n} font files installed	Nainstalováno souborů písem: {n}
+	Letter case	Velikost písmen
+	Font Projects…	Projekty písem…
+	Import…	Importovat…
+	Add {font} to the current project as…	Přidat {font} do aktuálního projektu jako…

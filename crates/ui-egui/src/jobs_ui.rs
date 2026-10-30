@@ -894,6 +894,8 @@ pub(crate) fn after_open(app: &mut PhotocraftApp, name: &str, path: Option<&str>
     let opened = crate::i18n::fmt(tl!("Opened {name}"), &[("name", name)]);
     app.ui.status = opened.clone();
     app.ui.status_error = false;
+    // Its font project (carried in its PSD, or named like a remembered page) becomes active.
+    crate::font_projects_ui::after_open(app);
     // A raw opens in Camera Raw first; the dialog says how it was developed.
     if crate::camera_raw_ui::wants_open_dialog(app, warnings) {
         crate::camera_raw_ui::queue_open_dialog(app, name, path, bytes);

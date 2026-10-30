@@ -3357,3 +3357,55 @@ curves	Smooth	平滑
 	Bend	彎曲
 	Horizontal Distortion	水平扭曲
 	Vertical Distortion	垂直扭曲
+	A .capiproj carries the project's settings and its font files, never pages or images.	.capiproj 包含專案的設定與字型檔案，絕不包含頁面或影像。
+	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	字型專案依角色（對白、喊叫、旁白…）保存系列的字型及其設定。先建立一個吧。
+	Add role	新增角色
+	Add tag	新增標籤
+	Add to the current project as…	加入目前專案，作為…
+	Apply the role's settings too	同時套用角色的設定
+	Bubble Type styles	氣泡文字樣式
+	Current project	目前專案
+	Dialogue	對白
+	Export {name}	匯出 {name}
+	Font Projects	字型專案
+	Font project exported	字型專案已匯出
+	Font project {name} imported	已匯入字型專案 {name}
+	Font project: {name}	字型專案：{name}
+	Fonts by role	依角色的字型
+	Include TypeR's styles and Bubble Type's styles	包含 TypeR 與氣泡文字的樣式
+	Include fonts whose licence restricts sharing	包含授權限制分享的字型
+	Install these separately: {fonts}	請另行安裝：{fonts}
+	Leading (0: Auto)	行距（0：自動）
+	Missing fonts: {fonts}	缺少字型：{fonts}
+	Named only (system or missing fonts): {fonts}	僅記名稱（系統字型或缺少的字型）：{fonts}
+	New project	新專案
+	New role	新角色
+	No fonts yet: right-click a font below (or press and hold) to add it.	還沒有字型：在下方字型上按右鍵（或長按）即可加入。
+	No projects yet	還沒有專案
+	Not included, its licence doesn't allow sharing it: {fonts}. Team members will need to install it separately.	未包含，授權不允許分享：{fonts}。團隊成員需要另行安裝。
+	Pages that open with this project	以此專案開啟的頁面
+	Project:	專案：
+	Remember pages like {name}	記住類似 {name} 的頁面
+	Remove from the project	從專案中移除
+	Remove this role	刪除此角色
+	SFX	SFX
+	Saved {file}	已儲存 {file}
+	Shout	喊叫
+	TAG	標籤
+	The project is large ({mb} MB): untick fonts to make it smaller.	專案較大（{mb} MB）：取消勾選部分字型可縮小體積。
+	This font doesn't allow redistribution; team members will need to install it separately.	此字型不允許再散布；團隊成員需要另行安裝。
+	Thought	心聲
+	TypeR tags	TypeR 標籤
+	Use for this page	用於此頁面
+	e.g. the scan	例如：漢化組
+	folder {name}	資料夾 {name}
+	missing	缺少
+	system font: named only	系統字型：僅記名稱
+	{font} added to {project} as {role}	已將 {font} 作為 {role} 加入 {project}
+	{n} font files installed	已安裝 {n} 個字型檔案
+	Letter case	大小寫
+	Font Projects…	字型專案…
+	Duplicate	複製
+	Import…	匯入…
+	Settings	設定
+	Add {font} to the current project as…	將 {font} 加入目前專案，作為…

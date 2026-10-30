@@ -1118,6 +1118,9 @@ pub struct Preferences {
     pub view_extras: Value,
     /// File › Scripts › Script Events Manager: event → script bindings.
     pub script_events: crate::automate_cmds::ScriptEvents,
+    /// Window › Font Projects: the projects and the active one (`font_projects::Projects`; no
+    /// font files, which are the user's fonts).
+    pub font_projects: Value,
 }
 
 /// Preferences dialog sections in Photoshop's order: (id, title).

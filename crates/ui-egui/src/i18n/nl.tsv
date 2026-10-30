@@ -4481,3 +4481,52 @@ curves	Smooth	Vloeiend maken
 	Bend	Buiging
 	Horizontal Distortion	Horizontale vervorming
 	Vertical Distortion	Verticale vervorming
+	A .capiproj carries the project's settings and its font files, never pages or images.	Een .capiproj bevat de instellingen van het project en zijn lettertypebestanden, nooit pagina's of afbeeldingen.
+	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Een lettertypeproject bewaart de lettertypen van een serie per rol (dialoog, schreeuw, vertelling…) en hun instellingen. Maak er een om te beginnen.
+	Add role	Rol toevoegen
+	Add tag	Tag toevoegen
+	Add to the current project as…	Aan het huidige project toevoegen als…
+	Apply the role's settings too	Ook de instellingen van de rol toepassen
+	Bubble Type styles	Stijlen voor ballontekst
+	Current project	Huidig project
+	Dialogue	Dialoog
+	Export {name}	{name} exporteren
+	Font Projects	Lettertypeprojecten
+	Font project exported	Lettertypeproject geëxporteerd
+	Font project {name} imported	Lettertypeproject {name} geïmporteerd
+	Font project: {name}	Lettertypeproject: {name}
+	Fonts by role	Lettertypen per rol
+	Include TypeR's styles and Bubble Type's styles	Stijlen van TypeR en ballontekst meenemen
+	Include fonts whose licence restricts sharing	Lettertypen meenemen waarvan de licentie delen beperkt
+	Install these separately: {fonts}	Apart installeren: {fonts}
+	Leading (0: Auto)	Regelafstand (0: auto)
+	Missing fonts: {fonts}	Ontbrekende lettertypen: {fonts}
+	Named only (system or missing fonts): {fonts}	Alleen bij naam (systeem- of ontbrekende lettertypen): {fonts}
+	New project	Nieuw project
+	New role	Nieuwe rol
+	No fonts yet: right-click a font below (or press and hold) to add it.	Nog geen lettertypen: klik met rechts op een lettertype hieronder (of houd ingedrukt) om het toe te voegen.
+	No projects yet	Nog geen projecten
+	Not included, its licence doesn't allow sharing it: {fonts}. Team members will need to install it separately.	Niet meegenomen, de licentie staat delen niet toe: {fonts}. Teamleden moeten het apart installeren.
+	Pages that open with this project	Pagina's die met dit project openen
+	Project:	Project:
+	Remember pages like {name}	Pagina's zoals {name} onthouden
+	Remove from the project	Uit het project verwijderen
+	Remove this role	Deze rol verwijderen
+	SFX	SFX
+	Saved {file}	Opgeslagen {file}
+	Shout	Schreeuw
+	TAG	TAG
+	The project is large ({mb} MB): untick fonts to make it smaller.	Het project is groot ({mb} MB): vink lettertypen uit om het kleiner te maken.
+	This font doesn't allow redistribution; team members will need to install it separately.	Dit lettertype staat herdistributie niet toe; teamleden moeten het apart installeren.
+	Thought	Gedachte
+	TypeR tags	TypeR-tags
+	Use for this page	Gebruiken voor deze pagina
+	e.g. the scan	bijv. de scan
+	folder {name}	map {name}
+	missing	ontbreekt
+	system font: named only	systeemlettertype: alleen bij naam
+	{font} added to {project} as {role}	{font} toegevoegd aan {project} als {role}
+	{n} font files installed	{n} lettertypebestanden geïnstalleerd
+	Letter case	Hoofdletters
+	Font Projects…	Lettertypeprojecten…
+	Add {font} to the current project as…	{font} aan het huidige project toevoegen als…

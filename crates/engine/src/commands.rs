@@ -1489,6 +1489,7 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::type_cmds::specs());
     v.extend(crate::remove_ai_cmds::specs());
     v.extend(crate::type_bubble_cmds::specs());
+    v.extend(crate::font_projects::specs());
     v.extend(crate::type_mask_cmds::specs());
     v.extend(crate::transform_cmds::specs());
     v.extend(crate::float_cmds::specs());
