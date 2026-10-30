@@ -115,18 +115,6 @@ fn plural_polish(n: u64) -> usize {
     }
 }
 
-/// Arabic (CLDR): 0 → zero, 1 → one, 2 → two, n % 100 in 3–10 → few, in 11–99 → many, else other.
-fn plural_arabic(n: u64) -> usize {
-    match (n, n % 100) {
-        (0, _) => 0,
-        (1, _) => 1,
-        (2, _) => 2,
-        (_, 3..=10) => 3,
-        (_, 11..=99) => 4,
-        _ => 5,
-    }
-}
-
 /// A catalog file as packed by build.rs (`pack_catalogs`; the binary would otherwise carry ~2.2 MB
 /// of translations, which the web build's size gate can't afford). See [`unpack`].
 macro_rules! catalog {
@@ -198,16 +186,8 @@ fn expand(packed: &str, keys: &[&str]) -> Result<String, String> {
     Ok(text)
 }
 
-/// Whether a catalog carries Capishot's own strings too. The catalogs Capishot added later
-/// (Serbian, Hungarian, Turkish, Vietnamese, Hindi, Arabic) have only Capishot's: Capishot's
-/// strings read in English there until they are translated.
-#[cfg(test)]
-pub(crate) fn has_capishot_strings(code: &str) -> bool {
-    !matches!(code, "sr" | "hu" | "tr" | "vi" | "hi" | "ar")
-}
-
 /// The registry. English first: it is the fallback and the source language.
-pub static LANGUAGES: [LangInfo; 23] = [
+pub static LANGUAGES: [LangInfo; 17] = [
     LangInfo { code: "en", name: "English", source: b"", plural: plural_one_other, complete_menus: false, catalog: OnceLock::new() },
     LangInfo { code: "ja", name: "日本語", source: catalog!("ja"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
     LangInfo { code: "zh-hans", name: "简体中文", source: catalog!("zh-hans"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
@@ -218,9 +198,6 @@ pub static LANGUAGES: [LangInfo; 23] = [
     LangInfo { code: "ru", name: "Русский", source: catalog!("ru"), plural: plural_russian, complete_menus: true, catalog: OnceLock::new() },
     // Ukrainian has the same one/few/many rule for integer counts.
     LangInfo { code: "uk", name: "Українська", source: catalog!("uk"), plural: plural_russian, complete_menus: true, catalog: OnceLock::new() },
-    // Serbian (Latin); `sr`, `sr-Latn-*` and `sr_RS@latin` resolve here; so do Cyrillic `sr` locales, which read Latin
-    // rather than English.
-    LangInfo { code: "sr", name: "Srpski", source: catalog!("sr"), plural: plural_russian, complete_menus: true, catalog: OnceLock::new() },
     LangInfo { code: "cs", name: "Čeština", source: catalog!("cs"), plural: plural_cs, complete_menus: true, catalog: OnceLock::new() },
     LangInfo { code: "fr", name: "Français", source: catalog!("fr"), plural: plural_fr, complete_menus: true, catalog: OnceLock::new() },
     LangInfo { code: "id", name: "Bahasa Indonesia", source: catalog!("id"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
@@ -233,17 +210,6 @@ pub static LANGUAGES: [LangInfo; 23] = [
     // Dutch; `nl-NL` and `nl-BE` locales both resolve here.
     LangInfo { code: "nl", name: "Nederlands", source: catalog!("nl"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
     LangInfo { code: "it", name: "Italiano", source: catalog!("it"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
-    // Hungarian: a count takes the singular noun ("3 réteg"), so one plural form.
-    LangInfo { code: "hu", name: "Magyar", source: catalog!("hu"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
-    // Turkish; `tr`, `tr-TR` and `tr_TR` locales resolve here.
-    LangInfo { code: "tr", name: "Türkçe", source: catalog!("tr"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
-    // Vietnamese; `vi-VN` resolves here.
-    LangInfo { code: "vi", name: "Tiếng Việt", source: catalog!("vi"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
-    // Hindi; `hi`, `hi-IN` locales resolve here.
-    LangInfo { code: "hi", name: "हिन्दी", source: catalog!("hi"), plural: plural_one_other, complete_menus: false, catalog: OnceLock::new() },
-    // Arabic (Modern Standard); `ar-SA`, `ar-EG` and the other regional locales resolve here. The
-    // chrome mirrors right to left (`dir_for_code`), and egui lays each label out right to left.
-    LangInfo { code: "ar", name: "العربية", source: catalog!("ar"), plural: plural_arabic, complete_menus: true, catalog: OnceLock::new() },
 ];
 
 impl LangInfo {

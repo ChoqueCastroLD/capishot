@@ -832,10 +832,10 @@ fn open_paths_reports_in_the_interface_language_before_the_first_frame() {
     let bytes = photocraft_io::pattern_map::write_pat(&[pattern(1), pattern(2), pattern(3)]).unwrap();
     let (dir, paths) = files("launch-language", &["launch.pat"], &bytes);
     let (mut app, _) = app_with(Vec::new());
-    app.session.edit_prefs(|p| p.interface.language = "ar".into());
+    app.session.edit_prefs(|p| p.interface.language = "es".into());
     crate::i18n::set_current(crate::i18n::Lang::EN);
     assert_eq!(app.open_paths(&paths), 1);
-    assert_eq!(app.ui.status, "تم استيراد 3 نقشات من launch");
+    assert_eq!(app.ui.status, "Se importaron 3 motivos de launch");
     crate::i18n::set_current(crate::i18n::Lang::EN);
     let _ = std::fs::remove_dir_all(&dir);
 }

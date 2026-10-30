@@ -142,7 +142,7 @@ fn advanced_opens_the_model_manager_and_closes_the_dialog() {
 
 #[test]
 fn new_strings_are_translated_in_every_catalog() {
-    for language in crate::i18n::LANGUAGES.iter().filter(|l| l.code != "en" && crate::i18n::has_capishot_strings(l.code)) {
+    for language in crate::i18n::LANGUAGES.iter().filter(|l| l.code != "en") {
         let lang = crate::i18n::Lang::from_code(language.code).unwrap();
         for key in STRINGS {
             assert_ne!(crate::i18n::tr(lang, key), *key, "{}: {key}", language.code);
