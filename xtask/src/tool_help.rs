@@ -1,4 +1,4 @@
-//! `xtask tool-help`: every tool of the editor (`Tool::ALL` in `crates/ui-egui/src/state.rs`)
+//! `xtask tool-help`: every tool of the editor (`Tool::ALL` in `crates/ui-egui/src/state/tool.rs`)
 //! says what it does in English, Spanish and Portuguese (`crates/ui-egui/src/help_text.rs`),
 //! and every described entry has its three sentences.
 
@@ -7,7 +7,7 @@ use std::path::Path;
 
 pub fn run(root: &Path) -> Result<(), String> {
     let read = |p: &str| std::fs::read_to_string(root.join(p)).map_err(|e| format!("{p}: {e}"));
-    let tools = tools(&read("crates/ui-egui/src/state.rs")?)?;
+    let tools = tools(&read("crates/ui-egui/src/state/tool.rs")?)?;
     let help = entries(&read("crates/ui-egui/src/help_text.rs")?);
     let mut problems = Vec::new();
     for t in &tools {
@@ -33,7 +33,7 @@ pub fn run(root: &Path) -> Result<(), String> {
 
 /// The names in `pub const ALL: [Tool; N] = [ Tool::A, … ];`.
 fn tools(src: &str) -> Result<Vec<String>, String> {
-    let start = src.find("pub const ALL: [Tool;").ok_or("state.rs: no Tool::ALL")?;
+    let start = src.find("pub const ALL: [Tool;").ok_or("state/tool.rs: no Tool::ALL")?;
     let body = &src[start..];
     let open = body.find("= [").ok_or("state.rs: Tool::ALL has no list")? + 3;
     let close = body[open..].find("];").ok_or("state.rs: Tool::ALL isn't closed")? + open;

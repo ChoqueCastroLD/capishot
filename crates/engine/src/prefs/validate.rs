@@ -42,6 +42,8 @@ pub const HIDDEN_UNTIL_IMPLEMENTED: &[&str] = &[
     // Upstream's GPU layer budget; Capishot's compositor pages layers through its own.
     "performance.gpuMemoryMb",
     "performance.legacyCompositing",
+    // Upstream's LUT folder fed its Color Lookup dropdown; Capishot's Color Lookup is its LUT library.
+    "fileHandling.lutFolder",
     "unitsAndRulers.columnWidth",
     "unitsAndRulers.gutter",
     "plugIns.showExtensionPanels",

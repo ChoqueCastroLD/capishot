@@ -3919,7 +3919,6 @@ curves	Smooth	Згладити
 	Search Google Fonts	Пошук у Google Fonts
 	All categories	Усі категорії
 	Sans Serif	Без засічок
-	Serif	З засічками
 	Display	Декоративні
 	Handwriting	Рукописні
 	Monospace	Моноширинні
@@ -4247,11 +4246,9 @@ curves	Smooth	Згладити
 	Handwritten	Рукописні
 	Hide Font Classes	Сховати класи шрифтів
 	Hide Styles	Сховати накреслення
-	Monospace	Моноширинні
 	No fonts match these filters.	Жоден шрифт не відповідає цим фільтрам.
 	No similar fonts: the current font doesn't say what it looks like.	Немає схожих шрифтів: поточний шрифт не описує свій вигляд.
 	OpenType font	Шрифт OpenType
-	Sans Serif	Без засічок
 	Script	Каліграфічні
 	Serif	Із засічками
 	Show Font Classes	Показати класи шрифтів

@@ -26,8 +26,8 @@ fn active_bounds(s: &Session) -> Rect {
 // ---- Memory budget (#3773, #7807). Tests run with a 20 MB budget (2²⁰ px of 32-bit CMYK with
 // alpha), so nothing here comes near the real one. ----
 
-/// Memory Usage's default, in bytes.
-const DEFAULT_BUDGET: u64 = (crate::prefs::DEFAULT_MEMORY_USAGE_MB as u64) << 20;
+/// Upstream's 8 GB Memory Usage, which these measurements are made against (Capishot defaults to less).
+const DEFAULT_BUDGET: u64 = 8192 << 20;
 
 /// Scales of 10⁷ and past are refused by the real budget too, whatever the axis or sign.
 #[test]

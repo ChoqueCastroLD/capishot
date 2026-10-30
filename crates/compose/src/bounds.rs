@@ -63,7 +63,7 @@ pub fn content_bounds(s: &Surface) -> Rect {
         };
         if let Some((x0, y0, x1, y1)) = b {
             let o = coord.rect();
-            let r = Rect::new(o.x0 + x0 as i32, o.y0 + y0 as i32, o.x0 + x1 as i32, o.y0 + y1 as i32);
+            let r = Rect::new(o.x0.saturating_add(x0 as i32), o.y0.saturating_add(y0 as i32), o.x0.saturating_add(x1 as i32), o.y0.saturating_add(y1 as i32));
             out = if out.is_empty() { r } else { out.union(&r) };
         }
     }

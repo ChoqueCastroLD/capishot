@@ -3240,7 +3240,6 @@ curves	Smooth	Lisser
 	All categories	Toutes les catégories
 	Sans Serif	Sans empattement
 	Serif	Avec empattement
-	Display	Titrage
 	Handwriting	Manuscrite
 	Monospace	Chasse fixe
 	All languages	Toutes les langues
@@ -3338,7 +3337,6 @@ curves	Smooth	Lisser
 	The browser may clear them when space runs low.	Le navigateur peut les effacer si l'espace manque.
 	Loaded for this session only.	Chargées pour cette session uniquement.
 	Browser storage is unavailable: {error}	Le stockage du navigateur n'est pas disponible : {error}
-	Remove All	Tout retirer
 	Remove all fonts from this browser?	Retirer toutes les polices de ce navigateur ?
 	Removed: {n}	Retirées : {n}
 	No fonts loaded yet.	Aucune police chargée pour l'instant.
@@ -3554,13 +3552,10 @@ curves	Smooth	Lisser
 	Handwritten	Manuscrite
 	Hide Font Classes	Masquer les classes de polices
 	Hide Styles	Masquer les styles
-	Monospace	Chasse fixe
 	No fonts match these filters.	Aucune police ne correspond à ces filtres.
 	No similar fonts: the current font doesn't say what it looks like.	Aucune police similaire : la police actuelle ne décrit pas son apparence.
 	OpenType font	Police OpenType
-	Sans Serif	Sans empattement
 	Script	Scripte
-	Serif	Avec empattement
 	Show Font Classes	Afficher les classes de polices
 	Show Similar Fonts	Afficher les polices similaires
 	Show Styles	Afficher les styles
@@ -3919,7 +3914,6 @@ curves	Smooth	Lisser
 	Auto-Align Layers	Alignement automatique des calques
 	Auto-Blend Layers	Fusion automatique des calques
 	Autosave failed: {error}	Échec de l'enregistrement automatique : {error}
-	Back	Retour
 	Backend: {backend} ({type})	Moteur : {backend} ({type})
 	Background Level	Niveau d'arrière-plan
 	Bamboo	Bambou
@@ -4047,7 +4041,6 @@ curves	Smooth	Lisser
 	Custom Branch Color	Couleur de branche personnalisée
 	Custom Pixel Aspect Ratio	Format des pixels personnalisé
 	Cutout	Découpage
-	Cyrillic	Cyrillique
 	Daisies	Pâquerettes
 	Dark Gray	Gris foncé
 	Dark Intensity	Intensité des tons foncés
@@ -4232,7 +4225,6 @@ curves	Smooth	Lisser
 	Gray Value (Median)	Valeur de gris (médiane)
 	Gray Value (Minimum)	Valeur de gris (minimum)
 	Gray-gamma-2.2	Gris gamma 2,2
-	Greek	Grec
 	Grid view	Affichage en grille
 	Group from Layers	Groupe d'après des calques
 	Groups	Groupes
@@ -4407,7 +4399,6 @@ curves	Smooth	Lisser
 	New Spot Channel…	Nouveau canal de ton direct…
 	New Video Layer from File	Nouveau calque vidéo à partir d'un fichier
 	New Window	Nouvelle fenêtre
-	New document	Nouveau document
 	Next	Suivant
 	No Document	Aucun document
 	No Image	Aucune image
@@ -4432,7 +4423,6 @@ curves	Smooth	Lisser
 	Octagon	Octogone
 	Odd Fields	Trames impaires
 	Oil Paint	Peinture à l'huile
-	On	Activé
 	One Flame Along Path	Une flamme le long du tracé
 	Open As	Ouvrir en tant que
 	Open File	Ouvrir un fichier
@@ -4527,7 +4517,6 @@ curves	Smooth	Lisser
 	Randomize Shapes	Formes aléatoires
 	Raw Defaults	Valeurs Raw par défaut
 	Reading	Lecture
-	Ready	Prêt
 	Rec2020	Rec2020
 	Recent Files	Fichiers récents
 	Reconstruct All	Tout reconstruire
@@ -4558,8 +4547,6 @@ curves	Smooth	Lisser
 	Resolve Missing Fonts	Résoudre les polices manquantes
 	Restart	Redémarrer
 	Restart Required	Redémarrage requis
-	Resume	Reprendre
-	Retry	Réessayer
 	Rgb	RVB
 	Ridges	Crêtes
 	Right Diagonal	Diagonale droite
@@ -4570,7 +4557,6 @@ curves	Smooth	Lisser
 	Roses	Roses
 	Rough Pastels	Pastels rugueux
 	Row Order	Ordre des lignes
-	Sample Size	Taille de l'échantillon
 	Sandstone	Grès
 	Sat	Sat.
 	Save As	Enregistrer sous
@@ -4649,7 +4635,6 @@ curves	Smooth	Lisser
 	Sparkle	Étincelle
 	Spatter	Éclaboussures
 	Speckle	Moucheté
-	Speed	Vitesse
 	Spherize	Sphérisation
 	Spin	Rotation
 	Spin Blur	Flou de rotation
@@ -4748,7 +4733,6 @@ curves	Smooth	Lisser
 	Unsupported file format	Format de fichier non pris en charge
 	Unsupported format	Format non pris en charge
 	Up	Haut
-	Update	Mettre à jour
 	Updates	Mises à jour
 	Upper	Supérieur
 	Use Custom Color	Utiliser une couleur personnalisée
@@ -4965,7 +4949,6 @@ shape	Appearance	Apparence
 	{tool}: done	{tool} : terminé
 	Which one should I use?	Lequel utiliser ?
 	Tap to use a tool; press and hold to see what it does and add it to the favorites bar.	Touchez pour utiliser un outil ; maintenez appuyé pour voir ce qu’il fait et l’ajouter à la barre des favoris.
-	Processing…	Traitement…
 	Outline	Contour
 	Outer	Extérieur
 	Centered	Centré

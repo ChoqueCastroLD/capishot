@@ -93,14 +93,17 @@ fn main() {
 mod tests {
     /// A WebAssembly module that never downloads (or doesn't match the page) runs no Rust, so the
     /// page itself replaces the endless "Loading" with what may have gone wrong and a way to
-    /// retry, without a hand-written script.
+    /// retry.
     #[test]
     fn loading_page_offers_a_reload_when_startup_stalls() {
         let html = include_str!("../index.html");
         let (_, hint) = html.split_once("<p id=\"photocraft_stalled\">").expect("stalled-startup hint in the loading element");
         assert!(hint.contains("failed to") && hint.contains("<a href=\"\">Reload</a>"), "{hint}");
         assert!(html.contains("animation: photocraft-stalled"), "the hint appears after a delay");
-        assert!(!html.contains("<script"), "trunk injects the generated loader; the page has no script of its own");
+        // Trunk injects the generated loader; the page's one script of its own is the broken-load
+        // retry (one cache-busting reload, then a Reload button).
+        assert_eq!(html.matches("<script").count(), 1, "only the broken-load retry");
+        assert!(html.contains("capishotLoadFailed") && html.contains("photocraft_reload"));
     }
 
     /// The threads page starts the module's download before importing the glue (on a phone

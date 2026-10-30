@@ -1156,7 +1156,7 @@ pub(crate) fn add_type_layer_with(s: &mut Session, p: &Value, mut t: TextLayer, 
         refresh(doc, &mut t);
         let mut layer = Layer::new(name, LayerContent::Text(t));
         dress(&mut layer, doc.mode);
-        let id = doc.insert_above(*active, layer);
+        let id = crate::layer_place::insert_new(doc, *active, layer, crate::layer_place::Place::AutoEditable);
         *active = Some(id);
         Ok(id)
     })?;

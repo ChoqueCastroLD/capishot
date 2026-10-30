@@ -171,6 +171,12 @@ fn a_move_tool_click_selects_without_moving() {
 #[test]
 fn selecting_recomposites_nothing_and_hiding_only_the_layer() {
     let (mut h, k) = app();
+    // The CPU canvas composites missing tiles on the worker pool: let them land first, so the
+    // hide below redraws drawn tiles rather than waiting on ones still in flight.
+    for _ in 0..30 {
+        h.step();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     for id in [k.text, k.group, k.smart, k.shape] {
         h.state_mut().perf.last_refresh = "untouched";
         h.state_mut().run("layer.select", json!({"layer": id.0})).expect("select");

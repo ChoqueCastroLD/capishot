@@ -52,7 +52,7 @@ fn abrupt_process_exit_restores_exact_current_undo_and_redo_at_every_depth() {
     for depth in ["8", "16", "32"] {
         let root = tempfile::tempdir().unwrap();
         let status = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "abrupt_exit_checkpoint_child", "--nocapture"])
+            .args(["--exact", "crash_recovery::abrupt_exit_checkpoint_child", "--nocapture"])
             .env("PHOTOCRAFT_CRASH_TEST_ROOT", root.path())
             .env("PHOTOCRAFT_CRASH_TEST_DEPTH", depth)
             .status()

@@ -37,11 +37,11 @@ fn no_marker_uses_the_platform_dir() {
     assert!(!exe.join(PORTABLE_DATA_DIR).exists(), "no portable folder without a marker");
     // The convention per platform.
     if cfg!(target_os = "macos") {
-        assert_eq!(dir, root.join("home/Library/Application Support/Photocraft"));
+        assert_eq!(dir, root.join("home/Library/Application Support/Capishot"));
     } else if cfg!(windows) {
-        assert_eq!(dir, root.join("appdata").join("Photocraft"));
+        assert_eq!(dir, root.join("appdata").join("Capishot"));
     } else {
-        assert_eq!(dir, root.join("home/.config/photocraft"));
+        assert_eq!(dir, root.join("home/.config/capishot"));
     }
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -116,11 +116,11 @@ fn override_wins_over_portable() {
 #[test]
 fn autosaves_stay_out_of_the_roaming_profile() {
     let root = temp("recovery-local");
-    let settings = root.join("appdata").join("Photocraft");
+    let settings = root.join("appdata").join("Capishot");
     let local = root.join("local");
     let env = env_of(&[("LOCALAPPDATA", &local)]);
     let platform = DataDir { dir: Some(settings.clone()), mode: Mode::Platform, warning: None };
-    let expected = if cfg!(windows) { local.join("Photocraft").join("Recovery") } else { settings.join("Recovery") };
+    let expected = if cfg!(windows) { local.join("Capishot").join("Recovery") } else { settings.join("Recovery") };
     assert_eq!(resolve_recovery(&platform, &env), Some(expected));
     for mode in [Mode::Override, Mode::Portable] {
         let d = DataDir { dir: Some(settings.clone()), mode, warning: None };
@@ -174,7 +174,7 @@ fn autosave(dir: &Path, key: &str) {
 fn autosaves_from_the_old_folder_move_to_the_new_one() {
     let root = temp("recovery-move");
     let legacy = root.join("roaming").join("Recovery");
-    let dir = root.join("local").join("Photocraft").join("Recovery");
+    let dir = root.join("local").join("Capishot").join("Recovery");
     autosave(&legacy, "a");
     assert_eq!(adopt_legacy_recovery(&legacy, &dir), dir);
     assert!(!legacy.exists(), "the old folder is gone");

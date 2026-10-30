@@ -112,19 +112,21 @@ fn stamp_and_healing_modes_reach_their_commands() {
     let mut app = textured();
     app.ui.tool = Tool::CloneStamp;
     crate::retouch_ui::set_source(&mut app, 20.0, 20.0);
-    app.ui.tool_options.clone_mode = "darken".into();
+    crate::paint_mouse::sync_tool_brush(&mut app);
+    app.run("tools.setBrush", json!({"brush": {"mode": "Darken"}})).unwrap();
     let p = crate::retouch_ui::clone_params(&app).unwrap();
-    assert_eq!(p["mode"], json!("darken"));
+    assert_eq!(p["mode"], json!("Darken"));
     app.ui.tool = Tool::Healing;
-    app.ui.tool_options.healing_mode = "replace".into();
-    assert_eq!(crate::retouch_ui::clone_params(&app).unwrap()["mode"], json!("replace"));
+    crate::paint_mouse::sync_tool_brush(&mut app);
+    app.run("tools.setBrush", json!({"brush": {"mode": "Luminosity"}})).unwrap();
+    assert_eq!(crate::retouch_ui::clone_params(&app).unwrap()["mode"], json!("Luminosity"));
     drag(&mut app, [60.0, 40.0], [100.0, 40.0], 6, |_| {});
     assert!(!app.ui.status_error, "{}", app.ui.status);
     app.ui.tool = Tool::PatternStamp;
-    app.ui.tool_options.pattern_stamp_mode = "multiply".into();
-    app.run("tools.setBrush", json!({"brush": {"opacity": 0.5, "flow": 0.7}})).unwrap();
+    crate::paint_mouse::sync_tool_brush(&mut app);
+    app.run("tools.setBrush", json!({"brush": {"mode": "Multiply", "opacity": 0.5, "flow": 0.7}})).unwrap();
     let p = crate::retouch_ui::pattern_stamp_params(&app, &[[10.0, 10.0, 1.0]]);
-    assert_eq!((p["mode"].clone(), p["opacity"].as_f64().map(f64::round), p["flow"].as_f64().map(f64::round)), (json!("multiply"), Some(50.0), Some(70.0)));
+    assert_eq!((p["mode"].clone(), p["opacity"].as_f64().map(f64::round), p["flow"].as_f64().map(f64::round)), (json!("Multiply"), Some(50.0), Some(70.0)));
     // Impressionist's seed follows the stroke's first point, for the preview and the commit.
     app.ui.tool_options.pattern_stamp_impressionist = true;
     let a = crate::retouch_ui::pattern_stamp_params(&app, &[[10.0, 10.0, 1.0]]);
@@ -184,7 +186,7 @@ fn magic_wand_and_bucket_send_their_options() {
     app.ui.tool_options.tolerance = 32.0;
     // Paint Bucket in Multiply: grey over red keeps red's hue, darker.
     app.ui.tool = Tool::PaintBucket;
-    app.ui.tool_options.bucket_mode = photocraft_color::BlendMode::Multiply;
+    app.ui.tool_options.bucket_blend_mode = photocraft_color::BlendMode::Multiply;
     app.run("tools.setColors", json!({"foreground": [0.5, 0.5, 0.5, 1.0]})).unwrap();
     tool_event(&mut app, ToolEvent::Down { x: 15.0, y: 15.0, pressure: 1.0 }, egui::Modifiers::NONE);
     tool_event(&mut app, ToolEvent::Up { x: 15.0, y: 15.0 }, egui::Modifiers::NONE);

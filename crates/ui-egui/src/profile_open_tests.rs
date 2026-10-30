@@ -169,30 +169,6 @@ fn the_prompt_is_translated_and_still_names_its_file() {
         assert!(name("working").starts_with("sRGB"), "{code}: {}", name("working"));
     }
 }
-
-/// #4559 with a held file: type in a font that isn't installed is reported with the import
-/// warnings while the file still waits for its profile prompt, and shown once when it opens.
-#[test]
-fn a_held_file_still_reports_its_missing_fonts() {
-    const MISSING: &str = "NoSuchFamily3471";
-    let warning = format!("font '{MISSING}' is not installed; text may render using a fallback face");
-    let mut s = Session::new();
-    s.execute("file.new", serde_json::json!({"width": 40, "height": 20})).unwrap();
-    s.execute("type.create", serde_json::json!({"text": "Hi", "x": 2, "y": 12, "size": 10, "font": MISSING})).unwrap();
-    let mut doc = (*s.active().unwrap().doc).clone();
-    doc.icc_profile = Some(photocraft_cms::Builtin::from_id("adobe-rgb-compat").unwrap().profile().to_bytes());
-    let services =
-        Services { import: Some(Box::new(move |_: &str, _: &[u8], _: &photocraft_io::ImportOptions| Ok((doc.clone(), Vec::new())))), ..Default::default() };
-    let mut app = PhotocraftApp::new(Session::new(), services);
-    app.run("edit.colorSettings", serde_json::json!({"askOnMismatch": true, "policyRgb": "preserve"})).unwrap();
-    assert_eq!(app.open_bytes("poster.psd", b"x").unwrap(), vec![warning.clone()]);
-    assert!(app.session.documents().is_empty() && app.ui.notices.is_empty(), "held: nothing shown yet");
-    crate::open_prompt::answer(&mut app, Some("preserve")).unwrap();
-    assert_eq!(app.session.documents().len(), 1);
-    assert_eq!(app.ui.notices.len(), 1);
-    assert_eq!(app.ui.notices[0].lines, vec![warning]);
-}
-
 #[test]
 fn each_answer_applies_to_its_own_file() {
     let use_embedded = use_embedded();

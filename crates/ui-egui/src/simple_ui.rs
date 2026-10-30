@@ -314,7 +314,7 @@ pub fn options_row(app: &mut PhotocraftApp, ui: &mut Ui) {
                     let before = app.session.tools.brush.clone();
                     let mut b = before.clone();
                     crate::panels::brush_preset_chip(ui, &b, &mut app.ui);
-                    crate::widgets::value_field(ui, &mut b.size, 1.0..=photocraft_engine::paint::MAX_BRUSH_SIZE, "px", 64.0);
+                    crate::widgets::value_field(ui, &mut b.size, 1.0..=photocraft_engine::paint::MAX_BRUSH_SIZE, "px", 64.0).accessible_name(tl!("Size"));
                     crate::brush_panel::commit_gesture(app, ui.ctx(), &before, &b);
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -479,9 +479,9 @@ fn paint_options(app: &mut PhotocraftApp, ui: &mut Ui) {
     let block = crate::eraser_ui::block_mode(app, tool);
     let pencil = tool == Tool::Pencil || crate::eraser_ui::pencil_mode(app, tool);
     let held = app.held_erase;
-    let percent = |ui: &mut Ui, v: &mut f32, min: f32| {
+    let percent = |ui: &mut Ui, v: &mut f32, min: f32, name: &str| {
         let mut p = *v * 100.0;
-        if crate::widgets::value_field(ui, &mut p, min..=100.0, "%", 76.0).changed() {
+        if crate::widgets::value_field(ui, &mut p, min..=100.0, "%", 76.0).accessible_name(name).changed() {
             *v = p / 100.0;
         }
     };
@@ -496,14 +496,14 @@ fn paint_options(app: &mut PhotocraftApp, ui: &mut Ui) {
         ui.label("");
         ui.end_row();
         ui.label(tl!("Opacity"));
-        ui.add_enabled_ui(!block, |ui| percent(ui, &mut b.opacity, 0.0));
+        ui.add_enabled_ui(!block, |ui| percent(ui, &mut b.opacity, 0.0, tl!("Opacity")));
         if crate::icons::button(ui, "circle-dot", 32.0, b.pressure_opacity, tl!("Always use pressure for opacity")).clicked() {
             b.pressure_opacity = !b.pressure_opacity;
         }
         ui.end_row();
         if !pencil {
             ui.label(tl!("Flow"));
-            ui.add_enabled_ui(!block, |ui| percent(ui, &mut b.flow, 1.0));
+            ui.add_enabled_ui(!block, |ui| percent(ui, &mut b.flow, 1.0, tl!("Flow")));
             if crate::icons::button(ui, "sparkles", 32.0, b.build_up, tl!("Enable airbrush-style build-up effects")).clicked() {
                 b.build_up = !b.build_up;
             }

@@ -3844,8 +3844,6 @@ navigator	Zoom	Zvětšení
 	Find More	Najít další
 	Search Google Fonts	Hledat v Google Fonts
 	All categories	Všechny kategorie
-	Sans Serif	Bezpatkové
-	Serif	Patkové
 	Handwriting	Ručně psané
 	Monospace	Neproporcionální
 	All languages	Všechny jazyky
@@ -3855,7 +3853,6 @@ navigator	Zoom	Zvětšení
 	Chinese (Simplified)	Čínština (zjednodušená)
 	Chinese (Traditional)	Čínština (tradiční)
 	Cyrillic	Cyrilice
-	Greek	Řečtina
 	Arabic	Arabština
 	Hebrew	Hebrejština
 	Thai	Thajština
@@ -4152,7 +4149,6 @@ navigator	Zoom	Zvětšení
 	Handwritten	Ručně psaná
 	Hide Font Classes	Skrýt třídy písem
 	Hide Styles	Skrýt řezy
-	Monospace	Neproporcionální
 	No fonts match these filters.	Filtrům neodpovídají žádná písma.
 	No similar fonts: the current font doesn't say what it looks like.	Žádná podobná písma: u aktuálního písma chybí popis vzhledu.
 	OpenType font	Písmo OpenType
@@ -4309,7 +4305,6 @@ navigator	Zoom	Zvětšení
 	Clone Stamp	Klonovací razítko
 	Color Sampler Tool	Nástroj vzorkovač barev
 	Currency	Měnové symboly
-	Cyrillic	Cyrilice
 	Decrease Type Size	Zmenšit velikost písma
 	Decrease Type Size by 10	Zmenšit velikost písma o 10
 	Delete Snapshot	Odstranit snímek
@@ -4671,8 +4666,6 @@ cameraRaw	Dehaze	Odstranění oparu
 	Color Picker (Outline)	Výběr barvy (obrys)
 	Edit text	Upravit text
 	Bend	Ohyb
-	Horizontal Distortion	Vodorovné zkreslení
-	Vertical Distortion	Svislé zkreslení
 	A .capiproj carries the project's settings and its font files, never pages or images.	Soubor .capiproj nese nastavení projektu a jeho soubory písem, nikdy stránky ani obrázky.
 	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Projekt písem uchovává písma série podle role (dialog, výkřik, vyprávění…) a jejich nastavení. Pro začátek jeden vytvořte.
 	Add role	Přidat roli

@@ -83,7 +83,8 @@ fn shrink_vectors(l: &mut Layer, k: f32) {
         *x /= kd;
         *y /= kd;
     }
-    if let Some(v) = &mut l.vector_mask {
+    // An empty path's coverage is constant (its density): nothing to scale, so it stays as is.
+    if let Some(v) = l.vector_mask.as_mut().filter(|v| v.path.subpaths.iter().any(|s| !s.knots.is_empty())) {
         v.path = v.path.transform(&photocraft_geom::Affine::scale(1.0 / kd));
         v.feather /= k;
     }

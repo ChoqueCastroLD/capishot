@@ -3201,13 +3201,10 @@ curves	Smooth	平滑
 	Handwritten	手写体
 	Hide Font Classes	隐藏字体类别
 	Hide Styles	隐藏样式
-	Monospace	等宽
 	No fonts match these filters.	没有符合这些筛选条件的字体。
 	No similar fonts: the current font doesn't say what it looks like.	没有相似字体：当前字体没有描述其外观。
 	OpenType font	OpenType 字体
-	Sans Serif	无衬线
 	Script	手写花体
-	Serif	衬线
 	Show Font Classes	显示字体类别
 	Show Similar Fonts	显示相似字体
 	Show Styles	显示样式

@@ -62,7 +62,7 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, compact: bool) {
                 act(app, "typer.resize", json!({"delta": settings.text_size_increment}));
             }
             let mut step = settings.text_size_increment as f32;
-            if crate::widgets::compact_value_field(ui, &mut step, 1.0..=99.0, "px", 44.0, 22.0).changed() {
+            if crate::widgets::compact_value_field(ui, &mut step, 1.0..=99.0, "px", 44.0, 22.0).accessible_name(tl!("Size")).changed() {
                 act(app, "typer.settings.set", json!({"key": "textSizeIncrement", "value": step}));
             }
             if ui
@@ -129,6 +129,7 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, compact: bool) {
             ui.label(RichText::new("%").color(t.text_dim).size(11.5));
             let mut scale = settings.text_scale.unwrap_or(100.0) as f32;
             if crate::widgets::compact_value_field(ui, &mut scale, 1.0..=999.0, "", 42.0, 20.0)
+                .accessible_name(tl!("Text scale"))
                 .on_hover_text(tl!("Text scale: pasted text is resized without changing the styles"))
                 .changed()
             {

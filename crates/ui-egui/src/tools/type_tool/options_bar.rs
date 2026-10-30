@@ -49,6 +49,7 @@ fn in_path_options(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let mut px = (shown * 10.0).round() / 10.0;
     let resp = ui
         .add(egui::DragValue::new(&mut px).range(0.0..=1000.0).speed(0.5).max_decimals(1).suffix(" px"))
+        .accessible_name(tl!("Inset"))
         .on_hover_text(tl!("How far the text stays inside the path"));
     if resp.changed() {
         let mut p = json!({"layer": layer, "inset": px});
@@ -97,7 +98,7 @@ fn leading_options(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     crate::icons::paint(ui, r, "line-height", 16.0, crate::theme::Tokens::get(ui.ctx()).text_dim);
     resp.on_hover_text(tl!("Line spacing (leading)"));
     let mut shown = lead.unwrap_or(size * auto_k) * k * u;
-    if crate::widgets::value_field(ui, &mut shown, 0.1 * u..=5000.0 * u, unit, 56.0).on_hover_text(tl!("Line spacing (leading)")).changed() {
+    if crate::widgets::value_field(ui, &mut shown, 0.1 * u..=5000.0 * u, unit, 56.0).accessible_name(tl!("Line spacing (leading)")).on_hover_text(tl!("Line spacing (leading)")).changed() {
         set_leading(app, ui.ctx(), Some(shown / u / k));
     }
     let auto = lead.is_none();
@@ -203,6 +204,7 @@ fn bubble_target_options(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let mut px = (shown * 10.0).round() / 10.0;
     let resp = ui
         .add(egui::DragValue::new(&mut px).range(0.0..=1000.0).speed(0.5).max_decimals(1).suffix(" px"))
+        .accessible_name(tl!("Margin"))
         .on_hover_text(tl!("How far the text stays inside the bubble"));
     if resp.changed() {
         let mut p = json!({"layer": layer, "inset": px});
@@ -266,7 +268,7 @@ pub fn phone_form(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         ui.label(tl!("Size"));
         let (unit, label) = type_unit(app);
         let mut display = size * unit;
-        if crate::widgets::value_field(ui, &mut display, unit..=1296.0 * unit, label, 90.0).changed() {
+        if crate::widgets::value_field(ui, &mut display, unit..=1296.0 * unit, label, 90.0).accessible_name(tl!("Size")).changed() {
             let size = display / unit;
             app.ui.tool_options.type_size = size;
             apply(app, &ctx, json!({"size": size, "metricsAsShown": true}));
@@ -645,7 +647,7 @@ fn font_and_size(app: &mut PhotocraftApp, ui: &mut egui::Ui, font_w: f32) {
     let (unit, label) = type_unit(app);
     let mut display = size * unit;
     let (rect, tap, mut child) = slot(ui, 64.0);
-    let r = crate::widgets::value_field(&mut child, &mut display, unit..=1296.0 * unit, label, 64.0);
+    let r = crate::widgets::value_field(&mut child, &mut display, unit..=1296.0 * unit, label, 64.0).accessible_name(tl!("Font size"));
     if tap.clicked() {
         ui.memory_mut(|m| m.request_focus(r.id));
     }

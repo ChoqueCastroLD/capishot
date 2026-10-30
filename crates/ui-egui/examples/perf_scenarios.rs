@@ -386,7 +386,7 @@ fn main() {
     // A panic in one group (a crash the scenario found) is reported against the row that was
     // running, and the other groups still run.
     type Group = fn(&mut Bench, &Sizes);
-    let groups: [(&str, Group); 8] = [
+    let groups: [(&str, Group); 7] = [
         ("layered", layered_scenarios),
         ("many layers", many_layer_scenarios),
         ("bit depths", depth_scenarios),
@@ -598,94 +598,6 @@ fn layered_scenarios(b: &mut Bench, sz: &Sizes) {
         b.refresh(s, false)?;
         Ok(v)
     });
-}
-
-/// Layers overhaul L3: edits that redraw the whole document (a layer's opacity, hiding it) with
-/// many full-canvas layers, under the app's own GPU memory budget (Memory Usage at its default,
-/// the adapter's kind; `gpu_canvas::memory_budget`). Past what the budget holds, each one went to
-/// the CPU compositor (2.6 s at 150 layers of 6 MP on a discrete card).
-fn full_canvas_layer_scenarios(b: &mut Bench, sz: &Sizes) {
-    let opacity = "opacity of a layer among many full-canvas layers + refresh";
-    let hide = "hide a layer among many full-canvas layers + refresh";
-    let adjust = "hide the top adjustment layer among many full-canvas layers, over the GPU budget + refresh";
-    if !b.wanted(opacity) && !b.wanted(hide) && !b.wanted(adjust) {
-        return;
-    }
-    b.current = Some(opacity.to_string());
-    let (w, h, n) = sz.full_layers;
-    let mut s = Session::new();
-    let built = (|| -> Res<u64> {
-        exec(&mut s, "file.new", json!({"width": w, "height": h, "background": "white"}))?;
-        let mut mid = 0;
-        for i in 0..n as u32 {
-            exec(&mut s, "layer.new.layer", json!({"name": format!("full {i}")}))?;
-            exec(&mut s, "edit.fill", json!({"color": format!("#{:02x}{:02x}80", (i * 37) % 256, (i * 91) % 256), "opacity": 3}))?;
-            if i % 7 == 3 {
-                exec(&mut s, "layer.layerStyle.dropShadow", json!({"distance": 6, "size": 8}))?;
-            }
-            if i as usize == n / 2 {
-                mid = active_layer(&s)?;
-            }
-        }
-        Ok(mid)
-    })();
-    let mid = match built {
-        Ok(v) => v,
-        Err(e) => {
-            b.errors.push((opacity.to_string(), e));
-            return;
-        }
-    };
-    let mut app_budget = None;
-    if let (Some((g, _)), Some(st)) = (&b.gpu, s.active()) {
-        // As the app counts it (`canvas::gpu_budget`).
-        let pixels = st.memory_bytes() as u64;
-        let allowance = u64::from(photocraft_engine::prefs::Performance::default().memory_usage_mb) << 20;
-        let budget = photocraft_ui_egui::gpu_canvas::memory_budget(allowance, pixels, photocraft_ui_egui::gpu_canvas::physical_memory(), g.video_memory(), 0);
-        g.set_memory_budget(budget);
-        app_budget = Some(budget);
-    }
-    let _ = b.refresh(&s, true);
-    let reps = b.reps;
-    b.time(opacity, &mut s, reps, true, |b, s, i| {
-        let t = Instant::now();
-        exec(s, "layer.setProps", json!({"layer": mid, "opacity": if i % 2 == 0 { 0.5 } else { 1.0 }}))?;
-        Ok(ms(t) + b.refresh(s, false)?)
-    });
-    b.time(hide, &mut s, reps, true, |b, s, i| {
-        let t = Instant::now();
-        exec(s, "layer.setProps", json!({"layer": mid, "visible": i % 2 == 1}))?;
-        Ok(ms(t) + b.refresh(s, false)?)
-    });
-    // #6533: an adjustment among them, added after the rows above so their document is unchanged.
-    // It lands on top (above the active `full n-1`), #6533's "hide the top adjustment layer" case.
-    let _ = exec(&mut s, "layer.setProps", json!({"layer": mid, "visible": true}));
-    b.current = Some(adjust.to_string());
-    let adj = exec(&mut s, "layer.newAdjustmentLayer.levels", json!({"inBlack": 8, "inWhite": 245, "gamma": 1.05})).and_then(|_| active_layer(&s));
-    match adj {
-        Ok(adj) => {
-            // As #6533's repro (`performance.gpuMemoryMb = 512`): the ~3.6 GB working set no longer
-            // fits, so a full refresh takes the from-scratch CPU path on every machine.
-            if let Some((g, _)) = &b.gpu {
-                g.set_memory_budget(photocraft_ui_egui::gpu_canvas::MIN_GPU_BUDGET);
-            }
-            let _ = b.refresh(&s, true);
-            // Each run is a from-scratch CPU composite of 150 full-canvas layers. Every timed run
-            // is a hide: the layer is shown again, untimed, before each one.
-            b.time(adjust, &mut s, reps.min(5), true, |b, s, _| {
-                exec(s, "layer.setProps", json!({"layer": adj, "visible": true}))?;
-                b.refresh(s, false)?;
-                let t = Instant::now();
-                exec(s, "layer.setProps", json!({"layer": adj, "visible": false}))?;
-                Ok(ms(t) + b.refresh(s, false)?)
-            });
-        }
-        Err(e) => b.errors.push((adjust.to_string(), e)),
-    }
-    // `b.gpu` is shared with the later groups: give them back the budget they see on main.
-    if let (Some((g, _)), Some(budget)) = (&b.gpu, app_budget) {
-        g.set_memory_budget(budget);
-    }
 }
 
 /// #1015, #9330: a huge document with one painted layer, zoomed out: times only the reduced CPU

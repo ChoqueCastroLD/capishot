@@ -113,7 +113,7 @@ fn row(ui: &mut egui::Ui, t: &Tokens, label: &str, add: impl FnOnce(&mut egui::U
 
 fn num(ui: &mut egui::Ui, o: &mut Map<String, Value>, k: &str, default: f64, range: std::ops::RangeInclusive<f32>, suffix: &str) {
     let mut v = get_f(o, k, default) as f32;
-    if crate::widgets::compact_value_field(ui, &mut v, range, suffix, 64.0, 20.0).changed() {
+    if crate::widgets::compact_value_field(ui, &mut v, range, suffix, 64.0, 20.0).accessible_name(k).changed() {
         o.insert(k.into(), photocraft_typer::id::num(f64::from(v)));
     }
 }
@@ -556,7 +556,7 @@ fn presets_section(ui: &mut egui::Ui, t: &Tokens, d: &mut StyleDraft) {
         }
         for i in 0..list.len() {
             let mut v = list[i] as f32;
-            if crate::widgets::compact_value_field(ui, &mut v, 0.1..=2000.0, "", 60.0, 20.0).changed() {
+            if crate::widgets::compact_value_field(ui, &mut v, 0.1..=2000.0, "", 60.0, 20.0).accessible_name(tl!("Size")).changed() {
                 list[i] = f64::from(v);
                 changed = true;
             }
@@ -568,7 +568,7 @@ fn presets_section(ui: &mut egui::Ui, t: &Tokens, d: &mut StyleDraft) {
                 ui.label(RichText::new("—").color(t.text_faint));
             } else {
                 let mut w = widths[i].unwrap_or(0.0) as f32;
-                if crate::widgets::compact_value_field(ui, &mut w, 0.0..=100000.0, "px", 80.0, 20.0).changed() {
+                if crate::widgets::compact_value_field(ui, &mut w, 0.0..=100000.0, "px", 80.0, 20.0).accessible_name(tl!("Width")).changed() {
                     widths[i] = (w > 0.0).then_some(f64::from(w));
                     changed = true;
                 }

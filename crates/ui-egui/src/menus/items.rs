@@ -190,6 +190,10 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
             items.insert(after + 1 + k, it);
         }
     }
+    // Capishot has no release-check transport: without one the update command isn't listed.
+    if !super::is_enabled(app, "help.checkForUpdates") {
+        items.retain(|i| i.id != "help.checkForUpdates");
+    }
     // Keep the update command with the links, ahead of System Info and About.
     if let Some(at) = items.iter().position(|i| i.id == "help.checkForUpdates") {
         let update = items.remove(at);

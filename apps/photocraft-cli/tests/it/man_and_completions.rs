@@ -45,7 +45,7 @@ fn the_example_writes_the_files_the_packages_install() {
     let mut written: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
     written.sort();
     let completions = ["capishot-cli.bash", "_capishot-cli", "capishot-cli.fish", "capishot-cli.elv", "_capishot-cli.ps1"];
-    let subcommands = ["convert", "info", "run", "batch", "droplet", "commands", "mcp", "serve"];
+    let subcommands = ["convert", "info", "run", "batch", "droplet", "commands", "mcp", "serve", "compile"];
     let mut expected: Vec<String> = completions.map(String::from).into();
     expected.push("capishot-cli.1".into());
     expected.extend(subcommands.iter().map(|s| format!("capishot-cli-{s}.1")));

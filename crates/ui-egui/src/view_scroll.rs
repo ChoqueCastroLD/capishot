@@ -26,6 +26,24 @@ pub fn run(app: &mut PhotocraftApp, id: &str) -> Result<Value, String> {
     if !(zoom.is_finite() && zoom > 0.0 && size.x > 0.0 && size.y > 0.0) {
         return Err("the canvas is not shown".into());
     }
+    // A turned or mirrored view: the corner keys go to the canvas corner the document runs on
+    // from, and the screens follow the view's axes (`page_keys`).
+    let turned = app.ui.views.get(i).is_some_and(|v| v.rotation.abs() > 0.05) || app.ui.view.flip_horizontal;
+    if turned {
+        let screen = size;
+        let key = match id {
+            "view.scroll.pageUp" => crate::page_keys::PageKey::Scroll(egui::vec2(0.0, -screen.y)),
+            "view.scroll.pageDown" => crate::page_keys::PageKey::Scroll(egui::vec2(0.0, screen.y)),
+            "view.scroll.pageLeft" => crate::page_keys::PageKey::Scroll(egui::vec2(-screen.x, 0.0)),
+            "view.scroll.pageRight" => crate::page_keys::PageKey::Scroll(egui::vec2(screen.x, 0.0)),
+            "view.scroll.home" => crate::page_keys::PageKey::Corner { end: false },
+            "view.scroll.end" => crate::page_keys::PageKey::Corner { end: true },
+            _ => return Err(format!("{id} is not a scroll command")),
+        };
+        let rect = crate::rulers::content_rect(app, app.last_canvas_rect);
+        crate::page_keys::apply(app, &[key], rect);
+        return Ok(json!({ "center": app.ui.views.get(i).map(|v| v.center) }));
+    }
     // One screen, in document pixels.
     let (sw, sh) = (size.x / zoom, size.y / zoom);
     let view = app.ui.views.get_mut(i).ok_or("no view for the document")?;

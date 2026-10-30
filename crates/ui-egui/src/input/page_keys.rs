@@ -42,7 +42,9 @@ pub fn page_key(key: Key, mods: Modifiers, size: Vec2) -> Option<PageKey> {
 
 /// Consumes this frame's page keys and moves the active document's view. True when one ran.
 pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
-    let Some(i) = app.session.active_index() else { return false };
+    if app.session.active_index().is_none() {
+        return false;
+    }
     let rect = crate::rulers::content_rect(app, app.last_canvas_rect);
     let size = rect.size();
     let presses: Vec<PageKey> = ctx.input_mut(|input| {
@@ -62,6 +64,17 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
     if presses.is_empty() {
         return false;
     }
+    if apply(app, &presses, rect) {
+        ctx.request_repaint();
+    }
+    true
+}
+
+/// Moves the active document's view by `presses` in the canvas `rect` (screen points). False when
+/// there is no view to move.
+pub(crate) fn apply(app: &mut PhotocraftApp, presses: &[PageKey], rect: egui::Rect) -> bool {
+    let Some(i) = app.session.active_index() else { return false };
+    let size = rect.size();
     app.sync_views();
     let Some(doc_size) = app.session.active().map(|st| [st.doc.size.width as f32, st.doc.size.height as f32]) else { return false };
     let (ppp, aspect, flip, overscroll) = (app.ppp, app.ui.view.display_aspect(), app.ui.view.flip_horizontal, app.session.prefs().tools.overscroll);
@@ -73,7 +86,7 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
     }
     view.fit_pending = false;
     view.fill_pending = false;
-    for p in presses {
+    for &p in presses {
         match p {
             PageKey::Scroll(d) => {
                 let xf = crate::canvas::ViewXform { rect, zoom, center: view.center, flip, rotation: view.rotation, aspect };
@@ -102,7 +115,6 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
     if !overscroll {
         crate::scrollbars::clamp_view_with_aspect(view, size, ppp, aspect);
     }
-    ctx.request_repaint();
     true
 }
 

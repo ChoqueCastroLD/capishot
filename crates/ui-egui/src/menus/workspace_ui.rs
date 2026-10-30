@@ -685,7 +685,7 @@ mod tests {
         }
         // The top-bar switcher lists them after the presets.
         let keys: Vec<String> = switcher_options(&app).into_iter().map(|(k, _)| k).collect();
-        assert_eq!(keys[6..], ["Comp", "Retouch"]);
+        assert_eq!(keys[keys.len() - 2..], ["Comp", "Retouch"]);
         assert!(keys.contains(&app.ui.workspace));
     }
 

@@ -216,7 +216,7 @@ fn style_fields(app: &mut PhotocraftApp, ui: &mut egui::Ui, tab: &str, st: &mut 
         }
     });
     row(ui, tl!("Size"), |ui| {
-        crate::widgets::value_field(ui, &mut st.size, 1.0..=400.0, "pt", 64.0);
+        crate::widgets::value_field(ui, &mut st.size, 1.0..=400.0, "pt", 64.0).accessible_name(tl!("Size"));
     });
     row(ui, tl!("Leading"), |ui| {
         let mut auto = st.leading.is_none();
@@ -224,11 +224,11 @@ fn style_fields(app: &mut PhotocraftApp, ui: &mut egui::Ui, tab: &str, st: &mut 
             st.leading = if auto { None } else { Some((st.size * 1.2).round()) };
         }
         if let Some(l) = st.leading.as_mut() {
-            crate::widgets::value_field(ui, l, 1.0..=1000.0, "pt", 64.0);
+            crate::widgets::value_field(ui, l, 1.0..=1000.0, "pt", 64.0).accessible_name(tl!("Leading"));
         }
     });
     row(ui, tl!("Tracking"), |ui| {
-        crate::widgets::value_field(ui, &mut st.tracking, -1000.0..=10000.0, "", 64.0);
+        crate::widgets::value_field(ui, &mut st.tracking, -1000.0..=10000.0, "", 64.0).accessible_name(tl!("Tracking"));
     });
     row(ui, tl!("Color"), |ui| {
         let mut c = hex_rgb(&st.color);
@@ -261,12 +261,12 @@ fn style_fields(app: &mut PhotocraftApp, ui: &mut egui::Ui, tab: &str, st: &mut 
             if crate::widgets::color_edit_button_srgb(ui, &mut c).changed() {
                 st.stroke_color = rgb_hex(c);
             }
-            crate::widgets::value_field(ui, &mut st.stroke_width, 0.0..=100.0, "px", 56.0);
+            crate::widgets::value_field(ui, &mut st.stroke_width, 0.0..=100.0, "px", 56.0).accessible_name(tl!("Stroke"));
         });
     });
     if tab != "floating" {
         row(ui, tl!("Margin"), |ui| {
-            ui.add_enabled_ui(!st.auto_margin, |ui| crate::widgets::value_field(ui, &mut st.margin, 0.0..=1000.0, "px", 56.0));
+            ui.add_enabled_ui(!st.auto_margin, |ui| crate::widgets::value_field(ui, &mut st.margin, 0.0..=1000.0, "px", 56.0).accessible_name(tl!("Margin")));
             ui.checkbox(&mut st.auto_margin, tl!("Auto")).on_hover_text(tl!("A margin of 5% of the bubble's smaller side"));
         });
         row(ui, tl!("Lines"), |ui| {

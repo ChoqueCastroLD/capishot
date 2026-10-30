@@ -138,7 +138,8 @@ fn the_tool_options_popover_is_a_form_that_fits() {
         assert!(window.contains_rect(pop.shrink(0.5)), "{tool:?}: {pop:?} leaves the window");
         if tool == crate::state::Tool::Type {
             for l in ["Font", "Size", "Alignment", "Color"] {
-                h.get_by_label(l);
+                // A caption and the control it names may share it.
+                assert!(h.query_all_by_label(l).next().is_some(), "{l}");
             }
             assert!(h.query_by_label("Home").is_none(), "no home button in the form");
             let ys: Vec<f32> = ["Left align text", "Center text", "Right align text"].iter().map(|l| h.get_by_label(l).rect().center().y).collect();

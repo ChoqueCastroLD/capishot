@@ -100,7 +100,9 @@ fn purge_and_close_release_compact_source_backing() {
     let source = Arc::downgrade(&session.active().unwrap().doc);
     session.execute("layer.translate", json!({"dx":1})).unwrap();
     assert!(source.upgrade().is_some());
+    // Purge › Histories, with the opening snapshot (which holds the document as opened) gone too.
     session.active_mut().unwrap().history.clear();
+    session.active_mut().unwrap().snapshots.clear();
     assert!(source.upgrade().is_none(), "Run must retain only weak source/current handles");
     session.execute("layer.translate", json!({"dx":1})).unwrap();
     let next_source = session.compact_move.as_ref().unwrap().source.clone();

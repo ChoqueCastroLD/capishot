@@ -2895,7 +2895,6 @@ curves	Smooth	Leviga
 	Serif	Con grazie
 	Display	Display
 	Handwriting	Calligrafico
-	Monospace	Monospazio
 	All languages	Tutte le lingue
 	Latin	Latino
 	Japanese	Giapponese
@@ -4508,9 +4507,7 @@ navigator	Zoom	Zoom
 	No fonts match these filters.	Nessun font corrisponde a questi filtri.
 	No similar fonts: the current font doesn't say what it looks like.	Nessun font simile: il font corrente non descrive il proprio aspetto.
 	OpenType font	Font OpenType
-	Sans Serif	Senza grazie
 	Script	Corsivo calligrafico
-	Serif	Con grazie
 	Show Font Classes	Mostra classi di font
 	Show Similar Fonts	Mostra font simili
 	Show Styles	Mostra stili

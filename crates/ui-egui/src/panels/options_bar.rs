@@ -508,9 +508,9 @@ fn selection_specific_options(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: 
                 // Original Ratio shows the document's numbers, as Photoshop does.
                 let (mut rw, mut rh) = crate::crop_size::custom_ratio_fields(o, doc_size);
                 let decimals = crate::crop_size::RATIO_DECIMALS;
-                let fw = widgets::value_field_prec(ui, &mut rw, 0.0..=99_999.0, "", 54.0, decimals);
+                let fw = widgets::value_field_prec(ui, &mut rw, 0.0..=99_999.0, "", 54.0, decimals).accessible_name(tl!("Width"));
                 let swap = icons::button(ui, "arrow-left-right", 22.0, false, tl!("Swaps height and width")).clicked();
-                let fh = widgets::value_field_prec(ui, &mut rh, 0.0..=99_999.0, "", 54.0, decimals);
+                let fh = widgets::value_field_prec(ui, &mut rh, 0.0..=99_999.0, "", 54.0, decimals).accessible_name(tl!("Height"));
                 let (cw, ch) = (fw.changed(), fh.changed());
                 if swap {
                     std::mem::swap(&mut rw, &mut rh);

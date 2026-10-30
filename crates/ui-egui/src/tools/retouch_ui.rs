@@ -34,9 +34,6 @@ pub(crate) fn clone_params(app: &PhotocraftApp) -> Option<Value> {
         p["wrap"] = json!(app.ui.view.pattern_preview);
         p["opacity"] = json!(app.session.tools.brush.opacity * 100.0);
         p["flow"] = json!(app.session.tools.brush.flow * 100.0);
-        p["mode"] = json!(o.clone_mode);
-    } else {
-        p["mode"] = json!(o.healing_mode);
     }
     // The Clone Source panel's active slot (set by ⌥-click) drives the stroke: the engine keeps
     // the aligned pairing and applies the slot's scale/rotation/flip.
@@ -105,7 +102,6 @@ pub(crate) fn pattern_stamp_params(app: &PhotocraftApp, points: &[[f64; 3]]) -> 
         "mode": app.session.tools.brush.mode.label(),
         "opacity": app.session.tools.brush.opacity * 100.0,
         "flow": app.session.tools.brush.flow * 100.0,
-        "mode": o.pattern_stamp_mode,
     });
     if o.pattern_stamp_aligned
         && let Some(ph) = app.ui.pattern_stamp_phase
@@ -188,7 +184,8 @@ pub fn finish_stroke(app: &mut PhotocraftApp, tool: Tool, points: &[[f64; 3]], m
     p["points"] = pts;
     // The layer mask, an alpha channel or the Quick Mask when targeted, as the Brush paints.
     p["target"] = crate::canvas::paint_target(app);
-    let result = app.run(cmd, p);
+    // The AI mode runs only with its model downloaded (else the missing-model dialog).
+    let result = crate::ai_model_gate::run(app, cmd, p);
     app.retouch_from_live = matches!(&result, Ok(r) if r.get("fromLive").and_then(Value::as_bool) == Some(true));
     match result {
         Ok(r) if matches!(tool, Tool::Healing | Tool::CloneStamp) => {
@@ -510,15 +507,12 @@ const HEALING_MODES: [(&str, &str); 8] = [
     ("luminosity", "Luminosity"),
 ];
 
-/// The options-bar Mode of a retouching tool that has one (Clone Stamp and Pattern Stamp: the
-/// painting modes; Healing Brush and Spot Healing Brush: [`HEALING_MODES`]). The value is what the
-/// tool's command takes as `"mode"`.
+/// The Spot Healing Brush's options-bar Mode ([`HEALING_MODES`], Replace included). The value is
+/// what its command takes as `"mode"`. The stamps' and the Healing Brush's Mode is their brush's
+/// (`blend_keys::tool_modes`).
 pub(crate) fn mode_dropdown(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) {
     let o = &mut app.ui.tool_options;
     let (value, healing) = match tool {
-        Tool::CloneStamp => (&mut o.clone_mode, false),
-        Tool::PatternStamp => (&mut o.pattern_stamp_mode, false),
-        Tool::Healing => (&mut o.healing_mode, true),
         Tool::SpotHealing => (&mut o.spot_mode, true),
         _ => return,
     };
@@ -569,7 +563,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bo
     {
         return false;
     }
-    if matches!(tool, Tool::Healing | Tool::SpotHealing) {
+    if tool == Tool::SpotHealing {
         mode_dropdown(app, ui, tool);
         crate::widgets::vline(ui, 22.0);
     }

@@ -1443,6 +1443,7 @@ fn compile_renders_a_psd_and_a_folder_with_psd_compiler() {
     assert!(chapter.join("compiled/02.webp").is_file());
     let o = bin().args(["compile", d.join("missing.psd").to_str().unwrap()]).output().unwrap();
     assert_eq!(o.status.code(), Some(1));
+    // A quality outside 1..=100 is a usage error.
     let o = bin().args(["compile", one.to_str().unwrap(), "--quality", "0"]).output().unwrap();
-    assert_eq!(o.status.code(), Some(1));
+    assert_eq!(o.status.code(), Some(2));
 }

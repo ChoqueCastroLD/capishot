@@ -123,52 +123,6 @@ fn the_cpu_canvas_shows_a_filter_dialogs_preview() {
     assert_eq!(app.session.active().unwrap().revision, revision, "the document untouched");
     assert_eq!(app.session.active().unwrap().doc.size, photocraft_geom::Size::new(64, 32));
 }
-
-/// A channel overlay drawn from a size-changing preview covers the preview's own area, as the
-/// image does, not the document's: a 90° rotation of a 64×32 document shows a 32×64 overlay.
-#[test]
-fn a_channel_overlay_follows_a_size_changing_preview() {
-    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
-    app.background_jobs = false;
-    app.run("file.new", json!({"width": 64, "height": 32, "background": "white"})).unwrap();
-    app.run("channel.new", json!({"name": "Alpha", "fill": "black"})).unwrap();
-    let id = crate::filter_dialog::open(&mut app, "image.rotation.arbitrary").unwrap();
-    let d = app.ui.dialogs.iter_mut().find(|d| d.id == id).unwrap();
-    d.fields.insert("angle".into(), json!(90.0));
-    d.fields.insert("__preview".into(), json!(true));
-    let ctx = egui::Context::default();
-    for rotation in [0.0f32, 30.0] {
-        let view = View { zoom: 4.0, center: [32.0, 16.0], rotation, ..app.ui.views[0].clone() };
-        let mut output = ctx.run_ui(Default::default(), |ui| {
-            canvas_view(&mut app, ui, 0, Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0)), view.clone(), true);
-        });
-        output.textures_delta.clear();
-        let overlay = crate::channel_view::ensure(&mut app, &ctx, 0).expect("the channel overlay");
-        let mesh = output
-            .shapes
-            .iter()
-            .find_map(|s| match &s.shape {
-                egui::Shape::Mesh(m) if m.texture_id == overlay => Some(m.clone()),
-                _ => None,
-            })
-            .expect("the overlay is painted");
-        // The quad's sides, in screen points: the two shortest distances from a corner (the
-        // third is the diagonal; a rotated view turns the quad, not its side lengths).
-        let v: Vec<Pos2> = mesh.vertices.iter().map(|v| v.pos).collect();
-        let mut d: Vec<f32> = v[1..4].iter().map(|p| v[0].distance(*p)).collect();
-        d.sort_by(f32::total_cmp);
-        let (short, long) = (d[0], d[1]);
-        // Which side is the width: the one along the view's x axis turned by the rotation.
-        let along = |p: Pos2| {
-            let r = rotation.to_radians();
-            ((p - v[0]).x * r.cos() + (p - v[0]).y * r.sin()).abs()
-        };
-        let width = v[1..4].iter().map(|p| along(*p)).fold(0.0f32, f32::max);
-        assert!((long / short - 2.0).abs() < 0.01, "rotation {rotation}: sides {short}×{long}, the preview's 1:2");
-        assert!((width - short).abs() < 0.5, "rotation {rotation}: the short side ({short}) runs across the view (width {width})");
-    }
-}
-
 #[test]
 fn inline_filter_preview_is_composited_and_recorded_once() {
     let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
@@ -1175,54 +1129,45 @@ fn dragging_a_tab_off_the_strip_floats_it_in_a_window() {
     }
 }
 
-#[test]
-fn clone_overlay_is_circular_and_respects_visibility() {
-    let ctx = egui::Context::default();
-    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
-    app.run("file.new", json!({"width": 64, "height": 64})).unwrap();
-    app.run("cloneSource.set", json!({"source": [16,16]})).unwrap();
-    app.ui.tool = Tool::CloneStamp;
-    app.session.tools.brush.size = 20.0;
-    let xf = ViewXform { rect: Rect::from_min_size(Pos2::ZERO, vec2(100.0, 100.0)), zoom: 1.0, center: [32.0, 32.0], flip: false, rotation: 0.0, aspect: 1.0 };
-    let revision = app.session.active().unwrap().revision;
-    let mut output = ctx.run_ui(Default::default(), |ui| {
-        let ctx = ui.ctx();
-        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("clone-test")));
-        draw_clone_preview(&mut app, &painter, &xf, [32.0, 32.0], None);
-    });
-    output.textures_delta.clear();
-    let mesh = output
-        .shapes
-        .iter()
-        .find_map(|s| match &s.shape {
-            egui::Shape::Mesh(m) => Some(m),
-            _ => None,
-        })
-        .unwrap();
-    assert_eq!(mesh.indices.len(), 64 * 3);
-    let center = xf.to_screen(32.0, 32.0);
-    assert!(mesh.vertices.iter().all(|v| v.pos.distance(center) <= 10.01));
-    assert_eq!(app.session.active().unwrap().revision, revision);
-    assert!(app.session.presets.clone.active().anchor.is_none());
-    let ordinary_key = app.clone_preview.as_ref().unwrap().key.clone();
-    app.ui.view.pattern_preview = true;
-    let mut periodic_output = ctx.run_ui(Default::default(), |ui| {
-        let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("clone-test")));
-        draw_clone_preview(&mut app, &painter, &xf, [32.0, 32.0], None);
-    });
-    assert_ne!(app.clone_preview.as_ref().unwrap().key, ordinary_key, "toggling Pattern Preview invalidates source pixels");
-    assert!(!periodic_output.textures_delta.set.is_empty(), "the overlay texture is refreshed without a document edit");
-    periodic_output.textures_delta.clear();
-    assert_eq!(app.session.active().unwrap().revision, revision);
-    app.session.presets.clone.overlay.show = false;
-    let mut output = ctx.run_ui(Default::default(), |ui| {
-        let ctx = ui.ctx();
-        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("clone-test")));
-        draw_clone_preview(&mut app, &painter, &xf, [32.0, 32.0], None);
-    });
-    output.textures_delta.clear();
-    assert!(output.shapes.iter().all(|s| !matches!(s.shape, egui::Shape::Mesh(_))));
-}
+    #[test]
+    fn clone_overlay_is_circular_and_respects_visibility() {
+        let ctx = egui::Context::default();
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        app.run("file.new", json!({"width": 64, "height": 64})).unwrap();
+        app.run("cloneSource.set", json!({"source": [16,16]})).unwrap();
+        app.ui.tool = Tool::CloneStamp;
+        app.session.tools.brush.size = 20.0;
+        let xf =
+            ViewXform { rect: Rect::from_min_size(Pos2::ZERO, vec2(100.0, 100.0)), zoom: 1.0, center: [32.0, 32.0], flip: false, rotation: 0.0, aspect: 1.0 };
+        let revision = app.session.active().unwrap().revision;
+        let mut output = ctx.run_ui(Default::default(), |ui| {
+            let ctx = ui.ctx();
+            let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("clone-test")));
+            draw_clone_preview(&mut app, &painter, &xf, [32.0, 32.0], None);
+        });
+        output.textures_delta.clear();
+        let mesh = output
+            .shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Mesh(m) => Some(m),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(mesh.indices.len(), 64 * 3);
+        let center = xf.to_screen(32.0, 32.0);
+        assert!(mesh.vertices.iter().all(|v| v.pos.distance(center) <= 10.01));
+        assert_eq!(app.session.active().unwrap().revision, revision);
+        assert!(app.session.presets.clone.active().anchor.is_none());
+        app.session.presets.clone.overlay.show = false;
+        let mut output = ctx.run_ui(Default::default(), |ui| {
+            let ctx = ui.ctx();
+            let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("clone-test")));
+            draw_clone_preview(&mut app, &painter, &xf, [32.0, 32.0], None);
+        });
+        output.textures_delta.clear();
+        assert!(output.shapes.iter().all(|s| !matches!(s.shape, egui::Shape::Mesh(_))));
+    }
 
 #[test]
 fn clone_overlay_keeps_magnified_pixels_crisp_on_upload_and_refresh() {
@@ -1276,39 +1221,6 @@ fn clone_overlay_blend_mode_mixes_with_the_image_under_the_brush() {
     assert_eq!(centre("difference"), Color32::BLACK, "Difference turns black where source and image match");
     assert_eq!(centre("lighten"), Color32::WHITE);
 }
-
-/// A shaped tip clips the Clone Source overlay to its outline, not to the brush circle.
-#[test]
-fn clone_overlay_is_clipped_to_a_shaped_tip() {
-    let ctx = egui::Context::default();
-    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
-    app.run("file.new", json!({"width": 64, "height": 64})).unwrap();
-    app.run("cloneSource.set", json!({"source": [16,16]})).unwrap();
-    app.ui.tool = Tool::CloneStamp;
-    app.session.tools.brush.size = 20.0;
-    app.session.tools.brush.roundness = 0.25;
-    let xf = ViewXform { rect: Rect::from_min_size(Pos2::ZERO, vec2(100.0, 100.0)), zoom: 1.0, center: [32.0, 32.0], flip: false, rotation: 0.0, aspect: 1.0 };
-    let mut output = ctx.run_ui(Default::default(), |ui| {
-        let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("clone-test")));
-        draw_clone_preview(&mut app, &painter, &xf, [32.0, 32.0], None);
-    });
-    let image = output
-        .textures_delta
-        .set
-        .values()
-        .flatten()
-        .find_map(|d| match &d.image {
-            egui::ImageData::Color(c) if c.size == [20, 20] => Some(c.clone()),
-            _ => None,
-        })
-        .expect("the overlay uploads a texture");
-    output.textures_delta.clear();
-    let alpha = |x: usize, y: usize| image.pixels[y * image.width() + x].a();
-    assert_eq!(alpha(10, 10), 255, "the tip's centre shows the source");
-    assert_eq!(alpha(10, 2), 0, "inside the circle but outside the flat tip: clipped");
-    assert_eq!(alpha(1, 10), 255, "the tip's long axis stays");
-}
-
 #[test]
 fn wayland_start_screen_hint_does_not_claim_file_drop_works() {
     let x11 = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());

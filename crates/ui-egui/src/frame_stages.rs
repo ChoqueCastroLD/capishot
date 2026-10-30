@@ -315,8 +315,10 @@ mod app_tests {
         // The CPU canvas (kittest has no wgpu) redraws the whole document. A damage refresh counts
         // reduced texels times the factor squared, which can fall a few rows short (see P80).
         assert_eq!(f.path, "cpu", "{f:?}");
-        assert!(matches!(f.refresh, "full" | "rect"), "{f:?}");
-        assert!(f.refresh_px * 100 >= w * h * 95 && f.refresh_px <= w * h, "{f:?}");
+        // Capishot's CPU canvas redraws the visible tiles at the view's resolution instead.
+        assert!(matches!(f.refresh, "full" | "rect" | "tiles"), "{f:?}");
+        assert!(f.refresh == "tiles" || f.refresh_px * 100 >= w * h * 95 && f.refresh_px <= w * h, "{f:?}");
+        assert!(f.refresh_px > 0 && f.refresh_px <= w * h, "{f:?}");
         assert!(f.composite_ms > 0.0 && f.command_ms > 0.0, "{f:?}");
         assert!(f.stage_ms() <= f.frame_ms, "{f:?}");
     }

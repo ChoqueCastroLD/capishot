@@ -455,7 +455,7 @@ fn settings_editor(ui: &mut egui::Ui, salt: &str, s: &RoleSettings) -> Option<Ro
             let mut on = v.is_some();
             crate::widgets::checkbox(ui, &mut on, label);
             let mut x = v.unwrap_or(def);
-            ui.add_enabled(on, egui::DragValue::new(&mut x).range(range).speed(0.5).suffix(suffix));
+            ui.add_enabled(on, egui::DragValue::new(&mut x).range(range).speed(0.5).suffix(suffix)).accessible_name(label);
             *v = on.then_some(x);
             ui.end_row();
         };
@@ -505,7 +505,7 @@ fn settings_editor(ui: &mut egui::Ui, salt: &str, s: &RoleSettings) -> Option<Ro
         let mut k = n.stroke.clone().unwrap_or(RoleStroke { width: 3.0, color: "#ffffff".into(), position: "outside".into() });
         ui.add_enabled_ui(st, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.add(egui::DragValue::new(&mut k.width).range(0.0..=250.0).speed(0.25).suffix(" px"));
+                ui.add(egui::DragValue::new(&mut k.width).range(0.0..=250.0).speed(0.25).suffix(" px")).accessible_name(tl!("Outline"));
                 let mut rgb = hex3(&k.color);
                 if ui.color_edit_button_srgb(&mut rgb).changed() {
                     k.color = hex_of(rgb);

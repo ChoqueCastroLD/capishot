@@ -123,7 +123,7 @@ fn flag(ui: &mut egui::Ui, v: &mut Value, key: &str, text: &str) {
 
 fn number(ui: &mut egui::Ui, v: &mut Value, key: &str, default: f64, range: std::ops::RangeInclusive<f32>, suffix: &str) {
     let mut n = v.get(key).and_then(Value::as_f64).unwrap_or(default) as f32;
-    if crate::widgets::compact_value_field(ui, &mut n, range, suffix, 60.0, 20.0).changed() {
+    if crate::widgets::compact_value_field(ui, &mut n, range, suffix, 60.0, 20.0).accessible_name(key).changed() {
         v[key] = json!(n);
     }
 }
@@ -218,7 +218,7 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
                         ui.end_row();
                         label(ui, &t, tl!("Text scale"));
                         let mut s = d.values.get("textScale").and_then(Value::as_f64).unwrap_or(100.0) as f32;
-                        if crate::widgets::compact_value_field(ui, &mut s, 1.0..=999.0, "%", 60.0, 20.0).changed() {
+                        if crate::widgets::compact_value_field(ui, &mut s, 1.0..=999.0, "%", 60.0, 20.0).accessible_name(tl!("Text scale")).changed() {
                             d.values["textScale"] = json!(s);
                         }
                         ui.end_row();

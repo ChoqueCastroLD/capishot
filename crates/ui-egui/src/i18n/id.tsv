@@ -3245,7 +3245,6 @@ curves	Smooth	Haluskan
 	Serif	Serif
 	Display	Display
 	Handwriting	Tulisan tangan
-	Monospace	Monospace
 	All languages	Semua bahasa
 	Latin	Latin
 	Japanese	Jepang
@@ -3561,9 +3560,7 @@ curves	Smooth	Haluskan
 	No fonts match these filters.	Tidak ada font yang cocok dengan filter ini.
 	No similar fonts: the current font doesn't say what it looks like.	Tidak ada font serupa: font saat ini tidak menjelaskan tampilannya.
 	OpenType font	Font OpenType
-	Sans Serif	Sans Serif
 	Script	Skrip
-	Serif	Serif
 	Show Font Classes	Tampilkan Kelas Font
 	Show Similar Fonts	Tampilkan Font Serupa
 	Show Styles	Tampilkan Gaya

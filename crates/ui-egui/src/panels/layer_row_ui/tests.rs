@@ -232,7 +232,7 @@ fn collapse_all_groups_from_the_panel_menu_and_it_is_saved() {
     assert!(groups_open(&h.state().session).iter().all(|o| *o));
     let group = crate::panel_docking::probe::group_rect(h.state(), &h.ctx, "layers").expect("layers group");
     // The group's menu button sits on its tab strip.
-    let menu = h.query_all_by_label("Panel menu").map(|n| n.rect()).find(|r| group.contains(r.center())).expect("Layers panel menu");
+    let menu = crate::dock::last_strips(&h.ctx).into_iter().map(|s| s.menu).find(|r| group.contains(r.center())).expect("Layers panel menu");
     click(&mut h, menu.center());
     let item = h.get_by_label("Collapse All Groups").rect().center();
     click(&mut h, item);
@@ -257,7 +257,7 @@ fn new_group_items_in_the_panel_menu_open_the_dialog() {
     for (label, command) in [("New Group…", "layer.new.group"), ("New Group from Layers…", "layer.new.groupFromLayers")] {
         let mut h = harness(busy(), 1.0, "promedium", 290.0);
         let group = crate::panel_docking::probe::group_rect(h.state(), &h.ctx, "layers").expect("layers group");
-        let menu = h.query_all_by_label("Panel menu").map(|n| n.rect()).find(|r| group.contains(r.center())).expect("Layers panel menu");
+        let menu = crate::dock::last_strips(&h.ctx).into_iter().map(|s| s.menu).find(|r| group.contains(r.center())).expect("Layers panel menu");
         click(&mut h, menu.center());
         let item = h.get_by_label(label).rect();
         assert!(item.top() < h.get_by_label("Collapse All Groups").rect().top(), "{label} comes before Collapse All Groups");

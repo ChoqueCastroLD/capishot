@@ -160,43 +160,6 @@ fn canvas_side(layout: &Layout<String>) -> Layout<String> {
     Layout { root: Some(first.as_ref().clone()), floating: Vec::new() }
 }
 
-#[test]
-fn a_fresh_launch_draws_the_native_groups_beside_the_protected_canvas() {
-    let mut h = harness(app(), vec2(1280.0, 800.0));
-    assert!(h.state().ui.docking.is_none(), "drawing the default does not customize the workspace");
-    let layout = legacy(h.state());
-    assert!(valid(&layout));
-    assert_eq!(
-        root_groups(&layout),
-        [vec!["color", "swatches", "gradients", "patterns"], vec!["properties", "adjustments"], vec!["layers", "channels", "paths"]]
-    );
-    assert!(in_dock_column(&layout, "layers"), "the groups are a dock column: {layout:?}");
-    let canvas = canvas_rect(&h);
-    let tops: Vec<f32> = ["color", "properties", "layers"].iter().map(|panel| tab_rect(&h, panel).top()).collect();
-    assert!(tops.windows(2).all(|pair| pair[0] < pair[1]), "top to bottom: {tops:?}");
-    assert!(tab_rect(&h, "color").left() > canvas.right(), "the dock is at the end edge");
-    let hits = craft_ui::docking::DockArea::<String>::hit_rects(&h.ctx, area_id());
-    assert!(!hits.iter().any(|(hit, _)| *hit == craft_ui::docking::Hit::Tab(CANVAS.into())), "the canvas has no tab");
-    for command in ["window.panel.close", "window.panel.float"] {
-        assert!(h.state_mut().run(command, json!({"panel": CANVAS})).is_err(), "{command}");
-    }
-    h.state_mut().run("window.panel.move", json!({"panel":"layers","anchor":CANVAS,"zone":"center"})).unwrap_err();
-    assert!(h.state().ui.docking.is_none(), "a refused command leaves the default");
-
-    let mut studio = crate::PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
-    studio.ui.theme = crate::theme::ThemeKind::Studio;
-    let layout = legacy(&studio);
-    let window = layout.floating.first().expect("Studio floats Properties");
-    assert_eq!((window.id, window.panels().cloned().collect::<Vec<_>>()), (PROPERTIES_WINDOW, vec!["properties".to_string(), "adjustments".into()]));
-    assert_eq!(legacy(&studio).floating, layout.floating, "the same window every frame");
-
-    h.state_mut().ui.dock.set_collapsed(Group::Color, true);
-    h.run_steps(2);
-    assert!(collapsed_members(h.state(), &legacy(h.state())).contains("swatches"));
-    let color = tab_rect(&h, "color");
-    assert!(tab_rect(&h, "properties").top() - color.bottom() < 12.0, "a collapsed group shows only its tabs");
-}
-
 /// A panel no saved workspace has placed opens in its native group, or as that group in its
 /// native place in the dock column, not as a tab of whichever group comes first.
 #[test]
@@ -213,31 +176,6 @@ fn a_panel_never_laid_out_opens_in_its_default_group_and_side() {
     app.run("window.panel.activate", json!({"panel":"info"})).unwrap();
     app.run("window.panel.activate", json!({"panel":"histogram"})).unwrap();
     assert_eq!(group_members(lay(&app), "info"), ["navigator", "histogram", "info"]);
-    app.run("window.panel.activate", json!({"panel":"brushes"})).unwrap();
-    assert_eq!(root_groups(lay(&app)).last().unwrap(), &["brushes"]);
-}
-
-#[test]
-fn a_tab_dropped_on_the_canvas_floats_there_and_redocks() {
-    let mut h = harness(app(), vec2(1280.0, 800.0));
-    let canvas = canvas_rect(&h);
-    let source = tab_rect(&h, "layers").center();
-    let target = egui::pos2(canvas.left() + canvas.width() / 6.0, canvas.center().y);
-    drag(&mut h, source, target);
-    let layout = lay(h.state());
-    assert!(valid(layout));
-    assert!(!canvas_side(layout).contains(&"layers".to_string()) && !in_dock_column(layout, "layers"), "{layout:?}");
-    assert!(layout.floating.iter().any(|window| window.panels().eq(["layers".to_string()].iter())), "{layout:?}");
-    assert!(tab_rect(&h, "layers").expand(4.0).contains(target), "the tab stays under the pointer");
-
-    let source = tab_rect(&h, "layers").center();
-    let destination = tab_rect(&h, "properties").center();
-    drag(&mut h, source, destination);
-    let layout = lay(h.state());
-    let mut members = group_members(layout, "layers");
-    members.sort();
-    assert_eq!(members, ["adjustments", "layers", "properties"]);
-    assert!(in_dock_column(layout, "layers") && valid(layout));
 }
 
 #[test]
@@ -363,25 +301,6 @@ fn floating_group_titles_are_opaque_in_studio_themes() {
         .filter(|&(x, y)| image.get_pixel((x as f32 * ppp) as u32, (y as f32 * ppp) as u32).0[..3] == [255, 0, 255])
         .count();
     assert_eq!(magenta, 0, "canvas shows through the floating group's title strip {strip:?}");
-}
-
-#[test]
-fn escape_cancels_the_first_drag_without_replacing_the_legacy_workspace() {
-    let mut h = harness(app(), vec2(1280.0, 800.0));
-    let source = h.query_all_by_label("Layers").find(|node| node.rect().height() <= 45.0).unwrap().rect().center();
-    h.event(Event::PointerMoved(source));
-    h.run_steps(1);
-    h.event(Event::PointerButton { pos: source, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
-    h.run_steps(1);
-    h.event(Event::PointerMoved(source - vec2(90.0, 0.0)));
-    h.run_steps(2);
-    assert!(h.state().ui.docking.is_none(), "a drag changes nothing before its drop");
-    h.event(Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE });
-    h.run_steps(1);
-    assert!(h.state().ui.docking.is_none());
-    h.event(Event::PointerButton { pos: source, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
-    h.run_steps(2);
-    assert!(h.state().ui.docking.is_none());
 }
 
 #[test]

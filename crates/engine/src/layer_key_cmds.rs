@@ -35,7 +35,11 @@ fn new_layer_silent(s: &mut Session, p: &Value) -> Result<Value> {
 /// when every one is already locked. The Background (always locked) is left alone.
 fn toggle_lock_transparency(s: &mut Session, p: &Value) -> Result<Value> {
     object(p, "layer.toggleLockTransparency")?;
-    let sel = crate::layer_multi_cmds::selected(s);
+    // An explicit `layer` (one layer), else the selected layers.
+    let sel = match p.get("layer") {
+        Some(_) => vec![crate::commands::layer_param(s, p)?],
+        None => crate::layer_multi_cmds::selected(s),
+    };
     let st = s.active().ok_or(EngineError::NoDocument)?;
     let bg = st.doc.layers.first().filter(|l| st.doc.is_background(l.id)).map(|l| l.id);
     let ids: Vec<_> = sel.into_iter().filter(|id| Some(*id) != bg && st.doc.layer(*id).is_some()).collect();
@@ -69,7 +73,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Toggle Lock Transparent Pixels",
             menu: &[],
             shortcut: Some("/"),
-            params: "{} → {locked, layers} (the selected layers; unlocks when all are locked)",
+            params: "{layer:id?} → {locked, layers} (the layer, else the selected layers; unlocks when all are locked)",
             enabled: has_layer,
             journal: true,
             run: toggle_lock_transparency,

@@ -209,7 +209,7 @@ mod tests {
         let body = fast().get(&format!("{base}/a.ttf"), 1000, &JobCtx::new()).unwrap();
         assert_eq!(body, b"hello font");
         let head = seen.lock().unwrap().to_lowercase();
-        assert!(head.contains(&format!("user-agent: photocraft/{}", env!("CARGO_PKG_VERSION"))), "{head}");
+        assert!(head.contains(&format!("user-agent: capishot/{}", env!("CARGO_PKG_VERSION"))), "{head}");
         assert!(!head.contains("cookie") && !head.contains("authorization"));
     }
 

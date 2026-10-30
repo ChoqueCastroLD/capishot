@@ -968,7 +968,11 @@ pub(crate) mod probe {
 
     /// The body of `panel`, when it is its group's selected tab.
     pub(crate) fn panel_rect(ctx: &egui::Context, panel: &str) -> Option<Rect> {
-        last_bodies(ctx).into_iter().find(|(id, _)| id == panel).map(|(_, rect)| rect)
+        last_bodies(ctx).into_iter().find(|(id, _)| id == panel).map(|(_, rect)| rect).or_else(|| {
+            // The native dock (the default workspace): the group holding the panel.
+            let group = PANELS.iter().find(|p| p.0 == panel)?.2;
+            crate::dock::last_rects(ctx).into_iter().find(|(g, _)| *g == group).map(|(_, r)| r)
+        })
     }
 
     /// The panels of the tab group holding `panel`, in tab order.
@@ -979,6 +983,11 @@ pub(crate) mod probe {
 
     /// The tab group holding `panel`: its tab strip and its selected panel's body.
     pub(crate) fn group_rect(app: &PhotocraftApp, ctx: &egui::Context, panel: &str) -> Option<Rect> {
+        // The default workspace is the native dock's: its group as drawn last frame.
+        if app.ui.docking.is_none() {
+            let group = PANELS.iter().find(|p| p.0 == panel)?.2;
+            return crate::dock::last_rects(ctx).into_iter().find(|(g, _)| *g == group).map(|(_, r)| r);
+        }
         let members = group_of(app, panel);
         let strip = DockArea::<String>::hit_rects(ctx, area_id()).into_iter().filter_map(|(hit, rect)| match hit {
             Hit::Tab(p) | Hit::DragBar(p) | Hit::Border(p) | Hit::Overflow(p) => members.contains(&p).then_some(rect),
@@ -1052,7 +1061,7 @@ fn in_dock_column(layout: &Layout<String>, panel: &str) -> bool {
     layout.root.iter().flat_map(tree_groups).any(|group| group.dock && group.panels.iter().any(|id| id == panel))
 }
 
-fn group_members(layout: &Layout<String>, panel: &str) -> Vec<String> {
+pub(crate) fn group_members(layout: &Layout<String>, panel: &str) -> Vec<String> {
     layout.root.iter().chain(layout.floating.iter().map(|window| &window.root)).find_map(|root| tree_group(root, panel)).unwrap_or_default()
 }
 

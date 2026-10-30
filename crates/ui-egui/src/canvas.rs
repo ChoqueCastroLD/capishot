@@ -912,12 +912,12 @@ fn handle_canvas_tool_menus(app: &mut PhotocraftApp, input: &CanvasToolInput<'_>
         && !transforming
         && response.interact_pointer_pos().is_some_and(|p| crate::canvas_tool_menu::open_guide(app, ctx, tool, mods, [p.x, p.y], xf.to_doc(p)));
     // Right-click with the Move tool, or ⌘/Ctrl+right-click: the layers under the pointer.
-    if response.secondary_clicked()
+    if secondary_click
         && !lasso_retracted
         && !transforming
         && !guide_menu
         && crate::layer_pick_ui::is_gesture(tool, mods)
-        && let Some(p) = response.interact_pointer_pos()
+        && let Some(p) = menu_at
     {
         let d = xf.to_doc(p);
         app.ui.canvas_tool_menu = None;
@@ -926,12 +926,12 @@ fn handle_canvas_tool_menus(app: &mut PhotocraftApp, input: &CanvasToolInput<'_>
             crate::canvas_tool_menu::open_pasteboard(app, ctx, tool, [p.x, p.y]);
         }
     }
-    if response.secondary_clicked()
+    if secondary_click
         && !lasso_retracted
         && !transforming
         && !guide_menu
         && !crate::layer_pick_ui::is_gesture(tool, mods)
-        && let Some(p) = response.interact_pointer_pos()
+        && let Some(p) = menu_at
     {
         // A pending crop: its menu, also outside the image, where the frame can reach (#6561).
         // Outside the image: the pasteboard colour menu (#2462), else the tool's own. The view
@@ -1618,16 +1618,9 @@ fn draw_default_tool_cursor(app: &mut PhotocraftApp, ui: &mut egui::Ui, input: &
         Tool::Hand => crate::tool_cursor::hand(ui.ctx(), false),
         Tool::RotateView => crate::rotate_view::cursor(response.dragged()),
         Tool::Zoom => crate::tool_cursor::zoom(ui.ctx(), zoom_out(alt)),
-        // Over a closed path, the type-in-path pointer: a click puts the type inside it.
-        Tool::Type | Tool::HorizontalTypeMask
-            if app.ui.text_edit.is_none() && {
-                let [x, y] = xf.to_doc(p);
-                crate::type_tool::in_path_at(app, x, y).is_some()
-            } =>
-        {
-            crate::tool_cursor::type_in_path(painter, p)
-        }
         Tool::Type | Tool::VerticalType if type_path.is_some() => match type_path {
+            // Inside a closed path, the type-in-path pointer: a click puts the type inside it.
+            Some(crate::type_tool::PathClick::Area { .. }) if app.ui.tool == Tool::Type => crate::tool_cursor::type_in_path(painter, p),
             Some(crate::type_tool::PathClick::Area { .. }) => crate::tool_cursor::area_type(painter, p),
             _ => crate::tool_cursor::path_type(painter, p),
         },

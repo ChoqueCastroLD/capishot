@@ -3194,7 +3194,6 @@ curves	Smooth	Suavizar
 	Not loaded: choose the page files again	Sin cargar: vuelve a elegir los archivos de página
 	Open this page's file	Abrir el archivo de esta página
 	Page is always a marker word. Separate words with ; (case, accents and a final dot don't matter): Página 12, Pág. 12 and Pag 12 all mark page 12.	Page siempre es una palabra de marcador. Separa las palabras con ; (no importan mayúsculas, tildes ni el punto final): Página 12, Pág. 12 y Pag 12 marcan la página 12.
-	Script	Guion
 	Some page files are too big to keep	Algunos archivos de página son demasiado grandes para guardarlos
 	Stop syncing page files	Dejar de sincronizar archivos de página
 	This page's file	Archivo de esta página
@@ -4702,13 +4701,10 @@ navigator	Zoom	Zoom
 	Handwritten	Manuscrita
 	Hide Font Classes	Ocultar clases de fuente
 	Hide Styles	Ocultar estilos
-	Monospace	Monoespaciada
 	No fonts match these filters.	Ninguna fuente coincide con estos filtros.
 	No similar fonts: the current font doesn't say what it looks like.	No hay fuentes similares: la fuente actual no describe su aspecto.
 	OpenType font	Fuente OpenType
-	Sans Serif	Sans serif
 	Script	Caligráfica
-	Serif	Serif
 	Show Font Classes	Mostrar clases de fuente
 	Show Similar Fonts	Mostrar fuentes similares
 	Show Styles	Mostrar estilos

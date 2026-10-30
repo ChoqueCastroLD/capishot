@@ -244,10 +244,11 @@ pub fn advanced(app: &mut PhotocraftApp, ui: &mut egui::Ui, kind: Kind, f: &mut 
                 let mut overlap = num_field(f, "overlap", 16);
                 ui.label(tl!("Tile size:"));
                 crate::widgets::value_field(ui, &mut tile, 0.0..=1024.0, "px", 70.0)
+                    .accessible_name(tl!("Tile size:"))
                     .on_hover_text(tl!("Input pixels per tile; 0 = automatic. Larger tiles are faster but need more memory."));
                 ui.end_row();
                 ui.label(tl!("Overlap:"));
-                crate::widgets::value_field(ui, &mut overlap, 0.0..=128.0, "px", 70.0);
+                crate::widgets::value_field(ui, &mut overlap, 0.0..=128.0, "px", 70.0).accessible_name(tl!("Overlap:"));
                 ui.end_row();
                 // 1..31 is not a valid tile: snap to automatic or the minimum.
                 let tile = if tile < 1.0 { 0 } else { (tile as u64).max(32) };
@@ -258,6 +259,7 @@ pub fn advanced(app: &mut PhotocraftApp, ui: &mut egui::Ui, kind: Kind, f: &mut 
                 let mut side = num_field(f, "maxSide", 0);
                 ui.label(tl!("Max working side:"));
                 crate::widgets::value_field(ui, &mut side, 0.0..=2048.0, "px", 70.0)
+                    .accessible_name(tl!("Max working side:"))
                     .on_hover_text(tl!("Larger areas are scaled down to this size for the model; 0 = automatic (512, at most 512 for MI-GAN)."));
                 ui.end_row();
                 let side = if side < 1.0 { 0 } else { ((side as u64).clamp(64, 2048) / 8) * 8 };
@@ -268,7 +270,7 @@ pub fn advanced(app: &mut PhotocraftApp, ui: &mut egui::Ui, kind: Kind, f: &mut 
         ui.label(egui::RichText::new(tl!("f32 (weights downloaded as f16; int8 isn't available)")).color(tokens.text_dim));
         ui.end_row();
         ui.label(tl!("CPU threads:"));
-        crate::widgets::value_field(ui, &mut threads, 0.0..=64.0, "", 70.0).on_hover_text(tl!("0 = one per core."));
+        crate::widgets::value_field(ui, &mut threads, 0.0..=64.0, "", 70.0).accessible_name(tl!("CPU threads:")).on_hover_text(tl!("0 = one per core."));
         ui.end_row();
         ui.label("");
         crate::widgets::checkbox(ui, &mut keep, tl!("Keep the model in memory between runs"));

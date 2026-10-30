@@ -455,7 +455,7 @@ fn every_label_of_the_google_fonts_ui_is_translated() {
         .map(|(_, l)| *l)
         .chain(["Manage Downloaded Fonts", "Resolve Missing Fonts…", "Family", "License", "Size", "Remove", "Fonts", "Find More"])
         .collect();
-    for lang in crate::i18n::Lang::all().filter(|l| l.complete_menus()) {
+    for lang in crate::i18n::Lang::all().filter(|l| l.complete_menus() && crate::i18n::has_capishot_strings(l.code())) {
         for s in &dynamic {
             assert!(crate::i18n::has(lang, s), "{}: `{s}` is not translated", lang.code());
         }
@@ -476,7 +476,7 @@ fn job_labels_and_messages_of_font_downloads_follow_the_ui_language() {
     use crate::jobs_ui::{localize_label, localize_message};
     assert_eq!(localize_label("Installing Anton"), "Installing Anton");
     assert_eq!(localize_message("Downloading Regular.ttf"), "Downloading Regular.ttf");
-    for lang in crate::i18n::Lang::all().filter(|l| l.complete_menus()) {
+    for lang in crate::i18n::Lang::all().filter(|l| l.complete_menus() && crate::i18n::has_capishot_strings(l.code())) {
         let _g = crate::i18n::language_scope(lang);
         let label = localize_label("Installing Anton");
         assert!(label.contains("Anton") && label != "Installing Anton", "{}: {label}", lang.code());

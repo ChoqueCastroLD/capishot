@@ -713,7 +713,8 @@ fn size_drag_is_live_and_one_history_step_per_drag() {
 }
 
 fn options_harness(app: PhotocraftApp) -> Harness<'static, PhotocraftApp> {
-    let mut h = Harness::builder().with_size(vec2(900.0, 60.0)).build_ui_state(
+    // Wide enough for Capishot's whole type bar (the colour swatch is past 900 points).
+    let mut h = Harness::builder().with_size(vec2(1400.0, 60.0)).build_ui_state(
         |ui, app: &mut PhotocraftApp| {
             ui.horizontal(|ui| super::options_bar(app, ui));
         },
@@ -3026,7 +3027,8 @@ fn clicking_inside_a_shape_starts_area_type_in_one_step() {
     click_at(&mut app, 400.0, 350.0);
     let id = LayerId(app.ui.text_edit.as_ref().expect("editing").layer);
     let st = app.session.active().unwrap();
-    assert!(matches!(text_layer(&st.doc, id).unwrap().shape, TextShape::Area { .. }));
+    // Capishot makes type in the path there (its alignment and inset controls) for area type.
+    assert!(matches!(text_layer(&st.doc, id).unwrap().shape, TextShape::InPath { .. }));
     assert_eq!(st.history.entries().len(), before + 1, "create + fill is one step");
     super::commit(&mut app);
     app.run("edit.undo", json!({})).unwrap();
@@ -3072,8 +3074,8 @@ fn the_path_pointer_is_off_while_dragging_a_text_box_or_editing() {
     tool_event(&mut app, ToolEvent::Up { x: 1200.0, y: 351.0 }, Modifiers::NONE);
     let id = LayerId(app.ui.text_edit.as_ref().expect("editing").layer);
     assert!(
-        matches!(text_layer(&app.session.active().unwrap().doc, id).unwrap().shape, photocraft_doc::text::TextShape::Area { .. }),
-        "the release made area type"
+        matches!(text_layer(&app.session.active().unwrap().doc, id).unwrap().shape, photocraft_doc::text::TextShape::InPath { .. }),
+        "the release made type in the path (Capishot's area type)"
     );
     let mut app = new_app();
     ellipse_layer(&mut app);
@@ -3505,7 +3507,8 @@ fn bubble_type_margin_rewraps_the_selected_bubble() {
     );
     PhotocraftApp::setup_context(&h.ctx, Default::default());
     h.run_steps(2);
-    h.get_by_label("Margin");
+    // The caption and the field it names.
+    assert!(h.query_all_by_label("Margin").next().is_some());
     // Auto off: the margin becomes the pixels it showed; then a wider one re-wraps.
     h.get_by_label("Auto").click();
     h.run_steps(2);

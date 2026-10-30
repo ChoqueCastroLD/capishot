@@ -198,6 +198,14 @@ fn expand(packed: &str, keys: &[&str]) -> Result<String, String> {
     Ok(text)
 }
 
+/// Whether a catalog carries Capishot's own strings too. The catalogs PhotoCraft added later
+/// (Serbian, Hungarian, Turkish, Vietnamese, Hindi, Arabic) have only PhotoCraft's: Capishot's
+/// strings read in English there until they are translated.
+#[cfg(test)]
+pub(crate) fn has_capishot_strings(code: &str) -> bool {
+    !matches!(code, "sr" | "hu" | "tr" | "vi" | "hi" | "ar")
+}
+
 /// The registry. English first: it is the fallback and the source language.
 pub static LANGUAGES: [LangInfo; 23] = [
     LangInfo { code: "en", name: "English", source: b"", plural: plural_one_other, complete_menus: false, catalog: OnceLock::new() },

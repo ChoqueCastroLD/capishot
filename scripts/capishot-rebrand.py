@@ -85,6 +85,12 @@ def binaries_and_dirs():
         ('root.join("home/.config/photocraft")', 'root.join("home/.config/capishot")'),
     ])
     sub_file('apps/photocraft/src/main.rs', [('const APP_ID: &str = "ai.storyteller.photocraft";', 'const APP_ID: &str = "io.github.choquecastrold.capishot";')])
+    sub_file('packaging/linux/ai.storyteller.photocraft.desktop', [('StartupWMClass=ai.storyteller.photocraft', 'StartupWMClass=io.github.choquecastrold.capishot')])
+    sub_file('apps/photocraft/src/app_dirs/tests.rs', [
+        ('Application Support/Photocraft', 'Application Support/Capishot'),
+        ('.join("Photocraft")', '.join("Capishot")'),
+        ('root.join("home/.config/photocraft")', 'root.join("home/.config/capishot")'),
+    ])
     for t in rs_files('apps/photocraft/tests'):
         sub_file(t, [('CARGO_BIN_EXE_photocraft")', 'CARGO_BIN_EXE_capishot")'), ('NEXTEST_BIN_EXE_photocraft")', 'NEXTEST_BIN_EXE_capishot")')])
     # The CLI binary name in usage text, docs comments and tests (not the package name).

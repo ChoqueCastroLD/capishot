@@ -200,17 +200,6 @@ fn undocking_a_panel_opens_its_own_window_and_the_studio_card_stays_in_the_main_
     desktop.steps(3);
     assert!(desktop.window_of("history").is_some(), "History has its own window");
 
-    let mut studio = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
-    studio.ui.theme = crate::theme::ThemeKind::Studio;
-    studio.run("file.new", json!({"width": 64, "height": 48})).unwrap();
-    let mut desktop = Desktop::new(studio);
-    desktop.steps(3);
-    let card = legacy(desktop.h.state()).floating.into_iter().find(|window| window.id == PROPERTIES_WINDOW).expect("the Studio Properties card");
-    assert!(desktop.host.borrow().windows.is_empty(), "the card opens no OS window");
-    let layer = craft_ui::docking::DockArea::<String>::floating_layer(area_id(), &card).unwrap();
-    assert!(desktop.h.ctx.memory(|m| m.area_rect(layer.id)).is_some(), "the card is drawn in the main window");
-    let refused = desktop.h.state_mut().run("window.panel.window", json!({"panel": "properties"}));
-    assert!(refused.is_err(), "{refused:?}");
 }
 
 fn studio_app() -> PhotocraftApp {

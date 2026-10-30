@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
   <title>Capishot</title>
   <!-- Translation catalogs not compiled in (photocraft-ui-egui `all-catalogs`), fetched when chosen. -->
+  <!-- An empty served-fonts manifest: a missing one is a 404 in the console. -->
   <link data-trunk rel="rust" data-bin="photocraft-web-boot" data-cargo-profile="wasm-release" data-wasm-opt="z" data-wasm-opt-params="--converge" data-weak-refs />
   <style>
     /* The notch and home indicator (viewport-fit=cover): the app keeps its bars inside these (safe_area.rs). */
@@ -20,6 +21,60 @@
     #photocraft_stalled { color: #8c8c8c; visibility: hidden; animation: photocraft-stalled 0s 20s forwards; }
     @keyframes photocraft-stalled { to { visibility: visible; } }
   </style>
+  <script>
+    // A broken load (a file that failed to download, a module that doesn't instantiate): one
+    // automatic retry that bypasses the caches, then a clear message with Reload instead of a
+    // half-started app. The app marks a good start by removing #photocraft_loading.
+    (() => {
+      const KEY = 'capishot.loadRetry';
+      const lang = (navigator.language || 'en').slice(0, 2);
+      const text = {
+        es: ['No se pudo cargar Capishot por completo.', 'Recargar'],
+        pt: ['Não foi possível carregar o Capishot por completo.', 'Recarregar'],
+      }[lang] || ["Capishot didn't load completely.", 'Reload'];
+      let shown = false;
+      const reload = (bust) => {
+        const u = new URL(location.href);
+        if (bust) u.searchParams.set('r', Date.now().toString(36));
+        location.replace(u.href);
+      };
+      const broken = (why) => {
+        if (shown || !document.getElementById('photocraft_loading')) return;
+        console.error('Capishot: the load failed:', why);
+        let retried = false;
+        try { retried = sessionStorage.getItem(KEY) === '1'; sessionStorage.setItem(KEY, '1'); } catch (e) { retried = true; }
+        if (!retried) { reload(true); return; }
+        shown = true;
+        const box = document.getElementById('photocraft_loading');
+        box.innerHTML = '';
+        box.style.pointerEvents = 'auto';
+        const p = document.createElement('p');
+        p.id = 'photocraft_load_failed';
+        p.textContent = text[0];
+        const b = document.createElement('button');
+        b.id = 'photocraft_reload';
+        b.textContent = text[1];
+        b.style.cssText = 'font:15px system-ui,sans-serif;padding:10px 22px;border-radius:20px;border:0;background:#3b82f6;color:#fff;margin-top:8px';
+        b.onclick = () => { try { sessionStorage.removeItem(KEY); } catch (e) {} reload(true); };
+        box.append(p, b);
+      };
+      self.capishotLoadFailed = broken;
+      // A script, module or worker file that failed to load (capture: resource errors don't bubble).
+      addEventListener('error', (e) => {
+        const t = e.target;
+        if (t && t !== window && (t.src || t.href)) broken(`${t.src || t.href} didn't load`);
+        else if (e.message && /wasm|WebAssembly|import|module|fetch/i.test(e.message)) broken(e.message);
+      }, true);
+      addEventListener('unhandledrejection', (e) => {
+        const m = String((e.reason && e.reason.message) || e.reason || '');
+        if (/wasm|WebAssembly|import|module|fetch|Failed to fetch|NetworkError|CompileError|LinkError/i.test(m)) broken(m);
+      });
+      // A good start clears the retry, so a later broken load retries again.
+      const ok = setInterval(() => {
+        if (!document.getElementById('photocraft_loading')) { clearInterval(ok); try { sessionStorage.removeItem(KEY); } catch (e) {} }
+      }, 1000);
+    })();
+  </script>
 </head>
 <body>
   <canvas id="photocraft_canvas"></canvas>

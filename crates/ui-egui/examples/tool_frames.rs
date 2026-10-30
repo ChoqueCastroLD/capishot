@@ -537,6 +537,7 @@ fn scenario(h: &mut H, pg: &Page, name: &str, moves: usize, per_frame: usize) ->
                         unit: egui::MouseWheelUnit::Point,
                         delta: egui::vec2(0.0, dy),
                         modifiers: Modifiers::NONE,
+                        source: egui::MouseWheelSource::Unknown,
                         phase: egui::TouchPhase::Move,
                     });
                     frame(h)

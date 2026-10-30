@@ -3171,7 +3171,6 @@ curves	Smooth	Сгладить
 	All categories	Все категории
 	Sans Serif	Без засечек
 	Serif	С засечками
-	Display	Акцидентные
 	Handwriting	Рукописные
 	Monospace	Моноширинные
 	All languages	Все языки
@@ -3269,7 +3268,6 @@ curves	Smooth	Сгладить
 	The browser may clear them when space runs low.	Браузер может удалить их при нехватке места.
 	Loaded for this session only.	Загружены только на этот сеанс.
 	Browser storage is unavailable: {error}	Хранилище браузера недоступно: {error}
-	Remove All	Удалить все
 	Remove all fonts from this browser?	Удалить все шрифты из этого браузера?
 	Removed: {n}	Удалено: {n}
 	No fonts loaded yet.	Шрифты ещё не загружены.
@@ -3534,13 +3532,10 @@ curves	Smooth	Сгладить
 	Handwritten	Рукописные
 	Hide Font Classes	Скрыть классы шрифтов
 	Hide Styles	Скрыть начертания
-	Monospace	Моноширинные
 	No fonts match these filters.	Нет шрифтов, подходящих под эти фильтры.
 	No similar fonts: the current font doesn't say what it looks like.	Нет похожих шрифтов: текущий шрифт не описывает свой вид.
 	OpenType font	Шрифт OpenType
-	Sans Serif	Без засечек
 	Script	Каллиграфические
-	Serif	С засечками
 	Show Font Classes	Показать классы шрифтов
 	Show Similar Fonts	Показать похожие шрифты
 	Show Styles	Показать начертания
@@ -3892,7 +3887,6 @@ curves	Smooth	Сгладить
 	Cutout	Аппликация
 	Cw	По часовой стрелке
 	Cyans	Голубые тона
-	Cyrillic	Кириллица
 	Daisies	Маргаритки
 	Dark Gray	Тёмно-серый
 	Dark Intensity	Интенсивность тёмного
@@ -4105,7 +4099,6 @@ curves	Smooth	Сгладить
 	Graphics adapter	Графический адаптер
 	Graphics adapter: {adapter}	Графический адаптер: {adapter}
 	Gray-gamma-2.2	Серый (гамма 2,2)
-	Greek	Греческий
 	Greens	Зелёные тона
 	Grid  (⌘')	Сетка  (⌘')
 	Grid view	Вид сеткой
@@ -4256,7 +4249,6 @@ curves	Smooth	Сгладить
 	How far the text stays inside the path	Насколько текст отстоит от края контура
 	Inset 5% of the path's smaller side	Внутренний отступ 5% меньшей стороны контура
 	All settings	Все настройки
-	Back	Назад
 	Brush size {px} px	Размер кисти {px} пикс.
 	Capi: tools, panels and actions	Capi: инструменты, панели и действия
 	Full interface	Полный интерфейс
@@ -4502,7 +4494,6 @@ curves	Smooth	Сгладить
 	New Video Layer from File	Новый видеослой из файла
 	New Window	Новое окно
 	New Workspace	Новая рабочая среда
-	New document	Новый документ
 	New document…	Новый документ…
 	New document…     ⌘N	Новый документ…     ⌘N
 	Next	Далее
@@ -4529,7 +4520,6 @@ curves	Smooth	Сгладить
 	Octagon	Восьмиугольник
 	Odd Fields	Нечётные поля
 	Oil Paint	Масляная живопись
-	On	Вкл.
 	One Flame Along Path	Один язык пламени вдоль контура
 	Open As	Открыть как
 	Open File	Открыть файл
@@ -4649,7 +4639,6 @@ curves	Smooth	Сгладить
 	Ratio	Соотношение
 	Raw Defaults	Значения RAW по умолчанию
 	Reading	Чтение
-	Ready	Готово
 	Rec2020	Rec. 2020
 	Recent Files	Недавние файлы
 	Reconstruct All	Восстановить всё
@@ -4683,8 +4672,6 @@ curves	Smooth	Сгладить
 	Resolve Missing Fonts	Устранить отсутствующие шрифты
 	Restart	Перезапустить
 	Restart Required	Требуется перезапуск
-	Resume	Продолжить
-	Retry	Повторить
 	Rgb	RGB
 	Ridges	Гребни
 	Right Diagonal	Правая диагональ
@@ -4696,7 +4683,6 @@ curves	Smooth	Сгладить
 	Rough Pastels	Пастель
 	Row Order	Порядок строк
 	Rulers  (⌘R)	Линейки  (⌘R)
-	Sample Size	Размер образца
 	Sampled Colors	Отобранные цвета
 	Sandstone	Песчаник
 	Sat	Насыщ.
@@ -4793,7 +4779,6 @@ curves	Smooth	Сгладить
 	Sparkle	Искры
 	Spatter	Разбрызгивание
 	Speckle	Крапинки
-	Speed	Скорость
 	Spherize	Сферизация
 	Spin	Вращение
 	Spin Blur	Размытие вращением
@@ -4915,7 +4900,6 @@ curves	Smooth	Сгладить
 	Unsupported file format	Неподдерживаемый формат файла
 	Unsupported format	Неподдерживаемый формат
 	Up	Вверх
-	Update	Обновить
 	Updates	Обновления
 	Upper	Верхний
 	Use Custom Color	Использовать свой цвет
@@ -5126,7 +5110,6 @@ shape	Appearance	Оформление
 	{tool}: done	{tool}: готово
 	Which one should I use?	Что выбрать?
 	Tap to use a tool; press and hold to see what it does and add it to the favorites bar.	Нажмите, чтобы выбрать инструмент; удерживайте, чтобы узнать, что он делает, и добавить его на панель избранного.
-	Processing…	Обработка…
 	Outline	Обводка
 	Outer	Снаружи
 	Centered	По центру
@@ -5134,9 +5117,6 @@ shape	Appearance	Оформление
 	Outline width	Толщина обводки
 	Color Picker (Outline)	Палитра цветов (обводка)
 	Edit text	Изменить текст
-	Bend	Изгиб
-	Horizontal Distortion	Искажение по горизонтали
-	Vertical Distortion	Искажение по вертикали
 	A .capiproj carries the project's settings and its font files, never pages or images.	Файл .capiproj содержит настройки проекта и его файлы шрифтов, но никогда не страницы и не изображения.
 	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Проект шрифтов хранит шрифты серии по ролям (диалог, крик, повествование…) и их настройки. Создайте проект, чтобы начать.
 	Add role	Добавить роль

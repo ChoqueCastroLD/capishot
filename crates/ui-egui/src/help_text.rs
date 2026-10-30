@@ -90,6 +90,7 @@ pub const HELP: &[Help] = &[
     h("tool:CloneStamp", "Copy pixels from one place and paint them in another", "Copia píxeles de un sitio y los pinta en otro", "Copia pixels de um lugar e pinta em outro"),
     h("tool:PatternStamp", "Paint with a repeating pattern", "Pinta con un patrón que se repite", "Pinte com um padrão que se repete"),
     h("tool:HistoryBrush", "Paint back an earlier state of the image", "Pinta para recuperar un estado anterior de la imagen", "Pinte para recuperar um estado anterior da imagem"),
+    h("tool:ArtHistoryBrush", "Paint an earlier state back in stylized dabs", "Pinta un estado anterior con trazos estilizados", "Pinte um estado anterior com traços estilizados"),
     h("tool:Blur", "Paint to soften and blur details", "Pinta para suavizar y desenfocar detalles", "Pinte para suavizar e desfocar detalhes"),
     h("tool:Sharpen", "Paint to make details crisper", "Pinta para dar más nitidez a los detalles", "Pinte para deixar os detalhes mais nítidos"),
     h("tool:Smudge", "Drag to smear pixels like a finger in wet paint", "Arrastra para difuminar como un dedo en pintura fresca", "Arraste para borrar como um dedo em tinta fresca"),

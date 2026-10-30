@@ -449,14 +449,7 @@ fn dragging_a_tab_onto_another_group_moves_only_that_panel() {
     drag(&mut h, source, destination);
 
     let layout = h.state().ui.docking.as_ref().expect("moving one native tab promotes to the shared layout");
-    fn tabs<'a>(node: &'a craft_ui::docking::Node<String>, panel: &str) -> Option<&'a [String]> {
-        match node {
-            craft_ui::docking::Node::Tabs { panels, .. } if panels.iter().any(|id| id == panel) => Some(panels),
-            craft_ui::docking::Node::Split { first, second, .. } => tabs(first, panel).or_else(|| tabs(second, panel)),
-            _ => None,
-        }
-    }
-    let source_group = tabs(layout.layout.root.as_ref().unwrap(), "swatches").unwrap();
+    let source_group = crate::panel_docking::group_members(&layout.layout, "swatches");
     assert!(source_group.contains(&"layers".to_owned()), "dropped into the destination tab group");
     assert!(!source_group.contains(&"color".to_owned()), "the source group remains intact");
     assert!(crate::panel_docking::valid_workspace(layout));
@@ -482,14 +475,7 @@ fn dragging_a_reordered_tab_onto_another_group_moves_that_panel() {
     drag(&mut h, source, destination);
 
     let layout = h.state().ui.docking.as_ref().expect("moving one native tab promotes to the shared layout");
-    fn tabs<'a>(node: &'a craft_ui::docking::Node<String>, panel: &str) -> Option<&'a [String]> {
-        match node {
-            craft_ui::docking::Node::Tabs { panels, .. } if panels.iter().any(|id| id == panel) => Some(panels),
-            craft_ui::docking::Node::Split { first, second, .. } => tabs(first, panel).or_else(|| tabs(second, panel)),
-            _ => None,
-        }
-    }
-    let moved = tabs(layout.layout.root.as_ref().unwrap(), "gradients").unwrap();
+    let moved = crate::panel_docking::group_members(&layout.layout, "gradients");
     assert!(moved.contains(&"layers".to_owned()), "the dragged Gradients tab joined Layers: {moved:?}");
     assert!(!moved.contains(&"color".to_owned()), "Color stayed in its group: {moved:?}");
 }
@@ -749,8 +735,10 @@ fn theme_switch_keeps_the_selected_color_group_panel() {
             h.state_mut().set_theme(&ctx, theme);
             h.run_steps(4);
             assert_eq!(Group::Color.tabs(is_pro(theme)).get(h.state().ui.dock_tabs.color), Some(name), "{theme:?}");
-            if *name == "Color" && !is_pro(theme) {
-                assert!(h.query_by_label("Hue").is_some(), "{theme:?}: Color picker missing");
+            if *name == "Color" {
+                // The spectrum field's hex readout, the same in every theme (#6000).
+                assert!(h.query_by_label("#").is_some(), "{theme:?}: Color field missing");
+                assert!(h.query_all_by_label("Hue").next().is_none(), "{theme:?}: no HSB sliders");
             }
             h.state_mut().set_theme(&ctx, ThemeKind::Pro);
             h.run_steps(4);

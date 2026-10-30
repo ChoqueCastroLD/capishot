@@ -201,6 +201,13 @@ pub(crate) fn recomposite(file: &mut PsdFile, bytes: &[u8], doc: &Document, plai
         {
             r.data.splice(..2, id.saturating_add(1).to_be_bytes());
         }
+        // The alpha channels' identifiers start with the transparency's (0), as a save with a
+        // translucent merged image writes them.
+        if let Some(r) = file.resources.iter_mut().find(|r| r.id == crate::channel_map::ALPHA_IDENTIFIERS)
+            && r.data.get(..4) != Some(&[0, 0, 0, 0][..])
+        {
+            r.data.splice(..0, [0u8; 4]);
+        }
     }
     let old = std::mem::replace(&mut file.image_data, merged.image_data.clone());
     if merged.has_alpha {

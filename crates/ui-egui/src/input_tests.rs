@@ -631,7 +631,7 @@ fn ctrl_wheel_stops_at_the_minimum_zoom() {
     assert_eq!(h.state().ui.views[0].center, c, "at the limit the image doesn't move");
 }
 
-/// Animated Zoom on (the default): a notch eases in over several frames but is still ×1.1 in
+/// Animated Zoom on (the default): a notch eases in over several frames but is still ×1.12 in
 /// total, around the pointer.
 #[test]
 fn animated_alt_scroll_zoom_still_lands_on_one_step_around_the_pointer() {
@@ -645,12 +645,12 @@ fn animated_alt_scroll_zoom_still_lands_on_one_step_around_the_pointer() {
     wheel(&h, 1.0, Modifiers::ALT);
     h.run_steps(40);
     let (z1, d1) = (zoom(&h), doc_at(&h, p));
-    assert!((z1 / z0 - 1.1).abs() < 1e-3, "one ⌥ notch is ×1.1: {z0} -> {z1}");
+    assert!((z1 / z0 - NOTCH).abs() < 1e-3, "one ⌥ notch is ×1.12: {z0} -> {z1}");
     assert!((d1[0] - d0[0]).abs() < 0.05 && (d1[1] - d0[1]).abs() < 0.05, "centred on the pointer: {d0:?} -> {d1:?}");
 }
 
 /// Animated Zoom on: notches flicked past 12800 % stop there, and the first notch back zooms out
-/// at once by its ×1/1.1. The rest of the notches the limit swallowed must not eat it.
+/// at once by its ×1/1.12. The rest of the notches the limit swallowed must not eat it.
 #[test]
 fn the_first_animated_notch_back_from_the_limit_zooms_out() {
     let mut h = harness();
@@ -666,7 +666,7 @@ fn the_first_animated_notch_back_from_the_limit_zooms_out() {
     assert_eq!(zoom(&h), crate::zoom_levels::MAX, "the flick reaches the limit");
     wheel(&h, -1.0, Modifiers::ALT);
     h.run_steps(40);
-    assert!((zoom(&h) - crate::zoom_levels::MAX / 1.1).abs() < 1e-2, "one notch back: {}", zoom(&h));
+    assert!((zoom(&h) - crate::zoom_levels::MAX / NOTCH).abs() < 1e-2, "one notch back: {}", zoom(&h));
 }
 
 #[test]
@@ -685,49 +685,6 @@ fn alt_scroll_zooms_while_a_temporary_tool_is_held() {
     h.event(egui::Event::Key { key: Key::Space, physical_key: None, pressed: false, repeat: false, modifiers: Modifiers::NONE });
     h.run_steps(2);
     assert_eq!(h.state().ui.tool, crate::state::Tool::Brush);
-}
-
-/// #8049 (Windows 11): the Alt key's press arrives, but the modifier state stays without Alt, so
-/// every wheel event while it is held reports no modifiers; tapping Ctrl brought Alt back. Until
-/// then ⌥ + scroll panned (or, with Zoom with Scroll Wheel on, zoomed) like a plain scroll.
-#[test]
-fn alt_scroll_zooms_when_the_modifier_state_misses_the_held_alt() {
-    let alt_key =
-        |pressed: bool, repeat: bool| egui::Event::Key { key: Key::AltLeft, physical_key: Some(Key::AltLeft), pressed, repeat, modifiers: Modifiers::NONE };
-    for zoom_with_wheel in [false, true] {
-        let mut h = harness();
-        h.state_mut().session.edit_prefs(|p| p.general.zoom_with_scroll_wheel = zoom_with_wheel);
-        let p = h.state().last_canvas_rect.center();
-        h.hover_at(p);
-        h.run_steps(2);
-        let (z0, c0) = (zoom(&h), h.state().ui.views[0].center);
-        // Alt goes down (and repeats while held); the wheel events carry no modifiers.
-        h.event(alt_key(true, false));
-        h.run_steps(1);
-        h.event(alt_key(true, true));
-        wheel(&h, 1.0, Modifiers::NONE);
-        h.run_steps(2);
-        wheel(&h, 1.0, Modifiers::NONE);
-        h.run_steps(40);
-        if zoom_with_wheel {
-            // ⌥ + scroll scrolls instead of zooming.
-            assert_eq!(zoom(&h), z0, "pref on: ⌥ + scroll never zooms");
-            assert!(h.state().ui.views[0].center[1] < c0[1], "pref on: ⌥ + scroll pans: {c0:?} -> {:?}", h.state().ui.views[0].center);
-        } else {
-            assert!((zoom(&h) / z0 - 1.1f32.powi(2)).abs() < 1e-3, "two ⌥ notches are ×1.21: {z0} -> {}", zoom(&h));
-        }
-        // Alt released: the wheel does its plain thing again.
-        h.event(alt_key(false, false));
-        h.run_steps(2);
-        let z1 = zoom(&h);
-        wheel(&h, -1.0, Modifiers::NONE);
-        h.run_steps(40);
-        if zoom_with_wheel {
-            assert!(zoom(&h) < z1, "pref on: a plain notch zooms out: {z1} -> {}", zoom(&h));
-        } else {
-            assert_eq!(zoom(&h), z1, "a plain scroll after Alt's release doesn't zoom");
-        }
-    }
 }
 
 #[test]

@@ -545,7 +545,9 @@ fn a_phone_width_screen_folds_the_menus_into_one_title() {
     h.get_by_label("Menu").click();
     h.run_steps(3);
     for top in TOP_MENUS {
-        let row = h.get_by_label(&format!("{top} ⏵")).rect();
+        // egui 0.37 names a submenu button by its text alone; 0.36 included the arrow.
+        let arrow = format!("{top} ⏵");
+        let row = h.query_all_by_label(top).chain(h.query_all_by_label(&arrow)).next().unwrap_or_else(|| panic!("{top}")).rect();
         assert!(row.height() >= 30.0, "{top}: finger-sized rows ({})", row.height());
     }
     assert!(h.query_by_label("Reset Tool").is_none(), "only the menus, not shortcut-only commands");

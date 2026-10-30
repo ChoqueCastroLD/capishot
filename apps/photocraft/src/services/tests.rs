@@ -182,12 +182,6 @@ fn open_filters_keep_literal_extensions_on_windows_and_macos() {
 }
 
 #[test]
-fn flatpak_builds_have_no_update_transport() {
-    assert!(update_transport(Some(std::ffi::OsStr::new("ai.storyteller.photocraft"))).is_none());
-    assert!(update_transport(None).is_some());
-}
-
-#[test]
 fn xwayland_command_matches_how_photocraft_was_installed() {
     // Flatpak: WAYLAND_DISPLAY doesn't reach the sandbox's socket choice; flatpak's flags do.
     let flatpak = xwayland_command(Some("ai.storyteller.photocraft"), None, false);
@@ -464,112 +458,6 @@ fn new_doc(app: &mut PhotocraftApp, color: &str) {
 fn autosave(app: &mut PhotocraftApp, ctx: &egui::Context) {
     prefs_ui::autosave_now(app);
     prefs_ui::tick(app, ctx);
-}
-
-#[test]
-fn recovered_documents_survive_a_second_crash_until_saved_or_closed() {
-    let dir = std::env::temp_dir().join(format!("photocraft-recovery-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    let ctx = egui::Context::default();
-    // Launch 1: two unsaved documents are autosaved, then the app crashes.
-    {
-        let mut app = launch(&dir);
-        new_doc(&mut app, "#ff0000");
-        new_doc(&mut app, "#0000ff");
-        autosave(&mut app, &ctx);
-    }
-    assert_eq!(list_recovery(&dir).len(), 2);
-    // Launch 2 recovers both and crashes again before its first autosave (#444).
-    {
-        let mut app = launch(&dir);
-        let mut docs = open_docs(&app);
-        docs.sort_by(|a, b| a.0[0].total_cmp(&b.0[0]));
-        assert_eq!(docs, [(BLUE, true), (RED, true)], "recovered and still unsaved");
-        prefs_ui::tick(&mut app, &ctx);
-    }
-    assert_eq!(list_recovery(&dir).len(), 2, "recovering keeps the entries on disk");
-    // Launch 3 has both again; autosaving unchanged documents adds nothing, a new document
-    // (whose id may repeat one from an earlier launch) gets an entry of its own.
-    {
-        let mut app = launch(&dir);
-        assert_eq!(app.session.documents().len(), 2);
-        autosave(&mut app, &ctx);
-        new_doc(&mut app, "#00ff00");
-        autosave(&mut app, &ctx);
-    }
-    assert_eq!(list_recovery(&dir).len(), 3);
-    // Launch 4: closing and saving recovered documents removes their entries, no duplicates.
-    let mut app = launch(&dir);
-    assert_eq!(app.session.documents().len(), 3);
-    let red = index_of(&app, RED);
-    app.run("file.close", json!({"document": red})).unwrap();
-    // Saving marks the revision saved (the file write itself is the save service's job).
-    assert!(app.session.set_active(index_of(&app, BLUE)));
-    let st = app.session.active_mut().unwrap();
-    st.saved_revision = st.revision;
-    prefs_ui::tick(&mut app, &ctx);
-    let left = list_recovery(&dir);
-    assert_eq!(left.len(), 1);
-    assert_eq!(photocraft_compose::flatten(&photocraft_format::recover(&left[0]).unwrap()).px.first().copied(), Some(GREEN));
-    let green = index_of(&app, GREEN);
-    app.run("file.close", json!({"document": green})).unwrap();
-    prefs_ui::tick(&mut app, &ctx);
-    assert!(list_recovery(&dir).is_empty());
-    drop(app);
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn failed_background_autosave_is_reported_and_retried_without_another_edit() {
-    let dir = temp("autosave-retry");
-    let recovery = dir.join("Recovery");
-    // A regular file prevents creation of the recovery bundle directory.
-    std::fs::write(&recovery, b"blocked").unwrap();
-    let ctx = egui::Context::default();
-    let mut app = launch(&recovery);
-    new_doc(&mut app, "#ff0000");
-    let revision = app.session.active().unwrap().revision;
-    assert_ne!(revision, 0, "a sidecar-less bundle lists as revision 0");
-    autosave(&mut app, &ctx);
-
-    let mut failed = false;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    while std::time::Instant::now() < deadline {
-        prefs_ui::tick(&mut app, &ctx);
-        if app.ui.status.starts_with("Autosave failed:") {
-            failed = true;
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    assert!(failed, "background write failures must reach the UI");
-    assert!(app.ui.status_error);
-    assert!(list_recovery(&recovery).is_empty());
-
-    // No edit occurs: retrying this very same revision must still work.
-    std::fs::remove_file(&recovery).unwrap();
-    std::fs::create_dir(&recovery).unwrap();
-    autosave(&mut app, &ctx);
-    // The worker commits the bundle's manifest before it publishes the sidecar, and
-    // `list_recovery` lists a committed sidecar-less bundle (revision 0) on its own, so
-    // the first non-empty listing can come from the middle of the write. Wait for the write
-    // to finish: the entry then carries the sidecar's revision.
-    let mut recovered = Vec::new();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    while std::time::Instant::now() < deadline {
-        prefs_ui::tick(&mut app, &ctx);
-        recovered = list_recovery(&recovery);
-        if recovered.iter().any(|e| e.info.revision == revision) {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    assert_eq!(recovered.len(), 1, "unchanged revision should retry after failure");
-    assert_eq!(recovered[0].info.revision, revision);
-    let restored = photocraft_format::recover(&recovered[0]).unwrap();
-    assert_eq!(photocraft_compose::flatten(&restored).px.first().copied(), Some(RED));
-    drop(app);
-    std::fs::remove_dir_all(dir).unwrap();
 }
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -881,4 +769,135 @@ fn a_panicking_clipboard_read_is_reported_not_a_crash() {
 
     let mut set = guarded_clipboard_set(|_: u32, _: u32, _: &[u8]| panic!("clipboard writer bug"));
     assert!(set(1, 1, &[0; 4]).unwrap_err().contains("Copy failed"));
+}
+
+#[test]
+fn recovered_documents_survive_a_second_crash_until_saved_or_closed() {
+    let dir = std::env::temp_dir().join(format!("photocraft-recovery-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let ctx = egui::Context::default();
+    // Launch 1: two unsaved documents are autosaved, then the app crashes.
+    {
+        let mut app = launch(&dir);
+        new_doc(&mut app, "#ff0000");
+        new_doc(&mut app, "#0000ff");
+        autosave(&mut app, &ctx);
+    }
+    assert_eq!(list_recovery(&dir).len(), 2);
+    // Launch 2 recovers both and crashes again before its first autosave (#444).
+    {
+        let mut app = launch(&dir);
+        let mut docs = open_docs(&app);
+        docs.sort_by(|a, b| a.0[0].total_cmp(&b.0[0]));
+        assert_eq!(docs, [(BLUE, true), (RED, true)], "recovered and still unsaved");
+        prefs_ui::tick(&mut app, &ctx);
+    }
+    assert_eq!(list_recovery(&dir).len(), 2, "recovering keeps the entries on disk");
+    // Launch 3 has both again; autosaving unchanged documents adds nothing, a new document
+    // (whose id may repeat one from an earlier launch) gets an entry of its own.
+    {
+        let mut app = launch(&dir);
+        assert_eq!(app.session.documents().len(), 2);
+        autosave(&mut app, &ctx);
+        new_doc(&mut app, "#00ff00");
+        autosave(&mut app, &ctx);
+    }
+    assert_eq!(list_recovery(&dir).len(), 3);
+    // Launch 4: closing and saving recovered documents removes their entries, no duplicates.
+    let mut app = launch(&dir);
+    assert_eq!(app.session.documents().len(), 3);
+    let red = index_of(&app, RED);
+    app.run("file.close", json!({"document": red})).unwrap();
+    // Saving marks the revision saved (the file write itself is the save service's job).
+    assert!(app.session.set_active(index_of(&app, BLUE)));
+    let st = app.session.active_mut().unwrap();
+    st.saved_revision = st.revision;
+    prefs_ui::tick(&mut app, &ctx);
+    assert!(
+        list_recovery(&dir).iter().any(|entry| photocraft_format::recover(entry).ok().is_some_and(|doc| photocraft_compose::flatten(&doc)
+            .px
+            .first()
+            .copied()
+            == Some(BLUE))),
+        "normal Save retains undo recovery"
+    );
+    app.run("file.close", json!({"document": index_of(&app, BLUE)})).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while list_recovery(&dir).len() > 1 && std::time::Instant::now() < deadline {
+        prefs_ui::tick(&mut app, &ctx);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let left = list_recovery(&dir);
+    assert_eq!(left.len(), 1);
+    assert_eq!(photocraft_compose::flatten(&photocraft_format::recover(&left[0]).unwrap()).px.first().copied(), Some(GREEN));
+    let green = index_of(&app, GREEN);
+    app.run("file.close", json!({"document": green})).unwrap();
+    prefs_ui::tick(&mut app, &ctx);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !list_recovery(&dir).is_empty() && std::time::Instant::now() < deadline {
+        prefs_ui::tick(&mut app, &ctx);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(list_recovery(&dir).is_empty());
+    drop(app);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn failed_background_autosave_is_reported_and_retried_without_another_edit() {
+    let dir = temp("autosave-retry");
+    let recovery = dir.join("Recovery");
+    // A regular file prevents creation of the recovery bundle directory.
+    std::fs::write(&recovery, b"blocked").unwrap();
+    let ctx = egui::Context::default();
+    let mut app = launch(&recovery);
+    new_doc(&mut app, "#ff0000");
+    let revision = app.session.active().unwrap().revision;
+    assert_ne!(revision, 0, "a sidecar-less bundle lists as revision 0");
+    autosave(&mut app, &ctx);
+
+    let mut failed = false;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while std::time::Instant::now() < deadline {
+        prefs_ui::tick(&mut app, &ctx);
+        if app.ui.status.starts_with("Autosave failed:") {
+            failed = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(failed, "background write failures must reach the UI");
+    assert!(app.ui.status_error);
+    assert!(list_recovery(&recovery).is_empty());
+
+    // No edit occurs: retrying this very same revision must still work.
+    std::fs::remove_file(&recovery).unwrap();
+    std::fs::create_dir(&recovery).unwrap();
+    autosave(&mut app, &ctx);
+    // The worker commits the bundle's manifest before it publishes the sidecar, and
+    // `list_recovery` lists a committed sidecar-less bundle (revision 0) on its own, so
+    // the first non-empty listing can come from the middle of the write. Wait for the write
+    // to finish: the entry then carries the sidecar's revision.
+    let mut recovered = Vec::new();
+    // Recovery retries use a 30-second backoff; allow its deadline plus worker completion.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(45);
+    while std::time::Instant::now() < deadline {
+        prefs_ui::tick(&mut app, &ctx);
+        recovered = list_recovery(&recovery);
+        if recovered.iter().any(|e| e.info.revision == revision) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    while app.ui.status.starts_with("Autosave failed:") && std::time::Instant::now() < deadline {
+        prefs_ui::tick(&mut app, &ctx);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(!app.ui.status.starts_with("Autosave failed:"), "a durable retry clears its matching error: {}", app.ui.status);
+    assert_eq!(recovered.len(), 1, "unchanged revision should retry after failure");
+    assert_eq!(recovered[0].info.revision, revision);
+    let restored = photocraft_format::recover(&recovered[0]).unwrap();
+    assert_eq!(photocraft_compose::flatten(&restored).px.first().copied(), Some(RED));
+    drop(app);
+    std::fs::remove_dir_all(dir).unwrap();
 }

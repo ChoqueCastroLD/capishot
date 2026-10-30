@@ -4281,7 +4281,6 @@ layerLabel	No Color	Sem cor
 	Not loaded: choose the page files again	Não carregados: escolha os arquivos de página de novo
 	Open this page's file	Abrir o arquivo desta página
 	Page is always a marker word. Separate words with ; (case, accents and a final dot don't matter): Página 12, Pág. 12 and Pag 12 all mark page 12.	Page é sempre uma palavra de marcador. Separe as palavras com ; (maiúsculas, acentos e o ponto final não importam): Página 12, Pág. 12 e Pag 12 marcam a página 12.
-	Script	Roteiro
 	Some page files are too big to keep	Alguns arquivos de página são grandes demais para manter
 	Stop syncing page files	Parar de sincronizar arquivos de página
 	This page's file	Arquivo desta página
@@ -4531,13 +4530,10 @@ layerLabel	No Color	Sem cor
 	Handwritten	Manuscrita
 	Hide Font Classes	Ocultar classes de fonte
 	Hide Styles	Ocultar estilos
-	Monospace	Monoespaçada
 	No fonts match these filters.	Nenhuma fonte corresponde a estes filtros.
 	No similar fonts: the current font doesn't say what it looks like.	Nenhuma fonte semelhante: a fonte atual não descreve sua aparência.
 	OpenType font	Fonte OpenType
-	Sans Serif	Sem serifa
 	Script	Cursiva
-	Serif	Com serifa
 	Show Font Classes	Mostrar classes de fonte
 	Show Similar Fonts	Mostrar fontes semelhantes
 	Show Styles	Mostrar estilos

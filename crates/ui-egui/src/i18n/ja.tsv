@@ -2276,12 +2276,6 @@
 	Automatic (recommended)	自動（推奨）
 	CPU / Compatibility	CPU / 互換性
 	Automatic uses GPU acceleration when available and falls back to CPU rendering on errors.	自動モードは利用可能な場合にGPUを使用し、エラー時はCPU描画に切り替えます。
-	Switched to CPU rendering	CPU描画に切り替えました
-	GPU acceleration could not continue. Your documents are unchanged.	GPUアクセラレーションを継続できませんでした。ドキュメントは変更されていません。
-	Capishot is using the CPU image compositor. The window may still use your graphics adapter.	CapishotはCPUで画像を合成しています。ウィンドウは引き続きグラフィックスアダプターを使用する場合があります。
-	Retry GPU requires a restart. Save your work first.	GPUの再試行には再起動が必要です。先に作業を保存してください。
-	Keep Using CPU	CPUを使い続ける
-	Retry GPU	GPUを再試行
 	Switched to CPU rendering	CPU 描画に切り替えました
 	GPU acceleration could not continue. Your documents are unchanged.	GPU アクセラレーションを継続できませんでした。ドキュメントは変更されていません。
 	Capishot is using the CPU image compositor. The window may still use your graphics adapter.	Capishot は CPU で画像を合成しています。ウィンドウは引き続きグラフィックスアダプターを使用する場合があります。
@@ -4228,13 +4222,10 @@ curves	Smooth	スムーズ
 	Handwritten	手書き
 	Hide Font Classes	フォントの分類を隠す
 	Hide Styles	スタイルを隠す
-	Monospace	等幅
 	No fonts match these filters.	このフィルターに一致するフォントはありません。
 	No similar fonts: the current font doesn't say what it looks like.	類似フォントはありません。現在のフォントは外観の情報を持っていません。
 	OpenType font	OpenType フォント
-	Sans Serif	サンセリフ
 	Script	スクリプト
-	Serif	セリフ
 	Show Font Classes	フォントの分類を表示
 	Show Similar Fonts	類似フォントを表示
 	Show Styles	スタイルを表示

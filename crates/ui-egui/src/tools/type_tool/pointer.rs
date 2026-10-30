@@ -292,7 +292,9 @@ fn makes_box(app: &PhotocraftApp, start: [f64; 2], end: [f64; 2]) -> bool {
 /// shape): a closed subpath of the work path, or of the active shape layer, that contains the
 /// point. As `type.create`'s `inPath` source.
 pub(crate) fn in_path_at(app: &PhotocraftApp, x: f64, y: f64) -> Option<serde_json::Value> {
-    if app.ui.tool.is_vertical_type() {
+    // Where a click makes area type ([`path_target`]: a path the canvas shows, not its outline),
+    // Capishot makes type in the path instead, with its alignment and inset controls.
+    if app.ui.tool.is_vertical_type() || !matches!(path_target(app, x, y), Some(PathClick::Area { .. })) {
         return None;
     }
     let st = app.session.active()?;
@@ -324,7 +326,8 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
     let mask = app.ui.tool.is_type_mask();
     // A click (not a drag) with the Type tool on a path: area type inside a closed path, type
     // on the path on its outline. The Type Mask tools ignore paths.
-    let target = if !mask && !makes_box(app, start, end) { path_target(app, start[0], start[1]) } else { None };
+    let bubble = app.ui.tool == crate::state::Tool::BubbleType;
+    let mut target = if !mask && !bubble && !makes_box(app, start, end) { path_target(app, start[0], start[1]) } else { None };
     // Preferences ▸ Type: "Fill new type layers with placeholder text" (on by default). The Type
     // Mask tools start empty, as Photoshop's do.
     let text = if !mask && app.session.prefs().type_.fill_new_type_layers_with_placeholder { PLACEHOLDER } else { "" };
@@ -334,7 +337,6 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
     if let Some(l) = o.type_leading {
         p["leading"] = json!(l);
     }
-    let bubble = app.ui.tool == crate::state::Tool::BubbleType;
     if w >= min && h >= min {
         p["box"] = json!([start[0].min(end[0]).round(), start[1].min(end[1]).round(), w.round(), h.round()]);
     } else if bubble {
@@ -352,9 +354,11 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
         if let Some(map) = crate::bubble_type_ui::shape_styles_param(app) {
             p["shapeStyles"] = map;
         }
-    } else if let Some(src) = in_path_at(app, start[0], start[1]) {
-        // A click inside a closed path: type in the path, as in Photoshop.
+    } else if let Some(src) = (!mask).then(|| in_path_at(app, start[0], start[1])).flatten() {
+        // A click inside a closed path: type in the path, as in Photoshop (made in one step: no
+        // area-type follow-up).
         p["inPath"] = src;
+        target = None;
     } else {
         p["x"] = json!(start[0].round());
         p["y"] = json!(start[1].round());
