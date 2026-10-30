@@ -335,7 +335,7 @@ fn prepare_merged_planes<'a>(
     let channels = (cc + usize::from(has_alpha) + extra.len()) as u16;
     let mode = if duotone { PsdMode::Duotone } else { psd_mode(fmt.mode) };
     let header = Header::new(ex.version, doc.size.width, doc.size.height, channels, psd_depth(sample), mode);
-    let compression = if sample == SampleType::F32 { Compression::Raw } else { opts.merged_compression };
+    let compression = if sample == SampleType::F32 { Compression::Raw } else { super::merged_compression(sample, opts.merged_compression) };
     let blank = if opts.merged_image || !planes.is_empty() { None } else { ImageData::blank_rle(&header).ok() };
     let image_data = match blank {
         Some(blank) => blank,
@@ -343,11 +343,7 @@ fn prepare_merged_planes<'a>(
             if planes.is_empty() {
                 planes = vec![0u8; cc * n * sample.bytes()];
             }
-            ImageData::encode(compression, &planes, &header).or_else(|_| ImageData::encode(Compression::Raw, &planes, &header)).unwrap_or(ImageData {
-                compression: Compression::Raw,
-                data: planes,
-                stored: None,
-            })
+            super::merged_image_data(compression, planes, &header)
         }
     };
     ctl.progress(1.0);
