@@ -111,7 +111,10 @@ fn prev_rects_id() -> Id {
 
 /// `ui.inspect`'s `touch`: the router's state and where the touch pieces were drawn.
 pub fn inspect(app: &PhotocraftApp, ctx: &egui::Context) -> serde_json::Value {
-    let rects: Vec<(String, [f32; 4])> = ctx.data(|d| d.get_temp(rects_id())).unwrap_or_default();
+    // What was noted before the overlays started this frame's list (the options bar), then this
+    // frame's: the last one of a label is where it is now.
+    let mut rects: Vec<(String, [f32; 4])> = ctx.data(|d| d.get_temp(prev_rects_id())).unwrap_or_default();
+    rects.extend(ctx.data(|d| d.get_temp::<Vec<(String, [f32; 4])>>(rects_id())).unwrap_or_default());
     let b = app.touch.button;
     json!({
         "active": active(app),

@@ -3779,3 +3779,13 @@ curves	Smooth	Haluskan
 	Letter case	Huruf besar/kecil
 	Font Projects…	Proyek font…
 	Add {font} to the current project as…	Tambahkan {font} ke proyek saat ini sebagai…
+	Automatic (by shape)	Otomatis (menurut bentuk)
+	Project: {name}	Proyek: {name}
+	Bubble style	Gaya balon
+	Search TypeR styles	Cari gaya TypeR
+	No styles match	Tidak ada gaya yang cocok
+	Remember by shape	Ingat per bentuk
+	In Automatic, the style each kind of shape uses	Di Otomatis, gaya yang dipakai setiap jenis bentuk
+	The style the next bubble uses: Bubble Type's, the font project's or a TypeR style	Gaya balon berikutnya: dari Teks balon, proyek font, atau TypeR
+	The style {style} is gone: the shape's own style was used	Gaya {style} sudah tidak ada: gaya bentuk itu sendiri yang dipakai
+	Bubble Type	Teks balon

@@ -4471,3 +4471,13 @@ curves	Smooth	Εξομάλυνση
 	Letter case	Πεζά/κεφαλαία
 	Font Projects…	Έργα γραμματοσειρών…
 	Add {font} to the current project as…	Προσθήκη {font} στο τρέχον έργο ως…
+	Automatic (by shape)	Αυτόματα (κατά σχήμα)
+	Project: {name}	Έργο: {name}
+	Bubble style	Στυλ συννεφάκι
+	Search TypeR styles	Αναζήτηση στυλ TypeR
+	No styles match	Κανένα στυλ δεν ταιριάζει
+	Remember by shape	Απομνημόνευση κατά σχήμα
+	In Automatic, the style each kind of shape uses	Στο Αυτόματο, το στυλ που χρησιμοποιεί κάθε είδος σχήματος
+	The style the next bubble uses: Bubble Type's, the font project's or a TypeR style	Το στυλ του επόμενου συννεφάκι: από το Κείμενο σε συννεφάκι, το έργο γραμματοσειρών ή το TypeR
+	The style {style} is gone: the shape's own style was used	Το στυλ {style} δεν υπάρχει πια: χρησιμοποιήθηκε το στυλ του σχήματος
+	Bubble Type	Κείμενο σε συννεφάκι

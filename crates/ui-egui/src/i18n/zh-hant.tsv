@@ -3409,3 +3409,13 @@ curves	Smooth	平滑
 	Import…	匯入…
 	Settings	設定
 	Add {font} to the current project as…	將 {font} 加入目前專案，作為…
+	Automatic (by shape)	自動（依形狀）
+	Project: {name}	專案：{name}
+	Bubble style	對話框樣式
+	Search TypeR styles	搜尋 TypeR 樣式
+	No styles match	沒有符合的樣式
+	Remember by shape	依形狀記住
+	In Automatic, the style each kind of shape uses	自動模式下，每種形狀使用的樣式
+	The style the next bubble uses: Bubble Type's, the font project's or a TypeR style	下一個對話框的樣式：對話框文字、字型專案或 TypeR 的樣式
+	The style {style} is gone: the shape's own style was used	樣式 {style} 已不存在：已使用該形狀本身的樣式
+	Bubble Type	對話框文字

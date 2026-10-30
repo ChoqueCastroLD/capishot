@@ -4381,3 +4381,13 @@ curves	Smooth	Wygładź
 	Letter case	Wielkość liter
 	Font Projects…	Projekty czcionek…
 	Add {font} to the current project as…	Dodaj {font} do bieżącego projektu jako…
+	Automatic (by shape)	Automatycznie (wg kształtu)
+	Project: {name}	Projekt: {name}
+	Bubble style	Styl dymku
+	Search TypeR styles	Szukaj stylów TypeR
+	No styles match	Żaden styl nie pasuje
+	Remember by shape	Zapamiętaj wg kształtu
+	In Automatic, the style each kind of shape uses	W trybie automatycznym: styl używany przez każdy rodzaj kształtu
+	The style the next bubble uses: Bubble Type's, the font project's or a TypeR style	Styl następnego dymku: z Tekstu w dymku, projektu czcionek lub TypeR
+	The style {style} is gone: the shape's own style was used	Styl {style} już nie istnieje: użyto własnego stylu kształtu
+	Bubble Type	Tekst w dymku

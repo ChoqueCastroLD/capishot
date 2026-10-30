@@ -3790,3 +3790,13 @@ curves	Smooth	Glätten
 	Import…	Importieren…
 	Settings	Einstellungen
 	Add {font} to the current project as…	{font} zum aktuellen Projekt hinzufügen als…
+	Automatic (by shape)	Automatisch (nach Form)
+	Project: {name}	Projekt: {name}
+	Bubble style	Blasenstil
+	Search TypeR styles	TypeR-Stile suchen
+	No styles match	Kein Stil passt
+	Remember by shape	Nach Form merken
+	In Automatic, the style each kind of shape uses	In Automatisch: der Stil, den jede Formart verwendet
+	The style the next bubble uses: Bubble Type's, the font project's or a TypeR style	Der Stil der nächsten Blase: aus Blasentext, dem Schriftprojekt oder TypeR
+	The style {style} is gone: the shape's own style was used	Der Stil {style} existiert nicht mehr: der eigene Stil der Form wurde verwendet
+	Bubble Type	Blasentext

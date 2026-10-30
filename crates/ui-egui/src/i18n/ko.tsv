@@ -3971,3 +3971,13 @@ curves	Smooth	매끄럽게
 	Font Projects…	글꼴 프로젝트…
 	Import…	가져오기…
 	Add {font} to the current project as…	{font}을(를) 현재 프로젝트에 다음 역할로 추가…
+	Automatic (by shape)	자동 (모양에 따라)
+	Project: {name}	프로젝트: {name}
+	Bubble style	말풍선 스타일
+	Search TypeR styles	TypeR 스타일 검색
+	No styles match	일치하는 스타일이 없습니다
+	Remember by shape	모양별로 기억
+	In Automatic, the style each kind of shape uses	자동에서 각 모양 종류가 쓰는 스타일
+	The style the next bubble uses: Bubble Type's, the font project's or a TypeR style	다음 말풍선의 스타일: 말풍선 텍스트, 글꼴 프로젝트 또는 TypeR
+	The style {style} is gone: the shape's own style was used	스타일 {style}이(가) 더 이상 없습니다: 모양 자체의 스타일을 사용했습니다
+	Bubble Type	말풍선 텍스트

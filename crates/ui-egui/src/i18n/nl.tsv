@@ -4530,3 +4530,13 @@ curves	Smooth	Vloeiend maken
 	Letter case	Hoofdletters
 	Font Projects…	Lettertypeprojecten…
 	Add {font} to the current project as…	{font} aan het huidige project toevoegen als…
+	Automatic (by shape)	Automatisch (op vorm)
+	Project: {name}	Project: {name}
+	Bubble style	Ballonstijl
+	Search TypeR styles	TypeR-stijlen zoeken
+	No styles match	Geen stijl komt overeen
+	Remember by shape	Onthouden per vorm
+	In Automatic, the style each kind of shape uses	In Automatisch: de stijl die elk soort vorm gebruikt
+	The style the next bubble uses: Bubble Type's, the font project's or a TypeR style	De stijl van de volgende ballon: van Ballontekst, het lettertypeproject of TypeR
+	The style {style} is gone: the shape's own style was used	De stijl {style} bestaat niet meer: de eigen stijl van de vorm is gebruikt
+	Bubble Type	Ballontekst

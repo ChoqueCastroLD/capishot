@@ -15,7 +15,7 @@
 //! cursor advances (TypeR's `nextLine {add}`) only after success, and only when the text came
 //! from the script.
 
-mod support;
+pub(crate) mod support;
 #[cfg(test)]
 mod tests;
 

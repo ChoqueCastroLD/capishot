@@ -4382,3 +4382,13 @@ navigator	Zoom	Zvětšení
 	Font Projects…	Projekty písem…
 	Import…	Importovat…
 	Add {font} to the current project as…	Přidat {font} do aktuálního projektu jako…
+	Automatic (by shape)	Automaticky (podle tvaru)
+	Project: {name}	Projekt: {name}
+	Bubble style	Styl bubliny
+	Search TypeR styles	Hledat styly TypeR
+	No styles match	Žádný styl neodpovídá
+	Remember by shape	Pamatovat podle tvaru
+	In Automatic, the style each kind of shape uses	V režimu Automaticky: styl, který používá každý druh tvaru
+	The style the next bubble uses: Bubble Type's, the font project's or a TypeR style	Styl další bubliny: z Textu v bublině, projektu písem nebo TypeR
+	The style {style} is gone: the shape's own style was used	Styl {style} už neexistuje: použil se vlastní styl tvaru
+	Bubble Type	Text v bublině

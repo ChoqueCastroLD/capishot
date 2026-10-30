@@ -4490,3 +4490,13 @@ curves	Smooth	Згладити
 	Letter case	Регістр
 	Font Projects…	Проєкти шрифтів…
 	Add {font} to the current project as…	Додати {font} до поточного проєкту як…
+	Automatic (by shape)	Автоматично (за формою)
+	Project: {name}	Проєкт: {name}
+	Bubble style	Стиль бульбашки
+	Search TypeR styles	Шукати стилі TypeR
+	No styles match	Жоден стиль не відповідає
+	Remember by shape	Запам’ятати за формою
+	In Automatic, the style each kind of shape uses	В автоматичному режимі: стиль для кожного виду форми
+	The style the next bubble uses: Bubble Type's, the font project's or a TypeR style	Стиль наступної бульбашки: з «Тексту в бульбашці», проєкту шрифтів або TypeR
+	The style {style} is gone: the shape's own style was used	Стилю {style} більше немає: використано власний стиль форми
+	Bubble Type	Текст у бульбашці

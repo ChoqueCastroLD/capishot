@@ -3792,3 +3792,13 @@ curves	Smooth	Lisser
 	Letter case	Casse
 	Font Projects…	Projets de polices…
 	Add {font} to the current project as…	Ajouter {font} au projet actuel comme…
+	Automatic (by shape)	Automatique (selon la forme)
+	Project: {name}	Projet : {name}
+	Bubble style	Style de bulle
+	Search TypeR styles	Rechercher des styles TypeR
+	No styles match	Aucun style ne correspond
+	Remember by shape	Mémoriser par forme
+	In Automatic, the style each kind of shape uses	En Automatique, le style utilisé par chaque type de forme
+	The style the next bubble uses: Bubble Type's, the font project's or a TypeR style	Le style de la prochaine bulle : ceux du Texte en bulle, du projet de polices ou de TypeR
+	The style {style} is gone: the shape's own style was used	Le style {style} n’existe plus : le style propre à la forme a été utilisé
+	Bubble Type	Texte en bulle

@@ -4933,3 +4933,13 @@ navigator	Zoom	Zoom
 	Letter case	Mayúsculas
 	Font Projects…	Proyectos de fuentes…
 	Add {font} to the current project as…	Agregar {font} al proyecto actual como…
+	Automatic (by shape)	Automático (por forma)
+	Project: {name}	Proyecto: {name}
+	Bubble style	Estilo del globo
+	Search TypeR styles	Buscar estilos de TypeR
+	No styles match	Ningún estilo coincide
+	Remember by shape	Recordar por forma
+	In Automatic, the style each kind of shape uses	En Automático, el estilo que usa cada tipo de forma
+	The style the next bubble uses: Bubble Type's, the font project's or a TypeR style	El estilo del próximo globo: de Texto en globo, del proyecto de fuentes o de TypeR
+	The style {style} is gone: the shape's own style was used	El estilo {style} ya no existe: se usó el estilo propio de la forma
+	Bubble Type	Texto en globo

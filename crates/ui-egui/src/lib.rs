@@ -2568,6 +2568,7 @@ impl eframe::App for PhotocraftApp {
         ai_progress::show(self, &ctx);
         ai_models_ui::window(self, &ctx);
         font_projects_ui::window(self, &ctx);
+        bubble_type_ui::picker(self, &ctx);
         discard_ui::show(self, &ctx);
         recovery_ui::show(self, &ctx);
         tiff_options_ui::show(self, &ctx);

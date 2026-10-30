@@ -530,6 +530,9 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
         p["y"] = json!(start[1]);
         p["style"] = json!(o.bubble_pick);
         p["styles"] = crate::font_projects_ui::bubble_styles(app, &o.bubble_styles);
+        if let Some(map) = crate::bubble_type_ui::shape_styles_param(app) {
+            p["shapeStyles"] = map;
+        }
     } else if let Some(src) = in_path_at(app, start[0], start[1]) {
         // A click inside a closed path: type in the path, as in Photoshop.
         p["inPath"] = src;
@@ -543,7 +546,17 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
     let created = app.run(command, p);
     if bubble && let Ok(v) = &created {
         let kind = v.get("style").and_then(serde_json::Value::as_str).unwrap_or("bubble");
-        crate::bubble_type_ui::flash(app, kind, start);
+        // Another source's style shows its own name by the cursor.
+        let shown = v.get("styleName").and_then(serde_json::Value::as_str).unwrap_or(kind).to_string();
+        crate::bubble_type_ui::flash(app, &shown, start);
+        if let Some(missing) = v.get("fallback").and_then(serde_json::Value::as_str) {
+            let title = crate::i18n::fmt(tl!("The style {style} is gone: the shape's own style was used"), &[("style", missing)]);
+            app.ui.notices.retain(|n| n.tag.as_deref() != Some("bubbleFallback"));
+            let id = crate::notices::post(app, title, Vec::new(), false, None);
+            if let Some(n) = app.ui.notices.iter_mut().find(|n| n.id == id) {
+                n.tag = Some("bubbleFallback".into());
+            }
+        }
         app.ui.notices.retain(|n| n.tag.as_deref() != Some("noBubble"));
         if kind == "floating" {
             // Nothing to fill there: floating text, said once however many clicks.
@@ -653,7 +666,7 @@ pub(crate) fn cut_selection(app: &mut PhotocraftApp, ctx: &egui::Context) {
 }
 
 /// Replace the selection with `s`.
-fn insert(app: &mut PhotocraftApp, s: &str) {
+pub(crate) fn insert(app: &mut PhotocraftApp, s: &str) {
     let Some(ed) = app.ui.text_edit.clone() else { return };
     let (a, b) = (ed.caret.min(ed.anchor), ed.caret.max(ed.anchor));
     let s = s.replace("\r\n", "\n").replace('\r', "\n");
@@ -2744,13 +2757,17 @@ pub fn touch_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
     if touch_bar_rows(w) == 1 {
         ui.horizontal(|ui| {
-            let font_w = (w - (TOUCH_BAR_ONE_ROW - 120.0)).clamp(120.0, 220.0);
+            let extra = if app.ui.tool == crate::state::Tool::BubbleType { 50.0 } else { 0.0 };
+            let font_w = (w - (TOUCH_BAR_ONE_ROW - 120.0) - extra).clamp(120.0, 220.0);
             font_and_size(app, ui, font_w);
             color_button(app, ui);
             stroke_control(app, ui, true);
             align_button(app, ui);
             touch_leading(app, ui);
             warp_button(app, ui);
+            if app.ui.tool == crate::state::Tool::BubbleType {
+                bubble_style_button(app, ui);
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| done_button(app, ui));
         });
         return;
@@ -2762,10 +2779,11 @@ pub fn touch_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             font_and_size(app, ui, font_w);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| done_button(app, ui));
         });
-        // Five buttons, evenly spaced across the width.
+        // Five buttons (six with Bubble Type's style), evenly spaced across the width.
+        let n = if app.ui.tool == crate::state::Tool::BubbleType { 6 } else { 5 };
         let (row, _) = ui.allocate_exact_size(egui::vec2(w, TOUCH_BAR_ROW), egui::Sense::hover());
-        let slot = w / 5.0;
-        for i in 0..5 {
+        let slot = w / n as f32;
+        for i in 0..n {
             let c = egui::pos2(row.left() + slot * (i as f32 + 0.5), row.center().y);
             let r = egui::Rect::from_center_size(c, egui::vec2(TOUCH_BAR_ROW, TOUCH_BAR_ROW));
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(r).layout(egui::Layout::left_to_right(egui::Align::Center)));
@@ -2774,7 +2792,8 @@ pub fn touch_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 1 => stroke_control(app, &mut child, true),
                 2 => align_button(app, &mut child),
                 3 => touch_leading(app, &mut child),
-                _ => warp_button(app, &mut child),
+                4 => warp_button(app, &mut child),
+                _ => bubble_style_button(app, &mut child),
             }
         }
     });
@@ -2862,6 +2881,16 @@ fn color_button(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 }
 
 /// The bar's Warp Text… (Arc, Arch, Flag…: the type's warp, with its preview).
+/// The bar's Bubble Type style: opens the style picker as a sheet.
+fn bubble_style_button(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    let r = crate::icons::button(ui, "type-bubble", 44.0, crate::bubble_type_ui::picker_open(ui.ctx()), tl!("Bubble style"));
+    crate::touch_ui::note_rect(ui.ctx(), "typeBubbleStyle", r.rect);
+    if r.clicked() {
+        crate::bubble_type_ui::open_picker(ui.ctx(), r.rect);
+    }
+    let _ = app;
+}
+
 pub(crate) fn warp_button(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let r = crate::icons::button(ui, "spline", 44.0, false, tl!("Warp"));
     crate::touch_ui::note_rect(ui.ctx(), "typeWarp", r.rect);

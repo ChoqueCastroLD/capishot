@@ -3424,3 +3424,13 @@ curves	Smooth	平滑
 	Import…	导入…
 	Settings	设置
 	Add {font} to the current project as…	将 {font} 添加到当前项目，作为…
+	Automatic (by shape)	自动（按形状）
+	Project: {name}	项目：{name}
+	Bubble style	气泡样式
+	Search TypeR styles	搜索 TypeR 样式
+	No styles match	没有匹配的样式
+	Remember by shape	按形状记住
+	In Automatic, the style each kind of shape uses	自动模式下，每种形状使用的样式
+	The style the next bubble uses: Bubble Type's, the font project's or a TypeR style	下一个气泡的样式：气泡文字、字体项目或 TypeR 的样式
+	The style {style} is gone: the shape's own style was used	样式 {style} 已不存在：已使用该形状自身的样式
+	Bubble Type	气泡文字

@@ -3759,3 +3759,13 @@ curves	Smooth	Сгладить
 	Letter case	Регистр
 	Font Projects…	Проекты шрифтов…
 	Add {font} to the current project as…	Добавить {font} в текущий проект как…
+	Automatic (by shape)	Автоматически (по форме)
+	Project: {name}	Проект: {name}
+	Bubble style	Стиль облачка
+	Search TypeR styles	Искать стили TypeR
+	No styles match	Нет подходящих стилей
+	Remember by shape	Запоминать по форме
+	In Automatic, the style each kind of shape uses	В автоматическом режиме: стиль для каждого вида формы
+	The style the next bubble uses: Bubble Type's, the font project's or a TypeR style	Стиль следующего облачка: из «Текста в облачке», проекта шрифтов или TypeR
+	The style {style} is gone: the shape's own style was used	Стиля {style} больше нет: использован собственный стиль формы
+	Bubble Type	Текст в облачке

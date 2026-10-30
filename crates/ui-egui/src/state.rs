@@ -717,9 +717,15 @@ pub struct ToolOptions {
     pub type_leading: Option<f32>,
     /// Bubble Type: its three text styles (bubble, narration box, floating text).
     pub bubble_styles: BubbleStyles,
-    /// Bubble Type: which style a click uses: `auto` (by what it hits), `bubble`, `narration`
-    /// or `floating`.
+    /// Bubble Type: which style a click uses: `auto` (by what it hits), `bubble`, `narration`,
+    /// `floating`, `project:<role>` (a role of the active font project) or `typer:<id>` (a TypeR
+    /// library style).
     pub bubble_pick: String,
+    /// Bubble Type: the styles picked lately, newest first (the picker's Recent section).
+    pub bubble_recent: Vec<String>,
+    /// Bubble Type, Auto: what each shape found uses ("bubble", "narration", "floating" → a
+    /// style as in `bubble_pick`) when no font project is active; with one, its mapping.
+    pub bubble_shape_styles: std::collections::BTreeMap<String, String>,
     /// Clone Stamp / Healing Brush.
     pub clone_aligned: bool,
     /// Pattern Stamp: lock the tile origin in document space across strokes.
@@ -1039,6 +1045,8 @@ impl Default for ToolOptions {
             type_leading: None,
             bubble_styles: BubbleStyles::default(),
             bubble_pick: "auto".into(),
+            bubble_recent: Vec::new(),
+            bubble_shape_styles: Default::default(),
             clone_aligned: true,
             pattern_stamp_aligned: true,
             pattern_stamp_impressionist: false,

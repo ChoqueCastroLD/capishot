@@ -4452,3 +4452,13 @@ curves	Smooth	スムーズ
 	Letter case	大文字/小文字
 	Font Projects…	フォントプロジェクト…
 	Add {font} to the current project as…	{font} を現在のプロジェクトに追加：役割…
+	Automatic (by shape)	自動（形状で判定）
+	Project: {name}	プロジェクト: {name}
+	Bubble style	吹き出しスタイル
+	Search TypeR styles	TypeR スタイルを検索
+	No styles match	一致するスタイルがありません
+	Remember by shape	形状ごとに記憶
+	In Automatic, the style each kind of shape uses	自動で、各形状の種類が使うスタイル
+	The style the next bubble uses: Bubble Type's, the font project's or a TypeR style	次の吹き出しのスタイル：吹き出しテキスト、フォントプロジェクト、または TypeR のもの
+	The style {style} is gone: the shape's own style was used	スタイル {style} はもうありません：形状のスタイルを使いました
+	Bubble Type	吹き出しテキスト

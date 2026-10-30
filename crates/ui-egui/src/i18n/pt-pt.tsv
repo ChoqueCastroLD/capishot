@@ -3390,3 +3390,13 @@ fontWeight	Italic	Itálico
 	Letter case	Maiúsculas
 	Font Projects…	Projetos de fontes…
 	Add {font} to the current project as…	Adicionar {font} ao projeto atual como…
+	Automatic (by shape)	Automático (pela forma)
+	Project: {name}	Projeto: {name}
+	Bubble style	Estilo do balão
+	Search TypeR styles	Procurar estilos do TypeR
+	No styles match	Nenhum estilo corresponde
+	Remember by shape	Lembrar por forma
+	In Automatic, the style each kind of shape uses	No Automático, o estilo que cada tipo de forma usa
+	The style the next bubble uses: Bubble Type's, the font project's or a TypeR style	O estilo do próximo balão: do Texto em balão, do projeto de tipos de letra ou do TypeR
+	The style {style} is gone: the shape's own style was used	O estilo {style} já não existe: foi usado o estilo da própria forma
+	Bubble Type	Texto no balão

@@ -4881,3 +4881,13 @@ shape	Appearance	Aspetto
 	Letter case	Maiuscole/minuscole
 	Font Projects…	Progetti di font…
 	Add {font} to the current project as…	Aggiungi {font} al progetto attuale come…
+	Automatic (by shape)	Automatico (per forma)
+	Project: {name}	Progetto: {name}
+	Bubble style	Stile del balloon
+	Search TypeR styles	Cerca stili TypeR
+	No styles match	Nessuno stile corrisponde
+	Remember by shape	Ricorda per forma
+	In Automatic, the style each kind of shape uses	In Automatico, lo stile usato da ogni tipo di forma
+	The style the next bubble uses: Bubble Type's, the font project's or a TypeR style	Lo stile del prossimo balloon: del Testo nel balloon, del progetto di font o di TypeR
+	The style {style} is gone: the shape's own style was used	Lo stile {style} non esiste più: è stato usato lo stile della forma
+	Bubble Type	Testo nel balloon
