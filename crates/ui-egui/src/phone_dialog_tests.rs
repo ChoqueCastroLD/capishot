@@ -130,7 +130,7 @@ fn the_tool_options_popover_is_a_form_that_fits() {
     let mut h = phone();
     for tool in crate::state::Tool::ALL {
         h.state_mut().ui.tool = tool;
-        h.ctx.data_mut(|d| d.insert_temp(egui::Id::new("simple-ui-options-open"), true));
+        h.ctx.data_mut(|d| d.insert_temp(egui::Id::unique("simple-ui-options-open"), true));
         h.run_steps(3);
         let pop = crate::simple_ui::noted_rect(&h.ctx, "options-popover");
         let window = egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(W, H));
@@ -149,7 +149,7 @@ fn the_tool_options_popover_is_a_form_that_fits() {
             h.run_steps(2);
             assert!(!crate::simple_ui::options_open(&h.ctx));
         }
-        h.ctx.data_mut(|d| d.insert_temp(egui::Id::new("simple-ui-options-open"), false));
+        h.ctx.data_mut(|d| d.insert_temp(egui::Id::unique("simple-ui-options-open"), false));
         h.run_steps(1);
     }
 }

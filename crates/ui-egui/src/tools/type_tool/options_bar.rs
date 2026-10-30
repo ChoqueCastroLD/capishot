@@ -98,7 +98,11 @@ fn leading_options(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     crate::icons::paint(ui, r, "line-height", 16.0, crate::theme::Tokens::get(ui.ctx()).text_dim);
     resp.on_hover_text(tl!("Line spacing (leading)"));
     let mut shown = lead.unwrap_or(size * auto_k) * k * u;
-    if crate::widgets::value_field(ui, &mut shown, 0.1 * u..=5000.0 * u, unit, 56.0).accessible_name(tl!("Line spacing (leading)")).on_hover_text(tl!("Line spacing (leading)")).changed() {
+    if crate::widgets::value_field(ui, &mut shown, 0.1 * u..=5000.0 * u, unit, 56.0)
+        .accessible_name(tl!("Line spacing (leading)"))
+        .on_hover_text(tl!("Line spacing (leading)"))
+        .changed()
+    {
         set_leading(app, ui.ctx(), Some(shown / u / k));
     }
     let auto = lead.is_none();
@@ -604,7 +608,7 @@ fn done_button(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(70.0, 44.0), egui::Sense::click());
     ui.painter().rect_filled(rect.shrink2(egui::vec2(0.0, 4.0)), egui::CornerRadius::same(18), t.accent);
     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, tl!("Done"), crate::theme::semibold(14.0), Color32::WHITE);
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Done")));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tl!("Done")));
     crate::touch_ui::note_rect(ui.ctx(), "typeDone", rect);
     if resp.clicked() {
         commit(app);
@@ -671,7 +675,7 @@ fn color_button(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(44.0, 44.0), egui::Sense::click());
     let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
     ui.painter().circle(rect.center(), 15.0, Color32::from_rgb(q(c[0]), q(c[1]), q(c[2])), Stroke::new(1.5, t.card_border));
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Set the text color")));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tl!("Set the text color")));
     crate::touch_ui::note_rect(ui.ctx(), "typeColor", rect);
     if resp.clicked() {
         open_color_picker(app, [c[0], c[1], c[2]]);

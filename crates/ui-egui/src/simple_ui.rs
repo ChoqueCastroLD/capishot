@@ -571,7 +571,7 @@ pub fn overlays(app: &mut PhotocraftApp, ctx: &egui::Context) {
 }
 
 fn help_id() -> Id {
-    Id::new("simple-help")
+    Id::unique("simple-help")
 }
 
 /// The long-press card for `entry` (a tool or command), pressed at `rect`.
@@ -583,7 +583,7 @@ fn open_help(ctx: &egui::Context, entry: &str, rect: Rect) {
 /// A long press on `entry`'s button (a finger resting half a second; a right click with a mouse).
 /// Frames keep coming while the finger rests, so it fires without waiting for the lift.
 fn held(resp: &Response, entry: &str) -> bool {
-    resp.long_touched() || resp.secondary_clicked() || crate::touch_nav::long_press(&resp.ctx, Id::new(("simple-hold", entry)), resp.rect).is_some()
+    resp.long_touched() || resp.secondary_clicked() || crate::touch_nav::long_press(&resp.ctx, Id::unique(("simple-hold", entry)), resp.rect).is_some()
 }
 
 /// The finger lifting after a long press on `entry` (whose card it opened) is no tap.
@@ -625,7 +625,7 @@ fn help_card(app: &mut PhotocraftApp, ctx: &egui::Context, screen: Rect) {
     let fav = is_favorite(app, &id);
     let mut toggle = false;
     let mut close = false;
-    let out = egui::Area::new(Id::new("simple-help-card")).order(egui::Order::Tooltip).pivot(pivot).fixed_pos(pos).show(ctx, |ui| {
+    let out = egui::Area::new(Id::unique("simple-help-card")).order(egui::Order::Tooltip).pivot(pivot).fixed_pos(pos).show(ctx, |ui| {
         egui::Frame::NONE
             .fill(t.card)
             .stroke(Stroke::new(1.0, t.card_border))

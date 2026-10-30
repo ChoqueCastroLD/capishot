@@ -127,7 +127,7 @@ fn stroke_swatch(ui: &mut egui::Ui, side: f32, s: Option<&TypeStroke>) -> egui::
             ui.painter().line_segment([c.0 + egui::vec2(-c.1, c.1), c.0 + egui::vec2(c.1, -c.1)], Stroke::new(1.5, t.text_faint));
         }
     }
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Outline")));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tl!("Outline")));
     resp.on_hover_text(tl!("Outline"))
 }
 
@@ -139,15 +139,15 @@ fn center_radius(rect: egui::Rect) -> (Pos2, f32) {
 /// slider and ±) and the position (outside, centred, inside), applied live to the edited layer
 /// as one undo step per opening. `phone`: finger-sized, above the button.
 fn stroke_popover(app: &mut PhotocraftApp, ui: &mut egui::Ui, button: &egui::Response, phone: bool) {
-    let open_id = egui::Id::new("type-stroke-open");
-    let key_id = egui::Id::new("type-stroke-key");
+    let open_id = egui::Id::unique("type-stroke-open");
+    let key_id = egui::Id::unique("type-stroke-key");
     let open = ui.data(|d| d.get_temp::<bool>(open_id).unwrap_or(false));
     if button.clicked() {
         if !open {
             // A new undo step for this opening.
             let n = ui.data_mut(|d| {
-                let n = d.get_temp::<u64>(egui::Id::new("type-stroke-n")).unwrap_or(0) + 1;
-                d.insert_temp(egui::Id::new("type-stroke-n"), n);
+                let n = d.get_temp::<u64>(egui::Id::unique("type-stroke-n")).unwrap_or(0) + 1;
+                d.insert_temp(egui::Id::unique("type-stroke-n"), n);
                 n
             });
             ui.data_mut(|d| d.insert_temp(key_id, format!("type-stroke-{n}")));
@@ -170,7 +170,7 @@ fn stroke_popover(app: &mut PhotocraftApp, ui: &mut egui::Ui, button: &egui::Res
     let (pivot, y) = if phone { (egui::Align2::CENTER_BOTTOM, button.rect.top() - 8.0) } else { (egui::Align2::CENTER_TOP, button.rect.bottom() + 6.0) };
     let h = if phone { 40.0 } else { 26.0 };
     let mut pick = false;
-    let area = egui::Area::new(egui::Id::new("type-stroke")).order(egui::Order::Foreground).pivot(pivot).fixed_pos(egui::pos2(x, y)).show(ui.ctx(), |ui| {
+    let area = egui::Area::new(egui::Id::unique("type-stroke")).order(egui::Order::Foreground).pivot(pivot).fixed_pos(egui::pos2(x, y)).show(ui.ctx(), |ui| {
         egui::Frame::popup(ui.style()).fill(t.chrome).show(ui, |ui| {
             ui.set_width(w);
             ui.horizontal(|ui| {
@@ -276,7 +276,7 @@ fn stroke_popover(app: &mut PhotocraftApp, ui: &mut egui::Ui, button: &egui::Res
 /// The type bars' Contorno button (phone: 44 px, next to the text colour) and its popover.
 pub(crate) fn stroke_control(app: &mut PhotocraftApp, ui: &mut egui::Ui, phone: bool) {
     let s = shown_stroke(app).map(|(_, s)| s);
-    let open = ui.data(|d| d.get_temp::<bool>(egui::Id::new("type-stroke-open")).unwrap_or(false));
+    let open = ui.data(|d| d.get_temp::<bool>(egui::Id::unique("type-stroke-open")).unwrap_or(false));
     let side = if phone { 44.0 } else { 24.0 };
     let button = stroke_swatch(ui, side, s.as_ref());
     if open {

@@ -219,7 +219,7 @@ mod tests {
 
     fn overlay_mesh(app: &mut PhotocraftApp, ctx: &egui::Context, xf: &ViewXform, at: [f64; 2]) -> Option<egui::Mesh> {
         let mut output = ctx.run_ui(Default::default(), |ui| {
-            let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("clone-test")));
+            let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("clone-test")));
             draw(app, &painter, xf, at, None);
         });
         output.textures_delta.clear();

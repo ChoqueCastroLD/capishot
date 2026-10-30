@@ -1129,45 +1129,44 @@ fn dragging_a_tab_off_the_strip_floats_it_in_a_window() {
     }
 }
 
-    #[test]
-    fn clone_overlay_is_circular_and_respects_visibility() {
-        let ctx = egui::Context::default();
-        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
-        app.run("file.new", json!({"width": 64, "height": 64})).unwrap();
-        app.run("cloneSource.set", json!({"source": [16,16]})).unwrap();
-        app.ui.tool = Tool::CloneStamp;
-        app.session.tools.brush.size = 20.0;
-        let xf =
-            ViewXform { rect: Rect::from_min_size(Pos2::ZERO, vec2(100.0, 100.0)), zoom: 1.0, center: [32.0, 32.0], flip: false, rotation: 0.0, aspect: 1.0 };
-        let revision = app.session.active().unwrap().revision;
-        let mut output = ctx.run_ui(Default::default(), |ui| {
-            let ctx = ui.ctx();
-            let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("clone-test")));
-            draw_clone_preview(&mut app, &painter, &xf, [32.0, 32.0], None);
-        });
-        output.textures_delta.clear();
-        let mesh = output
-            .shapes
-            .iter()
-            .find_map(|s| match &s.shape {
-                egui::Shape::Mesh(m) => Some(m),
-                _ => None,
-            })
-            .unwrap();
-        assert_eq!(mesh.indices.len(), 64 * 3);
-        let center = xf.to_screen(32.0, 32.0);
-        assert!(mesh.vertices.iter().all(|v| v.pos.distance(center) <= 10.01));
-        assert_eq!(app.session.active().unwrap().revision, revision);
-        assert!(app.session.presets.clone.active().anchor.is_none());
-        app.session.presets.clone.overlay.show = false;
-        let mut output = ctx.run_ui(Default::default(), |ui| {
-            let ctx = ui.ctx();
-            let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("clone-test")));
-            draw_clone_preview(&mut app, &painter, &xf, [32.0, 32.0], None);
-        });
-        output.textures_delta.clear();
-        assert!(output.shapes.iter().all(|s| !matches!(s.shape, egui::Shape::Mesh(_))));
-    }
+#[test]
+fn clone_overlay_is_circular_and_respects_visibility() {
+    let ctx = egui::Context::default();
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+    app.run("file.new", json!({"width": 64, "height": 64})).unwrap();
+    app.run("cloneSource.set", json!({"source": [16,16]})).unwrap();
+    app.ui.tool = Tool::CloneStamp;
+    app.session.tools.brush.size = 20.0;
+    let xf = ViewXform { rect: Rect::from_min_size(Pos2::ZERO, vec2(100.0, 100.0)), zoom: 1.0, center: [32.0, 32.0], flip: false, rotation: 0.0, aspect: 1.0 };
+    let revision = app.session.active().unwrap().revision;
+    let mut output = ctx.run_ui(Default::default(), |ui| {
+        let ctx = ui.ctx();
+        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("clone-test")));
+        draw_clone_preview(&mut app, &painter, &xf, [32.0, 32.0], None);
+    });
+    output.textures_delta.clear();
+    let mesh = output
+        .shapes
+        .iter()
+        .find_map(|s| match &s.shape {
+            egui::Shape::Mesh(m) => Some(m),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(mesh.indices.len(), 64 * 3);
+    let center = xf.to_screen(32.0, 32.0);
+    assert!(mesh.vertices.iter().all(|v| v.pos.distance(center) <= 10.01));
+    assert_eq!(app.session.active().unwrap().revision, revision);
+    assert!(app.session.presets.clone.active().anchor.is_none());
+    app.session.presets.clone.overlay.show = false;
+    let mut output = ctx.run_ui(Default::default(), |ui| {
+        let ctx = ui.ctx();
+        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("clone-test")));
+        draw_clone_preview(&mut app, &painter, &xf, [32.0, 32.0], None);
+    });
+    output.textures_delta.clear();
+    assert!(output.shapes.iter().all(|s| !matches!(s.shape, egui::Shape::Mesh(_))));
+}
 
 #[test]
 fn clone_overlay_keeps_magnified_pixels_crisp_on_upload_and_refresh() {

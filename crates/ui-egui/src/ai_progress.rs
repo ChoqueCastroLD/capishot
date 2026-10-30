@@ -324,7 +324,7 @@ fn anchor(app: &PhotocraftApp, ctx: &egui::Context, width: f32) -> (egui::Pos2, 
 }
 
 fn inspect_id() -> Id {
-    Id::new("ai-progress-inspect")
+    Id::unique("ai-progress-inspect")
 }
 
 /// `ui.inspect`'s `aiProgress`: what the card shows this frame (`kind` "progress", "done" or
@@ -421,7 +421,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
             let text = crate::i18n::fmt(tl!("{tool}: done"), &[("tool", title)]);
             ctx.data_mut(|d| d.insert_temp(inspect_id(), serde_json::json!({"kind": "done", "title": title, "text": text})));
-            egui::Area::new(Id::new("ai-progress-done")).order(egui::Order::Foreground).pivot(align).fixed_pos(pos).interactable(false).show(ctx, |ui| {
+            egui::Area::new(Id::unique("ai-progress-done")).order(egui::Order::Foreground).pivot(align).fixed_pos(pos).interactable(false).show(ctx, |ui| {
                 egui::Frame::NONE
                     .fill(t.card)
                     .stroke(Stroke::new(1.0, t.card_border))
@@ -473,7 +473,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
 
 /// A card at `pos`.
 fn area(ctx: &egui::Context, id: &str, pos: egui::Pos2, align: Align2, width: f32, t: &Tokens, add: impl FnOnce(&mut egui::Ui)) {
-    egui::Area::new(Id::new(id)).order(egui::Order::Foreground).pivot(align).fixed_pos(pos).show(ctx, |ui| {
+    egui::Area::new(Id::unique(id)).order(egui::Order::Foreground).pivot(align).fixed_pos(pos).show(ctx, |ui| {
         egui::Frame::NONE
             .fill(t.card)
             .stroke(Stroke::new(1.0, t.card_border))
@@ -501,7 +501,7 @@ fn pulse_region(app: &PhotocraftApp, ctx: &egui::Context, now: f64) {
         return;
     }
     let t = Tokens::get(ctx);
-    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, Id::new("ai-progress-region"))).with_clip_rect(clip);
+    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, Id::unique("ai-progress-region"))).with_clip_rect(clip);
     let k = ((now * 2.4).sin() * 0.5 + 0.5) as f32;
     p.rect_filled(rect, 2.0, t.accent.gamma_multiply(0.06 + 0.08 * k));
     p.rect_stroke(rect, 2.0, Stroke::new(1.5 + k, t.accent.gamma_multiply(0.55 + 0.4 * k)), egui::StrokeKind::Outside);

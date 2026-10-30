@@ -76,7 +76,7 @@ fn the_picker_lists_every_source() {
     h.run();
     assert!(crate::bubble_type_ui::picker_open(&h.ctx), "the button opens it");
     // Searched for, so the row is on screen.
-    h.ctx.data_mut(|d| d.insert_temp(egui::Id::new("bubble-picker-search"), "grito".to_string()));
+    h.ctx.data_mut(|d| d.insert_temp(egui::Id::unique("bubble-picker-search"), "grito".to_string()));
     h.run();
     h.get_by_label("Serie / Grito").click();
     h.run();
@@ -136,7 +136,7 @@ fn the_phone_type_bar_opens_the_picker_as_a_sheet() {
     let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(320.0, 640.0)).build_ui_state(
         |ui, app: &mut PhotocraftApp| {
             // The app's fonts are set up after the harness's first frame and bound a frame later.
-            let frames = egui::Id::new("frames-before-fonts");
+            let frames = egui::Id::unique("frames-before-fonts");
             let n = ui.data(|d| d.get_temp::<u32>(frames).unwrap_or(0));
             if n < 2 {
                 if n == 0 {

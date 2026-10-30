@@ -240,7 +240,7 @@ fn type_layer_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let w = actions.len() as f32 * (SEL_CELL.x + 2.0) + 12.0;
     let r = Rect::from_min_size(pos2(area.center().x - w / 2.0, area.top() + 8.0), vec2(w, SEL_CELL.y + 12.0));
     let mut run = None;
-    egui::Area::new(Id::new("touch-type-layer-bar")).order(egui::Order::Middle).fixed_pos(r.min).show(ctx, |ui| {
+    egui::Area::new(Id::unique("touch-type-layer-bar")).order(egui::Order::Middle).fixed_pos(r.min).show(ctx, |ui| {
         egui::Frame::NONE.fill(t.card).stroke(Stroke::new(1.0, t.card_border)).corner_radius(CornerRadius::same(18)).inner_margin(egui::Margin::same(6)).show(
             ui,
             |ui| {
@@ -252,7 +252,7 @@ fn type_layer_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
                         ui.painter().circle(c, 19.0, if resp.is_pointer_button_down_on() { t.hover } else { t.chrome }, Stroke::new(1.0, t.card_border));
                         crate::icons::paint(ui, Rect::from_center_size(c, Vec2::splat(30.0)), icon, 19.0, t.text);
                         ui.painter().text(pos2(rect.center().x, rect.top() + 50.0), Align2::CENTER_CENTER, name, crate::theme::medium(10.0), t.text_dim);
-                        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
+                        resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name));
                         note(ctx, &format!("typeLayer:{id}"), rect);
                         if resp.clicked() {
                             run = Some(id);

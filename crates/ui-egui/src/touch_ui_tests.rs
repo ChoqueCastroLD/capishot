@@ -350,7 +350,7 @@ fn no_scrollbars_with_the_touch_interface() {
     h.state_mut().run("view.zoomIn", json!({})).ok();
     h.state_mut().run("view.zoomIn", json!({})).ok();
     h.run_steps(3);
-    let over = h.ctx.data(|d| d.get_temp::<bool>(egui::Id::new(("pc-canvas-bars-hover", 0usize))));
+    let over = h.ctx.data(|d| d.get_temp::<bool>(egui::Id::unique(("pc-canvas-bars-hover", 0usize))));
     assert_ne!(over, Some(true));
     assert!(!h.state().ui.view.shows_scrollbars() || crate::touch_ui::active(h.state()));
 }

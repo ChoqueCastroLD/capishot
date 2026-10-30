@@ -455,18 +455,18 @@ const FRESH: &str = "bubble-picker-fresh";
 /// Open the picker (the phone's type bar and options call this).
 pub fn open_picker(ctx: &egui::Context, anchor: egui::Rect) {
     ctx.data_mut(|d| {
-        d.insert_temp(egui::Id::new(OPEN), true);
-        d.insert_temp(egui::Id::new(ANCHOR), anchor);
-        d.insert_temp(egui::Id::new(FRESH), true);
+        d.insert_temp(egui::Id::unique(OPEN), true);
+        d.insert_temp(egui::Id::unique(ANCHOR), anchor);
+        d.insert_temp(egui::Id::unique(FRESH), true);
     });
 }
 
 pub fn picker_open(ctx: &egui::Context) -> bool {
-    ctx.data(|d| d.get_temp::<bool>(egui::Id::new(OPEN)).unwrap_or(false))
+    ctx.data(|d| d.get_temp::<bool>(egui::Id::unique(OPEN)).unwrap_or(false))
 }
 
 fn close_picker(ctx: &egui::Context) {
-    ctx.data_mut(|d| d.insert_temp(egui::Id::new(OPEN), false));
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique(OPEN), false));
 }
 
 /// The button showing the style in use; a click opens the picker.
@@ -498,7 +498,7 @@ pub fn picker(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
     let screen = ctx.content_rect();
     let phone = screen.width() < crate::simple_ui::PHONE_BELOW;
-    let anchor: egui::Rect = ctx.data(|d| d.get_temp(egui::Id::new(ANCHOR))).unwrap_or(egui::Rect::from_min_size(screen.center(), vec2(1.0, 1.0)));
+    let anchor: egui::Rect = ctx.data(|d| d.get_temp(egui::Id::unique(ANCHOR))).unwrap_or(egui::Rect::from_min_size(screen.center(), vec2(1.0, 1.0)));
     let t = crate::theme::Tokens::get(ctx);
     let (pos, width, height) = if phone {
         let h = (screen.height() * 0.7).min(560.0);
@@ -506,7 +506,7 @@ pub fn picker(app: &mut PhotocraftApp, ctx: &egui::Context) {
     } else {
         (anchor.left_bottom() + vec2(0.0, 6.0), 320.0, (screen.bottom() - anchor.bottom() - 24.0).clamp(220.0, 520.0))
     };
-    let area = egui::Area::new(egui::Id::new("bubble-picker")).order(egui::Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
+    let area = egui::Area::new(egui::Id::unique("bubble-picker")).order(egui::Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
         let frame = if phone {
             egui::Frame::NONE
                 .fill(t.card)
@@ -532,7 +532,7 @@ pub fn picker(app: &mut PhotocraftApp, ctx: &egui::Context) {
 }
 
 fn picker_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, phone: bool) {
-    let search_id = egui::Id::new("bubble-picker-search");
+    let search_id = egui::Id::unique("bubble-picker-search");
     let mut search: String = ui.data(|d| d.get_temp(search_id)).unwrap_or_default();
     let row_h = if phone { 44.0 } else { 22.0 };
     ui.horizontal(|ui| {
@@ -552,10 +552,10 @@ fn picker_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, phone: bool) {
     }
     let current = app.ui.tool_options.bubble_pick.clone();
     let mut chosen: Option<String> = None;
-    let remember_id = egui::Id::new("bubble-picker-remember");
+    let remember_id = egui::Id::unique("bubble-picker-remember");
     let mut remember = ui.data(|d| d.get_temp::<bool>(remember_id).unwrap_or(false));
     let body_h = ui.available_height() - if remember { 150.0 } else { 40.0 };
-    let fresh = ui.data_mut(|d| d.remove_temp::<bool>(egui::Id::new(FRESH)).unwrap_or(false));
+    let fresh = ui.data_mut(|d| d.remove_temp::<bool>(egui::Id::unique(FRESH)).unwrap_or(false));
     let mut list = egui::ScrollArea::vertical().max_height(body_h.max(120.0)).auto_shrink([false, true]);
     if fresh {
         list = list.vertical_scroll_offset(0.0);

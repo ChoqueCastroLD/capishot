@@ -118,7 +118,7 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             for v in &shown {
                 let (rect, resp) = ui.allocate_exact_size(vec2(w, TILE_H), Sense::click());
                 #[cfg(test)]
-                ctx.data_mut(|d| d.insert_temp(egui::Id::new("typer-textshaper-tiles"), rect.center().y));
+                ctx.data_mut(|d| d.insert_temp(egui::Id::unique("typer-textshaper-tiles"), rect.center().y));
                 let hovered = resp.hovered();
                 let border = if v.fits == Some(false) {
                     t.danger
@@ -233,7 +233,7 @@ mod tests {
         assert!(!strip.no_bubble);
         // The tiles sit at the bottom of the preview block, three across.
         let first = strip.variants[0].lines.join("\n");
-        let y = h.ctx.data_mut(|d| d.get_temp::<f32>(egui::Id::new("typer-textshaper-tiles"))).expect("tiles drawn");
+        let y = h.ctx.data_mut(|d| d.get_temp::<f32>(egui::Id::unique("typer-textshaper-tiles"))).expect("tiles drawn");
         let before = h.state().session.active().unwrap().history.past_len();
         click(&mut h, Pos2::new(40.0, y), Modifiers::NONE);
         assert_eq!(layer_text(h.state()), first);

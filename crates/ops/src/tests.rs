@@ -440,6 +440,7 @@ fn stepped_back(non_linear: bool) -> (History, Arc<Document>) {
     (h, cur)
 }
 
+#[test]
 fn non_linear_history_keeps_later_states_and_appends_the_new_step() {
     let (mut h, mut cur) = stepped_back(true);
     edit(&mut h, &mut cur, "D", |d| d.name = format!("{}+d", d.name));
@@ -459,6 +460,7 @@ fn non_linear_history_keeps_later_states_and_appends_the_new_step() {
     assert_eq!(h.entries(), ["Open", "A", "D"]);
 }
 
+#[test]
 fn non_linear_steps_respect_the_state_limit_and_the_tile_counter() {
     let mut h = History::new(3);
     h.non_linear = true;
@@ -478,6 +480,7 @@ fn non_linear_steps_respect_the_state_limit_and_the_tile_counter() {
     assert_counter(&h, &cur);
 }
 
+#[test]
 fn remove_deletes_one_past_state_and_drop_current_keeps_the_redo_states() {
     let (mut h, _) = stepped_back(true);
     assert!(!h.remove(0), "the oldest state stays");
@@ -513,6 +516,7 @@ fn remove_deletes_one_past_state_and_drop_current_keeps_the_redo_states() {
     assert_counter(&h, &cur);
 }
 
+#[test]
 fn remove_later_deletes_one_redo_state() {
     let mut h = History::new(50);
     h.non_linear = true;
@@ -535,6 +539,7 @@ fn remove_later_deletes_one_redo_state() {
     assert_counter(&h, &c);
 }
 
+#[test]
 fn step_visibility_follows_steps_and_spans_removed_ones() {
     let vis = |h: &History| {
         let mut v: Vec<u64> = h.current_visibility().iter().map(|l| l.0).collect();
@@ -592,6 +597,7 @@ fn step_visibility_follows_steps_and_spans_removed_ones() {
     assert_eq!(vis(&h), Vec::<u64>::new());
 }
 
+#[test]
 fn rollback_takes_the_last_record_back_exactly_in_both_modes() {
     // Non-linear, with redo states: the moved states go back to the redo side and the
     // document the step replaced (A) is current again, not the last former redo state (C).
@@ -642,6 +648,7 @@ fn rollback_takes_the_last_record_back_exactly_in_both_modes() {
     assert_counter(&h, &cur);
 }
 
+#[test]
 fn rollback_brings_back_the_states_the_limit_dropped_for_the_step() {
     for max in 1..=4 {
         let (mut h, mut cur) = stepped_back(true);
@@ -688,6 +695,7 @@ fn rollback_brings_back_the_states_the_limit_dropped_for_the_step() {
     assert_counter(&h, &cur);
 }
 
+#[test]
 fn rollback_puts_states_back_behind_the_pinned_brush_source() {
     let (mut h, mut cur) = stepped_back(true);
     assert!(h.set_brush_source(0));

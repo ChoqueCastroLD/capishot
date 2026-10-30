@@ -1290,6 +1290,7 @@ impl<'a> Planner<'a> {
     /// `composite_with_effects` (atop = false) or the clipped-layer variant of `composite_atop`
     /// (atop = true: effects over the base treated as opaque, keeping the base's alpha).
     /// Consumes `backdrop`.
+#[expect(clippy::cognitive_complexity, reason = "the effect stack in Photoshop's order, one step each")]
     fn effects(&mut self, layer: &'a Layer, clipped: &[&'a Layer], backdrop: Slot, atop: bool) -> Result<Slot, Unsupported> {
         let canvas = self.cx.canvas;
         let region = bounds::effect_region(layer, canvas);

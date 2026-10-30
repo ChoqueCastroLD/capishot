@@ -38,14 +38,14 @@ struct State {
 }
 
 fn state_id() -> Id {
-    Id::new("overlay-guard")
+    Id::unique("overlay-guard")
 }
 
 /// Whether a dismissable overlay is showing this frame (call after the overlays are drawn).
 pub fn overlay_open(app: &PhotocraftApp, ctx: &egui::Context) -> bool {
     let narrow = ctx.content_rect().width() < crate::simple_ui::PHONE_BELOW;
-    let dialogs: Vec<Id> = app.ui.dialogs.iter().map(|d| Id::new(("dialog", d.id))).collect();
-    let persistent: Vec<Id> = PERSISTENT.iter().map(|s| Id::new(*s)).collect();
+    let dialogs: Vec<Id> = app.ui.dialogs.iter().map(|d| Id::unique(("dialog", d.id))).collect();
+    let persistent: Vec<Id> = PERSISTENT.iter().map(|s| Id::unique(*s)).collect();
     if egui::Popup::is_any_open(ctx) {
         return true;
     }

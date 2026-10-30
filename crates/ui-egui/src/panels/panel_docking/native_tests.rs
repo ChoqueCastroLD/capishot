@@ -199,7 +199,6 @@ fn undocking_a_panel_opens_its_own_window_and_the_studio_card_stays_in_the_main_
     desktop.h.state_mut().run("window.panel.window", json!({"panel": "history"})).unwrap();
     desktop.steps(3);
     assert!(desktop.window_of("history").is_some(), "History has its own window");
-
 }
 
 fn studio_app() -> PhotocraftApp {

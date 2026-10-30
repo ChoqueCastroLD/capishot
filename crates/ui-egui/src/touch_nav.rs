@@ -122,7 +122,7 @@ mod tests {
             events.push(Event::PointerMoved(*pos));
         }
         let input = RawInput { events, ..Default::default() };
-        let mut full = ctx.run_ui(input, |ui| out = frame(ui.ctx(), Id::new("t"), egui::Rect::from_min_size(Pos2::ZERO, Vec2::splat(1000.0)), enabled));
+        let mut full = ctx.run_ui(input, |ui| out = frame(ui.ctx(), Id::unique("t"), egui::Rect::from_min_size(Pos2::ZERO, Vec2::splat(1000.0)), enabled));
         full.textures_delta.clear();
         out
     }
@@ -159,8 +159,8 @@ mod tests {
             let mut out = (None, None);
             let input = RawInput { events, time: Some(t), ..Default::default() };
             let mut full = ctx.run_ui(input, |ui| {
-                let lp = long_press(ui.ctx(), Id::new("t"), area);
-                out = (lp, frame(ui.ctx(), Id::new("t"), area, true));
+                let lp = long_press(ui.ctx(), Id::unique("t"), area);
+                out = (lp, frame(ui.ctx(), Id::unique("t"), area, true));
             });
             full.textures_delta.clear();
             out
@@ -198,7 +198,7 @@ mod tests {
                 events.push(Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
             }
             let mut full =
-                ctx.run_ui(RawInput { events, time: Some(t), ..Default::default() }, |ui| fired |= long_press(ui.ctx(), Id::new("m"), area).is_some());
+                ctx.run_ui(RawInput { events, time: Some(t), ..Default::default() }, |ui| fired |= long_press(ui.ctx(), Id::unique("m"), area).is_some());
             full.textures_delta.clear();
         }
         assert!(!fired);
@@ -219,7 +219,7 @@ mod tests {
             }
             let t = 1.0 + 0.15 * k as f64;
             let mut full =
-                ctx.run_ui(RawInput { events, time: Some(t), ..Default::default() }, |ui| fired |= long_press(ui.ctx(), Id::new("b"), area).is_some());
+                ctx.run_ui(RawInput { events, time: Some(t), ..Default::default() }, |ui| fired |= long_press(ui.ctx(), Id::unique("b"), area).is_some());
             full.textures_delta.clear();
         }
         assert!(!fired, "the loop's end at its start opened the context menu");

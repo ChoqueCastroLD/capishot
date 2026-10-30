@@ -285,6 +285,7 @@ pub(crate) fn program(e: &Effect, light: &GlobalLight, vector_shape: bool) -> Ma
 
 /// The map program of one enabled effect (`build_maps`); bevel textures tile `patterns` from
 /// `anchor` (`effects::TextureCtx`).
+#[expect(clippy::cognitive_complexity, reason = "one arm per layer effect kind")]
 pub(crate) fn program_with(e: &Effect, light: &GlobalLight, vector_shape: bool, patterns: &[Pattern], anchor: (f64, f64)) -> MapProgram {
     let mut b = B { stages: Vec::new(), fields: Vec::new() };
     let maps = match e {

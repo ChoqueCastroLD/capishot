@@ -814,11 +814,9 @@ fn recovered_documents_survive_a_second_crash_until_saved_or_closed() {
     st.saved_revision = st.revision;
     prefs_ui::tick(&mut app, &ctx);
     assert!(
-        list_recovery(&dir).iter().any(|entry| photocraft_format::recover(entry).ok().is_some_and(|doc| photocraft_compose::flatten(&doc)
-            .px
-            .first()
-            .copied()
-            == Some(BLUE))),
+        list_recovery(&dir)
+            .iter()
+            .any(|entry| photocraft_format::recover(entry).ok().is_some_and(|doc| photocraft_compose::flatten(&doc).px.first().copied() == Some(BLUE))),
         "normal Save retains undo recovery"
     );
     app.run("file.close", json!({"document": index_of(&app, BLUE)})).unwrap();

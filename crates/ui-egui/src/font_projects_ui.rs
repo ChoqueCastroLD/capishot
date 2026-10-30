@@ -136,25 +136,25 @@ pub fn bubble_styles(app: &PhotocraftApp, styles: &crate::state::BubbleStyles) -
 pub fn offer_roles(app: &PhotocraftApp, ctx: &egui::Context) {
     let roles: Vec<(String, String)> =
         projects(app).active().map(|p| p.roles.iter().map(|r| (r.id.clone(), role_name(p, &r.id))).collect()).unwrap_or_default();
-    ctx.data_mut(|d| d.insert_temp(egui::Id::new("font-row-roles"), roles));
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique("font-row-roles"), roles));
 }
 
 /// A font row pressed and held, or right-clicked: the menu's top then offers it to the current
 /// project as one of its roles ([`menu_sections`]). Within the same menu: a menu opened over
 /// the font menu closed both.
 pub fn row_menu(response: &egui::Response, family: &str) {
-    let roles: Vec<(String, String)> = response.ctx.data(|d| d.get_temp(egui::Id::new("font-row-roles"))).unwrap_or_default();
+    let roles: Vec<(String, String)> = response.ctx.data(|d| d.get_temp(egui::Id::unique("font-row-roles"))).unwrap_or_default();
     if roles.is_empty() {
         return;
     }
     if response.secondary_clicked() || response.long_touched() {
-        response.ctx.data_mut(|d| d.insert_temp(egui::Id::new("font-row-adding"), family.to_string()));
+        response.ctx.data_mut(|d| d.insert_temp(egui::Id::unique("font-row-adding"), family.to_string()));
     }
 }
 
 /// The font a row's context menu added to the project: done now.
 pub fn take_add_request(app: &mut PhotocraftApp, ctx: &egui::Context) {
-    let Some((family, role)) = ctx.data_mut(|d| d.remove_temp::<(String, String)>(egui::Id::new("font-row-add"))) else { return };
+    let Some((family, role)) = ctx.data_mut(|d| d.remove_temp::<(String, String)>(egui::Id::unique("font-row-add"))) else { return };
     if run(app, "fontProjects.addFont", json!({"family": family, "role": role})).is_some()
         && let Some(p) = projects(app).active()
     {
@@ -176,7 +176,7 @@ pub fn menu_sections(app: &mut PhotocraftApp, ui: &mut egui::Ui, current: &mut S
     let mut picked = None;
     let mut activate: Option<Option<String>> = None;
     // A font held or right-clicked below: which role it joins the project as.
-    let adding: Option<String> = ui.data(|d| d.get_temp(egui::Id::new("font-row-adding")));
+    let adding: Option<String> = ui.data(|d| d.get_temp(egui::Id::unique("font-row-adding")));
     if let (Some(family), Some(p)) = (adding, all.active()) {
         egui::Frame::group(ui.style()).fill(t.accent_soft).show(ui, |ui| {
             ui.label(RichText::new(crate::i18n::fmt(tl!("Add {font} to the current project as…"), &[("font", &family)])).strong());
@@ -184,13 +184,13 @@ pub fn menu_sections(app: &mut PhotocraftApp, ui: &mut egui::Ui, current: &mut S
                 for r in &p.roles {
                     if ui.button(role_name(p, &r.id)).clicked() {
                         ui.ctx().data_mut(|d| {
-                            d.insert_temp(egui::Id::new("font-row-add"), (family.clone(), r.id.clone()));
-                            d.remove::<String>(egui::Id::new("font-row-adding"));
+                            d.insert_temp(egui::Id::unique("font-row-add"), (family.clone(), r.id.clone()));
+                            d.remove::<String>(egui::Id::unique("font-row-adding"));
                         });
                     }
                 }
                 if ui.button(tl!("Cancel")).clicked() {
-                    ui.ctx().data_mut(|d| d.remove::<String>(egui::Id::new("font-row-adding")));
+                    ui.ctx().data_mut(|d| d.remove::<String>(egui::Id::unique("font-row-adding")));
                 }
             });
         });
@@ -396,7 +396,7 @@ fn preview(ui: &mut egui::Ui, project: &Project, role: &str) {
     let style = project.role_style(role);
     let stroke = project.role(role).and_then(|r| r.settings.stroke_params());
     let key = format!("{style:?}{stroke:?}");
-    let id = egui::Id::new(("font-role-preview", project.id.as_str(), role));
+    let id = egui::Id::unique(("font-role-preview", project.id.as_str(), role));
     let cached: Option<(String, Option<egui::TextureHandle>)> = ui.data(|d| d.get_temp(id));
     let tex = match cached {
         Some((k, tex)) if k == key => tex,
@@ -550,7 +550,7 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let screen = ctx.content_rect();
     let phone = screen.width() < 600.0;
     let mut open = true;
-    let mut window = egui::Window::new(tl!("Font Projects")).id(egui::Id::new("font-projects-window")).open(&mut open).collapsible(false);
+    let mut window = egui::Window::new(tl!("Font Projects")).id(egui::Id::unique("font-projects-window")).open(&mut open).collapsible(false);
     window = if phone { window.fixed_rect(screen).resizable(false) } else { window.default_size([760.0, 600.0]).resizable(true) };
     let mut actions: Vec<(String, Value)> = Vec::new();
     let mut select: Option<String> = None;
@@ -641,7 +641,7 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
                         ui.label(RichText::new(role_name(&project, &role.id)).strong());
                         for f in project.fonts.iter().filter(|f| f.role == role.id) {
                             let here = families.iter().any(|x| x == &f.family);
-                            let id = egui::Id::new(("font-chip", project.id.as_str(), f.family.as_str()));
+                            let id = egui::Id::unique(("font-chip", project.id.as_str(), f.family.as_str()));
                             ui.dnd_drag_source(id, f.family.clone(), |ui| {
                                 let label =
                                     if here { RichText::new(&f.family) } else { RichText::new(format!("{} ({})", f.family, tl!("missing"))).color(t.warning) };
@@ -813,7 +813,7 @@ fn export_dialog(app: &mut PhotocraftApp, ctx: &egui::Context) {
     };
     let mut go = false;
     let mut cancel = false;
-    egui::Modal::new(egui::Id::new("font-project-export")).show(ctx, |ui| {
+    egui::Modal::new(egui::Id::unique("font-project-export")).show(ctx, |ui| {
         let t = Tokens::get(ui.ctx());
         ui.set_width(ctx.content_rect().width().min(460.0) - 40.0);
         ui.label(RichText::new(crate::i18n::fmt(tl!("Export {name}"), &[("name", &project.name)])).font(crate::theme::semibold(15.0)));

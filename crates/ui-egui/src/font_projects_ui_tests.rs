@@ -115,10 +115,10 @@ fn a_font_row_adds_to_the_project() {
     app.run("fontProjects.create", json!({"name": "Serie"})).unwrap();
     let ctx = egui::Context::default();
     super::offer_roles(&app, &ctx);
-    let roles: Vec<(String, String)> = ctx.data(|d| d.get_temp(egui::Id::new("font-row-roles"))).unwrap();
+    let roles: Vec<(String, String)> = ctx.data(|d| d.get_temp(egui::Id::unique("font-row-roles"))).unwrap();
     assert_eq!(roles.len(), 6);
     assert_eq!(roles[1].1, "Shout");
-    ctx.data_mut(|d| d.insert_temp(egui::Id::new("font-row-add"), ("Inter".to_string(), "narration".to_string())));
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique("font-row-add"), ("Inter".to_string(), "narration".to_string())));
     super::take_add_request(&mut app, &ctx);
     let p = fp::Projects::of(&app.session);
     assert_eq!(p.active().unwrap().role_of("Inter"), Some("narration"));
@@ -240,7 +240,7 @@ fn a_held_font_is_offered_to_the_project_in_the_menu() {
         },
         (app, String::new()),
     );
-    h.ctx.data_mut(|d| d.insert_temp(egui::Id::new("font-row-adding"), "Inter".to_string()));
+    h.ctx.data_mut(|d| d.insert_temp(egui::Id::unique("font-row-adding"), "Inter".to_string()));
     h.run();
     h.get_by_label("Add Inter to the current project as…");
     h.get_by_label("Thought").click();

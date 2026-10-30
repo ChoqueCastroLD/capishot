@@ -433,9 +433,9 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                                 ui.label(RichText::new(w.text(lang)).size(12.0).color(t.text_dim));
                             },
                         );
-                        ctx.data_mut(|d| d.insert_temp(egui::Id::new("palette-which"), true));
+                        ctx.data_mut(|d| d.insert_temp(egui::Id::unique("palette-which"), true));
                     } else {
-                        ctx.data_mut(|d| d.remove::<bool>(egui::Id::new("palette-which")));
+                        ctx.data_mut(|d| d.remove::<bool>(egui::Id::unique("palette-which")));
                     }
                     if enter && let Some(h) = hits.get(sel).filter(|h| h.4) {
                         run = Some(h.1.clone());

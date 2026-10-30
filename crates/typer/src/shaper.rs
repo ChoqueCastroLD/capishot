@@ -1156,6 +1156,7 @@ impl Gen<'_, '_> {
 }
 
 /// TextShapeR variants for `text`, best first (at most `opts.limit`).
+#[expect(clippy::cognitive_complexity, reason = "the search over line breaks and sizes")]
 pub fn shape(text: &str, opts: &Options, measure: &mut dyn Measure) -> Vec<Variant> {
     if text.len() > MAX_TEXT {
         return Vec::new();
