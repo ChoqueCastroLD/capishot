@@ -471,7 +471,7 @@ pub struct PhotocraftApp {
     pub(crate) user_fonts: user_fonts_ui::UserFonts,
     /// The low-memory warning's schedule and state (`memory_warning`).
     pub(crate) low_memory: memory_warning::Watch,
-    /// Apply theme on first frame.
+    /// Context resources have been registered for this app, either early or in its first logic pass.
     styled: bool,
     /// Whether the window uses an integrated (transparent) macOS title bar.
     pub integrated_titlebar: bool,
@@ -481,6 +481,7 @@ pub struct PhotocraftApp {
     /// Last window title sent to the OS (`ViewportCommand::Title`, see `panels::sync_window_title`):
     /// sent again only when it changes, so idle frames don't spam the backend.
     last_window_title: String,
+    /// The registered UI font definitions can be used in this pass.
     fonts_ready: bool,
     /// Screen rect of the main canvas last frame (for overlays and the navigator).
     pub last_canvas_rect: egui::Rect,

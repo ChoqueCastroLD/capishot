@@ -943,9 +943,9 @@ fn add_symbol_fonts(fonts: &mut FontDefinitions) {
     }
 }
 
-/// Has [`install_fonts`]'s stack reached the active fonts? Before that (the first pass, when
-/// the desktop app installs fonts and loads preferences in the same frame) the active fonts
-/// are egui's defaults, and rescaling a copy of those would overwrite the queued stack.
+/// Has [`install_fonts`]'s stack reached the active fonts? When a host defers registration to
+/// its first pass, the active fonts are still egui's defaults. Rescaling a copy of those would
+/// overwrite the queued stack.
 fn ui_fonts_active(ctx: &egui::Context) -> bool {
     ctx.fonts(|f| f.definitions().families.contains_key(&FontFamily::Name("medium".into())))
 }
@@ -1003,6 +1003,8 @@ impl egui::Plugin for UiFontSizePlugin {
         "photocraft-ui-font-size"
     }
 
+    /// Rescale only active font definitions, after any pending installation has landed, and
+    /// keep on-demand fallback faces at the same scale as the next pass's registered fonts.
     fn output_hook(&mut self, ctx: &egui::Context, _output: &mut egui::FullOutput) {
         let size = ui_font_size(ctx);
         let deferred = std::mem::take(&mut self.defer_after_install);
@@ -1010,8 +1012,8 @@ impl egui::Plugin for UiFontSizePlugin {
             return;
         }
         if deferred || !ui_fonts_active(ctx) {
-            // Cloning the active definitions now would discard the queued stack (the desktop
-            // app installs fonts and loads the saved size in its first frame).
+            // A host may register fonts and load the saved size in the same pass. Cloning the
+            // active definitions now would discard that queued stack.
             ctx.request_repaint();
             return;
         }

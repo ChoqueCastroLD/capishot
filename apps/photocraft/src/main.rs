@@ -40,6 +40,8 @@ mod control_server;
 mod crash_guard;
 mod cursor;
 mod file_dialog_probe;
+#[cfg(test)]
+mod first_frame_fonts_tests;
 mod gpu_startup;
 #[cfg(target_os = "linux")]
 mod icon_theme;
@@ -331,6 +333,7 @@ fn write_start_marker(sentinel: &gpu_startup::SharedSentinel, plan: &gpu_startup
     }
 }
 
+/// Start the native editor with platform services and crash-safe graphics recovery.
 fn main() -> eframe::Result {
     // First, so the panic hook and every start-up warning are recorded (`logging`).
     let logger = logging::install();
@@ -508,7 +511,6 @@ fn main() -> eframe::Result {
             let session = Session::new();
             let mut session = session;
             session.lut_library = services::luts_dir().map(photocraft_engine::lut_library::LutLibrary::new);
-            PhotocraftApp::install_type_reset_hooks(&cc.egui_ctx);
             let mut app = PhotocraftApp::new(session, services);
             // Google Fonts: download services, and the fonts downloaded earlier registered from
             // disk (no network at startup; downloads need Preferences > Type > Allow Online Fonts).
@@ -529,6 +531,7 @@ fn main() -> eframe::Result {
             if let Some(i) = photocraft_ai_lama::native::NativeInpainter::locate(models.as_deref()) {
                 app.session.set_inpainter(Some(std::sync::Arc::new(i)));
             }
+            app.prepare_first_frame(&cc.egui_ctx);
             app.min_frame_ms = uncapped.then_some(1000.0 / 240.0);
             // Edit › Generative Fill: Stable Diffusion inpainting on this machine (feature `ai`).
             #[cfg(feature = "ai")]
