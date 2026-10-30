@@ -198,8 +198,8 @@ pub struct History {
     undo: VecDeque<HistoryState>,
     redo: Vec<HistoryState>,
     pub max_states: usize,
-    /// Pixel memory budget in bytes for the current document plus the tiles only history holds
-    /// (0 = unlimited). [`History::trim`] drops the oldest states beyond it.
+    /// Pixel memory budget in bytes for the current document plus the tiles (and embedded smart
+    /// object contents) only history holds (0 = unlimited). [`History::trim`] drops the oldest states beyond it.
     pub max_bytes: usize,
     /// Label of the step that produced the current document.
     current_label: String,

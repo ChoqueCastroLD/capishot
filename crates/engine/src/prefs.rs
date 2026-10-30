@@ -604,6 +604,16 @@ impl Default for Export {
 /// [`Performance::memory_usage_mb`]'s default.
 pub const DEFAULT_MEMORY_USAGE_MB: u32 = 4096;
 
+/// The most Memory Usage the web build honours, in MB: a wasm module's linear memory tops out at
+/// 4 GiB, so a larger allowance (the desktop default is 8 GiB) would never trim anything.
+const WASM_MEMORY_USAGE_CAP_MB: u32 = 1536;
+
+/// The Memory Usage a build honours for a `stored` preference: capped on the web build (`web`).
+/// Separate from the target check so native tests exercise both.
+fn honoured_memory_usage_mb(stored: u32, web: bool) -> u32 {
+    if web { stored.min(WASM_MEMORY_USAGE_CAP_MB) } else { stored }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Performance {
@@ -661,10 +671,16 @@ impl Performance {
         self.rendering_mode.unwrap_or_else(|| if !self.use_gpu || self.gpu_backend == GpuBackend::Cpu { RenderingMode::Cpu } else { RenderingMode::Auto })
     }
 
+    /// [`Performance::memory_usage_mb`] as the build can honour it: capped on the web, where the
+    /// stored preference (a saved 8192 still loads) is larger than the module's address space.
+    pub fn effective_memory_usage_mb(&self) -> u32 {
+        honoured_memory_usage_mb(self.memory_usage_mb, cfg!(target_arch = "wasm32"))
+    }
+
     /// Shared managed-pixel RAM target (Memory Usage), in bytes, within the platform's cap
     /// ([`set_memory_cap`]).
     pub fn history_budget_bytes(&self) -> usize {
-        capped_budget((self.memory_usage_mb as usize).saturating_mul(1 << 20), memory_cap())
+        capped_budget((self.effective_memory_usage_mb() as usize).saturating_mul(1 << 20), memory_cap())
     }
 }
 
@@ -1420,7 +1436,7 @@ impl Session {
         }
         self.configure_history_cache();
         photocraft_compose::set_effect_cache_budget(budget << 20);
-        crate::transform_cmds::set_budget(u64::from(self.prefs().performance.memory_usage_mb) << 20);
+        crate::transform_cmds::set_budget(u64::from(self.prefs().performance.effective_memory_usage_mb()) << 20);
         // Without waiting for the system font scan: this runs on the UI thread at launch.
         photocraft_text::set_shared_missing_glyph_protection(self.prefs().type_.missing_glyph_protection());
         #[cfg(feature = "plugins")]

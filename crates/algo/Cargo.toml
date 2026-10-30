@@ -23,7 +23,12 @@ rayon = { workspace = true }
 [dev-dependencies]
 photocraft-testkit = { workspace = true }
 serde_json = { workspace = true }
+criterion = { workspace = true }
 
 # The browser threads build (wasm with `atomics`, packaging/web-threads) takes the rayon paths too.
 [target.'cfg(all(target_arch = "wasm32", target_feature = "atomics"))'.dependencies]
 rayon = { workspace = true }
+
+[[bench]]
+name = "blur"
+harness = false

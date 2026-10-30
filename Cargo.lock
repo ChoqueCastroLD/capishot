@@ -7678,6 +7678,7 @@ dependencies = [
 name = "photocraft-algo"
 version = "0.17.0"
 dependencies = [
+ "criterion",
  "photocraft-color",
  "photocraft-geom",
  "photocraft-raster",
@@ -7980,6 +7981,7 @@ dependencies = [
  "photocraft-geom",
  "photocraft-raster",
  "rayon",
+ "rustc-hash 2.1.3",
  "serde",
  "serde_json",
 ]

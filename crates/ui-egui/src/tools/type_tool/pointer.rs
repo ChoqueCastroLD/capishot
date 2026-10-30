@@ -115,6 +115,7 @@ pub fn pointer_down(app: &mut PhotocraftApp, x: f64, y: f64, mods: egui::Modifie
     if let Some(ed) = app.ui.text_edit.clone() {
         let id = LayerId(ed.layer);
         if let Some(i) = box_handle_at(app, id, x, y) {
+            app.ui.type_insertion_style = None;
             // Snapshot the box and transform now: every move recomputes from them, so ⌥ held
             // or released mid-drag mirrors about the centre the drag started with.
             let snap = box_shape(app, id).zip(layout(app, id)).map(|((bx, by, w, h), (_, aff, _))| BoxResize { handle: i, shape: [bx, by, w, h], aff });
@@ -127,6 +128,9 @@ pub fn pointer_down(app: &mut PhotocraftApp, x: f64, y: f64, mods: egui::Modifie
         // (left of a line's start, below the last line); only a click outside it commits.
         if hit_layer(app, x, y) == Some(id) || inside_box(app, id, x, y) {
             let off = hit_offset(app, id, x, y);
+            if off != ed.caret || (!mods.shift && off != ed.anchor) {
+                app.ui.type_insertion_style = None;
+            }
             if let Some(e) = app.ui.text_edit.as_mut() {
                 e.caret = off;
                 if !mods.shift {
@@ -140,6 +144,7 @@ pub fn pointer_down(app: &mut PhotocraftApp, x: f64, y: f64, mods: egui::Modifie
         commit_with(app, mods);
         return true; // Photoshop: a click outside commits without starting new text
     }
+    app.ui.type_insertion_style = None;
     // The Type Mask tools always start new text: existing type layers are just pixels to them;
     // so does a ⇧-click with the Type tool, as in Photoshop, to start new text over old.
     if app.ui.tool.is_type_mask() || mods.shift {
@@ -178,6 +183,9 @@ pub fn pointer_move(app: &mut PhotocraftApp, x: f64, y: f64, mods: egui::Modifie
     }
     if ed.dragging {
         let off = hit_offset(app, LayerId(ed.layer), x, y);
+        if off != ed.caret {
+            app.ui.type_insertion_style = None;
+        }
         if let Some(e) = app.ui.text_edit.as_mut() {
             e.caret = off;
         }

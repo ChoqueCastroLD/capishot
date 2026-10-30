@@ -252,7 +252,8 @@ fn handle_pressed_key(
 
     use egui::Key;
     match key {
-        Key::Enter if modifiers.command => commit_with(app, *modifiers),
+        Key::Enter if modifiers.command && edit.edit.preedit.is_none() => commit_with(app, *modifiers),
+        Key::Enter if modifiers.command => {} // IME owns confirmation until preedit ends.
         Key::Enter => insert(app, "\n"),
         Key::Tab if !modifiers.command && !modifiers.alt && !modifiers.shift => {
             // egui queues focus navigation before this handler runs; consuming the
@@ -268,6 +269,7 @@ fn handle_pressed_key(
         Key::Escape => cancel(app),
         _ if modifiers.command && modifiers.shift && format_shortcut(app, key, *modifiers) => {}
         Key::A if modifiers.command && !modifiers.shift => {
+            app.ui.type_insertion_style = None;
             if let Some(state) = app.ui.text_edit.as_mut() {
                 state.anchor = 0;
                 state.caret = edit.char_count;
@@ -403,6 +405,9 @@ fn handle_move_key(app: &mut PhotocraftApp, key: egui::Key, modifiers: &egui::Mo
 
 fn set_caret(app: &mut PhotocraftApp, char_count: usize, caret: usize, extend: bool) {
     if let Some(state) = app.ui.text_edit.as_mut() {
+        if state.caret != caret.min(char_count) || (!extend && state.anchor != caret.min(char_count)) {
+            app.ui.type_insertion_style = None;
+        }
         state.caret = caret.min(char_count);
         if !extend {
             state.anchor = state.caret;

@@ -30,6 +30,9 @@
 //! `--click-at X,Y` opens a screen-space menu (for example the top Select menu) after the script.
 //! `--drag-from X,Y --drag-to X,Y` captures a screen-space drag with the button held.
 
+//! `--hover-at X,Y` leaves the pointer there without a click, for what a tool shows under it (the
+//! brush outline, the Clone Source overlay).
+
 // The fake Google Fonts backend of the shell's tests (`--dev-fonts`).
 #[path = "../tests/support/dev_fonts.rs"]
 mod dev_fonts;
@@ -259,6 +262,10 @@ fn main() {
     }
     if recovery_error.is_some() {
         photocraft_ui_egui::prefs_ui::autosave_now(harness.state_mut());
+    }
+    if let Some((x, y)) = arg(&args, "--hover-at").and_then(|s| s.split_once(',').and_then(|(x, y)| Some((x.parse::<f32>().ok()?, y.parse::<f32>().ok()?)))) {
+        harness.event(egui::Event::PointerMoved(egui::pos2(x, y)));
+        harness.run_steps(4);
     }
     let t_settle = std::time::Instant::now();
     while t_settle.elapsed() < std::time::Duration::from_millis(settle_ms) {

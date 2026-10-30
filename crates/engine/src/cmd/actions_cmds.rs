@@ -369,8 +369,8 @@ fn stop(s: &mut Session, _p: &Value) -> Result<Value> {
 /// A step Photoshop plays as a silent no-op although its menu item is greyed: Deselect with an
 /// open document and nothing selected (actions often start with it to clear any selection, #6744),
 /// and an Arrange that can't move the layer, such as Bring to Front on a new adjustment layer that
-/// is already on top (#8453).
-fn noop_step(s: &Session, id: &str, params: &Value) -> bool {
+/// is already on top (#8453). The CLI's `run` and `batch` scripts skip these too (#8802).
+pub fn noop_step(s: &Session, id: &str, params: &Value) -> bool {
     let Some(d) = s.active() else { return false };
     let dir = match id {
         "select.deselect" => return d.doc.selection.is_none(),
