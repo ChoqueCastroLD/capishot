@@ -943,8 +943,10 @@ impl History {
 
     /// Keep pixel memory within [`History::max_bytes`]: the current document's tiles plus the
     /// tiles only history holds (newest states first). The oldest undo states that don't fit are
-    /// dropped; the most recent one is always kept so the last step can be undone. Returns how
-    /// many states were dropped.
+    /// dropped; the most recent one is always kept so the last step can be undone. The History
+    /// Brush's source state ([`History::set_brush_source`]) is never dropped: its own tiles are
+    /// counted first, and the newest states fill what remains. Returns how many states were
+    /// dropped.
     pub fn trim(&mut self, current: &Document) -> usize {
         if self.max_bytes == 0 || self.undo.len() <= 1 {
             return 0;
@@ -956,9 +958,15 @@ impl History {
                 total = total.saturating_add(document_bytes(doc, &mut seen));
             }
         }
+        let source = self.brush_source.and_then(|id| self.undo.iter().position(|s| s.id == id));
+        if let Some(doc) = source.and_then(|i| self.undo.get(i)).and_then(|s| s.document.resident()) {
+            total = total.saturating_add(document_bytes(doc, &mut seen));
+        }
         let mut keep = 0;
-        for s in self.undo.iter().rev() {
-            if let Some(doc) = s.document.resident() {
+        for (i, s) in self.undo.iter().enumerate().rev() {
+            if Some(i) != source
+                && let Some(doc) = s.document.resident()
+            {
                 total = total.saturating_add(document_bytes(doc, &mut seen));
             }
             if total > self.max_bytes && keep >= 1 {
@@ -966,15 +974,24 @@ impl History {
             }
             keep += 1;
         }
-        let drop = self.undo.len() - keep;
-        for state in self.undo.drain(..drop) {
-            // Held for a rollback of the step that pushed them out: each was the front when
-            // taken off, so putting them back at the front, the last first, restores the order.
+        // The oldest states that didn't fit go, the source among them staying where it is.
+        let first_kept = self.undo.len() - keep;
+        let mut at = 0;
+        let mut dropped = 0;
+        for i in 0..first_kept {
+            if Some(i) == source {
+                at += 1;
+                continue;
+            }
+            let Some(state) = self.undo.remove(at) else { break };
+            dropped += 1;
+            // Held for a rollback of the step that pushed them out, with the index each was taken
+            // from: put back in reverse they restore the order.
             if let Some(held) = &mut self.last_record {
-                held.evicted.push((0, state));
+                held.evicted.push((at, state));
             }
         }
-        drop
+        dropped
     }
 }
 

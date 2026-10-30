@@ -9,10 +9,13 @@ fn draw(app: &mut PhotocraftApp, ctx: &egui::Context) -> egui::FullOutput {
     let mut input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1440.0, 900.0))), ..Default::default() };
     input.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = ctx.native_pixels_per_point();
     app.raw_input_hook(ctx, &mut input);
-    ctx.run_ui(input, |ui| {
+    let mut output = ctx.run_ui(input, |ui| {
         app.logic(ui.ctx(), &mut frame);
         app.ui(ui, &mut frame);
-    })
+    });
+    // No renderer takes the textures here: dropping unapplied deltas is a debug panic.
+    output.textures_delta.clear();
+    output
 }
 
 /// App-creator preparation must make the first presentation contain editor text, with its
