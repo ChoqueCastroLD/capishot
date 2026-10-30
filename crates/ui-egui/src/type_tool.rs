@@ -1171,6 +1171,8 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
                     Key::Escape if ed.mask => cancel(app),
                     // Preferences ▸ Type: with "Use Escape to Commit" off, Escape cancels the
                     // session (undoes it, removing a just-created layer) like the Cancel button.
+                    // On a phone, Back (Escape) is how one leaves the text: it keeps it.
+                    Key::Escape if crate::touch_ui::active(app) => commit(app),
                     Key::Escape if app.session.prefs().type_.use_esc_to_commit => commit(app),
                     Key::Escape => cancel(app),
                     _ if m.command && m.shift && format_shortcut(app, *key, *m) => {}
@@ -2709,64 +2711,128 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
 }
 
+/// Width the phone's type bar needs to fit in one row (the font field at 120 points); narrower,
+/// it takes two rows ([`touch_bar_rows`]).
+pub const TOUCH_BAR_ONE_ROW: f32 = 120.0 + 64.0 + 5.0 * 44.0 + 70.0 + 7.0 * 6.0;
+/// The height of one of the bar's rows.
+pub const TOUCH_BAR_ROW: f32 = 44.0;
+
+/// How many rows the phone's type bar takes in `width` points: one when everything fits,
+/// else two (font, size and Done; then colour, outline, alignment and line spacing).
+pub fn touch_bar_rows(width: f32) -> usize {
+    if width >= TOUCH_BAR_ONE_ROW { 1 } else { 2 }
+}
+
 /// The type bar above a phone's keyboard while text is edited: font, size, color, outline,
-/// alignment, line spacing and Done, each a finger-sized control (touch_ui.rs places it). On a
-/// narrow phone the controls scroll sideways; Done stays at the right.
+/// alignment, line spacing and Done, each a finger-sized control (touch_ui.rs places it). Every
+/// control shows whatever the phone's width: on a narrow one the bar takes two rows.
 pub fn touch_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
-    let t = crate::theme::Tokens::get(ui.ctx());
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        ui.spacing_mut().item_spacing.x = 6.0;
-        let (rect, resp) = ui.allocate_exact_size(egui::vec2(70.0, 44.0), egui::Sense::click());
-        ui.painter().rect_filled(rect.shrink2(egui::vec2(0.0, 4.0)), egui::CornerRadius::same(18), t.accent);
-        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, tl!("Done"), crate::theme::semibold(14.0), Color32::WHITE);
-        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Done")));
-        crate::touch_ui::note_rect(ui.ctx(), "typeDone", rect);
-        if resp.clicked() {
-            commit(app);
+    let w = ui.available_width();
+    ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+    if touch_bar_rows(w) == 1 {
+        ui.horizontal(|ui| {
+            let font_w = (w - (TOUCH_BAR_ONE_ROW - 120.0)).clamp(120.0, 220.0);
+            font_and_size(app, ui, font_w);
+            color_button(app, ui);
+            stroke_control(app, ui, true);
+            align_button(app, ui);
+            touch_leading(app, ui);
+            warp_button(app, ui);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| done_button(app, ui));
+        });
+        return;
+    }
+    ui.vertical(|ui| {
+        ui.horizontal(|ui| {
+            // The font field takes what the size and Done leave; long names end in an ellipsis.
+            let font_w = (w - 64.0 - 70.0 - 2.0 * 6.0).max(60.0);
+            font_and_size(app, ui, font_w);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| done_button(app, ui));
+        });
+        // Five buttons, evenly spaced across the width.
+        let (row, _) = ui.allocate_exact_size(egui::vec2(w, TOUCH_BAR_ROW), egui::Sense::hover());
+        let slot = w / 5.0;
+        for i in 0..5 {
+            let c = egui::pos2(row.left() + slot * (i as f32 + 0.5), row.center().y);
+            let r = egui::Rect::from_center_size(c, egui::vec2(TOUCH_BAR_ROW, TOUCH_BAR_ROW));
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(r).layout(egui::Layout::left_to_right(egui::Align::Center)));
+            match i {
+                0 => color_button(app, &mut child),
+                1 => stroke_control(app, &mut child, true),
+                2 => align_button(app, &mut child),
+                3 => touch_leading(app, &mut child),
+                _ => warp_button(app, &mut child),
+            }
         }
-        egui::ScrollArea::horizontal()
-            .id_salt("touch-type-bar-scroll")
-            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-            .show(ui, |ui| {
-                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| touch_bar_controls(app, ui));
-            });
     });
 }
 
-/// [`touch_bar`] but Done.
-fn touch_bar_controls(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+/// The type bar's Done.
+fn done_button(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = crate::theme::Tokens::get(ui.ctx());
-    let shown = target(app).and_then(|(id, _)| {
-        let st = app.session.active()?;
-        let tl = text_layer(&st.doc, LayerId(id))?;
-        let size = styles_at(app).map_or(tl.size_pt, |(c, _)| c.size_pt) * shown_scale(app);
-        Some((tl.font_family.clone(), size, styles_at(app).map_or(tl.color, |(c, _)| c.color)))
-    });
-    let o = app.ui.tool_options.clone();
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(70.0, 44.0), egui::Sense::click());
+    ui.painter().rect_filled(rect.shrink2(egui::vec2(0.0, 4.0)), egui::CornerRadius::same(18), t.accent);
+    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, tl!("Done"), crate::theme::semibold(14.0), Color32::WHITE);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Done")));
+    crate::touch_ui::note_rect(ui.ctx(), "typeDone", rect);
+    if resp.clicked() {
+        commit(app);
+    }
+}
+
+/// The type target's font, size and colour as the bar shows them.
+fn touch_shown(app: &PhotocraftApp) -> Option<(String, f32, photocraft_color::Color)> {
+    let (id, _) = target(app)?;
+    let st = app.session.active()?;
+    let tl = text_layer(&st.doc, LayerId(id))?;
+    let size = styles_at(app).map_or(tl.size_pt, |(c, _)| c.size_pt) * shown_scale(app);
+    Some((tl.font_family.clone(), size, styles_at(app).map_or(tl.color, |(c, _)| c.color)))
+}
+
+/// The bar's font field (`font_w` wide) and size field.
+fn font_and_size(app: &mut PhotocraftApp, ui: &mut egui::Ui, font_w: f32) {
+    let shown = touch_shown(app);
+    let o = &app.ui.tool_options;
     let (mut fam, size) = match &shown {
         Some((f, z, _)) => (f.clone(), *z),
         None => (o.type_font.clone(), o.type_size),
     };
-    ui.spacing_mut().item_spacing.x = 6.0;
-    // The font field takes what the other controls leave, at least 110 points (then it scrolls).
-    let room = ui.available_width();
-    let font_w = (room - 64.0 - 4.0 * 44.0 - 5.0 * 6.0).clamp(110.0, 200.0);
-    if fonts_ready(ui, font_w) {
+    // Each in a finger-sized slot (44 points tall): the font menu's button fills it, a tap
+    // anywhere on the size's slot edits the size.
+    let slot = |ui: &mut egui::Ui, w: f32| {
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, TOUCH_BAR_ROW), egui::Sense::click());
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        child.spacing_mut().interact_size.y = TOUCH_BAR_ROW;
+        (rect, resp, child)
+    };
+    let (rect, _, mut child) = slot(ui, font_w);
+    if fonts_ready(&mut child, font_w) {
         let preview = app.session.prefs().type_.font_preview;
-        if font_picker(app, ui, &mut fam, font_w, preview) {
+        if font_picker(app, &mut child, &mut fam, font_w, preview) {
             app.ui.tool_options.type_font = fam.clone();
             apply(app, ui.ctx(), json!({"font": fam}));
         }
     }
+    crate::touch_ui::note_rect(ui.ctx(), "typeFont", rect);
     let (unit, label) = type_unit(app);
     let mut display = size * unit;
-    if crate::widgets::value_field(ui, &mut display, unit..=1296.0 * unit, label, 64.0).changed() {
+    let (rect, tap, mut child) = slot(ui, 64.0);
+    let r = crate::widgets::value_field(&mut child, &mut display, unit..=1296.0 * unit, label, 64.0);
+    if tap.clicked() {
+        ui.memory_mut(|m| m.request_focus(r.id));
+    }
+    crate::touch_ui::note_rect(ui.ctx(), "typeSize", rect);
+    if r.changed() {
         let size = display / unit;
         app.ui.tool_options.type_size = size;
         apply(app, ui.ctx(), json!({"size": size, "metricsAsShown": true}));
     }
-    let c = shown
-        .as_ref()
+}
+
+/// The bar's text colour swatch.
+fn color_button(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    let t = crate::theme::Tokens::get(ui.ctx());
+    let c = touch_shown(app)
         .map(|s| {
             let v = s.2.to_rgb();
             [v[0], v[1], v[2], 1.0]
@@ -2780,10 +2846,24 @@ fn touch_bar_controls(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     if resp.clicked() {
         open_color_picker(app, [c[0], c[1], c[2]]);
     }
-    // Contorno: the edited layer's stroke, next to the text colour.
-    stroke_control(app, ui, true);
-    // Alignment: one button that steps left → centre → right.
-    let (next, icon) = match o.type_align.as_str() {
+}
+
+/// The bar's Warp Text… (Arc, Arch, Flag…: the type's warp, with its preview).
+pub(crate) fn warp_button(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    let r = crate::icons::button(ui, "spline", 44.0, false, tl!("Warp"));
+    crate::touch_ui::note_rect(ui.ctx(), "typeWarp", r.rect);
+    if r.clicked() {
+        let ctx = ui.ctx().clone();
+        if let Err(e) = crate::menus::invoke(app, &ctx, "type.warpText", json!({})) {
+            app.ui.status = e;
+            app.ui.status_error = true;
+        }
+    }
+}
+
+/// The bar's alignment: one button that steps left → centre → right.
+fn align_button(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    let (next, icon) = match app.ui.tool_options.type_align.as_str() {
         "center" => ("right", "align-center"),
         "right" => ("left", "align-right"),
         _ => ("center", "align-left"),
@@ -2794,7 +2874,6 @@ fn touch_bar_controls(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         app.ui.tool_options.type_align = next.into();
         apply(app, ui.ctx(), json!({"align": next}));
     }
-    touch_leading(app, ui);
 }
 
 /// Character and paragraph style at the target (selection start, else the layer's first run).

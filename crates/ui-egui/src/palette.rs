@@ -467,7 +467,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             }
         } else if let Some(tool) = id.strip_prefix("tool:") {
             if let Some(t) = crate::state::Tool::from_name(tool) {
-                app.ui.tool = t;
+                crate::tool_memory::select(app, t);
             }
         } else if let Err(e) = crate::telemetry::with_source(crate::telemetry::Source::Palette, || crate::menus::invoke(app, ctx, &id, serde_json::json!({}))) {
             app.ui.status = e;

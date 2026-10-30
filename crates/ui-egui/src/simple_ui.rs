@@ -507,8 +507,13 @@ fn paint_options(app: &mut PhotocraftApp, ui: &mut Ui) {
 /// Capi button between both, and whatever sheet it has open.
 pub fn overlays(app: &mut PhotocraftApp, ctx: &egui::Context) {
     note_tool(ctx, app.ui.tool);
-    // Typing: the keyboard and the type bar take the bottom (touch_ui::type_bar).
+    // Typing: the keyboard and the type bar take the bottom (touch_ui::type_bar); the Capi
+    // button stays, above the bar, so a tool can still be chosen (which ends the typing).
     if app.ui.text_edit.is_some() && sheet(ctx) == Sheet::Closed {
+        let screen = crate::safe_area::rect(ctx);
+        let bar = crate::touch_ui::type_bar_height(ctx);
+        let capi = Rect::from_center_size(pos2(screen.center().x, screen.bottom() - 6.0 - bar - 10.0 - CAPI / 2.0), Vec2::splat(CAPI));
+        capi_button(app, ctx, capi);
         return;
     }
     // Esc (the phone's Back) closes the open sheet.
@@ -985,7 +990,7 @@ mod tests;
 /// Something the phone's Back button should close (a dialog, the options, a sheet): the web
 /// shell keeps a history entry while there is one, and a Back sends Esc, which closes it.
 pub fn back_target(app: &PhotocraftApp, ctx: &egui::Context) -> bool {
-    !app.ui.dialogs.is_empty() || options_open(ctx) || sheet(ctx) != Sheet::Closed || crate::remove_ai_ui::is_open(app) || help_open(ctx).is_some()
+    !app.ui.dialogs.is_empty() || options_open(ctx) || sheet(ctx) != Sheet::Closed || crate::remove_ai_ui::is_open(app) || app.ui.text_edit.is_some() || help_open(ctx).is_some()
 }
 
 /// Where the button `label` was drawn (the last time this frame), as `ui.inspect` reports it.

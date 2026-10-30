@@ -391,7 +391,7 @@ impl Boot {
         if let Some(el) = loading {
             el.remove();
         }
-        WebShell { app, safe_area_size: None, inbox, places, canvas: pen_target, unsaved, served, user_fonts, database, presets, startup_frames: 0, perf, recovery, outbox, photopea, watchdog: crate::watchdog::Watchdog::new(), downloads: Default::default(), hosted, lost_at: None }
+        WebShell { app, safe_area_size: None, inbox, places, canvas: pen_target, unsaved, served, user_fonts, database, presets, startup_frames: 0, perf, recovery, outbox, photopea, watchdog: crate::watchdog::Watchdog::new(), downloads: Default::default(), hosted, lost_at: None, typing_view: None, was_typing: false }
     }
 }
 
@@ -965,6 +965,11 @@ struct WebShell {
     canvas: web_sys::HtmlCanvasElement,
     /// Read by the `beforeunload` listener ([`guard_unload`]).
     unsaved: Arc<AtomicBool>,
+    /// Typing on a phone: the lowest visual-viewport height seen (the keyboard up), and since
+    /// when the viewport has been back to full height (the keyboard closed) — see [`WebShell::keyboard`].
+    typing_view: Option<(f64, Option<f64>)>,
+    /// Text was being edited last frame.
+    was_typing: bool,
     /// When the graphics context was lost (ms), while the page saves for recovery (gpu_lost.rs).
     lost_at: Option<f64>,
     served: Served,
@@ -1003,6 +1008,42 @@ struct PendingDownload {
 }
 
 impl WebShell {
+    /// The phone keyboard and the type edit agree: once the edit ends (Done, a tool, Back, a tap
+    /// outside) the hidden input that holds the keyboard lets go of it, so taps reach the bars
+    /// again; and a keyboard closed while typing (its own button, Back) ends the edit, keeping
+    /// the text, so the bars come back. A dialog or menu open meanwhile (the colour picker, the
+    /// font menu) doesn't count.
+    fn keyboard(&mut self, ctx: &egui::Context) {
+        let typing = self.app.ui.text_edit.is_some();
+        let height = web_sys::window().and_then(|w| js_sys::Reflect::get(&w, &"visualViewport".into()).ok()).and_then(|v| js_sys::Reflect::get(&v, &"height".into()).ok()).and_then(|h| h.as_f64());
+        if typing && photocraft_ui_egui::touch_ui::active(&self.app) {
+            if let Some(h) = height {
+                let now = js_sys::Date::now();
+                let (low, since) = self.typing_view.get_or_insert((h, None));
+                *low = low.min(h);
+                // Back to more than 120 px above the lowest: the keyboard went down.
+                let up = h - *low > 120.0;
+                *since = if up { Some(since.unwrap_or(now)) } else { None };
+                let busy = !self.app.ui.dialogs.is_empty() || egui::Popup::is_any_open(ctx);
+                if since.is_some_and(|t| now - t > 400.0) && !busy {
+                    photocraft_ui_egui::type_tool::commit(&mut self.app);
+                    self.typing_view = None;
+                }
+            }
+        } else {
+            self.typing_view = None;
+        }
+        if self.was_typing
+            && self.app.ui.text_edit.is_none()
+            && let Some(active) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element())
+            && active.tag_name().eq_ignore_ascii_case("input")
+            && let Ok(el) = active.dyn_into::<web_sys::HtmlElement>()
+        {
+            let _ = el.blur();
+        }
+        self.was_typing = self.app.ui.text_edit.is_some();
+    }
+
     /// Every frame once the graphics context is lost: unsaved documents go to crash recovery,
     /// then the page reloads on the CPU canvas, where they reopen (gpu_lost.rs). An embedding
     /// host's page isn't reloaded: it decides.
@@ -1241,6 +1282,7 @@ impl eframe::App for WebShell {
             self.after_context_lost(ctx);
             return;
         }
+        self.keyboard(ctx);
         back_history::sync(photocraft_ui_egui::simple_ui::back_target(&self.app, ctx), ctx);
         // Startup timings: the first frame starts, and the second starts once it is drawn.
         if self.startup_frames < 2 {

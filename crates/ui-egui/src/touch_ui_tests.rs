@@ -455,3 +455,86 @@ fn the_selection_bar_names_its_buttons_and_hints_that_it_scrolls() {
     use egui_kittest::kittest::Queryable;
     assert!(h.query_by_label("Invertir").is_some(), "names in the UI language");
 }
+
+fn phone_harness(w: f32, h: f32) -> H {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    app.run("prefs.set", json!({"values": {"interface.language": "en", "interface.simpleUi": "on"}})).unwrap();
+    app.run("file.new", json!({"width": 600, "height": 800, "background": "white"})).unwrap();
+    app.sync_views();
+    let mut hh = Harness::builder().with_size(vec2(w, h)).with_max_steps(64).with_step_dt(1.0 / 30.0).build_eframe(move |cc| {
+        PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+        app
+    });
+    hh.run_steps(4);
+    hh
+}
+
+fn tap(h: &mut H, p: Pos2) {
+    frame(h, vec![touch(7, TouchPhase::Start, p)]);
+    frame(h, vec![touch(7, TouchPhase::End, p)]);
+    h.run_steps(3);
+}
+
+fn noted(h: &H, label: &str) -> Option<egui::Rect> {
+    crate::touch_ui::noted_rect(&h.ctx, label).or_else(|| crate::simple_ui::noted_rect(&h.ctx, label))
+}
+
+/// Start typing on the phone: the Type tool, a tap on the canvas, some letters.
+fn start_typing(h: &mut H) {
+    h.state_mut().ui.tool = Tool::Type;
+    h.run_steps(2);
+    let c = canvas_center(h);
+    tap(h, c);
+    frame(h, vec![Event::Text("Hola".into())]);
+    h.run_steps(2);
+    assert!(h.state().ui.text_edit.is_some(), "typing");
+}
+
+#[test]
+fn done_then_move_selects_move() {
+    let mut h = phone_harness(360.0, 780.0);
+    start_typing(&mut h);
+    let done = noted(&h, "typeDone").expect("Done");
+    tap(&mut h, done.center());
+    assert!(h.state().ui.text_edit.is_none(), "Done leaves typing");
+    let mv = noted(&h, "slot:tool:Move").expect("the favourites bar is back with Move");
+    tap(&mut h, mv.center());
+    assert_eq!(h.state().ui.tool, Tool::Move);
+}
+
+/// Every way out of typing on a phone keeps the text, brings the tool bars back and lets the
+/// next tool be chosen: a tool in the Capi sheet (reachable above the type bar), a tap outside
+/// the text, and Back (Escape).
+#[test]
+fn every_way_out_of_typing_brings_the_tools_back() {
+    // The Capi sheet while typing.
+    let mut h = phone_harness(360.0, 780.0);
+    start_typing(&mut h);
+    let capi = noted(&h, "capi").expect("the Capi button stays while typing");
+    tap(&mut h, capi.center());
+    let mv = noted(&h, "tool:Move").expect("the sheet's tools");
+    tap(&mut h, mv.center());
+    assert_eq!(h.state().ui.tool, Tool::Move);
+    assert!(h.state().ui.text_edit.is_none(), "the tool ended the typing");
+    assert!(history(&mut h).iter().any(|s| s.contains("Type")), "the text was kept: {:?}", history(&mut h));
+    // A tap outside the text.
+    let mut h = phone_harness(360.0, 780.0);
+    start_typing(&mut h);
+    let c = canvas_center(&h);
+    tap(&mut h, c + vec2(0.0, 150.0));
+    assert!(h.state().ui.text_edit.is_none(), "a tap outside ends the typing");
+    let mv = noted(&h, "slot:tool:Move").expect("the bars are back");
+    tap(&mut h, mv.center());
+    assert_eq!(h.state().ui.tool, Tool::Move);
+    // Back (the phone's Back sends Escape): keeps the text.
+    let mut h = phone_harness(360.0, 780.0);
+    start_typing(&mut h);
+    let n = history(&mut h).len();
+    frame(&mut h, vec![Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() }]);
+    h.run_steps(3);
+    assert!(h.state().ui.text_edit.is_none(), "Back ends the typing");
+    assert!(history(&mut h).len() >= n, "and keeps the text");
+    let mv = noted(&h, "slot:tool:Move").expect("the bars are back");
+    tap(&mut h, mv.center());
+    assert_eq!(h.state().ui.tool, Tool::Move);
+}

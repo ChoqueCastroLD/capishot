@@ -204,8 +204,13 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         let mut sizing = false;
         // On a phone Preferences is a full-screen sheet (a section list, then a section).
         let sheet = crate::prefs_ui::is_sheet(&d.fields, ctx);
+        // A phone's previewed dialog (Warp Text, a filter) sits at the bottom, above the type bar
+        // while typing, so the canvas it previews stays in view.
+        let preview_low = narrow && start.is_none() && d.fields.get("__preview").and_then(Value::as_bool) == Some(true);
+        let low = if app.ui.text_edit.is_some() { crate::touch_ui::type_bar_height(ctx) + 14.0 } else { 12.0 };
         let area = match start {
             _ if sheet => egui::Modal::default_area(id).anchor(egui::Align2::LEFT_TOP, egui::Vec2::ZERO),
+            None if preview_low => egui::Modal::default_area(id).anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -low)),
             Some(offset) => egui::Modal::default_area(id).anchor(egui::Align2::LEFT_TOP, offset),
             None => egui::Modal::default_area(id),
         };

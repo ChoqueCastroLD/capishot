@@ -23,6 +23,10 @@ pub(crate) type ToolBrushes = (Tool, Vec<(Tool, BrushSettings)>);
 
 /// Explicit choices override temporary pen and held-key tools, even when selecting the same tool.
 pub(crate) fn select(app: &mut PhotocraftApp, tool: Tool) {
+    // Another tool while typing: the text is kept and the edit ends, as in Photoshop.
+    if app.ui.text_edit.is_some() && tool != app.ui.tool && !tool.is_type() {
+        crate::type_tool::commit(app);
+    }
     app.stylus.tool_before_eraser = None;
     app.ui.spring = None;
     app.ui.tool = tool;

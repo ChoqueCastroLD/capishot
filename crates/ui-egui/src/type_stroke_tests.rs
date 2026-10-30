@@ -169,3 +169,37 @@ fn the_phone_popover_opens_and_a_chip_applies() {
     let s = strokes(h.state(), id);
     assert_eq!(s.len(), 1, "a white stroke");
 }
+
+/// The phone's type bar shows every control whatever the phone's width (two rows when one
+/// doesn't fit): each fully inside the window, at least 44 points, none overlapping.
+#[test]
+fn every_type_bar_control_shows_on_narrow_phones() {
+    for w in [320.0_f32, 360.0, 390.0, 412.0, 430.0] {
+        let mut app = new_app();
+        app.run("prefs.set", json!({"values": {"interface.language": "en"}})).unwrap();
+        type_new(&mut app, "Hola");
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(w, 780.0)).with_max_steps(64).build_eframe(move |cc| {
+            PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+            app
+        });
+        h.run_steps(4);
+        let v = crate::touch_ui::inspect(h.state(), &h.ctx);
+        let rect = |l: &str| -> egui::Rect {
+            let r = v["rects"].as_array().and_then(|a| a.iter().rev().find(|r| r["label"] == l)).unwrap_or_else(|| panic!("{w}: no {l}"))["rect"].clone();
+            let f = |i: usize| r[i].as_f64().unwrap() as f32;
+            egui::Rect::from_min_max(egui::pos2(f(0), f(1)), egui::pos2(f(2), f(3)))
+        };
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(w, 780.0));
+        let labels = ["typeFont", "typeSize", "typeColor", "typeStroke", "typeAlign", "typeLeading", "typeWarp", "typeDone"];
+        let rects: Vec<(&str, egui::Rect)> = labels.iter().map(|l| (*l, rect(l))).collect();
+        for (l, r) in &rects {
+            assert!(screen.contains_rect(*r), "{w}: {l} {r:?} outside the window");
+            assert!(r.height() >= 43.9 && r.width() >= 43.9, "{w}: {l} {r:?} under 44 points");
+        }
+        for (i, (a, ra)) in rects.iter().enumerate() {
+            for (b, rb) in &rects[i + 1..] {
+                assert!(ra.intersect(*rb).area() < 1.0, "{w}: {a} {ra:?} overlaps {b} {rb:?}");
+            }
+        }
+    }
+}
