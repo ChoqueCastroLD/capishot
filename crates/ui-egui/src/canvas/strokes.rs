@@ -5,59 +5,6 @@ use super::{Color32, DRect, PhotocraftApp, Pos2, Stroke, Tool, json};
 
 pub(crate) use crate::clone_overlay::ClonePreviewCache;
 
-/// The most document pixels one dab's coverage is rendered over for the overlay: a 1000 px brush,
-/// the largest the overlay draws, at hardness 0 reaches about 1.73 × its radius (`tip_reach`).
-const CLONE_PREVIEW_MAX_PIXELS: u64 = 1800 * 1800;
-
-/// The largest side `retouch_cmds::clone_preview_periodic` samples, for the overlay's area and for
-/// the source area it reads (`Mapping::source_rect`: the overlay's, mapped, with a 2 px apron).
-const CLONE_PREVIEW_MAX_SIDE: u32 = 1024;
-
-/// The coverage of one dab of `brush` at `at`, as the brush engine paints it with opacity and flow
-/// at full: its tip, angle, roundness and hardness (a soft tip reaches past its radius). The area
-/// it covers and its `width × height` coverage values in 0..1. A very large soft tip, or a source
-/// the Clone Source panel scales down (which reads a larger area than it covers), is cropped
-/// around `at` to the sampling budget, keeping the middle of the dab.
-fn clone_dab_coverage(
-    brush: &photocraft_paint::BrushSettings,
-    at: [f64; 2],
-    map: &photocraft_engine::presets::clone_source::Mapping,
-) -> Option<(DRect, Vec<f32>)> {
-    let brush = photocraft_paint::BrushSettings { opacity: 1.0, flow: 1.0, erase: false, ..brush.clone() };
-    let stroke = photocraft_paint::Stroke { brush, points: vec![photocraft_paint::StrokePoint::new(at[0], at[1], 1.0)] };
-    let (rect, cov) = photocraft_paint::retouch::stroke_coverage_within(&stroke, CLONE_PREVIEW_MAX_PIXELS)?;
-    let fits = |r: DRect| r.width() <= CLONE_PREVIEW_MAX_SIDE && r.height() <= CLONE_PREVIEW_MAX_SIDE;
-    let (cx, cy) = (at[0].floor() as i32, at[1].floor() as i32);
-    let around = |half: i32| rect.intersect(&DRect::new(cx.saturating_sub(half), cy.saturating_sub(half), cx.saturating_add(half), cy.saturating_add(half)));
-    // The source area scales with the overlay's: shrink by what overflows, a few times for the
-    // apron's rounding.
-    let mut half = i32::try_from((CLONE_PREVIEW_MAX_SIDE - 4) / 2).unwrap_or(510);
-    let mut window = around(half);
-    for _ in 0..8 {
-        let src = map.source_rect(window);
-        if fits(window) && fits(src) {
-            break;
-        }
-        let over = f64::from(src.width().max(src.height())) / f64::from(CLONE_PREVIEW_MAX_SIDE - 4);
-        half = ((f64::from(half) / over.max(1.0)).floor() as i32).saturating_sub(2).max(1);
-        window = around(half);
-    }
-    if window.is_empty() || !fits(window) || !fits(map.source_rect(window)) {
-        return None;
-    }
-    if window == rect {
-        return Some((rect, cov));
-    }
-    let stride = rect.width() as usize;
-    let mut cropped = Vec::with_capacity(window.width() as usize * window.height() as usize);
-    for y in window.y0..window.y1 {
-        let row = (y - rect.y0) as usize * stride;
-        let from = row + (window.x0 - rect.x0) as usize;
-        cropped.extend_from_slice(cov.get(from..from + window.width() as usize)?);
-    }
-    Some((window, cropped))
-}
-
 /// A transient source image beneath the brush outline; never part of the document render. The
 /// Clone Source panel drives the Clone Stamp and the Healing Brush alike, so both show it.
 pub(super) fn draw_clone_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewXform, at: [f64; 2], output: Option<u32>) {

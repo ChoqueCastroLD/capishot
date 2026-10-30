@@ -558,6 +558,7 @@ pub fn build_txt2(objects: &[(i32, &TextLayer)], previous: Option<&[u8]>) -> Vec
 
 /// [`build_txt2`] for a document of `dpi` (the style runs of new and edited objects carry sizes
 /// in the document's points, as EngineData does).
+#[expect(clippy::cognitive_complexity, reason = "one pass over the objects, their runs and the previous Txt2")]
 pub fn build_txt2_at(objects: &[(i32, &TextLayer)], previous: Option<&[u8]>, dpi: f32) -> Vec<u8> {
     let prev = previous.and_then(parse_txt2);
     let prev_objects: &[E] = prev.as_ref().and_then(|p| p.path(&["1", "1"]).and_then(E::as_array)).unwrap_or(&[]);
