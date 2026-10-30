@@ -14,7 +14,7 @@ pub struct Insets {
 }
 
 fn id() -> Id {
-    Id::new("safe-area-insets")
+    Id::unique("safe-area-insets")
 }
 
 pub fn set(ctx: &Context, insets: Insets) {
@@ -35,5 +35,8 @@ pub fn get(ctx: &Context) -> Insets {
 pub fn rect(ctx: &Context) -> Rect {
     let r = ctx.content_rect();
     let i = get(ctx);
-    Rect::from_min_max(pos2(r.left() + i.left, r.top() + i.top), pos2((r.right() - i.right).max(r.left() + i.left), (r.bottom() - i.bottom).max(r.top() + i.top)))
+    Rect::from_min_max(
+        pos2(r.left() + i.left, r.top() + i.top),
+        pos2((r.right() - i.right).max(r.left() + i.left), (r.bottom() - i.bottom).max(r.top() + i.top)),
+    )
 }

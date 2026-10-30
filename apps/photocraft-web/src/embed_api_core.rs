@@ -438,7 +438,13 @@ mod tests {
 
     #[test]
     fn events_follow_what_changed() {
-        let a = Snapshot { active: Some(1), docs: vec![DocSnap { id: 1, revision: 3, dirty: false, selection: None }], tool: "brush".into(), error: None, view: None };
+        let a = Snapshot {
+            active: Some(1),
+            docs: vec![DocSnap { id: 1, revision: 3, dirty: false, selection: None }],
+            tool: "brush".into(),
+            error: None,
+            view: None,
+        };
         assert!(events(None, &a).is_empty(), "the first frame is the baseline");
         assert!(events(Some(&a), &a).is_empty());
         let mut b = a.clone();

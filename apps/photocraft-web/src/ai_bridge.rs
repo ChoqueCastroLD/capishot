@@ -488,7 +488,9 @@ impl photocraft_ai_lama::service::Inpainter for WebInpainter {
 
     fn run(&self, req: photocraft_ai_lama::service::Request, hooks: Arc<dyn photocraft_ai_lama::service::Hooks>, done: photocraft_ai_lama::service::Done) {
         use photocraft_ai_lama::LamaError;
-        let Some(model) = photocraft_ai::catalog::model(req.model) else { return done(Err(LamaError::Unavailable(format!("{} isn't in the catalog", req.model)))) };
+        let Some(model) = photocraft_ai::catalog::model(req.model) else {
+            return done(Err(LamaError::Unavailable(format!("{} isn't in the catalog", req.model))));
+        };
         let Some(target) = self.up.target(req.cpu, req.threads) else { return done(Err(LamaError::Unavailable(NO_WORKER.into()))) };
         let (base, cpu, gpu) = (target.base.clone(), target.cpu, !target.cpu && !target.threads);
         let t = &req.tile;
@@ -790,7 +792,8 @@ fn spawn(url: &str, threads: bool, pool: usize) -> Result<(), String> {
     let worker = module_worker(url, pool, &on_message, &on_error)?;
     let tick = Closure::<dyn FnMut()>::new(poll_cancel);
     LIVE.with(|l| {
-        *l.borrow_mut() = Some(Live { worker, threads, pool, ready: false, queued: None, run: None, timer: None, _on_message: on_message, _on_error: on_error, _tick: tick });
+        *l.borrow_mut() =
+            Some(Live { worker, threads, pool, ready: false, queued: None, run: None, timer: None, _on_message: on_message, _on_error: on_error, _tick: tick });
     });
     Ok(())
 }

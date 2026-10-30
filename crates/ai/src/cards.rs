@@ -217,9 +217,16 @@ impl Card {
 pub enum CardState {
     NotDownloaded,
     /// Some files downloading or queued: bytes done and total over all its files, speed.
-    Downloading { done: u64, total: u64, bytes_per_sec: f64 },
+    Downloading {
+        done: u64,
+        total: u64,
+        bytes_per_sec: f64,
+    },
     /// Stopped part-way (paused or interrupted): resumes where it stopped.
-    Paused { done: u64, total: u64 },
+    Paused {
+        done: u64,
+        total: u64,
+    },
     Ready,
     /// A file failed (and why).
     Error(String),
@@ -288,7 +295,12 @@ mod tests {
     #[test]
     fn every_card_file_is_in_the_catalog_and_every_file_has_a_card() {
         for c in CARDS {
-            assert_eq!(c.models().len(), c.files.iter().filter_map(|id| catalog::model(id)).map(|m| m.file).collect::<std::collections::HashSet<_>>().len(), "{}", c.id);
+            assert_eq!(
+                c.models().len(),
+                c.files.iter().filter_map(|id| catalog::model(id)).map(|m| m.file).collect::<std::collections::HashSet<_>>().len(),
+                "{}",
+                c.id
+            );
             assert!((1..=5).contains(&c.quality) && (1..=5).contains(&c.speed));
         }
         let shown: Vec<&str> = CARDS.iter().flat_map(|c| c.models()).map(|m| m.file).collect();

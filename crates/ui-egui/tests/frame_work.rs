@@ -259,6 +259,7 @@ fn thumbnails_are_built_a_few_per_frame() {
     h.step();
     let (thumbs, deferred) = (counter(&h, "thumbs"), counter(&h, "thumbs_deferred"));
     h.input_mut().events.push(Event::MouseWheel {
+        source: egui::MouseWheelSource::Unknown,
         unit: egui::MouseWheelUnit::Point,
         delta: egui::vec2(0.0, -4000.0),
         modifiers: Modifiers::NONE,

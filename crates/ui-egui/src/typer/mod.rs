@@ -328,7 +328,7 @@ pub(crate) fn chip(ui: &mut egui::Ui, label: &str, on: bool, t: &Tokens) -> egui
     ui.painter().rect_filled(rect, 9.0, fill);
     ui.painter().rect_stroke(rect, 9.0, Stroke::new(1.0, if on { t.accent_border } else { t.field_border }), StrokeKind::Inside);
     ui.painter().galley(rect.center() - galley.size() / 2.0, galley, Color32::PLACEHOLDER);
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
     resp
 }
 
@@ -358,7 +358,7 @@ pub(crate) fn icon_label_button(ui: &mut egui::Ui, icon: &str, label: &str, prim
     let icon_rect = egui::Rect::from_center_size(egui::pos2(rect.left() + 15.0, rect.center().y), vec2(16.0, 16.0));
     crate::icons::paint(ui, icon_rect, icon, 16.0, fg);
     ui.painter().galley(egui::pos2(rect.left() + 26.0, rect.center().y - galley.size().y / 2.0), galley, fg);
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
     resp
 }
 
@@ -429,7 +429,7 @@ fn confirm_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
         ),
     };
     let mut answer: Option<crate::widgets::ButtonRole> = None;
-    egui::Modal::new(egui::Id::new("typer-confirm")).frame(dialog_frame(&t)).show(ctx, |ui| {
+    egui::Modal::new(egui::Id::unique("typer-confirm")).frame(dialog_frame(&t)).show(ctx, |ui| {
         ui.set_width(340.0);
         ui.label(RichText::new(title).color(t.text).size(13.0).strong());
         ui.add_space(6.0);
@@ -500,7 +500,7 @@ pub(crate) fn workspace_text(typer: &TyperSession) -> String {
 pub fn persist(app: &mut PhotocraftApp, ctx: &egui::Context) {
     capture_bubbles(app, ctx);
     pages::sync(app, ctx);
-    let id = egui::Id::new("typer-persist");
+    let id = egui::Id::unique("typer-persist");
     let mut st = ctx.data(|d| d.get_temp::<PersistState>(id)).unwrap_or_default();
     let now = ctx.input(|i| i.time);
     if !st.restored {
@@ -563,7 +563,7 @@ fn capture_bubbles(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if !app.session.typer.state.settings.multi_bubble_mode {
         return;
     }
-    let id = egui::Id::new("typer-seen-selection");
+    let id = egui::Id::unique("typer-seen-selection");
     let mut seen = ctx.data(|d| d.get_temp::<SeenSelection>(id)).unwrap_or_default();
     let Some(st) = app.session.active() else { return };
     let key = Some((st.doc.id, st.revision));

@@ -660,7 +660,10 @@ mod tests {
         var["weight"] = json!(300);
         let c = parse(&index(vec![fam("Inter", "SANS_SERIF", &[], vec![file("ofl/inter/Inter-Regular.ttf", &["Inter-Regular"]), bold, it, var])])).unwrap();
         let f = c.family("inter").unwrap();
-        let styles = |v: &[&str]| c.files_for(f, &v.iter().map(|s| s.to_string()).collect::<Vec<_>>()).map(|v| v.iter().map(|x| x.path.rsplit('/').next().unwrap().to_string()).collect::<Vec<_>>());
+        let styles = |v: &[&str]| {
+            c.files_for(f, &v.iter().map(|s| s.to_string()).collect::<Vec<_>>())
+                .map(|v| v.iter().map(|x| x.path.rsplit('/').next().unwrap().to_string()).collect::<Vec<_>>())
+        };
         assert_eq!(styles(&[]).unwrap().len(), 4);
         assert_eq!(styles(&["Regular"]).unwrap(), ["Inter-Regular.ttf", "Inter[wght].ttf"]);
         assert_eq!(styles(&["bold"]).unwrap(), ["Inter-Bold.ttf", "Inter[wght].ttf"]);

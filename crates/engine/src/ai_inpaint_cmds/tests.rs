@@ -268,7 +268,9 @@ fn quality_and_device_choose_lama_or_migan() {
     let (_, last) = run(gpu, json!({"model": "manga-lama", "device": "cpu"}));
     assert_eq!(last, ("manga-lama", true));
     let mut s = with_fake(page(8), FakeInpainter::default());
-    for bad in [json!({"quality": "max"}), json!({"device": "npu"}), json!({"model": "mangajanai-v1-2x-1200p"}), json!({"threads": 99}), json!({"keepLoaded": 1})] {
+    for bad in
+        [json!({"quality": "max"}), json!({"device": "npu"}), json!({"model": "mangajanai-v1-2x-1200p"}), json!({"threads": 99}), json!({"keepLoaded": 1})]
+    {
         assert!(s.execute(ID, bad.clone()).is_err(), "{bad}");
     }
 }

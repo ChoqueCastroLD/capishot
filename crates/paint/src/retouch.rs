@@ -275,21 +275,19 @@ pub fn mix_back(target: &mut Surface, orig: &Region, work: &Region, rect: Rect, 
     let mut out = orig.crop(rect);
     let n = out.ch;
     let opacity = opacity.clamp(0.0, 1.0);
-    let w = rect.width() as usize;
-    if w == 0 || n == 0 {
-        return;
-    }
-    // Row by row (in parallel for a large area, as a long stroke's commit mixes): every pixel
-    // depends only on its own original, working and selection values.
-    let row = |(i, line): (usize, &mut [f32])| {
-        let y = rect.y0 + i as i32;
-        for (j, o) in line.chunks_exact_mut(n).enumerate() {
-            let x = rect.x0 + j as i32;
+    for y in rect.y0..rect.y1 {
+        for x in rect.x0..rect.x1 {
             let k = opacity * selection.map_or(1.0, |s| s.sample_channel(x, y, 0));
             if k <= 0.0 {
                 continue;
             }
             let wv = work.px(x, y);
+            let i = out.index(x, y) * n;
+            let o = &mut out.data[i..i + n];
+            // Untouched by the dabs: keep the pixel exactly (the premultiplied mix can round it).
+            if *o == *wv {
+                continue;
+            }
             match a {
                 // Alpha changes: mix premultiplied, so colour under transparent pixels doesn't bleed in.
                 Some(a) if !lock_transparency => mix_premultiplied(o, wv, a, k),
@@ -303,15 +301,7 @@ pub fn mix_back(target: &mut Surface, orig: &Region, work: &Region, rect: Rect, 
                 }
             }
         }
-    };
-    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
-    if w * rect.height() as usize >= 1 << 16 {
-        use rayon::prelude::*;
-        out.data.par_chunks_mut(w * n).enumerate().for_each(row);
-        out.write(target);
-        return;
     }
-    out.data.chunks_mut(w * n).enumerate().for_each(row);
     out.write(target);
 }
 
@@ -350,8 +340,14 @@ pub struct Smudge {
 }
 
 impl Smudge {
+    /// Radius of the carried-colour buffer, including pixels outside a pressure-sized dab.
+    /// Both the first pickup and every subsequent pickup need this entire neighbourhood.
+    pub fn sampling_radius(max_brush_size: f32) -> i32 {
+        ((max_brush_size / 2.0).ceil() as i32).saturating_add(2)
+    }
+
     pub fn new(strength: f32, finger: Option<Vec<f32>>, max_brush_size: f32) -> Self {
-        Self { strength: strength.clamp(0.0, 1.0), finger, radius: (max_brush_size / 2.0).ceil() as i32 + 2, alpha: None, carry: None }
+        Self { strength: strength.clamp(0.0, 1.0), finger, radius: Self::sampling_radius(max_brush_size), alpha: None, carry: None }
     }
 
     /// Mix in premultiplied space using alpha channel `a` (the format's [`alpha_index`]).
@@ -460,34 +456,6 @@ mod tests {
     use super::*;
     use crate::{BrushSettings, StrokePoint};
     use photocraft_geom::Point;
-
-    /// A large mix-back runs its rows in parallel: the same pixels as mixing it strip by strip.
-    #[test]
-    fn large_mix_back_matches_strip_by_strip() {
-        for (fmt, lock) in [
-            (PixelFormat::RGBA8, false),
-            (PixelFormat::RGBA8, true),
-            (PixelFormat::new(photocraft_color::ColorMode::Rgb, photocraft_color::SampleType::F32, true), false),
-        ] {
-            let r = Rect::new(-5, 3, 345, 263);
-            let n = fmt.channels();
-            let px = |i: usize, m: usize| ((i * m) % 251) as f32 / 250.0;
-            let mut orig = Region::new(r, n);
-            orig.data.iter_mut().enumerate().for_each(|(i, v)| *v = px(i, 7));
-            let mut work = Region::new(r, n);
-            work.data.iter_mut().enumerate().for_each(|(i, v)| *v = px(i, 13));
-            let mut sel = Surface::new(PixelFormat::GRAY8);
-            let sv: Vec<f32> = (0..r.width() as usize * r.height() as usize).map(|i| px(i, 3)).collect();
-            sel.write_region(r, &sv);
-            let (mut a, mut b) = (Surface::new(fmt), Surface::new(fmt));
-            mix_back(&mut a, &orig, &work, r, 0.8, Some(&sel), lock);
-            for y in (r.y0..r.y1).step_by(50) {
-                let strip = Rect::new(r.x0, y, r.x1, (y + 50).min(r.y1));
-                mix_back(&mut b, &orig, &work, strip, 0.8, Some(&sel), lock);
-            }
-            assert_eq!(a.read_region(r), b.read_region(r), "{fmt:?} lock {lock}");
-        }
-    }
 
     fn stroke(points: &[(f64, f64)], size: f32, hardness: f32) -> Stroke {
         Stroke {

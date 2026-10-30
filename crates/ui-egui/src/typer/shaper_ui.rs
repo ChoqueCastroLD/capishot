@@ -36,7 +36,7 @@ struct Variant {
 }
 
 fn strip_id() -> egui::Id {
-    egui::Id::new("typer-textshaper")
+    egui::Id::unique("typer-textshaper")
 }
 
 fn parse(v: &Value) -> (Vec<Variant>, bool) {
@@ -81,7 +81,7 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         strip = Strip { key: Some(key), variants, no_bubble, page: 0 };
     }
     let t = Tokens::get(ui.ctx());
-    let open_id = egui::Id::new("typer-textshaper-open");
+    let open_id = egui::Id::unique("typer-textshaper-open");
     let mut open = ctx.data_mut(|d| *d.get_persisted_mut_or_insert_with(open_id, || true));
     let pages = strip.variants.len().div_ceil(PER_PAGE).max(1);
     strip.page %= pages;

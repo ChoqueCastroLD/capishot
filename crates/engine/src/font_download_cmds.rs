@@ -21,10 +21,10 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use photocraft_text::catalog::{Catalog, Family, MAX_INDEX_BYTES};
-use photocraft_text::sha256::sha256_hex;
-use photocraft_text::fonts::{Registered, validate_font};
 use photocraft_doc::LayerContent;
+use photocraft_text::catalog::{Catalog, Family, MAX_INDEX_BYTES};
+use photocraft_text::fonts::{Registered, validate_font};
+use photocraft_text::sha256::sha256_hex;
 use serde_json::{Value, json};
 
 use crate::commands::CommandSpec;
@@ -442,7 +442,13 @@ fn download_family(svc: &FontServices, cat: &Catalog, family: &Family, styles: &
     records.sort_by(|a, b| a.name.cmp(&b.name));
     all.sort_by(|a, b| a.0.cmp(&b.0));
     ctx.check()?;
-    let record = FamilyRecord { slug, family: family.family.clone(), files: records, license_file: license_name.filter(|_| license.is_some()), index_commit: cat.commit.clone() };
+    let record = FamilyRecord {
+        slug,
+        family: family.family.clone(),
+        files: records,
+        license_file: license_name.filter(|_| license.is_some()),
+        index_commit: cat.commit.clone(),
+    };
     svc.store.write_family(&record, &all, license.as_deref())?;
     ctx.progress(hi, "");
     Ok(Downloaded { record, files: need.len(), bytes: downloaded, unchanged: false, replaced: existing.is_some() })
@@ -565,7 +571,10 @@ fn catalog(s: &mut Session, p: &Value) -> Result<Value> {
     let subset = text_param(p, "subset", CMD, 100)?.filter(|c| !c.is_empty());
     let limit = match p.get("limit") {
         None | Some(Value::Null) => 50,
-        Some(v) => v.as_u64().filter(|n| (1..=MAX_LIMIT as u64).contains(n)).ok_or_else(|| bad(CMD, format!("`limit` must be a whole number from 1 to {MAX_LIMIT}")))? as usize,
+        Some(v) => v
+            .as_u64()
+            .filter(|n| (1..=MAX_LIMIT as u64).contains(n))
+            .ok_or_else(|| bad(CMD, format!("`limit` must be a whole number from 1 to {MAX_LIMIT}")))? as usize,
     };
     let svc = online(s)?;
     jobs::run(
@@ -752,12 +761,8 @@ pub(crate) fn download_missing(s: &mut Session, missing: Vec<String>) -> Result<
             }
             let downloaded = installed.clone();
             installed.extend(b.available);
-            let remap: serde_json::Map<String, Value> = b
-                .targets
-                .iter()
-                .filter(|(m, f)| m != f && installed.contains(f))
-                .map(|(m, f)| (m.clone(), Value::String(f.clone())))
-                .collect();
+            let remap: serde_json::Map<String, Value> =
+                b.targets.iter().filter(|(m, f)| m != f && installed.contains(f)).map(|(m, f)| (m.clone(), Value::String(f.clone()))).collect();
             let replaced = if remap.is_empty() { 0 } else { crate::type_extra_cmds::replace_fonts(s, &remap, false)?["replaced"].as_u64().unwrap_or(0) };
             let still = s.active().map(|d| crate::type_extra_cmds::missing_fonts(&d.doc)).unwrap_or_default();
             Ok(json!({

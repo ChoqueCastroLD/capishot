@@ -107,13 +107,13 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
     egui::Grid::new("ai-upscale-form").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
         ui.label(tl!("Scale:"));
         ui.add_enabled_ui(model == "auto", |ui| {
-            crate::widgets::dropdown(ui, "ai-upscale-scale", &mut scale, &[("2".to_string(), "2×"), ("4".to_string(), "4×")], 200.0);
+            crate::widgets::dropdown(ui, "ai-upscale-scale", tl!("Scale:"), &mut scale, &[("2".to_string(), "2×"), ("4".to_string(), "4×")], 200.0);
         });
         ui.end_row();
         ui.label(tl!("Image type:"));
         ui.add_enabled_ui(model == "auto", |ui| {
             let opts = [("auto".to_string(), tl!("Detect")), ("grayscale".to_string(), tl!("Black-and-white manga")), ("color".to_string(), tl!("Colour"))];
-            crate::widgets::dropdown(ui, "ai-upscale-content", &mut content, &opts, 200.0);
+            crate::widgets::dropdown(ui, "ai-upscale-content", tl!("Image type:"), &mut content, &opts, 200.0);
         });
         ui.end_row();
         crate::ai_options_ui::simple_rows(ui, f);
@@ -126,7 +126,7 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
             ("replace".to_string(), tl!("Replace this image (flattens)")),
             ("newDocument".to_string(), tl!("New document")),
         ];
-        crate::widgets::dropdown(ui, "ai-upscale-output", &mut output, &opts, 260.0);
+        crate::widgets::dropdown(ui, "ai-upscale-output", "", &mut output, &opts, 260.0);
         ui.end_row();
     });
     f.insert("scale".into(), json!(scale));

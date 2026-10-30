@@ -45,7 +45,13 @@ fn hdr_adjustments_preserve_range_and_cpu_parity() {
             space: Default::default(),
             black: Default::default(),
         },
-        Adjustment::Curves { master: identity.clone(), per_channel: std::array::from_fn(|_| identity.clone()), space: Default::default(), black: Vec::new(), pencil: false },
+        Adjustment::Curves {
+            master: identity.clone(),
+            per_channel: std::array::from_fn(|_| identity.clone()),
+            space: Default::default(),
+            black: Vec::new(),
+            pencil: false,
+        },
         Adjustment::Curves {
             master: Vec::new(),
             per_channel: [Vec::new(), identity.clone(), vec![CurvePoint { input: 0.0, output: 0.0 }, CurvePoint { input: 1.0, output: 0.5 }]],
@@ -527,7 +533,7 @@ fn lookup(n: usize, tetrahedral: bool, dither: bool) -> Adjustment {
             }
         }
     }
-    Adjustment::ColorLookup { name: "test".into(), lut: Some(std::sync::Arc::new(t)), size: n as u32, tetrahedral, dither }
+    Adjustment::ColorLookup { name: "test".into(), lut: Some(std::sync::Arc::new(t)), size: n as u32, tetrahedral, dither, source: None }
 }
 
 #[test]
@@ -729,8 +735,14 @@ fn hard_stop_effects_and_gradient_maps_request_cpu() {
             }
             let paint = FxPaint::Gradient(gradient.clone());
             let effects = [
-                Effect::GradientOverlay { common: FxCommon::new(BlendMode::Normal, 1.0), gradient, dither: false },
-                Effect::Stroke(StrokeFx { common: FxCommon::new(BlendMode::Normal, 1.0), size: 1.0, position: StrokePosition::Inside, paint: paint.clone(), overprint: false }),
+                Effect::GradientOverlay { common: FxCommon::new(BlendMode::Normal, 1.0), gradient, dither: false, interpolation: None },
+                Effect::Stroke(StrokeFx {
+                    common: FxCommon::new(BlendMode::Normal, 1.0),
+                    size: 1.0,
+                    position: StrokePosition::Inside,
+                    paint: paint.clone(),
+                    overprint: false,
+                }),
                 Effect::InnerGlow(glow(paint.clone(), GlowTechnique::Softer, 1.0, 0.0, GlowSource::Edge)),
                 Effect::OuterGlow(glow(paint, GlowTechnique::Softer, 1.0, 0.0, GlowSource::Edge)),
             ];
@@ -1285,6 +1297,7 @@ fn effect_cases() -> Vec<(&'static str, Vec<Effect>)> {
                 common: FxCommon::new(BlendMode::Normal, 0.8),
                 gradient: Gradient { style: GradientStyle::Radial, ..gradient() },
                 dither: false,
+                interpolation: None,
             }],
         ),
         (
@@ -1356,7 +1369,7 @@ fn effect_cases() -> Vec<(&'static str, Vec<Effect>)> {
                     invert: false,
                 }),
                 Effect::ColorOverlay { common: FxCommon::new(BlendMode::SoftLight, 0.5), color: Color::rgb(0.9, 0.3, 0.2) },
-                Effect::GradientOverlay { common: FxCommon::new(BlendMode::Overlay, 0.4), gradient: gradient(), dither: false },
+                Effect::GradientOverlay { common: FxCommon::new(BlendMode::Overlay, 0.4), gradient: gradient(), dither: false, interpolation: None },
                 Effect::Stroke(stroke(3.0, StrokePosition::Outside, FxPaint::Color(Color::rgb(0.0, 0.0, 0.0)))),
             ],
         ),
@@ -1891,7 +1904,16 @@ fn stroked_shapes_with_clipped_layers() {
             d.layers.push(noise_layer("bg", d.pixel_format(), Rect::from_xywh(0, 0, 80, 64), 1, 0.3));
             let path = Path::new(vec![Subpath::polygon(&[(10.3, 8.6), (66.2, 12.1), (58.7, 54.4), (16.9, 48.2)])]);
             let stroke = ShapeStroke { width: 5.0, paint: Fill::Solid(Color::rgb(0.9, 0.9, 0.1)), ..Default::default() };
-            let mut sh = ShapeLayer { path, fill: Some(Fill::Solid(Color::rgb(0.2, 0.3, 0.8))), stroke: Some(stroke), live: None, cache: None, psd_raw: None, density: 1.0, feather: 0.0 };
+            let mut sh = ShapeLayer {
+                path,
+                fill: Some(Fill::Solid(Color::rgb(0.2, 0.3, 0.8))),
+                stroke: Some(stroke),
+                live: None,
+                cache: None,
+                psd_raw: None,
+                density: 1.0,
+                feather: 0.0,
+            };
             sh.cache = Some(photocraft_vector::render_shape(&sh, d.pixel_format(), d.bounds()));
             let mut l = Layer::new("shape", LayerContent::Shape(sh));
             l.blend = blend;

@@ -73,7 +73,10 @@ fn the_modifier_finger_holds_shift_then_alt_and_never_reaches_egui() {
     let started = frame(&mut t, browser(2, TouchPhase::Start, 300.0, 300.0, false), 1.1);
     assert!(started.iter().all(|e| !matches!(e, Event::Touch { id: TouchId(1), .. })));
     let out = frame(&mut t, vec![], 1.1 + PRESS_WAIT_S);
-    assert!(matches!(out.iter().find(|e| matches!(e, Event::PointerButton { .. })), Some(Event::PointerButton { pressed: true, modifiers, .. }) if modifiers.shift), "{out:?}");
+    assert!(
+        matches!(out.iter().find(|e| matches!(e, Event::PointerButton { .. })), Some(Event::PointerButton { pressed: true, modifiers, .. }) if modifiers.shift),
+        "{out:?}"
+    );
     // Slid out of the button: Alt.
     frame(&mut t, browser(1, TouchPhase::Move, 110.0, 600.0, true), 1.2);
     assert_eq!(t.held_modifiers(), Modifiers::ALT);
@@ -261,7 +264,11 @@ fn a_slow_small_twist_does_not_repeat_undo() {
     for k in 1..=12 {
         // Each finger moves 8 pt over 1.2 s: the twist of a rotation, too slow for egui's eye.
         let d = 8.0 * k as f32 / 12.0;
-        frame(&mut t, [browser(1, TouchPhase::Move, 140.0, 300.0 + d, true), browser(2, TouchPhase::Move, 260.0, 300.0 - d, false)].concat(), 1.0 + 0.1 * f64::from(k));
+        frame(
+            &mut t,
+            [browser(1, TouchPhase::Move, 140.0, 300.0 + d, true), browser(2, TouchPhase::Move, 260.0, 300.0 - d, false)].concat(),
+            1.0 + 0.1 * f64::from(k),
+        );
     }
     frame(&mut t, [browser(1, TouchPhase::End, 140.0, 308.0, true), browser(2, TouchPhase::End, 260.0, 292.0, false)].concat(), 2.4);
     assert!(t.take_actions().is_empty());

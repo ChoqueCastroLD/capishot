@@ -384,7 +384,7 @@ fn fonts_the_host_serves_are_fetched_not_reported_missing() {
     assert!(notice(&app, "Missing fonts").is_none(), "every font is served: no notice");
     assert!(crate::served_fonts::take_requests().iter().any(|f| f == family), "and it is fetched");
     // The shell hands the file over: the layer is drawn with it.
-    crate::served_fonts::install(&mut app, vec![(family.into(), mono(family))]);
+    crate::served_fonts::install(&mut app, &egui::Context::default(), vec![(family.into(), mono(family))]);
     assert!(registered(family));
     assert!(photocraft_engine::type_extra_cmds::missing_fonts(&app.session.active().unwrap().doc).is_empty());
     assert!(ink(&app, layer).width() > before.width(), "re-rendered with the served font");
@@ -396,14 +396,14 @@ fn the_missing_fonts_notice_drops_what_a_late_manifest_serves() {
     let mut app = PhotocraftApp::new(Session::new(), Services::default());
     doc_with_text(&mut app, served);
     app.run("type.create", json!({"x": 10, "y": 20, "text": "x", "size": 12, "font": other})).unwrap();
-    crate::served_fonts::install(&mut app, Vec::new());
+    crate::served_fonts::install(&mut app, &egui::Context::default(), Vec::new());
     after_open(&mut app);
     let mut lines = notice(&app, "Missing fonts").expect("before the manifest, both are missing").lines.clone();
     lines.sort();
     assert_eq!(lines, [other, served]);
     // The manifest arrives (next frame): the served family is fetched and leaves the notice.
     serve(served);
-    crate::served_fonts::install(&mut app, Vec::new());
+    crate::served_fonts::install(&mut app, &egui::Context::default(), Vec::new());
     assert_eq!(notice(&app, "Missing fonts").expect("still one missing").lines, [other]);
     assert!(crate::served_fonts::take_requests().iter().any(|f| f == served));
 }

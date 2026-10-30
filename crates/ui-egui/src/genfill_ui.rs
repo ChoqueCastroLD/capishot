@@ -94,8 +94,9 @@ pub fn ok_label(f: &Map<String, Value>) -> Option<&'static str> {
 
 /// The prompt field (shared by the dialog and the bar); true when Enter was pressed.
 fn prompt_field(ui: &mut egui::Ui, id: &str, prompt: &mut String, width: f32, focus: bool) -> bool {
-    let r = ui
-        .add(egui::TextEdit::singleline(prompt).id(egui::Id::new(id)).char_limit(1000).desired_width(width).hint_text(tl!("Describe what to add (optional)")));
+    let r = ui.add(
+        egui::TextEdit::singleline(prompt).id(egui::Id::unique(id)).char_limit(1000).desired_width(width).hint_text(tl!("Describe what to add (optional)")),
+    );
     if focus {
         r.request_focus();
     }
@@ -137,10 +138,11 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
             ("standard".to_string(), tl!("Standard (GPU, 2.3 GB)")),
             ("high".to_string(), tl!("High (GPU, slow)")),
         ];
-        crate::widgets::dropdown(ui, "genfill-quality", &mut quality, &opts, 220.0);
+        crate::widgets::dropdown(ui, "genfill-quality", "", &mut quality, &opts, 220.0);
         ui.label(tl!("Variants:"));
-        let opts: Vec<(String, &str)> = std::iter::once(("auto".to_string(), tl!("Automatic"))).chain(["1", "2", "3", "4"].iter().map(|v| ((*v).to_string(), *v))).collect();
-        crate::widgets::dropdown(ui, "genfill-variants", &mut variants, &opts, 90.0);
+        let opts: Vec<(String, &str)> =
+            std::iter::once(("auto".to_string(), tl!("Automatic"))).chain(["1", "2", "3", "4"].iter().map(|v| ((*v).to_string(), *v))).collect();
+        crate::widgets::dropdown(ui, "genfill-variants", tl!("Variants:"), &mut variants, &opts, 90.0);
     });
     f.insert("variants".into(), json!(variants));
     f.insert("quality".into(), json!(quality));
@@ -285,7 +287,7 @@ pub fn prompt_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let Some(xf) = crate::canvas::ViewXform::active(app) else { return };
     let r = xf.doc_rect(bounds);
     let screen = app.last_canvas_rect;
-    let id = egui::Id::new("genfill-prompt-bar");
+    let id = egui::Id::unique("genfill-prompt-bar");
     let size = ctx.memory(|m| m.area_rect(id)).map_or(egui::vec2(360.0, 34.0), |a| a.size());
     let (x, y) = (r.center().x - size.x / 2.0, r.bottom() + 10.0);
     let y = if y + size.y > screen.bottom() { (r.top() - size.y - 10.0).max(screen.top()) } else { y };

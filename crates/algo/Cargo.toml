@@ -21,6 +21,7 @@ rustfft = "6.4.1"
 rayon = { workspace = true }
 
 [dev-dependencies]
+photocraft-testkit = { workspace = true }
 serde_json = { workspace = true }
 
 # The browser threads build (wasm with `atomics`, packaging/web-threads) takes the rayon paths too.

@@ -718,13 +718,13 @@ pub(crate) fn forget_rects(ctx: &egui::Context) {
 }
 
 fn rects_id() -> egui::Id {
-    egui::Id::new("dock-group-rects")
+    egui::Id::unique("dock-group-rects")
 }
 
 /// The group expanded from its collapsed tab strip (see [`show`]), if any: with Preferences ▸
 /// Workspace ▸ Auto-Collapse Iconic Panels on, the first click outside it collapses it again.
 fn peek_id() -> egui::Id {
-    egui::Id::new("dock-peek")
+    egui::Id::unique("dock-peek")
 }
 
 fn auto_collapse_peek(app: &mut PhotocraftApp, ctx: &egui::Context) {
@@ -761,7 +761,7 @@ pub fn last_strips(ctx: &egui::Context) -> Vec<StripRects> {
 }
 
 fn strips_id() -> egui::Id {
-    egui::Id::new("dock-strip-rects")
+    egui::Id::unique("dock-strip-rects")
 }
 
 /// Add this frame's `rects` and `strips` to what the frame drew so far (several places draw
@@ -785,11 +785,11 @@ fn note_drawn(ctx: &egui::Context, rects: Vec<(Group, Rect)>, strips: Vec<StripR
 }
 
 fn rects_frame_id() -> egui::Id {
-    egui::Id::new("dock-group-rects-frame")
+    egui::Id::unique("dock-group-rects-frame")
 }
 
 fn columns_id() -> egui::Id {
-    egui::Id::new("dock-columns")
+    egui::Id::unique("dock-columns")
 }
 
 /// A column's area this frame, and its groups' rects (for drops from elsewhere).
@@ -813,7 +813,7 @@ pub fn columns(ctx: &egui::Context) -> Vec<(Side, Rect)> {
 }
 
 fn drag_id() -> egui::Id {
-    egui::Id::new("dock-group-drag")
+    egui::Id::unique("dock-group-drag")
 }
 
 /// The group being dragged by its strip or window (drop zones show while it is).
@@ -853,7 +853,7 @@ pub fn drop_target(app: &PhotocraftApp, ctx: &egui::Context, g: Group, p: Pos2) 
 }
 
 fn left_slot_id() -> egui::Id {
-    egui::Id::new("dock-left-slot")
+    egui::Id::unique("dock-left-slot")
 }
 
 /// Where an empty left column accepts a drop: a strip of the canvas beside the toolbar.
@@ -878,7 +878,7 @@ pub fn paint_drop_hint(app: &PhotocraftApp, ctx: &egui::Context) {
     let Some(g) = dragging(ctx) else { return };
     let Some(p) = ctx.pointer_latest_pos() else { return };
     let t = Tokens::get(ctx);
-    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("dock-drop-hint")));
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::unique("dock-drop-hint")));
     let fill = t.accent.gamma_multiply(0.25);
     let stroke = Stroke::new(2.0, t.accent);
     if let Some(slot) = left_slot(ctx) {
@@ -1068,6 +1068,10 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, place: Place, shown: &[G
                 crate::layer_row_ui::panel_menu(app, ui);
                 ui.separator();
             }
+            if front_label == Some("Color") {
+                crate::color_panel_ui::panel_menu(app, ui);
+                ui.separator();
+            }
             if front_label == Some("Swatches") {
                 crate::swatches_ui::panel_menu(app, ui);
                 ui.separator();
@@ -1078,6 +1082,10 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, place: Place, shown: &[G
             }
             if front_label == Some("Brush Settings") {
                 crate::brush_panel::panel_menu(app, ui);
+                ui.separator();
+            }
+            if front_label == Some("Histogram") {
+                crate::histogram_panel::panel_menu(app, ui);
                 ui.separator();
             }
             if front_label == Some("Actions") {
@@ -1126,7 +1134,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, place: Place, shown: &[G
         // Splitter in the gap below this group: resizes it, pushing the neighbouring groups.
         if i + 1 < rects.len() && !collapsed && rects.iter().skip(i + 1).any(|(n, _)| !app.ui.dock.is_collapsed(*n)) {
             let gap = Rect::from_min_size(pos2(rect.left(), rect.bottom()), vec2(rect.width(), GAP)).expand2(vec2(0.0, 2.0));
-            let sresp = ui.interact(gap, ui.id().with(("dock-splitter", g.key())), Sense::drag());
+            let sresp = ui.interact(gap, ui.scope_id().with(("dock-splitter", g.key())), Sense::drag());
             if sresp.hovered() || sresp.dragged() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
                 ui.painter().line_segment([gap.left_center(), gap.right_center()], Stroke::new(2.0, t.accent.gamma_multiply(0.7)));
@@ -1309,8 +1317,18 @@ fn resize(layout: &mut DockLayout, heights: &[(Group, f32)], i: usize, dy: f32) 
 }
 
 /// What `prefs.panelLayout` holds: the live layout and open panels.
-fn snapshot(app: &PhotocraftApp) -> Value {
-    json!({"workspace": app.ui.workspace, "panels": app.ui.panels, "dockTabs": app.ui.dock_tabs, "dock": app.ui.dock, "timelineOpen": app.ui.timeline.open, "docking": app.ui.docking, "dockingHidden": app.ui.docking_hidden, "dockingCollapsed": app.ui.docking_collapsed})
+pub(crate) fn snapshot(app: &PhotocraftApp) -> Value {
+    let mut layout = json!({"workspace": app.ui.workspace, "panels": app.ui.panels, "dockTabs": app.ui.dock_tabs, "dock": app.ui.dock, "timelineOpen": app.ui.timeline.open, "docking": app.ui.docking, "dockingReturns": app.ui.docking_returns, "dockingCollapsed": app.ui.docking_collapsed});
+    keep_newer(app, &mut layout);
+    layout
+}
+
+/// A saved layout's workspace from a newer version stays as saved while the default layout
+/// shows in its place (craft-ui: keep it on disk, don't overwrite it).
+pub(crate) fn keep_newer(app: &PhotocraftApp, layout: &mut Value) {
+    if let (None, Some(kept), Some(layout)) = (&app.ui.docking, &app.ui.docking_kept, layout.as_object_mut()) {
+        layout.extend(kept.clone());
+    }
 }
 
 /// Remember the layout in the preferences once the user lets go of the mouse (Workspace ›
@@ -1345,11 +1363,16 @@ pub fn restore(app: &mut PhotocraftApp) {
 /// (a workspace or `panelLayout`). Missing or invalid dock parts are left alone; old
 /// layouts without Timeline visibility restore it closed.
 pub fn apply(app: &mut PhotocraftApp, v: &Value) {
-    app.ui.docking_collapsed = v.get("dockingCollapsed").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
     app.ui.docking_reveal = None;
     app.ui.docking_generation = app.ui.docking_generation.wrapping_add(1);
-    app.ui.docking_hidden = v.get("dockingHidden").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
-    app.ui.docking = v.get("docking").and_then(|d| serde_json::from_value(d.clone()).ok()).filter(crate::panel_docking::valid);
+    (app.ui.docking, app.ui.docking_returns) = crate::panel_docking::load(v).map_or((None, Default::default()), |(w, r)| (Some(w), r));
+    app.ui.docking_kept = (app.ui.docking.is_none() && crate::panel_docking::newer(v))
+        .then(|| ["docking", "dockingReturns", "dockingCollapsed"].into_iter().filter_map(|key| Some((key.to_owned(), v.get(key)?.clone()))).collect());
+    // Collapsed custom groups belong to the workspace; the native dock keeps its own flags.
+    app.ui.docking_collapsed = match app.ui.docking {
+        Some(_) => v.get("dockingCollapsed").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default(),
+        None => Vec::new(),
+    };
     if let Some(mut p) = v.get("panels").and_then(|p| serde_json::from_value::<Panels>(p.clone()).ok()) {
         // The embedding host owns these flags, including for layouts that serialize them.
         p.menu_bar = app.ui.panels.menu_bar;
@@ -1370,5 +1393,4 @@ pub fn apply(app: &mut PhotocraftApp, v: &Value) {
 }
 
 #[cfg(test)]
-#[path = "dock_tests.rs"]
 mod tests;

@@ -131,7 +131,7 @@ pub fn frame(app: &mut PhotocraftApp, ctx: &Context) {
 }
 
 fn requests_id() -> Id {
-    Id::new("floaters-requests")
+    Id::unique("floaters-requests")
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -147,7 +147,7 @@ fn request(ctx: &Context, g: Group, req: Request) {
 }
 
 fn reserved_id(g: Group) -> Id {
-    Id::new(("floater-docked-area", g.key()))
+    Id::unique(("floater-docked-area", g.key()))
 }
 
 /// In the dock: take the group's content area for docked panel `g`, which draws itself there
@@ -271,7 +271,7 @@ impl Host {
 }
 
 fn current_id() -> Id {
-    Id::new("floater-current-host")
+    Id::unique("floater-current-host")
 }
 
 /// Run `body` with `host` as the panel being drawn, for headers drawn by shared helpers

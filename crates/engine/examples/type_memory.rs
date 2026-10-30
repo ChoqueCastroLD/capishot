@@ -12,7 +12,8 @@ use serde_json::json;
 
 fn rss() -> (usize, usize) {
     let st = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
-    let kb = |k: &str| st.lines().find(|l| l.starts_with(k)).and_then(|l| l.split_whitespace().nth(1)).and_then(|v| v.parse::<usize>().ok()).unwrap_or(0) * 1024;
+    let kb =
+        |k: &str| st.lines().find(|l| l.starts_with(k)).and_then(|l| l.split_whitespace().nth(1)).and_then(|v| v.parse::<usize>().ok()).unwrap_or(0) * 1024;
     (kb("VmRSS"), kb("VmHWM"))
 }
 
@@ -27,7 +28,10 @@ fn main() {
     let mut s = Session::new();
     let bytes = std::fs::read(page).unwrap();
     s.add_document(photocraft_io::import(page, &bytes).unwrap().document, None);
-    let (w, h) = { let d = &s.active().unwrap().doc; (d.size.width as f64, d.size.height as f64) };
+    let (w, h) = {
+        let d = &s.active().unwrap().doc;
+        (d.size.width as f64, d.size.height as f64)
+    };
     let mut saver = photocraft_format::ObjectAutosaver::default();
     println!("open: rss {} MB, peak {} MB", mb(rss().0), mb(rss().1));
     let mut seed = 7u64;
@@ -71,7 +75,8 @@ fn main() {
         let mut note = String::new();
         if op % 10 == 9 {
             let st = s.active().unwrap();
-            let info = photocraft_format::RecoveryInfo { key: "web-x-1".into(), document_name: "p".into(), original_path: None, saved_at: 0, revision: st.revision };
+            let info =
+                photocraft_format::RecoveryInfo { key: "web-x-1".into(), document_name: "p".into(), original_path: None, saved_at: 0, revision: st.revision };
             let hist = st.history.checkpoint();
             let c = saver
                 .checkpoint_with_history(&st.doc, Some(&hist), photocraft_format::HistoryLimits { max_states: 20, max_bytes: 50 << 20 }, info, json!({}))
@@ -80,12 +85,6 @@ fn main() {
             note = format!(", autosave wrote {} MB", mb(written));
             saver.committed(c.live);
         }
-        println!(
-            "op {op} kind {}: rss {} MB, peak {} MB, history {} MB{note}",
-            op % 6,
-            mb(rss().0),
-            mb(rss().1),
-            mb(s.history_resident_bytes())
-        );
+        println!("op {op} kind {}: rss {} MB, peak {} MB, history {} MB{note}", op % 6, mb(rss().0), mb(rss().1), mb(s.history_resident_bytes()));
     }
 }

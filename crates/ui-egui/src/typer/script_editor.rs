@@ -18,27 +18,27 @@ const FONT_SIZE: f32 = 12.5;
 
 /// The editor's widget id (its `TextEdit`).
 pub fn editor_id() -> egui::Id {
-    egui::Id::new("typer-script-editor")
+    egui::Id::unique("typer-script-editor")
 }
 
 fn buffer_id() -> egui::Id {
-    egui::Id::new("typer-script-buffer")
+    egui::Id::unique("typer-script-buffer")
 }
 
 fn pending_id() -> egui::Id {
-    egui::Id::new("typer-script-format")
+    egui::Id::unique("typer-script-format")
 }
 
 fn scroll_id() -> egui::Id {
-    egui::Id::new("typer-script-scroll-to")
+    egui::Id::unique("typer-script-scroll-to")
 }
 
 fn last_line_id() -> egui::Id {
-    egui::Id::new("typer-script-last-line")
+    egui::Id::unique("typer-script-last-line")
 }
 
 fn layout_id() -> egui::Id {
-    egui::Id::new("typer-script-layout")
+    egui::Id::unique("typer-script-layout")
 }
 
 /// The gutter and each raw line's rect as drawn last frame (screen points), for tests and

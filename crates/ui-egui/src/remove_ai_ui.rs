@@ -112,7 +112,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let mb = format!("{} MB", (bytes as f64 / 1e6).round());
     let mut cancelled = false;
     let mut retry = false;
-    let modal = egui::Modal::new(egui::Id::new("remove-ai-download")).show(ctx, |ui| {
+    let modal = egui::Modal::new(egui::Id::unique("remove-ai-download")).show(ctx, |ui| {
         ui.set_width(width);
         ui.label(egui::RichText::new(tl!("Remove with AI")).font(crate::theme::semibold(15.0)));
         ui.add_space(6.0);

@@ -11,7 +11,9 @@ const SCRIPT: &str = "Página 1\nHola.\nPág. 2\nAdiós.\nPage 3\nFin.";
 /// An app whose importer makes a 4×4 document named after the file.
 fn app() -> PhotocraftApp {
     let services = crate::Services {
-        import: Some(Box::new(|name: &str, _b: &[u8], _depth: usize| Ok((Document::new(name, Size::new(4, 4), ColorMode::Rgb, SampleType::U8), Vec::new())))),
+        import: Some(Box::new(|name: &str, _b: &[u8], _opts: &photocraft_io::ImportOptions| {
+            Ok((Document::new(name, Size::new(4, 4), ColorMode::Rgb, SampleType::U8), Vec::new()))
+        })),
         ..Default::default()
     };
     let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);

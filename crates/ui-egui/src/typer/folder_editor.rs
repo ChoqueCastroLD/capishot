@@ -49,7 +49,7 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let (mut close, mut save, mut delete) = (false, false, false);
     let title = if d.id.is_none() { tl!("New folder") } else { tl!("Edit folder") };
     egui::Window::new(title)
-        .id(egui::Id::new("typer-folder-editor"))
+        .id(egui::Id::unique("typer-folder-editor"))
         .title_bar(false)
         .resizable(false)
         .default_width(320.0)
@@ -67,7 +67,7 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 ui.label(RichText::new(tl!("Parent folder")).color(t.text_dim).size(11.5));
                 let mut cur = d.parent.as_ref().and_then(Id::from_value).map_or(String::new(), |i| i.to_string());
                 let o: Vec<(String, &str)> = parents.iter().map(|(k, l)| (k.clone(), l.as_str())).collect();
-                if crate::widgets::dropdown(ui, "typer-folder-parent", &mut cur, &o, 200.0) {
+                if crate::widgets::dropdown(ui, "typer-folder-parent", "", &mut cur, &o, 200.0) {
                     d.parent = folder_ids.iter().find(|(k, _)| *k == cur).map(|(_, v)| v.clone());
                 }
                 ui.end_row();

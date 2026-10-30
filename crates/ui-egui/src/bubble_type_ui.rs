@@ -111,18 +111,18 @@ pub fn options(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     crate::widgets::vline(ui, 22.0);
     let mut pick = app.ui.tool_options.bubble_pick.clone();
     let opts: Vec<(String, &str)> = PICKS.iter().map(|(k, _)| (k.to_string(), pick_label(k))).collect();
-    let resp_changed = crate::widgets::dropdown(ui, "bubble-pick", &mut pick, &opts, 104.0);
+    let resp_changed = crate::widgets::dropdown(ui, "bubble-pick", "", &mut pick, &opts, 104.0);
     if resp_changed {
         app.ui.tool_options.bubble_pick = pick;
     }
-    let open_id = egui::Id::new("bubble-styles-open");
+    let open_id = egui::Id::unique("bubble-styles-open");
     let open = ui.data(|d| d.get_temp::<bool>(open_id).unwrap_or(false));
     let button = ui.add(egui::Button::new(tl!("Styles")).selected(open)).on_hover_text(tl!("The text styles for bubbles, narration boxes and floating text"));
     if button.clicked() {
         ui.data_mut(|d| d.insert_temp(open_id, !open));
     }
     if ui.data(|d| d.get_temp::<bool>(open_id).unwrap_or(false)) {
-        let area = egui::Area::new(egui::Id::new("bubble-styles"))
+        let area = egui::Area::new(egui::Id::unique("bubble-styles"))
             .order(egui::Order::Foreground)
             .fixed_pos(button.rect.left_bottom() + vec2(0.0, 6.0))
             .show(ui.ctx(), |ui| {
@@ -143,7 +143,7 @@ pub fn options(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 
 /// The popover: one tab per style, its fields and a live preview.
 fn popover(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
-    let tab_id = egui::Id::new("bubble-styles-tab");
+    let tab_id = egui::Id::unique("bubble-styles-tab");
     let mut tab: String = ui.data(|d| d.get_temp(tab_id)).unwrap_or_else(|| "bubble".to_string());
     ui.horizontal(|ui| {
         for k in ["bubble", "narration", "floating"] {
@@ -200,11 +200,10 @@ fn row(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) {
 }
 
 fn style_fields(app: &mut PhotocraftApp, ui: &mut egui::Ui, tab: &str, st: &mut BubbleTextStyle) {
-    let preview_pref = app.session.prefs().type_.font_preview;
     row(ui, tl!("Font"), |ui| {
         if crate::type_tool::fonts_ready(ui, 250.0) {
             let mut fam = st.font.clone();
-            if crate::type_tool::font_picker_salted(app, ui, &format!("bubble-font-{tab}"), &mut fam, 160.0, preview_pref) {
+            if crate::type_tool::font_picker_salted(app, ui, &format!("bubble-font-{tab}"), &mut fam, 160.0).is_some() {
                 st.font = fam;
             }
             let mut faces = crate::type_tool::styles(&st.font);
@@ -216,7 +215,7 @@ fn style_fields(app: &mut PhotocraftApp, ui: &mut egui::Ui, tab: &str, st: &mut 
             }
             let labels: Vec<(String, String)> = faces.iter().map(|f| (f.clone(), crate::type_tool::style_label(f))).collect();
             let opts: Vec<(String, &str)> = labels.iter().map(|(a, b)| (a.clone(), b.as_str())).collect();
-            crate::widgets::dropdown(ui, &format!("bubble-face-{tab}"), &mut st.style, &opts, 84.0);
+            crate::widgets::dropdown(ui, &format!("bubble-face-{tab}"), "", &mut st.style, &opts, 84.0);
         }
     });
     row(ui, tl!("Size"), |ui| {
@@ -242,7 +241,9 @@ fn style_fields(app: &mut PhotocraftApp, ui: &mut egui::Ui, tab: &str, st: &mut 
     });
     row(ui, tl!("Alignment"), |ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
-        for (align, icon, tip) in [("left", "align-left", tl!("Left align text")), ("center", "align-center", tl!("Center text")), ("right", "align-right", tl!("Right align text"))] {
+        for (align, icon, tip) in
+            [("left", "align-left", tl!("Left align text")), ("center", "align-center", tl!("Center text")), ("right", "align-right", tl!("Right align text"))]
+        {
             if crate::icons::button(ui, icon, 22.0, st.align == align, tip).clicked() {
                 st.align = align.into();
             }
@@ -287,7 +288,7 @@ fn style_fields(app: &mut PhotocraftApp, ui: &mut egui::Ui, tab: &str, st: &mut 
 /// command), cached until the style changes.
 fn preview(ui: &mut egui::Ui, tab: &str, st: &BubbleTextStyle) {
     let key = format!("{tab}{}", serde_json::to_string(st).unwrap_or_default());
-    let id = egui::Id::new("bubble-style-preview");
+    let id = egui::Id::unique("bubble-style-preview");
     let cached: Option<(String, egui::TextureHandle)> = ui.data(|d| d.get_temp(id));
     let tex = match cached {
         Some((k, tex)) if k == key => tex,
@@ -329,7 +330,8 @@ fn render_sample(st: &BubbleTextStyle) -> Option<egui::ColorImage> {
     let doc = &s.active()?.doc;
     let area = doc.bounds();
     let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
-    let px: Vec<Color32> = photocraft_compose::render(doc, area).px.iter().map(|p| Color32::from_rgba_unmultiplied(q(p[0]), q(p[1]), q(p[2]), q(p[3]))).collect();
+    let px: Vec<Color32> =
+        photocraft_compose::render(doc, area).px.iter().map(|p| Color32::from_rgba_unmultiplied(q(p[0]), q(p[1]), q(p[2]), q(p[3]))).collect();
     Some(egui::ColorImage::new([area.width() as usize, area.height() as usize], px))
 }
 

@@ -515,7 +515,6 @@ pub const MODELS: &[ModelInfo] = &[
     ),
 ];
 
-
 /// The lite upscaler's ids.
 pub const COMPACT_4X_ID: &str = "realesr-compact-4x";
 pub const COMPACT_2X_ID: &str = "realesr-compact-2x";

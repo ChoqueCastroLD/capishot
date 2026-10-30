@@ -51,7 +51,12 @@ fn on_screen(h: &Harness<'static, PhotocraftApp>, labels: &[&str]) -> Result<(),
 /// Menu items that would leave the test (quit, close the document, open the system) or that
 /// show no dialog of their own.
 fn skipped(id: &str) -> bool {
-    id.starts_with("file.close") || id.starts_with("file.exit") || id == "file.quit" || id.starts_with("file.revert") || id.starts_with("help.") || id.starts_with("window.")
+    id.starts_with("file.close")
+        || id.starts_with("file.exit")
+        || id == "file.quit"
+        || id.starts_with("file.revert")
+        || id.starts_with("help.")
+        || id.starts_with("window.")
 }
 
 #[test]

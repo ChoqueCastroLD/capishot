@@ -266,10 +266,7 @@ impl TouchInput {
                 Event::Touch { device_id, id, phase, pos, force } => {
                     // A new touch after a click this frame waits for the next frame: the canvas
                     // and egui take one click per frame (a double tap's second tap was lost).
-                    if phase == TouchPhase::Start
-                        && self.fingers.is_empty()
-                        && out.iter().any(|o| matches!(o, Event::PointerButton { pressed: false, .. }))
-                    {
+                    if phase == TouchPhase::Start && self.fingers.is_empty() && out.iter().any(|o| matches!(o, Event::PointerButton { pressed: false, .. })) {
                         self.carry.push(Event::Touch { device_id, id, phase, pos, force });
                         self.carry.extend(events.filter(|(i, _)| !derived.get(*i).copied().unwrap_or(false)).map(|(_, e)| e));
                         break;
@@ -591,7 +588,15 @@ impl TouchInput {
             self.button.moving = true;
             self.modifiers = Modifiers::NONE;
         }
-        if self.gestures && self.tap.active && self.tap.still && self.tap.resting && !self.drew && matches!(self.tap.most, 2 | 3) && self.nav_count() == self.tap.most && now >= self.tap.next_repeat {
+        if self.gestures
+            && self.tap.active
+            && self.tap.still
+            && self.tap.resting
+            && !self.drew
+            && matches!(self.tap.most, 2 | 3)
+            && self.nav_count() == self.tap.most
+            && now >= self.tap.next_repeat
+        {
             if let Some(a) = tap_action(self.tap.most) {
                 self.actions.push(a);
             }

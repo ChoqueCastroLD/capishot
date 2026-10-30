@@ -66,10 +66,12 @@ fn a_finger_lasso_selects() {
     h.state_mut().ui.tool = Tool::Lasso;
     h.run_steps(2);
     let c = canvas_center(&h);
-    let pts: Vec<Pos2> = (0..=16).map(|k| {
-        let a = k as f32 / 16.0 * std::f32::consts::TAU;
-        c + vec2(80.0 * a.cos(), 60.0 * a.sin())
-    }).collect();
+    let pts: Vec<Pos2> = (0..=16)
+        .map(|k| {
+            let a = k as f32 / 16.0 * std::f32::consts::TAU;
+            c + vec2(80.0 * a.cos(), 60.0 * a.sin())
+        })
+        .collect();
     finger_drag(&mut h, &pts);
     assert!(h.state().session.active().unwrap().doc.selection.is_some(), "history: {:?}", history(&mut h));
     assert!(h.state().ui.canvas_tool_menu.is_none(), "no context menu");
@@ -190,7 +192,16 @@ fn a_selection_brings_its_action_bar() {
     h.run_steps(3);
     let t = crate::touch_ui::inspect(h.state(), &h.ctx);
     let rects = t["rects"].as_array().unwrap();
-    for id in ["sel:select.deselect", "sel:select.inverse", "sel:edit.fill", "sel:edit.inpaintAi", "sel:edit.copy", "sel:edit.cut", "sel:edit.freeTransform", "sel:select.modify.feather"] {
+    for id in [
+        "sel:select.deselect",
+        "sel:select.inverse",
+        "sel:edit.fill",
+        "sel:edit.inpaintAi",
+        "sel:edit.copy",
+        "sel:edit.cut",
+        "sel:edit.freeTransform",
+        "sel:select.modify.feather",
+    ] {
         let r = rects.iter().find(|r| r["label"] == id).unwrap_or_else(|| panic!("{id}"));
         let r: [f32; 4] = serde_json::from_value(r["rect"].clone()).unwrap();
         assert!(r[2] - r[0] >= 44.0 && r[3] - r[1] >= 44.0, "{id} is a 44 pt target");
@@ -228,7 +239,8 @@ fn transform_has_done_and_cancel_and_a_pinch_inside_scales_it() {
     assert!(w(q1) > w(q0) * 1.5, "{q0:?} → {q1:?}");
     assert!((h.state().ui.views[0].zoom - zoom0).abs() < 1e-6, "the view didn't zoom");
     let t = crate::touch_ui::inspect(h.state(), &h.ctx);
-    let done: [f32; 4] = serde_json::from_value(t["rects"].as_array().unwrap().iter().find(|r| r["label"] == "transformDone").expect("Done")["rect"].clone()).unwrap();
+    let done: [f32; 4] =
+        serde_json::from_value(t["rects"].as_array().unwrap().iter().find(|r| r["label"] == "transformDone").expect("Done")["rect"].clone()).unwrap();
     assert!(done[3] - done[1] >= 44.0);
     let p = pos2((done[0] + done[2]) / 2.0, (done[1] + done[3]) / 2.0);
     frame(&mut h, vec![touch(1, TouchPhase::Start, p)]);
@@ -257,15 +269,14 @@ fn the_selection_mode_chips_set_the_mode() {
     h.state_mut().ui.tool = Tool::Lasso;
     h.run_steps(3);
     let s = crate::simple_ui::inspect(h.state(), &h.ctx);
-    let r: [f32; 4] = serde_json::from_value(s["buttons"].as_array().unwrap().iter().find(|b| b["label"] == "mode:2").expect("Subtract chip")["rect"].clone()).unwrap();
+    let r: [f32; 4] =
+        serde_json::from_value(s["buttons"].as_array().unwrap().iter().find(|b| b["label"] == "mode:2").expect("Subtract chip")["rect"].clone()).unwrap();
     let p = pos2((r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0);
     frame(&mut h, vec![touch(1, TouchPhase::Start, p)]);
     frame(&mut h, vec![touch(1, TouchPhase::End, p)]);
     h.run_steps(2);
     assert_eq!(h.state().ui.selection_mode, 2);
 }
-
-
 
 #[test]
 fn a_long_press_with_the_clone_stamp_sets_its_source() {

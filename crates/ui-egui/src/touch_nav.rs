@@ -218,7 +218,8 @@ mod tests {
                 events.push(Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
             }
             let t = 1.0 + 0.15 * k as f64;
-            let mut full = ctx.run_ui(RawInput { events, time: Some(t), ..Default::default() }, |ui| fired |= long_press(ui.ctx(), Id::new("b"), area).is_some());
+            let mut full =
+                ctx.run_ui(RawInput { events, time: Some(t), ..Default::default() }, |ui| fired |= long_press(ui.ctx(), Id::new("b"), area).is_some());
             full.textures_delta.clear();
         }
         assert!(!fired, "the loop's end at its start opened the context menu");

@@ -36,6 +36,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod bounds;
+mod camera_raw;
 mod fx;
 pub mod health;
 pub mod plan;
@@ -51,6 +52,7 @@ use photocraft_doc::{DocId, Document, Layer, LayerContent, LayerId, Pattern};
 use photocraft_geom::{Rect, TILE_SIZE, TileCoord};
 use photocraft_raster::{Surface, Tile};
 
+pub use camera_raw::{CAMERA_RAW_SHADER, CameraRawDevelop};
 pub use health::{DeviceHealth, Fault};
 pub use plan::{Kernel, Plan, Role, Unsupported, plan};
 
@@ -755,10 +757,8 @@ impl Compositor {
             label: Some("pc_compose_layers_uniforms"),
             entries: &[uniform_entry(0, CHUNK_UNIFORM), uniform_entry(1, OP_UNIFORM), uniform_entry(2, MEMBERS_UNIFORM)],
         });
-        let bgl1m = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("pc_compose_layers_textures"),
-            entries: &LAYERS_BINDINGS.map(tex_entry),
-        });
+        let bgl1m = device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("pc_compose_layers_textures"), entries: &LAYERS_BINDINGS.map(tex_entry) });
         let layout_m = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("pc_compose_layers"),
             bind_group_layouts: &[Some(&bgl0m), Some(&bgl1m)],
@@ -1076,7 +1076,9 @@ impl Compositor {
         region: Rect,
         stats: &mut Stats,
     ) -> Option<(ResKey, [i32; 4])> {
-        let Some((source, (dx, dy))) = (if self.translated.is_empty() || region.is_empty() { None } else { self.translation(key.0, key.1 == Role::Mask, surface) }) else {
+        let Some((source, (dx, dy))) =
+            (if self.translated.is_empty() || region.is_empty() { None } else { self.translation(key.0, key.1 == Role::Mask, surface) })
+        else {
             return self.sync(device, queue, encoder, doc, key, surface, region, stats);
         };
         let back = tile_grid(Rect::new(region.x0.saturating_sub(dx), region.y0.saturating_sub(dy), region.x1.saturating_sub(dx), region.y1.saturating_sub(dy)));
@@ -1422,7 +1424,10 @@ impl Compositor {
             .map(|p| {
                 let rows = p.lut.as_ref()?;
                 // The same table (an unchanged Curves or gradient) is uploaded once, not per frame.
-                let key = rows.iter().flat_map(|r| r.iter()).fold(0xcbf2_9ce4_8422_2325u64 ^ rows.len() as u64, |h, v| (h ^ u64::from(v.to_bits())).wrapping_mul(0x100_0000_01b3));
+                let key = rows
+                    .iter()
+                    .flat_map(|r| r.iter())
+                    .fold(0xcbf2_9ce4_8422_2325u64 ^ rows.len() as u64, |h, v| (h ^ u64::from(v.to_bits())).wrapping_mul(0x100_0000_01b3));
                 let entry = self.lut_cache.entry(key).or_insert_with(|| (lut_texture(device, queue, rows), frame));
                 entry.1 = frame;
                 Some(entry.0.clone())
@@ -1503,17 +1508,21 @@ impl Compositor {
         keys: &mut Vec<ResKey>,
         stats: &mut Stats,
     ) -> (Option<ResidentRef>, Option<ResidentRef>) {
-        let tex = p.tex.as_ref().and_then(|t| self.sync_shown(device, queue, encoder, doc, (t.layer, t.role, cell), t.surface.get(), ta.intersect(&cr), stats)).map(|(k, r)| {
-            keys.push(k);
-            (keys.len() - 1, r)
-        });
-        let mask =
-            p.mask.as_ref().and_then(|m| self.sync_shown(device, queue, encoder, doc, (m.layer, Role::Mask, cell), m.surface.get(), ma.intersect(&cr), stats)).map(
+        let tex =
+            p.tex.as_ref().and_then(|t| self.sync_shown(device, queue, encoder, doc, (t.layer, t.role, cell), t.surface.get(), ta.intersect(&cr), stats)).map(
                 |(k, r)| {
                     keys.push(k);
                     (keys.len() - 1, r)
                 },
             );
+        let mask = p
+            .mask
+            .as_ref()
+            .and_then(|m| self.sync_shown(device, queue, encoder, doc, (m.layer, Role::Mask, cell), m.surface.get(), ma.intersect(&cr), stats))
+            .map(|(k, r)| {
+                keys.push(k);
+                (keys.len() - 1, r)
+            });
         (tex, mask)
     }
 
@@ -1628,9 +1637,16 @@ impl Compositor {
                     views.push(tex.map_or(dummy, |(k, _)| resident_views[k]));
                     views.push(mask.map_or(dummy, |(k, _)| resident_views[k]));
                 }
-                let entries: Vec<wgpu::BindGroupEntry> =
-                    LAYERS_BINDINGS.iter().zip(&views).map(|(&b, v)| wgpu::BindGroupEntry { binding: b, resource: wgpu::BindingResource::TextureView(v) }).collect();
-                bg1.push(Some(device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("pc_compose_layers"), layout: &self.kit.bgl1m, entries: &entries })));
+                let entries: Vec<wgpu::BindGroupEntry> = LAYERS_BINDINGS
+                    .iter()
+                    .zip(&views)
+                    .map(|(&b, v)| wgpu::BindGroupEntry { binding: b, resource: wgpu::BindingResource::TextureView(v) })
+                    .collect();
+                bg1.push(Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("pc_compose_layers"),
+                    layout: &self.kit.bgl1m,
+                    entries: &entries,
+                })));
                 continue;
             }
             let (tex, mask) = &bound.views[i];

@@ -23,9 +23,14 @@ fn harness(app: PhotocraftApp, w: f32, h: f32) -> Harness<'static, PhotocraftApp
 fn auto_is_on_for_phones_and_the_preference_overrides_it() {
     let mut a = app();
     let phone = egui::Context::default();
-    phone.run_ui(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(412.0, 915.0))), ..Default::default() }, |_| {}).textures_delta.clear();
+    phone
+        .run_ui(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(412.0, 915.0))), ..Default::default() }, |_| {})
+        .textures_delta
+        .clear();
     let desk = egui::Context::default();
-    desk.run_ui(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(1280.0, 800.0))), ..Default::default() }, |_| {}).textures_delta.clear();
+    desk.run_ui(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(1280.0, 800.0))), ..Default::default() }, |_| {})
+        .textures_delta
+        .clear();
     assert!(active(&a, &phone) && !active(&a, &desk));
     a.run("prefs.set", json!({"values": {"interface.simpleUi": "off"}})).unwrap();
     assert!(!active(&a, &phone));
@@ -183,9 +188,19 @@ fn a_tool_tapped_in_the_sheet_is_picked() {
     h.run_steps(3);
     let screen = h.ctx.content_rect();
     h.event(egui::Event::PointerMoved(egui::pos2(screen.center().x, screen.top() + 60.0)));
-    h.event(egui::Event::PointerButton { pos: egui::pos2(screen.center().x, screen.top() + 60.0), button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
+    h.event(egui::Event::PointerButton {
+        pos: egui::pos2(screen.center().x, screen.top() + 60.0),
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: Default::default(),
+    });
     h.run_steps(1);
-    h.event(egui::Event::PointerButton { pos: egui::pos2(screen.center().x, screen.top() + 60.0), button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() });
+    h.event(egui::Event::PointerButton {
+        pos: egui::pos2(screen.center().x, screen.top() + 60.0),
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: Default::default(),
+    });
     h.run_steps(3);
     assert_eq!(sheet(&h.ctx), Sheet::Closed, "the scrim closes the sheet");
     h.get_by_label("Capi: tools, panels and actions").click();

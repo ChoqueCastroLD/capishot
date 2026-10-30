@@ -341,7 +341,12 @@ mod tests {
         ] {
             assert!(s.execute("type.nudge", p.clone()).is_err(), "{p}");
         }
-        for p in [json!({"layer": id}), json!({"layer": id, "style": "bold"}), json!({"layer": id, "style": "underline", "on": 1}), json!({"layer": 9999, "style": "underline"})] {
+        for p in [
+            json!({"layer": id}),
+            json!({"layer": id, "style": "bold"}),
+            json!({"layer": id, "style": "underline", "on": 1}),
+            json!({"layer": 9999, "style": "underline"}),
+        ] {
             assert!(s.execute("type.toggleStyle", p.clone()).is_err(), "{p}");
         }
         // Reversed or out-of-range character ranges clamp.

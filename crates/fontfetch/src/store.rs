@@ -367,7 +367,16 @@ mod tests {
         assert!(store.write_family(&with_license, &f2, None).is_err());
         assert!(store.write_family(&good, &files, Some(b"l")).is_err());
         // Hostile slugs and names.
-        for (slug, name) in [("../evil", "A.ttf"), ("Upper", "A.ttf"), ("", "A.ttf"), ("ok", "../A.ttf"), ("ok", "a/b.ttf"), ("ok", "manifest.json"), ("ok", ".hidden"), ("ok", "")] {
+        for (slug, name) in [
+            ("../evil", "A.ttf"),
+            ("Upper", "A.ttf"),
+            ("", "A.ttf"),
+            ("ok", "../A.ttf"),
+            ("ok", "a/b.ttf"),
+            ("ok", "manifest.json"),
+            ("ok", ".hidden"),
+            ("ok", ""),
+        ] {
             let (r, f) = record(slug, "X", &[(name, b"x")], None);
             assert!(store.write_family(&r, &f, None).is_err(), "{slug} {name}");
         }

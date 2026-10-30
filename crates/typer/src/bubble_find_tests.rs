@@ -164,7 +164,13 @@ fn bubbles_on_toned_and_grey_pages_are_found() {
         .enumerate()
         .map(|(i, p)| {
             let (x, y) = ((i % W) as f64 + 0.5, (i / W) as f64 + 0.5);
-            if p[0] == 0 { [20, 20, 20, 255] } else if inside(x, y) { [170, 170, 170, 255] } else { [110, 110, 110, 255] }
+            if p[0] == 0 {
+                [20, 20, 20, 255]
+            } else if inside(x, y) {
+                [170, 170, 170, 255]
+            } else {
+                [110, 110, 110, 255]
+            }
         })
         .collect();
     let f = find(&grey, area(), (210, 160)).expect("a light grey bubble on a grey page");
@@ -198,10 +204,13 @@ fn rectangularity_tells_boxes_from_bubbles() {
     assert!(rounded > BOX_RECTANGULARITY, "a rounded box: {rounded}");
     // A tilted box is still a box: its minimum rectangle turns with it.
     let (c, s) = (0.2f64.cos(), 0.2f64.sin());
-    let tilted = r(&page(&move |x, y| {
-        let (u, v) = ((x - 210.0) * c + (y - 160.0) * s, -(x - 210.0) * s + (y - 160.0) * c);
-        u.abs() < 110.0 && v.abs() < 60.0
-    }, 3));
+    let tilted = r(&page(
+        &move |x, y| {
+            let (u, v) = ((x - 210.0) * c + (y - 160.0) * s, -(x - 210.0) * s + (y - 160.0) * c);
+            u.abs() < 110.0 && v.abs() < 60.0
+        },
+        3,
+    ));
     assert!(tilted > 0.95, "a tilted box: {tilted}");
     let (cx, cy) = (210.0, 160.0);
     let star = move |x: f64, y: f64| {

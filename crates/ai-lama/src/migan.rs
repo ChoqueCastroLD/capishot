@@ -133,7 +133,10 @@ impl Migan {
             return Err(LamaError::Weights("not an MI-GAN generator (no synthesis blocks)".into()));
         }
         let ch = |name: &str, dim: usize| -> Result<usize> {
-            r.shape(name).and_then(|s| s.get(dim).copied()).filter(|c| (1..=4096).contains(c)).ok_or_else(|| LamaError::Weights(format!("missing or bad tensor `{name}`")))
+            r.shape(name)
+                .and_then(|s| s.get(dim).copied())
+                .filter(|c| (1..=4096).contains(c))
+                .ok_or_else(|| LamaError::Weights(format!("missing or bad tensor `{name}`")))
         };
         let scalar = |name: &str| -> Result<f32> {
             let t = r.st.tensor(name).map_err(|_| LamaError::Weights(format!("missing tensor `{name}`")))?;
@@ -171,12 +174,22 @@ impl Migan {
             let ic = ch(&format!("{p}.conv1.conv1.weight"), 0)?;
             let oc = ch(&format!("{p}.conv2.conv2.weight"), 0)?;
             let fromrgb = if s == res { Some((r.t4(&format!("{p}.fromrgb.weight"), [ic, 4, 1, 1])?, r.t1(&format!("{p}.fromrgb.bias"), ic)?)) } else { None };
-            enc.push(EncBlock { fromrgb, conv1: sep(&format!("{p}.conv1"), ic, ic, false, false, None)?, conv2: sep(&format!("{p}.conv2"), ic, oc, true, false, None)? });
+            enc.push(EncBlock {
+                fromrgb,
+                conv1: sep(&format!("{p}.conv1"), ic, ic, false, false, None)?,
+                conv2: sep(&format!("{p}.conv2"), ic, oc, true, false, None)?,
+            });
             s /= 2;
         }
         let c4 = ch("encoder.b4.conv1.conv1.weight", 0)?;
-        enc.push(EncBlock { fromrgb: None, conv1: sep("encoder.b4.conv1", c4, c4, false, false, None)?, conv2: sep("encoder.b4.conv2", c4, c4, false, false, None)? });
-        let torgb = |p: &str, c: usize| -> Result<(Tensor<4>, Tensor<1>)> { Ok((r.t4(&format!("{p}.torgb.weight"), [3, c, 1, 1])?, r.t1(&format!("{p}.torgb.bias"), 3)?)) };
+        enc.push(EncBlock {
+            fromrgb: None,
+            conv1: sep("encoder.b4.conv1", c4, c4, false, false, None)?,
+            conv2: sep("encoder.b4.conv2", c4, c4, false, false, None)?,
+        });
+        let torgb = |p: &str, c: usize| -> Result<(Tensor<4>, Tensor<1>)> {
+            Ok((r.t4(&format!("{p}.torgb.weight"), [3, c, 1, 1])?, r.t1(&format!("{p}.torgb.bias"), 3)?))
+        };
         let s4 = ch("synthesis.b4.conv1.conv1.weight", 0)?;
         let mut syn = vec![SynBlock {
             conv1: sep("synthesis.b4.conv1", s4, s4, false, false, None)?,

@@ -23,12 +23,13 @@ pub fn start(portable: bool) -> Option<UpdateCheck> {
     let url = manifest_url(std::env::var("CAPISHOT_UPDATE_URL").ok())?;
     let check = UpdateCheck { portable, ..Default::default() };
     let slot = check.manifest.clone();
-    let spawned = std::thread::Builder::new().name("capishot-update-check".into()).spawn(move || match photocraft_fontfetch::get_small(&url, MAX_MANIFEST_BYTES) {
-        Ok(bytes) => {
-            *slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(String::from_utf8_lossy(&bytes).into_owned());
-        }
-        Err(e) => log::info!("update check: {url}: {e}"),
-    });
+    let spawned =
+        std::thread::Builder::new().name("capishot-update-check".into()).spawn(move || match photocraft_fontfetch::get_small(&url, MAX_MANIFEST_BYTES) {
+            Ok(bytes) => {
+                *slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(String::from_utf8_lossy(&bytes).into_owned());
+            }
+            Err(e) => log::info!("update check: {url}: {e}"),
+        });
     if let Err(e) = spawned {
         log::warn!("update check not started: {e}");
     }

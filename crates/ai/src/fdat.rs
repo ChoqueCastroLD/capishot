@@ -166,7 +166,12 @@ impl Fdat {
         let t4 = |name: &str, shape: [usize; 4]| -> Result<Tensor<4>> { rt.tensor(w.get(name, &shape)?.data.clone(), shape) };
         let t1 = |name: &str, n: usize| -> Result<Tensor<1>> { rt.tensor(w.get(name, &[n])?.data.clone(), [n]) };
         let conv = |name: &str, o: usize, i: usize, k: usize, bias: bool, groups: usize| -> Result<Conv> {
-            Ok(Conv { weight: t4(&format!("{name}.weight"), [o, i, k, k])?, bias: if bias { Some(t1(&format!("{name}.bias"), o)?) } else { None }, pad: k / 2, groups })
+            Ok(Conv {
+                weight: t4(&format!("{name}.weight"), [o, i, k, k])?,
+                bias: if bias { Some(t1(&format!("{name}.bias"), o)?) } else { None },
+                pad: k / 2,
+                groups,
+            })
         };
         let linear = |name: &str, o: usize, i: usize, bias: bool| -> Result<Linear> {
             let wt = w.get(&format!("{name}.weight"), &[o, i])?;

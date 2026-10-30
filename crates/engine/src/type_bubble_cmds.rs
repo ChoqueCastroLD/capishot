@@ -3,9 +3,9 @@
 //! body (the interior without the tail) traced and fitted with Béziers, and a type-in-path layer
 //! made in it: centred both ways, with the margin (`inset`) given or automatic.
 
+use photocraft_doc::Affine;
 use photocraft_doc::text::{InPathAlign, TextShape};
 use photocraft_doc::vector::Subpath;
-use photocraft_doc::Affine;
 use photocraft_typer::bubble_find::{self, Miss};
 use serde_json::{Value, json};
 
@@ -122,9 +122,17 @@ fn stroke_param(q: &Value) -> Result<Option<photocraft_typer::psjson::Stroke>> {
         None | Some(Value::Null) | Some(Value::Bool(false)) => return Ok(None),
         Some(v) => v,
     };
-    let width = v.get("width").and_then(Value::as_f64).filter(|w| w.is_finite() && (0.0..=250.0).contains(w)).ok_or_else(|| bad("\"stroke.width\" must be 0..=250 px"))?;
+    let width = v
+        .get("width")
+        .and_then(Value::as_f64)
+        .filter(|w| w.is_finite() && (0.0..=250.0).contains(w))
+        .ok_or_else(|| bad("\"stroke.width\" must be 0..=250 px"))?;
     let hex = v.get("color").and_then(Value::as_str).unwrap_or("#ffffff");
-    let c = hex.strip_prefix('#').filter(|h| h.len() == 6).and_then(|h| u32::from_str_radix(h, 16).ok()).ok_or_else(|| bad("\"stroke.color\" must be \"#rrggbb\""))?;
+    let c = hex
+        .strip_prefix('#')
+        .filter(|h| h.len() == 6)
+        .and_then(|h| u32::from_str_radix(h, 16).ok())
+        .ok_or_else(|| bad("\"stroke.color\" must be \"#rrggbb\""))?;
     if width <= 0.0 {
         return Ok(None);
     }
@@ -150,7 +158,8 @@ fn region_at(s: &mut Session, x: i32, y: i32, want: Option<Kind>) -> Result<(Kin
 }
 
 fn create_in_bubble(s: &mut Session, p: &Value) -> Result<Value> {
-    let coord = |k: &str| p.get(k).and_then(Value::as_f64).filter(|v| v.is_finite() && v.abs() < 1e9).ok_or_else(|| bad("\"x\" and \"y\" must be document pixels"));
+    let coord =
+        |k: &str| p.get(k).and_then(Value::as_f64).filter(|v| v.is_finite() && v.abs() < 1e9).ok_or_else(|| bad("\"x\" and \"y\" must be document pixels"));
     let (fx, fy) = (coord("x")?, coord("y")?);
     let (x, y) = (fx.floor() as i32, fy.floor() as i32);
     let want = Kind::parse(p.get("style"))?;
@@ -398,7 +407,8 @@ mod tests {
         outlined(&mut s, "ellipse", [40, 200, 240, 160], json!({}));
         outlined(&mut s, "star", [330, 190, 230, 200], json!({"sides": 14, "starRatio": 0.75}));
         let styles = json!({"narration": {"align": "left", "vertical": "top", "caps": "all", "inset": 6}, "bubble": {"size": 14}});
-        let make = |s: &mut Session, x: i32, y: i32| s.execute(CMD, json!({"x": x, "y": y, "text": "Some words here", "size": 12, "styles": styles.clone()})).unwrap();
+        let make =
+            |s: &mut Session, x: i32, y: i32| s.execute(CMD, json!({"x": x, "y": y, "text": "Some words here", "size": 12, "styles": styles.clone()})).unwrap();
         let boxed = make(&mut s, 160, 100);
         assert_eq!(boxed["style"], "narration", "{boxed}");
         let ks = boxed["path"]["subpaths"][0]["knots"].as_array().unwrap();

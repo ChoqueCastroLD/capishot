@@ -65,17 +65,19 @@ pub enum Sheet {
 }
 
 fn sheet_id() -> Id {
-    Id::new("simple-ui-sheet")
+    Id::unique("simple-ui-sheet")
 }
 
 fn rects_id() -> Id {
-    Id::new("simple-ui-rects")
+    Id::unique("simple-ui-rects")
 }
 
 /// Where a button of the simple interface was drawn this frame (for `ui.inspect`: automation
 /// and tests tap it there).
 fn note(ctx: &egui::Context, label: &str, rect: Rect) {
-    ctx.data_mut(|d| d.get_temp_mut_or_default::<Vec<(String, [f32; 4])>>(rects_id()).push((label.to_string(), [rect.min.x, rect.min.y, rect.max.x, rect.max.y])));
+    ctx.data_mut(|d| {
+        d.get_temp_mut_or_default::<Vec<(String, [f32; 4])>>(rects_id()).push((label.to_string(), [rect.min.x, rect.min.y, rect.max.x, rect.max.y]))
+    });
 }
 
 /// `ui.inspect`'s `simpleUi`: whether it is on, the open sheet, and the buttons' rects by label.
@@ -178,14 +180,16 @@ pub fn top_bar(app: &mut PhotocraftApp, ui: &mut Ui) {
                 // Undo, Redo and Search at the far end when there is room for them (else they are
                 // in the Capi sheet), then the name in the room between.
                 let fit = full.right() - menus_end >= 3.0 * 40.0 + 12.0;
-                ui.ctx().data_mut(|d| d.insert_temp(Id::new("simple-ui-bar-icons"), fit));
+                ui.ctx().data_mut(|d| d.insert_temp(Id::unique("simple-ui-bar-icons"), fit));
                 if !fit {
                     return;
                 }
                 let right = Rect::from_min_max(pos2(menus_end, full.top()), full.right_bottom());
                 let mut r = ui.new_child(egui::UiBuilder::new().max_rect(right).layout(egui::Layout::right_to_left(egui::Align::Center)));
                 r.spacing_mut().item_spacing.x = 2.0;
-                if crate::icons::button(&mut r, "search", 40.0, app.ui.palette_open, &crate::shortcuts::tip_label(app, "Search commands", "edit.search")).clicked() {
+                if crate::icons::button(&mut r, "search", 40.0, app.ui.palette_open, &crate::shortcuts::tip_label(app, "Search commands", "edit.search"))
+                    .clicked()
+                {
                     app.ui.palette_open = !app.ui.palette_open;
                 }
                 let has_doc = app.session.active().is_some();
@@ -201,7 +205,8 @@ pub fn top_bar(app: &mut PhotocraftApp, ui: &mut Ui) {
                     }
                 });
                 let end = r.min_rect().left();
-                let title = app.session.active().map(|d| format!("{}{}", d.doc.name, if d.is_dirty() { " •" } else { "" })).unwrap_or_else(|| "Capishot".into());
+                let title =
+                    app.session.active().map(|d| format!("{}{}", d.doc.name, if d.is_dirty() { " •" } else { "" })).unwrap_or_else(|| "Capishot".into());
                 let room = (end - menus_end - 12.0).max(0.0);
                 if room > 24.0 {
                     let mut job = egui::text::LayoutJob::simple_singleline(title, crate::theme::medium(14.0), t.text_dim);
@@ -216,11 +221,11 @@ pub fn top_bar(app: &mut PhotocraftApp, ui: &mut Ui) {
 
 /// Whether the top bar had room for Undo, Redo and Search (else the Capi sheet offers them).
 fn bar_icons(ctx: &egui::Context) -> bool {
-    ctx.data(|d| d.get_temp::<bool>(Id::new("simple-ui-bar-icons"))).unwrap_or(true)
+    ctx.data(|d| d.get_temp::<bool>(Id::unique("simple-ui-bar-icons"))).unwrap_or(true)
 }
 
 fn recent_id() -> Id {
-    Id::new("simple-ui-recent-tools")
+    Id::unique("simple-ui-recent-tools")
 }
 
 /// The tools used lately, newest first (session-scoped).
@@ -248,7 +253,7 @@ pub fn recent_bar(app: &PhotocraftApp, ctx: &egui::Context) -> Vec<Tool> {
     let favs = favorites(app);
     let fav = |t: &Tool| favs.iter().any(|f| f.strip_prefix("tool:") == Some(&format!("{t:?}")));
     let recent = recent_tools(ctx);
-    let bar_id = Id::new("simple-ui-recent-bar");
+    let bar_id = Id::unique("simple-ui-recent-bar");
     let mut out: Vec<Tool> = ctx.data(|d| d.get_temp::<Vec<Tool>>(bar_id)).unwrap_or_default();
     out.retain(|t| !fav(t));
     out.dedup();
@@ -276,7 +281,7 @@ pub fn recent_bar(app: &PhotocraftApp, ctx: &egui::Context) -> Vec<Tool> {
 }
 
 fn options_open_id() -> Id {
-    Id::new("simple-ui-options-open")
+    Id::unique("simple-ui-options-open")
 }
 
 /// The tool's options on a phone: the tool, its brush and size where it paints, and "⋯" for the
@@ -341,7 +346,7 @@ pub fn options_row(app: &mut PhotocraftApp, ui: &mut Ui) {
     let top = row.response.rect.bottom() + 4.0;
     let max_h = (screen.bottom() - top - 16.0).max(120.0);
     let mut close = false;
-    let area = egui::Area::new(Id::new("simple-options")).order(egui::Order::Foreground).fixed_pos(pos2(screen.left() + 8.0, top)).show(&ctx, |ui| {
+    let area = egui::Area::new(Id::unique("simple-options")).order(egui::Order::Foreground).fixed_pos(pos2(screen.left() + 8.0, top)).show(&ctx, |ui| {
         float_frame(&t).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
             let width = screen.width() - 16.0 - 20.0;
             ui.set_width(width);
@@ -381,7 +386,8 @@ pub fn options_row(app: &mut PhotocraftApp, ui: &mut Ui) {
         });
     });
     note(&ctx, "options-popover", area.response.rect);
-    let outside = ctx.input(|i| i.pointer.primary_clicked() && i.pointer.interact_pos().is_some_and(|p| !area.response.rect.contains(p) && !row.response.rect.contains(p)));
+    let outside = ctx
+        .input(|i| i.pointer.primary_clicked() && i.pointer.interact_pos().is_some_and(|p| !area.response.rect.contains(p) && !row.response.rect.contains(p)));
     let back = !egui::Popup::is_any_open(&ctx) && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
     if close || back || (outside && !egui::Popup::is_any_open(&ctx)) {
         ctx.data_mut(|d| d.insert_temp(options_open_id(), false));
@@ -395,7 +401,17 @@ pub fn options_open(ctx: &egui::Context) -> bool {
 
 /// The selection tools whose options bar has New, Add, Subtract and Intersect.
 pub fn selection_modes(tool: Tool) -> bool {
-    matches!(tool, Tool::RectMarquee | Tool::EllipseMarquee | Tool::SingleRowMarquee | Tool::SingleColumnMarquee | Tool::Lasso | Tool::PolygonLasso | Tool::MagneticLasso | Tool::MagicWand)
+    matches!(
+        tool,
+        Tool::RectMarquee
+            | Tool::EllipseMarquee
+            | Tool::SingleRowMarquee
+            | Tool::SingleColumnMarquee
+            | Tool::Lasso
+            | Tool::PolygonLasso
+            | Tool::MagneticLasso
+            | Tool::MagicWand
+    )
 }
 
 /// The selection mode chips: touch screens have no Shift or Alt to add or subtract (the touch
@@ -406,11 +422,17 @@ fn mode_chips(app: &mut PhotocraftApp, ui: &mut Ui) {
         let (rect, resp) = ui.allocate_exact_size(Vec2::splat(38.0), Sense::click());
         let on = app.ui.selection_mode == k;
         let p = ui.painter();
-        let bg = if on { t.accent } else if resp.hovered() { t.hover } else { t.chrome };
+        let bg = if on {
+            t.accent
+        } else if resp.hovered() {
+            t.hover
+        } else {
+            t.chrome
+        };
         p.rect(rect.shrink(2.0), CornerRadius::same(10), bg, Stroke::new(1.0, t.card_border), egui::StrokeKind::Inside);
         paint_mode_glyph(p, rect.shrink(9.0), k, if on { Color32::WHITE } else { t.text }, bg);
         let resp = resp.on_hover_text(crate::i18n::t(label));
-        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, crate::i18n::t(label)));
+        resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, crate::i18n::t(label)));
         note(ui.ctx(), &format!("mode:{k}"), rect);
         if resp.clicked() {
             app.ui.selection_mode = k;
@@ -510,7 +532,11 @@ pub fn overlays(app: &mut PhotocraftApp, ctx: &egui::Context) {
         return;
     }
     // Esc (the phone's Back) closes the open sheet.
-    if sheet(ctx) != Sheet::Closed && app.ui.dialogs.is_empty() && !egui::Popup::is_any_open(ctx) && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+    if sheet(ctx) != Sheet::Closed
+        && app.ui.dialogs.is_empty()
+        && !egui::Popup::is_any_open(ctx)
+        && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    {
         set_sheet(ctx, Sheet::Closed);
     }
     let screen = crate::safe_area::rect(ctx);
@@ -535,11 +561,12 @@ pub fn overlays(app: &mut PhotocraftApp, ctx: &egui::Context) {
 
 /// A rounded bar floating over the canvas.
 fn float_frame(t: &Tokens) -> egui::Frame {
-    egui::Frame::NONE
-        .fill(t.card)
-        .stroke(Stroke::new(1.0, t.card_border))
-        .corner_radius(CornerRadius::same(18))
-        .shadow(egui::Shadow { offset: [0, 6], blur: 18, spread: 0, color: t.shadow })
+    egui::Frame::NONE.fill(t.card).stroke(Stroke::new(1.0, t.card_border)).corner_radius(CornerRadius::same(18)).shadow(egui::Shadow {
+        offset: [0, 6],
+        blur: 18,
+        spread: 0,
+        color: t.shadow,
+    })
 }
 
 /// One of the floating bars: `entries` in its slots, three left of the Capi button and three
@@ -557,7 +584,7 @@ fn tool_bar(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, rect: Rect, 
         side + step * (i % 3) as f32 + (step - SLOT) / 2.0
     };
     // A layer below the Capi button's (and the menus', which open over the bars).
-    egui::Area::new(Id::new(id)).order(egui::Order::Middle).fixed_pos(rect.min).show(ctx, |ui| {
+    egui::Area::new(Id::unique(id)).order(egui::Order::Middle).fixed_pos(rect.min).show(ctx, |ui| {
         float_frame(&t).show(ui, |ui| {
             let (frame_rect, _) = ui.allocate_exact_size(rect.size(), Sense::hover());
             let y = frame_rect.center().y - SLOT / 2.0;
@@ -578,10 +605,9 @@ fn tool_bar(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, rect: Rect, 
             } else {
                 // More favorites than slots: the bar scrolls; the fourth starts past the button.
                 let mut sub = ui.new_child(egui::UiBuilder::new().max_rect(frame_rect));
-                egui::ScrollArea::horizontal()
-                    .id_salt((id, "scroll"))
-                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-                    .show(&mut sub, |ui| {
+                egui::ScrollArea::horizontal().id_salt((id, "scroll")).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(
+                    &mut sub,
+                    |ui| {
                         ui.horizontal_centered(|ui| {
                             ui.spacing_mut().item_spacing.x = step - SLOT;
                             ui.add_space((step - SLOT) / 2.0);
@@ -598,7 +624,8 @@ fn tool_bar(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, rect: Rect, 
                             }
                             ui.add_space((step - SLOT) / 2.0);
                         });
-                    });
+                    },
+                );
             }
         });
     });
@@ -631,7 +658,7 @@ fn initials(ui: &mut Ui, label: &str, side: f32) -> Response {
     ui.painter().rect_filled(rect.shrink(4.0), CornerRadius::same(10), if resp.hovered() { t.hover } else { t.chrome });
     let short: String = label.chars().filter(|c| c.is_alphanumeric()).take(2).collect();
     ui.painter().text(rect.center(), Align2::CENTER_CENTER, short, crate::theme::semibold(14.0), t.text);
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     resp
 }
 
@@ -645,7 +672,7 @@ fn chip(ui: &mut Ui, label: &str, height: f32) -> Response {
     ui.painter().rect_filled(rect, CornerRadius::same((height / 2.0) as u8), fill);
     ui.painter().rect_stroke(rect, CornerRadius::same((height / 2.0) as u8), Stroke::new(1.0, t.card_border), egui::StrokeKind::Inside);
     ui.painter().galley(rect.center() - galley.size() / 2.0, galley, t.text);
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     note(ui.ctx(), label, rect);
     resp
 }
@@ -653,12 +680,22 @@ fn chip(ui: &mut Ui, label: &str, height: f32) -> Response {
 /// The Capi button: opens (or closes) the sheet with everything else.
 fn capi_button(_app: &mut PhotocraftApp, ctx: &egui::Context, rect: Rect) {
     let t = Tokens::get(ctx);
-    egui::Area::new(Id::new("simple-capi")).order(egui::Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
+    egui::Area::new(Id::unique("simple-capi")).order(egui::Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
         let (r, resp) = ui.allocate_exact_size(rect.size(), Sense::click());
         let open = sheet(ctx) != Sheet::Closed;
         let p = ui.painter();
-        p.add(egui::epaint::CircleShape { center: r.center() + vec2(0.0, 3.0), radius: r.width() / 2.0, fill: Color32::from_black_alpha(80), stroke: Stroke::NONE });
-        p.circle(r.center(), r.width() / 2.0, if resp.is_pointer_button_down_on() { t.accent_soft } else { t.card }, Stroke::new(2.5, if open { t.accent } else { t.card_border }));
+        p.add(egui::epaint::CircleShape {
+            center: r.center() + vec2(0.0, 3.0),
+            radius: r.width() / 2.0,
+            fill: Color32::from_black_alpha(80),
+            stroke: Stroke::NONE,
+        });
+        p.circle(
+            r.center(),
+            r.width() / 2.0,
+            if resp.is_pointer_button_down_on() { t.accent_soft } else { t.card },
+            Stroke::new(2.5, if open { t.accent } else { t.card_border }),
+        );
         if open {
             crate::icons::paint(ui, r, "x", 24.0, t.text);
         } else {
@@ -667,7 +704,7 @@ fn capi_button(_app: &mut PhotocraftApp, ctx: &egui::Context, rect: Rect) {
         note(ctx, "capi", r);
         let label = if open { tl!("Close") } else { tl!("Capi: tools, panels and actions") };
         let resp = resp.on_hover_text(label);
-        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
         if resp.clicked() {
             set_sheet(ctx, if open { Sheet::Closed } else { Sheet::Master });
         }
@@ -676,7 +713,7 @@ fn capi_button(_app: &mut PhotocraftApp, ctx: &egui::Context, rect: Rect) {
 
 /// Dims the window behind a sheet; a tap there closes the sheet.
 fn scrim(ctx: &egui::Context, screen: Rect) {
-    egui::Area::new(Id::new("simple-scrim")).order(egui::Order::Foreground).fixed_pos(screen.min).show(ctx, |ui| {
+    egui::Area::new(Id::unique("simple-scrim")).order(egui::Order::Foreground).fixed_pos(screen.min).show(ctx, |ui| {
         let r = ui.allocate_exact_size(screen.size(), Sense::click()).1;
         ui.painter().rect_filled(screen, 0.0, Color32::from_black_alpha(90));
         if r.clicked() {
@@ -692,7 +729,7 @@ const UNDER_SHEET: f32 = MARGIN + BAR + GAP / 2.0 + CAPI / 2.0 + 8.0;
 fn bottom_sheet(ctx: &egui::Context, screen: Rect, id: &str, height: f32, add: impl FnOnce(&mut Ui)) {
     let t = Tokens::get(ctx);
     let top = screen.bottom() - UNDER_SHEET - height;
-    egui::Area::new(Id::new(id)).order(egui::Order::Foreground).fixed_pos(pos2(screen.left() + 8.0, top.max(screen.top() + TOP_BAR))).show(ctx, |ui| {
+    egui::Area::new(Id::unique(id)).order(egui::Order::Foreground).fixed_pos(pos2(screen.left() + 8.0, top.max(screen.top() + TOP_BAR))).show(ctx, |ui| {
         egui::Frame::NONE
             .fill(t.card)
             .stroke(Stroke::new(1.0, t.card_border))
@@ -707,8 +744,8 @@ fn bottom_sheet(ctx: &egui::Context, screen: Rect, id: &str, height: f32, add: i
     });
     // egui raises an area that was tapped: once the scrim had closed a sheet it stayed above the
     // next one and took its taps. The sheet and the Capi button always go over the scrim.
-    ctx.move_to_top(egui::LayerId::new(egui::Order::Foreground, Id::new(id)));
-    ctx.move_to_top(egui::LayerId::new(egui::Order::Foreground, Id::new("simple-capi")));
+    ctx.move_to_top(egui::LayerId::new(egui::Order::Foreground, Id::unique(id)));
+    ctx.move_to_top(egui::LayerId::new(egui::Order::Foreground, Id::unique("simple-capi")));
 }
 
 fn heading(ui: &mut Ui, text: &str) {
@@ -741,8 +778,14 @@ fn master_sheet(app: &mut PhotocraftApp, ctx: &egui::Context, screen: Rect) {
         let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 42.0), Sense::click());
         ui.painter().rect_filled(r, CornerRadius::same(12), t.chrome);
         crate::icons::paint(ui, Rect::from_min_size(r.min + vec2(8.0, 9.0), Vec2::splat(24.0)), "search", 17.0, t.text_dim);
-        ui.painter().text(r.left_center() + vec2(40.0, 0.0), Align2::LEFT_CENTER, tl!("Search commands, tools and panels…"), crate::theme::medium(14.0), t.text_faint);
-        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("Search commands, tools and panels…")));
+        ui.painter().text(
+            r.left_center() + vec2(40.0, 0.0),
+            Align2::LEFT_CENTER,
+            tl!("Search commands, tools and panels…"),
+            crate::theme::medium(14.0),
+            t.text_faint,
+        );
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tl!("Search commands, tools and panels…")));
         note(ui.ctx(), "search", r);
         if resp.clicked() {
             action = Some("edit.search".into());
@@ -761,7 +804,9 @@ fn master_sheet(app: &mut PhotocraftApp, ctx: &egui::Context, screen: Rect) {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
                 let undo: &[&str] = if bar_icons(ui.ctx()) { &[] } else { &["edit.undo", "edit.redo"] };
-                for &id in undo.iter().chain(&["file.new", "file.open", "file.save", "file.export.quickExportAsPng", "edit.inpaintAi", "edit.preferences.general"]) {
+                for &id in
+                    undo.iter().chain(&["file.new", "file.open", "file.save", "file.export.quickExportAsPng", "edit.inpaintAi", "edit.preferences.general"])
+                {
                     let label = command_label(id).unwrap_or_else(|| id.into());
                     if chip(ui, &label, 36.0).clicked() {
                         action = Some(id.into());

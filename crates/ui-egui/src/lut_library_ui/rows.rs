@@ -195,7 +195,7 @@ impl Source<'_> {
 /// The listing for this frame, rebuilt when the library changed.
 pub(super) fn listing(app: &PhotocraftApp, ui: &egui::Ui) -> Option<Listing> {
     let lib = app.session.lut_library.as_ref()?;
-    let id = egui::Id::new("lutlib-listing");
+    let id = egui::Id::unique("lutlib-listing");
     if let Some(cached) = ui.data(|d| d.get_temp::<Listing>(id))
         && cached.rev == lib.rev
     {

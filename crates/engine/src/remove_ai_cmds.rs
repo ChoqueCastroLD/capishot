@@ -37,7 +37,13 @@ pub fn lama_params(s: &Session, p: &Value) -> Result<serde_json::Map<String, Val
     // Phones and machines with little memory: LaMa's own working size, so a run stays bounded
     // within the page's memory cap (one crop of at most 512 x 512 at a time).
     let bounded = run.choice.small_tiles || run.profile.mobile || run.profile.memory_gb.is_some_and(|m| m <= 4.0);
-    let side = if bounded { 512 } else if run.choice.cpu { 768 } else { 1024 };
+    let side = if bounded {
+        512
+    } else if run.choice.cpu {
+        768
+    } else {
+        1024
+    };
     q.insert("maxSide".into(), json!(side));
     q.insert("margin".into(), json!(MARGIN));
     Ok(q)

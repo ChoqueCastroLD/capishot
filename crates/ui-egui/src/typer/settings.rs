@@ -141,7 +141,7 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let (mut close, mut save) = (false, false);
     let mut run_after: Vec<AfterFn> = Vec::new();
     egui::Window::new(tl!("TypeR Settings"))
-        .id(egui::Id::new("typer-settings"))
+        .id(egui::Id::unique("typer-settings"))
         .title_bar(false)
         .resizable(false)
         .default_width(430.0)
@@ -172,7 +172,7 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     egui::Grid::new("typer-settings-general").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
                         label(ui, &t, tl!("Pasted text layer"));
                         let mut point = d.values.get("pastePointText").and_then(Value::as_bool).unwrap_or(false);
-                        if crate::widgets::dropdown(ui, "typer-set-kind", &mut point, &[(false, tl!("Paragraph text")), (true, tl!("Point text"))], 160.0) {
+                        if crate::widgets::dropdown(ui, "typer-set-kind", "", &mut point, &[(false, tl!("Paragraph text")), (true, tl!("Point text"))], 160.0) {
                             d.values["pastePointText"] = json!(point);
                         }
                         ui.end_row();
@@ -180,14 +180,14 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
                         let mut cur = d.values.get("defaultStyleId").and_then(photocraft_typer::Id::from_value).map_or(String::new(), |i| i.to_string());
                         let mut opts: Vec<(String, &str)> = vec![(String::new(), tl!("No style set"))];
                         opts.extend(styles.iter().map(|(k, n, _)| (k.clone(), n.as_str())));
-                        if crate::widgets::dropdown(ui, "typer-set-default", &mut cur, &opts, 200.0) {
+                        if crate::widgets::dropdown(ui, "typer-set-default", "", &mut cur, &opts, 200.0) {
                             d.values["defaultStyleId"] = styles.iter().find(|(k, _, _)| *k == cur).map_or(Value::Null, |(_, _, v)| v.clone());
                         }
                         ui.end_row();
                         label(ui, &t, tl!("Text direction"));
                         let mut dir = d.values.get("direction").and_then(Value::as_str).unwrap_or("ltr").to_string();
                         let opts = [("ltr".to_string(), tl!("Left to right")), ("rtl".to_string(), tl!("Right to left"))];
-                        if crate::widgets::dropdown(ui, "typer-set-dir", &mut dir, &opts, 160.0) {
+                        if crate::widgets::dropdown(ui, "typer-set-dir", "", &mut dir, &opts, 160.0) {
                             d.values["direction"] = json!(dir);
                         }
                         ui.end_row();
@@ -291,7 +291,7 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
                         let mut cur = d.export_folder.as_ref().and_then(photocraft_typer::Id::from_value).map_or(String::new(), |i| i.to_string());
                         let mut opts: Vec<(String, &str)> = vec![(String::new(), tl!("Choose a folder"))];
                         opts.extend(folders.iter().map(|(k, n, _)| (k.clone(), n.as_str())));
-                        if crate::widgets::dropdown(ui, "typer-set-export-folder", &mut cur, &opts, 200.0) {
+                        if crate::widgets::dropdown(ui, "typer-set-export-folder", "", &mut cur, &opts, 200.0) {
                             d.export_folder = folders.iter().find(|(k, _, _)| *k == cur).map(|(_, _, v)| v.clone());
                         }
                         if ui.add_enabled(d.export_folder.is_some(), egui::Button::new(tl!("Export folder…"))).clicked()

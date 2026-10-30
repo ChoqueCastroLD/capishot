@@ -123,7 +123,8 @@ fn pct(v: &mut [f64], p: f64) -> f64 {
 
 fn main() -> Res<()> {
     let args: Vec<String> = std::env::args().collect();
-    let (w, h) = arg(&args, "--size").and_then(|s| s.split_once('x').map(|(a, b)| (a.parse().unwrap_or(2000), b.parse().unwrap_or(3000)))).unwrap_or((2000, 3000));
+    let (w, h) =
+        arg(&args, "--size").and_then(|s| s.split_once('x').map(|(a, b)| (a.parse().unwrap_or(2000), b.parse().unwrap_or(3000)))).unwrap_or((2000, 3000));
     let layers: usize = arg(&args, "--layers").and_then(|v| v.parse().ok()).unwrap_or(50);
     let reps: usize = arg(&args, "--reps").and_then(|v| v.parse().ok()).unwrap_or(8).max(1);
     let only = arg(&args, "--only");
@@ -140,7 +141,13 @@ fn main() -> Res<()> {
         comp.set_composite_cache_budget(0);
     }
     let plan = photocraft_gpu::plan(&doc)?;
-    println!("adapter={} ({:?}) acc={format:?} doc={w}x{h} layers={layers} passes={} slots={}", adapter.get_info().name, adapter.get_info().backend, plan.passes.len(), plan.slots);
+    println!(
+        "adapter={} ({:?}) acc={format:?} doc={w}x{h} layers={layers} passes={} slots={}",
+        adapter.get_info().name,
+        adapter.get_info().backend,
+        plan.passes.len(),
+        plan.slots
+    );
     if args.iter().any(|a| a == "--dump-plan") {
         for (i, p) in plan.passes.iter().enumerate() {
             println!("{i:3} {:?} dst {} a {:?} b {:?} clip {:?} members {}", p.kernel, p.dst, p.a, p.b, p.clip, p.members.len());
@@ -219,7 +226,13 @@ fn main() -> Res<()> {
         for f in 1..=reps * 2 {
             let off = (f as i32 * 7, f as i32 * 5);
             let moved = src.translated(off.0, off.1, src.content_bounds());
-            comp.set_translated(vec![Translated { layer: before.layers[m].id, mask: false, shown: surface_fingerprint(&moved), source: src.clone(), offset: off }]);
+            comp.set_translated(vec![Translated {
+                layer: before.layers[m].id,
+                mask: false,
+                shown: surface_fingerprint(&moved),
+                source: src.clone(),
+                offset: off,
+            }]);
             *doc.layers[m].surface_mut().expect("raster") = moved;
             let now = photocraft_gpu::bounds::composite_bounds(&doc.layers[m], doc.bounds()).unwrap_or(doc.bounds());
             let (ms, s) = render(&mut comp, &device, &queue, &doc, now.union(&prev))?;

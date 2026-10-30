@@ -809,7 +809,14 @@ mod tests {
                 let want = tile_image(None, &want);
                 let want: Vec<[u8; 4]> = want.pixels.iter().map(|c| c.to_array()).collect();
                 let bad = got.iter().zip(&want).position(|(a, b)| a != b);
-                assert!(bad.is_none(), "zoom {zoom} tile {k:?} held {:?}: first wrong pixel at {:?}: {:?} vs {:?}", t.held, bad.map(|i| (i % w, i / w)), bad.map(|i| got[i]), bad.map(|i| want[i]));
+                assert!(
+                    bad.is_none(),
+                    "zoom {zoom} tile {k:?} held {:?}: first wrong pixel at {:?}: {:?} vs {:?}",
+                    t.held,
+                    bad.map(|i| (i % w, i / w)),
+                    bad.map(|i| got[i]),
+                    bad.map(|i| want[i])
+                );
             }
         }
     }

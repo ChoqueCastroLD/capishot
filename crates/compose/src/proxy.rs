@@ -189,7 +189,8 @@ pub fn lod_faithful(doc: &Document) -> bool {
 /// with it. Empty vector masks have constant coverage, including inversion and density.
 /// Nonempty paths can still anchor fill layouts even when their mask density is zero.
 pub fn proxy_faithful(doc: &Document) -> bool {
-    doc.walk().iter().all(|(_, _, l)| !crate::effects::has_effects(l) && l.vector_mask.as_ref().is_none_or(|v| !v.enabled || v.path.is_empty()))
+    // Hidden layers (and what they hold) are not composited, so they don't count.
+    crate::visible_layers(&doc.layers).iter().all(|l| !crate::effects::has_effects(l) && l.vector_mask.as_ref().is_none_or(|v| !v.enabled || v.path.is_empty()))
 }
 
 #[cfg(test)]
@@ -372,6 +373,57 @@ mod tests {
         assert!(!proxy_faithful(&doc));
         doc.layers[1].effects.items[0].set_enabled(false);
         assert!(proxy_faithful(&doc));
+    }
+
+    #[test]
+    fn a_hidden_layer_with_effects_does_not_rule_out_the_proxy_or_the_uniform_shortcut() {
+        let mut doc = two_colors(Size::new(32, 16), SampleType::U8);
+        doc.layers[1].effects.items.push(Effect::default_drop_shadow());
+        doc.layers[1].effects.enabled = true;
+        assert!(!proxy_faithful(&doc));
+        assert!(crate::uniform::UniformAreas::new(&doc).is_none());
+        doc.layers[1].visible = false;
+        assert!(proxy_faithful(&doc));
+        assert!(crate::uniform::UniformAreas::new(&doc).is_some());
+        // Inside a hidden group too.
+        doc.layers[1].visible = true;
+        let group = Layer::group("g", vec![doc.layers.remove(1)]);
+        doc.layers.push(group);
+        assert!(!proxy_faithful(&doc));
+        doc.layers[1].visible = false;
+        assert!(proxy_faithful(&doc));
+    }
+
+    #[test]
+    fn empty_vector_masks_keep_constant_coverage_at_every_depth() {
+        for depth in [SampleType::U8, SampleType::U16, SampleType::F32] {
+            let mut doc = two_colors(Size::new(32, 16), depth);
+            for path in [Path::default(), Path::new(vec![Subpath::default()])] {
+                for inverted in [false, true] {
+                    for density in [0.0, 0.25, 1.0] {
+                        for feather in [0.0, 4.0] {
+                            let mut mask = VectorMask::new(path.clone());
+                            mask.path.inverted = inverted;
+                            mask.density = density;
+                            mask.feather = feather;
+                            doc.layers[1].vector_mask = Some(mask);
+                            assert!(proxy_faithful(&doc));
+                            let coverage = if inverted { 1.0 - density } else { 1.0 };
+                            let coverage = if feather > 0.0 { u16_coverage(coverage) } else { coverage };
+                            let expected = [coverage, 0.0, 1.0 - coverage, 1.0];
+                            let full = crate::render(&doc, doc.bounds());
+                            for pixel in &full.px {
+                                assert!(pixel.iter().zip(expected).all(|(a, b)| (a - b).abs() < 1e-6), "{depth:?} {inverted} {density} {feather}: {pixel:?}");
+                            }
+                            let proxy = proxy_document(&doc, 4);
+                            assert_eq!(proxy.layers[1].vector_mask, doc.layers[1].vector_mask);
+                            let reference = proxy_document(&opacity_reference(&doc, coverage), 4);
+                            assert_same_pixels(&crate::render(&proxy, proxy.bounds()), &crate::render(&reference, reference.bounds()));
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]

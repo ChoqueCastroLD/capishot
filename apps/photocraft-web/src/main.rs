@@ -35,6 +35,8 @@ mod indexed_presets;
 #[cfg(target_arch = "wasm32")]
 mod ai_bridge;
 #[cfg(target_arch = "wasm32")]
+mod breadcrumb;
+#[cfg(target_arch = "wasm32")]
 mod clipboard;
 #[cfg(any(target_arch = "wasm32", test))]
 mod clipboard_data;
@@ -47,17 +49,15 @@ mod open_formats;
 #[cfg(target_arch = "wasm32")]
 mod recovery;
 #[cfg(target_arch = "wasm32")]
+mod save_handles;
+#[cfg(target_arch = "wasm32")]
 mod startup;
 #[cfg(target_arch = "wasm32")]
 mod usage_stats;
 #[cfg(target_arch = "wasm32")]
 mod watchdog;
 #[cfg(target_arch = "wasm32")]
-mod breadcrumb;
-#[cfg(target_arch = "wasm32")]
 mod web;
-#[cfg(target_arch = "wasm32")]
-mod save_handles;
 
 // The versioned embedding API for host apps such as Capistudio (`embed/README.md`).
 #[cfg(target_arch = "wasm32")]

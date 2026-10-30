@@ -99,7 +99,7 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, height: f32) {
     let collapsed = app.ui.typer.collapsed.clone();
     let has_clip = app.ui.typer.clipboard.is_some();
     let mut actions: Vec<Action> = Vec::new();
-    let last_id = egui::Id::new("typer-styles-last-current");
+    let last_id = egui::Id::unique("typer-styles-last-current");
     let scroll_to_current = auto_scroll && ctx.data(|d| d.get_temp::<Option<String>>(last_id)).flatten() != current;
     ctx.data_mut(|d| d.insert_temp(last_id, current.clone()));
     egui::ScrollArea::vertical().id_salt("typer-styles").min_scrolled_height(height).max_height(height).auto_shrink([false, false]).show(ui, |ui| {
@@ -278,7 +278,7 @@ fn style_row(
     actions: &mut Vec<Action>,
 ) {
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
-    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, &r.name));
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, selected, &r.name));
     if selected {
         ui.painter().rect_filled(rect, 2.0, t.row_selected);
         if scroll {

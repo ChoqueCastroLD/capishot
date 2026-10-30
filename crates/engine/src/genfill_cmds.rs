@@ -35,7 +35,8 @@ const LABEL: &str = "Generative Fill";
 /// Why the command fails in a build without the service.
 pub const UNAVAILABLE: &str = "Generative Fill is not available in this build";
 /// Why it can't run with little memory.
-pub const LOW_MEMORY: &str = "Not enough memory for Generative Fill on this device (the light model needs about 1 GB free); use Edit › Clean with AI to remove things";
+pub const LOW_MEMORY: &str =
+    "Not enough memory for Generative Fill on this device (the light model needs about 1 GB free); use Edit › Clean with AI to remove things";
 /// Why Standard (and up) can't run on a phone or with little memory.
 pub const LOW_MEMORY_STANDARD: &str = "Not enough memory for this Generative Fill quality on this device (it needs about 8 GB); choose Quality: Ultra-light";
 /// How much an empty-prompt fill re-draws Manga LaMa's result (variants differ, the background

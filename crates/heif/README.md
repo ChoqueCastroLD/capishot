@@ -32,5 +32,5 @@ input, and every call into it also runs under `catch_unwind` as a last resort.
 
 The crate depends on no other Capishot crate and knows nothing of `photocraft-codecs`' types;
 `codecs` → `heif` is the one allowed dependency between standalone crates (`cargo xtask layers`).
-Tests on real files live in `photocraft-codecs` (`tests/heif.rs`, features `corpus,heif`, files
+Tests on real files live in `photocraft-codecs` (`tests/it/heif.rs`, features `corpus,heif`, files
 fetched by `cargo xtask corpus --heif`).

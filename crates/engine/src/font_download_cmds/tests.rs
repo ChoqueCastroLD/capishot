@@ -352,7 +352,11 @@ fn a_local_index_file_overrides_the_pinned_index() {
     // A broken override is an error and does not fall back to the network.
     std::fs::write(&file, b"{\"schema\": 1}").unwrap();
     let mut s2 = Session::new();
-    s2.set_font_services(r.fetcher.clone(), DirStore::new(temp("local2")), FontIndexConfig { urls: vec![INDEX_URL.into()], sha256: Some(sha256_hex(&r.index)), local_file: Some(file) });
+    s2.set_font_services(
+        r.fetcher.clone(),
+        DirStore::new(temp("local2")),
+        FontIndexConfig { urls: vec![INDEX_URL.into()], sha256: Some(sha256_hex(&r.index)), local_file: Some(file) },
+    );
     s2.edit_prefs(|p| p.type_.allow_online_fonts = true);
     assert!(s2.execute("type.fonts.catalog", json!({})).is_err());
     let _ = r.run("type.fonts.remove", json!({"family": "Zqcaa"}));
@@ -370,7 +374,12 @@ fn styles_install_only_the_chosen_files_and_merge_later() {
     let i = r.run("type.fonts.install", json!({"family": "Zqdaa", "styles": ["bold"]})).unwrap();
     assert_eq!(i["files"], 1);
     let names = |r: &mut Rig| -> Vec<String> {
-        r.run("type.fonts.installed", json!({})).unwrap()["families"][0]["files"].as_array().unwrap().iter().map(|f| f["name"].as_str().unwrap().to_string()).collect()
+        r.run("type.fonts.installed", json!({})).unwrap()["families"][0]["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["name"].as_str().unwrap().to_string())
+            .collect()
     };
     assert_eq!(names(&mut r), ["Bold.ttf"]);
     // Asking for a style already there is a no-op; another style merges into the family.
@@ -433,7 +442,8 @@ fn resolve_missing_fonts_lists_and_downloads() {
     assert!(l.get("downloadable").is_none());
     r.run("type.fonts.catalog", json!({"limit": 1})).unwrap();
     let l = r.run("type.resolveMissingFonts", json!({})).unwrap();
-    let mut dl: Vec<String> = l["downloadable"].as_array().unwrap().iter().map(|d| format!("{}={}", d["missing"].as_str().unwrap(), d["family"].as_str().unwrap())).collect();
+    let mut dl: Vec<String> =
+        l["downloadable"].as_array().unwrap().iter().map(|d| format!("{}={}", d["missing"].as_str().unwrap(), d["family"].as_str().unwrap())).collect();
     dl.sort();
     assert_eq!(dl, ["Zqfaa=Zqfaa", "ZqfaaSans-W400=Zqfaa"]);
     // With the preference off the key is omitted, not an error.
@@ -483,7 +493,11 @@ fn assert_clean(r: &Rig, family: &str) {
 fn the_preference_gates_every_networked_command() {
     let mut r = Rig::new("pref", &[plain("Zqhaa", "zqhaa")]);
     r.s.edit_prefs(|p| p.type_.allow_online_fonts = false);
-    for (id, p) in [("type.fonts.catalog", json!({})), ("type.fonts.install", json!({"family": "Zqhaa"})), ("type.fonts.install", json!({"family": "Zqhaa", "online": true, "allowOnlineFonts": true}))] {
+    for (id, p) in [
+        ("type.fonts.catalog", json!({})),
+        ("type.fonts.install", json!({"family": "Zqhaa"})),
+        ("type.fonts.install", json!({"family": "Zqhaa", "online": true, "allowOnlineFonts": true})),
+    ] {
         let e = r.err(id, p);
         assert_eq!(e, TURNED_OFF);
         assert!(e.contains("Preferences › Type › Allow Online Fonts"));
@@ -516,7 +530,11 @@ fn without_services_every_command_says_so() {
 #[test]
 fn an_unconfigured_index_is_an_error() {
     let fetcher = Arc::new(FakeFetcher::default());
-    for cfg in [FontIndexConfig::default(), FontIndexConfig { urls: vec![INDEX_URL.into()], sha256: None, local_file: None }, FontIndexConfig { urls: vec![], sha256: Some("0".repeat(64)), local_file: None }] {
+    for cfg in [
+        FontIndexConfig::default(),
+        FontIndexConfig { urls: vec![INDEX_URL.into()], sha256: None, local_file: None },
+        FontIndexConfig { urls: vec![], sha256: Some("0".repeat(64)), local_file: None },
+    ] {
         let store = DirStore::new(temp("unconfigured"));
         let mut s = Session::new();
         s.set_font_services(fetcher.clone(), store.clone(), cfg);
@@ -561,9 +579,25 @@ fn a_wrong_index_is_rejected() {
 fn bad_downloads_leave_nothing_behind() {
     let good = font_named("Zqjaa");
     let cases: Vec<(&str, Vec<u8>, &str)> = vec![
-        ("sha mismatch", { let mut b = good.clone(); b[100] ^= 0xff; b }, "sha256"),
+        (
+            "sha mismatch",
+            {
+                let mut b = good.clone();
+                b[100] ^= 0xff;
+                b
+            },
+            "sha256",
+        ),
         ("short body", good[..good.len() - 1].to_vec(), "expected"),
-        ("over the size cap", { let mut b = good.clone(); b.extend_from_slice(&[0; 10]); b }, "larger than"),
+        (
+            "over the size cap",
+            {
+                let mut b = good.clone();
+                b.extend_from_slice(&[0; 10]);
+                b
+            },
+            "larger than",
+        ),
         ("html instead of a font", b"<html>404</html>".to_vec(), "expected"),
     ];
     for (name, body, want) in cases {

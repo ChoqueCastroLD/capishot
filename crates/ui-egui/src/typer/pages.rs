@@ -114,7 +114,9 @@ pub fn pick(app: &mut PhotocraftApp) {
             FileDialogAnswer::Paths(paths) => (paths, Vec::new()),
             FileDialogAnswer::Contents(name, bytes) => (vec![name.clone()], vec![(name, bytes)]),
             FileDialogAnswer::ContentsMany(files) => (files.iter().map(|(n, _)| n.clone()).collect(), files),
-            FileDialogAnswer::SaveTo(_) | FileDialogAnswer::FolderTo(_) | FileDialogAnswer::Unavailable(_) => return Err("the file dialog gave an unexpected answer".into()),
+            FileDialogAnswer::SaveTo(_) | FileDialogAnswer::FolderTo(_) | FileDialogAnswer::Unavailable(_) => {
+                return Err("the file dialog gave an unexpected answer".into());
+            }
         };
         set_files(app, names, files)
     });
@@ -284,7 +286,7 @@ pub(super) fn footer(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     ui.painter().rect_filled(rect, 9.0, if resp.hovered() { t.hover } else { t.field });
     ui.painter().circle_filled(egui::pos2(rect.left() + 9.0, rect.center().y), 3.5, dot);
     ui.painter().galley(egui::pos2(rect.left() + 16.0, rect.center().y - galley.size().y / 2.0), galley, t.text_dim);
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
     let mut tip = match &current {
         Some(c) => format!("{}: {c}", tl!("This page's file")),
         None => tl!("No file for this page").to_string(),

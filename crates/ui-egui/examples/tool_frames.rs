@@ -686,7 +686,13 @@ fn main() {
         let row = Row { name: name.to_string(), frames, counters: diff(&before, &counters(&h)) };
         row.print();
         if std::env::var_os("TOOL_FRAMES_SPANS").is_some() {
-            println!("    spans {:?} last refresh {} {:.1} ms command {:.1} ms", h.state().perf.spans, h.state().perf.last_refresh, h.state().perf.composite_ms, h.state().perf.command_ms);
+            println!(
+                "    spans {:?} last refresh {} {:.1} ms command {:.1} ms",
+                h.state().perf.spans,
+                h.state().perf.last_refresh,
+                h.state().perf.composite_ms,
+                h.state().perf.command_ms
+            );
         }
         if *name == "idle" {
             let reps = row.frames.iter().filter(|f| f.repaint).count();

@@ -223,9 +223,7 @@ fn download(s: &mut Session, p: &Value) -> Result<Value> {
         if ids.len() > 256 {
             return Err(bad(DOWNLOAD, "too many `ids`"));
         }
-        ids.iter()
-            .map(|v| v.as_str().and_then(models::by_id_or_file).ok_or_else(|| bad(DOWNLOAD, format!("unknown model {v}"))))
-            .collect::<Result<_>>()?
+        ids.iter().map(|v| v.as_str().and_then(models::by_id_or_file).ok_or_else(|| bad(DOWNLOAD, format!("unknown model {v}")))).collect::<Result<_>>()?
     } else if flag("all")? {
         models::files()
     } else if flag("recommended")? {

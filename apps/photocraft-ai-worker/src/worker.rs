@@ -44,8 +44,8 @@ use std::rc::Rc;
 
 use js_sys::{Array, Float32Array, Object, Reflect, Uint8Array};
 use photocraft_ai::cache::{WEB_CACHE, verify};
-use photocraft_ai::models::Throttle;
 use photocraft_ai::catalog::{self, ModelInfo};
+use photocraft_ai::models::Throttle;
 use photocraft_ai::runtime::{Accel, Runtime};
 use photocraft_ai::upscale::{Loaded, default_tiles, upscale};
 use photocraft_ai::{AiError, Planar, Progress, Result};
@@ -456,7 +456,11 @@ async fn fetch_verified(url: &str, model: &ModelInfo, progress: &mut dyn FnMut(u
 /// tell an outdated file from the catalog's).
 async fn store(cache: &Cache, url: &str, model: &ModelInfo, blob: &Blob) -> std::result::Result<(), String> {
     let headers = web_sys::Headers::new().map_err(js_err)?;
-    for (k, v) in [("content-type", "application/octet-stream".to_string()), ("content-length", model.bytes.to_string()), (photocraft_ai::cache::WEB_SHA_HEADER, model.sha256.to_string())] {
+    for (k, v) in [
+        ("content-type", "application/octet-stream".to_string()),
+        ("content-length", model.bytes.to_string()),
+        (photocraft_ai::cache::WEB_SHA_HEADER, model.sha256.to_string()),
+    ] {
         headers.set(k, &v).map_err(js_err)?;
     }
     let init = web_sys::ResponseInit::new();
@@ -482,13 +486,17 @@ async fn download(msg: JsValue) {
         if base.is_empty() {
             return Err(AiError::Download("model downloads are not configured on this site".into()));
         }
-        let cache = open_cache().await.ok_or_else(|| AiError::Cache("this browser can't store models here (Cache Storage is unavailable, as in some private windows)".into()))?;
+        let cache = open_cache()
+            .await
+            .ok_or_else(|| AiError::Cache("this browser can't store models here (Cache Storage is unavailable, as in some private windows)".into()))?;
         let url = model.url(&base);
         let blob = fetch_resumable(&cache, &url, model, &mut |done, total| {
             reply("dl-progress", &[("done", (done as f64).into()), ("total", (total as f64).into())]);
         })
         .await?;
-        store(&cache, &url, model, &blob).await.map_err(|e| AiError::Cache(format!("couldn't store {} ({e}); free some space or allow this site more storage", model.title)))?;
+        store(&cache, &url, model, &blob)
+            .await
+            .map_err(|e| AiError::Cache(format!("couldn't store {} ({e}); free some space or allow this site more storage", model.title)))?;
         drop_parts(&cache, &url).await;
         Ok(())
     }
@@ -549,7 +557,8 @@ async fn fetch_resumable(cache: &Cache, url: &str, model: &ModelInfo, progress: 
         headers.set("Range", &format!("bytes={done}-")).map_err(|e| err(js_err(e)))?;
         init.set_headers(&headers);
     }
-    let resp: Response = JsFuture::from(scope().fetch_with_str_and_init(url, &init)).await.map_err(|e| err(js_err(e)))?.dyn_into().map_err(|_| err("not a response".into()))?;
+    let resp: Response =
+        JsFuture::from(scope().fetch_with_str_and_init(url, &init)).await.map_err(|e| err(js_err(e)))?.dyn_into().map_err(|_| err("not a response".into()))?;
     if !resp.ok() {
         return Err(err(format!("HTTP {}", resp.status())));
     }
@@ -739,7 +748,10 @@ async fn genfill_inner(msg: &JsValue, id: f64) -> std::result::Result<(Vec<Vec<f
     let (rgb, mask) = (arr("rgb")?, arr("mask")?);
     let text = |k: &str| get(msg, k).as_string().unwrap_or_default();
     let mut p = Posting::new(id);
-    let reuse = GENFILL.with(|g| g.borrow().clone()).filter(|(t, m)| *t == tier && m.scratch.dtype() == if get(msg, "f32").as_bool().unwrap_or(false) { photocraft_ai_sd::burn::tensor::DType::F32 } else { m.scratch.dtype() });
+    let reuse = GENFILL.with(|g| g.borrow().clone()).filter(|(t, m)| {
+        *t == tier
+            && m.scratch.dtype() == if get(msg, "f32").as_bool().unwrap_or(false) { photocraft_ai_sd::burn::tensor::DType::F32 } else { m.scratch.dtype() }
+    });
     let models = match reuse {
         Some((_, m)) => m,
         None => {

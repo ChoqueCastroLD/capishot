@@ -63,7 +63,9 @@ fn options(p: &Value, rerender_default: bool, cmd: &str) -> Result<photocraft_io
     let font_dirs = match p.get("fonts") {
         None | Some(Value::Null) => Vec::new(),
         Some(Value::String(s)) => vec![s.into()],
-        Some(Value::Array(a)) => a.iter().map(|v| v.as_str().map(Into::into).ok_or_else(|| bad(cmd, "\"fonts\" must be folder paths"))).collect::<Result<_>>()?,
+        Some(Value::Array(a)) => {
+            a.iter().map(|v| v.as_str().map(Into::into).ok_or_else(|| bad(cmd, "\"fonts\" must be folder paths"))).collect::<Result<_>>()?
+        }
         Some(_) => return Err(bad(cmd, "\"fonts\" must be a folder or a list of folders")),
     };
     let opts = photocraft_io::psdc::CompileOptions {
@@ -76,7 +78,11 @@ fn options(p: &Value, rerender_default: bool, cmd: &str) -> Result<photocraft_io
 }
 
 fn check_format(ext: &str, cmd: &str) -> Result<()> {
-    if matches!(ext, "png" | "jpg" | "jpeg" | "webp" | "tif" | "tiff") { Ok(()) } else { Err(bad(cmd, format!("can't compile to \"{ext}\": use png, jpg, webp or tif"))) }
+    if matches!(ext, "png" | "jpg" | "jpeg" | "webp" | "tif" | "tiff") {
+        Ok(())
+    } else {
+        Err(bad(cmd, format!("can't compile to \"{ext}\": use png, jpg, webp or tif")))
+    }
 }
 
 fn authorize(s: &Session, cmd: &str, p: &Value) -> Result<()> {
@@ -158,8 +164,7 @@ fn compile_folder(_: &mut Session, p: &Value) -> Result<Value> {
     let quality = quality(p, COMPILE_FOLDER)?;
     let opts = options(p, true, COMPILE_FOLDER)?;
     let rd = std::fs::read_dir(&input).map_err(|e| EngineError::Other(format!("{input}: {e}")))?;
-    let mut sources: Vec<std::path::PathBuf> =
-        rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|f| f.is_file() && f.to_str().is_some_and(is_psd)).collect();
+    let mut sources: Vec<std::path::PathBuf> = rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|f| f.is_file() && f.to_str().is_some_and(is_psd)).collect();
     sources.sort();
     std::fs::create_dir_all(&output).map_err(|e| EngineError::Other(format!("{output}: {e}")))?;
     // Fonts are loaded once, then the pages compile on all cores.

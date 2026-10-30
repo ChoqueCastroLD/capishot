@@ -236,8 +236,8 @@ fn reduced_renders_reuse_the_reduced_lower_stack() {
             d.layers[top].opacity = op;
             let (got, st) = render_to_vec_lod(&mut g.comp, &g.device, &g.queue, &d, d.bounds(), level).unwrap();
             let mut fresh = Compositor::try_new_with_format(&g.device, wgpu::TextureFormat::Rgba32Float).unwrap();
-        // As the canvas composites a refresh it splits (and its catch-up): no whole-chunk fill.
-        fresh.set_fill_prefix(false);
+            // As the canvas composites a refresh it splits (and its catch-up): no whole-chunk fill.
+            fresh.set_fill_prefix(false);
             fresh.set_composite_cache_budget(0);
             let (want, _) = render_to_vec_lod(&mut fresh, &g.device, &g.queue, &d, d.bounds(), level).unwrap();
             assert!(diffs(&got, &want).0 <= 1e-5, "level {level} edit {k}: cached differs");

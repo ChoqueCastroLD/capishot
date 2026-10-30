@@ -202,7 +202,7 @@ impl egui::load::TextureLoader for Recorder {
 }
 
 fn install_recorder(ctx: &egui::Context) {
-    let id = egui::Id::new("photocraft-chrome-recorder");
+    let id = egui::Id::unique("photocraft-chrome-recorder");
     if ctx.data(|d| d.get_temp::<bool>(id)).is_none() {
         ctx.add_texture_loader(std::sync::Arc::new(Recorder));
         ctx.data_mut(|d| d.insert_temp(id, true));
@@ -211,5 +211,5 @@ fn install_recorder(ctx: &egui::Context) {
 
 /// The canvas area's `Ui`: a child of `ui` over `area` with a fixed id (see the module docs).
 pub fn canvas_ui(ui: &mut egui::Ui, area: Rect) -> egui::Ui {
-    ui.new_child(egui::UiBuilder::new().id(egui::Id::new("photocraft-canvas-area")).max_rect(area).layout(*ui.layout()))
+    ui.new_child(egui::UiBuilder::new().scope_id(egui::Id::unique("photocraft-canvas-area")).max_rect(area).layout(*ui.layout()))
 }

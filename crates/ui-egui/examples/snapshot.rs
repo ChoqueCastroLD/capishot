@@ -11,7 +11,9 @@
 //! `--fake-ai` injects a stand-in AI upscaler (models "need a download") for Upscale with AI….
 //!
 //! `--safe-gpu` draws the canvas on the CPU path, like the app's `--safe-gpu` launch.
+//! `--hardware-filtering` respects texture samplers; the default predictable renderer forces bilinear filtering.
 //! `--wayland-notice` previews the native file drag-and-drop guidance shown in Wayland sessions.
+//! `--update-notice` previews a newer release without contacting the network.
 //! `--custom-titlebar` draws the Windows/Linux title bar (caption buttons in the top bar).
 //!
 //! `--monitor 1366x768 --window-top 31` simulates the display the window is on (in points) and
@@ -48,18 +50,20 @@ fn main() {
         .unwrap_or((1440.0, 900.0));
     let scale: f32 = arg(&args, "--scale").and_then(|s| s.parse().ok()).unwrap_or(2.0);
     let wayland_notice = args.iter().any(|a| a == "--wayland-notice");
+    let update_notice = args.iter().any(|a| a == "--update-notice");
     let script: Vec<(String, Value)> =
         arg(&args, "--script").map(|s| serde_json::from_str::<Vec<(String, Value)>>(&s).expect("--script must be [[method, params], …]")).unwrap_or_default();
 
     let mut services = Services {
-        import: Some(Box::new(|name: &str, bytes: &[u8], depth: usize| {
-            photocraft_io::import_with_svg_group_depth(name, bytes, depth).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string())
+        import: Some(Box::new(|name: &str, bytes: &[u8], opts: &photocraft_io::ImportOptions| {
+            photocraft_io::import_with_options(name, bytes, opts).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string())
         })),
         export: Some(Box::new(|doc: &photocraft_doc::Document, path: &str, settings: &photocraft_ui_egui::ExportSettings| {
             let mut opts = photocraft_io::ExportOptions::default();
             if let Some(q) = settings.jpeg_quality {
                 opts.encode.jpeg_quality = q;
             }
+            opts.encode.jpeg_format = settings.jpeg_format;
             opts.encode.webp_lossless = settings.webp_lossless;
             if let Some(q) = settings.webp_quality {
                 opts.encode.webp_quality = q;
@@ -106,15 +110,26 @@ fn main() {
     // `--settle-ms N`: keep rendering frames for N ms before the capture (e.g. mid-job).
     let click_wait_ms: u64 = arg(&args, "--click-wait-ms").and_then(|s| s.parse().ok()).unwrap_or(0);
     let settle_ms: u64 = arg(&args, "--settle-ms").and_then(|s| s.parse().ok()).unwrap_or(0);
-    let mut harness =
-        egui_kittest::Harness::builder().with_size(egui::vec2(w, h)).with_pixels_per_point(scale).with_max_steps(64).wgpu().build_eframe(move |cc| {
+    let mut render_options = eframe::egui_wgpu::RendererOptions::PREDICTABLE;
+    render_options.predictable_texture_filtering = !args.iter().any(|a| a == "--hardware-filtering");
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(egui::vec2(w, h))
+        .with_pixels_per_point(scale)
+        .with_max_steps(64)
+        .with_render_options(render_options)
+        .wgpu()
+        .build_eframe(move |cc| {
             PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
             let mut services = services;
             services.is_wayland = wayland_notice;
             services.xwayland_command = wayland_notice.then(|| "WAYLAND_DISPLAY= photocraft".into());
             let mut session = photocraft_engine::Session::new();
             if dev_fonts {
-                let mk = |name, dir, files, size, category: &'static str, variable| dev_fonts::Fam { category, variable, ..dev_fonts::Fam::listed(name, dir, files, size) };
+                let mk = |name, dir, files, size, category: &'static str, variable| dev_fonts::Fam {
+                    category,
+                    variable,
+                    ..dev_fonts::Fam::listed(name, dir, files, size)
+                };
                 let mut oswald = mk("Oswald", "oswald", 3, 0, "SANS_SERIF", true);
                 oswald.hang_on = Some(1);
                 let fams = [

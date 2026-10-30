@@ -30,7 +30,7 @@ pub(super) struct Scans(Arc<Mutex<Inner>>);
 
 impl Scans {
     pub(super) fn get(ctx: &Context) -> Scans {
-        let id = Id::new("lutlib-scans");
+        let id = Id::unique("lutlib-scans");
         if let Some(s) = ctx.data(|d| d.get_temp::<Scans>(id)) {
             return s;
         }

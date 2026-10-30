@@ -170,7 +170,7 @@ fn launch(app: &mut PhotocraftApp, id: &str, params: Value) -> Launch {
 /// Names an icon-only button for screen readers (and the tests).
 fn named(resp: egui::Response, label: &str) -> egui::Response {
     let enabled = resp.enabled();
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
     resp
 }
 
@@ -446,9 +446,9 @@ pub fn find_more(app: &mut PhotocraftApp, ui: &mut egui::Ui, current: &str) -> O
     ui.horizontal(|ui| {
         let w = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0 - 20.0;
         let cats: Vec<(String, &str)> = CATEGORIES.iter().map(|(v, l)| (v.to_string(), *l)).collect();
-        crate::widgets::dropdown(ui, "gf-category", &mut f.category, &cats, w);
+        crate::widgets::dropdown(ui, "gf-category", "", &mut f.category, &cats, w);
         let subs: Vec<(String, &str)> = SUBSETS.iter().map(|(v, l)| (v.to_string(), *l)).collect();
-        crate::widgets::dropdown(ui, "gf-subset", &mut f.subset, &subs, w);
+        crate::widgets::dropdown(ui, "gf-subset", "", &mut f.subset, &subs, w);
     });
     app.ui.fonts.query = f.query;
     app.ui.fonts.category = f.category;

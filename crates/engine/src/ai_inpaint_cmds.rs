@@ -93,9 +93,10 @@ pub fn model_for(s: &Session, p: &Value, cmd: &str) -> Result<(&'static ModelInf
         }
         id => id,
     };
-    let model = catalog::model(id)
-        .filter(|m| m.content == catalog::Content::Inpaint)
-        .ok_or_else(|| EngineError::BadParams { cmd: cmd.into(), msg: format!("unknown inpainting model `{id}` ({} or {})", catalog::LAMA_ID, catalog::MIGAN_ID) })?;
+    let model = catalog::model(id).filter(|m| m.content == catalog::Content::Inpaint).ok_or_else(|| EngineError::BadParams {
+        cmd: cmd.into(),
+        msg: format!("unknown inpainting model `{id}` ({} or {})", catalog::LAMA_ID, catalog::MIGAN_ID),
+    })?;
     Ok((model, run))
 }
 

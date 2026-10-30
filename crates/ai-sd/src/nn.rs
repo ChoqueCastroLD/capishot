@@ -122,7 +122,9 @@ impl Store {
             (1, "I32") => part.shape = Some(data.as_chunks::<4>().0.iter().map(|b| usize::try_from(i32::from_le_bytes(*b)).unwrap_or(0)).collect()),
             _ => return Err(SdError::Weights(format!("`{name}`: unexpected dtype {dtype}"))),
         }
-        if part.values.is_some() && part.scales.is_some() && part.shape.is_some()
+        if part.values.is_some()
+            && part.scales.is_some()
+            && part.shape.is_some()
             && let Some(p) = self.pending.remove(&base)
         {
             self.upload_quantized(base, p)?;

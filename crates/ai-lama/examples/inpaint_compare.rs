@@ -50,7 +50,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             se += f64::from(x - r).powi(2);
         }
         let psnr = 10.0 * (1.0 / (se / out.len() as f64)).log10();
-        println!("run {run}: {s}x{s} in {:.3}s; max|diff| {max:.2e}, 8-bit max {max8}/255 ({n8} of {} values differ), PSNR {psnr:.1} dB", dt.as_secs_f64(), out.len());
+        println!(
+            "run {run}: {s}x{s} in {:.3}s; max|diff| {max:.2e}, 8-bit max {max8}/255 ({n8} of {} values differ), PSNR {psnr:.1} dB",
+            dt.as_secs_f64(),
+            out.len()
+        );
     }
     Ok(())
 }

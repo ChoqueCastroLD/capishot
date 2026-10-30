@@ -339,6 +339,54 @@ fn prepare_state(
     }
     String::from_utf8(prepared.manifest).map_err(|_| FormatError::corrupt("invalid UTF-8 manifest"))
 }
+/// Publish a recovery sidecar atomically: a flushed temporary file renamed over the old one.
+///
+/// The replacing step is a plain rename on every platform, never `ReplaceFileW` (what
+/// [`crate::atomic::RealFs`] uses on Windows to keep a user file's ACL and named streams). That
+/// call first moves the old file to a backup name and only then moves the new one in, so for a
+/// moment `<key>.json` does not exist: a listing in between took the entry for a sidecar-less
+/// bundle and listed it twice, or not at all (#9034). A rename swaps the name in one step, and
+/// recovery data is private to the app, so there is no metadata to keep.
+fn write_sidecar(path: &Path, bytes: &[u8]) -> Result<()> {
+    struct SidecarFs;
+    impl crate::atomic::AtomicFs for SidecarFs {
+        // As before: Windows refuses a read-only sidecar up front, Unix replaces it.
+        #[cfg(not(unix))]
+        fn is_readonly(&self, path: &Path) -> bool {
+            crate::atomic::RealFs.is_readonly(path)
+        }
+        fn write_new(&self, tmp: &Path, bytes: &[u8]) -> std::io::Result<()> {
+            #[cfg(unix)]
+            {
+                use std::io::Write;
+                use std::os::unix::fs::OpenOptionsExt;
+                let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(tmp)?;
+                f.write_all(bytes)?;
+                crate::atomic::sync_file(&f)
+            }
+            #[cfg(not(unix))]
+            {
+                crate::atomic::RealFs.write_new(tmp, bytes)
+            }
+        }
+        fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+            crate::atomic::RealFs.rename(from, to)
+        }
+        // `replace_existing` keeps the trait's default: this same one-step rename.
+        fn remove(&self, path: &Path) -> std::io::Result<()> {
+            crate::atomic::RealFs.remove(path)
+        }
+        fn sync_dir(&self, dir: &Path) -> std::io::Result<()> {
+            crate::atomic::RealFs.sync_dir(dir)
+        }
+        fn copy_metadata(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+            crate::atomic::RealFs.copy_metadata(from, to)
+        }
+    }
+    crate::atomic::atomic_write_with(&SidecarFs, crate::atomic::RenameRetry::platform(), path, bytes)?;
+    Ok(())
+}
+
 fn save_checkpoint(writer: &mut PcraftWriter, verified: &mut HashMap<PathBuf, FileFingerprint>, job: &Job, bundle: &Path, sidecar: &Path) -> Result<SaveStats> {
     // Serialize publication and deferred cleanup so a retired root cannot be
     // deleted while a replacement checkpoint is being written.
@@ -383,7 +431,7 @@ fn save_checkpoint(writer: &mut PcraftWriter, verified: &mut HashMap<PathBuf, Fi
     if std::fs::symlink_metadata(sidecar).is_ok() {
         ensure_file(sidecar)?;
     }
-    write_atomic(sidecar, &descriptor)?;
+    write_sidecar(sidecar, &descriptor)?;
     // A recovered lazy history pins the entire root conservatively. This keeps
     // cold states valid after another checkpoint replaces the descriptor.
     let pinned = root_registry.get(bundle).and_then(Weak::upgrade).is_some();
@@ -915,7 +963,11 @@ struct MemorySource {
 
 impl ByteSource for MemorySource {
     fn get(&self, path: &str, max: usize) -> Result<Vec<u8>> {
-        let bytes = if path == store::MANIFEST { self.manifest.as_bytes() } else { self.objects.get(path).ok_or_else(|| FormatError::corrupt(format!("missing `{path}`")))? };
+        let bytes = if path == store::MANIFEST {
+            self.manifest.as_bytes()
+        } else {
+            self.objects.get(path).ok_or_else(|| FormatError::corrupt(format!("missing `{path}`")))?
+        };
         if bytes.len() > max {
             return Err(FormatError::LimitExceeded(format!("`{path}` exceeds its size limit")));
         }

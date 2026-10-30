@@ -29,7 +29,7 @@ pub use self::install::{end_stale_preview, install_path, is_pack_drop, report};
 use std::collections::HashMap;
 use std::path::Path;
 
-use egui::{Align2, EventFilter, FontId, Id, Key, Modifiers, Pos2, Rect, Sense, Ui, WidgetInfo, WidgetType, vec2};
+use egui::{Align2, EventFilter, FontId, Id, Key, Modifiers, Pos2, Rect, Role, Sense, Ui, WidgetInfo, vec2};
 use photocraft_doc::LayerId;
 use photocraft_engine::lut_library::LutLibrary;
 use serde_json::{Value, json};
@@ -115,10 +115,10 @@ fn dup_zone(ctx: &egui::Context, src: &Source, name: &str) -> f32 {
 /// Call after the rest of the Color Lookup editor is drawn: measures how tall everything below the
 /// list is, so the list can use all the room that is left.
 pub fn finish(ui: &Ui, layer: LayerId) {
-    let Some(bottom) = memory::<f32>(ui, Id::new(("lutlib-list-bottom", layer.0))) else { return };
+    let Some(bottom) = memory::<f32>(ui, Id::unique(("lutlib-list-bottom", layer.0))) else { return };
     let below = ui.min_rect().bottom() - bottom;
     if below > 0.0 && below < 600.0 {
-        remember(ui, Id::new(("lutlib-below", layer.0)), below);
+        remember(ui, Id::unique(("lutlib-below", layer.0)), below);
     }
 }
 
@@ -136,7 +136,7 @@ pub fn browser(app: &mut PhotocraftApp, ui: &mut Ui, layer: LayerId, cur: &Curre
         if scans.take_stale(l.rev) {
             let _ = app.run("lut.rescan", json!({}));
         }
-        let (now, scan_id) = (ui.input(|i| i.time), Id::new("lutlib-scan"));
+        let (now, scan_id) = (ui.input(|i| i.time), Id::unique("lutlib-scan"));
         if now - memory::<f64>(ui, scan_id).unwrap_or(0.0) > 2.0 {
             remember(ui, scan_id, now);
             scans.start_stale_check(&ctx, root, l.rev, l.packs.clone());
@@ -145,11 +145,11 @@ pub fn browser(app: &mut PhotocraftApp, ui: &mut Ui, layer: LayerId, cur: &Curre
     }
     let listing = rows::listing(app, ui);
 
-    let open_id = Id::new("lutlib-open");
+    let open_id = Id::unique("lutlib-open");
     let mut open: HashMap<String, bool> = memory(ui, open_id).unwrap_or_default();
-    let filter_id = Id::new("lutlib-filter");
+    let filter_id = Id::unique("lutlib-filter");
     let mut filter: String = memory(ui, filter_id).unwrap_or_default();
-    let loaded_id = Id::new(("lutlib-loaded", layer.0));
+    let loaded_id = Id::unique(("lutlib-loaded", layer.0));
     let (mut loaded, mut loaded_name): (String, String) = memory(ui, loaded_id).unwrap_or_default();
     if cur.look != "custom" {
         loaded.clear();
@@ -158,9 +158,9 @@ pub fn browser(app: &mut PhotocraftApp, ui: &mut Ui, layer: LayerId, cur: &Curre
     } else if loaded_name != cur.name {
         loaded.clear();
     }
-    let confirm_id = Id::new("lutlib-confirm");
+    let confirm_id = Id::unique("lutlib-confirm");
     let mut confirm: String = memory(ui, confirm_id).unwrap_or_default();
-    let cursor_id = Id::new(("lutlib-cursor", layer.0));
+    let cursor_id = Id::unique(("lutlib-cursor", layer.0));
     // The keyboard cursor: the LUT's key and the row it is on (a LUT can be listed twice).
     let (mut cursor, mut cursor_row): (String, usize) = memory(ui, cursor_id).unwrap_or_default();
 
@@ -199,7 +199,8 @@ pub fn browser(app: &mut PhotocraftApp, ui: &mut Ui, layer: LayerId, cur: &Curre
         "custom" => lib.and_then(|l| id_of(l, &loaded)).map(|id| format!("lut:{id}")),
         look => Some(format!("look:{look}")),
     };
-    let (list_id, scroll_id, state_id) = (Id::new(("lutlib-list", layer.0)), Id::new(("lutlib-scroll", layer.0)), Id::new(("lutlib-scroll-state", layer.0)));
+    let (list_id, scroll_id, state_id) =
+        (Id::unique(("lutlib-list", layer.0)), Id::unique(("lutlib-scroll", layer.0)), Id::unique(("lutlib-scroll-state", layer.0)));
 
     // Arrow keys move the cursor while the list or the filter box has focus.
     let focused = ui.memory(|m| m.has_focus(list_id)) || filter_resp.has_focus();
@@ -245,7 +246,7 @@ pub fn browser(app: &mut PhotocraftApp, ui: &mut Ui, layer: LayerId, cur: &Curre
     // The list fills what the Properties group has left: it follows the window, not a fixed size.
     // The height of what the editor draws below the list is measured by `finish` (the frame
     // before), so nothing here depends on a guessed layout.
-    let below: f32 = memory(ui, Id::new(("lutlib-below", layer.0))).unwrap_or(BELOW_LIST_GUESS);
+    let below: f32 = memory(ui, Id::unique(("lutlib-below", layer.0))).unwrap_or(BELOW_LIST_GUESS);
     let list_h = (ui.clip_rect().bottom() - ui.cursor().min.y - below - BOTTOM_MARGIN).max(MIN_LIST_H);
     let (saved_offset, saved_h): (f32, f32) = memory(ui, state_id).unwrap_or((0.0, list_h));
     let well = Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), list_h));
@@ -316,9 +317,9 @@ pub fn browser(app: &mut PhotocraftApp, ui: &mut Ui, layer: LayerId, cur: &Curre
                     let galley = ctx.fonts_mut(|f| f.layout_job(job));
                     ui.painter().galley(Pos2::new(x, mid - galley.size().y / 2.0), galley, t.text);
                     let info = if is_header {
-                        WidgetInfo::labeled(WidgetType::CollapsingHeader, true, &text)
+                        WidgetInfo::labeled(Role::DisclosureTriangle, true, &text)
                     } else {
-                        WidgetInfo::selected(WidgetType::SelectableLabel, true, applied, &text)
+                        WidgetInfo::selected(Role::Button, true, applied, &text)
                     };
                     resp.widget_info(move || info.clone());
 
@@ -409,8 +410,8 @@ pub fn browser(app: &mut PhotocraftApp, ui: &mut Ui, layer: LayerId, cur: &Curre
             })
         })
         .inner;
-    remember(ui, state_id, (out.state.offset.y, out.inner_rect.height()));
-    remember(ui, Id::new(("lutlib-list-bottom", layer.0)), out.inner_rect.bottom());
+    remember(ui, state_id, (out.state.clamped_offset().y, out.inner_rect.height()));
+    remember(ui, Id::unique(("lutlib-list-bottom", layer.0)), out.inner_rect.bottom());
     // The list takes keyboard focus when clicked; Up / Down must not move focus away from it.
     let list_resp = ui.interact(out.inner_rect, list_id, Sense::focusable_noninteractive());
     if clicked_row {
@@ -431,18 +432,18 @@ pub fn browser(app: &mut PhotocraftApp, ui: &mut Ui, layer: LayerId, cur: &Curre
     };
     let preview = if commit.is_none() { target.filter(|r| src.key_of(r) != applied_key).and_then(|r| pick_of(r, &src, lib)) } else { None };
     let frame = ctx.cumulative_frame_nr();
-    let previewing: (u64, u64) = ui.data(|d| d.get_temp(Id::new("lutlib-previewing"))).unwrap_or_default();
+    let previewing: (u64, u64) = ui.data(|d| d.get_temp(Id::unique("lutlib-previewing"))).unwrap_or_default();
     if let Some(p) = &preview {
         app.live_adjust = Some((layer, p.params()));
-        ctx.data_mut(|d| d.insert_temp(Id::new("lutlib-previewing"), (layer.0, frame)));
+        ctx.data_mut(|d| d.insert_temp(Id::unique("lutlib-previewing"), (layer.0, frame)));
     } else if previewing.0 == layer.0 {
         if app.live_adjust.as_ref().is_some_and(|(l, _)| *l == layer) {
             app.live_adjust = None;
         }
-        ctx.data_mut(|d| d.insert_temp(Id::new("lutlib-previewing"), (0u64, 0u64)));
+        ctx.data_mut(|d| d.insert_temp(Id::unique("lutlib-previewing"), (0u64, 0u64)));
     }
     if previewing.0 == layer.0 && preview.is_some() {
-        ctx.data_mut(|d| d.insert_temp(Id::new("lutlib-previewing"), (layer.0, frame)));
+        ctx.data_mut(|d| d.insert_temp(Id::unique("lutlib-previewing"), (layer.0, frame)));
     }
 
     if let Some((key, state)) = toggled {

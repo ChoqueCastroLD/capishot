@@ -36,7 +36,14 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen(module = "/src/recovery_store.js")]
 extern "C" {
     #[wasm_bindgen(catch)]
-    async fn rcv_write(key: &str, names: js_sys::Array, datas: js_sys::Array, descriptor: js_sys::Uint8Array, thumb: JsValue, live: js_sys::Array) -> Result<JsValue, JsValue>;
+    async fn rcv_write(
+        key: &str,
+        names: js_sys::Array,
+        datas: js_sys::Array,
+        descriptor: js_sys::Uint8Array,
+        thumb: JsValue,
+        live: js_sys::Array,
+    ) -> Result<JsValue, JsValue>;
     #[wasm_bindgen(catch)]
     async fn rcv_list() -> Result<JsValue, JsValue>;
     #[wasm_bindgen(catch)]
@@ -113,9 +120,7 @@ fn history_limits() -> photocraft_format::HistoryLimits {
     static PHONE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     // Measured once, on the page's thread (`kick`).
     let phone = *PHONE.get_or_init(|| {
-        web_sys::window()
-            .and_then(|w| Some(w.inner_width().ok()?.as_f64()?.min(w.inner_height().ok()?.as_f64()?)))
-            .is_some_and(|short| short < 600.0)
+        web_sys::window().and_then(|w| Some(w.inner_width().ok()?.as_f64()?.min(w.inner_height().ok()?.as_f64()?))).is_some_and(|short| short < 600.0)
     });
     // Without threads a checkpoint is encoded on the page's thread: the phone's cap keeps the
     // first one (which encodes every kept step) short there too.
@@ -179,7 +184,15 @@ impl Recovery {
         }
     }
 
-    fn queue(&self, doc: &Arc<Document>, history: photocraft_ops::HistoryCheckpoint, revision: u64, path: Option<&str>, key: Option<&str>, context: serde_json::Value) -> Result<(), String> {
+    fn queue(
+        &self,
+        doc: &Arc<Document>,
+        history: photocraft_ops::HistoryCheckpoint,
+        revision: u64,
+        path: Option<&str>,
+        key: Option<&str>,
+        context: serde_json::Value,
+    ) -> Result<(), String> {
         {
             let mut inner = self.0.borrow_mut();
             let slot = inner.claim(doc.id.0, key)?;
@@ -364,7 +377,8 @@ impl Recovery {
                     return;
                 }
             };
-            let live: Option<Vec<String>> = rcv_live_sessions().await.ok().filter(|v| !v.is_null()).map(|v| js_sys::Array::from(&v).iter().filter_map(|s| s.as_string()).collect());
+            let live: Option<Vec<String>> =
+                rcv_live_sessions().await.ok().filter(|v| !v.is_null()).map(|v| js_sys::Array::from(&v).iter().filter_map(|s| s.as_string()).collect());
             let clean: Vec<String> = rcv_clean_sessions().iter().filter_map(|s| s.as_string()).collect();
             let (own, owned): (String, Vec<String>) = {
                 let inner = me.0.borrow();
@@ -456,7 +470,8 @@ impl Recovery {
                     path: path.clone(),
                     // Decoded by the recovery job, on a worker in the threads build.
                     load: Box::new(move || {
-                        let (document, history, context) = photocraft_format::recover_object_checkpoint(&descriptor, Arc::new(objects)).map_err(|e| e.to_string())?;
+                        let (document, history, context) =
+                            photocraft_format::recover_object_checkpoint(&descriptor, Arc::new(objects)).map_err(|e| e.to_string())?;
                         Ok(RecoveredDocument { key: load_key, path, document, history: Some(history), context })
                     }),
                 });

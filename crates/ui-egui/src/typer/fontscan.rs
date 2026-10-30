@@ -137,7 +137,7 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     };
     let (mut close, mut do_import, mut scan_docs, mut scan_psds, mut load_fonts) = (false, false, false, false, false);
     egui::Window::new("FontScanR")
-        .id(egui::Id::new("typer-fontscan"))
+        .id(egui::Id::unique("typer-fontscan"))
         .title_bar(false)
         .resizable(false)
         .default_width(460.0)
@@ -219,7 +219,7 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(tl!("Import into")).color(t.text_dim).size(11.5));
                         let opts = [(Dest::NewFolder, tl!("New folder")), (Dest::Existing, tl!("Existing folder")), (Dest::Unsorted, tl!("Unsorted"))];
-                        crate::widgets::dropdown(ui, "typer-fontscan-dest", &mut d.dest, &opts, 140.0);
+                        crate::widgets::dropdown(ui, "typer-fontscan-dest", "", &mut d.dest, &opts, 140.0);
                         match d.dest {
                             Dest::NewFolder => {
                                 ui.add(egui::TextEdit::singleline(&mut d.new_folder).desired_width(150.0).hint_text(tl!("Folder name")));
@@ -228,7 +228,7 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
                                 let mut cur = d.folder.as_ref().and_then(photocraft_typer::Id::from_value).map_or(String::new(), |i| i.to_string());
                                 let mut opts: Vec<(String, &str)> = vec![(String::new(), tl!("Choose a folder"))];
                                 opts.extend(folders.iter().map(|(k, n, _)| (k.clone(), n.as_str())));
-                                if crate::widgets::dropdown(ui, "typer-fontscan-folder", &mut cur, &opts, 150.0) {
+                                if crate::widgets::dropdown(ui, "typer-fontscan-folder", "", &mut cur, &opts, 150.0) {
                                     d.folder = folders.iter().find(|(k, _, _)| *k == cur).map(|(_, _, v)| v.clone());
                                 }
                             }

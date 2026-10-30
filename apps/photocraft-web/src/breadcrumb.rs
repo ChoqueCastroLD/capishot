@@ -98,7 +98,8 @@ pub fn tick(app: &PhotocraftApp) {
 
 /// The unclean exits found at start, as statistics events (taken once).
 pub fn take_events() -> Vec<Value> {
-    FOUND.with(|f| std::mem::take(&mut *f.borrow_mut()))
+    FOUND
+        .with(|f| std::mem::take(&mut *f.borrow_mut()))
         .into_iter()
         .map(|v| {
             json!({

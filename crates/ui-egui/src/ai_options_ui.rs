@@ -197,11 +197,11 @@ pub fn simple_rows(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     let mut device = text_field(f, "device");
     ui.label(tl!("Quality:"));
     let q = [("auto".to_string(), tl!("Auto")), ("fast".to_string(), tl!("Fast (lite)")), ("best".to_string(), tl!("Best (full)"))];
-    crate::widgets::dropdown(ui, "ai-opts-quality", &mut quality, &q, 200.0);
+    crate::widgets::dropdown(ui, "ai-opts-quality", tl!("Quality:"), &mut quality, &q, 200.0);
     ui.end_row();
     ui.label(tl!("Device:"));
     let d = [("auto".to_string(), tl!("Auto")), ("gpu".to_string(), tl!("GPU")), ("cpu".to_string(), tl!("CPU"))];
-    crate::widgets::dropdown(ui, "ai-opts-device", &mut device, &d, 200.0);
+    crate::widgets::dropdown(ui, "ai-opts-device", tl!("Device:"), &mut device, &d, 200.0);
     ui.end_row();
     f.insert("quality".into(), json!(quality));
     f.insert("device".into(), json!(device));
@@ -236,7 +236,7 @@ pub fn advanced(app: &mut PhotocraftApp, ui: &mut egui::Ui, kind: Kind, f: &mut 
             .chain(MODELS.iter().filter(wanted).map(|m| (m.id.to_string(), format!("{} · {} MB", m.title, mb(m)))))
             .collect();
         let opts: Vec<(String, &str)> = models.iter().map(|(a, b)| (a.clone(), b.as_str())).collect();
-        crate::widgets::dropdown(ui, "ai-opts-model", &mut model, &opts, 280.0);
+        crate::widgets::dropdown(ui, "ai-opts-model", "", &mut model, &opts, 280.0);
         ui.end_row();
         match kind {
             Kind::Upscale => {

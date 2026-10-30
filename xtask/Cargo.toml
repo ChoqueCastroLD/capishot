@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 serde_json = { workspace = true }
 serde = { workspace = true }
+chrono = { workspace = true }
 # perf/budgets.toml and scorecard/*.toml (MIT OR Apache-2.0).
 toml = "1"
 # fonts-index: named instances / axes / PostScript names (same version as photocraft-text).

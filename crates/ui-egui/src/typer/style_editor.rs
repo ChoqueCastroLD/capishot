@@ -129,7 +129,7 @@ fn check(ui: &mut egui::Ui, o: &mut Map<String, Value>, k: &str, default: bool, 
 fn choice(ui: &mut egui::Ui, id: &str, o: &mut Map<String, Value>, k: &str, default: &str, options: &[(&str, &str)], width: f32) {
     let mut v = o.get(k).and_then(Value::as_str).unwrap_or(default).to_string();
     let opts: Vec<(String, &str)> = options.iter().map(|(v, l)| (v.to_string(), *l)).collect();
-    if crate::widgets::dropdown(ui, id, &mut v, &opts, width) {
+    if crate::widgets::dropdown(ui, id, "", &mut v, &opts, width) {
         o.insert(k.into(), json!(v));
     }
 }
@@ -148,8 +148,7 @@ fn color(ui: &mut egui::Ui, o: &mut Map<String, Value>, k: &str, short: bool) {
 fn family_field(app: &mut PhotocraftApp, ui: &mut egui::Ui, t: &Tokens, ts: &mut Map<String, Value>) {
     let mut family = get_s(ts, "fontName").to_string();
     if crate::type_tool::fonts_ready(ui, 170.0) {
-        let preview = app.session.prefs().type_.font_preview;
-        if crate::type_tool::font_picker(app, ui, &mut family, 170.0, preview) {
+        if crate::type_tool::font_picker(app, ui, &mut family, 170.0).is_some() {
             ts.insert("fontName".into(), json!(family));
             // The PostScript name no longer applies; the family and style name pick the face.
             ts.insert("fontPostScriptName".into(), json!(""));
@@ -182,7 +181,7 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let title = if d.new { tl!("New style") } else { tl!("Edit style") };
     let canvas = app.last_canvas_rect;
     egui::Window::new(title)
-        .id(egui::Id::new("typer-style-editor"))
+        .id(egui::Id::unique("typer-style-editor"))
         .title_bar(false)
         .resizable(false)
         .default_width(400.0)
@@ -323,7 +322,7 @@ fn fields(
             let ids: Vec<(String, Value)> = lib.folders.iter().map(|f| (f.id.to_string(), f.id.to_value())).collect();
             let mut cur = d.style.get("folder").and_then(Id::from_value).map_or(String::new(), |i| i.to_string());
             let o: Vec<(String, &str)> = opts.iter().map(|(k, l)| (k.clone(), l.as_str())).collect();
-            if crate::widgets::dropdown(ui, "typer-style-folder", &mut cur, &o, 240.0) {
+            if crate::widgets::dropdown(ui, "typer-style-folder", "", &mut cur, &o, 240.0) {
                 d.style["folder"] = ids.iter().find(|(k, _)| *k == cur).map_or(Value::Null, |(_, v)| v.clone());
             }
         });
@@ -354,7 +353,7 @@ fn fields(
             let mut v = d.style.get("textType").and_then(Value::as_str).unwrap_or("inherit").to_string();
             let opts =
                 [("inherit".to_string(), tl!("As in Settings")), ("paragraph".to_string(), tl!("Paragraph text")), ("point".to_string(), tl!("Point text"))];
-            if crate::widgets::dropdown(ui, "typer-style-texttype", &mut v, &opts, 160.0) {
+            if crate::widgets::dropdown(ui, "typer-style-texttype", "", &mut v, &opts, 160.0) {
                 if v == "inherit" {
                     if let Some(o) = d.style.as_object_mut() {
                         o.remove("textType");

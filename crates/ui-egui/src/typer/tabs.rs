@@ -72,7 +72,7 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         let mut draft = r.name.clone();
                         let resp = ui.add(
                             egui::TextEdit::singleline(&mut draft)
-                                .id(egui::Id::new("typer-tab-rename"))
+                                .id(egui::Id::unique("typer-tab-rename"))
                                 .desired_width(90.0)
                                 .font(egui::FontId::proportional(11.5)),
                         );
@@ -173,6 +173,6 @@ fn pill(ui: &mut egui::Ui, t: &Tokens, label: &str, current: bool, synced: bool)
     }
     let fg = if current { t.accent_text } else { t.text_dim };
     ui.painter().galley(egui::pos2(rect.left() + 7.0 + dot, rect.center().y - galley.size().y / 2.0), galley, fg);
-    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, current, label));
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, current, label));
     resp.on_hover_text(tl!("Click: switch · double-click: rename · right-click: more"))
 }

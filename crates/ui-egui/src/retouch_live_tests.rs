@@ -5,7 +5,8 @@
 use serde_json::json;
 
 use crate::PhotocraftApp;
-use crate::canvas::{ToolEvent, live_doc, tool_event};
+use crate::canvas::live_doc;
+use crate::canvas::{ToolEvent, tool_event};
 use crate::state::Tool;
 
 fn textured() -> PhotocraftApp {

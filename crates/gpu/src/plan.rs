@@ -2129,7 +2129,14 @@ mod tests {
     #[test]
     fn color_lookup_with_an_overflowing_stored_size_uploads_no_table() {
         for size in [1 << 22, u32::MAX] {
-            let a = Adjustment::ColorLookup { name: "x".into(), lut: Some(std::sync::Arc::new(vec![0.5; 24])), size, tetrahedral: false, dither: false };
+            let a = Adjustment::ColorLookup {
+                name: "x".into(),
+                lut: Some(std::sync::Arc::new(vec![0.5; 24])),
+                size,
+                tetrahedral: false,
+                dither: false,
+                source: Default::default(),
+            };
             let (kind, _, rows) = adjustment_program(&a, Transfer::Srgb, SampleType::U8);
             assert_eq!((kind, rows.is_none()), (0, true), "size {size}");
         }
@@ -2182,14 +2189,10 @@ mod tests {
         assert!(p.slots <= 3, "{} slots", p.slots);
         // The background and the small layers in runs of four: the first with the background
         // everywhere, the others over the small layers' bounds and copied back once.
-        assert_eq!(p.passes.iter().map(|p| p.kernel).collect::<Vec<_>>(), [
-            Kernel::Clear,
-            Kernel::Layers,
-            Kernel::Layers,
-            Kernel::CopyRect,
-            Kernel::Layers,
-            Kernel::CopyRect
-        ]);
+        assert_eq!(
+            p.passes.iter().map(|p| p.kernel).collect::<Vec<_>>(),
+            [Kernel::Clear, Kernel::Layers, Kernel::Layers, Kernel::CopyRect, Kernel::Layers, Kernel::CopyRect]
+        );
         assert_eq!(p.passes.iter().map(|p| p.members.len()).sum::<usize>(), 11);
         assert_eq!(p.passes[1].clip, None);
         assert_eq!(p.passes[2].clip, Some(Rect::new(0, 0, 4, 8)));
@@ -2206,7 +2209,11 @@ mod tests {
         let p = plan(&d).unwrap();
         let r = Rect::new(10, 12, 20, 30);
         // The group's content, its blend and the copy back are all limited to the layer.
-        assert!(p.passes.iter().filter(|p| matches!(p.kernel, Kernel::Content | Kernel::Blend | Kernel::LayerBlend)).skip(1).all(|p| p.clip == Some(r)), "{:?}", p.passes);
+        assert!(
+            p.passes.iter().filter(|p| matches!(p.kernel, Kernel::Content | Kernel::Blend | Kernel::LayerBlend)).skip(1).all(|p| p.clip == Some(r)),
+            "{:?}",
+            p.passes
+        );
         let last = p.passes.last().unwrap();
         assert_eq!((last.kernel, last.dst, last.clip), (Kernel::CopyRect, p.root, Some(r)));
         // A layer that covers most of the canvas composites everywhere.

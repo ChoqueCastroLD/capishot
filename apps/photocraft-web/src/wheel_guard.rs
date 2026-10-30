@@ -56,7 +56,7 @@ pub fn install() {
             let mut r = r.borrow_mut();
             // A runaway queue (frames stalled) is dropped rather than grown without bound.
             if r.len() < 1024 {
-                r.push(egui::Event::MouseWheel { unit, delta, phase: egui::TouchPhase::Move, modifiers });
+                r.push(egui::Event::MouseWheel { source: egui::MouseWheelSource::Unknown, unit, delta, phase: egui::TouchPhase::Move, modifiers });
             }
         });
     });

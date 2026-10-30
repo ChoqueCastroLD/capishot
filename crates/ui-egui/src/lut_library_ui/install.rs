@@ -42,13 +42,13 @@ const SHOWN: &str = "lutlib-shown";
 /// Called by the browser every frame it is drawn, so a drop can tell whether it landed on it.
 pub(super) fn mark_shown(ctx: &egui::Context) {
     let frame = ctx.cumulative_frame_nr();
-    ctx.data_mut(|d| d.insert_temp(Id::new(SHOWN), frame));
+    ctx.data_mut(|d| d.insert_temp(Id::unique(SHOWN), frame));
 }
 
 /// Whether the LUT browser was drawn in the previous frame or this one. A drop is read at the start
 /// of a frame, before the panel is drawn, so "the previous frame" is the one the user was looking at.
 fn browser_visible(ctx: &egui::Context) -> bool {
-    let seen: Option<u64> = ctx.data(|d| d.get_temp(Id::new(SHOWN)));
+    let seen: Option<u64> = ctx.data(|d| d.get_temp(Id::unique(SHOWN)));
     seen.is_some_and(|seen| ctx.cumulative_frame_nr() <= seen.saturating_add(1))
 }
 
@@ -82,11 +82,11 @@ pub(super) fn install_dialog(app: &mut PhotocraftApp) {
 
 /// The preview of a LUT stops when the editor is no longer drawn (another layer, a closed panel).
 pub fn end_stale_preview(app: &mut PhotocraftApp, ctx: &egui::Context) {
-    let (flag, seen): (u64, u64) = ctx.data(|d| d.get_temp(Id::new("lutlib-previewing"))).unwrap_or_default();
+    let (flag, seen): (u64, u64) = ctx.data(|d| d.get_temp(Id::unique("lutlib-previewing"))).unwrap_or_default();
     if flag != 0 && ctx.cumulative_frame_nr() > seen + 1 {
         if app.live_adjust.as_ref().is_some_and(|(l, _)| l.0 == flag) {
             app.live_adjust = None;
         }
-        ctx.data_mut(|d| d.insert_temp(Id::new("lutlib-previewing"), (0u64, 0u64)));
+        ctx.data_mut(|d| d.insert_temp(Id::unique("lutlib-previewing"), (0u64, 0u64)));
     }
 }

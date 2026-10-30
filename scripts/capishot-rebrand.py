@@ -85,14 +85,20 @@ def binaries_and_dirs():
         ('root.join("home/.config/photocraft")', 'root.join("home/.config/capishot")'),
     ])
     sub_file('apps/photocraft/src/main.rs', [('const APP_ID: &str = "ai.storyteller.photocraft";', 'const APP_ID: &str = "io.github.choquecastrold.capishot";')])
-    for t in sorted(os.listdir('apps/photocraft/tests')):
-        if t.endswith('.rs'):
-            sub_file(os.path.join('apps/photocraft/tests', t), [('CARGO_BIN_EXE_photocraft")', 'CARGO_BIN_EXE_capishot")')])
+    for t in rs_files('apps/photocraft/tests'):
+        sub_file(t, [('CARGO_BIN_EXE_photocraft")', 'CARGO_BIN_EXE_capishot")'), ('NEXTEST_BIN_EXE_photocraft")', 'NEXTEST_BIN_EXE_capishot")')])
     # The CLI binary name in usage text, docs comments and tests (not the package name).
-    for p in ['apps/photocraft-cli/src/lib.rs', 'apps/photocraft-cli/tests/cli.rs', 'apps/photocraft-cli/tests/orientation.rs',
-              'crates/automation/src/lib.rs', 'crates/automation/src/rpc.rs', 'crates/automation/src/server.rs',
-              'crates/engine/src/lib.rs', 'apps/photocraft/src/main.rs', 'crates/engine/src/automate_cmds.rs']:
-        sub_file(p, [(r'photocraft-cli\b', 'capishot-cli'), (r'headless Photocraft', 'headless Capishot')], regex=True)
+    cli = rs_files('apps/photocraft-cli/src') + rs_files('apps/photocraft-cli/tests') + rs_files('apps/photocraft-cli/examples')
+    for p in cli + ['crates/automation/src/lib.rs', 'crates/automation/src/rpc.rs', 'crates/automation/src/server.rs',
+              'crates/engine/src/lib.rs', 'apps/photocraft/src/main.rs', 'crates/engine/src/automate_cmds.rs', 'crates/engine/src/cmd/automate_cmds.rs']:
+        sub_file(p, [(r'photocraft-cli\b', 'capishot-cli'), (r'NEXTEST_BIN_EXE_photocraft_cli\b', 'NEXTEST_BIN_EXE_capishot_cli'), (r'headless Photocraft', 'headless Capishot')], regex=True)
+
+
+def rs_files(root):
+    out = []
+    for dp, _, fn in os.walk(root):
+        out += [os.path.join(dp, f) for f in sorted(fn) if f.endswith('.rs')]
+    return sorted(out)
 
 
 if __name__ == '__main__':

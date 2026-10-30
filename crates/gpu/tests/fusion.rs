@@ -41,7 +41,11 @@ fn stack(depth: SampleType) -> Document {
         BlendMode::Luminosity,
     ];
     for i in 0..23u32 {
-        let r = if i % 4 == 0 { d.bounds() } else { Rect::new((i * 37 % 500) as i32, (i * 53 % 400) as i32, (i * 37 % 500 + 60 + i * 7) as i32, (i * 53 % 400 + 50 + i * 5) as i32) };
+        let r = if i % 4 == 0 {
+            d.bounds()
+        } else {
+            Rect::new((i * 37 % 500) as i32, (i * 53 % 400) as i32, (i * 37 % 500 + 60 + i * 7) as i32, (i * 53 % 400 + 50 + i * 5) as i32)
+        };
         let mut l = noise(&format!("l{i}"), fmt, r, 100 + i * 10);
         l.blend = modes[i as usize % modes.len()];
         l.opacity = 0.5 + 0.5 * rnd(7, i);

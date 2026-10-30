@@ -51,13 +51,7 @@ fn translations(before: &Document, after: &Document, offset: (i32, i32)) -> Vec<
     let (b, a) = (&before.layers[1], &after.layers[1]);
     let (Some(bm), Some(am)) = (b.mask.as_ref(), a.mask.as_ref()) else { return Vec::new() };
     vec![
-        Translated {
-            layer: b.id,
-            mask: false,
-            shown: surface_fingerprint(a.surface().expect("raster")),
-            source: b.surface().expect("raster").clone(),
-            offset,
-        },
+        Translated { layer: b.id, mask: false, shown: surface_fingerprint(a.surface().expect("raster")), source: b.surface().expect("raster").clone(), offset },
         Translated { layer: b.id, mask: true, shown: surface_fingerprint(&am.surface), source: bm.surface.clone(), offset },
     ]
 }

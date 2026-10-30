@@ -127,7 +127,11 @@ pub(crate) fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let t = Tokens::get(ctx);
     let now = wall_clock_ms(&app.services);
     let n = d.entries.len();
-    let title = if n == 0 { tl!("Recover Documents").to_string() } else { crate::i18n::trn(crate::i18n::current(), n as u64, "Recover {n} document", "Recover {n} documents") };
+    let title = if n == 0 {
+        tl!("Recover Documents").to_string()
+    } else {
+        crate::i18n::trn(crate::i18n::current(), n as u64, "Recover {n} document", "Recover {n} documents")
+    };
     let message = match (n, d.crashed) {
         (0, _) => tl!("There are no documents to recover."),
         (_, true) => tl!("Capishot didn't close properly last time. These documents had unsaved changes:"),
@@ -135,7 +139,7 @@ pub(crate) fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     };
     let mut answer = None;
     let mut buttons = Vec::new();
-    let modal = egui::Modal::new(egui::Id::new("recovery-dialog")).show(ctx, |ui| {
+    let modal = egui::Modal::new(egui::Id::unique("recovery-dialog")).show(ctx, |ui| {
         let width = (ctx.content_rect().width() - 48.0).clamp(240.0, 460.0);
         ui.set_width(width);
         ui.label(RichText::new(&title).font(crate::theme::semibold(15.0)));

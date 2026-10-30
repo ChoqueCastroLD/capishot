@@ -13,7 +13,7 @@
 //! window and, for the blend modes, the canvas under it are rendered for the brush's rectangle
 //! only (bounded to 1024 × 1024 document pixels), never the whole page.
 
-use egui::{Color32, Pos2, TextureOptions, pos2};
+use egui::{Color32, Pos2, pos2};
 use photocraft_engine::presets::clone_source::{CloneOverlay, Mapping, transform_matrix};
 use photocraft_geom::Rect as DRect;
 
@@ -136,10 +136,13 @@ pub(crate) fn draw(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewXf
         let image = crate::canvas::display_image(display.as_deref(), &buf);
         match app.clone_preview.as_mut() {
             Some(cache) => {
-                cache.texture.set(image, TextureOptions::LINEAR);
+                cache.texture.set(image, crate::canvas::canvas_texture_options(1));
                 cache.key = key;
             }
-            None => app.clone_preview = Some(ClonePreviewCache { key, texture: painter.ctx().load_texture("clone-preview", image, TextureOptions::LINEAR) }),
+            None => {
+                app.clone_preview =
+                    Some(ClonePreviewCache { key, texture: painter.ctx().load_texture("clone-preview", image, crate::canvas::canvas_texture_options(1)) })
+            }
         }
     }
     let Some(cache) = &app.clone_preview else { return };

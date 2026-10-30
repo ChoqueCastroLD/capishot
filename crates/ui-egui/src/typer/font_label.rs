@@ -36,7 +36,7 @@ pub(crate) fn family_of(ctx: &egui::Context, style: &photocraft_typer::Style) ->
     let name = ts.get("fontName").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let ps = ts.get("fontPostScriptName").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let key = (name, ps, (photocraft_text::fonts::generation(), photocraft_text::served::generation()));
-    let id = egui::Id::new("typer-font-families");
+    let id = egui::Id::unique("typer-font-families");
     type Families = std::collections::HashMap<(String, String, (u64, u64)), Option<String>>;
     if let Some(hit) = ctx.data_mut(|d| d.get_temp_mut_or_default::<Families>(id).get(&key).cloned()) {
         return hit;
@@ -97,7 +97,7 @@ fn texture(ctx: &egui::Context, family: &str, text: &str, size_pt: f32) -> Optio
     let scale = ctx.pixels_per_point().ceil().clamp(1.0, 4.0) as u32;
     let key: Key =
         (family.to_owned(), text.clone(), size_pt.round() as u32, scale, (photocraft_text::fonts::generation(), photocraft_text::served::generation()));
-    let id = egui::Id::new(CACHE_ID);
+    let id = egui::Id::unique(CACHE_ID);
     let cached = ctx.data_mut(|d| {
         let cache = d.get_temp_mut_or_default::<Cache>(id);
         cache.0.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone())

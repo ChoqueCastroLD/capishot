@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use photocraft_codecs::{ChannelLayout, EncodeOptions, Image};
 use photocraft_doc::Document;
@@ -174,9 +174,7 @@ pub async fn run(canvas: web_sys::HtmlCanvasElement, hosted: Option<crate::embed
     }
     let mut options = eframe::WebOptions::default();
     photocraft_ui_egui::gpu_canvas::use_adapter_limits(&mut options.wgpu_options.wgpu_setup);
-    if force_webgl
-        && let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup
-    {
+    if force_webgl && let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup {
         create.instance_descriptor.backends = eframe::wgpu::Backends::GL;
     }
     // Hydrate before constructing an interactive session: a late load must never undo a
@@ -216,6 +214,7 @@ pub async fn run(canvas: web_sys::HtmlCanvasElement, hosted: Option<crate::embed
             options,
             Box::new(move |cc| {
                 crate::startup::mark("graphics ready");
+                PhotocraftApp::install_type_reset_hooks(&cc.egui_ctx);
                 PhotocraftApp::setup_context(&cc.egui_ctx, ThemeKind::Pro);
                 crate::startup::mark("fonts and theme");
                 // The threads build may get here before its worker pool is up (the page starts
@@ -344,7 +343,27 @@ impl Boot {
         if let Some(el) = loading {
             el.remove();
         }
-        WebShell { app, safe_area_size: None, inbox, places, canvas: pen_target, unsaved, served, user_fonts, database, presets, startup_frames: 0, perf, recovery, outbox, photopea, watchdog: crate::watchdog::Watchdog::new(), downloads: Default::default(), hosted }
+        WebShell {
+            app,
+            safe_area_size: None,
+            inbox,
+            places,
+            canvas: pen_target,
+            unsaved,
+            served,
+            user_fonts,
+            database,
+            presets,
+            startup_frames: 0,
+            perf,
+            recovery,
+            outbox,
+            photopea,
+            watchdog: crate::watchdog::Watchdog::new(),
+            downloads: Default::default(),
+            hosted,
+            ui_language: "",
+        }
     }
 }
 
@@ -447,7 +466,8 @@ fn cap_memory() {
             photocraft_ui_egui::gpu_canvas::set_physical_memory(bytes);
             // Phones and small tablets: a touch screen on a device of 4 GB or less, or a phone-sized
             // window.
-            let short = window.inner_width().ok().and_then(|v| v.as_f64()).zip(window.inner_height().ok().and_then(|v| v.as_f64())).map_or(f64::MAX, |(w, h)| w.min(h));
+            let short =
+                window.inner_width().ok().and_then(|v| v.as_f64()).zip(window.inner_height().ok().and_then(|v| v.as_f64())).map_or(f64::MAX, |(w, h)| w.min(h));
             if touch && (gb <= 4.0 || short < 600.0) {
                 // And 25 undo steps (each can hold a type layer's pixels).
                 photocraft_engine::prefs::set_history_states_cap(25);
@@ -586,7 +606,8 @@ fn track_stylus_touches() {
             for t in (0..changed.length()).filter_map(|i| changed.get(i)) {
                 let id = t.identifier();
                 if start {
-                    let stylus = js_sys::Reflect::get(&t, &wasm_bindgen::JsValue::from_str("touchType")).ok().and_then(|v| v.as_string()).as_deref() == Some("stylus");
+                    let stylus =
+                        js_sys::Reflect::get(&t, &wasm_bindgen::JsValue::from_str("touchType")).ok().and_then(|v| v.as_string()).as_deref() == Some("stylus");
                     if stylus && !s.contains(&id) {
                         s.push(id);
                     }
@@ -843,12 +864,15 @@ fn load_font_manifest(served: Served, ctx: egui::Context) {
             files.entry(f.family.clone()).or_default().push((f.file.clone(), f.integrity.clone()));
         }
         log::info!("photocraft-web: {} served font families", files.len());
-        served.lock().unwrap_or_else(|e| e.into_inner()).files = files;
+        served.lock().unwrap_or_else(PoisonError::into_inner).files = files;
         // The families for the font menus, and the script fallbacks (the manifest's `scripts`).
         served_fonts::add_fonts(&fonts);
         // Fetch now the fallbacks of the scripts the browser's languages use (an Arabic reader gets
         // the Arabic font before typing); the rest is fetched when text or a font menu needs it.
-        served_fonts::request_for_languages(browser_languages().iter().map(String::as_str));
+        // Also the interface language's: `serve_fonts` asked for it once already, maybe before
+        // this manifest arrived, when no fallback was registered yet.
+        let ui_language = photocraft_ui_egui::i18n::current().code();
+        served_fonts::request_for_languages(browser_languages().iter().map(String::as_str).chain([ui_language]));
         ctx.request_repaint();
     });
 }
@@ -883,20 +907,21 @@ fn browser_languages() -> Vec<String> {
     web_sys::window().map(|w| w.navigator().languages().iter().filter_map(|l| l.as_string()).collect()).unwrap_or_default()
 }
 
-/// GET `url` (relative to the page) and read the whole body. With `integrity` (a Subresource
-/// Integrity value), the browser rejects a body whose hash differs.
+/// GET `url` (a relative path on the same origin) and read the whole body. With `integrity` (a
+/// Subresource Integrity value), the browser rejects a body whose hash differs.
 async fn fetch_bytes(url: &str, integrity: Option<&str>) -> Result<Vec<u8>, String> {
     use wasm_bindgen_futures::JsFuture;
+    if !served_fonts::is_relative_path(url) {
+        return Err("url must be a relative path".into());
+    }
     let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
     let window = web_sys::window().ok_or("no window")?;
-    let request = match integrity {
-        Some(sri) => {
-            let init = web_sys::RequestInit::new();
-            init.set_integrity(sri);
-            window.fetch_with_str_and_init(url, &init)
-        }
-        None => window.fetch_with_str(url),
-    };
+    let init = web_sys::RequestInit::new();
+    init.set_mode(web_sys::RequestMode::SameOrigin);
+    if let Some(sri) = integrity {
+        init.set_integrity(sri);
+    }
+    let request = window.fetch_with_str_and_init(url, &init);
     let resp: web_sys::Response = JsFuture::from(request).await.map_err(js)?.dyn_into().map_err(|_| "not a Response")?;
     if !resp.ok() {
         return Err(format!("HTTP {}", resp.status()));
@@ -923,6 +948,8 @@ struct WebShell {
     user_fonts: UserFontStore,
     database: Option<web_sys::IdbDatabase>,
     presets: crate::preset_bridge::Bridge,
+    /// The interface language whose served script font was last asked for.
+    ui_language: &'static str,
     /// Embedded by another page (`crate::embed_api`), which drives it every frame.
     hosted: bool,
     /// Frames begun so far, counted up to 2 (for the startup timings).
@@ -1035,9 +1062,15 @@ impl WebShell {
     /// Fetches the served families asked for (picked in a font menu, or needed by a layout) and
     /// installs the files that arrived.
     fn serve_fonts(&mut self, ctx: &egui::Context) {
+        // The interface language's script font draws its labels (Arabic, Japanese…).
+        let ui_language = photocraft_ui_egui::i18n::current().code();
+        if ui_language != self.ui_language {
+            self.ui_language = ui_language;
+            served_fonts::request_for_languages([ui_language]);
+        }
         let requested = served_fonts::take_requests();
         let (fetch, arrived) = {
-            let mut s = self.served.lock().unwrap_or_else(|e| e.into_inner());
+            let mut s = self.served.lock().unwrap_or_else(PoisonError::into_inner);
             let mut fetch = Vec::new();
             for family in requested {
                 if let Some(files) = s.files.get(&family).cloned()
@@ -1054,14 +1087,14 @@ impl WebShell {
             wasm_bindgen_futures::spawn_local(async move {
                 match fetch_bytes(&file, integrity.as_deref()).await {
                     Ok(bytes) => {
-                        served.lock().unwrap_or_else(|e| e.into_inner()).arrived.push((family, bytes));
+                        served.lock().unwrap_or_else(PoisonError::into_inner).arrived.push((family, bytes));
                         ctx.request_repaint();
                     }
                     Err(e) => log::error!("couldn't fetch served font {file}: {e}"),
                 }
             });
         }
-        served_fonts::install(&mut self.app, arrived);
+        served_fonts::install(&mut self.app, ctx, arrived);
     }
 
     /// The user's font store: writes the fonts loaded or removed, reads stored ones back when a
@@ -1155,7 +1188,13 @@ impl eframe::App for WebShell {
         // sheets take as close.
         if back_history::take_back() {
             for pressed in [true, false] {
-                raw_input.events.push(egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::NONE });
+                raw_input.events.push(egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                });
             }
         }
         // The app's own hook (clipboard keys, synthetic automation input), around the browser's
@@ -1179,7 +1218,9 @@ impl eframe::App for WebShell {
         self.perf.begin(frame.info().cpu_usage);
         self.watchdog.begin();
         // A tap on the canvas with the Type tool opens the keyboard (keyboard_on_type_tap).
-        let zone = (self.app.ui.tool.is_type() && photocraft_ui_egui::touch_ui::active(&self.app) && photocraft_ui_egui::simple_ui::sheet(ctx) == photocraft_ui_egui::simple_ui::Sheet::Closed)
+        let zone = (self.app.ui.tool.is_type()
+            && photocraft_ui_egui::touch_ui::active(&self.app)
+            && photocraft_ui_egui::simple_ui::sheet(ctx) == photocraft_ui_egui::simple_ui::Sheet::Closed)
             .then(|| {
                 let r = self.app.last_canvas_rect;
                 let z = f64::from(ctx.zoom_factor());
@@ -1241,7 +1282,8 @@ impl eframe::App for WebShell {
             let _s = photocraft_ui_egui::perf_span::span("save.deliver");
             self.deliver_saves(ctx);
         }
-        self.app.logic(ctx, frame);
+        self.app.logic_frame(ctx, frame);
+        self.app.finish_type_reset_logic(ctx);
         // The page is being hidden (another app, the tab switcher, closing): pending preference
         // changes are written now rather than after the debounce, which a frozen tab never ends.
         if photocraft_ui_egui::prefs_ui::prefs_pending(&self.app) && web_sys::window().and_then(|w| w.document()).is_some_and(|d| d.hidden()) {
@@ -1292,7 +1334,8 @@ impl eframe::App for WebShell {
                 });
             });
         }
-        self.app.ui(ui, frame);
+        self.app.ui_frame(ui, frame);
+        self.app.finish_type_reset_pass(ui.ctx());
         if self.hosted {
             // After the frame's UI: a pan, zoom or rotation made this frame is reported now.
             crate::embed_api::report(&self.app);
@@ -1378,9 +1421,9 @@ fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig
     Services {
         save_file: save_in_worker(outbox),
         screen_pick: screen_color_service(),
-        import: Some(Box::new(|name: &str, bytes: &[u8], max_svg_group_depth: usize| {
+        import: Some(Box::new(|name: &str, bytes: &[u8], opts: &photocraft_io::ImportOptions| {
             let t0 = js_sys::Date::now();
-            let r = photocraft_io::import_with_svg_group_depth(name, bytes, max_svg_group_depth).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string());
+            let r = photocraft_io::import_with_options(name, bytes, opts).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string());
             crate::usage_stats::doc_open(name, bytes.len(), r.as_ref().map(|(doc, _)| doc), js_sys::Date::now() - t0);
             r
         })),
