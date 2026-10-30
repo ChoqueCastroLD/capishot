@@ -15,7 +15,7 @@
 //! cursor advances (TypeR's `nextLine {add}`) only after success, and only when the text came
 //! from the script.
 
-mod support;
+pub(crate) mod support;
 #[cfg(test)]
 mod tests;
 
@@ -146,6 +146,34 @@ fn place_new(s: &mut Session, label: &str, items: Vec<NewText>, padding: f64) ->
     Ok(out)
 }
 
+/// The script's line `i` as written (with its tag).
+fn raw_line(s: &Session, i: usize) -> Option<String> {
+    s.typer.state.lines().get(i).map(|l| l.raw_text.clone())
+}
+
+/// Font projects: the undo step key that lets [`apply_roles`] join the placing step, when the
+/// active project maps any of `lines`' tags to a role.
+fn roles_key(s: &mut Session, lines: &[Option<String>]) -> Option<String> {
+    let project = crate::font_projects::active(s)?;
+    if !lines.iter().flatten().any(|l| project.role_for_line(l).is_some()) {
+        return None;
+    }
+    let key = format!("typer-roles-{}", s.active().map_or(0, |st| st.revision));
+    s.coalesce_request = Some(key.clone());
+    Some(key)
+}
+
+/// Font projects: each placed layer whose line's tag (`GRITO: …`) the active project maps to a
+/// role gets the role's font and settings, in the step that placed it.
+fn apply_roles(s: &mut Session, key: Option<String>, placed: &[LayerId], lines: &[Option<String>]) {
+    let (Some(key), Some(project)) = (key, crate::font_projects::active(s)) else { return };
+    for (id, line) in placed.iter().zip(lines) {
+        if let Some(role) = line.as_deref().and_then(|l| project.role_for_line(l)) {
+            let _ = s.execute("fontProjects.applyRole", json!({"role": role, "layer": id.0, "coalesce": key}));
+        }
+    }
+}
+
 fn paste(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "typer.paste";
     let text = support::text_param(p, "text", CMD)?;
@@ -185,7 +213,10 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
     let padding = padding.unwrap_or(settings.internal_padding);
     let fallback = place::px_to_pt(place::FALLBACK_SIZE_PX, f64::from(info.dpi)) as f32;
     let styled = support::styled(&style, &opts, size, fallback);
+    let lines = vec![if from_script { raw_line(s, s.typer.state.current_line_index) } else { Some(text.clone()) }];
+    let key = roles_key(s, &lines);
     let placed = place_new(s, "TypeR Paste", vec![NewText { text, styled, point, bubble: target.opened }], padding)?;
+    apply_roles(s, key, &placed.iter().map(|(id, _)| *id).collect::<Vec<_>>(), &lines);
     let moved = from_script && advance && s.typer.state.next_line(true) == photocraft_typer::Moved::Yes;
     let (id, ink) = placed.first().copied().ok_or_else(|| EngineError::Other("nothing pasted".into()))?;
     Ok(json!({
@@ -232,8 +263,12 @@ fn paste_many(s: &mut Session, p: &Value) -> Result<Value> {
     let fallback = place::px_to_pt(place::FALLBACK_SIZE_PX, f64::from(info.dpi)) as f32;
     let settings = s.typer.state.settings.clone();
     let current = chosen_style(s, &Value::Null, CMD)?;
+    let lines: Vec<Option<String>>;
     let (jobs, stored): (Vec<(String, Style, Rect, bool)>, bool) = match entries_param(s, p, CMD)? {
-        Some(list) => (list.into_iter().map(|(t, st, b)| (t, st.unwrap_or_else(|| current.clone()), b, false)).collect(), false),
+        Some(list) => {
+            lines = list.iter().map(|(t, _, _)| Some(t.clone())).collect();
+            (list.into_iter().map(|(t, st, b)| (t, st.unwrap_or_else(|| current.clone()), b, false)).collect(), false)
+        }
         None => {
             let sel = &s.typer.stored_selections;
             if sel.is_empty() {
@@ -241,6 +276,7 @@ fn paste_many(s: &mut Session, p: &Value) -> Result<Value> {
             }
             let st = &s.typer.state;
             let stored: Vec<Stored> = sel.iter().map(|x| Stored { line_index: x.line_index, style_id: x.style_id.clone() }).collect();
+            lines = sel.iter().map(|x| x.line_index.and_then(|i| st.lines().get(i)).map(|l| l.raw_text.clone())).collect();
             let picked = payload::stored_selections(&stored, st.lines(), st.current_line_index, &st.library, st.current_style_id.as_ref(), settings.text_scale);
             if picked.is_empty() {
                 return Err(typer_error(CMD, "noText"));
@@ -262,7 +298,9 @@ fn paste_many(s: &mut Session, p: &Value) -> Result<Value> {
         let pt = point.unwrap_or_else(|| payload::resolve_point_text(Some(&style), settings.paste_point_text));
         items.push(NewText { text, styled: support::styled(&style, &opts, size, fallback), point: pt, bubble: b });
     }
+    let key = roles_key(s, &lines);
     let placed = place_new(s, "TypeR Multiple Paste", items, padding)?;
+    apply_roles(s, key, &placed.iter().map(|(id, _)| *id).collect::<Vec<_>>(), &lines);
     if stored {
         s.typer.stored_selections.clear();
     }
@@ -401,7 +439,15 @@ fn apply_with(s: &mut Session, p: &Value, cmd: &str, mode: Mode) -> Result<Value
         _ => Some((chosen_style(s, p, cmd)?, map_opts(s, &info, p, cmd, false)?)),
     };
     let targets = ids.iter().map(|id| (*id, mode, text.clone(), style.clone())).collect();
+    let raw = match (&text, from_script) {
+        (None, _) => None,
+        (Some(_), true) => raw_line(s, s.typer.state.current_line_index),
+        (Some(t), false) => Some(t.clone()),
+    };
+    let lines: Vec<Option<String>> = ids.iter().map(|_| raw.clone()).collect();
+    let key = roles_key(s, &lines);
     let done = retext_all(s, "TypeR Change", targets, keep)?;
+    apply_roles(s, key, &ids, &lines);
     let moved = from_script && advance && s.typer.state.next_line(true) == photocraft_typer::Moved::Yes;
     Ok(json!({
         "layers": done.iter().map(|(id, _)| id.0).collect::<Vec<_>>(),
@@ -451,7 +497,10 @@ fn apply_lines(s: &mut Session, p: &Value) -> Result<Value> {
         .iter()
         .map(|i| (i.target, Mode::TextAndStyle, Some(i.text.clone()), Some((i.style.clone().unwrap_or_else(|| fallback.clone()), opts))))
         .collect();
+    let lines: Vec<Option<String>> = batch.items.iter().map(|i| raw_line(s, i.line_index)).collect();
+    let key = roles_key(s, &lines);
     let done = retext_all(s, "TypeR Change", targets, keep)?;
+    apply_roles(s, key, &batch.items.iter().map(|i| i.target).collect::<Vec<_>>(), &lines);
     if advance {
         let state = &mut s.typer.state;
         for (line, style) in used {

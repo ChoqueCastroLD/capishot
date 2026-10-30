@@ -490,3 +490,19 @@ fn freezes_name_the_tool_the_phase_and_the_last_action() {
     assert_eq!((f[1]["tool"].as_str(), f[1]["action"].as_str()), (Some("tool.other"), Some("layer.other")));
     assert_eq!(b["v"], 5);
 }
+
+/// `gpu_lost`: the context-lost (black canvas) class and the others, once each per batch.
+#[test]
+fn gpu_lost_events_carry_their_class() {
+    let mut r = Recorder::new("a", "s", 0.0);
+    r.gpu_lost("webgl", "intel", "context_lost", Some("gpu.pipelines"), 1, None);
+    r.gpu_lost("webgl", "intel", "context_lost", Some("gpu.pipelines"), 2, None);
+    r.gpu_lost("webgl", "intel", "slow_pipelines", None, 1, Some(4840.4));
+    let body: serde_json::Value = serde_json::from_str(&r.take_batch().unwrap()).unwrap();
+    let ev: Vec<&serde_json::Value> = body["events"].as_array().unwrap().iter().filter(|e| e["e"] == "gpu_lost").collect();
+    assert_eq!(ev.len(), 2, "{ev:?}");
+    assert_eq!(ev[0]["cause"], "context_lost");
+    assert_eq!(ev[0]["api"], "webgl");
+    assert_eq!(ev[0]["phase"], "gpu.pipelines");
+    assert_eq!(ev[1]["ms"], 4840);
+}

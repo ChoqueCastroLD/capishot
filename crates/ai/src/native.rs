@@ -275,7 +275,11 @@ fn download(url: &str, model: &ModelInfo, hooks: &dyn Hooks) -> Result<Vec<u8>> 
     let mut reader = resp.body_mut().with_config().limit(model.bytes.saturating_add(1)).reader();
     let mut out = Vec::with_capacity(usize::try_from(model.bytes).unwrap_or(0));
     let mut buf = vec![0u8; 1 << 16];
-    let status = format!("Downloading {}", model.title);
+    // "Downloading Manga LaMa (100 MB): 45% at 12.3 MB/s", refreshed twice a second.
+    let mb = model.bytes as f64 / 1e6;
+    let t0 = std::time::Instant::now();
+    let mut said: Option<std::time::Instant> = None;
+    let mut status = format!("Downloading {} ({mb:.0} MB)", model.title);
     loop {
         if hooks.cancelled() {
             return Err(AiError::Cancelled);
@@ -287,6 +291,12 @@ fn download(url: &str, model: &ModelInfo, hooks: &dyn Hooks) -> Result<Vec<u8>> 
         out.extend_from_slice(buf.get(..n).unwrap_or(&[]));
         if out.len() as u64 > model.bytes {
             return Err(AiError::Download(format!("{url}: larger than expected")));
+        }
+        if said.is_none_or(|t| t.elapsed().as_millis() >= 500) {
+            said = Some(std::time::Instant::now());
+            let speed = out.len() as f64 / t0.elapsed().as_secs_f64().max(0.001) / 1e6;
+            status =
+                format!("Downloading {} ({mb:.0} MB): {:.0}% at {speed:.1} MB/s", model.title, (100.0 * out.len() as f64 / model.bytes.max(1) as f64).floor());
         }
         hooks.progress(0.1 * out.len() as f32 / model.bytes.max(1) as f32, &status);
     }

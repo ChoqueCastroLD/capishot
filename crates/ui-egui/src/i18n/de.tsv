@@ -3932,3 +3932,89 @@ curves	Smooth	Glätten
 	Font size presets	Schriftgrößen-Vorgaben
 	Leading presets	Zeilenabstand-Vorgaben
 	Tracking presets	Laufweiten-Vorgaben
+	Capishot will draw on the CPU on this device	Capishot zeichnet auf diesem Gerät mit der CPU
+	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	Die Grafikkarte war zu langsam oder wurde beim Zeichnen neu gestartet. Um sie wieder zu nutzen: Voreinstellungen › Leistung › Rendering-Modus.
+	Your graphics card restarted; Capishot keeps working on the CPU	Ihre Grafikkarte wurde neu gestartet; Capishot arbeitet mit der CPU weiter
+	Unsaved documents were reopened from crash recovery.	Nicht gespeicherte Dokumente wurden aus der Wiederherstellung neu geöffnet.
+	Commands	Befehle
+	AI	KI
+	Downloading model {pct}%	Modell wird geladen {pct} %
+	Downloading model…	Modell wird geladen…
+	Preparing AI…	KI wird vorbereitet…
+	Preparing AI for this GPU (first run only)…	KI wird für diese GPU vorbereitet (nur beim ersten Mal)…
+	Processing {i}/{n}	Verarbeitung {i}/{n}
+	Applying…	Wird angewendet…
+	Using the CPU, it may take longer	Die CPU wird verwendet, das kann länger dauern
+	{tool}: done	{tool}: fertig
+	Which one should I use?	Welches soll ich nehmen?
+	Tap to use a tool; press and hold to see what it does and add it to the favorites bar.	Tippen, um ein Werkzeug zu verwenden; gedrückt halten, um zu sehen, was es tut, und es zur Favoritenleiste hinzuzufügen.
+	Processing…	Verarbeitung…
+	Outline	Kontur
+	Outer	Außen
+	Centered	Mitte
+	Inner	Innen
+	Outline width	Konturstärke
+	Color Picker (Outline)	Farbwähler (Kontur)
+	Edit text	Text bearbeiten
+	A .capiproj carries the project's settings and its font files, never pages or images.	Eine .capiproj enthält die Einstellungen des Projekts und seine Schriftdateien, nie Seiten oder Bilder.
+	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Ein Schriftprojekt hält die Schriften einer Serie nach Rolle (Dialog, Schrei, Erzählung…) und ihre Einstellungen fest. Lege eines an, um zu beginnen.
+	Add role	Rolle hinzufügen
+	Add tag	Tag hinzufügen
+	Add to the current project as…	Zum aktuellen Projekt hinzufügen als…
+	Apply the role's settings too	Auch die Einstellungen der Rolle anwenden
+	Bubble Type styles	Stile für Sprechblasentext
+	Current project	Aktuelles Projekt
+	Dialogue	Dialog
+	Export {name}	{name} exportieren
+	Font Projects	Schriftprojekte
+	Font project exported	Schriftprojekt exportiert
+	Font project {name} imported	Schriftprojekt {name} importiert
+	Font project: {name}	Schriftprojekt: {name}
+	Fonts by role	Schriften nach Rolle
+	Include TypeR's styles and Bubble Type's styles	Stile von TypeR und Sprechblasentext einschließen
+	Include fonts whose licence restricts sharing	Schriften einschließen, deren Lizenz das Weitergeben einschränkt
+	Install these separately: {fonts}	Separat installieren: {fonts}
+	Leading (0: Auto)	Zeilenabstand (0: Auto)
+	Missing fonts: {fonts}	Fehlende Schriften: {fonts}
+	Named only (system or missing fonts): {fonts}	Nur benannt (System- oder fehlende Schriften): {fonts}
+	New project	Neues Projekt
+	New role	Neue Rolle
+	No fonts yet: right-click a font below (or press and hold) to add it.	Noch keine Schriften: Rechtsklick auf eine Schrift unten (oder gedrückt halten), um sie hinzuzufügen.
+	No projects yet	Noch keine Projekte
+	Not included, its licence doesn't allow sharing it: {fonts}. Team members will need to install it separately.	Nicht enthalten, die Lizenz erlaubt keine Weitergabe: {fonts}. Teammitglieder müssen sie separat installieren.
+	Pages that open with this project	Seiten, die mit diesem Projekt öffnen
+	Project:	Projekt:
+	Remember pages like {name}	Seiten wie {name} merken
+	Remove from the project	Aus dem Projekt entfernen
+	Remove this role	Diese Rolle entfernen
+	SFX	SFX
+	Saved {file}	Gespeichert {file}
+	Shout	Schrei
+	TAG	TAG
+	The project is large ({mb} MB): untick fonts to make it smaller.	Das Projekt ist groß ({mb} MB): Schriften abwählen, um es zu verkleinern.
+	This font doesn't allow redistribution; team members will need to install it separately.	Diese Schrift erlaubt keine Weitergabe; Teammitglieder müssen sie separat installieren.
+	Thought	Gedanke
+	TypeR tags	TypeR-Tags
+	Use for this page	Für diese Seite verwenden
+	e.g. the scan	z. B. die Scan-Gruppe
+	folder {name}	Ordner {name}
+	missing	fehlt
+	system font: named only	Systemschrift: nur benannt
+	{font} added to {project} as {role}	{font} zu {project} als {role} hinzugefügt
+	{n} font files installed	{n} Schriftdateien installiert
+	Letter case	Groß-/Kleinschreibung
+	Font Projects…	Schriftprojekte…
+	Duplicate	Duplizieren
+	Import…	Importieren…
+	Settings	Einstellungen
+	Add {font} to the current project as…	{font} zum aktuellen Projekt hinzufügen als…
+	Automatic (by shape)	Automatisch (nach Form)
+	Project: {name}	Projekt: {name}
+	Bubble style	Blasenstil
+	Search TypeR styles	TypeR-Stile suchen
+	No styles match	Kein Stil passt
+	Remember by shape	Nach Form merken
+	In Automatic, the style each kind of shape uses	In Automatisch: der Stil, den jede Formart verwendet
+	The style the next bubble uses: Bubble Type's, the font project's or a TypeR style	Der Stil der nächsten Blase: aus Blasentext, dem Schriftprojekt oder TypeR
+	The style {style} is gone: the shape's own style was used	Der Stil {style} existiert nicht mehr: der eigene Stil der Form wurde verwendet
+	Bubble Type	Blasentext

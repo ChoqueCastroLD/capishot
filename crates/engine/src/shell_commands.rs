@@ -84,6 +84,7 @@ pub const SHELL_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("window.toggle.options", "Options", &["Window"], None),
     ("window.panel.typer", "TypeR", &["Window"], None),
     ("window.aiModels", "AI Models…", &["Window"], None),
+    ("window.fontProjects", "Font Projects…", &["Window"], None),
     // Photoshop's Ctrl+Tab and Ctrl+Shift+Tab, on macOS too (⌘Tab belongs to the system, #2340).
     ("window.nextDocument", "Next Document", &[], Some("Ctrl+Tab")),
     ("window.previousDocument", "Previous Document", &[], Some("Ctrl+Shift+Tab")),

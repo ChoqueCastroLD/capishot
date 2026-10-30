@@ -57,7 +57,7 @@ fn a_tap_with_a_selection_fills_the_selection() {
     assert!(!red(&app), "the selection is filled, not the tap's spot");
 }
 
-/// The first use: the modal opens and the download starts by itself; when it is done the stroke
+/// The first use: the progress card shows the download, which starts by itself; when it is done the stroke
 /// is applied without another click. Cancel drops it.
 #[test]
 fn the_first_use_downloads_then_applies_and_cancel_drops_it() {
@@ -65,13 +65,14 @@ fn the_first_use_downloads_then_applies_and_cancel_drops_it() {
     let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(900.0, 700.0)).build_ui_state(
         |ui, app: &mut PhotocraftApp| {
             crate::remove_ai_ui::show(app, ui.ctx());
+            crate::ai_progress::show(app, ui.ctx());
         },
         app0,
     );
     PhotocraftApp::setup_context(&h.ctx, Default::default());
     crate::remove_ai_ui::finish_stroke(h.state_mut(), &[[29.0, 22.0, 1.0], [35.0, 22.0, 1.0]]);
     h.run_steps(2);
-    assert!(crate::remove_ai_ui::is_open(h.state()), "the modal is open");
+    assert!(crate::remove_ai_ui::is_open(h.state()), "waiting for the model");
     h.get_by_label_contains("Manga LaMa model");
     assert!(matches!(store.status(model(LAMA_ID).unwrap()), Status::Downloading { .. } | Status::Queued), "downloading by itself");
     assert!(red(h.state()), "nothing applied yet");
@@ -86,6 +87,7 @@ fn the_first_use_downloads_then_applies_and_cancel_drops_it() {
     let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(390.0, 780.0)).build_ui_state(
         |ui, app: &mut PhotocraftApp| {
             crate::remove_ai_ui::show(app, ui.ctx());
+            crate::ai_progress::show(app, ui.ctx());
         },
         app0,
     );

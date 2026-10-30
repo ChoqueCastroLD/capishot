@@ -49,6 +49,7 @@ pub mod work_area;
 pub mod ai_model_gate;
 pub mod ai_models_ui;
 pub mod ai_options_ui;
+pub mod ai_progress;
 pub mod ai_upscale_ui;
 pub mod bubble_type_ui;
 mod capishot_ui;
@@ -56,10 +57,13 @@ pub mod chrome_freeze;
 pub(crate) mod clone_overlay;
 pub mod cpu_canvas;
 pub mod floaters;
+pub mod font_projects_ui;
 pub mod fonts_ui;
 pub mod genfill_ui;
+pub mod help_text;
 pub mod lut_library_ui;
 pub(crate) mod move_cpu;
+pub mod overlay_guard;
 pub mod palette_search;
 pub mod perf_counters;
 pub mod perf_span;
@@ -644,6 +648,10 @@ pub struct PhotocraftApp {
     pub(crate) bubble_flash: Option<(String, [f64; 2], f64)>,
     /// Remove with AI: a run waiting for its first-use model download (`remove_ai_ui`).
     pub(crate) remove_ai: remove_ai_ui::Pending,
+    /// Window › Font Projects and the font menus' project sections (`font_projects_ui`).
+    pub(crate) font_projects: font_projects_ui::State,
+    /// The AI progress card (`ai_progress`).
+    pub(crate) ai_progress: ai_progress::State,
     /// Channel thumbnails for one document snapshot; view-only revisions reuse their pixels.
     channel_thumbs: Option<(DocId, std::sync::Weak<Document>, bool, Vec<egui::TextureHandle>)>,
     /// Channels panel overlays / channel views drawn over the canvas, per document id.
@@ -658,6 +666,8 @@ pub struct PhotocraftApp {
     window_device: Option<(eframe::wgpu::Device, photocraft_gpu::DeviceHealth)>,
     /// That device was lost: frames draw nothing and the app closes once its work is saved (#3438).
     window_lost: bool,
+    /// The GPU canvas's slow pipelines were reported (`gpu_status::warm_up`).
+    pub(crate) gpu_slow_noted: bool,
     /// When (in `egui::InputState::time`) to try saving unsaved work for recovery again after a
     /// failed attempt; the app closes only once it succeeded.
     window_recovery_retry: Option<f64>,

@@ -90,6 +90,7 @@ pub fn inspect(app: &PhotocraftApp, ctx: &egui::Context) -> Value {
         // centre, where a document point is on screen for real pointer input.
         "canvasRect": canvas_rect,
         "simpleUi": crate::simple_ui::inspect(app, ctx),
+        "aiProgress": crate::ai_progress::inspect(ctx),
         "touch": crate::touch_ui::inspect(app, ctx),
         "dialogs": dialogs,
         "windows": app.ui.windows,
@@ -116,6 +117,7 @@ pub fn inspect(app: &PhotocraftApp, ctx: &egui::Context) -> Value {
         "jobs": crate::jobs_ui::inspect(app),
         "aiModels": crate::ai_models_ui::inspect(app),
         "histogram": crate::histogram_panel::inspect(app),
+        "fontProjects": crate::font_projects_ui::inspect(app),
         "cameraRaw": app.camera_raw.as_ref().map(|d| d.describe(&app.ui.camera_raw_scope, &app.ui.camera_raw_preview)),
     })
 }

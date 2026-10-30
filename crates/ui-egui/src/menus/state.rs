@@ -70,6 +70,7 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
         | "edit.search" | "view.simpleUi" => true,
         "type.loadFonts" | "type.loadFontFolder" | "type.manageFonts" => true,
         crate::ai_models_ui::COMMAND => true,
+        crate::font_projects_ui::COMMAND => true,
         crate::update_notice::COMMAND => app.ui.update.is_some(),
         crate::recovery_ui::COMMAND => crate::recovery_ui::available(app),
         i if i.starts_with("file.openRecent.") => true,

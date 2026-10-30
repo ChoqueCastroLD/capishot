@@ -491,6 +491,17 @@ pub(crate) fn recovery_pending(app: &PhotocraftApp) -> Vec<String> {
         .collect()
 }
 
+/// [`recovery_pending`] for every document, saved or not (a page about to reload after its
+/// graphics context was lost keeps them all).
+pub(crate) fn recovery_pending_all(app: &PhotocraftApp) -> Vec<String> {
+    app.session
+        .documents()
+        .iter()
+        .filter(|d| app.prefs_rt.autosaved.get(&d.doc.id).is_none_or(|s| s.revision < d.revision))
+        .map(|d| d.doc.name.clone())
+        .collect()
+}
+
 /// Force the autosave timer to fire on the next tick (tests, `prefs` changes).
 pub fn autosave_now(app: &mut PhotocraftApp) {
     app.prefs_rt.next_autosave_ms = f64::MIN_POSITIVE;

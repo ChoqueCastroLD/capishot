@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use crate::PhotocraftApp;
 use crate::state::{BubbleStyles, BubbleTextStyle};
 
-/// The picks, in the chip's order: the command's `"style"` value and its label.
+/// The picks, in the picker's order: the command's `"style"` value and its label.
 pub const PICKS: [(&str, &str); 4] = [("auto", "Auto"), ("bubble", "Bubble"), ("narration", "Narration"), ("floating", "Floating")];
 
 /// A style's name as shown.
@@ -97,7 +97,9 @@ pub fn draw_flash(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &crate::
     let t = crate::theme::Tokens::get(ctx);
     let p = xf.to_screen(at[0] as f32, at[1] as f32) + vec2(16.0, 18.0);
     let font = crate::theme::medium(13.0);
-    let galley = painter.layout_no_wrap(style_title(&kind).to_string(), font, t.text.gamma_multiply(alpha));
+    // A kind shows its style's title; another source's style comes with its own name.
+    let title = if PICKS.iter().any(|(k, _)| *k == kind) { style_title(&kind).to_string() } else { kind.clone() };
+    let galley = painter.layout_no_wrap(title, font, t.text.gamma_multiply(alpha));
     let r = egui::Rect::from_min_size(p, galley.size() + vec2(16.0, 8.0));
     painter.rect(r, 6.0, t.chrome.gamma_multiply(0.95 * alpha), Stroke::new(1.0, t.accent.gamma_multiply(alpha)), egui::StrokeKind::Inside);
     painter.galley(r.min + vec2(8.0, 4.0), galley, Color32::WHITE);
@@ -109,12 +111,7 @@ pub fn draw_flash(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &crate::
 /// The chip (Auto / Globo / Narración / Flotante) and the Estilos button with its popover.
 pub fn options(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     crate::widgets::vline(ui, 22.0);
-    let mut pick = app.ui.tool_options.bubble_pick.clone();
-    let opts: Vec<(String, &str)> = PICKS.iter().map(|(k, _)| (k.to_string(), pick_label(k))).collect();
-    let resp_changed = crate::widgets::dropdown(ui, "bubble-pick", "", &mut pick, &opts, 104.0);
-    if resp_changed {
-        app.ui.tool_options.bubble_pick = pick;
-    }
+    picker_button(app, ui, 150.0);
     let open_id = egui::Id::unique("bubble-styles-open");
     let open = ui.data(|d| d.get_temp::<bool>(open_id).unwrap_or(false));
     let button = ui.add(egui::Button::new(tl!("Styles")).selected(open)).on_hover_text(tl!("The text styles for bubbles, narration boxes and floating text"));
@@ -339,3 +336,275 @@ fn render_sample(st: &BubbleTextStyle) -> Option<egui::ColorImage> {
 pub fn flashing(app: &PhotocraftApp) -> Option<(String, Pos2)> {
     app.bubble_flash.as_ref().map(|(k, at, _)| (k.clone(), Pos2::new(at[0] as f32, at[1] as f32)))
 }
+
+// ------------------------------------------------------------------ the style picker
+
+/// How many recently used styles the picker lists.
+const RECENT: usize = 5;
+
+/// One section of the picker: its title and its styles (the `"style"` value and the label).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Section {
+    pub title: String,
+    pub items: Vec<(String, String)>,
+}
+
+/// The name a style shows (`"auto"`, a kind, `project:<role>`, `typer:<id>`); `None` for one that
+/// no longer exists.
+pub fn label_of(app: &PhotocraftApp, key: &str) -> Option<String> {
+    if let Some((_, _)) = PICKS.iter().find(|(k, _)| *k == key) {
+        return Some(if key == "auto" { tl!("Automatic").into() } else { style_title(key).into() });
+    }
+    let r = photocraft_engine::type_bubble_cmds::StyleRef::parse(key)?;
+    match &r {
+        photocraft_engine::type_bubble_cmds::StyleRef::Project(role) => {
+            let p = photocraft_engine::font_projects::active(&app.session)?;
+            p.role(role)?;
+            Some(crate::font_projects_ui::role_name(&p, role))
+        }
+        photocraft_engine::type_bubble_cmds::StyleRef::Typer(_) => photocraft_engine::type_bubble_cmds::ref_name(&app.session, &r),
+    }
+}
+
+/// The picker's sections: Recent, Automatic, Bubble Type's own three, the active project's roles
+/// and the TypeR library (folder by folder; `search` filters its styles by name or folder).
+pub fn sections(app: &PhotocraftApp, search: &str) -> Vec<Section> {
+    let mut out = Vec::new();
+    let recent: Vec<(String, String)> =
+        app.ui.tool_options.bubble_recent.iter().filter_map(|k| label_of(app, k).map(|l| (k.clone(), l))).take(RECENT).collect();
+    if !recent.is_empty() && search.is_empty() {
+        out.push(Section { title: tl!("Recent").into(), items: recent });
+    }
+    out.push(Section { title: tl!("Automatic").into(), items: vec![("auto".into(), tl!("Automatic (by shape)").into())] });
+    out.push(Section {
+        title: tl!("Bubble Type").into(),
+        items: ["bubble", "narration", "floating"].iter().map(|k| ((*k).into(), style_title(k).into())).collect(),
+    });
+    if let Some(p) = photocraft_engine::font_projects::active(&app.session) {
+        let items = p.roles.iter().map(|r| (format!("project:{}", r.id), crate::font_projects_ui::role_name(&p, &r.id))).collect();
+        out.push(Section { title: crate::i18n::fmt(tl!("Project: {name}"), &[("name", &p.name)]), items });
+    }
+    let lib = &app.session.typer.state.library;
+    if !lib.styles.is_empty() {
+        let folders: std::collections::HashMap<String, String> = lib.flatten_tree().into_iter().map(|f| (f.id.to_string(), f.label)).collect();
+        let needle = search.trim().to_lowercase();
+        let mut items = Vec::new();
+        for st in &lib.styles {
+            let folder = st.folder.as_ref().and_then(|f| folders.get(&f.to_string())).cloned();
+            let label = match &folder {
+                Some(f) => format!("{f} / {}", st.name),
+                None => st.name.clone(),
+            };
+            if needle.is_empty() || label.to_lowercase().contains(&needle) {
+                items.push((format!("typer:{}", st.id), label));
+            }
+        }
+        out.push(Section { title: "TypeR".into(), items });
+    }
+    out
+}
+
+/// Use `key` for the next bubbles; it goes first among the recent ones.
+pub fn pick(app: &mut PhotocraftApp, key: &str) {
+    let o = &mut app.ui.tool_options;
+    o.bubble_pick = key.to_string();
+    o.bubble_recent.retain(|k| k != key);
+    o.bubble_recent.insert(0, key.to_string());
+    o.bubble_recent.truncate(RECENT * 2);
+}
+
+/// Auto's style for each shape kind ("Remember by shape"): the active project's mapping, else
+/// the tool's own.
+pub fn shape_style(app: &PhotocraftApp, kind: &str) -> String {
+    match photocraft_engine::font_projects::active(&app.session) {
+        Some(p) => p
+            .bubble
+            .get(kind)
+            .map(|v| if v.contains(':') || PICKS.iter().any(|(k, _)| k == v) { v.clone() } else { format!("project:{v}") })
+            .unwrap_or_else(|| kind.to_string()),
+        None => app.ui.tool_options.bubble_shape_styles.get(kind).cloned().unwrap_or_else(|| kind.to_string()),
+    }
+}
+
+/// Map shape `kind` to `key` in Auto: in the active project when there is one.
+pub fn set_shape_style(app: &mut PhotocraftApp, kind: &str, key: &str) {
+    if photocraft_engine::font_projects::active(&app.session).is_some() {
+        // A role keeps the project's own spelling (its id), so older builds read it too.
+        let v = key.strip_prefix("project:").unwrap_or(key);
+        let _ = app.run("fontProjects.setMapping", json!({"bubble": {kind: v}}));
+    } else if key == kind {
+        app.ui.tool_options.bubble_shape_styles.remove(kind);
+    } else {
+        app.ui.tool_options.bubble_shape_styles.insert(kind.to_string(), key.to_string());
+    }
+}
+
+/// The `"shapeStyles"` a click sends (no project active; with one the engine reads its mapping).
+pub fn shape_styles_param(app: &PhotocraftApp) -> Option<Value> {
+    if photocraft_engine::font_projects::active(&app.session).is_some() || app.ui.tool_options.bubble_shape_styles.is_empty() {
+        return None;
+    }
+    serde_json::to_value(&app.ui.tool_options.bubble_shape_styles).ok()
+}
+
+const OPEN: &str = "bubble-picker-open";
+const ANCHOR: &str = "bubble-picker-anchor";
+/// Set when the picker opens: its list starts at the top (Recent).
+const FRESH: &str = "bubble-picker-fresh";
+
+/// Open the picker (the phone's type bar and options call this).
+pub fn open_picker(ctx: &egui::Context, anchor: egui::Rect) {
+    ctx.data_mut(|d| {
+        d.insert_temp(egui::Id::new(OPEN), true);
+        d.insert_temp(egui::Id::new(ANCHOR), anchor);
+        d.insert_temp(egui::Id::new(FRESH), true);
+    });
+}
+
+pub fn picker_open(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(egui::Id::new(OPEN)).unwrap_or(false))
+}
+
+fn close_picker(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(OPEN), false));
+}
+
+/// The button showing the style in use; a click opens the picker.
+pub fn picker_button(app: &mut PhotocraftApp, ui: &mut egui::Ui, width: f32) -> egui::Response {
+    let key = app.ui.tool_options.bubble_pick.clone();
+    let label = label_of(app, &key).unwrap_or_else(|| style_title("bubble").into());
+    let resp = ui
+        .add_sized(vec2(width, 24.0), egui::Button::new(egui::RichText::new(format!("{label}    "))).truncate().selected(picker_open(ui.ctx())))
+        .on_hover_text(tl!("The style the next bubble uses: Bubble Type's, the font project's or a TypeR style"));
+    // A small chevron at the right end: it opens a list.
+    let c = egui::pos2(resp.rect.right() - 10.0, resp.rect.center().y);
+    let col = crate::theme::Tokens::get(ui.ctx()).text_dim;
+    ui.painter().add(egui::Shape::convex_polygon(vec![c + vec2(-4.0, -2.0), c + vec2(4.0, -2.0), c + vec2(0.0, 3.0)], col, Stroke::NONE));
+    crate::touch_ui::note_rect(ui.ctx(), "bubbleStyle", resp.rect);
+    if resp.clicked() {
+        if picker_open(ui.ctx()) {
+            close_picker(ui.ctx());
+        } else {
+            open_picker(ui.ctx(), resp.rect);
+        }
+    }
+    resp
+}
+
+/// The picker, when open: a popup under its button, a sheet on a phone.
+pub fn picker(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    if !picker_open(ctx) {
+        return;
+    }
+    let screen = ctx.content_rect();
+    let phone = screen.width() < crate::simple_ui::PHONE_BELOW;
+    let anchor: egui::Rect = ctx.data(|d| d.get_temp(egui::Id::new(ANCHOR))).unwrap_or(egui::Rect::from_min_size(screen.center(), vec2(1.0, 1.0)));
+    let t = crate::theme::Tokens::get(ctx);
+    let (pos, width, height) = if phone {
+        let h = (screen.height() * 0.7).min(560.0);
+        (egui::pos2(screen.left() + 8.0, screen.bottom() - h - 8.0), screen.width() - 16.0, h)
+    } else {
+        (anchor.left_bottom() + vec2(0.0, 6.0), 320.0, (screen.bottom() - anchor.bottom() - 24.0).clamp(220.0, 520.0))
+    };
+    let area = egui::Area::new(egui::Id::new("bubble-picker")).order(egui::Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
+        let frame = if phone {
+            egui::Frame::NONE
+                .fill(t.card)
+                .stroke(Stroke::new(1.0, t.card_border))
+                .corner_radius(egui::CornerRadius::same(18))
+                .inner_margin(egui::Margin::same(12))
+        } else {
+            egui::Frame::popup(ui.style()).fill(t.chrome)
+        };
+        frame.show(ui, |ui| {
+            ui.set_width(width - if phone { 24.0 } else { 12.0 });
+            ui.set_max_height(height);
+            picker_body(app, ui, phone);
+        });
+    });
+    ctx.move_to_top(area.response.layer_id);
+    let outside = ctx.input(|i| i.pointer.any_pressed())
+        && ctx.input(|i| i.pointer.interact_pos()).is_some_and(|p| !area.response.rect.contains(p) && !anchor.contains(p))
+        && !ctx.any_popup_open();
+    if outside || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        close_picker(ctx);
+    }
+}
+
+fn picker_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, phone: bool) {
+    let search_id = egui::Id::new("bubble-picker-search");
+    let mut search: String = ui.data(|d| d.get_temp(search_id)).unwrap_or_default();
+    let row_h = if phone { 44.0 } else { 22.0 };
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(tl!("Bubble style")).font(crate::theme::semibold(14.0)));
+        if phone {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.add_sized(vec2(64.0, 36.0), egui::Button::new(tl!("Close"))).clicked() {
+                    close_picker(ui.ctx());
+                }
+            });
+        }
+    });
+    let has_typer = !app.session.typer.state.library.styles.is_empty();
+    if has_typer {
+        ui.add(egui::TextEdit::singleline(&mut search).hint_text(tl!("Search TypeR styles")).desired_width(f32::INFINITY));
+        ui.data_mut(|d| d.insert_temp(search_id, search.clone()));
+    }
+    let current = app.ui.tool_options.bubble_pick.clone();
+    let mut chosen: Option<String> = None;
+    let remember_id = egui::Id::new("bubble-picker-remember");
+    let mut remember = ui.data(|d| d.get_temp::<bool>(remember_id).unwrap_or(false));
+    let body_h = ui.available_height() - if remember { 150.0 } else { 40.0 };
+    let fresh = ui.data_mut(|d| d.remove_temp::<bool>(egui::Id::new(FRESH)).unwrap_or(false));
+    let mut list = egui::ScrollArea::vertical().max_height(body_h.max(120.0)).auto_shrink([false, true]);
+    if fresh {
+        list = list.vertical_scroll_offset(0.0);
+    }
+    list.show(ui, |ui| {
+        for sec in sections(app, &search) {
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new(&sec.title).font(crate::theme::semibold(12.0)).color(crate::theme::Tokens::get(ui.ctx()).text_dim));
+            if sec.items.is_empty() {
+                ui.label(tl!("No styles match"));
+            }
+            for (key, label) in &sec.items {
+                let r = ui.add(egui::Button::selectable(*key == current, label.as_str()).min_size(vec2(ui.available_width(), row_h)));
+                crate::touch_ui::note_rect(ui.ctx(), &format!("bubbleStyle:{key}"), r.rect);
+                if r.clicked() {
+                    chosen = Some(key.clone());
+                }
+            }
+        }
+    });
+    if let Some(k) = chosen {
+        pick(app, &k);
+        if phone {
+            close_picker(ui.ctx());
+        }
+    }
+    ui.separator();
+    let check = ui.checkbox(&mut remember, tl!("Remember by shape")).on_hover_text(tl!("In Automatic, the style each kind of shape uses"));
+    crate::touch_ui::note_rect(ui.ctx(), "bubbleRemember", check.rect);
+    if check.changed() {
+        ui.data_mut(|d| d.insert_temp(remember_id, remember));
+    }
+    if remember {
+        let all: Vec<(String, String)> =
+            sections(app, "").into_iter().filter(|s| s.title != tl!("Recent")).flat_map(|s| s.items).filter(|(k, _)| k != "auto").collect();
+        let opts: Vec<(String, &str)> = all.iter().map(|(k, l)| (k.clone(), l.as_str())).collect();
+        egui::Grid::new("bubble-remember").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
+            for kind in ["bubble", "narration", "floating"] {
+                ui.label(pick_label(kind));
+                let mut v = shape_style(app, kind);
+                if crate::widgets::dropdown(ui, &format!("bubble-remember-{kind}"), pick_label(kind), &mut v, &opts, if phone { 200.0 } else { 190.0 }) {
+                    set_shape_style(app, kind, &v);
+                }
+                ui.end_row();
+            }
+        });
+    }
+}
+
+#[cfg(test)]
+#[path = "bubble_picker_tests.rs"]
+mod tests;

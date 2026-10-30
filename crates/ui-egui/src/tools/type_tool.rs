@@ -30,6 +30,7 @@ mod options_bar;
 mod overlay;
 mod panel;
 mod pointer;
+mod stroke;
 
 #[cfg(test)]
 use defaults::{apply, default_style_params, default_styles, shown_scale};
@@ -38,9 +39,9 @@ pub(crate) use defaults::{formatting_params, target, target_text, type_unit, wit
 #[cfg(test)]
 pub(crate) use editing::{CharToggle, step_char_metric, toggle_char_style, toggle_hyphenate};
 pub use editing::{cancel, commit, commit_with, edit_active, edit_at, end_if_left};
-pub(crate) use editing::{copy_selection, cut_selection, request_paste, select_all};
+pub(crate) use editing::{copy_selection, cut_selection, insert, request_paste, select_all};
 #[cfg(test)]
-use editing::{insert, insert_typed, smart_quotes};
+use editing::{insert_typed, smart_quotes};
 #[cfg(test)]
 pub(crate) use fonts::partition_user_rows;
 #[cfg(test)]
@@ -62,10 +63,10 @@ pub use layout::layout;
 pub(crate) use layout::{hit_layer, offset_at, shows_own_layout};
 #[cfg(test)]
 use options_bar::num_field;
+pub use options_bar::{TOUCH_BAR_ONE_ROW, TOUCH_BAR_ROW, options_bar, phone_form, touch_bar, touch_bar_rows};
 pub(crate) use options_bar::{in_path_target, styles_at, toggle_type_panels};
 #[cfg(test)]
 pub(crate) use options_bar::{kerning_label, parse_kerning};
-pub use options_bar::{options_bar, phone_form, touch_bar};
 #[cfg(test)]
 use overlay::CARET_STROKES;
 pub use overlay::draw_overlay;
@@ -78,6 +79,7 @@ pub(crate) use pointer::{PathClick, box_handle_at, hover_path_target, in_path_at
 #[cfg(test)]
 pub(crate) use pointer::{box_shape, click_selection, next_click_count, path_target};
 pub use pointer::{multi_click, pointer_down, pointer_move, pointer_up};
+pub(crate) use stroke::{TypeStroke, set_type_stroke, shown_stroke, stroke_control, target_stroke};
 
 pub const PLACEHOLDER: &str = "Lorem Ipsum";
 
@@ -145,6 +147,9 @@ mod capishot_commit_tests;
 
 #[cfg(test)]
 mod keys_tests;
+
+#[cfg(test)]
+mod stroke_tests;
 
 #[cfg(test)]
 mod ime_tests;

@@ -4657,3 +4657,88 @@ curves	Smooth	Vloeiend maken
 	Font size presets	Voorinstellingen lettergrootte
 	Leading presets	Voorinstellingen interlinie
 	Tracking presets	Voorinstellingen spatiëring
+	Capishot will draw on the CPU on this device	Capishot tekent op dit apparaat met de CPU
+	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	De grafische kaart was te traag of herstartte tijdens het tekenen. Om hem weer te gebruiken: Voorkeuren › Prestaties › Renderingmodus.
+	Your graphics card restarted; Capishot keeps working on the CPU	Je grafische kaart is herstart; Capishot werkt verder met de CPU
+	Unsaved documents were reopened from crash recovery.	Niet-opgeslagen documenten zijn heropend uit het herstel.
+	Commands	Opdrachten
+	AI	AI
+	Downloading model {pct}%	Model downloaden {pct}%
+	Downloading model…	Model downloaden…
+	Preparing AI…	AI voorbereiden…
+	Preparing AI for this GPU (first run only)…	AI voorbereiden voor deze GPU (alleen de eerste keer)…
+	Processing {i}/{n}	Verwerken {i}/{n}
+	Applying…	Toepassen…
+	Using the CPU, it may take longer	De CPU wordt gebruikt, dit kan langer duren
+	{tool}: done	{tool}: klaar
+	Which one should I use?	Welke moet ik gebruiken?
+	Tap to use a tool; press and hold to see what it does and add it to the favorites bar.	Tik om een gereedschap te gebruiken; houd ingedrukt om te zien wat het doet en het aan de favorietenbalk toe te voegen.
+	Outline	Contour
+	Outer	Buiten
+	Centered	Midden
+	Inner	Binnen
+	Outline width	Contourdikte
+	Color Picker (Outline)	Kleurkiezer (contour)
+	Edit text	Tekst bewerken
+	Bend	Buiging
+	Horizontal Distortion	Horizontale vervorming
+	Vertical Distortion	Verticale vervorming
+	A .capiproj carries the project's settings and its font files, never pages or images.	Een .capiproj bevat de instellingen van het project en zijn lettertypebestanden, nooit pagina's of afbeeldingen.
+	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Een lettertypeproject bewaart de lettertypen van een serie per rol (dialoog, schreeuw, vertelling…) en hun instellingen. Maak er een om te beginnen.
+	Add role	Rol toevoegen
+	Add tag	Tag toevoegen
+	Add to the current project as…	Aan het huidige project toevoegen als…
+	Apply the role's settings too	Ook de instellingen van de rol toepassen
+	Bubble Type styles	Stijlen voor ballontekst
+	Current project	Huidig project
+	Dialogue	Dialoog
+	Export {name}	{name} exporteren
+	Font Projects	Lettertypeprojecten
+	Font project exported	Lettertypeproject geëxporteerd
+	Font project {name} imported	Lettertypeproject {name} geïmporteerd
+	Font project: {name}	Lettertypeproject: {name}
+	Fonts by role	Lettertypen per rol
+	Include TypeR's styles and Bubble Type's styles	Stijlen van TypeR en ballontekst meenemen
+	Include fonts whose licence restricts sharing	Lettertypen meenemen waarvan de licentie delen beperkt
+	Install these separately: {fonts}	Apart installeren: {fonts}
+	Leading (0: Auto)	Regelafstand (0: auto)
+	Missing fonts: {fonts}	Ontbrekende lettertypen: {fonts}
+	Named only (system or missing fonts): {fonts}	Alleen bij naam (systeem- of ontbrekende lettertypen): {fonts}
+	New project	Nieuw project
+	New role	Nieuwe rol
+	No fonts yet: right-click a font below (or press and hold) to add it.	Nog geen lettertypen: klik met rechts op een lettertype hieronder (of houd ingedrukt) om het toe te voegen.
+	No projects yet	Nog geen projecten
+	Not included, its licence doesn't allow sharing it: {fonts}. Team members will need to install it separately.	Niet meegenomen, de licentie staat delen niet toe: {fonts}. Teamleden moeten het apart installeren.
+	Pages that open with this project	Pagina's die met dit project openen
+	Project:	Project:
+	Remember pages like {name}	Pagina's zoals {name} onthouden
+	Remove from the project	Uit het project verwijderen
+	Remove this role	Deze rol verwijderen
+	SFX	SFX
+	Saved {file}	Opgeslagen {file}
+	Shout	Schreeuw
+	TAG	TAG
+	The project is large ({mb} MB): untick fonts to make it smaller.	Het project is groot ({mb} MB): vink lettertypen uit om het kleiner te maken.
+	This font doesn't allow redistribution; team members will need to install it separately.	Dit lettertype staat herdistributie niet toe; teamleden moeten het apart installeren.
+	Thought	Gedachte
+	TypeR tags	TypeR-tags
+	Use for this page	Gebruiken voor deze pagina
+	e.g. the scan	bijv. de scan
+	folder {name}	map {name}
+	missing	ontbreekt
+	system font: named only	systeemlettertype: alleen bij naam
+	{font} added to {project} as {role}	{font} toegevoegd aan {project} als {role}
+	{n} font files installed	{n} lettertypebestanden geïnstalleerd
+	Letter case	Hoofdletters
+	Font Projects…	Lettertypeprojecten…
+	Add {font} to the current project as…	{font} aan het huidige project toevoegen als…
+	Automatic (by shape)	Automatisch (op vorm)
+	Project: {name}	Project: {name}
+	Bubble style	Ballonstijl
+	Search TypeR styles	TypeR-stijlen zoeken
+	No styles match	Geen stijl komt overeen
+	Remember by shape	Onthouden per vorm
+	In Automatic, the style each kind of shape uses	In Automatisch: de stijl die elk soort vorm gebruikt
+	The style the next bubble uses: Bubble Type's, the font project's or a TypeR style	De stijl van de volgende ballon: van Ballontekst, het lettertypeproject of TypeR
+	The style {style} is gone: the shape's own style was used	De stijl {style} bestaat niet meer: de eigen stijl van de vorm is gebruikt
+	Bubble Type	Ballontekst

@@ -4126,3 +4126,90 @@ curves	Smooth	매끄럽게
 	Font size presets	글꼴 크기 사전 설정
 	Leading presets	행간 사전 설정
 	Tracking presets	자간 사전 설정
+	Capishot will draw on the CPU on this device	이 기기에서 Capishot은 CPU로 그립니다
+	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	그리는 중에 그래픽 카드가 너무 느리거나 다시 시작되었습니다. 다시 사용하려면: 환경 설정 › 성능 › 렌더링 모드.
+	Your graphics card restarted; Capishot keeps working on the CPU	그래픽 카드가 다시 시작되었습니다. Capishot은 CPU 모드로 계속 작동합니다
+	Unsaved documents were reopened from crash recovery.	저장하지 않은 문서를 복구에서 다시 열었습니다.
+	Commands	명령
+	AI	AI
+	Downloading model {pct}%	모델 다운로드 중 {pct}%
+	Downloading model…	모델 다운로드 중…
+	Preparing AI…	AI 준비 중…
+	Preparing AI for this GPU (first run only)…	이 GPU용 AI 준비 중(처음 한 번만)…
+	Processing {i}/{n}	처리 중 {i}/{n}
+	Applying…	적용 중…
+	Using the CPU, it may take longer	CPU를 사용 중이라 더 오래 걸릴 수 있습니다
+	{tool}: done	{tool}: 완료
+	Which one should I use?	어떤 걸 써야 하나요?
+	Tap to use a tool; press and hold to see what it does and add it to the favorites bar.	탭하면 도구를 사용하고, 길게 누르면 하는 일을 보고 즐겨찾기 막대에 추가할 수 있습니다.
+	Processing…	처리 중…
+	Outline	외곽선
+	Outer	바깥
+	Centered	가운데
+	Inner	안쪽
+	Outline width	외곽선 두께
+	Color Picker (Outline)	색상 피커(외곽선)
+	Edit text	텍스트 편집
+	Bend	구부리기
+	Horizontal Distortion	가로 왜곡
+	Vertical Distortion	세로 왜곡
+	A .capiproj carries the project's settings and its font files, never pages or images.	.capiproj에는 프로젝트 설정과 글꼴 파일이 들어 있으며 페이지나 이미지는 들어 있지 않습니다.
+	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	글꼴 프로젝트는 시리즈의 글꼴을 역할(대사, 외침, 내레이션…)별로 설정과 함께 보관합니다. 시작하려면 하나 만드세요.
+	Add role	역할 추가
+	Add tag	태그 추가
+	Add to the current project as…	현재 프로젝트에 다음 역할로 추가…
+	Apply the role's settings too	역할 설정도 적용
+	Bubble Type styles	말풍선 텍스트 스타일
+	Current project	현재 프로젝트
+	Dialogue	대사
+	Export {name}	{name} 내보내기
+	Font Projects	글꼴 프로젝트
+	Font project exported	글꼴 프로젝트를 내보냈습니다
+	Font project {name} imported	글꼴 프로젝트 {name}을(를) 가져왔습니다
+	Font project: {name}	글꼴 프로젝트: {name}
+	Fonts by role	역할별 글꼴
+	Include TypeR's styles and Bubble Type's styles	TypeR 및 말풍선 텍스트 스타일 포함
+	Include fonts whose licence restricts sharing	공유가 제한된 라이선스의 글꼴 포함
+	Install these separately: {fonts}	따로 설치하세요: {fonts}
+	Leading (0: Auto)	행간(0: 자동)
+	Missing fonts: {fonts}	없는 글꼴: {fonts}
+	Named only (system or missing fonts): {fonts}	이름만(시스템 또는 없는 글꼴): {fonts}
+	New project	새 프로젝트
+	New role	새 역할
+	No fonts yet: right-click a font below (or press and hold) to add it.	아직 글꼴이 없습니다: 아래 글꼴을 오른쪽 클릭(또는 길게 눌러) 추가하세요.
+	No projects yet	아직 프로젝트가 없습니다
+	Not included, its licence doesn't allow sharing it: {fonts}. Team members will need to install it separately.	라이선스상 공유할 수 없어 포함하지 않았습니다: {fonts}. 팀원이 따로 설치해야 합니다.
+	Pages that open with this project	이 프로젝트로 열리는 페이지
+	Project:	프로젝트:
+	Remember pages like {name}	{name} 같은 페이지 기억
+	Remove from the project	프로젝트에서 제거
+	Remove this role	이 역할 삭제
+	SFX	SFX
+	Saved {file}	{file} 저장됨
+	Shout	외침
+	TAG	태그
+	The project is large ({mb} MB): untick fonts to make it smaller.	프로젝트가 큽니다({mb} MB): 글꼴 선택을 해제하면 작아집니다.
+	This font doesn't allow redistribution; team members will need to install it separately.	이 글꼴은 재배포가 허용되지 않습니다. 팀원이 따로 설치해야 합니다.
+	Thought	생각
+	TypeR tags	TypeR 태그
+	Use for this page	이 페이지에 사용
+	e.g. the scan	예: 스캔 팀
+	folder {name}	폴더 {name}
+	missing	없음
+	system font: named only	시스템 글꼴: 이름만
+	{font} added to {project} as {role}	{font}을(를) {project}에 {role}(으)로 추가했습니다
+	{n} font files installed	글꼴 파일 {n}개를 설치했습니다
+	Letter case	대소문자
+	Font Projects…	글꼴 프로젝트…
+	Import…	가져오기…
+	Add {font} to the current project as…	{font}을(를) 현재 프로젝트에 다음 역할로 추가…
+	Automatic (by shape)	자동 (모양에 따라)
+	Project: {name}	프로젝트: {name}
+	Bubble style	말풍선 스타일
+	Search TypeR styles	TypeR 스타일 검색
+	No styles match	일치하는 스타일이 없습니다
+	Remember by shape	모양별로 기억
+	In Automatic, the style each kind of shape uses	자동에서 각 모양 종류가 쓰는 스타일
+	The style the next bubble uses: Bubble Type's, the font project's or a TypeR style	다음 말풍선의 스타일: 말풍선 텍스트, 글꼴 프로젝트 또는 TypeR
+	The style {style} is gone: the shape's own style was used	스타일 {style}이(가) 더 이상 없습니다: 모양 자체의 스타일을 사용했습니다
+	Bubble Type	말풍선 텍스트

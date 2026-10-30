@@ -53,6 +53,11 @@ pub fn flagged(ctx: &egui::Context) -> bool {
 
 pub fn begin_frame(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let on = active(app);
+    // A tool other than a type tool chosen while typing (any way: a bar, the sheet, the palette,
+    // automation): the text is kept and the edit ends, so the bars come back.
+    if on && app.ui.text_edit.is_some() && !app.ui.tool.is_type() && app.ui.spring.is_none() {
+        crate::type_tool::commit(app);
+    }
     ctx.data_mut(|d| d.insert_temp(Id::unique("touch-ui-flag"), on));
     // A finger's double tap is slower than a mouse's double click (and a phone's frames slower
     // still): the Polygonal Lasso's double tap to close missed it.
@@ -86,6 +91,12 @@ pub fn note_rect(ctx: &egui::Context, label: &str, rect: Rect) {
     note(ctx, label, rect);
 }
 
+/// Where the control `label` was drawn this frame (the last time), as `ui.inspect` reports it.
+pub fn noted_rect(ctx: &egui::Context, label: &str) -> Option<Rect> {
+    let rects: Vec<(String, [f32; 4])> = ctx.data(|d| d.get_temp(rects_id())).unwrap_or_default();
+    rects.iter().rev().find(|(l, _)| l == label).map(|(_, r)| Rect::from_min_max(pos2(r[0], r[1]), pos2(r[2], r[3])))
+}
+
 fn note(ctx: &egui::Context, label: &str, rect: Rect) {
     ctx.data_mut(|d| {
         d.get_temp_mut_or_default::<Vec<(String, [f32; 4])>>(rects_id()).push((label.to_string(), [rect.min.x, rect.min.y, rect.max.x, rect.max.y]))
@@ -102,7 +113,10 @@ fn prev_rects_id() -> Id {
 
 /// `ui.inspect`'s `touch`: the router's state and where the touch pieces were drawn.
 pub fn inspect(app: &PhotocraftApp, ctx: &egui::Context) -> serde_json::Value {
-    let rects: Vec<(String, [f32; 4])> = ctx.data(|d| d.get_temp(rects_id())).unwrap_or_default();
+    // What was noted before the overlays started this frame's list (the options bar), then this
+    // frame's: the last one of a label is where it is now.
+    let mut rects: Vec<(String, [f32; 4])> = ctx.data(|d| d.get_temp(prev_rects_id())).unwrap_or_default();
+    rects.extend(ctx.data(|d| d.get_temp::<Vec<(String, [f32; 4])>>(rects_id())).unwrap_or_default());
     let b = app.touch.button;
     json!({
         "active": active(app),
@@ -132,7 +146,8 @@ pub fn overlays(app: &mut PhotocraftApp, ctx: &egui::Context) {
         let last = d.remove_temp::<Vec<(String, [f32; 4])>>(rects_id()).unwrap_or_default();
         d.insert_temp(prev_rects_id(), last);
     });
-    if !active(app) || app.session.active().is_none() {
+    // Window › Font Projects fills a phone's screen: nothing floats over it.
+    if !active(app) || app.session.active().is_none() || app.font_projects.open {
         return;
     }
     if app.ui_hidden {
@@ -154,6 +169,8 @@ pub fn overlays(app: &mut PhotocraftApp, ctx: &egui::Context) {
         }
         if !busy && has_selection(app) && crate::simple_ui::sheet(ctx) == crate::simple_ui::Sheet::Closed && !app.ui.palette_open {
             selection_bar(app, ctx);
+        } else if !busy && type_layer_selected(app) && crate::simple_ui::sheet(ctx) == crate::simple_ui::Sheet::Closed && !app.ui.palette_open {
+            type_layer_bar(app, ctx);
         }
     }
     if app.touch.button_enabled {
@@ -203,6 +220,54 @@ fn round_button(ui: &mut egui::Ui, rect: Rect, icon: Option<&str>, text: &str, s
     }
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, text));
     resp
+}
+
+/// A type layer is the active layer with a type tool or Move: its action bar shows.
+fn type_layer_selected(app: &PhotocraftApp) -> bool {
+    use crate::state::Tool;
+    matches!(app.ui.tool, Tool::Type | Tool::VerticalType | Tool::BubbleType | Tool::Move)
+        && app
+            .session
+            .active()
+            .is_some_and(|d| d.active_layer.and_then(|id| d.doc.layer(id)).is_some_and(|l| matches!(l.content, photocraft_doc::LayerContent::Text(_))))
+}
+
+/// The selected type layer's action bar: edit its text, warp it (Arc, Arch, Flag…).
+fn type_layer_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let t = Tokens::get(ctx);
+    let area = canvas_area(app, ctx);
+    let actions = [("type.editText", tl!("Edit text"), "text-cursor"), ("type.warpText", tl!("Warp"), "spline")];
+    let w = actions.len() as f32 * (SEL_CELL.x + 2.0) + 12.0;
+    let r = Rect::from_min_size(pos2(area.center().x - w / 2.0, area.top() + 8.0), vec2(w, SEL_CELL.y + 12.0));
+    let mut run = None;
+    egui::Area::new(Id::new("touch-type-layer-bar")).order(egui::Order::Middle).fixed_pos(r.min).show(ctx, |ui| {
+        egui::Frame::NONE.fill(t.card).stroke(Stroke::new(1.0, t.card_border)).corner_radius(CornerRadius::same(18)).inner_margin(egui::Margin::same(6)).show(
+            ui,
+            |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
+                    for (id, name, icon) in actions {
+                        let (rect, resp) = ui.allocate_exact_size(SEL_CELL, Sense::click());
+                        let c = pos2(rect.center().x, rect.top() + 20.0);
+                        ui.painter().circle(c, 19.0, if resp.is_pointer_button_down_on() { t.hover } else { t.chrome }, Stroke::new(1.0, t.card_border));
+                        crate::icons::paint(ui, Rect::from_center_size(c, Vec2::splat(30.0)), icon, 19.0, t.text);
+                        ui.painter().text(pos2(rect.center().x, rect.top() + 50.0), Align2::CENTER_CENTER, name, crate::theme::medium(10.0), t.text_dim);
+                        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
+                        note(ctx, &format!("typeLayer:{id}"), rect);
+                        if resp.clicked() {
+                            run = Some(id);
+                        }
+                    }
+                });
+            },
+        );
+    });
+    if let Some(id) = run
+        && let Err(e) = crate::menus::invoke(app, ctx, id, serde_json::json!({}))
+    {
+        app.ui.status = e;
+        app.ui.status_error = true;
+    }
 }
 
 /// The selection's action bar: what a phone does next with a selection, one tap away. Each
@@ -693,10 +758,18 @@ pub fn snap_rotation(ctx: &egui::Context, rotation: &mut f32) {
 /// While text is edited: the type bar at the bottom of the visible window, which the keyboard
 /// shrinks (`interactive-widget=resizes-content`, and the web shell fits the page to the visual
 /// viewport on iOS), so it sits right above the keyboard.
+/// The height of the phone's type bar: one row when everything fits, else two
+/// (`type_tool::touch_bar_rows`).
+pub fn type_bar_height(ctx: &egui::Context) -> f32 {
+    let screen = crate::safe_area::rect(ctx);
+    let rows = crate::type_tool::touch_bar_rows(screen.width() - 12.0 - 16.0) as f32;
+    12.0 + rows * crate::type_tool::TOUCH_BAR_ROW + (rows - 1.0) * 6.0
+}
+
 fn type_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let t = Tokens::get(ctx);
     let screen = crate::safe_area::rect(ctx);
-    let h = 56.0;
+    let h = type_bar_height(ctx);
     let r = Rect::from_min_size(pos2(screen.left() + 6.0, screen.bottom() - h - 6.0), vec2(screen.width() - 12.0, h));
     egui::Area::new(Id::unique("touch-type-bar")).order(egui::Order::Foreground).fixed_pos(r.min).show(ctx, |ui| {
         egui::Frame::NONE
@@ -706,7 +779,7 @@ fn type_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
             .inner_margin(egui::Margin::symmetric(8, 6))
             .show(ui, |ui| {
                 ui.set_width(r.width() - 16.0);
-                ui.horizontal_centered(|ui| crate::type_tool::touch_bar(app, ui));
+                crate::type_tool::touch_bar(app, ui);
             });
     });
     note(ctx, "typeBar", r);

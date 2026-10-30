@@ -195,13 +195,13 @@ pub fn option_keys(tool: Tool) -> &'static [&'static str] {
         Tool::Type | Tool::VerticalType | Tool::HorizontalTypeMask | Tool::VerticalTypeMask => {
             reset!(type_font, type_style, type_size, type_aa, type_align, type_leading, type_direction, type_style_defaults)
         }
+        Tool::BubbleType => reset!(type_aa, bubble_styles, bubble_pick, bubble_recent, bubble_shape_styles),
         Tool::Zoom => reset!(zoom_scrubby),
         Tool::SpotHealing => reset!(spot_type, spot_mode),
         Tool::Healing => reset!(clone_aligned, clone_sample, healing_mode),
         Tool::Patch => reset!(patch_mode, patch_content_aware, patch_structure, patch_color),
         Tool::ContentAwareMove => reset!(cam_mode, cam_structure, cam_color, cam_transform_on_drop),
         Tool::RedEye => reset!(red_eye_pupil_size, red_eye_darken),
-        Tool::BubbleType => reset!(type_aa, bubble_styles, bubble_pick),
         Tool::CloneStamp => reset!(clone_aligned, clone_sample, clone_mode),
         Tool::ArtHistoryBrush => reset!(art_history_style, art_history_area, art_history_tolerance),
         Tool::PatternStamp => reset!(pattern_stamp_aligned, pattern_stamp_impressionist, pattern_stamp_scale, pattern_stamp_angle, pattern_stamp_mode),

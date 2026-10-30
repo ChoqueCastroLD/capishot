@@ -4601,3 +4601,88 @@ curves	Smooth	Εξομάλυνση
 	Font size presets	Προεπιλογές μεγέθους γραμματοσειράς
 	Leading presets	Προεπιλογές διάστιχου
 	Tracking presets	Προεπιλογές διαστήματος χαρακτήρων
+	Capishot will draw on the CPU on this device	Το Capishot θα σχεδιάζει με την CPU σε αυτή τη συσκευή
+	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	Η κάρτα γραφικών ήταν πολύ αργή ή επανεκκινήθηκε κατά τη σχεδίαση. Για να τη χρησιμοποιήσετε ξανά: Προτιμήσεις › Επιδόσεις › Λειτουργία απόδοσης.
+	Your graphics card restarted; Capishot keeps working on the CPU	Η κάρτα γραφικών επανεκκινήθηκε· το Capishot συνεχίζει σε λειτουργία CPU
+	Unsaved documents were reopened from crash recovery.	Τα μη αποθηκευμένα έγγραφα ανοίχτηκαν ξανά από την ανάκτηση.
+	Commands	Εντολές
+	AI	ΤΝ
+	Downloading model {pct}%	Λήψη μοντέλου {pct}%
+	Downloading model…	Λήψη μοντέλου…
+	Preparing AI…	Προετοιμασία ΤΝ…
+	Preparing AI for this GPU (first run only)…	Προετοιμασία ΤΝ για αυτή την GPU (μόνο την πρώτη φορά)…
+	Processing {i}/{n}	Επεξεργασία {i}/{n}
+	Applying…	Εφαρμογή…
+	Using the CPU, it may take longer	Χρησιμοποιείται η CPU, μπορεί να αργήσει
+	{tool}: done	{tool}: έτοιμο
+	Which one should I use?	Ποιο να χρησιμοποιήσω;
+	Tap to use a tool; press and hold to see what it does and add it to the favorites bar.	Πατήστε για να χρησιμοποιήσετε ένα εργαλείο· κρατήστε πατημένο για να δείτε τι κάνει και να το προσθέσετε στη γραμμή αγαπημένων.
+	Outline	Περίγραμμα
+	Outer	Έξω
+	Centered	Κέντρο
+	Inner	Μέσα
+	Outline width	Πάχος περιγράμματος
+	Color Picker (Outline)	Επιλογέας χρώματος (περίγραμμα)
+	Edit text	Επεξεργασία κειμένου
+	Bend	Κάμψη
+	Horizontal Distortion	Οριζόντια παραμόρφωση
+	Vertical Distortion	Κατακόρυφη παραμόρφωση
+	A .capiproj carries the project's settings and its font files, never pages or images.	Ένα .capiproj περιέχει τις ρυθμίσεις του έργου και τα αρχεία γραμματοσειρών του, ποτέ σελίδες ή εικόνες.
+	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Ένα έργο γραμματοσειρών κρατά τις γραμματοσειρές μιας σειράς ανά ρόλο (διάλογος, κραυγή, αφήγηση…) και τις ρυθμίσεις τους. Δημιουργήστε ένα για να ξεκινήσετε.
+	Add role	Προσθήκη ρόλου
+	Add tag	Προσθήκη ετικέτας
+	Add to the current project as…	Προσθήκη στο τρέχον έργο ως…
+	Apply the role's settings too	Εφαρμογή και των ρυθμίσεων του ρόλου
+	Bubble Type styles	Στυλ κειμένου σε συννεφάκι
+	Current project	Τρέχον έργο
+	Dialogue	Διάλογος
+	Export {name}	Εξαγωγή {name}
+	Font Projects	Έργα γραμματοσειρών
+	Font project exported	Το έργο γραμματοσειρών εξήχθη
+	Font project {name} imported	Εισήχθη το έργο γραμματοσειρών {name}
+	Font project: {name}	Έργο γραμματοσειρών: {name}
+	Fonts by role	Γραμματοσειρές ανά ρόλο
+	Include TypeR's styles and Bubble Type's styles	Συμπερίληψη των στυλ TypeR και κειμένου σε συννεφάκι
+	Include fonts whose licence restricts sharing	Συμπερίληψη γραμματοσειρών με άδεια που περιορίζει την κοινοποίηση
+	Install these separately: {fonts}	Εγκαταστήστε χωριστά: {fonts}
+	Leading (0: Auto)	Διάστιχο (0: αυτόματο)
+	Missing fonts: {fonts}	Λείπουν γραμματοσειρές: {fonts}
+	Named only (system or missing fonts): {fonts}	Μόνο κατ' όνομα (γραμματοσειρές συστήματος ή που λείπουν): {fonts}
+	New project	Νέο έργο
+	New role	Νέος ρόλος
+	No fonts yet: right-click a font below (or press and hold) to add it.	Δεν υπάρχουν ακόμη γραμματοσειρές: δεξί κλικ σε μια γραμματοσειρά παρακάτω (ή παρατεταμένο πάτημα) για προσθήκη.
+	No projects yet	Δεν υπάρχουν ακόμη έργα
+	Not included, its licence doesn't allow sharing it: {fonts}. Team members will need to install it separately.	Δεν συμπεριλήφθηκε, η άδεια δεν επιτρέπει κοινοποίηση: {fonts}. Τα μέλη της ομάδας θα πρέπει να την εγκαταστήσουν χωριστά.
+	Pages that open with this project	Σελίδες που ανοίγουν με αυτό το έργο
+	Project:	Έργο:
+	Remember pages like {name}	Απομνημόνευση σελίδων όπως {name}
+	Remove from the project	Αφαίρεση από το έργο
+	Remove this role	Αφαίρεση αυτού του ρόλου
+	SFX	SFX
+	Saved {file}	Αποθηκεύτηκε {file}
+	Shout	Κραυγή
+	TAG	ΕΤΙΚΕΤΑ
+	The project is large ({mb} MB): untick fonts to make it smaller.	Το έργο είναι μεγάλο ({mb} MB): αποεπιλέξτε γραμματοσειρές για να μικρύνει.
+	This font doesn't allow redistribution; team members will need to install it separately.	Αυτή η γραμματοσειρά δεν επιτρέπει αναδιανομή· τα μέλη της ομάδας θα πρέπει να την εγκαταστήσουν χωριστά.
+	Thought	Σκέψη
+	TypeR tags	Ετικέτες TypeR
+	Use for this page	Χρήση για αυτή τη σελίδα
+	e.g. the scan	π.χ. η ομάδα
+	folder {name}	φάκελος {name}
+	missing	λείπει
+	system font: named only	γραμματοσειρά συστήματος: μόνο κατ' όνομα
+	{font} added to {project} as {role}	Η {font} προστέθηκε στο {project} ως {role}
+	{n} font files installed	Εγκαταστάθηκαν αρχεία γραμματοσειρών: {n}
+	Letter case	Πεζά/κεφαλαία
+	Font Projects…	Έργα γραμματοσειρών…
+	Add {font} to the current project as…	Προσθήκη {font} στο τρέχον έργο ως…
+	Automatic (by shape)	Αυτόματα (κατά σχήμα)
+	Project: {name}	Έργο: {name}
+	Bubble style	Στυλ συννεφάκι
+	Search TypeR styles	Αναζήτηση στυλ TypeR
+	No styles match	Κανένα στυλ δεν ταιριάζει
+	Remember by shape	Απομνημόνευση κατά σχήμα
+	In Automatic, the style each kind of shape uses	Στο Αυτόματο, το στυλ που χρησιμοποιεί κάθε είδος σχήματος
+	The style the next bubble uses: Bubble Type's, the font project's or a TypeR style	Το στυλ του επόμενου συννεφάκι: από το Κείμενο σε συννεφάκι, το έργο γραμματοσειρών ή το TypeR
+	The style {style} is gone: the shape's own style was used	Το στυλ {style} δεν υπάρχει πια: χρησιμοποιήθηκε το στυλ του σχήματος
+	Bubble Type	Κείμενο σε συννεφάκι

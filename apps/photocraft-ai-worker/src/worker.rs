@@ -68,6 +68,31 @@ struct State {
     loaded: Option<Rc<Loaded>>,
     /// The loaded inpainting model and its catalog id.
     inpaint: Option<(&'static str, Rc<photocraft_ai_lama::Generator>)>,
+    /// Models that have run on this GPU: the first run compiles the GPU's shaders (slow, said so).
+    warmed: Vec<&'static str>,
+}
+
+/// The first GPU run of `id` in this worker (its shaders compile): said once, as a stage of its own.
+fn first_gpu_run(id: &'static str, gpu: bool, p: &Posting, fraction: f32) {
+    if !gpu {
+        return;
+    }
+    let first = STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        let first = !s.warmed.contains(&id);
+        if first {
+            s.warmed.push(id);
+        }
+        first
+    });
+    if first {
+        p.send(fraction, "Compiling GPU shaders (first run)");
+    }
+}
+
+/// The worker's runtime is the GPU.
+fn on_gpu_now() -> bool {
+    STATE.with(|s| s.borrow().rt.as_ref().is_some_and(|r| r.accel() == Accel::Gpu))
 }
 
 thread_local! {
@@ -261,6 +286,7 @@ async fn run_inner(msg: &JsValue, id: f64) -> Result<(Planar, String)> {
     if let Some(o) = n("overlap").filter(|o| o * 2 < tiles.tile) {
         tiles.overlap = o;
     }
+    first_gpu_run(model.id, rt.accel() == Accel::Gpu, &p, 0.15);
     let out = upscale(&rt, &loaded, &input, tiles, &p).await.map_err(|e| on_device(&rt, e));
     if get(msg, "unload").as_bool().unwrap_or(false) {
         STATE.with(|s| s.borrow_mut().loaded = None);
@@ -386,8 +412,20 @@ async fn weights(model: &'static ModelInfo, base: &str, download: bool, p: &Post
     if base.is_empty() {
         return Err(AiError::Download("model downloads are not configured on this site".into()));
     }
-    let status = format!("Downloading {} ({:.0} MB)", model.title, model.bytes as f64 / 1e6);
-    let blob = fetch_verified(&url, model, &mut |done, total| p.send(0.12 * done as f32 / total.max(1) as f32, &status)).await?;
+    // "Downloading Manga LaMa (100 MB): 45% at 12.3 MB/s": the share and speed, the text
+    // refreshed twice a second (each new text is posted).
+    let mb = model.bytes as f64 / 1e6;
+    let (t0, mut said_at, mut status) = (now_ms(), f64::MIN, format!("Downloading {} ({mb:.0} MB)", model.title));
+    let blob = fetch_verified(&url, model, &mut |done, total| {
+        let now = now_ms();
+        if now - said_at >= 500.0 {
+            said_at = now;
+            let speed = done as f64 / ((now - t0) / 1000.0).max(0.001) / 1e6;
+            status = format!("Downloading {} ({mb:.0} MB): {:.0}% at {speed:.1} MB/s", model.title, (100.0 * done as f64 / total.max(1) as f64).floor());
+        }
+        p.send(0.12 * done as f32 / total.max(1) as f32, &status)
+    })
+    .await?;
     if let Some(cache) = &cache
         && let Err(e) = store(cache, &url, model, &blob).await
     {
@@ -689,6 +727,7 @@ async fn inpaint_inner(msg: &JsValue, id: f64) -> std::result::Result<(Vec<f32>,
     p.device = STATE.with(|s| s.borrow().device.clone());
     p.send(0.2, &format!("Cleaning with {} ({})", model.title, p.device));
     let gpu = rt.accel() == Accel::Gpu;
+    first_gpu_run(model.id, gpu, &p, 0.2);
     let out = lama.generate_async(&rgb, &mask, w, h).await.map_err(|e| (e.to_string(), gpu && is_device(&e)));
     if get(msg, "unload").as_bool().unwrap_or(false) {
         STATE.with(|s| s.borrow_mut().inpaint = None);
@@ -807,8 +846,9 @@ async fn genfill_inner(msg: &JsValue, id: f64) -> std::result::Result<(Vec<Vec<f
     let total = params.steps.max(1) as f32;
     let status = format!("Generating ({})", p.device);
     p.send(0.18, &status);
+    first_gpu_run(tier.id(), on_gpu_now(), &p, 0.18);
     let out = generate(&models, &params, &mut |d, _| {
-        p.send(0.18 + 0.8 * d as f32 / total, &status);
+        p.send(0.18 + 0.8 * d as f32 / total, &format!("{status} (step {} of {})", (d + 1).min(total as usize), total as usize));
         true
     })
     .await

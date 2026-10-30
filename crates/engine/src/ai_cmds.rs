@@ -82,6 +82,9 @@ pub(crate) fn run_choice(s: &Session, p: &Value, cmd: &str) -> Result<RunChoice>
 pub const GPU_FALLBACK_NOTICE: &str = "GPU couldn't run this model; used the CPU instead";
 /// Its class.
 pub const GPU_FALLBACK_CLASS: &str = "ai.gpuFallback";
+/// The progress message while a run that the GPU couldn't do moves to the CPU (the progress UI
+/// says the CPU may take longer).
+pub const SWITCHING_TO_CPU: &str = "Switching to the CPU";
 
 /// After the GPU failed: the same Quality on the CPU (Auto then means the lite model, as for any
 /// CPU run; Best keeps the full one).
@@ -359,6 +362,7 @@ fn run_upscale(svc: Arc<dyn Upscaler>, ctx: JobCtx, req: Request, retry: Option<
                     m = l;
                 }
                 ctx.notice(GPU_FALLBACK_CLASS, GPU_FALLBACK_NOTICE, &why);
+                ctx.progress(ctx.fraction(), SWITCHING_TO_CPU);
                 let req = Request { model: m, input: retry.input, grayscale, allow_download, opts: RunOptions { cpu: true, ..opts } };
                 run_upscale(again, ctx, req, None, finish);
             }

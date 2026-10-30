@@ -262,6 +262,8 @@ fn handle_pressed_key(
         }
         Key::Escape if crate::type_transform::active(app) => crate::type_transform::cancel_drag(app),
         Key::Escape if edit.edit.mask => cancel(app),
+        // On a phone, Back (Escape) is how one leaves the text: it keeps it.
+        Key::Escape if crate::touch_ui::active(app) => commit(app),
         Key::Escape if app.session.prefs().type_.use_esc_to_commit => commit(app),
         Key::Escape => cancel(app),
         _ if modifiers.command && modifiers.shift && format_shortcut(app, key, *modifiers) => {}

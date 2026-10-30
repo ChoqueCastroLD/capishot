@@ -5060,3 +5060,88 @@ navigator	Zoom	Zoom
 	Font size presets	Valores predefinidos de tamaño de fuente
 	Leading presets	Valores predefinidos de interlineado
 	Tracking presets	Valores predefinidos de tracking
+	Capishot will draw on the CPU on this device	Capishot dibujará con la CPU en este dispositivo
+	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	La tarjeta gráfica fue demasiado lenta o se reinició mientras dibujaba. Para volver a usarla: Preferencias › Rendimiento › Modo de renderizado.
+	Your graphics card restarted; Capishot keeps working on the CPU	Tu tarjeta gráfica se reinició; Capishot sigue en modo CPU
+	Unsaved documents were reopened from crash recovery.	Los documentos sin guardar se reabrieron desde la recuperación.
+	Commands	Comandos
+	AI	IA
+	Downloading model {pct}%	Descargando modelo {pct}%
+	Downloading model…	Descargando modelo…
+	Preparing AI…	Preparando IA…
+	Preparing AI for this GPU (first run only)…	Preparando la IA para esta GPU (solo la primera vez)…
+	Processing {i}/{n}	Procesando {i}/{n}
+	Applying…	Aplicando…
+	Using the CPU, it may take longer	Usando la CPU, puede tardar más
+	{tool}: done	{tool}: listo
+	Which one should I use?	¿Cuál uso?
+	Tap to use a tool; press and hold to see what it does and add it to the favorites bar.	Toca para usar una herramienta; mantén pulsado para ver qué hace y añadirla a la barra de favoritos.
+	Outline	Contorno
+	Outer	Fuera
+	Centered	Centro
+	Inner	Dentro
+	Outline width	Grosor del contorno
+	Color Picker (Outline)	Selector de color (contorno)
+	Edit text	Editar texto
+	Bend	Inflexión
+	Horizontal Distortion	Distorsión horizontal
+	Vertical Distortion	Distorsión vertical
+	A .capiproj carries the project's settings and its font files, never pages or images.	Un .capiproj lleva los ajustes del proyecto y sus archivos de fuentes, nunca páginas ni imágenes.
+	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Un proyecto de fuentes guarda las fuentes de una serie por rol (diálogo, grito, narración…) y sus ajustes. Crea uno para empezar.
+	Add role	Añadir rol
+	Add tag	Añadir etiqueta
+	Add to the current project as…	Agregar al proyecto actual como…
+	Apply the role's settings too	Aplicar también los ajustes del rol
+	Bubble Type styles	Estilos de Texto en globo
+	Current project	Proyecto actual
+	Dialogue	Diálogo
+	Export {name}	Exportar {name}
+	Font Projects	Proyectos de fuentes
+	Font project exported	Proyecto de fuentes exportado
+	Font project {name} imported	Proyecto de fuentes {name} importado
+	Font project: {name}	Proyecto de fuentes: {name}
+	Fonts by role	Fuentes por rol
+	Include TypeR's styles and Bubble Type's styles	Incluir los estilos de TypeR y de Texto en globo
+	Include fonts whose licence restricts sharing	Incluir fuentes cuya licencia restringe compartirlas
+	Install these separately: {fonts}	Instálalas aparte: {fonts}
+	Leading (0: Auto)	Interlineado (0: auto)
+	Missing fonts: {fonts}	Faltan fuentes: {fonts}
+	Named only (system or missing fonts): {fonts}	Solo por nombre (fuentes del sistema o que faltan): {fonts}
+	New project	Proyecto nuevo
+	New role	Rol nuevo
+	No fonts yet: right-click a font below (or press and hold) to add it.	Aún no hay fuentes: haz clic derecho en una fuente de abajo (o mantén pulsado) para agregarla.
+	No projects yet	Aún no hay proyectos
+	Not included, its licence doesn't allow sharing it: {fonts}. Team members will need to install it separately.	No incluida, su licencia no permite compartirla: {fonts}. Los miembros del equipo deberán instalarla aparte.
+	Pages that open with this project	Páginas que abren con este proyecto
+	Project:	Proyecto:
+	Remember pages like {name}	Recordar páginas como {name}
+	Remove from the project	Quitar del proyecto
+	Remove this role	Quitar este rol
+	SFX	SFX
+	Saved {file}	Guardado {file}
+	Shout	Grito
+	TAG	ETIQUETA
+	The project is large ({mb} MB): untick fonts to make it smaller.	El proyecto es grande ({mb} MB): desmarca fuentes para que pese menos.
+	This font doesn't allow redistribution; team members will need to install it separately.	Esta fuente no permite redistribución; los miembros del equipo deberán instalarla aparte.
+	Thought	Pensamiento
+	TypeR tags	Etiquetas de TypeR
+	Use for this page	Usar en esta página
+	e.g. the scan	p. ej. el scan
+	folder {name}	carpeta {name}
+	missing	falta
+	system font: named only	fuente del sistema: solo por nombre
+	{font} added to {project} as {role}	{font} agregada a {project} como {role}
+	{n} font files installed	{n} archivos de fuentes instalados
+	Letter case	Mayúsculas
+	Font Projects…	Proyectos de fuentes…
+	Add {font} to the current project as…	Agregar {font} al proyecto actual como…
+	Automatic (by shape)	Automático (por forma)
+	Project: {name}	Proyecto: {name}
+	Bubble style	Estilo del globo
+	Search TypeR styles	Buscar estilos de TypeR
+	No styles match	Ningún estilo coincide
+	Remember by shape	Recordar por forma
+	In Automatic, the style each kind of shape uses	En Automático, el estilo que usa cada tipo de forma
+	The style the next bubble uses: Bubble Type's, the font project's or a TypeR style	El estilo del próximo globo: de Texto en globo, del proyecto de fuentes o de TypeR
+	The style {style} is gone: the shape's own style was used	El estilo {style} ya no existe: se usó el estilo propio de la forma
+	Bubble Type	Texto en globo

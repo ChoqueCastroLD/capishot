@@ -723,16 +723,33 @@ impl Compositor {
     /// to the CPU compositor. Where errors only arrive asynchronously (WebGPU), creation is assumed
     /// to have worked.
     pub fn try_new_with_format(device: &wgpu::Device, acc_format: wgpu::TextureFormat) -> Result<Self, Unsupported> {
-        let comp = match first_error(device, || Self::new_with_format(device, acc_format)) {
-            (comp, None) => comp,
-            (_, Some(e)) => return Err(Unsupported(format!("couldn't build the compositor's pipelines: {e}"))),
-        };
-        // The pipelines every page draws with (the rest are built as renders need them, see
-        // [`Kit::pipeline`]): a driver that can't build these keeps the canvas on the CPU.
-        for k in [Kernel::Content, Kernel::Blend, Kernel::LayerBlend] {
-            comp.kit.pipeline(device, k, acc_format)?;
+        let comp = Self::try_new_lazy(device, acc_format)?;
+        for i in 0..Self::FIRST_PIPELINES {
+            comp.warm(device, i)?;
         }
         Ok(comp)
+    }
+
+    /// How many pipelines every page draws with ([`Self::warm`] builds them one at a time).
+    pub const FIRST_PIPELINES: usize = 3;
+
+    /// [`Self::try_new_with_format`] without building any pipeline yet: the caller builds the
+    /// first ones with [`Self::warm`], one at a time (on WebGL each is a shader program compiled
+    /// and linked on the spot, seconds on a weak GPU: several in one frame made the browser
+    /// drop the context).
+    pub fn try_new_lazy(device: &wgpu::Device, acc_format: wgpu::TextureFormat) -> Result<Self, Unsupported> {
+        match first_error(device, || Self::new_with_format(device, acc_format)) {
+            (comp, None) => Ok(comp),
+            (_, Some(e)) => Err(Unsupported(format!("couldn't build the compositor's pipelines: {e}"))),
+        }
+    }
+
+    /// Builds the `i`-th of the pipelines every page draws with (the rest are built as renders
+    /// need them, see [`Kit::pipeline`]): a driver that can't build these keeps the canvas on
+    /// the CPU. Nothing when it is built already or `i` is past [`Self::FIRST_PIPELINES`].
+    pub fn warm(&self, device: &wgpu::Device, i: usize) -> Result<(), Unsupported> {
+        let Some(&k) = [Kernel::Content, Kernel::Blend, Kernel::LayerBlend].get(i) else { return Ok(()) };
+        self.kit.pipeline(device, k, self.acc_format).map(|_| ())
     }
 
     /// Create a compositor whose accumulation/render-target format is `acc_format`. Pass

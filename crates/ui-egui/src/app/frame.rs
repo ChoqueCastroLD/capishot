@@ -236,6 +236,8 @@ impl PhotocraftApp {
         }
         // A menu or dialog can start a filter after `jobs_ui::tick` ran in this frame. Keep
         // polling it even when the platform would otherwise put the event loop to sleep.
+        // Whether an overlay is showing, so the next press that closes it stays off the canvas.
+        crate::overlay_guard::end_frame(self, &ctx);
         jobs_ui::keep_polling(self, &ctx);
         // Menus and buttons in this frame may have asked for a file dialog.
         self.poll_file_dialog(&ctx, Some(frame));
@@ -383,7 +385,10 @@ impl PhotocraftApp {
         layers_panel_ui::show_dialog(self, &ctx);
         rasterize_prompt::run_pending(self, &ctx);
         jobs_ui::dialog(self, &ctx);
+        crate::ai_progress::show(self, &ctx);
         ai_models_ui::window(self, &ctx);
+        crate::font_projects_ui::window(self, &ctx);
+        crate::bubble_type_ui::picker(self, &ctx);
         discard_ui::show(self, &ctx);
         recovery_ui::show(self, &ctx);
         tiff_options_ui::show(self, &ctx);
@@ -396,6 +401,7 @@ impl PhotocraftApp {
         canvas::extra_windows(self, &ctx);
         touch_ui::overlays(self, &ctx);
         notices::show(self, &ctx);
+        gpu_status::warm_up(self, &ctx);
         updates_ui::show(self, &ctx);
         gpu_status::show_fallback(self, &ctx);
         kys_import::show_offer(self, &ctx);

@@ -135,7 +135,7 @@ pub(crate) fn cut_selection(app: &mut PhotocraftApp, ctx: &egui::Context) {
 }
 
 /// Replace the selection with `s`.
-pub(super) fn insert(app: &mut PhotocraftApp, s: &str) {
+pub(crate) fn insert(app: &mut PhotocraftApp, s: &str) {
     let Some(ed) = app.ui.text_edit.clone() else { return };
     let (a, b) = (ed.caret.min(ed.anchor), ed.caret.max(ed.anchor));
     let s = s.replace("\r\n", "\n").replace('\r', "\n");

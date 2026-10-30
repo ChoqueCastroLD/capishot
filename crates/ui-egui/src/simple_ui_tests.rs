@@ -135,16 +135,23 @@ fn favorites_can_be_added_and_removed() {
     assert_eq!(command_label("image.imageSize").as_deref(), Some("Image Size"));
 }
 
-/// A long press on a tool in the recent-tools bar makes it a favorite (it then leaves that bar).
+/// A long press on a tool in the recent-tools bar shows what it does, and its card makes it a
+/// favorite (it then leaves that bar).
 #[test]
 fn a_long_press_makes_a_recent_tool_a_favorite() {
     let mut a = app();
     a.run("file.new", json!({"width": 600, "height": 800})).unwrap();
     a.sync_views();
     let mut h = harness(a, 412.0, 915.0);
-    // A secondary click is what a mouse has for the long press (both toggle).
+    // A secondary click is what a mouse has for the long press (both open the card).
     h.get_by_label("Zoom Tool").click_secondary();
     h.run_steps(3);
+    assert_eq!(help_open(&h.ctx).as_deref(), Some("tool:Zoom"));
+    h.get_by_label("Tap or drag to zoom in and out");
+    assert!(!is_favorite(h.state(), "tool:Zoom"), "only the card's button adds it");
+    h.get_by_label("Add to favorites").click();
+    h.run_steps(3);
+    assert!(help_open(&h.ctx).is_none(), "the card closes");
     assert!(is_favorite(h.state(), "tool:Zoom"));
     assert_eq!(favorites(h.state()).len(), 7);
     assert!(!recent_bar(h.state(), &h.ctx).contains(&Tool::Zoom));

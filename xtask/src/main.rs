@@ -15,6 +15,7 @@ mod prereqs;
 mod scorecard;
 mod sha256;
 mod stats;
+mod tool_help;
 mod version;
 
 use std::path::{Path, PathBuf};
@@ -46,6 +47,7 @@ commands:
   parity          Photoshop menu parity; rewrites docs/parity-checklist.md
   i18n-coverage   report UI translation coverage and the missing strings per registered language
                   (the last `ci` step; it never fails)
+  tool-help       check every tool (and described command) says what it does in en/es/pt
   perf [--quick] [--update-baseline] [--threshold PCT] [--bench NAME]... [--skip-build] [--reuse]
                   run the release benches, merge them by scenario id into target/perf/results.json,
                   check perf/budgets.toml and perf/baseline.json (non-zero on a broken budget or regression)
@@ -77,6 +79,7 @@ fn main() -> ExitCode {
         Some("fonts-index") => fonts_index::cmd(&root(), &rest),
         Some("parity") => cmd_parity(),
         Some("i18n-coverage") => i18n_coverage::run(&root()),
+        Some("tool-help") => tool_help::run(&root()),
         Some("perf") => perf::run(&root(), &rest),
         Some("scorecard") => scorecard::run(&root(), &rest),
         Some("doctor") => prereqs::run(&root(), &rest),
@@ -302,6 +305,7 @@ fn cmd_ci() -> Result<(), String> {
                 run(c, "cargo test --workspace --locked --features heif --doc")
             }),
         ),
+        ("tool-help", Box::new(|| tool_help::run(&root()))),
         ("wasm", Box::new(cmd_wasm)),
         (
             "i18n",

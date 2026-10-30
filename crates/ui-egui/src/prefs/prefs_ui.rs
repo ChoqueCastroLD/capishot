@@ -157,7 +157,7 @@ use graphics::{gpu_status_rows, rendering_mode_value};
 use save::SaveRetry;
 #[cfg(test)]
 use save::{SAVE_RETRY_MAX_S, SAVE_RETRY_S, merge_changes, persist};
-pub(crate) use save::{autosave_hint, document_written, recovery_pending, retire_all, save_preferences};
+pub(crate) use save::{autosave_hint, document_written, recovery_pending, recovery_pending_all, retire_all, save_preferences};
 pub use save::{autosave_now, flush_prefs, prefs_pending, tick};
 #[cfg(test)]
 pub(crate) use shortcuts::capture_key_press;

@@ -348,7 +348,10 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
         p["x"] = json!(start[0]);
         p["y"] = json!(start[1]);
         p["style"] = json!(o.bubble_pick);
-        p["styles"] = crate::bubble_type_ui::styles_params(&o.bubble_styles);
+        p["styles"] = crate::font_projects_ui::bubble_styles(app, &o.bubble_styles);
+        if let Some(map) = crate::bubble_type_ui::shape_styles_param(app) {
+            p["shapeStyles"] = map;
+        }
     } else if let Some(src) = in_path_at(app, start[0], start[1]) {
         // A click inside a closed path: type in the path, as in Photoshop.
         p["inPath"] = src;
@@ -362,7 +365,17 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
     let created = app.run(command, p);
     if bubble && let Ok(v) = &created {
         let kind = v.get("style").and_then(serde_json::Value::as_str).unwrap_or("bubble");
-        crate::bubble_type_ui::flash(app, kind, start);
+        // Another source's style shows its own name by the cursor.
+        let shown = v.get("styleName").and_then(serde_json::Value::as_str).unwrap_or(kind).to_string();
+        crate::bubble_type_ui::flash(app, &shown, start);
+        if let Some(missing) = v.get("fallback").and_then(serde_json::Value::as_str) {
+            let title = crate::i18n::fmt(tl!("The style {style} is gone: the shape's own style was used"), &[("style", missing)]);
+            app.ui.notices.retain(|n| n.tag.as_deref() != Some("bubbleFallback"));
+            let id = crate::notices::post(app, title, Vec::new(), false, None);
+            if let Some(n) = app.ui.notices.iter_mut().find(|n| n.id == id) {
+                n.tag = Some("bubbleFallback".into());
+            }
+        }
         app.ui.notices.retain(|n| n.tag.as_deref() != Some("noBubble"));
         if kind == "floating" {
             // Nothing to fill there: floating text, said once however many clicks.

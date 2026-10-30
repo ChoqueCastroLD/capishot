@@ -46,6 +46,7 @@ pub mod ai_models_cmds;
 pub mod capishot_cmds;
 mod compact_move;
 pub mod font_download_cmds;
+pub mod font_projects;
 pub mod genfill_cmds;
 mod history_cache;
 pub mod layer_key_cmds;

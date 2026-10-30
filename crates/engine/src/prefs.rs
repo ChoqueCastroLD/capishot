@@ -1268,6 +1268,9 @@ pub struct Preferences {
     pub script_events: crate::automate_cmds::ScriptEvents,
     /// Layer Mask Display Options: the layer mask rubylith's colour and opacity.
     pub layer_mask_overlay: LayerMaskOverlay,
+    /// Window › Font Projects: the projects and the active one (`font_projects::Projects`; no
+    /// font files, which are the user's fonts).
+    pub font_projects: Value,
 }
 
 impl Preferences {

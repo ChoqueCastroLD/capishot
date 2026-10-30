@@ -4949,3 +4949,89 @@ shape	Appearance	Apparence
 	Font size presets	Tailles de police prédéfinies
 	Leading presets	Interlignages prédéfinis
 	Tracking presets	Approches prédéfinies
+	Capishot will draw on the CPU on this device	Capishot dessinera avec le processeur sur cet appareil
+	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	La carte graphique était trop lente ou a redémarré pendant le dessin. Pour la réutiliser : Préférences › Performances › Mode de rendu.
+	Your graphics card restarted; Capishot keeps working on the CPU	Votre carte graphique a redémarré ; Capishot continue en mode CPU
+	Unsaved documents were reopened from crash recovery.	Les documents non enregistrés ont été rouverts depuis la récupération.
+	Commands	Commandes
+	AI	IA
+	Downloading model {pct}%	Téléchargement du modèle {pct} %
+	Downloading model…	Téléchargement du modèle…
+	Preparing AI…	Préparation de l’IA…
+	Preparing AI for this GPU (first run only)…	Préparation de l’IA pour ce GPU (première fois seulement)…
+	Processing {i}/{n}	Traitement {i}/{n}
+	Applying…	Application…
+	Using the CPU, it may take longer	Utilisation du CPU, cela peut prendre plus de temps
+	{tool}: done	{tool} : terminé
+	Which one should I use?	Lequel utiliser ?
+	Tap to use a tool; press and hold to see what it does and add it to the favorites bar.	Touchez pour utiliser un outil ; maintenez appuyé pour voir ce qu’il fait et l’ajouter à la barre des favoris.
+	Processing…	Traitement…
+	Outline	Contour
+	Outer	Extérieur
+	Centered	Centré
+	Inner	Intérieur
+	Outline width	Épaisseur du contour
+	Color Picker (Outline)	Sélecteur de couleur (contour)
+	Edit text	Modifier le texte
+	Bend	Inflexion
+	Horizontal Distortion	Déformation horizontale
+	Vertical Distortion	Déformation verticale
+	A .capiproj carries the project's settings and its font files, never pages or images.	Un .capiproj contient les réglages du projet et ses fichiers de polices, jamais de pages ni d’images.
+	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Un projet de polices garde les polices d’une série par rôle (dialogue, cri, narration…) et leurs réglages. Créez-en un pour commencer.
+	Add role	Ajouter un rôle
+	Add tag	Ajouter une balise
+	Add to the current project as…	Ajouter au projet actuel comme…
+	Apply the role's settings too	Appliquer aussi les réglages du rôle
+	Bubble Type styles	Styles du Texte en bulle
+	Current project	Projet actuel
+	Dialogue	Dialogue
+	Export {name}	Exporter {name}
+	Font Projects	Projets de polices
+	Font project exported	Projet de polices exporté
+	Font project {name} imported	Projet de polices {name} importé
+	Font project: {name}	Projet de polices : {name}
+	Fonts by role	Polices par rôle
+	Include TypeR's styles and Bubble Type's styles	Inclure les styles de TypeR et du Texte en bulle
+	Include fonts whose licence restricts sharing	Inclure les polices dont la licence limite le partage
+	Install these separately: {fonts}	À installer séparément : {fonts}
+	Leading (0: Auto)	Interlignage (0 : auto)
+	Missing fonts: {fonts}	Polices manquantes : {fonts}
+	Named only (system or missing fonts): {fonts}	Nommées seulement (polices système ou manquantes) : {fonts}
+	New project	Nouveau projet
+	New role	Nouveau rôle
+	No fonts yet: right-click a font below (or press and hold) to add it.	Pas encore de polices : clic droit sur une police ci-dessous (ou appui long) pour l’ajouter.
+	No projects yet	Aucun projet
+	Not included, its licence doesn't allow sharing it: {fonts}. Team members will need to install it separately.	Non incluse, sa licence n’en permet pas le partage : {fonts}. Les membres de l’équipe devront l’installer séparément.
+	Pages that open with this project	Pages qui s’ouvrent avec ce projet
+	Project:	Projet :
+	Remember pages like {name}	Mémoriser les pages comme {name}
+	Remove from the project	Retirer du projet
+	Remove this role	Supprimer ce rôle
+	SFX	SFX
+	Saved {file}	Enregistré {file}
+	Shout	Cri
+	TAG	BALISE
+	The project is large ({mb} MB): untick fonts to make it smaller.	Le projet est volumineux ({mb} Mo) : décochez des polices pour l’alléger.
+	This font doesn't allow redistribution; team members will need to install it separately.	Cette police n’autorise pas la redistribution ; les membres de l’équipe devront l’installer séparément.
+	Thought	Pensée
+	TypeR tags	Balises TypeR
+	Use for this page	Utiliser pour cette page
+	e.g. the scan	p. ex. le scan
+	folder {name}	dossier {name}
+	missing	manquante
+	system font: named only	police système : nommée seulement
+	{font} added to {project} as {role}	{font} ajoutée à {project} comme {role}
+	{n} font files installed	{n} fichiers de polices installés
+	Letter case	Casse
+	Font Projects…	Projets de polices…
+	Add {font} to the current project as…	Ajouter {font} au projet actuel comme…
+	Automatic (by shape)	Automatique (selon la forme)
+	Project: {name}	Projet : {name}
+	Bubble style	Style de bulle
+	Search TypeR styles	Rechercher des styles TypeR
+	No styles match	Aucun style ne correspond
+	Remember by shape	Mémoriser par forme
+	In Automatic, the style each kind of shape uses	En Automatique, le style utilisé par chaque type de forme
+	The style the next bubble uses: Bubble Type's, the font project's or a TypeR style	Le style de la prochaine bulle : ceux du Texte en bulle, du projet de polices ou de TypeR
+	The style {style} is gone: the shape's own style was used	Le style {style} n’existe plus : le style propre à la forme a été utilisé
+	Bubble Type	Texte en bulle

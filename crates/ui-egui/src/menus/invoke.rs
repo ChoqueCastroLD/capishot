@@ -171,6 +171,10 @@ fn invoke_shell_commands(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str,
     if let Some(r) = crate::capishot_ui::invoke(app, id, params) {
         return Some(r);
     }
+    // Window › Font Projects….
+    if let Some(r) = crate::font_projects_ui::invoke(app, id) {
+        return Some(r);
+    }
     // Window › AI Models… (the AI Model Manager).
     if let Some(r) = crate::ai_models_ui::invoke(app, id, params) {
         return Some(r);

@@ -371,9 +371,17 @@ pub(crate) fn font_picker_salted(app: &mut PhotocraftApp, ui: &mut egui::Ui, sal
     let mut library = FontLibrary { preview_text: preview_text(app), ..FontLibrary::of(app) };
     let mut load_fonts = false;
     // Capishot's Find More tab replaces the family list; picking a font there closes the menu.
+    // Font projects: a font's context menu adds it to the active project; the menu's top shows
+    // the project's fonts and the recent ones.
+    crate::font_projects_ui::offer_roles(app, ui.ctx());
+    let mut role_pick: Option<Option<String>> = None;
     let mut top = |ui: &mut egui::Ui, current: &mut String| -> Option<bool> {
         crate::fonts_ui::tabs(app, ui);
         if app.ui.fonts.tab != crate::fonts_ui::PickerTab::FindMore {
+            if let Some(role) = crate::font_projects_ui::menu_sections(app, ui, current) {
+                role_pick = Some(role);
+                return Some(true);
+            }
             // The user's own font files: on the web, the only fonts besides the bundled ones.
             if ui.add(egui::Button::new(tl!("Load Fonts…")).small()).on_hover_text(tl!("User fonts")).clicked() {
                 load_fonts = true;
@@ -390,6 +398,10 @@ pub(crate) fn font_picker_salted(app: &mut PhotocraftApp, ui: &mut egui::Ui, sal
         Some(changed)
     };
     let changed = family_picker_with(ui, salt, current, width, &families(), preview, &mut library, &mut top);
+    if changed {
+        crate::font_projects_ui::picked(app, current, role_pick.flatten().as_deref());
+    }
+    crate::font_projects_ui::take_add_request(app, ui.ctx());
     if load_fonts
         && let Err(e) = crate::menus::invoke(app, ui.ctx(), "type.loadFonts", json!({}))
         && e != crate::file_dialog::CANCELLED
@@ -727,6 +739,8 @@ fn family_picker_with(
                                 ui.add_sized([ui.available_width(), row_h], button)
                             })
                             .inner;
+                        // A font's context menu: add it to the active font project as a role.
+                        crate::font_projects_ui::row_menu(&response, f);
                         if stepped == Some(i) {
                             response.scroll_to_me(Some(egui::Align::Center));
                         } else if reveal.is_some() {

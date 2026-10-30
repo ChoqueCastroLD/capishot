@@ -4589,3 +4589,86 @@ curves	Smooth	スムーズ
 	Font size presets	フォントサイズのプリセット
 	Leading presets	行送りのプリセット
 	Tracking presets	トラッキングのプリセット
+	Capishot will draw on the CPU on this device	このデバイスでは Capishot は CPU で描画します
+	The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.	描画中にグラフィックカードが遅すぎたか再起動しました。再び使うには：環境設定 › パフォーマンス › レンダリングモード。
+	Your graphics card restarted; Capishot keeps working on the CPU	グラフィックカードが再起動しました。Capishot は CPU モードで動作を続けます
+	Unsaved documents were reopened from crash recovery.	保存していない書類はリカバリーから開き直しました。
+	Commands	コマンド
+	AI	AI
+	Downloading model {pct}%	モデルをダウンロード中 {pct}%
+	Downloading model…	モデルをダウンロード中…
+	Preparing AI…	AI を準備中…
+	Preparing AI for this GPU (first run only)…	この GPU 用に AI を準備中（初回のみ）…
+	Processing {i}/{n}	処理中 {i}/{n}
+	Applying…	適用中…
+	Using the CPU, it may take longer	CPU で処理中です。時間がかかることがあります
+	{tool}: done	{tool}：完了
+	Which one should I use?	どれを使えばいい？
+	Tap to use a tool; press and hold to see what it does and add it to the favorites bar.	タップでツールを使います。長押しで説明を表示し、お気に入りバーに追加できます。
+	Processing…	処理中…
+	Outline	縁取り
+	Outer	外側
+	Centered	中央
+	Inner	内側
+	Outline width	縁取りの太さ
+	Color Picker (Outline)	カラーピッカー（縁取り）
+	Edit text	テキストを編集
+	A .capiproj carries the project's settings and its font files, never pages or images.	.capiproj にはプロジェクトの設定とフォントファイルが入ります。ページや画像は入りません。
+	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	フォントプロジェクトは、シリーズのフォントを役割（セリフ、叫び、ナレーション…）ごとに設定とともに保存します。まず作成してください。
+	Add role	役割を追加
+	Add tag	タグを追加
+	Add to the current project as…	現在のプロジェクトに追加：役割…
+	Apply the role's settings too	役割の設定も適用
+	Bubble Type styles	吹き出しテキストのスタイル
+	Current project	現在のプロジェクト
+	Dialogue	セリフ
+	Export {name}	{name} を書き出し
+	Font Projects	フォントプロジェクト
+	Font project exported	フォントプロジェクトを書き出しました
+	Font project {name} imported	フォントプロジェクト {name} を読み込みました
+	Font project: {name}	フォントプロジェクト：{name}
+	Fonts by role	役割ごとのフォント
+	Include TypeR's styles and Bubble Type's styles	TypeR と吹き出しテキストのスタイルも含める
+	Include fonts whose licence restricts sharing	共有が制限されたライセンスのフォントも含める
+	Install these separately: {fonts}	別途インストールしてください：{fonts}
+	Leading (0: Auto)	行送り（0：自動）
+	Missing fonts: {fonts}	不足しているフォント：{fonts}
+	Named only (system or missing fonts): {fonts}	名前のみ（システムまたは不足フォント）：{fonts}
+	New project	新規プロジェクト
+	New role	新しい役割
+	No fonts yet: right-click a font below (or press and hold) to add it.	フォントはまだありません：下のフォントを右クリック（または長押し）して追加します。
+	No projects yet	プロジェクトはまだありません
+	Not included, its licence doesn't allow sharing it: {fonts}. Team members will need to install it separately.	ライセンスで共有が許可されていないため含めていません：{fonts}。チームメンバーは別途インストールが必要です。
+	Pages that open with this project	このプロジェクトで開くページ
+	Project:	プロジェクト：
+	Remember pages like {name}	{name} のようなページを記憶
+	Remove from the project	プロジェクトから外す
+	Remove this role	この役割を削除
+	SFX	SFX
+	Saved {file}	{file} を保存しました
+	Shout	叫び
+	TAG	タグ
+	The project is large ({mb} MB): untick fonts to make it smaller.	プロジェクトが大きいです（{mb} MB）：フォントのチェックを外すと小さくなります。
+	This font doesn't allow redistribution; team members will need to install it separately.	このフォントは再配布が許可されていません。チームメンバーは別途インストールが必要です。
+	Thought	心の声
+	TypeR tags	TypeR のタグ
+	Use for this page	このページで使う
+	e.g. the scan	例：スキャングループ
+	folder {name}	フォルダー {name}
+	missing	不足
+	system font: named only	システムフォント：名前のみ
+	{font} added to {project} as {role}	{font} を {project} に {role} として追加しました
+	{n} font files installed	フォントファイルを {n} 個インストールしました
+	Letter case	大文字/小文字
+	Font Projects…	フォントプロジェクト…
+	Add {font} to the current project as…	{font} を現在のプロジェクトに追加：役割…
+	Automatic (by shape)	自動（形状で判定）
+	Project: {name}	プロジェクト: {name}
+	Bubble style	吹き出しスタイル
+	Search TypeR styles	TypeR スタイルを検索
+	No styles match	一致するスタイルがありません
+	Remember by shape	形状ごとに記憶
+	In Automatic, the style each kind of shape uses	自動で、各形状の種類が使うスタイル
+	The style the next bubble uses: Bubble Type's, the font project's or a TypeR style	次の吹き出しのスタイル：吹き出しテキスト、フォントプロジェクト、または TypeR のもの
+	The style {style} is gone: the shape's own style was used	スタイル {style} はもうありません：形状のスタイルを使いました
+	Bubble Type	吹き出しテキスト
