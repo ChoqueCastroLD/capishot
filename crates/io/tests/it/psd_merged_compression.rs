@@ -2,7 +2,7 @@
 //!
 //! Photoshop never writes a 16- or 32-bit merged image in RLE: every 16-bit (74) and 32-bit (43)
 //! file in the PSD corpus stores it raw. macOS ImageIO, which Finder, Quick Look and Preview open
-//! PSDs with, refuses one that is, so a 16-bit PSD saved by PhotoCraft had no preview there and
+//! PSDs with, refuses one that is, so a 16-bit PSD saved by Capishot had no preview there and
 //! opened nowhere else. ZIP asked for explicitly is kept: Photoshop reads it at any depth.
 
 use crate::common;

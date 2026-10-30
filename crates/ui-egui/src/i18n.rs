@@ -198,8 +198,8 @@ fn expand(packed: &str, keys: &[&str]) -> Result<String, String> {
     Ok(text)
 }
 
-/// Whether a catalog carries Capishot's own strings too. The catalogs PhotoCraft added later
-/// (Serbian, Hungarian, Turkish, Vietnamese, Hindi, Arabic) have only PhotoCraft's: Capishot's
+/// Whether a catalog carries Capishot's own strings too. The catalogs Capishot added later
+/// (Serbian, Hungarian, Turkish, Vietnamese, Hindi, Arabic) have only Capishot's: Capishot's
 /// strings read in English there until they are translated.
 #[cfg(test)]
 pub(crate) fn has_capishot_strings(code: &str) -> bool {

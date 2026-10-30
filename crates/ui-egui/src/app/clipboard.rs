@@ -1,6 +1,6 @@
 use super::PhotocraftApp;
-use std::hash::{DefaultHasher, Hash, Hasher};
 use serde_json::Value;
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 // Sampling misses changed channels even in a 1x1 image: include the complete OS image.
 fn clip_signature(w: u32, h: u32, px: &[u8]) -> u64 {

@@ -750,7 +750,7 @@ fn ok_after_a_layer_switch_leaves_the_new_layer_alone() {
 fn the_reason_a_stale_workspace_closed_is_translated() {
     let document = "Select and Mask was closed: its document is no longer the active one";
     let layer = "Select and Mask was closed: another layer was selected";
-    // PhotoCraft's Arabic catalog doesn't have these rows yet at the merged revision.
+    // Capishot's Arabic catalog doesn't have these rows yet at the merged revision.
     for lang in crate::i18n::Lang::all().filter(|l| l.code() != "en" && l.code() != "ar") {
         for (reason, english) in [("document", document), ("layer", layer)] {
             assert!(crate::i18n::has(lang, english), "{}: no row for the {reason} reason", lang.code());
