@@ -87,6 +87,17 @@ localStorage, and there is no server-side storage.
 Browser support: current Chrome, Edge, Firefox and Safari (Wasm threads, SIMD and cross-origin
 isolation). WebGPU is used where available, WebGL2 otherwise; `?webgl` and `?cpu` work as in the single-threaded build.
 
+## Release checklist
+
+Before building a release of either web build ([`docs/releasing.md`](../../docs/releasing.md)):
+
+1. Refresh the module split's profile if the web app changed since the last one, and commit what
+   it writes (`packaging/web-split/cold-functions*.txt.gz`, `hot-commands*.txt`):
+   `CHROME=<chromium> CAPISHOT_PROFILE_PAGE=<a page image> packaging/web-split/profile.sh st`, then
+   the same with `threads`.
+2. Build both from the same commit (Trunk for `st/`, then `build.sh`) and run the checks below,
+   `e2e/load-failures.mjs` included.
+
 ## Browser checks (`e2e/`)
 
 Playwright scripts run against a build served by `serve.py` (they need `playwright-core` and a
@@ -102,5 +113,9 @@ Chromium in `CHROME`):
   with no long task over 500 ms. It prints each step's longest task and the app's slow frames
   with the part of the frame that took longest. `CAPISHOT_E2E_WEBGPU=1` runs the canvas on WebGPU
   (SwiftShader) instead of the CPU canvas headless Chrome falls back to.
+- `e2e/load-failures.mjs`: a bad network on a phone: every module file failing to download
+  (the reload message after one retry), chunks arriving late (a command waits for its chunk, no
+  synchronous load on the page) or never (the command fails cleanly with a Retry notice), and a
+  failed last-resort synchronous load (`?split=sync`: the toast). Works on either build.
 - `e2e/save-to-device.mjs`: where the browser can save to a picked file, Save As asks once and
   File › Save writes that file again in place (no download); elsewhere saves download.

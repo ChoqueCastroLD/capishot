@@ -706,6 +706,10 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
             true
         }
     });
+    // The code a command waited for is in (or failed to load): run (or drop) what waited.
+    if crate::code_gate::on_event(app, ctx, &e) {
+        return;
+    }
     // A Free Transform commit's session ends with its job (then reported like any job).
     crate::transform_tool::on_job_event(app, &e);
     // An AI run's end: "Done" or its error on the progress card.

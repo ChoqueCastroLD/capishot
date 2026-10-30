@@ -81,7 +81,7 @@ elif [ "${PHOTOCRAFT_WEB_SPLIT:-1}" = "0" ]; then
   python3 "$ROOT/packaging/web-split/split.py" --wasm "$STAGE/photocraft_bg.wasm" --glue "$STAGE/photocraft.js" --cold - --strip-only
 else
   python3 "$ROOT/packaging/web-split/split.py" --threads --wasm "$STAGE/photocraft_bg.wasm" --glue "$STAGE/photocraft.js" \
-    --cold "$ROOT/packaging/web-split/cold-functions-threads.txt.gz" --wasm-split "$(binaryen_tool wasm-split)"
+    --cold "$ROOT/packaging/web-split/cold-functions-threads.txt.gz" --hot "$ROOT/packaging/web-split/hot-commands-threads.txt" --wasm-split "$(binaryen_tool wasm-split)"
 fi
 
 mkdir -p "$OUT"

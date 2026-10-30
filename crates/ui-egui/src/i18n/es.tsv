@@ -5141,3 +5141,5 @@ navigator	Zoom	Zoom
 	The style the next bubble uses: Bubble Type's, the font project's or a TypeR style	El estilo del próximo globo: de Texto en globo, del proyecto de fuentes o de TypeR
 	The style {style} is gone: the shape's own style was used	El estilo {style} ya no existe: se usó el estilo propio de la forma
 	Bubble Type	Texto en globo
+	Loading Capishot…	Cargando Capishot…
+	Couldn't load a part of Capishot (network). Try again	No se pudo cargar una parte de Capishot (red). Reintenta

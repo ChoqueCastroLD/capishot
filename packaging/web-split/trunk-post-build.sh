@@ -18,7 +18,7 @@ elif [ "${PHOTOCRAFT_WEB_SPLIT:-1}" = "0" ]; then
   echo "split: skipped (PHOTOCRAFT_WEB_SPLIT=0)"
   python3 "$HERE/split.py" --wasm "$wasm" --glue "$glue" --cold - --strip-only
 else
-  python3 "$HERE/split.py" --wasm "$wasm" --glue "$glue" --cold "$HERE/cold-functions.txt.gz" \
+  python3 "$HERE/split.py" --wasm "$wasm" --glue "$glue" --cold "$HERE/cold-functions.txt.gz" --hot "$HERE/hot-commands.txt" \
     --wasm-split "$(binaryen_tool wasm-split)"
 fi
 python3 "$HERE/rehash.py" "$D"

@@ -1,12 +1,20 @@
 // --- Lazily loaded chunks of the module (packaging/web-split/split.py) ---
 // The first-load module imports one placeholder per function moved to a chunk ("placeholder.cN",
-// field = its slot in the shared function table). A placeholder loads its chunk, whose element
-// segment puts the real functions into that table, then calls the real one. On the page the chunks
-// are fetched and instantiated in the background once the app runs, so placeholders rarely have to
-// load anything; a worker (the threads build's pool) loads a chunk synchronously when it first
-// needs it. A chunk's element segment also overwrites the slots that held its placeholders, so once
-// it is in, calls stop going through JavaScript (split.py checks no placeholder sits elsewhere).
-const __split = { chunks: __SPLIT_CHUNKS__, tableName: __SPLIT_TABLE__, loaded: Object.create(null), modules: Object.create(null), prefetching: false, calls: 0, syncLoads: 0 };
+// field = its slot in the shared function table). A chunk's element segment puts its functions
+// into that table (over the placeholders), so once it is in, calls go straight to them.
+//
+// On the page every chunk's download starts (high priority) as soon as the module's instance is
+// up, in parallel with the app's start; they are compiled and instantiated once the app has
+// drawn its first frame (`capishotSplit.firstFrame`), or as soon as a command asks for them. A command that needs code from a
+// chunk not in yet waits for it (`capishotSplit.ready` / `whenLoaded`, the app's code gate: a job
+// card instead of a stall). Only a call the app didn't see coming reaches a placeholder before
+// its chunk: then the page fetches it synchronously, the last resort (a worker, which may block,
+// always loads chunks that way). That failing too is reported (`capishotBoot.chunkFailed`).
+const __split = {
+    chunks: __SPLIT_CHUNKS__, tableName: __SPLIT_TABLE__, hot: new Set(__SPLIT_HOT__),
+    loaded: Object.create(null), modules: Object.create(null), pending: Object.create(null), downloads: Object.create(null),
+    prefetching: false, calls: 0, syncLoads: 0,
+};
 
 function __splitAddImports(imports) {
     for (const c of Object.keys(__split.chunks)) {
@@ -35,6 +43,10 @@ function __splitTable() {
 
 function __splitUrl(c) {
     return new URL(__split.chunks[c], import.meta.url).href;
+}
+
+function __splitAllLoaded() {
+    return Object.keys(__split.chunks).every((c) => __split.loaded[c]);
 }
 
 // The chunk's bytes, synchronously: on the page with the x-user-defined text trick (a page's
@@ -68,44 +80,101 @@ function __splitInstalled(c, module) {
     __split.loaded[c] = true;
 }
 
+// The last resort: the chunk, now.
 function __splitLoad(c) {
     if (__split.loaded[c]) return;
     let module = __split.modules[c];
-    if (!module) {
-        __split.syncLoads++;
-        module = new WebAssembly.Module(__splitFetchSync(c));
+    try {
+        if (!module) {
+            __split.syncLoads++;
+            module = new WebAssembly.Module(__splitFetchSync(c));
+        }
+        new WebAssembly.Instance(module, { primary: wasm });
+    } catch (e) {
+        if (typeof document !== 'undefined' && self.capishotBoot && self.capishotBoot.chunkFailed) self.capishotBoot.chunkFailed(e, true);
+        throw e;
     }
-    new WebAssembly.Instance(module, { primary: wasm });
     __splitInstalled(c, module);
 }
 
-// The page: every chunk in the background once the app runs (it removes #photocraft_loading).
-async function __splitPrefetch() {
-    for (const c of Object.keys(__split.chunks)) {
-        if (__split.loaded[c]) continue;
-        try {
-            const res = await fetch(__splitUrl(c));
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const module = await WebAssembly.compileStreaming(res).catch(async () => WebAssembly.compile(await (await fetch(__splitUrl(c))).arrayBuffer()));
-            if (__split.loaded[c]) continue;
-            await WebAssembly.instantiate(module, { primary: wasm });
-            if (!__split.loaded[c]) __splitInstalled(c, module);
-        } catch (e) {
-            // A placeholder loads it on first use instead.
-            console.warn(`Capishot: chunk ${c} not preloaded:`, e);
+// The page: chunk `c` fetched, compiled and instantiated, tried three times (1 s, then 3 s apart).
+function __splitFetch(c) {
+    if (__split.loaded[c]) return Promise.resolve();
+    if (__split.pending[c]) return __split.pending[c];
+    const once = async () => {
+        // The download started at the instance's start, else a new one.
+        const early = __split.downloads[c];
+        delete __split.downloads[c];
+        const module = await WebAssembly.compile(await (early || __splitDownload(c)));
+        if (__split.loaded[c]) return;
+        await WebAssembly.instantiate(module, { primary: wasm });
+        if (!__split.loaded[c]) __splitInstalled(c, module);
+    };
+    const p = (async () => {
+        let error;
+        for (const wait of [0, 1000, 3000]) {
+            if (wait) await new Promise((r) => setTimeout(r, wait));
+            try {
+                return await once();
+            } catch (e) {
+                error = e;
+            }
         }
-    }
+        throw error;
+    })();
+    __split.pending[c] = p;
+    // A failed chunk can be asked for again (the app's Try Again).
+    p.catch(() => {}).finally(() => { delete __split.pending[c]; });
+    return p;
 }
+
+function __splitDownload(c) {
+    return fetch(__splitUrl(c), { priority: 'high' }).then((res) => {
+        if (!res.ok) throw new Error(`${__split.chunks[c]}: HTTP ${res.status}`);
+        return res.arrayBuffer();
+    });
+}
+
+// For the app's code gate (photocraft-web): whether command `id` can run now, and every chunk.
+const __splitApi = {
+    state: __split,
+    ready(id) {
+        return __splitAllLoaded() || __split.hot.has(id) || __split.sync;
+    },
+    // Every chunk in; `onProgress(fraction)` as each one arrives. Rejects with the first chunk
+    // that didn't load (after its retries).
+    // The app drew its first frame: compile and instantiate what has downloaded meanwhile.
+    firstFrame() {
+        if (__split.lazy || __split.started) return;
+        __split.started = true;
+        for (const c of Object.keys(__split.chunks)) {
+            __splitFetch(c).catch((e) => console.warn(`Capishot: chunk ${c} not loaded yet:`, e));
+        }
+    },
+    whenLoaded(onProgress) {
+        const all = Object.keys(__split.chunks);
+        const report = () => { if (onProgress) onProgress(all.filter((c) => __split.loaded[c]).length / all.length); };
+        report();
+        return Promise.all(all.map((c) => __splitFetch(c).then(report))).then(() => undefined, (e) => {
+            if (self.capishotBoot && self.capishotBoot.chunkFailed) self.capishotBoot.chunkFailed(e, false);
+            throw e;
+        });
+    },
+};
 
 function __splitInstanceReady() {
     if (typeof document === 'undefined' || __split.prefetching) return;
     __split.prefetching = true;
-    // Diagnostics: `capishotSplit` (counters); ?split=lazy loads chunks only when first called.
-    self.capishotSplit = __split;
-    if (/[?&]split=lazy\b/.test(location.search)) return;
-    const go = () => {
-        if (document.getElementById('photocraft_loading')) { setTimeout(go, 500); return; }
-        __splitPrefetch();
-    };
-    setTimeout(go, 500);
+    self.capishotSplit = __splitApi;
+    // Diagnostics: ?split=lazy loads chunks only when a command waits for them; ?split=sync never
+    // waits, so every call into a chunk loads it on the spot.
+    const mode = new URLSearchParams(location.search).get('split');
+    __split.sync = mode === 'sync';
+    __split.lazy = mode === 'lazy' || mode === 'sync';
+    if (__split.lazy) return;
+    for (const c of Object.keys(__split.chunks)) {
+        const d = __splitDownload(c);
+        d.catch(() => {});
+        __split.downloads[c] = d;
+    }
 }

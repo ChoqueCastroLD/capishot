@@ -1357,6 +1357,7 @@ impl eframe::App for WebShell {
             crate::startup::mark(if self.startup_frames == 1 { "first frame" } else { "first frame drawn" });
             if self.startup_frames == 2 {
                 crate::startup::report();
+                crate::code_split::first_frame();
             }
         }
         self.perf.begin(frame.info().cpu_usage);
@@ -1651,6 +1652,8 @@ fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig
             photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &EncodeOptions::default()).map_err(|e| e.to_string())
         })),
         inbox: Some(inbox),
+        // Commands that need the module's later chunks wait for them (code_split.rs).
+        code_wait: Some(crate::code_split::code_wait()),
         clipboard_set_image: Some(Box::new(crate::clipboard::set)),
         clipboard_get_image: Some(Box::new(|| Ok(crate::clipboard::get()))),
         clipboard_refresh: Some(Box::new(crate::clipboard::refresh)),

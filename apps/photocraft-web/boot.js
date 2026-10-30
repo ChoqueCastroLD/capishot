@@ -26,16 +26,19 @@
       loading: 'Loading Capishot…', download: 'Downloading Capishot', preparing: 'Preparing Capishot…', starting: 'Starting Capishot…',
       failed: "Capishot didn't load completely.", memory: "This device doesn't have enough free memory for Capishot. Close other tabs or apps and try again.",
       reload: 'Reload', details: 'Details', stage: 'Stage', error: 'Error', loaded: 'Downloaded', build: 'Build', threadsFirst: 'Threads build first',
+      chunk: "Couldn't load a part of Capishot (network). Try again", retry: 'Try again',
     },
     es: {
       loading: 'Cargando Capishot…', download: 'Descargando Capishot', preparing: 'Preparando Capishot…', starting: 'Iniciando Capishot…',
       failed: 'No se pudo cargar Capishot por completo.', memory: 'Tu dispositivo no tiene memoria suficiente para Capishot. Cierra otras pestañas o apps e inténtalo de nuevo.',
       reload: 'Recargar', details: 'Detalles', stage: 'Etapa', error: 'Error', loaded: 'Descargado', build: 'Versión', threadsFirst: 'Antes, la versión con hilos',
+      chunk: 'No se pudo cargar una parte de Capishot (red). Reintenta', retry: 'Reintentar',
     },
     pt: {
       loading: 'Carregando o Capishot…', download: 'Baixando o Capishot', preparing: 'Preparando o Capishot…', starting: 'Iniciando o Capishot…',
       failed: 'Não foi possível carregar o Capishot por completo.', memory: 'Este dispositivo não tem memória livre suficiente para o Capishot. Feche outras abas ou apps e tente de novo.',
       reload: 'Recarregar', details: 'Detalhes', stage: 'Etapa', error: 'Erro', loaded: 'Baixado', build: 'Versão', threadsFirst: 'Antes, a versão com threads',
+      chunk: 'Não foi possível carregar uma parte do Capishot (rede). Tente de novo', retry: 'Tentar de novo',
     },
   };
   const text = TEXT[lang] || TEXT.en;
@@ -303,7 +306,36 @@
 
   if (statusEl()) setStatus(text.loading);
   else document.addEventListener('DOMContentLoaded', () => { if (state.stage === 'html') setStatus(text.loading); });
-  self.capishotBoot = { stage, progress, counted, fail, build, state };
+  // A part of the module loaded after the start (packaging/web-split) didn't arrive. `sync`: the
+  // page needed it at once and couldn't wait (the call that needed it is lost and the app may no
+  // longer respond): a toast whose button reloads (crash recovery brings the documents back).
+  // Otherwise the app dropped the command itself and says so: only the beacon.
+  let chunkReported = false;
+  const chunkFailed = (e, sync) => {
+    if (!chunkReported) {
+      chunkReported = true;
+      const r = report(e, sync ? 'failed' : 'aborted');
+      r.stage = 'chunk';
+      beacon(r);
+    }
+    if (!sync || el('photocraft_chunk_failed')) return;
+    const box = document.createElement('div');
+    box.id = 'photocraft_chunk_failed';
+    box.setAttribute('role', 'alert');
+    box.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:2147483647;max-width:calc(100vw - 32px);'
+      + 'display:flex;gap:12px;align-items:center;padding:12px 16px;border-radius:12px;background:#2a2a2a;color:#eee;'
+      + 'font:14px system-ui,sans-serif;box-shadow:0 4px 18px rgba(0,0,0,.4)';
+    const p = document.createElement('span');
+    p.textContent = text.chunk;
+    const b = document.createElement('button');
+    b.textContent = text.retry;
+    b.style.cssText = 'font:14px system-ui,sans-serif;padding:8px 16px;border-radius:16px;border:0;background:#3b82f6;color:#fff;flex:none';
+    b.onclick = () => location.reload();
+    box.append(p, b);
+    (document.body || document.documentElement).append(box);
+  };
+
+  self.capishotBoot = { stage, progress, counted, fail, build, state, chunkFailed };
   // The pre-boot.js name, still called by older pages' scripts.
   self.capishotLoadFailed = (why) => fail(why instanceof Error ? why : new Error(String(why)));
 })();

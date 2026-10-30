@@ -55,6 +55,7 @@ pub mod ai_upscale_ui;
 pub mod bubble_type_ui;
 mod capishot_ui;
 pub mod chrome_freeze;
+pub mod code_gate;
 pub(crate) mod clone_overlay;
 pub mod cpu_canvas;
 pub mod floaters;
@@ -623,6 +624,8 @@ pub struct PhotocraftApp {
     /// A paste waiting for an asynchronous read of the OS clipboard ([`ClipboardRefreshFn`]):
     /// the command and its params, run again by [`Self::resume_clipboard_paste`].
     clip_waiting: Option<(String, Value)>,
+    /// Commands and control requests waiting for code that hasn't loaded yet ([`code_gate`]).
+    pub(crate) code_waiting: code_gate::Waiting,
     /// Pointer position over the canvas (document px), for the Info panel and status bar.
     pub(crate) hover_doc: Option<[f64; 2]>,
     /// Layer hovered in the Layers panel, outlined on the canvas.

@@ -404,6 +404,9 @@ pub struct Services {
     pub clipboard_set_image: Option<ClipboardSetFn>,
     pub clipboard_get_image: Option<ClipboardGetFn>,
     pub clipboard_refresh: Option<ClipboardRefreshFn>,
+    /// Code loaded after the first frame (the web build's module chunks): commands that need it
+    /// wait for it ([`crate::code_gate`]). `None` when everything is there from the start.
+    pub code_wait: Option<crate::code_gate::CodeWait>,
     /// True when the last `clipboard_get_image` read had no clipboard to read, as in a Flatpak on
     /// Wayland (#5031), rather than a clipboard that holds no image. `None` where that can't happen.
     pub clipboard_unreadable: Option<ClipboardUnreadableFn>,

@@ -816,6 +816,39 @@ impl Session {
         }
     }
 
+    /// [`Self::start_job`] for work that completes asynchronously ([`run_async`]): `work` starts it
+    /// and hands the [`Completion`] to whatever finishes it (a browser event). Not journaled, no
+    /// document locked; a job card with progress and Esc to cancel like any other.
+    pub fn start_async_job<T: Send + 'static>(
+        &mut self,
+        command: &str,
+        params: Value,
+        label: &str,
+        work: impl FnOnce(&JobCtx, Completion<T>) + Send + 'static,
+        apply: impl FnOnce(&mut Session, T) -> Result<Value> + Send + 'static,
+    ) -> Result<Started> {
+        self.jobs.spawn = true;
+        let r = run_async(self, label, false, work, apply);
+        self.jobs.spawn = false;
+        let pending = self.jobs.pending.take();
+        match (r, pending) {
+            (Err(e), Some(job)) => {
+                job.ctx.cancel();
+                Err(e)
+            }
+            (Err(e), None) => Err(e),
+            (Ok(_), Some(mut job)) => {
+                job.command = command.to_string();
+                job.params = params;
+                job.journal = false;
+                let id = job.id;
+                self.jobs.running.push(job);
+                Ok(Started::Job(id))
+            }
+            (Ok(v), None) => Ok(Started::Done(v)),
+        }
+    }
+
     /// [`Self::start_job`] that runs `work` off the page's thread in the browser threads build
     /// too (on the rayon Web Worker pool), so a long job (a save) never freezes the page. `work`
     /// must not touch the browser's APIs, which only the page's thread may call. Inline in the

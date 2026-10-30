@@ -40,6 +40,8 @@ mod ai_bridge;
 mod breadcrumb;
 #[cfg(target_arch = "wasm32")]
 mod clipboard;
+#[cfg(target_arch = "wasm32")]
+mod code_split;
 #[cfg(any(target_arch = "wasm32", test))]
 mod clipboard_data;
 #[cfg(target_arch = "wasm32")]
@@ -157,7 +159,9 @@ mod tests {
         let hook = include_str!("../../../packaging/web-split/trunk-post-build.sh");
         assert!(hook.contains("rehash.py") && hook.contains("sri.py"), "renamed by content, integrity refreshed");
         let loader = include_str!("../../../packaging/web-split/loader.js");
-        assert!(loader.contains("photocraft_loading") && loader.contains("compileStreaming"), "background fetch once the app runs");
+        assert!(loader.contains("firstFrame()") && loader.contains("whenLoaded(onProgress)") && loader.contains("priority: 'high'"), "chunks fetched at start, in after the first frame, awaited by commands");
+        let web = include_str!("web.rs");
+        assert!(web.contains("code_wait: Some(crate::code_split::code_wait())") && web.contains("crate::code_split::first_frame();"), "the app waits for chunks instead of a synchronous load");
     }
 
     /// The threads build's page must start the Web Worker pool before the app can touch rayon

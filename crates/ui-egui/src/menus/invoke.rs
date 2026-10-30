@@ -54,6 +54,10 @@ fn invoke_counted(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params
     {
         authorize(id, &params)?;
     }
+    // Code that hasn't loaded yet: wait for it on a job card rather than stall the page.
+    if let Some(r) = crate::code_gate::intercept(app, id, &params) {
+        return r;
+    }
     if crate::discard_ui::intercept(app, id, &params) {
         return Ok(Value::Null);
     }

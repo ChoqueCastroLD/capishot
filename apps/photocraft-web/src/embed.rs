@@ -80,7 +80,11 @@ pub fn install(query: &str, ctx: egui::Context) -> Receiver<ControlRequest> {
 /// requests, reports Photopea uploads that failed, and tells the page when the unsaved state
 /// changes (after the saves, so `await save(); isDirty()` sees the save).
 pub fn process(app: &mut PhotocraftApp) {
-    for (name, bytes, (resolve, reject)) in OPENS.with(|o| std::mem::take(&mut *o.borrow_mut())) {
+    // A file whose decoder hasn't loaded yet waits (code_split.rs), with the ones after it.
+    let names: Vec<String> = OPENS.with(|o| o.borrow().iter().map(|(n, ..)| n.clone()).collect());
+    let ready = photocraft_ui_egui::code_gate::files_ready(app) && names.iter().all(|n| photocraft_ui_egui::code_gate::open_ready(app, n));
+    let opens = if ready && photocraft_ui_egui::code_gate::files_ready(app) { OPENS.with(|o| std::mem::take(&mut *o.borrow_mut())) } else { Vec::new() };
+    for (name, bytes, (resolve, reject)) in opens {
         match app.open_bytes(&name, &bytes) {
             Ok(warnings) => resolve.call1(&JsValue::NULL, &to_js(&json!({ "warnings": warnings }))).ok(),
             Err(e) => {

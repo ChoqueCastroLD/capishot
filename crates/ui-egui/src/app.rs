@@ -156,6 +156,7 @@ impl PhotocraftApp {
             clip_external: false,
             clip_read_for_paste: false,
             clip_waiting: None,
+            code_waiting: Default::default(),
             transform_preview: None,
             move_mods: Default::default(),
             nudge_bundle: Default::default(),

@@ -5109,3 +5109,5 @@ layerLabel	No Color	Sem cor
 	The style the next bubble uses: Bubble Type's, the font project's or a TypeR style	O estilo do próximo balão: do Texto em balão, do projeto de fontes ou do TypeR
 	The style {style} is gone: the shape's own style was used	O estilo {style} não existe mais: foi usado o estilo da própria forma
 	Bubble Type	Texto no balão
+	Loading Capishot…	Carregando o Capishot…
+	Couldn't load a part of Capishot (network). Try again	Não foi possível carregar uma parte do Capishot (rede). Tente de novo

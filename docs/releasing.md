@@ -27,6 +27,18 @@ changes are required: publishing a newer stable GitHub Release makes it discover
 
 ## Cutting a release
 
+0. **Refresh the web split's profile** when the web app changed since the last one: what the
+   first frames and the basic tools run stays in the module the page loads first, everything
+   else downloads after the first frame ([`packaging/web-split`](../packaging/web-split)).
+
+   ```sh
+   CHROME=<chromium> CAPISHOT_PROFILE_PAGE=<a page image> packaging/web-split/profile.sh st
+   CHROME=<chromium> CAPISHOT_PROFILE_PAGE=<a page image> packaging/web-split/profile.sh threads
+   ```
+
+   Commit the regenerated `cold-functions*.txt.gz` and `hot-commands*.txt`. A stale profile
+   still works (new code stays in the first part), but the first download grows and more
+   commands wait for the chunks.
 1. **Bump the version** on `main`. The only place it lives is `[workspace.package] version`
    in the root `Cargo.toml`:
 

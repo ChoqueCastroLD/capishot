@@ -115,8 +115,15 @@ impl PhotocraftApp {
                 }
             }
         }
-        let arrived: Vec<(String, Vec<u8>)> =
-            self.services.inbox.as_ref().map(|q| std::mem::take(&mut *q.lock().unwrap_or_else(|e| e.into_inner()))).unwrap_or_default();
+        // A file whose decoder hasn't loaded yet (web) waits in the inbox, with the files after it.
+        let names: Vec<String> =
+            self.services.inbox.as_ref().map(|q| q.lock().unwrap_or_else(|e| e.into_inner()).iter().map(|(n, _)| n.clone()).collect()).unwrap_or_default();
+        let go = crate::code_gate::files_ready(self) && names.iter().all(|n| crate::code_gate::open_ready(self, n));
+        let arrived: Vec<(String, Vec<u8>)> = if go && crate::code_gate::files_ready(self) {
+            self.services.inbox.as_ref().map(|q| std::mem::take(&mut *q.lock().unwrap_or_else(|e| e.into_inner()))).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let _open_span = (!arrived.is_empty()).then(|| perf_span::span("open.bytes"));
         for (name, bytes) in arrived {
             if let Err(e) = self.open_bytes(&name, &bytes) {

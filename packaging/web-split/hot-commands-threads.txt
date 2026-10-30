@@ -1,0 +1,15 @@
+# Commands the basic page flows ran (profile.sh): they run before the chunks are in.
+edit.fill
+edit.redo
+edit.undo
+file.export.quickPng
+file.new
+file.saveAs
+layer.delete
+layer.duplicate
+layer.list
+layer.new.layer
+open:jpg
+select.deselect
+select.rect
+type.edit

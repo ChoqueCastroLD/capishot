@@ -51,6 +51,7 @@ def main():
     ap.add_argument('--glue', required=True)
     ap.add_argument('--cold', required=True)
     ap.add_argument('--wasm-split', default=os.environ.get('WASM_SPLIT', 'wasm-split'))
+    ap.add_argument('--hot', help='the commands the profiled flows ran (hot-commands*.txt): they run without waiting for the chunks')
     ap.add_argument('--chunk-bytes', type=float, default=5.5e6)
     ap.add_argument('--threads', action='store_true', help='the module uses threads and SIMD')
     ap.add_argument('--strip-only', action='store_true', help="don't split; only drop the name section")
@@ -113,7 +114,8 @@ def main():
     os.remove(manifest)
     os.rmdir(work)
     # The glue: the loader in the module's scope, its imports added, and told when an instance is up.
-    loader = open(os.path.join(HERE, 'loader.js'), encoding='utf8').read().replace('__SPLIT_CHUNKS__', json.dumps(names)).replace('__SPLIT_TABLE__', json.dumps(added[0]))
+    hot = sorted(line.strip() for line in open(a.hot, encoding='utf8') if line.strip() and not line.startswith('#')) if a.hot else []
+    loader = open(os.path.join(HERE, 'loader.js'), encoding='utf8').read().replace('__SPLIT_CHUNKS__', json.dumps(names)).replace('__SPLIT_TABLE__', json.dumps(added[0])).replace('__SPLIT_HOT__', json.dumps(hot))
     params = get.group(1)
     glue = glue.replace(get.group(0), f'function __wbg_get_imports_unsplit({params}) {{', 1)
     glue = glue.replace('wasm = instance.exports;', 'wasm = instance.exports;\n    __splitInstanceReady();', 1)
