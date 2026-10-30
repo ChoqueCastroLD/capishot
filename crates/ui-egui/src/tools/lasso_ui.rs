@@ -257,7 +257,10 @@ pub fn canvas_input(app: &mut PhotocraftApp, ctx: &egui::Context, xf: &ViewXform
             Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: m } => {
                 mods = m;
                 let p = xf.to_doc(pos);
-                if pressed && response.contains_pointer() && response.rect.contains(pos) {
+                // A finger press: egui 0.37 does not hover a touch before it lands, so the
+                // canvas is under it when no layer above it is.
+                let over = response.contains_pointer() || ctx.layer_id_at(pos) == Some(response.layer_id);
+                if pressed && over && response.rect.contains(pos) {
                     Some(ToolEvent::Down { x: p[0], y: p[1], pressure: 1.0 })
                 } else if !pressed && (active(app) || handed_over(app)) {
                     Some(ToolEvent::Up { x: p[0], y: p[1] })
