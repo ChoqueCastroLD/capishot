@@ -14,107 +14,56 @@
     #photocraft_loading p { margin: 0 0 8px; max-width: 420px; line-height: 1.5; white-space: pre-line; }
     #photocraft_loading a { color: #e0e0e0; pointer-events: auto; }
     #photocraft_loading.error p { color: #f0a0a0; }
-    /* The app removes this element once it runs. If the WebAssembly never downloads or doesn't match
-       this page, no Rust runs to say so, so the page itself shows what to do after a while. */
-    #photocraft_stalled { color: #8c8c8c; visibility: hidden; animation: photocraft-stalled 0s 30s forwards; }
-    @keyframes photocraft-stalled { to { visibility: visible; } }
   </style>
-  <script>
-    // A broken load (a file that failed to download, a module that doesn't instantiate): one
-    // automatic retry that bypasses the caches, then a clear message with Reload instead of a
-    // half-started app. The app marks a good start by removing #photocraft_loading.
-    (() => {
-      const KEY = 'capishot.loadRetry';
-      const lang = (navigator.language || 'en').slice(0, 2);
-      const text = {
-        es: ['No se pudo cargar Capishot por completo.', 'Recargar'],
-        pt: ['Não foi possível carregar o Capishot por completo.', 'Recarregar'],
-      }[lang] || ["Capishot didn't load completely.", 'Reload'];
-      let shown = false;
-      const reload = (bust) => {
-        const u = new URL(location.href);
-        if (bust) u.searchParams.set('r', Date.now().toString(36));
-        location.replace(u.href);
-      };
-      const broken = (why) => {
-        if (shown || !document.getElementById('photocraft_loading')) return;
-        console.error('Capishot: the load failed:', why);
-        let retried = false;
-        try { retried = sessionStorage.getItem(KEY) === '1'; sessionStorage.setItem(KEY, '1'); } catch (e) { retried = true; }
-        if (!retried) { reload(true); return; }
-        shown = true;
-        const box = document.getElementById('photocraft_loading');
-        box.innerHTML = '';
-        box.style.pointerEvents = 'auto';
-        const p = document.createElement('p');
-        p.id = 'photocraft_load_failed';
-        p.textContent = text[0];
-        const b = document.createElement('button');
-        b.id = 'photocraft_reload';
-        b.textContent = text[1];
-        b.style.cssText = 'font:15px system-ui,sans-serif;padding:10px 22px;border-radius:20px;border:0;background:#3b82f6;color:#fff;margin-top:8px';
-        b.onclick = () => { try { sessionStorage.removeItem(KEY); } catch (e) {} reload(true); };
-        box.append(p, b);
-      };
-      self.capishotLoadFailed = broken;
-      // A script, module or worker file that failed to load (capture: resource errors don't bubble).
-      addEventListener('error', (e) => {
-        const t = e.target;
-        if (t && t !== window && (t.src || t.href)) broken(`${t.src || t.href} didn't load`);
-        else if (e.message && /wasm|WebAssembly|import|module|fetch/i.test(e.message)) broken(e.message);
-      }, true);
-      addEventListener('unhandledrejection', (e) => {
-        const m = String((e.reason && e.reason.message) || e.reason || '');
-        if (/wasm|WebAssembly|import|module|fetch|Failed to fetch|NetworkError|CompileError|LinkError/i.test(m)) broken(m);
-      });
-      // A good start clears the retry, so a later broken load retries again.
-      const ok = setInterval(() => {
-        if (!document.getElementById('photocraft_loading')) { clearInterval(ok); try { sessionStorage.removeItem(KEY); } catch (e) {} }
-      }, 1000);
-    })();
-  </script>
+  <!-- The loader around the WebAssembly start (progress, a broken load's reason, the fall back to
+       the single-threaded build): boot.js, shared with that build's page. -->
+  <script src="boot.js" data-build="threads"></script>
 </head>
 <body>
   <canvas id="photocraft_canvas"></canvas>
   <div id="photocraft_loading">
     <p id="photocraft_status">Loading Capishot&hellip;</p>
-    <p id="photocraft_stalled">This is taking longer than usual. If Capishot doesn't start, its files may have failed to
-      download or come from a different version of this page. <a href="">Reload</a> to try again; the browser
-      console lists what failed.</p>
   </div>
   <script type="module">
     // Threads build (packaging/web-threads): the module shares one memory with a pool of Web
     // Workers, so the page must be cross-origin isolated (COOP + COEP, see _headers). The pool
     // is started before the app so rayon never falls back to its one-thread pool.
     const version = '__PHOTOCRAFT_VERSION__';
+    // The glue, the module and the glue's snippets of this build live in v/<version>/: a page
+    // from an earlier deploy keeps loading its own pair (deploy.sh keeps the previous builds).
+    const dir = `./v/${version}/`;
+    const boot = self.capishotBoot;
     const loading = document.getElementById('photocraft_loading');
     const status = document.getElementById('photocraft_status');
+    // Where the single-threaded build sits relative to this page (build.sh: PHOTOCRAFT_WEB_FALLBACK),
+    // or empty. Without cross-origin isolation (a host that doesn't send COOP + COEP, or a browser
+    // that doesn't honour them), or when this build fails at any stage, the page goes there.
+    const fallback = '__PHOTOCRAFT_FALLBACK__';
+    self.capishotFallback = fallback;
     // The module ships gzipped (build.sh) and is inflated on its way into streaming compilation.
     // Sniff the bytes rather than trust the name: a host that serves the file with
-    // Content-Encoding: gzip has the browser inflate it already.
+    // Content-Encoding (br or gzip) has the browser decode it already. No time limit: a slow
+    // network takes as long as it takes, with its progress on the page.
     const wasmResponse = async (url) => {
+      boot.stage('wasm_download');
       const res = await fetch(url);
-      if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+      if (!res.ok) { const e = new Error(`${url}: HTTP ${res.status}`); e.http = res.status; throw e; }
       const reader = res.body.getReader();
       const first = await reader.read();
       const head = first.value ?? new Uint8Array();
+      const gzipped = head[0] === 0x1f && head[1] === 0x8b;
       const body = new ReadableStream({
         start(c) { if (first.done) c.close(); else c.enqueue(head); },
         async pull(c) { const { done, value } = await reader.read(); if (done) c.close(); else c.enqueue(value); },
         cancel(reason) { return reader.cancel(reason); },
       });
-      const gzipped = head[0] === 0x1f && head[1] === 0x8b;
-      return new Response(gzipped ? body.pipeThrough(new DecompressionStream('gzip')) : body, { headers: { 'Content-Type': 'application/wasm' } });
+      const raw = boot.counted(new Response(body, { headers: { 'Content-Type': 'application/wasm' } }), gzipped);
+      return new Response(gzipped ? raw.body.pipeThrough(new DecompressionStream('gzip')) : raw.body, { headers: { 'Content-Type': 'application/wasm' } });
     };
     const fail = (msg) => {
       loading.classList.add('error');
       status.textContent = msg;
-      document.getElementById('photocraft_stalled').remove();
     };
-    // Where the single-threaded build sits relative to this page (build.sh: PHOTOCRAFT_WEB_FALLBACK),
-    // or empty. Without cross-origin isolation (a host that doesn't send COOP + COEP, or a browser
-    // that doesn't honour them) the page goes there instead of stopping.
-    const fallback = '__PHOTOCRAFT_FALLBACK__';
     const isolated = self.crossOriginIsolated === true;
     if (!isolated && fallback) {
       console.warn('photocraft-web: not cross-origin isolated; loading the single-threaded build');
@@ -129,11 +78,12 @@
         // The module's download starts with the glue's, not after it: on a phone network the
         // glue's round trip and bytes are otherwise time the module isn't downloading.
         const bust = new URLSearchParams(location.search).get('r');
-        const v = bust ? `${version}&r=${bust}` : version;
-        const wasm = wasmResponse(`./photocraft_bg.wasm.gz?v=${v}`);
+        const q = bust ? `?r=${bust}` : '';
+        const wasm = wasmResponse(`${dir}photocraft_bg.wasm.gz${q}`);
         wasm.catch(() => {});
-        const pc = await import(`./photocraft.js?v=${v}`);
-        await pc.default({ module_or_path: await wasm });
+        const pc = await import(`${dir}photocraft.js${q}`);
+        const response = await wasm;
+        await pc.default({ module_or_path: response });
         const moduleReady = Math.round(performance.now());
         // One worker per core but one (the UI thread spins while it waits for them), at most 16.
         // ?threads=N overrides it (1 runs every parallel step on one worker; useful to compare).
@@ -143,9 +93,11 @@
         // The pool and the app start together: the app gets its graphics device, fonts and presets
         // ready while the workers come up, and is built (the first thing to use rayon, which must
         // not run before the pool exists) once the page calls threadPoolReady().
+        boot.stage('threads_pool');
         const pool = pc.initThreadPool(threads);
         pc.start();
         await pool;
+        boot.stage('start');
         pc.threadPoolReady();
         // The module, for diagnostics: photocraftModule.parallelSelfTest(4000, 3000). Not
         // `photocraft`: the app sets window.photocraft to its embedding API once it runs.
@@ -154,8 +106,8 @@
         console.info(`photocraft-web: module downloaded and compiled at ${moduleReady} ms, rayon pool of ${threads} Web Workers at ${Math.round(performance.now())} ms`);
       } catch (e) {
         console.error(e);
-        // A download or instantiation that failed: retry once past the caches, then say so.
-        if (self.capishotLoadFailed && isolated) self.capishotLoadFailed(e && e.message ? e.message : String(e));
+        // Any stage failed: the single-threaded build (boot.js), or the reason when there is none.
+        if (boot && (isolated || fallback)) boot.fail(e);
         else fail(`Capishot could not start:\n${e && e.message ? e.message : e}`);
       }
     }

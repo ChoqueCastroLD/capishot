@@ -116,6 +116,14 @@ fi
 # The page loads the glue and the wasm with ?v=<content hash>, so both can be cached forever.
 version=$(cat "$OUT/photocraft.js" "$OUT/photocraft_bg.wasm.gz" | sha256sum | cut -c1-16)
 sed -e "s/__PHOTOCRAFT_VERSION__/$version/g" -e "s|__PHOTOCRAFT_FALLBACK__|$FALLBACK|g" "$HERE/index.html" >"$OUT/index.html"
+# The glue, the module and the glue's snippets go to v/<version>/: an index.html from an earlier
+# deploy (a cached page, a tab opened before it) keeps loading its own glue and module, never a
+# mix of two builds (deploy.sh keeps the previous builds' v/ directories).
+mkdir -p "$OUT/v/$version"
+mv "$OUT/photocraft.js" "$OUT/photocraft_bg.wasm.gz" "$OUT/v/$version/"
+[ -d "$OUT/snippets" ] && mv "$OUT/snippets" "$OUT/v/$version/"
+# The page's loader (progress, a broken load's reason, the fall back to the single-threaded build).
+cp "$ROOT/apps/photocraft-web/boot.js" "$OUT/"
 cp "$HERE/_headers" "$OUT/"
 # Translation catalogs the build doesn't compile in (photocraft-ui-egui `all-catalogs`): the app
 # fetches i18n/<code>.tsv when that language is chosen.
@@ -131,7 +139,7 @@ fi
 
 # Cloudflare Workers/Pages reject any single file over 25 MiB; fail well before that.
 max="${PHOTOCRAFT_WASM_MAX_BYTES:-33554432}" # 32 MiB (our nginx has no 25 MiB limit)
-size=$(wc -c <"$OUT/photocraft_bg.wasm.gz" | tr -d ' ')
+size=$(wc -c <"$OUT/v/$version/photocraft_bg.wasm.gz" | tr -d ' ')
 echo "photocraft_bg.wasm: $raw bytes ($((raw / 1048576)) MiB), gzipped $size bytes ($((size / 1048576)) MiB; limit $max)"
 big=$(find "$OUT" -type f -size +"$max"c)
 if [ -n "$big" ]; then

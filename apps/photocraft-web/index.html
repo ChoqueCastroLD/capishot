@@ -8,6 +8,7 @@
   <!-- Translation catalogs not compiled in (photocraft-ui-egui `all-catalogs`), fetched when chosen. -->
   <!-- An empty served-fonts manifest: a missing one is a 404 in the console. -->
   <link data-trunk rel="copy-file" href="fonts/manifest.txt" data-target-path="fonts" />
+  <link data-trunk rel="copy-file" href="boot.js" />
   <link data-trunk rel="copy-file" href="../../crates/ui-egui/src/i18n/ja.tsv" data-target-path="i18n" />
   <link data-trunk rel="copy-file" href="../../crates/ui-egui/src/i18n/zh-hans.tsv" data-target-path="i18n" />
   <link data-trunk rel="copy-file" href="../../crates/ui-egui/src/i18n/zh-hant.tsv" data-target-path="i18n" />
@@ -33,73 +34,15 @@
       padding: 0 16px; text-align: center; color: #b8b8b8; font: 14px system-ui, sans-serif; pointer-events: none; }
     #photocraft_loading p { margin: 0 0 8px; max-width: 420px; line-height: 1.5; }
     #photocraft_loading a { color: #e0e0e0; pointer-events: auto; }
-    /* The app removes this element once it runs. If the WebAssembly never downloads or doesn't match
-       this page, no Rust runs to say so, so the page itself shows what to do after a while. */
-    #photocraft_stalled { color: #8c8c8c; visibility: hidden; animation: photocraft-stalled 0s 20s forwards; }
-    @keyframes photocraft-stalled { to { visibility: visible; } }
+    #photocraft_loading.error p { color: #f0a0a0; }
   </style>
-  <script>
-    // A broken load (a file that failed to download, a module that doesn't instantiate): one
-    // automatic retry that bypasses the caches, then a clear message with Reload instead of a
-    // half-started app. The app marks a good start by removing #photocraft_loading.
-    (() => {
-      const KEY = 'capishot.loadRetry';
-      const lang = (navigator.language || 'en').slice(0, 2);
-      const text = {
-        es: ['No se pudo cargar Capishot por completo.', 'Recargar'],
-        pt: ['Não foi possível carregar o Capishot por completo.', 'Recarregar'],
-      }[lang] || ["Capishot didn't load completely.", 'Reload'];
-      let shown = false;
-      const reload = (bust) => {
-        const u = new URL(location.href);
-        if (bust) u.searchParams.set('r', Date.now().toString(36));
-        location.replace(u.href);
-      };
-      const broken = (why) => {
-        if (shown || !document.getElementById('photocraft_loading')) return;
-        console.error('Capishot: the load failed:', why);
-        let retried = false;
-        try { retried = sessionStorage.getItem(KEY) === '1'; sessionStorage.setItem(KEY, '1'); } catch (e) { retried = true; }
-        if (!retried) { reload(true); return; }
-        shown = true;
-        const box = document.getElementById('photocraft_loading');
-        box.innerHTML = '';
-        box.style.pointerEvents = 'auto';
-        const p = document.createElement('p');
-        p.id = 'photocraft_load_failed';
-        p.textContent = text[0];
-        const b = document.createElement('button');
-        b.id = 'photocraft_reload';
-        b.textContent = text[1];
-        b.style.cssText = 'font:15px system-ui,sans-serif;padding:10px 22px;border-radius:20px;border:0;background:#3b82f6;color:#fff;margin-top:8px';
-        b.onclick = () => { try { sessionStorage.removeItem(KEY); } catch (e) {} reload(true); };
-        box.append(p, b);
-      };
-      self.capishotLoadFailed = broken;
-      // A script, module or worker file that failed to load (capture: resource errors don't bubble).
-      addEventListener('error', (e) => {
-        const t = e.target;
-        if (t && t !== window && (t.src || t.href)) broken(`${t.src || t.href} didn't load`);
-        else if (e.message && /wasm|WebAssembly|import|module|fetch/i.test(e.message)) broken(e.message);
-      }, true);
-      addEventListener('unhandledrejection', (e) => {
-        const m = String((e.reason && e.reason.message) || e.reason || '');
-        if (/wasm|WebAssembly|import|module|fetch|Failed to fetch|NetworkError|CompileError|LinkError/i.test(m)) broken(m);
-      });
-      // A good start clears the retry, so a later broken load retries again.
-      const ok = setInterval(() => {
-        if (!document.getElementById('photocraft_loading')) { clearInterval(ok); try { sessionStorage.removeItem(KEY); } catch (e) {} }
-      }, 1000);
-    })();
-  </script>
+  <!-- The loader around the WebAssembly start (progress, a broken load's reason, one retry): boot.js. -->
+  <script src="boot.js" data-build="st"></script>
 </head>
 <body>
   <canvas id="photocraft_canvas"></canvas>
   <div id="photocraft_loading">
-    <p>Loading Capishot&hellip;</p>
-    <p id="photocraft_stalled">This is taking longer than usual. If Capishot doesn't start, its files may have failed to
-      download or come from a different version of this page. <a href="">Reload</a> to try again; the browser
-      console lists what failed.</p>
+    <p id="photocraft_status">Loading Capishot&hellip;</p>
   </div>
 </body>
 </html>

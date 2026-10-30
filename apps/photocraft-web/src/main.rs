@@ -97,13 +97,13 @@ mod tests {
     #[test]
     fn loading_page_offers_a_reload_when_startup_stalls() {
         let html = include_str!("../index.html");
-        let (_, hint) = html.split_once("<p id=\"photocraft_stalled\">").expect("stalled-startup hint in the loading element");
-        assert!(hint.contains("failed to") && hint.contains("<a href=\"\">Reload</a>"), "{hint}");
-        assert!(html.contains("animation: photocraft-stalled"), "the hint appears after a delay");
-        // Trunk injects the generated loader; the page's one script of its own is the broken-load
-        // retry (one cache-busting reload, then a Reload button).
-        assert_eq!(html.matches("<script").count(), 1, "only the broken-load retry");
-        assert!(html.contains("capishotLoadFailed") && html.contains("photocraft_reload"));
+        // Trunk injects the generated loader; the page's one script of its own is boot.js, the
+        // loader around it (progress, a broken load's reason, one cache-busting retry).
+        assert_eq!(html.matches("<script").count(), 1, "only boot.js");
+        assert!(html.contains(r#"<script src="boot.js" data-build="st"></script>"#) && html.contains(r#"rel="copy-file" href="boot.js""#));
+        assert!(html.contains(r#"<p id="photocraft_status">"#), "the line boot.js writes the progress to");
+        let boot = include_str!("../boot.js");
+        assert!(boot.contains("photocraft_reload") && boot.contains("photocraft_load_details") && !boot.contains("setTimeout("), "no time limits");
     }
 
     /// The threads page starts the module's download before importing the glue (on a phone
@@ -114,13 +114,14 @@ mod tests {
     fn the_threads_page_downloads_the_module_and_snippets_early() {
         let page = include_str!("../../../packaging/web-threads/index.html");
         let fetch = page.find("const wasm = wasmResponse(").expect("the module's fetch");
-        let import = page.find("await import(`./photocraft.js").expect("the glue's import");
+        let import = page.find("await import(`${dir}photocraft.js").expect("the glue's import");
         assert!(fetch < import, "the module's fetch starts first");
         let build = include_str!("../../../packaging/web-threads/build.sh");
         assert!(build.contains("?v=$snip"), "snippet imports versioned");
         let headers = include_str!("../../../packaging/web-threads/_headers");
-        let snippets = headers.split_once("/snippets/*").expect("a /snippets/* rule").1;
-        assert!(snippets.trim_start().lines().take(2).any(|l| l.contains("immutable")), "snippets cached forever");
+        let versioned = headers.split_once("/v/*").expect("a /v/* rule").1;
+        assert!(versioned.trim_start().lines().take(2).any(|l| l.contains("immutable")), "a build's glue, module and snippets cached forever");
+        assert!(build.contains(r#"mv "$OUT/snippets" "$OUT/v/$version/""#), "snippets in the build's directory");
     }
 
     /// Every catalog the web build doesn't compile in is shipped next to the page by both builds
