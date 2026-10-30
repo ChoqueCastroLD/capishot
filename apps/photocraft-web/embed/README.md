@@ -62,7 +62,9 @@ or changing the shape of any of them bumps it, and the host then needs a new ada
 scripts/build-embed.sh        # trunk release build of HEAD → dist/embed/<hash>/ (or $CAPISHOT_EMBED_BUILDS/<hash>/)
 ```
 
-The directory holds `capishot-embed.js`, `capishot-embed_bg.wasm`, `capishot-embed.d.ts` and
-`manifest.json` (embed API version, commit, build hash, sha256 and size of every file). The commit
+The directory holds `capishot-embed.js`, `capishot-embed_bg.wasm`, `capishot-embed.d.ts`, the
+module's lazily loaded chunks (`photocraft-web-<hash>_bg.c<N>.wasm`, fetched next to the glue in the
+background once the app runs; serve them with the rest) and `manifest.json` (embed API version,
+commit, build hash, sha256 and size of every file). The commit
 and build hash are compiled in (`CAPISHOT_COMMIT`, `CAPISHOT_BUILD_HASH`) and reported by
 `version()`, so a host can refuse a build that isn't the one it pinned.

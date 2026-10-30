@@ -70,10 +70,13 @@ cp -R dist/web dist/web-threads/st
 assets and Cloudflare/Netlify Pages, along with caching: `photocraft.js` and `photocraft_bg.wasm.gz`
 are requested as `?v=<content hash>` and cached for a year; everything else revalidates.
 
-The module ships as `photocraft_bg.wasm.gz` (about 10 MB instead of about 25 MB) and the page inflates
+The module ships as `photocraft_bg.wasm.gz` (about 6 MB instead of about 13 MB) and the page inflates
 it with `DecompressionStream` while it compiles, so no server-side compression or wasm MIME type is
-needed, and it stays far below the 25 MiB per-file cap of Cloudflare Workers/Pages (the raw module
-is already close to it; `build.sh` fails if any file passes 24 MiB). The page checks the first bytes
+needed for it. It holds what the first frames and the basic tools run; the rest of the code is in
+`photocraft_bg.c<N>.wasm` (about 5.5 MB each, plain wasm), which the glue fetches and instantiates in
+the background once the app runs, or on the spot when something calls into one first
+(`packaging/web-split`; `PHOTOCRAFT_WEB_SPLIT=0` builds one module). `build.sh` fails if any file
+passes 32 MiB. The page checks the first bytes
 for the gzip header, so a host that serves the file with `Content-Encoding: gzip` (and so has the
 browser inflate it first) works too.
 

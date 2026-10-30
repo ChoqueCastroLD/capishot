@@ -143,6 +143,23 @@ mod tests {
         }
     }
 
+    /// Both web builds split their module (packaging/web-split): the first-load part, and chunks
+    /// fetched in the background. The split finds the cold functions by name, so both keep the
+    /// name section for it (the split drops it).
+    #[test]
+    fn both_web_builds_split_the_module() {
+        let html = include_str!("../index.html");
+        let trunk = include_str!("../Trunk.toml");
+        assert!(html.contains(r#"data-wasm-opt-params="--debuginfo""#), "Trunk's wasm-opt keeps the names");
+        assert!(trunk.contains(r#"stage = "post_build""#) && trunk.contains("packaging/web-split/trunk-post-build.sh"), "Trunk runs the split");
+        let threads = include_str!("../../../packaging/web-threads/build.sh");
+        assert!(threads.contains("--debuginfo") && threads.contains("web-split/split.py\" --threads"), "the threads build splits");
+        let hook = include_str!("../../../packaging/web-split/trunk-post-build.sh");
+        assert!(hook.contains("rehash.py") && hook.contains("sri.py"), "renamed by content, integrity refreshed");
+        let loader = include_str!("../../../packaging/web-split/loader.js");
+        assert!(loader.contains("photocraft_loading") && loader.contains("compileStreaming"), "background fetch once the app runs");
+    }
+
     /// The threads build's page must start the Web Worker pool before the app can touch rayon
     /// (or rayon keeps its one-thread fallback pool): the app starts alongside it but is built
     /// only once the page reports the pool up (`threadPoolReady`, web.rs `WebRoot`). Its host

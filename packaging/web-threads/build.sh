@@ -31,9 +31,6 @@ PROFILE=wasm-release
 OUT="$ROOT/dist/web-threads"
 # Its own target dir: the std rebuild and RUSTFLAGS differ from every other build.
 TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}/web-threads"
-BINARYEN_VERSION=133
-BINARYEN_SHA256=2dc9c7813f5375db93d96ead4b78222fcc3e2677bbb832297af4797782a37489 # x86_64-linux tarball
-
 want=$(awk '/^name = "wasm-bindgen"$/{getline; gsub(/"/,"",$3); print $3; exit}' Cargo.lock)
 have=$(wasm-bindgen --version 2>/dev/null | awk '{print $2}')
 if [ "$want" != "$have" ]; then
@@ -42,27 +39,9 @@ if [ "$want" != "$have" ]; then
   exit 1
 fi
 
-wasm_opt() {
-  if command -v wasm-opt >/dev/null; then
-    command -v wasm-opt
-    return
-  fi
-  local dir="$ROOT/target/tools/binaryen-version_$BINARYEN_VERSION"
-  if [ ! -x "$dir/bin/wasm-opt" ]; then
-    local name="binaryen-version_$BINARYEN_VERSION-x86_64-linux.tar.gz"
-    local url="https://github.com/WebAssembly/binaryen/releases/download/version_$BINARYEN_VERSION/$name"
-    local tmp
-    tmp=$(mktemp -d)
-    echo "downloading $name" >&2
-    curl -fsSL "$url" -o "$tmp/$name"
-    echo "$BINARYEN_SHA256  $tmp/$name" | sha256sum -c - >&2
-    mkdir -p "$ROOT/target/tools"
-    tar -xzf "$tmp/$name" -C "$ROOT/target/tools"
-    rm -rf "$tmp"
-  fi
-  echo "$dir/bin/wasm-opt"
-}
-WASM_OPT=$(wasm_opt)
+# shellcheck source=../web-split/binaryen.sh
+. "$ROOT/packaging/web-split/binaryen.sh"
+WASM_OPT=$(binaryen_tool wasm-opt)
 
 # atomics + bulk-memory: threads (std is rebuilt with them). The linker flags make the memory
 # shared and imported (so every worker instantiates the module on the same memory, up to 4 GiB)
@@ -91,20 +70,31 @@ wasm-bindgen --target web --no-typescript --weak-refs --out-dir "$STAGE" --out-n
   "$TARGET_DIR/wasm32-unknown-unknown/$PROFILE/photocraft-web.wasm"
 "$WASM_OPT" -Oz --enable-threads --enable-bulk-memory --enable-mutable-globals --enable-sign-ext \
   --enable-nontrapping-float-to-int --enable-simd --enable-reference-types --enable-multivalue \
-  "$STAGE/photocraft_bg.wasm" -o "$STAGE/photocraft_bg.opt.wasm"
+  --debuginfo "$STAGE/photocraft_bg.wasm" -o "$STAGE/photocraft_bg.opt.wasm"
 mv "$STAGE/photocraft_bg.opt.wasm" "$STAGE/photocraft_bg.wasm"
+# What the first frame needs stays in photocraft_bg.wasm; the rest goes to photocraft_bg.cN.wasm,
+# fetched in the background once the app runs (packaging/web-split; it drops the names kept above
+# for it). PHOTOCRAFT_WEB_SPLIT=0 skips the split (=names also keeps the names, for profile.sh).
+if [ "${PHOTOCRAFT_WEB_SPLIT:-1}" = "names" ]; then
+  :
+elif [ "${PHOTOCRAFT_WEB_SPLIT:-1}" = "0" ]; then
+  python3 "$ROOT/packaging/web-split/split.py" --wasm "$STAGE/photocraft_bg.wasm" --glue "$STAGE/photocraft.js" --cold - --strip-only
+else
+  python3 "$ROOT/packaging/web-split/split.py" --threads --wasm "$STAGE/photocraft_bg.wasm" --glue "$STAGE/photocraft.js" \
+    --cold "$ROOT/packaging/web-split/cold-functions-threads.txt.gz" --wasm-split "$(binaryen_tool wasm-split)"
+fi
 
 mkdir -p "$OUT"
 cp -R "$STAGE/." "$OUT/"
 # The wasm ships gzipped and the page inflates it with DecompressionStream on its way into
-# streaming compilation: a third of the bytes to upload and download, and far below the 25 MiB
-# per-file cap of Cloudflare Workers/Pages that the raw module (about 25 MB) is close to.
+# streaming compilation: under half the bytes to upload and download for a host without
+# compression. The chunks stay plain wasm (the loader compiles them as they are).
 raw=$(wc -c <"$OUT/photocraft_bg.wasm" | tr -d ' ')
 # The glue's snippet imports (the worker helper, recovery storage, watchdog) get a content version
 # too, cached forever like the glue (_headers): every worker of the pool imports them, and each
 # had to revalidate them over the network before the app could start (several round trips on a
 # phone). The import object's keys (the wasm's import module names) stay as they are.
-snip=$( (find "$OUT/snippets" -name '*.js' -type f | LC_ALL=C sort | xargs cat; cat "$OUT/photocraft_bg.wasm") | sha256sum | cut -c1-16)
+snip=$( (find "$OUT/snippets" -name '*.js' -type f | LC_ALL=C sort | xargs cat; cat "$OUT"/photocraft_bg*.wasm) | sha256sum | cut -c1-16)
 sed -i -E "/^import /s#(['\"]\./snippets/[^'\"]+\.js)(['\"])#\1?v=$snip\2#" "$OUT/photocraft.js"
 # pigz -11 is zopfli on every core: still plain gzip for every browser, about 4% (0.4 MB) less to
 # download than gzip -9, in a few seconds.
@@ -114,13 +104,13 @@ else
   gzip -9 -n "$OUT/photocraft_bg.wasm"
 fi
 # The page loads the glue and the wasm with ?v=<content hash>, so both can be cached forever.
-version=$(cat "$OUT/photocraft.js" "$OUT/photocraft_bg.wasm.gz" | sha256sum | cut -c1-16)
+version=$(cat "$OUT/photocraft.js" "$OUT"/photocraft_bg*.wasm* | sha256sum | cut -c1-16)
 sed -e "s/__PHOTOCRAFT_VERSION__/$version/g" -e "s|__PHOTOCRAFT_FALLBACK__|$FALLBACK|g" "$HERE/index.html" >"$OUT/index.html"
 # The glue, the module and the glue's snippets go to v/<version>/: an index.html from an earlier
 # deploy (a cached page, a tab opened before it) keeps loading its own glue and module, never a
 # mix of two builds (deploy.sh keeps the previous builds' v/ directories).
 mkdir -p "$OUT/v/$version"
-mv "$OUT/photocraft.js" "$OUT/photocraft_bg.wasm.gz" "$OUT/v/$version/"
+mv "$OUT/photocraft.js" "$OUT"/photocraft_bg*.wasm* "$OUT/v/$version/"
 [ -d "$OUT/snippets" ] && mv "$OUT/snippets" "$OUT/v/$version/"
 # The page's loader (progress, a broken load's reason, the fall back to the single-threaded build).
 cp "$ROOT/apps/photocraft-web/boot.js" "$OUT/"

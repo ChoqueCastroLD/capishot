@@ -8,3 +8,11 @@ filehash = true
 [serve]
 addresses = ["127.0.0.1"]
 port = 8765
+
+# Release builds: split the module into what the first frame needs and chunks loaded in the
+# background (packaging/web-split). The rust link keeps the name section (--debuginfo) for it;
+# the split strips it. PHOTOCRAFT_WEB_SPLIT=0 skips the step.
+[[hooks]]
+stage = "post_build"
+command = "bash"
+command_arguments = ["../../packaging/web-split/trunk-post-build.sh"]

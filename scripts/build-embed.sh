@@ -48,6 +48,9 @@ mkdir -p "$PKG"
 # Stable names inside the versioned directory; the glue gets the wasm URL from the host.
 cp "$STAGE/dist/$JS" "$PKG/capishot-embed.js"
 cp "$STAGE/dist/$WASM" "$PKG/capishot-embed_bg.wasm"
+# The module's lazily loaded chunks (packaging/web-split), under their own names: the glue finds
+# them next to itself.
+for c in "$STAGE/dist/${WASM%.wasm}".c*.wasm; do if [ -f "$c" ]; then cp "$c" "$PKG/"; fi; done
 [ -d "$STAGE/dist/snippets" ] && cp -r "$STAGE/dist/snippets" "$PKG/"
 cp apps/photocraft-web/embed/capishot-embed.d.ts "$PKG/capishot-embed.d.ts"
 
