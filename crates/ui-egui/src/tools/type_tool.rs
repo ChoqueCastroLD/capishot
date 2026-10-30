@@ -37,11 +37,11 @@ use defaults::{apply, default_style_params, default_styles, shown_scale};
 pub use defaults::{foreground_changed, open_color_picker};
 pub(crate) use defaults::{formatting_params, target, target_text, type_unit, with_target};
 #[cfg(test)]
+pub(crate) use editing::insert;
+#[cfg(test)]
 pub(crate) use editing::{CharToggle, step_char_metric, toggle_char_style, toggle_hyphenate};
 pub use editing::{cancel, commit, commit_with, edit_active, edit_at, end_if_left};
 pub(crate) use editing::{copy_selection, cut_selection, request_paste, select_all};
-#[cfg(test)]
-pub(crate) use editing::insert;
 #[cfg(test)]
 use editing::{insert_typed, smart_quotes};
 #[cfg(test)]
@@ -65,8 +65,8 @@ pub use layout::layout;
 pub(crate) use layout::{hit_layer, offset_at, shows_own_layout};
 #[cfg(test)]
 use options_bar::num_field;
-pub use options_bar::{TOUCH_BAR_ONE_ROW, TOUCH_BAR_ROW, options_bar, phone_form, touch_bar, touch_bar_rows};
 pub(crate) use options_bar::styles_at;
+pub use options_bar::{TOUCH_BAR_ONE_ROW, TOUCH_BAR_ROW, options_bar, phone_form, touch_bar, touch_bar_rows};
 #[cfg(test)]
 pub(crate) use options_bar::{in_path_target, toggle_type_panels};
 #[cfg(test)]
@@ -78,10 +78,10 @@ pub use overlay::draw_overlay;
 pub(crate) use panel::{OPENTYPE_BUTTONS, toggle_opentype};
 pub use panel::{character_panel, type_properties};
 #[cfg(test)]
+pub(crate) use pointer::in_path_at;
+#[cfg(test)]
 use pointer::{MIN_BOX, handle_sides, word_boundary};
 pub(crate) use pointer::{PathClick, box_handle_at, hover_path_target, inside_box};
-#[cfg(test)]
-pub(crate) use pointer::in_path_at;
 #[cfg(test)]
 pub(crate) use pointer::{box_shape, click_selection, next_click_count, path_target};
 pub use pointer::{multi_click, pointer_down, pointer_move, pointer_up};

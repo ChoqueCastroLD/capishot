@@ -5,9 +5,7 @@ use super::{
     theme, tiff_options_ui, timeline_ui, titlebar, tool_cursor, tool_memory, transform_tool, type_panels_ui, type_tool, updates_ui, vector_ui, view_cmds,
     wide_angle_ui, work_area, workspace_ui,
 };
-use crate::{
-    ai_models_ui, chrome_freeze, lut_library_ui, perf_span, recovery_ui, remove_ai_ui, simple_ui, telemetry, touch_ui, typer, user_fonts_ui,
-};
+use crate::{ai_models_ui, chrome_freeze, lut_library_ui, perf_span, recovery_ui, remove_ai_ui, simple_ui, telemetry, touch_ui, typer, user_fonts_ui};
 
 impl PhotocraftApp {
     /// Wait out the rest of [`Self::min_frame_ms`] since the last frame started.

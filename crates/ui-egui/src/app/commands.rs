@@ -3,9 +3,7 @@ use super::{
     DocId, PhotocraftApp, Tool, Value, actions, canvas, delete_layer_prompt, dock, gpu_canvas, jobs_ui, json, mask_trash_prompt, notices, panel_docking, state,
     transform_tool, type_transform, vector_ui,
 };
-use crate::{
-    perf_span, telemetry,
-};
+use crate::{perf_span, telemetry};
 
 impl PhotocraftApp {
     /// Run an engine command, reporting errors in the status bar.

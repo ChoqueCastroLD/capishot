@@ -147,12 +147,11 @@ fn color(ui: &mut egui::Ui, o: &mut Map<String, Value>, k: &str, short: bool) {
 /// Load Fonts…). A family the font database doesn't have is kept and flagged.
 fn family_field(app: &mut PhotocraftApp, ui: &mut egui::Ui, t: &Tokens, ts: &mut Map<String, Value>) {
     let mut family = get_s(ts, "fontName").to_string();
-    if crate::type_tool::fonts_ready(ui, 170.0)
-        && crate::type_tool::font_picker(app, ui, &mut family, 170.0).is_some() {
-            ts.insert("fontName".into(), json!(family));
-            // The PostScript name no longer applies; the family and style name pick the face.
-            ts.insert("fontPostScriptName".into(), json!(""));
-        }
+    if crate::type_tool::fonts_ready(ui, 170.0) && crate::type_tool::font_picker(app, ui, &mut family, 170.0).is_some() {
+        ts.insert("fontName".into(), json!(family));
+        // The PostScript name no longer applies; the family and style name pick the face.
+        ts.insert("fontPostScriptName".into(), json!(""));
+    }
     if !family.is_empty() && !crate::type_tool::families().iter().any(|f| f.eq_ignore_ascii_case(&family)) {
         ui.label(RichText::new(tl!("not installed")).color(t.warning).size(11.0)).on_hover_text(tl!("Load the font with Type › Load Fonts…"));
     }
