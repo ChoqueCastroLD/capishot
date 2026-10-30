@@ -176,7 +176,7 @@ fn tile_damage_grows_by_the_layer_effect_margin() {
 #[test]
 fn a_dab_inside_a_group_with_a_drop_shadow_damages_the_shadow() {
     let mut s = session(1024, 768);
-    let child = layer_with(&mut s, &[(Rect::new(600, 400, 700, 500), [1.0, 0.0, 0.0, 1.0])]);
+    let child = layer_with(&mut s, &[(Rect::new(200, 400, 300, 500), [1.0, 0.0, 0.0, 1.0])]);
     s.execute("layer.select", json!({"layer": child.0})).unwrap();
     let g = LayerId(s.execute("layer.groupLayers", json!({})).unwrap()["layer"].as_u64().unwrap());
     s.edit("fx", |doc, _| {
@@ -185,10 +185,11 @@ fn a_dab_inside_a_group_with_a_drop_shadow_damages_the_shadow() {
     })
     .unwrap();
     assert!(photocraft_compose::effects::margin(doc(&s).layer(g).unwrap()) > 0);
-    let dab = Rect::new(640, 440, 660, 460);
-    let (before, after) = paint(&mut s, child, dab, [0.0, 0.0, 1.0, 1.0]);
+    // A hole at a tile's right edge: its shadow lands in the next tile.
+    let dab = Rect::new(250, 440, TILE_SIZE, 460);
+    let (before, after) = paint(&mut s, child, dab, [0.0, 0.0, 0.0, 0.0]);
     let d = damage(&s).expect("a bounded dab");
-    assert!(d.contains_rect(&dab), "{d:?}");
+    assert!(d.contains_rect(&dab) && d.x1 > TILE_SIZE, "{d:?}");
     assert!(unchanged_outside(&before, &after, d), "the group's shadow changed outside {d:?}");
 }
 
@@ -209,6 +210,12 @@ fn painting_a_clip_base_under_a_styled_clipped_layer_is_covered() {
     assert!(unchanged_outside(&before, &after, d), "the clipped layer changed outside {d:?}");
     let (before, after) = paint(&mut s, base, Rect::new(640, 440, 660, 460), [0.0, 0.0, 0.0, 0.0]);
     let d = damage(&s).expect("a bounded base edit");
+    assert!(unchanged_outside(&before, &after, d), "the clipped layer changed outside {d:?}");
+    // At a tile's edge too: the clipped layer's shadow is built from its own shape, and the base
+    // only masks it pixel by pixel, so a base edit changes nothing past its own tiles.
+    let (before, after) = paint(&mut s, base, Rect::new(3 * TILE_SIZE - 6, 440, 3 * TILE_SIZE, 460), [0.0, 0.0, 0.0, 0.0]);
+    let d = damage(&s).expect("a bounded base edit");
+    assert!(d.x1 <= 3 * TILE_SIZE, "{d:?}");
     assert!(unchanged_outside(&before, &after, d), "the clipped layer changed outside {d:?}");
 }
 
@@ -267,6 +274,41 @@ fn a_hint_that_misses_a_changed_tile_is_counted() {
     s.hint_damage(Rect::new(600, 400, 620, 420));
     assert_eq!(s.damage_misses, 1);
     assert_eq!(damage(&s), Some(Rect::new(600, 400, 620, 420)));
+}
+
+/// A brush hint is the bare dab; on a feathered mask the dab changes a soft ring around it, and
+/// the hint must not cut that off.
+#[test]
+fn a_brush_hint_on_a_feathered_mask_keeps_the_ring() {
+    let mut s = session(1024, 768);
+    let id = full_layer(&mut s);
+    s.edit("mask", |doc, _| {
+        doc.layer_mut(id).unwrap().mask = Some(photocraft_doc::LayerMask { feather: 10.0, ..photocraft_doc::LayerMask::reveal_all() });
+        Ok(())
+    })
+    .unwrap();
+    let before = doc(&s);
+    s.execute("paint.stroke", json!({"points": [[500, 400]], "size": 10, "hardness": 1.0, "color": "#000000", "target": "mask", "layer": id.0})).unwrap();
+    assert_eq!(s.damage_misses, 0);
+    let d = damage(&s).expect("a bounded dab");
+    assert!(unchanged_outside(&before, &doc(&s), d), "the feathered mask changed outside {d:?}");
+}
+
+/// The same for a layer's effects: the dab's drop shadow lands outside the dab.
+#[test]
+fn a_brush_hint_on_a_layer_with_a_drop_shadow_keeps_the_shadow() {
+    let mut s = session(1024, 768);
+    let id = layer_with(&mut s, &[(Rect::new(600, 400, 700, 500), [1.0, 0.0, 0.0, 1.0])]);
+    s.edit("fx", |doc, _| {
+        doc.layer_mut(id).unwrap().effects.items.push(photocraft_doc::Effect::default_drop_shadow());
+        Ok(())
+    })
+    .unwrap();
+    let before = doc(&s);
+    s.execute("paint.stroke", json!({"points": [[300, 300]], "size": 10, "hardness": 1.0, "color": "#0000ff", "layer": id.0})).unwrap();
+    assert_eq!(s.damage_misses, 0);
+    let d = damage(&s).expect("a bounded dab");
+    assert!(unchanged_outside(&before, &doc(&s), d), "the shadow changed outside {d:?}");
 }
 
 #[test]
