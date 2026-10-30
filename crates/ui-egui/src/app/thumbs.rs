@@ -1,7 +1,5 @@
 use super::{DocId, Document, PhotocraftApp, mask_thumbs_ui};
-use crate::{
-    ai_models_ui, chrome_freeze, filter_dialog, lut_library_ui, perf_span, recovery_ui, remove_ai_ui, simple_ui, telemetry, touch_ui, typer, user_fonts_ui,
-};
+use crate::perf_span;
 
 impl PhotocraftApp {
     pub(super) fn prune_thumbs(&mut self) {

@@ -123,6 +123,7 @@ pub fn finish(ui: &Ui, layer: LayerId) {
 }
 
 /// The browser. `layer` keys the per-layer state; `builtins` are `(id, label)`.
+#[expect(clippy::cognitive_complexity, reason = "search, groups and rows in one list")]
 pub fn browser(app: &mut PhotocraftApp, ui: &mut Ui, layer: LayerId, cur: &Current, builtins: &[(&str, &str)]) -> Option<Pick> {
     let t = Tokens::get(ui.ctx());
     let ctx = ui.ctx().clone();

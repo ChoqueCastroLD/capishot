@@ -4,7 +4,7 @@ use super::options_bar::{quad_scale, readout};
 use super::pointer::{Hit, handle_at, rotate_dir, rotation_degrees};
 use super::warp::{on_section_edge, quick_split_kind, single_patch};
 use super::{
-    BezierMesh, Color32, DocId, HANDLE_PX, Homography, LayerId, PhotocraftApp, Pos2, SplitTool, Stroke, TransformPreview, TransformSession, ViewXform, Warp,
+    BezierMesh, Color32, DocId, Homography, LayerId, PhotocraftApp, Pos2, SplitTool, Stroke, TransformPreview, TransformSession, ViewXform, Warp,
     WarpDrag, WarpStyle, corners, handle_px, pos2, vec2,
 };
 

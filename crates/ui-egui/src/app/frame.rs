@@ -6,7 +6,7 @@ use super::{
     wide_angle_ui, work_area, workspace_ui,
 };
 use crate::{
-    ai_models_ui, chrome_freeze, filter_dialog, lut_library_ui, perf_span, recovery_ui, remove_ai_ui, simple_ui, telemetry, touch_ui, typer, user_fonts_ui,
+    ai_models_ui, chrome_freeze, lut_library_ui, perf_span, recovery_ui, remove_ai_ui, simple_ui, telemetry, touch_ui, typer, user_fonts_ui,
 };
 
 impl PhotocraftApp {
@@ -104,8 +104,8 @@ impl PhotocraftApp {
             #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
             crate::dialogs::filter_preview_worker::discard_closed(self);
             #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
-            if !filter_dialog::previewing(self) {
-                filter_dialog::release_proxy();
+            if !crate::filter_dialog::previewing(self) {
+                crate::filter_dialog::release_proxy();
             }
             if type_tool::in_ui_pass(ctx) {
                 if self.fonts_ready {

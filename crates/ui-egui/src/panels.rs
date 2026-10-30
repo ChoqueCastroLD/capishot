@@ -71,7 +71,7 @@ pub(crate) use color::{color_field, color_field_fill_id, field_chips, field_hsva
 pub(crate) use color::{hsva_color32, hsva_srgb, srgb_bytes};
 #[cfg(test)]
 pub(crate) use dock::DOCK_MIN_WIDTH;
-pub(crate) use dock::{NARROW_SCREEN, canvas_panel, dock_body, dock_width_id, dock_width_range, group_icon, narrow_dock_open};
+pub(crate) use dock::{canvas_panel, dock_body, dock_width_id, dock_width_range, narrow_dock_open};
 pub use dock::{dock_area, floating_groups, left_dock, request_dock_width, right_dock};
 #[cfg(test)]
 use history::history;

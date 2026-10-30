@@ -259,6 +259,7 @@ pub(crate) fn hits_for(app: &PhotocraftApp, ctx: &egui::Context, q: &str) -> Vec
     if empty { hits } else { grouped(hits) }
 }
 
+#[expect(clippy::cognitive_complexity, reason = "the palette window: search, list and keys")]
 pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if !app.ui.palette_open {
         return;

@@ -561,6 +561,7 @@ fn craft_provider_id() -> egui::Id {
 /// An English UI on a Japanese, Korean or Chinese OS therefore uses that OS script, not the
 /// migration baseline's manifest-first face. The baseline applies only when the effective locale
 /// is non-CJK or unknown.
+#[cfg(not(target_arch = "wasm32"))]
 fn effective_locale(ui_code: &str, os_locale: Option<&str>) -> Option<String> {
     match ui_code {
         "ja" | "ko" | "zh-hans" | "zh-hant" => Some(ui_code.to_owned()),

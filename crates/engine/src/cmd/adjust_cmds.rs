@@ -189,8 +189,10 @@ fn base_name(path: &str) -> String {
 }
 
 /// Most LUT files [`folder_luts`] lists.
+#[cfg(not(target_arch = "wasm32"))]
 const MAX_FOLDER_LUTS: usize = 500;
 /// Largest LUT file [`folder_luts`] lists: a 129³ `.cube` (the parser's largest) is about 60 MB.
+#[cfg(not(target_arch = "wasm32"))]
 const MAX_FOLDER_LUT_BYTES: u64 = 64 << 20;
 
 /// The `.cube`, `.3dl` and `.look` files directly in `dir`, as (file name, path) sorted by name,

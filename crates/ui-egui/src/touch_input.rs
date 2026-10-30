@@ -304,6 +304,7 @@ impl TouchInput {
     }
 
     /// One touch event; returns whether egui gets it.
+    #[expect(clippy::cognitive_complexity, reason = "the touch state machine")]
     fn touch(&mut self, out: &mut Vec<Event>, id: TouchId, phase: TouchPhase, pos: Pos2, force: Option<f32>, now: f64) -> bool {
         match phase {
             TouchPhase::Start => {

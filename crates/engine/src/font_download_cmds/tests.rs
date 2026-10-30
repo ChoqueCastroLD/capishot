@@ -249,6 +249,7 @@ fn wait_job(s: &mut Session, id: jobs::JobId) -> jobs::JobEvent {
 
 // ------------------------------------------------------------------ the happy path
 
+#[expect(clippy::cognitive_complexity, reason = "one end-to-end scenario")]
 #[test]
 fn install_lists_registers_and_removes_end_to_end() {
     let mut r = Rig::new("e2e", &[plain("Zqaaa", "zqaaa"), plain("Zqaab", "zqaab")]);

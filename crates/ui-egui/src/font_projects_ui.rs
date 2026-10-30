@@ -466,7 +466,7 @@ fn settings_editor(ui: &mut egui::Ui, salt: &str, s: &RoleSettings) -> Option<Ro
         crate::widgets::checkbox(ui, &mut caps, tl!("Letter case"));
         let mut c = n.caps.clone().unwrap_or_else(|| "all".into());
         ui.add_enabled_ui(caps, |ui| {
-            egui::ComboBox::from_id_salt(("role-caps", salt))
+            craft_ui::ComboBox::from_id_salt(("role-caps", salt))
                 .selected_text(match c.as_str() {
                     "small" => tl!("Small Caps"),
                     "normal" => tl!("Normal"),
@@ -569,7 +569,7 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
         }
         // The project list.
         ui.horizontal_wrapped(|ui| {
-            egui::ComboBox::from_id_salt("font-projects-pick")
+            craft_ui::ComboBox::from_id_salt("font-projects-pick")
                 .selected_text(selected.as_deref().and_then(|id| all.get(id)).map_or_else(|| tl!("No projects yet").to_string(), |p| p.name.clone()))
                 .width(200.0)
                 .show_ui(ui, |ui| {
@@ -694,7 +694,7 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
             });
             let role_combo = |ui: &mut egui::Ui, salt: &str, current: Option<&String>| -> Option<Option<String>> {
                 let mut out = None;
-                egui::ComboBox::from_id_salt(salt).selected_text(current.map_or_else(|| tl!("None").to_string(), |r| role_name(&project, r))).show_ui(
+                craft_ui::ComboBox::from_id_salt(salt).selected_text(current.map_or_else(|| tl!("None").to_string(), |r| role_name(&project, r))).show_ui(
                     ui,
                     |ui| {
                         if ui.selectable_label(current.is_none(), tl!("None")).clicked() {

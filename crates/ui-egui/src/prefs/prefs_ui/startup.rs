@@ -1,4 +1,4 @@
-use super::{CheckpointStamp, RecoveryContext, recovery_context};
+use super::{CheckpointStamp, RecoveryContext};
 use super::{JobEvent, JobOutcome, PhotocraftApp, Started, Value, json, prefs};
 
 /// View › Rulers follows `unitsAndRulers.showRulers` when the preference changes (at launch, from

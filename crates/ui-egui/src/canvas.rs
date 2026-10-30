@@ -1845,6 +1845,7 @@ fn polygon_edge_scroll(app: &PhotocraftApp, ctx: &egui::Context, idx: usize, rec
     view.center[1] += delta.y;
 }
 
+#[expect(clippy::cognitive_complexity, reason = "one view: the GPU or CPU canvas, then every overlay in order")]
 pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect: Rect, mut view: View, primary: bool) -> View {
     let ctx = ui.ctx().clone();
     // The camera as the app holds it before this frame's input. The canvas works on its own copy

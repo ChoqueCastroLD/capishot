@@ -1,8 +1,7 @@
-use super::display::{canvas_display, display_image};
 use super::drag::Drag;
-use super::textures::{canvas_texture_options, shown_as_document};
+use super::textures::shown_as_document;
 use super::view_xform::ViewXform;
-use super::{Color32, DRect, PhotocraftApp, Pos2, Stroke, Tool, json, pos2};
+use super::{Color32, DRect, PhotocraftApp, Pos2, Stroke, Tool, json};
 
 pub(crate) use crate::clone_overlay::ClonePreviewCache;
 
@@ -213,11 +212,11 @@ pub(crate) fn strokes_live(tool: Tool) -> bool {
 /// semi-opaque dark overlay (an image overlay, the same in every UI theme) and heals on release.
 pub(crate) const SPOT_HEALING_TRAIL: Color32 = Color32::from_black_alpha(128);
 
+/// The retouching tools drawn live (`LiveRetouch`), by the command their live stroke previews.
+/// The Healing Brush heals as it is drawn, as Photoshop CC's does. The Spot Healing Brush isn't
+/// here on purpose: like Photoshop's it shows a dark footprint while drawing and heals on release
+/// (its fill needs the whole stroke).
 pub(super) fn live_retouch_command(tool: Tool) -> Option<&'static str> {
-    /// The retouching tools drawn live (`LiveRetouch`), by the command their live stroke previews.
-    /// The Healing Brush heals as it is drawn, as Photoshop CC's does. The Spot Healing Brush isn't
-    /// here on purpose: like Photoshop's it shows a dark footprint while drawing and heals on release
-    /// (its fill needs the whole stroke).
     match tool {
         Tool::CloneStamp => Some("paint.cloneStamp"),
         Tool::Healing => Some("paint.healingBrush"),

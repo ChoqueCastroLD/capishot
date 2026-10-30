@@ -127,18 +127,9 @@ pub(super) fn merged_object<T: serde::Serialize + serde::de::DeserializeOwned>(
     serde_json::from_value(cur).map(Some).map_err(|e| format!("{field}: {e}"))
 }
 
-/// A `ui.set` object field applied by whole-value replacement (e.g. `dock`):
-/// unknown nested keys are rejected like [`merged_object`] does, but the value replaces the
-/// state instead of merging into it.
-pub(super) fn whole_object<T: serde::Serialize + serde::de::DeserializeOwned>(
-    current: &T,
-    v: Option<&Value>,
-    field: &str,
-) -> std::result::Result<Option<T>, String> {
-    whole_object_with(current, v, field, &[])
-}
-
-/// [`whole_object`] that also knows `optional` fields (left out of `current`'s JSON while empty).
+/// A `ui.set` object field applied by whole-value replacement (e.g. `dock`): unknown nested
+/// keys are rejected like [`merged_object`] does, but the value replaces the state instead of
+/// merging into it. `optional` fields are left out of `current`'s JSON while empty.
 pub(super) fn whole_object_with<T: serde::Serialize + serde::de::DeserializeOwned>(
     current: &T,
     v: Option<&Value>,

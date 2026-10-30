@@ -958,14 +958,6 @@ pub(crate) mod probe {
     use craft_ui::docking::{DockArea, Hit};
     use egui::Rect;
 
-    pub(crate) fn hit_rect(ctx: &egui::Context, hit: &Hit<String>) -> Option<Rect> {
-        DockArea::<String>::hit_rects(ctx, area_id()).into_iter().find(|(drawn, _)| drawn == hit).map(|(_, rect)| rect)
-    }
-
-    pub(crate) fn tab_rect(ctx: &egui::Context, panel: &str) -> Option<Rect> {
-        hit_rect(ctx, &Hit::Tab(panel.to_owned()))
-    }
-
     /// The body of `panel`, when it is its group's selected tab.
     pub(crate) fn panel_rect(ctx: &egui::Context, panel: &str) -> Option<Rect> {
         last_bodies(ctx).into_iter().find(|(id, _)| id == panel).map(|(_, rect)| rect).or_else(|| {

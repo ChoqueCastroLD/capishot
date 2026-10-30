@@ -251,15 +251,14 @@ pub fn phone_form(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             ui.end_row();
         }
         ui.label(tl!("Font"));
-        if fonts_ready(ui, field) {
-            if font_picker(app, ui, &mut fam, field).is_some() {
+        if fonts_ready(ui, field)
+            && font_picker(app, ui, &mut fam, field).is_some() {
                 app.ui.tool_options.type_font = fam.clone();
                 let st = styles(&fam);
                 style = if st.contains(&style) { style.clone() } else { st.first().cloned().unwrap_or_else(|| "Regular".into()) };
                 app.ui.tool_options.type_style = style.clone();
                 apply(app, &ctx, json!({"font": fam}));
             }
-        }
         ui.end_row();
         ui.label(tl!("Style"));
         let opts: Vec<(String, String)> = styles(&fam).into_iter().map(|s| (s.clone(), style_label(&s))).collect();
@@ -641,12 +640,11 @@ fn font_and_size(app: &mut PhotocraftApp, ui: &mut egui::Ui, font_w: f32) {
         (rect, resp, child)
     };
     let (rect, _, mut child) = slot(ui, font_w);
-    if fonts_ready(&mut child, font_w) {
-        if font_picker(app, &mut child, &mut fam, font_w).is_some() {
+    if fonts_ready(&mut child, font_w)
+        && font_picker(app, &mut child, &mut fam, font_w).is_some() {
             app.ui.tool_options.type_font = fam.clone();
             apply(app, ui.ctx(), json!({"font": fam}));
         }
-    }
     crate::touch_ui::note_rect(ui.ctx(), "typeFont", rect);
     let (unit, label) = type_unit(app);
     let mut display = size * unit;

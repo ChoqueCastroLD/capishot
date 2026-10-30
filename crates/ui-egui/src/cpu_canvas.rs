@@ -288,6 +288,7 @@ enum Job {
 
 /// Draw document `idx`'s CPU canvas: tiles in view at the zoom's level, composited as needed.
 /// `zoom` is device pixels per document pixel (`View::zoom`).
+#[expect(clippy::cognitive_complexity, reason = "the tile pipeline in frame order")]
 #[allow(clippy::too_many_arguments)]
 pub fn paint(
     app: &mut PhotocraftApp,

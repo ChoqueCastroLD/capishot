@@ -1,7 +1,7 @@
 use super::inspect::inspect;
 use super::params::{
     BUTTONS, KEY_MODIFIERS, MAX_CLICKS, POINTER_MODIFIERS, UI_SET_FIELDS, bool_field, err, f32_field, f32_range, input_choice, input_modifiers, input_number,
-    input_object, merged_object, modifiers_from, num_field, ok, screen_point, uint_field, whole_object, whole_object_with,
+    input_object, merged_object, modifiers_from, num_field, ok, screen_point, uint_field, whole_object_with,
 };
 use super::{ControlRequest, DialogKind, Outcome, PhotocraftApp, SHELL_DIALOG, Tool, ToolEvent, Value, json, run_waiting, tool_event, wrap};
 

@@ -910,6 +910,7 @@ pub fn paint_drop_hint(app: &PhotocraftApp, ctx: &egui::Context) {
 /// Draw the `shown` groups (any order; the layout decides) filling `ui` at `place`. A group with
 /// guests ([`DockLayout::guests`]) shows their tabs on its strip too. `body` draws one group's
 /// tab content.
+#[expect(clippy::cognitive_complexity, reason = "the column, its strips, drags and drops in one pass")]
 pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, place: Place, shown: &[Group], mut body: impl FnMut(&mut PhotocraftApp, &mut egui::Ui, Group, usize)) {
     let t = Tokens::get(ui.ctx());
     let auto_collapse = app.session.prefs().workspace.auto_collapse_icon_panels;

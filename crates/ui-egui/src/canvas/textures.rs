@@ -1,6 +1,5 @@
 use super::display::{GPU_OUTPUT, cache_key, canvas_display, display_doc, display_image, texture_key};
 use super::filter_preview::filter_channel_preview;
-use super::navigator::navigator_waits_for_drag;
 use super::strokes::live_stroke;
 use super::view_xform::ViewXform;
 use super::{CanvasCache, CpuTextures, DRect, DetailTexture, Document, InView, LayerContent, PhotocraftApp, TextureOptions, pos2};

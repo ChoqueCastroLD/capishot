@@ -104,7 +104,7 @@ pub(crate) fn interact(
     viewport: Rect,
     size: Vec2,
     sampler: &mut bool,
-    animated_zoom: bool,
+    _animated_zoom: bool,
 ) -> (Rect, Response, bool, Option<Rect>) {
     let sampling = *sampler;
     let response = ui.interact(viewport, ui.scope_id().with("cr-sample-preview"), Sense::click_and_drag());

@@ -1,7 +1,4 @@
 use super::{ControlRequest, PhotocraftApp, Receiver, gpu_canvas};
-use crate::{
-    ai_models_ui, chrome_freeze, filter_dialog, lut_library_ui, perf_span, recovery_ui, remove_ai_ui, simple_ui, telemetry, touch_ui, typer, user_fonts_ui,
-};
 
 impl PhotocraftApp {
     /// Attach a control channel (requests arrive from a transport thread: TCP, stdin, tests).

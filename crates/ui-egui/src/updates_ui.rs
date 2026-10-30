@@ -13,6 +13,7 @@ pub(crate) struct Runtime {
     updater: craft_update::updater::Updater,
 }
 
+#[cfg_attr(target_arch = "wasm32", allow(clippy::derivable_impls))]
 impl Default for Runtime {
     fn default() -> Self {
         Self {

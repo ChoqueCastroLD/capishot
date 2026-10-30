@@ -43,6 +43,7 @@ impl Pass {
     }
 
     /// Builds the pass into `slot`, on a thread where there are threads.
+    #[cfg_attr(target_arch = "wasm32", allow(clippy::needless_return))]
     pub(crate) fn start(adapter: &wgpu::Adapter, device: &wgpu::Device, slot: &Slot) {
         if !Self::usable(adapter) {
             let _ = (slot.set(None), device);
