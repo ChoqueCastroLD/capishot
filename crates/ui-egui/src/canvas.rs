@@ -3229,7 +3229,8 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     let xf = ViewXform { rect, zoom: point_zoom, center: view.center, flip, rotation: view.rotation, aspect }.pixel_aligned_for(app, ppp);
     let pixel_grid = app.ui.view.shows(app.ui.view.show.pixel_grid);
     let response = ui.allocate_rect(rect, Sense::click_and_drag());
-    let stroke_dismissal = primary && crate::shape_stroke_ui::dismiss_from_canvas(app, &response);
+    // A press that closes a popover, sheet, menu or the like is only that (`overlay_guard`).
+    let stroke_dismissal = primary && (crate::shape_stroke_ui::dismiss_from_canvas(app, &response) | crate::overlay_guard::swallowed(&response));
     let painter = ui.painter_at(rect);
 
     match crate::prefs_ui::pasteboard_color(app) {

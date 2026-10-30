@@ -538,3 +538,67 @@ fn every_way_out_of_typing_brings_the_tools_back() {
     tap(&mut h, mv.center());
     assert_eq!(h.state().ui.tool, Tool::Move);
 }
+
+/// Closing the tool options popover (its ✕ or a tap or drag outside it) is only that, for
+/// Bubble Type, the Brush and the Lasso: no layer, no stroke, no selection, no history step
+/// (`overlay_guard`). A quick tap (press and release in one frame) too.
+#[test]
+fn closing_the_options_popover_never_reaches_the_canvas() {
+    for tool in [Tool::BubbleType, Tool::Brush, Tool::Lasso] {
+        let mut h = phone_harness(390.0, 844.0);
+        h.state_mut().ui.tool = tool;
+        h.run_steps(3);
+        let open = |h: &mut H| {
+            let b = noted(h, "options").expect("the options button");
+            tap(h, b.center());
+            h.run_steps(2);
+            assert!(crate::simple_ui::options_open(&h.ctx), "{tool:?}: the popover opens");
+        };
+        let state = |h: &mut H| {
+            let st = h.state().session.active().unwrap();
+            (st.doc.walk().len(), st.history.entries().len(), st.doc.selection.is_some())
+        };
+        let before = state(&mut h);
+        let c = canvas_center(&h);
+        let below = pos2(c.x, h.state().last_canvas_rect.bottom() - 120.0);
+        // ✕, a tap outside, a quick tap outside, a drag outside, ✕ then the browser's emulated
+        // mouse click for that tap a frame later.
+        for way in 0..5 {
+            open(&mut h);
+            match way {
+                0 => {
+                    let x = noted(&h, "options-close").expect("✕");
+                    tap(&mut h, x.center());
+                }
+                1 => tap(&mut h, below),
+                2 => {
+                    frame(&mut h, vec![touch(9, TouchPhase::Start, below), touch(9, TouchPhase::End, below)]);
+                    h.run_steps(4);
+                }
+                4 => {
+                    let x = noted(&h, "options-close").expect("✕");
+                    frame(&mut h, vec![touch(9, TouchPhase::Start, x.center()), touch(9, TouchPhase::End, x.center())]);
+                    let m = egui::Modifiers::NONE;
+                    frame(&mut h, vec![Event::PointerMoved(x.center()), Event::PointerButton { pos: x.center(), button: egui::PointerButton::Primary, pressed: true, modifiers: m }]);
+                    frame(&mut h, vec![Event::PointerButton { pos: x.center(), button: egui::PointerButton::Primary, pressed: false, modifiers: m }]);
+                    h.run_steps(4);
+                }
+                _ => {
+                    // A drag outside doesn't close it, and draws nothing either; ✕ then closes.
+                    finger_drag(&mut h, &[below, below + vec2(30.0, -40.0), below + vec2(70.0, -10.0), below + vec2(90.0, 30.0)]);
+                    if let Some(x) = noted(&h, "options-close").filter(|_| crate::simple_ui::options_open(&h.ctx)) {
+                        tap(&mut h, x.center());
+                    }
+                }
+            }
+            assert!(!crate::simple_ui::options_open(&h.ctx), "{tool:?} way {way}: closed");
+            assert!(h.state().ui.text_edit.is_none(), "{tool:?} way {way}: not typing");
+            assert_eq!(state(&mut h), before, "{tool:?} way {way}: nothing made");
+        }
+        // With the popover closed, the same drag works again.
+        if tool == Tool::Lasso {
+            finger_drag(&mut h, &[below, below + vec2(60.0, -60.0), below + vec2(120.0, 0.0), below + vec2(60.0, 40.0)]);
+            assert!(state(&mut h).2, "the Lasso selects once nothing is open");
+        }
+    }
+}

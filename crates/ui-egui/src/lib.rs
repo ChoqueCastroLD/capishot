@@ -213,6 +213,7 @@ pub mod served_fonts;
 pub mod remove_ai_ui;
 pub mod perf_span;
 pub mod bubble_type_ui;
+pub mod overlay_guard;
 pub mod shape_dialog;
 pub(crate) mod shape_fill_ui;
 pub mod shape_stroke_ui;
@@ -2638,6 +2639,8 @@ impl eframe::App for PhotocraftApp {
                 let _ = w.send(serde_json::json!({"ok": true, "result": null}));
             }
         }
+        // Whether an overlay is showing, so the next press that closes it stays off the canvas.
+        overlay_guard::end_frame(self, &ctx);
         // A menu or dialog can start a filter after `jobs_ui::tick` ran in this frame. Keep
         // polling it even when the platform would otherwise put the event loop to sleep.
         jobs_ui::keep_polling(self, &ctx);
