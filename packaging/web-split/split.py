@@ -33,11 +33,14 @@ FEATURES = [
     '--enable-mutable-globals', '--enable-nontrapping-float-to-int', '--enable-bulk-memory', '--enable-sign-ext',
     '--enable-reference-types', '--enable-multivalue', '--enable-bulk-memory-opt',
 ]
-HASH = re.compile(r'\[[0-9a-f]{16}\]')
+# The crates' disambiguators: 16 hex digits, fewer when the hash starts with zeros.
+HASH = re.compile(r'\[[0-9a-f]{1,16}\]')
+# LLVM's suffix for a duplicated symbol (`read_sample.3510`), which differs between builds.
+SUFFIX = re.compile(r'\.\d+$')
 
 
 def norm(name):
-    return HASH.sub('', name)
+    return SUFFIX.sub('', HASH.sub('', name))
 
 
 def crate_of(name):
@@ -65,7 +68,7 @@ def main():
     if not get or 'wasm = instance.exports;' not in glue:
         sys.exit(f'{a.glue}: not the wasm-bindgen glue this step knows')
     opener = gzip.open if a.cold.endswith('.gz') else open
-    cold = {line.rstrip('\n') for line in opener(a.cold, 'rt', encoding='utf8') if line.strip() and not line.startswith('#')}
+    cold = {norm(line.rstrip('\n')) for line in opener(a.cold, 'rt', encoding='utf8') if line.strip() and not line.startswith('#')}
     funcs = info(a.wasm)
     named = [f for f in funcs if not f[4].startswith('$f')]
     if len(named) < len(funcs) // 2:
