@@ -63,6 +63,7 @@ use ime::{IncomingComposition, ResetPhase};
 #[cfg(test)]
 use ime_edit::ime_update;
 pub(crate) use ime_edit::sync_ime;
+pub use ime_edit::caret_screen_rect;
 #[cfg(test)]
 pub(crate) use keys::flow_key;
 pub use keys::handle_keys;
@@ -71,7 +72,7 @@ pub(crate) use layout::{hit_layer, offset_at, shows_own_layout};
 #[cfg(test)]
 use options_bar::num_field;
 pub(crate) use options_bar::styles_at;
-pub use options_bar::{TOUCH_BAR_ONE_ROW, TOUCH_BAR_ROW, options_bar, phone_form, touch_bar, touch_bar_rows};
+pub use options_bar::{TOUCH_BAR_ONE_ROW, TOUCH_BAR_ROW, options_bar, phone_form, set_touch_bar_expanded, touch_bar, touch_bar_expanded, touch_bar_rows};
 #[cfg(test)]
 pub(crate) use options_bar::{in_path_target, toggle_type_panels};
 #[cfg(test)]
@@ -167,3 +168,4 @@ mod stroke_tests;
 
 #[cfg(test)]
 mod ime_tests;
+

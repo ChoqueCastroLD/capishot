@@ -128,6 +128,8 @@ fn the_phone_bar_has_the_outline_and_keeps_done_in_view() {
         PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
         app
     });
+    // The narrow bar's second row ("⋯") holds the outline, alignment and the rest.
+    crate::type_tool::set_touch_bar_expanded(&h.ctx, true);
     h.run_steps(4);
     let rects = crate::touch_ui::inspect(h.state(), &h.ctx).to_string();
     let v: serde_json::Value = serde_json::from_str(&rects).unwrap();
@@ -147,6 +149,8 @@ fn the_phone_popover_opens_and_a_chip_applies() {
         PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
         app
     });
+    // The narrow bar's second row ("⋯") holds the outline, alignment and the rest.
+    crate::type_tool::set_touch_bar_expanded(&h.ctx, true);
     h.run_steps(4);
     let rect = |h: &egui_kittest::Harness<'static, PhotocraftApp>, l: &str| -> Option<egui::Rect> {
         let v = crate::touch_ui::inspect(h.state(), &h.ctx);
@@ -182,6 +186,7 @@ fn every_type_bar_control_shows_on_narrow_phones() {
             PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
             app
         });
+        crate::type_tool::set_touch_bar_expanded(&h.ctx, true);
         h.run_steps(4);
         let v = crate::touch_ui::inspect(h.state(), &h.ctx);
         let rect = |l: &str| -> egui::Rect {

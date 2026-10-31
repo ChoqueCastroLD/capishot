@@ -146,6 +146,8 @@ fn a_long_press_with_the_brush_picks_a_color_and_paints_nothing() {
 #[test]
 fn the_modifier_button_adds_to_a_marquee_selection() {
     let mut h = harness();
+    // Opt-in in the simple interface (Preferences › Interface).
+    h.state_mut().run("prefs.set", json!({"values": {"interface.simpleModifierButton": true}})).unwrap();
     h.state_mut().ui.tool = Tool::RectMarquee;
     h.run_steps(3);
     let c = canvas_center(&h);
@@ -514,20 +516,19 @@ fn done_then_move_selects_move() {
 }
 
 /// Every way out of typing on a phone keeps the text, brings the tool bars back and lets the
-/// next tool be chosen: a tool in the Capi sheet (reachable above the type bar), a tap outside
-/// the text, and Back (Escape).
+/// next tool be chosen: Done, a tap outside the text, and Back (Escape). Nothing floats over the
+/// text while typing (the Capi button comes back with the bars).
 #[test]
 fn every_way_out_of_typing_brings_the_tools_back() {
-    // The Capi sheet while typing.
+    // Done.
     let mut h = phone_harness(360.0, 780.0);
     start_typing(&mut h);
-    let capi = noted(&h, "capi").expect("the Capi button stays while typing");
-    tap(&mut h, capi.center());
-    let mv = noted(&h, "tool:Move").expect("the sheet's tools");
-    tap(&mut h, mv.center());
-    assert_eq!(h.state().ui.tool, Tool::Move);
-    assert!(h.state().ui.text_edit.is_none(), "the tool ended the typing");
+    assert!(noted(&h, "capi").is_none(), "no Capi button over the text while typing");
+    let done = noted(&h, "typeDone").expect("Done");
+    tap(&mut h, done.center());
+    assert!(h.state().ui.text_edit.is_none(), "Done ended the typing");
     assert!(history(&mut h).iter().any(|s| s.contains("Type")), "the text was kept: {:?}", history(&mut h));
+    assert!(noted(&h, "capi").is_some(), "the Capi button is back");
     // A tap outside the text.
     let mut h = phone_harness(360.0, 780.0);
     start_typing(&mut h);
@@ -657,4 +658,3 @@ fn type_perspective_by_finger() {
     assert_eq!(hist.len(), past + 1, "{hist:?}");
     assert_eq!(hist.last().map(String::as_str), Some("Perspective"));
 }
-

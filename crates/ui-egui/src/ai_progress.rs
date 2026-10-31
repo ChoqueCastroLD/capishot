@@ -49,12 +49,18 @@ struct Tracked {
     job: JobId,
     /// The localized tool name.
     title: String,
+    /// What it does, as the phone's one-line card says it ("Removing…").
+    verb: String,
     /// When the card first saw it (egui time, seconds).
     started: Option<f64>,
     /// The GPU couldn't run it: the CPU does now.
     cpu: bool,
     /// What it works on, in document pixels, and the document.
     region: Option<(DocId, photocraft_geom::Rect)>,
+    /// The strokes it removes (document pixels) and their brush diameter: tinted on the canvas
+    /// while it works, in place of the region's box.
+    strokes: Vec<Vec<[f64; 2]>>,
+    size: f64,
 }
 
 enum Outcome {
@@ -153,7 +159,10 @@ pub fn note_start(app: &mut PhotocraftApp, id: &str, params: &Value) {
 pub fn started(app: &mut PhotocraftApp, id: &str, params: &Value, job: JobId) {
     let region = region_of(app, params);
     let title = title_of(id);
-    app.ai_progress.tracked = Some(Tracked { job, title, started: None, cpu: false, region });
+    let verb = verb_of(id);
+    let strokes = strokes_of(params);
+    let size = params.get("size").and_then(Value::as_f64).filter(|s| s.is_finite() && *s > 0.0).unwrap_or(0.0);
+    app.ai_progress.tracked = Some(Tracked { job, title, verb, started: None, cpu: false, region, strokes, size });
 }
 
 fn title_of(id: &str) -> String {
@@ -162,6 +171,16 @@ fn title_of(id: &str) -> String {
         photocraft_engine::ai_inpaint_cmds::ID => tl!("Clean with AI").to_string(),
         photocraft_engine::ai_cmds::COMMAND => tl!("Upscale with AI…").trim_end_matches('…').to_string(),
         _ => tl!("Generative Fill").to_string(),
+    }
+}
+
+/// What the run of `id` does, in one word for the phone's one-line card.
+fn verb_of(id: &str) -> String {
+    match id {
+        photocraft_engine::remove_ai_cmds::ID | "paint.remove" => tl!("Removing…").to_string(),
+        photocraft_engine::ai_inpaint_cmds::ID => tl!("Cleaning…").to_string(),
+        photocraft_engine::ai_cmds::COMMAND => tl!("Upscaling…").to_string(),
+        _ => tl!("Generating…").to_string(),
     }
 }
 
@@ -186,6 +205,19 @@ fn region_of(app: &PhotocraftApp, params: &Value) -> Option<(DocId, photocraft_g
     };
     let r = r.intersect(&canvas);
     (!r.is_empty()).then_some((st.doc.id, r))
+}
+
+/// The strokes of a run's `params` (`strokes`: lists of `[x, y, …]` points), in document pixels.
+fn strokes_of(params: &Value) -> Vec<Vec<[f64; 2]>> {
+    let point = |p: &Value| Some([p.get(0)?.as_f64()?, p.get(1)?.as_f64()?]).filter(|q| q[0].is_finite() && q[1].is_finite());
+    params
+        .get("strokes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|s| s.as_array().into_iter().flatten().filter_map(point).collect::<Vec<_>>())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 /// A job ended: an AI one says "Done" (and taps the vibration) or keeps its error for the card.
@@ -241,6 +273,8 @@ fn downloading(app: &PhotocraftApp) -> Option<(&'static photocraft_ai::catalog::
 /// What the card shows this frame.
 struct Card {
     title: String,
+    /// The one-line card's words ("Removing…", "Downloading 45%").
+    verb: String,
     stage: Stage,
     /// The bar's share (`None`: sliding).
     fraction: Option<f32>,
@@ -272,7 +306,16 @@ fn card(app: &mut PhotocraftApp, now: f64) -> Option<Card> {
             _ => (j.progress > 0.0).then_some(j.progress),
         };
         let note = t.cpu.then(|| tl!("Using the CPU, it may take longer").to_string());
-        return Some(Card { title: t.title.clone(), stage, fraction, note, elapsed: Some(now - started), cancel: CancelWith::Job(t.job), retry: false });
+        return Some(Card {
+            title: t.title.clone(),
+            verb: t.verb.clone(),
+            stage,
+            fraction,
+            note,
+            elapsed: Some(now - started),
+            cancel: CancelWith::Job(t.job),
+            retry: false,
+        });
     }
     if crate::remove_ai_ui::is_open(app) {
         let (fraction, speed, failed) = crate::remove_ai_ui::download_progress(app);
@@ -286,6 +329,7 @@ fn card(app: &mut PhotocraftApp, now: f64) -> Option<Card> {
         };
         return Some(Card {
             title: tl!("Remove with AI").to_string(),
+            verb: download_verb(fraction),
             stage: Stage::Download { fraction, speed },
             fraction: if failed.is_some() { Some(0.0) } else { fraction },
             note: Some(note),
@@ -299,6 +343,7 @@ fn card(app: &mut PhotocraftApp, now: f64) -> Option<Card> {
         let speed = (bytes_per_sec > 1.0).then_some(bytes_per_sec);
         return Some(Card {
             title: m.title.to_string(),
+            verb: download_verb(fraction),
             stage: Stage::Download { fraction, speed },
             fraction,
             note: None,
@@ -309,6 +354,35 @@ fn card(app: &mut PhotocraftApp, now: f64) -> Option<Card> {
     }
     None
 }
+
+/// "Downloading 45%" (or "Downloading…" while the share isn't known).
+fn download_verb(fraction: Option<f32>) -> String {
+    match fraction {
+        Some(f) => crate::i18n::fmt(tl!("Downloading {pct}%"), &[("pct", &format!("{:.0}", (f * 100.0).floor()))]),
+        None => tl!("Downloading…").to_string(),
+    }
+}
+
+fn expanded_id() -> Id {
+    Id::unique("ai-progress-expanded")
+}
+
+/// Where the AI card is this frame (the phone's floating controls keep clear of it).
+pub fn card_rect(ctx: &egui::Context) -> Option<Rect> {
+    ctx.data(|d| d.get_temp::<Rect>(Id::unique("ai-progress-card-rect")))
+}
+
+fn set_card_rect(ctx: &egui::Context, r: Option<Rect>) {
+    ctx.data_mut(|d| match r {
+        Some(r) => {
+            d.insert_temp(Id::unique("ai-progress-card-rect"), r);
+        }
+        None => d.remove::<Rect>(Id::unique("ai-progress-card-rect")),
+    });
+}
+
+/// Height of the phone's one-line card.
+pub const COMPACT_H: f32 = 34.0;
 
 /// Where the card goes: under the simple interface's bars, else bottom right.
 fn anchor(app: &PhotocraftApp, ctx: &egui::Context, width: f32) -> (egui::Pos2, Align2) {
@@ -340,6 +414,7 @@ fn rect_json(r: Rect) -> Value {
 /// Every frame: the card, the pulse over the canvas, "Done" and the error card.
 pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     ctx.data_mut(|d| d.remove::<Value>(inspect_id()));
+    set_card_rect(ctx, None);
     let now = ctx.input(|i| i.time);
     // A job that ended without an event the card saw (it was replaced) stops being followed.
     if app.ai_progress.tracked.as_ref().is_some_and(|t| t.started.is_some() && app.session.job(t.job).is_none()) {
@@ -354,43 +429,87 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
         let (mut cancel, mut retry) = (false, false);
         let (mut cancel_rect, mut retry_rect) = (Rect::NOTHING, Rect::NOTHING);
-        area(ctx, "ai-progress", pos, align, width, &t, |ui| {
-            ui.horizontal(|ui| {
-                let (r, _) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
+        // A phone: one thin line (icon, "Removing… 7 s", a thin bar, ✕); a tap opens the full card.
+        let expanded = ctx.data(|d| d.get_temp::<bool>(expanded_id())).unwrap_or(false);
+        let compact = app.simple && !expanded && !c.retry;
+        let card_rect = if compact {
+            let w = width.min(300.0);
+            let r = Rect::from_min_size(pos2(pos.x - w / 2.0, pos.y), vec2(w, COMPACT_H));
+            let mut open = false;
+            egui::Area::new(Id::unique("ai-progress-compact")).order(egui::Order::Foreground).fixed_pos(r.min).show(ctx, |ui| {
+                let (rect, resp) = ui.allocate_exact_size(r.size(), Sense::click());
+                let p = ui.painter();
+                p.rect(rect, CornerRadius::same((COMPACT_H / 2.0) as u8), t.card, Stroke::new(1.0, t.card_border), egui::StrokeKind::Inside);
                 let k = (((now * 3.0).sin() * 0.5 + 0.5) as f32).mul_add(0.5, 0.5);
-                crate::icons::paint(ui, r, "sparkles", 16.0, t.accent.gamma_multiply(k));
-                ui.label(RichText::new(&c.title).font(crate::theme::semibold(14.0)).color(t.text));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let r = crate::widgets::secondary_button(ui, tl!("Cancel"), 84.0);
-                    cancel_rect = r.rect;
-                    cancel = r.clicked();
-                    if let Some(s) = c.elapsed {
-                        ui.label(RichText::new(elapsed(s)).color(t.text_faint).size(11.5).monospace());
-                    }
-                });
+                let icon = Rect::from_center_size(pos2(rect.left() + 18.0, rect.center().y - 1.0), vec2(18.0, 18.0));
+                crate::icons::paint(ui, icon, "sparkles", 14.0, t.accent.gamma_multiply(k));
+                let mut text = c.verb.clone();
+                if let Some(s) = c.elapsed {
+                    text.push(' ');
+                    text.push_str(&elapsed(s));
+                }
+                let x_rect = Rect::from_center_size(pos2(rect.right() - 17.0, rect.center().y), vec2(30.0, 30.0));
+                let room = (x_rect.left() - icon.right() - 8.0).max(10.0);
+                let g = p.layout(text.clone(), crate::theme::medium(12.5), t.text, room);
+                p.galley(pos2(icon.right() + 6.0, rect.center().y - 1.5 - g.size().y / 2.0), g, t.text);
+                // The thin bar along the bottom, inside the rounded ends.
+                let bar = Rect::from_min_max(pos2(rect.left() + 14.0, rect.bottom() - 6.0), pos2(x_rect.left() - 4.0, rect.bottom() - 3.5));
+                crate::jobs_ui::bar(ui, bar, c.fraction, &t);
+                let x = ui.interact(x_rect, Id::unique("ai-progress-compact-cancel"), Sense::click());
+                crate::icons::paint(ui, x_rect, "x", 15.0, if x.is_pointer_button_down_on() { t.text } else { t.text_dim });
+                x.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tl!("Cancel")));
+                cancel_rect = x_rect;
+                cancel = x.clicked();
+                let label = format!("{} · {}", c.title, stage_text(&c.stage));
+                resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
+                open = resp.clicked() && !cancel;
             });
-            ui.add_space(2.0);
-            ui.label(RichText::new(stage_text(&c.stage)).color(t.text_dim).size(12.5));
-            ui.add_space(4.0);
-            let (br, _) = ui.allocate_exact_size(vec2(ui.available_width(), 6.0), Sense::hover());
-            crate::jobs_ui::bar(ui, br, c.fraction, &t);
-            if let Some(n) = &c.note {
-                ui.add_space(4.0);
-                ui.label(RichText::new(n).color(if c.retry { t.danger } else { t.text_faint }).size(11.5));
+            if open {
+                ctx.data_mut(|d| d.insert_temp(expanded_id(), true));
             }
-            if c.retry {
-                ui.add_space(6.0);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let r = crate::widgets::primary_button(ui, tl!("Retry"), 84.0);
-                    retry_rect = r.rect;
-                    retry = r.clicked();
+            r
+        } else {
+            area(ctx, "ai-progress", pos, align, width, &t, |ui| {
+                ui.horizontal(|ui| {
+                    let (r, _) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
+                    let k = (((now * 3.0).sin() * 0.5 + 0.5) as f32).mul_add(0.5, 0.5);
+                    crate::icons::paint(ui, r, "sparkles", 16.0, t.accent.gamma_multiply(k));
+                    ui.label(RichText::new(&c.title).font(crate::theme::semibold(14.0)).color(t.text));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let r = crate::widgets::secondary_button(ui, tl!("Cancel"), 84.0);
+                        cancel_rect = r.rect;
+                        cancel = r.clicked();
+                        if let Some(s) = c.elapsed {
+                            ui.label(RichText::new(elapsed(s)).color(t.text_faint).size(11.5).monospace());
+                        }
+                    });
                 });
-            }
-        });
+                ui.add_space(2.0);
+                ui.label(RichText::new(stage_text(&c.stage)).color(t.text_dim).size(12.5));
+                ui.add_space(4.0);
+                let (br, _) = ui.allocate_exact_size(vec2(ui.available_width(), 6.0), Sense::hover());
+                crate::jobs_ui::bar(ui, br, c.fraction, &t);
+                if let Some(n) = &c.note {
+                    ui.add_space(4.0);
+                    ui.label(RichText::new(n).color(if c.retry { t.danger } else { t.text_faint }).size(11.5));
+                }
+                if c.retry {
+                    ui.add_space(6.0);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let r = crate::widgets::primary_button(ui, tl!("Retry"), 84.0);
+                        retry_rect = r.rect;
+                        retry = r.clicked();
+                    });
+                }
+            })
+        };
+        set_card_rect(ctx, Some(card_rect));
+        crate::touch_ui::note_rect(ctx, "aiCard", card_rect);
         ctx.data_mut(|d| {
             d.insert_temp(
                 inspect_id(),
                 serde_json::json!({"kind": "progress", "title": c.title, "stage": stage_text(&c.stage), "fraction": c.fraction, "note": c.note,
+                    "compact": compact, "text": c.verb, "card": rect_json(card_rect),
                     "cancel": rect_json(cancel_rect), "retry": (retry_rect != Rect::NOTHING).then(|| rect_json(retry_rect))}),
             )
         });
@@ -412,6 +531,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         }
         return;
     }
+    ctx.data_mut(|d| d.remove::<bool>(expanded_id()));
     match app.ai_progress.outcome.as_ref() {
         Some(Outcome::Done { title, at }) => {
             if now - at > DONE_FOR {
@@ -472,25 +592,32 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
 }
 
 /// A card at `pos`.
-fn area(ctx: &egui::Context, id: &str, pos: egui::Pos2, align: Align2, width: f32, t: &Tokens, add: impl FnOnce(&mut egui::Ui)) {
-    egui::Area::new(Id::unique(id)).order(egui::Order::Foreground).pivot(align).fixed_pos(pos).show(ctx, |ui| {
-        egui::Frame::NONE
-            .fill(t.card)
-            .stroke(Stroke::new(1.0, t.card_border))
-            .corner_radius(CornerRadius::same(14))
-            .shadow(egui::Shadow { offset: [0, 8], blur: 24, spread: 0, color: t.shadow })
-            .inner_margin(egui::Margin::same(12))
-            .show(ui, |ui| {
-                ui.set_width(width - 24.0);
-                add(ui);
-            });
-    });
+fn area(ctx: &egui::Context, id: &str, pos: egui::Pos2, align: Align2, width: f32, t: &Tokens, add: impl FnOnce(&mut egui::Ui)) -> Rect {
+    egui::Area::new(Id::unique(id))
+        .order(egui::Order::Foreground)
+        .pivot(align)
+        .fixed_pos(pos)
+        .show(ctx, |ui| {
+            egui::Frame::NONE
+                .fill(t.card)
+                .stroke(Stroke::new(1.0, t.card_border))
+                .corner_radius(CornerRadius::same(14))
+                .shadow(egui::Shadow { offset: [0, 8], blur: 24, spread: 0, color: t.shadow })
+                .inner_margin(egui::Margin::same(12))
+                .show(ui, |ui| {
+                    ui.set_width(width - 24.0);
+                    add(ui);
+                });
+        })
+        .response
+        .rect
 }
 
 /// The followed run's area on the canvas: an outline that breathes and a light band sweeping
 /// across it.
 fn pulse_region(app: &PhotocraftApp, ctx: &egui::Context, now: f64) {
-    let Some((doc, r)) = app.ai_progress.tracked.as_ref().and_then(|t| t.region) else { return };
+    let Some(tracked) = app.ai_progress.tracked.as_ref() else { return };
+    let Some((doc, r)) = tracked.region else { return };
     if app.session.active().map(|d| d.doc.id) != Some(doc) {
         return;
     }
@@ -503,6 +630,24 @@ fn pulse_region(app: &PhotocraftApp, ctx: &egui::Context, now: f64) {
     let t = Tokens::get(ctx);
     let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, Id::unique("ai-progress-region"))).with_clip_rect(clip);
     let k = ((now * 2.4).sin() * 0.5 + 0.5) as f32;
+    // Brush strokes (Remove with AI): the strokes themselves stay tinted, breathing softly, so
+    // what is being removed stays visible while it works.
+    if !tracked.strokes.is_empty() {
+        let width = (tracked.size as f32 * xf.zoom).max(2.0);
+        let tint = stroke_tint(&t, k);
+        for (w, c) in [(width * 1.12, tint.gamma_multiply(0.45)), (width, tint)] {
+            for s in &tracked.strokes {
+                let pts: Vec<egui::Pos2> = s.iter().map(|q| xf.to_screen(q[0] as f32, q[1] as f32)).collect();
+                for pair in pts.windows(2) {
+                    p.line_segment([pair[0], pair[1]], Stroke::new(w, c));
+                }
+                for q in &pts {
+                    p.circle_filled(*q, w / 2.0, c);
+                }
+            }
+        }
+        return;
+    }
     p.rect_filled(rect, 2.0, t.accent.gamma_multiply(0.06 + 0.08 * k));
     p.rect_stroke(rect, 2.0, Stroke::new(1.5 + k, t.accent.gamma_multiply(0.55 + 0.4 * k)), egui::StrokeKind::Outside);
     // The shimmer: a soft diagonal band crossing the area every 1.6 s.
@@ -512,6 +657,12 @@ fn pulse_region(app: &PhotocraftApp, ctx: &egui::Context, now: f64) {
     if shimmer.width() > 0.0 {
         p.with_clip_rect(rect.intersect(clip)).rect_filled(shimmer, 0.0, Color32::from_white_alpha(28));
     }
+}
+
+/// The tint of strokes being removed: the danger red at about 45 %, breathing a little with `k`
+/// (0..1).
+pub(crate) fn stroke_tint(t: &Tokens, k: f32) -> Color32 {
+    t.danger.gamma_multiply(0.30 + 0.15 * k)
 }
 
 /// The Capi button's ring while [`busy`]: drawn by `simple_ui`.

@@ -137,6 +137,8 @@ pub struct ButtonState {
 /// See the module docs. One per app window.
 #[derive(Clone, Debug, Default)]
 pub struct TouchInput {
+    /// The tool row's chips that stand in for held keys (touch_locks.rs).
+    pub locks: crate::touch_locks::TouchLocks,
     fingers: Vec<Finger>,
     /// Input held for the next frame: a new touch that began after a tap's click in the same
     /// frame (a quick double tap when frames run late), so each click gets a frame of its own.

@@ -298,16 +298,30 @@ pub fn options_row(app: &mut PhotocraftApp, ui: &mut Ui) {
             ui.horizontal_centered(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
                 let tool = app.ui.tool;
-                let (icon, _) = ui.allocate_exact_size(Vec2::splat(30.0), Sense::hover());
-                crate::icons::paint(ui, icon, crate::icons::tool_icon(tool), 20.0, t.text);
-                if app.ui.transform.is_some() {
-                    ui.label(RichText::new(crate::i18n::t("Free Transform")).color(t.text_dim).size(13.0));
-                } else if selection_modes(tool) {
+                // The tool's touch chips for what its keys do (touch_locks.rs): on a narrow phone
+                // with the selection modes too, the tool's icon makes room for them.
+                let locks = crate::touch_locks::chips(app);
+                let modes = app.ui.transform.is_none() && selection_modes(tool);
+                let need = 30.0 + if modes { 4.0 * 38.0 } else { 0.0 } + locks.len() as f32 * crate::touch_locks::CHIP + 38.0 + 8.0 * 6.0;
+                if need > ui.available_width() {
+                    ui.spacing_mut().item_spacing.x = 3.0;
+                } else {
+                    let (icon, _) = ui.allocate_exact_size(Vec2::splat(30.0), Sense::hover());
+                    crate::icons::paint(ui, icon, crate::icons::tool_icon(tool), 20.0, t.text);
+                }
+                if modes {
                     // New, Add, Subtract, Intersect as chips, in place of the name.
                     mode_chips(app, ui);
-                } else {
-                    ui.label(RichText::new(crate::i18n::t(tool.label())).color(t.text_dim).size(13.0));
+                } else if tool == Tool::Crop && app.ui.transform.is_none() {
+                    // The ratio presets (1:1, 4:3, 16:9…), where the name would be.
+                    crate::crop_presets::dropdown(app, ui);
+                } else if locks.is_empty() {
+                    let name = if app.ui.transform.is_some() { "Free Transform" } else { tool.label() };
+                    ui.label(RichText::new(crate::i18n::t(name)).color(t.text_dim).size(13.0));
                 }
+                // The brush chip and size field follow, then the options button.
+                let brush = !open && (tool.is_brushlike() || matches!(tool, Tool::Brush | Tool::Pencil | Tool::Eraser | Tool::MixerBrush));
+                crate::touch_locks::row(app, ui, 46.0 + if brush { 44.0 + 64.0 + 14.0 } else { 0.0 });
                 // With the options open the brush is there (its chip is one widget per frame).
                 if !open && (tool.is_brushlike() || matches!(tool, Tool::Brush | Tool::Pencil | Tool::Eraser | Tool::MixerBrush)) {
                     crate::paint_mouse::sync_tool_brush(app);
@@ -531,13 +545,9 @@ pub fn overlays(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if app.font_projects.open {
         return;
     }
-    // Typing: the keyboard and the type bar take the bottom (touch_ui::type_bar); the Capi
-    // button stays, above the bar, so a tool can still be chosen (which ends the typing).
+    // Typing: the keyboard and the type bar take the bottom (touch_ui::type_bar) and nothing else
+    // floats over the text: the Capi button comes back with Done.
     if app.ui.text_edit.is_some() && sheet(ctx) == Sheet::Closed {
-        let screen = crate::safe_area::rect(ctx);
-        let bar = crate::touch_ui::type_bar_height(ctx);
-        let capi = Rect::from_center_size(pos2(screen.center().x, screen.bottom() - 6.0 - bar - 10.0 - CAPI / 2.0), Vec2::splat(CAPI));
-        capi_button(app, ctx, capi);
         return;
     }
     // Esc (the phone's Back) closes the open sheet.
@@ -692,21 +702,24 @@ fn tool_bar(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, rect: Rect, 
     let mut run = None;
     let mut fav = None;
     // Where the slots go: evenly across each side of the Capi button.
+    // A narrow phone (320 points) has less than a full slot per step: the slots shrink to fit
+    // rather than overlap.
     let half = (rect.width() - CAPI - 16.0) / 2.0;
     let step = half / 3.0;
+    let side_len = SLOT.min(step - 2.0);
     let slot_x = |i: usize| -> f32 {
         let side = if i < 3 { rect.left() } else { rect.left() + half + CAPI + 16.0 };
-        side + step * (i % 3) as f32 + (step - SLOT) / 2.0
+        side + step * (i % 3) as f32 + (step - side_len) / 2.0
     };
     // A layer below the Capi button's (and the menus', which open over the bars).
     egui::Area::new(Id::unique(id)).order(egui::Order::Middle).fixed_pos(rect.min).show(ctx, |ui| {
         float_frame(&t).show(ui, |ui| {
             let (frame_rect, _) = ui.allocate_exact_size(rect.size(), Sense::hover());
-            let y = frame_rect.center().y - SLOT / 2.0;
+            let y = frame_rect.center().y - side_len / 2.0;
             let mut place = |ui: &mut Ui, entry: &str, x: f32| {
-                let slot = Rect::from_min_size(pos2(x, y), Vec2::splat(SLOT));
+                let slot = Rect::from_min_size(pos2(x, y), Vec2::splat(side_len));
                 let mut child = ui.new_child(egui::UiBuilder::new().max_rect(slot));
-                let resp = entry_button(app, &mut child, entry, SLOT);
+                let resp = entry_button(app, &mut child, entry, side_len);
                 if held(&resp, entry) {
                     fav = Some((entry.to_string(), resp.rect));
                 } else if resp.clicked() && !long_pressed(ui.ctx(), entry) {
@@ -724,20 +737,20 @@ fn tool_bar(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, rect: Rect, 
                     &mut sub,
                     |ui| {
                         ui.horizontal_centered(|ui| {
-                            ui.spacing_mut().item_spacing.x = step - SLOT;
-                            ui.add_space((step - SLOT) / 2.0);
+                            ui.spacing_mut().item_spacing.x = step - side_len;
+                            ui.add_space((step - side_len) / 2.0);
                             for (i, e) in entries.iter().enumerate() {
                                 if i == 3 {
-                                    ui.add_space(CAPI + 16.0 - (step - SLOT));
+                                    ui.add_space(CAPI + 16.0 - (step - side_len));
                                 }
-                                let resp = entry_button(app, ui, e, SLOT);
+                                let resp = entry_button(app, ui, e, side_len);
                                 if held(&resp, e) {
                                     fav = Some((e.clone(), resp.rect));
                                 } else if resp.clicked() && !long_pressed(ui.ctx(), e) {
                                     run = Some(e.clone());
                                 }
                             }
-                            ui.add_space((step - SLOT) / 2.0);
+                            ui.add_space((step - side_len) / 2.0);
                         });
                     },
                 );

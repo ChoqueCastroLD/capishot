@@ -625,6 +625,9 @@ pub(super) fn draw_drag_preview(app: &mut PhotocraftApp, painter: &egui::Painter
                 // Remove removes every pixel a dab touches, so its whole reach is tinted: a soft
                 // tip's reaches well past the nominal radius.
                 Tool::Remove => trail.feed_reach(&d.points, brush),
+                // Remove with AI: a soft-edged tint a little past the stroke, so it reads as a
+                // mark over the page rather than paint on it.
+                Tool::RemoveAi => trail.feed_dabs(&d.points, || soft_tint_brush(brush())),
                 // What the stroke covers, dab by dab: soft edges, pressure and shape dynamics
                 // (Spot Healing #2364; the Mixer Brush, and a tool whose live stroke didn't start).
                 _ => trail.feed_dabs(&d.points, brush),
@@ -702,4 +705,11 @@ pub(super) fn draw_drag_preview(app: &mut PhotocraftApp, painter: &egui::Painter
         }
         _ => {}
     }
+}
+
+/// The brush Remove with AI's stroke is tinted with: softer and a little wider than the stroke.
+pub(crate) fn soft_tint_brush(mut b: photocraft_engine::paint::BrushSettings) -> photocraft_engine::paint::BrushSettings {
+    b.hardness = b.hardness.min(0.55);
+    b.size *= 1.12;
+    b
 }

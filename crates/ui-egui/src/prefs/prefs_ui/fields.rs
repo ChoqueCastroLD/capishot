@@ -41,6 +41,8 @@ pub(super) fn humanize(key: &str) -> String {
         "automaticallyCheckUpdates" => return "Automatically Check for Updates".into(),
         "simpleUi" => return "Simple UI".into(),
         "touchShortcut" => return "Touch Modifier Button".into(),
+        "simpleModifierButton" => return "Touch Modifier Button (Simple UI)".into(),
+        "simpleTwoFingerRotate" => return "Rotate with Two Fingers (Simple UI)".into(),
         "stylusInput" => return "Stylus".into(),
         "longPressMs" => return "Long Press for Eyedropper (ms)".into(),
         _ => {}

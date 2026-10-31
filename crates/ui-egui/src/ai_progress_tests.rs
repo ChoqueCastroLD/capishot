@@ -96,6 +96,15 @@ fn phone(held: Arc<Held>) -> Harness<'static, PhotocraftApp> {
     h
 }
 
+/// A phone's AI card is one line: a tap on it opens the full card the tests read.
+fn expand(h: &mut Harness<'static, PhotocraftApp>) {
+    if inspect(&h.ctx)["compact"] == true {
+        h.get_by_label_contains(" · ").click();
+        // The full card's first frame is egui's invisible sizing pass.
+        h.run_steps(4);
+    }
+}
+
 /// Remove with AI through its command: the card shows its stages, the area pulses, the Capi
 /// button pulses, the modal progress dialog stays away, and Cancel stops it.
 #[test]
@@ -106,6 +115,8 @@ fn remove_with_ai_shows_its_stages_and_cancel_stops_it() {
     h.run_steps(3);
     held.arrived();
     assert!(busy(h.state()), "the Capi button pulses");
+    assert_eq!(inspect(&h.ctx)["text"], "Quitando…", "one line on the phone");
+    expand(&mut h);
     h.get_by_label("Quitar con IA");
     h.get_by_label("Preparando IA…");
     held.progress(0.0, "Compiling GPU shaders (first run)");
@@ -140,6 +151,7 @@ fn a_failure_says_why_and_retry_runs_it_again() {
     h.get_by_label("Reintentar").click();
     h.run_steps(3);
     held.arrived();
+    expand(&mut h);
     h.get_by_label("Quitar con IA");
 }
 
@@ -180,6 +192,7 @@ fn every_ai_command_gets_the_card_and_done_taps_the_phone() {
         let ctx = ctx_rx.recv().unwrap();
         ctx.progress(0.3, "Generating (test) (step 3 of 8)");
         h.run_steps(2);
+        expand(&mut h);
         h.get_by_label(title);
         h.get_by_label("Procesando 3/8");
         VIBRATED.store(0, Ordering::SeqCst);
@@ -212,5 +225,6 @@ fn the_cpu_fallback_is_said() {
     h.run_steps(2);
     held.progress(0.6, "Cleaning with Manga LaMa (CPU)");
     h.run_steps(2);
+    expand(&mut h);
     h.get_by_label("Usando la CPU, puede tardar más");
 }

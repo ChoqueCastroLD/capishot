@@ -633,7 +633,9 @@ fn update_canvas_navigation(app: &mut PhotocraftApp, view: &mut View, input: Can
     let box_pinch = input.primary && touch_gestures && crate::touch_ui::transform_pinch(app, input.ctx, &input.xf);
     // Touch: a two-finger twist turns the view (with or without Rotate View with Trackpad), and
     // snaps upright when let go near 0°.
-    let touch_turn = crate::touch_ui::active(app) && touch_gestures;
+    // The simple interface turns only when asked to (Preferences › Interface): a pinch there
+    // never tilts the page by accident.
+    let touch_turn = crate::touch_ui::active(app) && touch_gestures && (!app.simple || app.session.prefs().interface.simple_two_finger_rotate);
     if touch_turn && input.primary {
         crate::touch_ui::snap_rotation(input.ctx, &mut view.rotation);
     }

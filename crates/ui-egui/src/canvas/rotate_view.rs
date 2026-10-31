@@ -37,6 +37,13 @@ fn compass_id() -> egui::Id {
     egui::Id::unique("pc-rotate-view-compass")
 }
 
+fn unturn_id() -> egui::Id {
+    egui::Id::unique("pc-rotate-view-unturn")
+}
+
+/// How long the compass's turn back to 0 takes (seconds).
+const UNTURN_S: f64 = 0.3;
+
 /// Wrap `a` degrees into (−180, 180]. Non-finite values become 0 so a hostile angle never
 /// propagates into the camera.
 pub fn wrap_deg(a: f32) -> f32 {
@@ -236,29 +243,66 @@ pub fn overlay(app: &PhotocraftApp, ctx: &egui::Context, painter: &egui::Painter
         view.rotation = 0.0;
         ctx.data_mut(|d| d.remove::<RotateDrag>(id()));
     }
-    if !compass_visible(view.rotation) {
+    // A tap on the compass turns the view back to 0 over a moment instead of at once.
+    if let Some((from, since)) = ctx.data(|d| d.get_temp::<(f32, f64)>(unturn_id())) {
+        let k = ((ctx.input(|i| i.time) - since) / UNTURN_S).clamp(0.0, 1.0) as f32;
+        let ease = 1.0 - (1.0 - k).powi(3);
+        view.rotation = if k >= 1.0 { 0.0 } else { wrap_deg(from * (1.0 - ease)) };
+        if k >= 1.0 {
+            ctx.data_mut(|d| d.remove::<(f32, f64)>(unturn_id()));
+        } else {
+            ctx.request_repaint();
+        }
+    }
+    // While typing nothing floats over the text (the simple interface's rule).
+    if !compass_visible(view.rotation) || (app.simple && app.ui.text_edit.is_some()) {
         ctx.data_mut(|d| d.remove::<Rect>(compass_id()));
         return false;
     }
     let r = compass_rect(xf.rect);
     ctx.data_mut(|d| d.insert_temp(compass_id(), r));
     let t = Tokens::get(ctx);
-    let hover = response.hover_pos().is_some_and(|p| r.contains(p));
-    painter.circle_filled(r.center(), r.width() * 0.5, if hover { t.hover } else { t.chrome });
-    painter.circle_stroke(r.center(), r.width() * 0.5 - 0.5, Stroke::new(1.0, t.separator));
     // Document up: (0, −1) in document space, rotated then flipped like [`ViewXform::to_screen`].
     let rad = view.rotation.to_radians();
     let (c, s) = if view.rotation.abs() < 1e-6 { (1.0, 0.0) } else { (rad.cos(), rad.sin()) };
-    let (rx, ry) = (s, -c);
     let sx = if xf.flip { -1.0 } else { 1.0 };
-    let needle = vec2(rx * sx, ry) * (r.width() * 0.32);
-    let tip = r.center() + needle;
-    painter.line_segment([r.center(), tip], Stroke::new(2.0, t.accent));
-    painter.circle_filled(tip, 2.5, t.accent);
-    painter.text(r.center() + vec2(0.0, r.width() * 0.18), Align2::CENTER_CENTER, "N", egui::FontId::proportional(9.0), t.text_faint);
-    if response.clicked() && response.interact_pointer_pos().is_some_and(|p| r.contains(p)) {
-        view.rotation = 0.0;
-        ctx.data_mut(|d| d.remove::<RotateDrag>(id()));
+    let needle = vec2(s * sx, -c) * (r.width() * 0.32);
+    let paint = |painter: &egui::Painter, hover: bool| {
+        painter.circle_filled(r.center(), r.width() * 0.5, if hover { t.hover } else { t.chrome });
+        painter.circle_stroke(r.center(), r.width() * 0.5 - 0.5, Stroke::new(1.0, t.separator));
+        let tip = r.center() + needle;
+        painter.line_segment([r.center(), tip], Stroke::new(2.0, t.accent));
+        painter.circle_filled(tip, 2.5, t.accent);
+        painter.text(r.center() + vec2(0.0, r.width() * 0.18), Align2::CENTER_CENTER, "N", egui::FontId::proportional(9.0), t.text_faint);
+    };
+    let clicked = if crate::touch_ui::active(app) {
+        // A touch screen: a button of its own over the canvas, so a tap on it is never a stroke.
+        crate::touch_ui::note_rect(ctx, "compass", r);
+        egui::Area::new(compass_id().with("button"))
+            .order(egui::Order::Middle)
+            .fixed_pos(r.min)
+            .show(ctx, |ui| {
+                let (rect, resp) = ui.allocate_exact_size(r.size(), egui::Sense::click());
+                paint(ui.painter(), resp.is_pointer_button_down_on());
+                let label = crate::i18n::t("Rotate View");
+                resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
+                let _ = rect;
+                resp.clicked()
+            })
+            .inner
+    } else {
+        paint(painter, response.hover_pos().is_some_and(|p| r.contains(p)));
+        response.clicked() && response.interact_pointer_pos().is_some_and(|p| r.contains(p))
+    };
+    let hover = response.hover_pos().is_some_and(|p| r.contains(p));
+    if clicked {
+        let now = ctx.input(|i| i.time);
+        let from = view.rotation;
+        ctx.data_mut(|d| {
+            d.remove::<RotateDrag>(id());
+            d.insert_temp(unturn_id(), (from, now));
+        });
+        ctx.request_repaint();
         return true;
     }
     hover

@@ -541,10 +541,24 @@ pub const TOUCH_BAR_ONE_ROW: f32 = 120.0 + 64.0 + 6.0 * 44.0 + 70.0 + 8.0 * 6.0;
 /// The height of one of the bar's rows.
 pub const TOUCH_BAR_ROW: f32 = 44.0;
 
-/// How many rows the phone's type bar takes in `width` points: one when everything fits,
-/// else two (font, size and Done; then colour, outline, alignment and line spacing).
-pub fn touch_bar_rows(width: f32) -> usize {
-    if width >= TOUCH_BAR_ONE_ROW { 1 } else { 2 }
+fn more_id() -> egui::Id {
+    egui::Id::unique("type-touch-bar-more")
+}
+
+/// Whether the narrow type bar's second row ("⋯") is open: remembered between edits and runs.
+pub fn touch_bar_expanded(ctx: &egui::Context) -> bool {
+    ctx.data_mut(|d| d.get_persisted::<bool>(more_id())).unwrap_or(false)
+}
+
+/// Open or close the narrow type bar's second row ("⋯").
+pub fn set_touch_bar_expanded(ctx: &egui::Context, open: bool) {
+    ctx.data_mut(|d| d.insert_persisted(more_id(), open));
+}
+
+/// How many rows the phone's type bar takes in `width` points: one when everything fits; narrower,
+/// one row (font, size, colour, "⋯" and Done) with a second for the rest while "⋯" is open.
+pub fn touch_bar_rows(ctx: &egui::Context, width: f32) -> usize {
+    if width >= TOUCH_BAR_ONE_ROW || !touch_bar_expanded(ctx) { 1 } else { 2 }
 }
 
 /// The type bar above a phone's keyboard while text is edited: font, size, color, outline,
@@ -553,7 +567,7 @@ pub fn touch_bar_rows(width: f32) -> usize {
 pub fn touch_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let w = ui.available_width();
     ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-    if touch_bar_rows(w) == 1 {
+    if w >= TOUCH_BAR_ONE_ROW {
         ui.horizontal(|ui| {
             let extra = if app.ui.tool == crate::state::Tool::BubbleType { 50.0 } else { 0.0 };
             let font_w = (w - (TOUCH_BAR_ONE_ROW - 120.0) - extra).clamp(120.0, 220.0);
@@ -571,15 +585,28 @@ pub fn touch_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         });
         return;
     }
+    // Narrower: the keyboard leaves little room, so one row (font, size, colour, "⋯", Done);
+    // "⋯" opens a second row with the rest.
+    let expanded = touch_bar_expanded(ui.ctx());
+    let done_w = if w < 320.0 { 58.0 } else { 70.0 };
     ui.vertical(|ui| {
         ui.horizontal(|ui| {
-            // The font field takes what the size and Done leave; long names end in an ellipsis.
-            let font_w = (w - 64.0 - 70.0 - 2.0 * 6.0).max(60.0);
+            // The font field takes what the others leave; long names end in an ellipsis.
+            let font_w = (w - 64.0 - 44.0 - 44.0 - done_w - 4.0 * 6.0).max(50.0);
             font_and_size(app, ui, font_w);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| done_button(app, ui));
+            color_button(app, ui);
+            let more = crate::icons::button(ui, "ellipsis", 40.0, expanded, tl!("More text options"));
+            crate::touch_ui::note_rect(ui.ctx(), "typeMore", more.rect);
+            if more.clicked() {
+                ui.ctx().data_mut(|d| d.insert_persisted(more_id(), !expanded));
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| done_button_w(app, ui, done_w));
         });
-        // Six buttons (seven with Bubble Type's style), evenly spaced across the width.
-        let n = if app.ui.tool == crate::state::Tool::BubbleType { 7 } else { 6 };
+        if !expanded {
+            return;
+        }
+        // Five buttons (six with Bubble Type's style), evenly spaced across the width.
+        let n = if app.ui.tool == crate::state::Tool::BubbleType { 6 } else { 5 };
         let (row, _) = ui.allocate_exact_size(egui::vec2(w, TOUCH_BAR_ROW), egui::Sense::hover());
         let slot = w / n as f32;
         for i in 0..n {
@@ -587,12 +614,11 @@ pub fn touch_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             let r = egui::Rect::from_center_size(c, egui::vec2(TOUCH_BAR_ROW, TOUCH_BAR_ROW));
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(r).layout(egui::Layout::left_to_right(egui::Align::Center)));
             match i {
-                0 => color_button(app, &mut child),
-                1 => stroke_control(app, &mut child, true),
-                2 => effects_control(app, &mut child, true),
-                3 => align_button(app, &mut child),
-                4 => touch_leading(app, &mut child),
-                5 => warp_button(app, &mut child),
+                0 => stroke_control(app, &mut child, true),
+                1 => effects_control(app, &mut child, true),
+                2 => align_button(app, &mut child),
+                3 => touch_leading(app, &mut child),
+                4 => warp_button(app, &mut child),
                 _ => bubble_style_button(app, &mut child),
             }
         }
@@ -601,8 +627,13 @@ pub fn touch_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 
 /// The type bar's Done.
 fn done_button(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    done_button_w(app, ui, 70.0);
+}
+
+/// The type bar's Done, `w` points wide.
+fn done_button_w(app: &mut PhotocraftApp, ui: &mut egui::Ui, w: f32) {
     let t = crate::theme::Tokens::get(ui.ctx());
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(70.0, 44.0), egui::Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 44.0), egui::Sense::click());
     ui.painter().rect_filled(rect.shrink2(egui::vec2(0.0, 4.0)), egui::CornerRadius::same(18), t.accent);
     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, tl!("Done"), crate::theme::semibold(14.0), Color32::WHITE);
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tl!("Done")));

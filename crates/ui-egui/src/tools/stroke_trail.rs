@@ -227,10 +227,12 @@ impl Trail {
     fn image(&self, r: [usize; 4], color: Color32) -> ColorImage {
         let [x0, y0, x1, y1] = r;
         let mut px = Vec::with_capacity((x1 - x0) * (y1 - y0));
+        // `color` is premultiplied (a `gamma_multiply`'d tint): its own hue, not a darker one.
+        let rgb = color.to_srgba_unmultiplied();
         for y in y0..y1 {
             for x in x0..x1 {
                 let c = self.coverage(x, y);
-                px.push(Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), ((u16::from(c) * u16::from(color.a())) / 255) as u8));
+                px.push(Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], ((u16::from(c) * u16::from(rgb[3])) / 255) as u8));
             }
         }
         ColorImage::new([x1 - x0, y1 - y0], px)
@@ -261,6 +263,21 @@ impl Trail {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A premultiplied tint (`gamma_multiply`) shows in its own hue at its own opacity: Remove with
+    /// AI's 45 % red came out a dark, nearly black red.
+    #[test]
+    fn a_premultiplied_tint_keeps_its_hue() {
+        let mut t = Trail::new([100, 100]);
+        t.feed(&[[50.0, 50.0, 1.0], [60.0, 50.0, 1.0]], 20.0);
+        let red = Color32::from_rgb(230, 60, 50).gamma_multiply(0.45);
+        let img = t.image([0, 0, t.w, t.h], red);
+        let k = f64::from(t.k);
+        let (x, y) = ((55.0 / k) as usize, (50.0 / k) as usize);
+        let px = img.pixels[y * t.w + x].to_srgba_unmultiplied();
+        assert!(px[0] >= 225 && px[1] <= 65 && px[2] <= 55, "the red itself: {px:?}");
+        assert!((105..=125).contains(&px[3]), "at about 45 %: {px:?}");
+    }
 
     #[test]
     fn the_trail_is_the_union_of_round_footprints_along_the_drag() {

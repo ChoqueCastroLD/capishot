@@ -20,7 +20,10 @@ pub fn route(app: &mut PhotocraftApp, ctx: &egui::Context, raw: &mut egui::RawIn
     let p = &app.session.prefs().enhanced_controls;
     app.touch.mode = StylusMode::from_pref(p.stylus_input);
     app.touch.gestures = p.touch_gestures;
-    app.touch.button_enabled = p.touch_shortcut && active(app) && app.session.active().is_some() && !app.ui_hidden && app.ui.text_edit.is_none();
+    // The simple interface shows the button only when asked to (Preferences › Interface): its
+    // tools have touch controls of their own for what Shift and Alt do (`touch_locks`).
+    let wanted = p.touch_shortcut && (!app.simple || app.session.prefs().interface.simple_modifier_button);
+    app.touch.button_enabled = wanted && active(app) && app.session.active().is_some() && !app.ui_hidden && app.ui.text_edit.is_none();
     app.touch.precision = if active(app) { precision(app.ui.tool) } else { crate::touch_input::Precision::Direct };
     let pen_down = app.stylus.feed.get().is_some();
     // The offset cursor is for fingers that land on the canvas itself, not on the bars over it.
@@ -84,6 +87,9 @@ pub fn begin_frame(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if app.session.active().is_none() {
         app.ui_hidden = false;
     }
+    if app.simple {
+        size_brushes_for_document(app, ctx);
+    }
 }
 
 /// Note where a touch piece drawn elsewhere is (the type bar's buttons), for `ui.inspect`.
@@ -141,6 +147,18 @@ fn bottom_reserve(app: &PhotocraftApp) -> f32 {
 
 /// The touch pieces over the canvas, after it and the simple interface's bars.
 pub fn overlays(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    // A finger lifted from the canvas (the tools have seen it by now) ends a one-gesture chip
+    // (Duplicate, Set Source).
+    let canvas = app.last_canvas_rect;
+    let lifted = ctx.input(|i| {
+        i.events.iter().find_map(|e| match e {
+            egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, .. } if canvas.contains(*pos) => Some(*pos),
+            _ => None,
+        })
+    });
+    if lifted.is_some_and(|p| !covers(ctx, p)) {
+        crate::touch_locks::gesture_ended(app);
+    }
     // Last frame's pieces stay known (`covers`) while this frame draws them again.
     ctx.data_mut(|d| {
         let last = d.remove_temp::<Vec<(String, [f32; 4])>>(rects_id()).unwrap_or_default();
@@ -163,9 +181,17 @@ pub fn overlays(app: &mut PhotocraftApp, ctx: &egui::Context) {
         transform_bar(app, ctx);
     } else if app.ui.text_edit.is_some() {
         type_bar(app, ctx);
+        follow_caret(app, ctx);
     } else {
-        if quick_slider_tool(app) {
+        // The sliders step aside while a stroke paints (they come back when it lifts).
+        let painting = busy && !slider_held(ctx);
+        if quick_slider_tool(app) && !painting {
             quick_sliders(app, ctx);
+        } else {
+            ctx.data_mut(|d| d.insert_temp(slider_id(), 0u8));
+        }
+        if quick_slider_tool(app) {
+            size_ring(app, ctx);
         }
         if !busy && has_selection(app) && crate::simple_ui::sheet(ctx) == crate::simple_ui::Sheet::Closed && !app.ui.palette_open {
             selection_bar(app, ctx);
@@ -443,58 +469,179 @@ pub fn t_to_size(t: f32) -> f32 {
     (1.0 + t.clamp(0.0, 1.0).powi(3) * (SIZE_MAX - 1.0)).round()
 }
 
-/// The quick size and opacity sliders down the left edge (Procreate, ibis Paint): a finger
-/// drags either; while it does, the brush shows at its size in the middle of the canvas.
+/// Width of a quick slider.
+pub const SLIDER_W: f32 = 30.0;
+/// How far past a quick slider's right edge a finger still grabs it (a 44 pt target).
+pub const SLIDER_REACH: f32 = 10.0;
+
+/// Where the quick size and opacity sliders go: pinned to the left edge of the canvas `area`, one
+/// above the other around its middle, below what floats at the top and above the modifier button
+/// (`button_top`) when those show, so nothing floats over them. `above`: what floats at the top
+/// (the AI card, the selection bar).
+pub fn quick_slider_rects(area: Rect, above: Option<Rect>, button_top: Option<f32>) -> (Rect, Rect) {
+    let gap = 12.0;
+    let top = above.map_or(area.top() + 8.0, |r| r.bottom().max(area.top()) + 8.0);
+    let bottom = button_top.map_or(area.bottom() - 8.0, |b| b.min(area.bottom()) - 8.0);
+    let band = (bottom - top).max(0.0);
+    let h = ((band - gap) / 2.0).clamp(24.0, 150.0);
+    let total = 2.0 * h + gap;
+    let mid = (top + bottom) / 2.0;
+    let y0 = (mid - total / 2.0).max(top);
+    let size = Rect::from_min_size(pos2(area.left() + 4.0, y0), vec2(SLIDER_W, h));
+    (size, size.translate(vec2(0.0, h + gap)))
+}
+
+/// The quick size and opacity sliders on the left edge (Procreate, ibis Paint): a finger drags
+/// either; while it does, its value shows in a bubble beside it and the brush shows at its size
+/// in the middle of the canvas.
 fn quick_sliders(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let t = Tokens::get(ctx);
     let area = canvas_area(app, ctx);
-    let w = 44.0;
-    let button_top = app.touch.button.center.map_or(area.bottom(), |c| c.y - BUTTON_RADIUS - 12.0);
-    let avail = (button_top.min(area.bottom()) - area.top() - 70.0).max(160.0);
-    let h = ((avail - 16.0) / 2.0).clamp(90.0, 200.0);
-    let top = area.top() + 64.0;
-    let size_r = Rect::from_min_size(pos2(area.left() + 6.0, top), vec2(w, h));
-    let opac_r = size_r.translate(vec2(0.0, h + 16.0));
+    let button_top = app.touch.button_enabled.then_some(()).and(app.touch.button.center).map(|c| c.y - BUTTON_RADIUS - 4.0);
+    // The selection bar floats at the top of the canvas when there is a selection.
+    let mut above = crate::ai_progress::card_rect(ctx);
+    if has_selection(app) && crate::simple_ui::sheet(ctx) == crate::simple_ui::Sheet::Closed && !app.ui.palette_open {
+        let bar = Rect::from_min_size(area.min, vec2(area.width(), 8.0 + SEL_CELL.y + 12.0));
+        above = Some(above.map_or(bar, |r| r.union(bar)));
+    }
+    let (size_r, opac_r) = quick_slider_rects(area, above, button_top);
     crate::paint_mouse::sync_tool_brush(app);
     let before = app.session.tools.brush.clone();
     let mut b = before.clone();
     let mut held = 0u8;
+    let mut bubble = None;
     egui::Area::new(Id::unique("touch-quick-sliders")).order(egui::Order::Middle).fixed_pos(size_r.min).show(ctx, |ui| {
         for (k, rect) in [(1u8, size_r), (2u8, opac_r)] {
-            let resp = ui.allocate_rect(rect, Sense::click_and_drag());
+            // Slim to see, a finger wide to grab: the touch area reaches past its right edge.
+            let hit = Rect::from_min_max(pos2(rect.left() - 4.0, rect.top()), pos2(rect.right() + SLIDER_REACH, rect.bottom()));
+            let resp = ui.allocate_rect(hit, Sense::click_and_drag());
             let v = if k == 1 { size_to_t(b.size) } else { b.opacity.clamp(0.0, 1.0) };
             let p = ui.painter();
-            p.rect(rect, CornerRadius::same(22), t.card, Stroke::new(1.0, t.card_border), egui::StrokeKind::Inside);
-            let fill_h = (rect.height() - 8.0) * v;
-            let fill = Rect::from_min_max(pos2(rect.left() + 4.0, rect.bottom() - 4.0 - fill_h), pos2(rect.right() - 4.0, rect.bottom() - 4.0));
-            p.rect_filled(fill, CornerRadius::same(18), t.accent_soft);
-            let knob = pos2(rect.center().x, rect.bottom() - 4.0 - fill_h);
-            p.circle(knob, 9.0, t.accent, Stroke::new(2.0, Color32::WHITE));
-            let label = if k == 1 { format!("{}", b.size.round() as i64) } else { format!("{}%", (b.opacity * 100.0).round() as i64) };
-            // The value at the end away from the knob, so the knob never covers it.
-            let ly = if v > 0.6 { rect.bottom() - 14.0 } else { rect.top() + 14.0 };
-            p.text(pos2(rect.center().x, ly), Align2::CENTER_CENTER, label, crate::theme::semibold(11.0), t.text);
+            let r = CornerRadius::same((SLIDER_W / 2.0) as u8);
+            p.rect(rect, r, t.card.gamma_multiply(0.92), Stroke::new(1.0, t.card_border), egui::StrokeKind::Inside);
+            let fill_h = (rect.height() - 6.0) * v;
+            let fill = Rect::from_min_max(pos2(rect.left() + 3.0, rect.bottom() - 3.0 - fill_h), pos2(rect.right() - 3.0, rect.bottom() - 3.0));
+            p.rect_filled(fill, CornerRadius::same((SLIDER_W / 2.0 - 3.0) as u8), t.accent_soft);
+            let knob = pos2(rect.center().x, (rect.bottom() - 3.0 - fill_h).clamp(rect.top() + 9.0, rect.bottom() - 9.0));
+            p.circle(knob, 7.0, t.accent, Stroke::new(2.0, Color32::WHITE));
             let name = if k == 1 { tl!("Brush size slider") } else { tl!("Brush opacity slider") };
             resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Slider, true, name));
-            note(ctx, if k == 1 { "sizeSlider" } else { "opacitySlider" }, rect);
+            note(ctx, if k == 1 { "sizeSlider" } else { "opacitySlider" }, hit);
             if (resp.dragged() || resp.is_pointer_button_down_on())
                 && let Some(pos) = resp.interact_pointer_pos()
             {
-                let tv = ((rect.bottom() - 4.0 - pos.y) / (rect.height() - 8.0)).clamp(0.0, 1.0);
+                let tv = ((rect.bottom() - 3.0 - pos.y) / (rect.height() - 6.0)).clamp(0.0, 1.0);
                 if k == 1 {
                     b.size = t_to_size(tv).min(photocraft_engine::paint::MAX_BRUSH_SIZE);
                 } else {
                     b.opacity = (tv * 100.0).round().max(1.0) / 100.0;
                 }
                 held = k;
+                let label = if k == 1 { format!("{} px", b.size.round() as i64) } else { format!("{}%", (b.opacity * 100.0).round() as i64) };
+                bubble = Some((rect, knob.y, label));
             }
         }
     });
     ctx.data_mut(|d| d.insert_temp(slider_id(), held));
+    // The value only while a finger drags the slider: in a bubble beside it, at the knob.
+    if let Some((rect, y, label)) = bubble {
+        let font = crate::theme::semibold(13.0);
+        let g = ctx.fonts_mut(|f| f.layout_no_wrap(label, font, t.text));
+        let size = g.size() + vec2(16.0, 10.0);
+        let screen = crate::safe_area::rect(ctx);
+        let y = y.clamp(area.top() + size.y / 2.0, area.bottom() - size.y / 2.0);
+        let br = Rect::from_min_size(pos2(rect.right() + 8.0, y - size.y / 2.0), size);
+        let br = br.translate(vec2((screen.right() - 4.0 - br.right()).min(0.0), 0.0));
+        egui::Area::new(Id::unique("touch-slider-bubble")).order(egui::Order::Foreground).interactable(false).fixed_pos(br.min).show(ctx, |ui| {
+            ui.allocate_exact_size(size, Sense::hover());
+            ui.painter().rect(br, CornerRadius::same(10), t.card, Stroke::new(1.0, t.card_border), egui::StrokeKind::Inside);
+            ui.painter().galley(br.min + vec2(8.0, 5.0), g, t.text);
+        });
+        note(ctx, "sliderBubble", br);
+    }
     if held > 0 {
         brush_preview(app, ctx, &b, area);
     }
     crate::brush_panel::commit_gesture(app, ctx, &before, &b);
+}
+
+/// When a finger lands with a painting tool: a ring of the brush's size around it, fading out
+/// over a moment, so the size is seen where it paints.
+fn size_ring(app: &PhotocraftApp, ctx: &egui::Context) {
+    let id = Id::unique("touch-size-ring");
+    let now = ctx.input(|i| i.time);
+    let finger = app.touch.tool_finger().filter(|p| app.last_canvas_rect.contains(*p) && !covers(ctx, *p) && app.drag.is_some());
+    let Some(at) = finger else {
+        ctx.data_mut(|d| d.remove::<f64>(id));
+        return;
+    };
+    let since = match ctx.data(|d| d.get_temp::<f64>(id)) {
+        Some(s) => s,
+        None => {
+            ctx.data_mut(|d| d.insert_temp(id, now));
+            now
+        }
+    };
+    let age = (now - since) as f32;
+    const SHOW: f32 = 0.9;
+    if age > SHOW {
+        return;
+    }
+    let fade = (1.0 - age / SHOW).clamp(0.0, 1.0);
+    let r = (app.session.tools.brush.size * app.point_zoom() / 2.0).clamp(3.0, 400.0);
+    egui::Area::new(Id::unique("touch-size-ring-area")).order(egui::Order::Foreground).interactable(false).fixed_pos(at - Vec2::splat(r + 4.0)).show(
+        ctx,
+        |ui| {
+            ui.allocate_exact_size(Vec2::splat(2.0 * r + 8.0), Sense::hover());
+            let p = ui.painter();
+            p.circle_stroke(at, r + 0.5, Stroke::new(2.5, Color32::from_black_alpha((160.0 * fade) as u8)));
+            p.circle_stroke(at, r, Stroke::new(1.5, Color32::from_white_alpha((235.0 * fade) as u8)));
+        },
+    );
+    ctx.request_repaint();
+}
+
+/// A phone's starting brush size: about a 25th of the page's side in view (whole pixels, 3 px at
+/// least), so the first stroke is neither a hair nor a blob whatever the page's resolution.
+pub fn phone_brush_size(canvas: Rect, point_zoom: f32, doc_size: [u32; 2]) -> f32 {
+    let zoom = if point_zoom.is_finite() && point_zoom > 0.0 { point_zoom } else { 1.0 };
+    let seen = (canvas.width().min(canvas.height()) / zoom).min(doc_size[0].min(doc_size[1]) as f32);
+    (seen / 25.0).round().clamp(3.0, 500.0)
+}
+
+/// The phone's brushes start at [`phone_brush_size`] for each document opened, unless the size was
+/// changed by hand (it is then the user's).
+fn size_brushes_for_document(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let id = Id::unique("touch-phone-brush-size");
+    let Some(st) = app.session.active() else { return };
+    let doc = st.doc.id;
+    let doc_size = [st.doc.size.width, st.doc.size.height];
+    let last: Option<(photocraft_doc::DocId, f32)> = ctx.data(|d| d.get_temp(id));
+    if last.is_some_and(|(d, _)| d == doc) || app.last_canvas_rect.width() < 1.0 {
+        return;
+    }
+    // Once the view has settled on the new page (laid out and fitted for a few frames).
+    let seen = Id::unique("touch-phone-brush-seen");
+    let frames = ctx.data(|d| d.get_temp::<(photocraft_doc::DocId, u32)>(seen)).filter(|(d, _)| *d == doc).map_or(0, |(_, n)| n) + 1;
+    ctx.data_mut(|d| d.insert_temp(seen, (doc, frames)));
+    let fitting = app.session.active_index().and_then(|i| app.ui.views.get(i)).is_none_or(|v| v.fit_pending || v.fill_pending);
+    if frames < 3 || fitting {
+        ctx.request_repaint();
+        return;
+    }
+    let factory = photocraft_engine::paint::BrushSettings::default().size;
+    let untouched = |s: f32| s == factory || last.is_some_and(|(_, auto)| s == auto);
+    let auto = phone_brush_size(app.last_canvas_rect, app.point_zoom(), doc_size);
+    if untouched(app.session.tools.brush.size) {
+        app.session.tools.brush.size = auto;
+        app.session.tools.brush_changed();
+    }
+    for (_, b) in &mut app.ui.tool_brushes {
+        if untouched(b.size) {
+            b.size = auto;
+        }
+    }
+    ctx.data_mut(|d| d.insert_temp(id, (doc, auto)));
 }
 
 /// The brush at its size on screen (and its opacity) in the middle of the canvas, while a quick
@@ -794,7 +941,7 @@ pub fn snap_rotation(ctx: &egui::Context, rotation: &mut f32) {
 /// (`type_tool::touch_bar_rows`).
 pub fn type_bar_height(ctx: &egui::Context) -> f32 {
     let screen = crate::safe_area::rect(ctx);
-    let rows = crate::type_tool::touch_bar_rows(screen.width() - 12.0 - 16.0) as f32;
+    let rows = crate::type_tool::touch_bar_rows(ctx, screen.width() - 12.0 - 16.0) as f32;
     12.0 + rows * crate::type_tool::TOUCH_BAR_ROW + (rows - 1.0) * 6.0
 }
 
@@ -815,6 +962,98 @@ fn type_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
             });
     });
     note(ctx, "typeBar", r);
+}
+
+/// What the caret follow last did: the edit it followed (layer, caret, document revision), the
+/// view it left (zoom, centre), and whether a hand gesture has paused it.
+#[derive(Clone, Copy, Default)]
+struct Follow {
+    edit: (u64, usize, u64),
+    left: Option<(f32, [f32; 2])>,
+    paused: bool,
+}
+
+/// The smallest caret height (points) the follow keeps readable: smaller text is zoomed in to
+/// [`CARET_READABLE`].
+const CARET_SMALL: f32 = 10.0;
+const CARET_READABLE: f32 = 20.0;
+
+/// Where the view should move so the caret `caret` (screen) sits inside `safe`: the smallest pan
+/// that brings it in (screen points), and the zoom factor that makes a too-small caret readable.
+pub fn caret_follow_step(caret: Rect, safe: Rect) -> (Vec2, f32) {
+    let zoom = if caret.height() > 0.5 && caret.height() < CARET_SMALL { CARET_READABLE / caret.height() } else { 1.0 };
+    let c = caret.center();
+    let half = vec2(4.0, caret.height() / 2.0 + 4.0);
+    let inner = Rect::from_min_max(safe.min + half, (safe.max - half).max(safe.min + half));
+    let target = pos2(c.x.clamp(inner.left(), inner.right()), c.y.clamp(inner.top(), inner.bottom()));
+    (target - c, zoom)
+}
+
+/// While text is typed on a phone, the view follows the caret: it pans (and zooms in on tiny
+/// text) so the caret stays in view above the type bar and the keyboard, gliding there over a
+/// few frames. A hand gesture on the view stops the follow until the next edit.
+fn follow_caret(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let id = Id::unique("touch-follow-caret");
+    let Some(ed) = app.ui.text_edit.as_ref() else { return };
+    let (layer, caret_at) = (ed.layer, ed.caret);
+    let Some(i) = app.session.active_index() else { return };
+    let revision = app.session.active().map_or(0, |s| s.revision);
+    let mut f: Follow = ctx.data(|d| d.get_temp(id)).unwrap_or_default();
+    let Some(v) = app.ui.views.get(i) else { return };
+    let now_view = (v.zoom, v.center);
+    let edit = (layer, caret_at, revision);
+    if f.edit != edit {
+        // An edit (typing, a caret move): follow again.
+        f = Follow { edit, left: f.left, paused: false };
+    } else if f.left.is_some_and(|(z, c)| (z - now_view.0).abs() > 1e-4 || (c[0] - now_view.1[0]).abs() > 0.01 || (c[1] - now_view.1[1]).abs() > 0.01) {
+        // The view moved without us: a pinch or a pan. Leave it there.
+        f.paused = true;
+    }
+    let fingers_on_view = ctx.input(|i| i.multi_touch().is_some());
+    if f.paused || fingers_on_view {
+        f.left = Some(now_view);
+        ctx.data_mut(|d| d.insert_temp(id, f));
+        return;
+    }
+    let Some(caret) = crate::type_tool::caret_screen_rect(app) else {
+        ctx.data_mut(|d| d.insert_temp(id, f));
+        return;
+    };
+    let canvas = app.last_canvas_rect;
+    let screen = crate::safe_area::rect(ctx);
+    let bar_top = screen.bottom() - type_bar_height(ctx) - 12.0;
+    let safe = Rect::from_min_max(pos2(canvas.left() + 16.0, canvas.top() + 16.0), pos2(canvas.right() - 16.0, bar_top.min(canvas.bottom()) - 16.0));
+    let (pan, zoom) = caret_follow_step(caret, safe);
+    let Some(xf) = crate::canvas::ViewXform::active(app) else { return };
+    let ppp = app.canvas_ppp();
+    let Some(v) = app.ui.views.get_mut(i) else { return };
+    // A fraction of the way each frame: the view glides instead of jumping.
+    const K: f32 = 0.3;
+    let mut moved = false;
+    if (zoom - 1.0).abs() > 0.01 {
+        let doc = xf.to_doc(caret.center());
+        let nz = (v.zoom * (1.0 + (zoom - 1.0) * K)).min(32.0);
+        if nz > v.zoom {
+            let r = v.zoom / nz;
+            v.center = [doc[0] as f32 + (v.center[0] - doc[0] as f32) * r, doc[1] as f32 + (v.center[1] - doc[1] as f32) * r];
+            v.zoom = nz;
+            moved = true;
+        }
+    }
+    if pan.length() > 0.5 {
+        let step = if pan.length() * K < 1.0 { pan } else { pan * K };
+        let d = xf.unmap_vec(step) / (v.zoom / ppp);
+        v.center[0] -= d.x;
+        v.center[1] -= d.y;
+        moved = true;
+    }
+    if moved {
+        v.zoom_animating = false;
+        v.zoom_anchor = None;
+        ctx.request_repaint();
+    }
+    f.left = Some((v.zoom, v.center));
+    ctx.data_mut(|d| d.insert_temp(id, f));
 }
 
 #[cfg(test)]
@@ -845,10 +1084,14 @@ fn status_toast(app: &PhotocraftApp, ctx: &egui::Context) {
     let t = Tokens::get(ctx);
     let area = canvas_area(app, ctx);
     let font = crate::theme::medium(13.0);
-    let max_w = area.width() - 40.0;
+    // Clear of the quick sliders on the left (and as far from the right edge), below where the
+    // selection bar and the AI card float.
+    let side = 4.0 + SLIDER_W + SLIDER_REACH + 8.0;
+    let max_w = (area.width() - 2.0 * side - 28.0).max(80.0);
     let galley = ctx.fonts_mut(|f| f.layout(text.clone(), font, if app.ui.status_error { t.warning } else { t.text }, max_w));
     let size = galley.size() + vec2(28.0, 16.0);
-    let pos = pos2(area.center().x - size.x / 2.0, area.top() + 70.0);
+    let below = (area.top() + 8.0 + SEL_CELL.y + 12.0 + 8.0).max(crate::ai_progress::card_rect(ctx).map_or(0.0, |r| r.bottom() + 8.0));
+    let pos = pos2(area.center().x - size.x / 2.0, below);
     egui::Area::new(id).order(egui::Order::Foreground).interactable(false).fixed_pos(pos).show(ctx, |ui| {
         let (r, _) = ui.allocate_exact_size(size, Sense::hover());
         ui.painter().rect(

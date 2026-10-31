@@ -152,6 +152,8 @@ fn the_phone_type_bar_opens_the_picker_as_a_sheet() {
         },
         app,
     );
+    // The narrow bar's second row ("⋯") holds the style button.
+    crate::type_tool::set_touch_bar_expanded(&h.ctx, true);
     h.run_steps(4);
     let b = crate::touch_ui::noted_rect(&h.ctx, "typeBubbleStyle").expect("the style button");
     assert!(b.width() >= 44.0 && b.height() >= 44.0 && b.right() <= 320.0, "{b:?}");

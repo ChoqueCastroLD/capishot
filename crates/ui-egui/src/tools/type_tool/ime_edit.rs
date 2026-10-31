@@ -410,3 +410,10 @@ fn ime_delete_around(app: &mut PhotocraftApp, ed: TextEdit, from: usize, start: 
     remember_incoming(app, None);
     true
 }
+
+/// Where the text caret being edited is on screen (egui points), if text is edited in view.
+pub fn caret_screen_rect(app: &mut PhotocraftApp) -> Option<egui::Rect> {
+    let ed = app.ui.text_edit.clone()?;
+    let xf = crate::canvas::ViewXform::active(app)?;
+    ime_geometry(app, &ed, xf).map(|(_, caret)| caret)
+}

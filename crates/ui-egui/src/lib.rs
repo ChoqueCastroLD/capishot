@@ -77,6 +77,7 @@ pub mod safe_area;
 pub mod simple_ui;
 pub mod telemetry;
 pub mod touch_input;
+pub mod touch_locks;
 pub mod touch_nav;
 pub mod touch_ui;
 pub mod typer;
@@ -809,6 +810,8 @@ mod screenshot_tests;
 mod navigator_gpu_tests;
 #[cfg(test)]
 mod phone_dialog_tests;
+#[cfg(test)]
+mod phone_polish_tests;
 
 #[cfg(test)]
 mod color_swatch_tests;

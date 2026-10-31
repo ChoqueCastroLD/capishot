@@ -345,6 +345,12 @@ pub struct Interface {
     /// The simple interface's favorites bar: tool names (`tool:Brush`) and command ids, in
     /// order. Empty: a starter set of drawing and typesetting tools.
     pub favorites: Vec<String>,
+    /// The simple interface shows the floating touch modifier button (Shift, Alt slid out). Off
+    /// by default: each tool has touch controls of its own for what the keys do.
+    pub simple_modifier_button: bool,
+    /// The simple interface turns the view with a two-finger twist. Off by default, so a pinch
+    /// never tilts the page by accident.
+    pub simple_two_finger_rotate: bool,
 }
 
 impl Default for Interface {
@@ -376,6 +382,8 @@ impl Default for Interface {
             notification_duration_seconds: 6,
             simple_ui: SimpleUi::Auto,
             favorites: Vec::new(),
+            simple_modifier_button: false,
+            simple_two_finger_rotate: false,
         }
     }
 }

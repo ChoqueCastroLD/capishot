@@ -114,7 +114,8 @@ pub fn sticky_mods(app: &PhotocraftApp, mut m: egui::Modifiers) -> egui::Modifie
             m.ctrl = true;
         }
     }
-    m
+    // The touch interface's tool chips (Square, From Center, Duplicate…) act as held keys.
+    crate::touch_locks::apply(app, m)
 }
 
 fn no_params(p: &Value) -> bool {
