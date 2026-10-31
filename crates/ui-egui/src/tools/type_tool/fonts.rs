@@ -592,7 +592,7 @@ fn family_picker_with(
     if navigation_down || navigation_up {
         ui.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
     }
-    if edit.opening {
+    if edit.opening && crate::widgets::autofocus_allowed(ui.ctx()) {
         ui.memory_mut(|m| m.request_focus(field));
     }
     let (input, rect) = crate::widgets::text_field_with_trailing(ui, field, &mut edit.text, tl!("Font"), width, crate::widgets::POPUP_ARROW_W);
@@ -959,7 +959,10 @@ fn family_picker_with(
     if !was_open && open {
         edit.recents = library.recent.clone();
         edit.opening = arrow.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_down());
-        ui.memory_mut(|m| m.request_focus(field));
+        // On a phone the list opens without the keyboard; a tap on the field brings it up.
+        if crate::widgets::autofocus_allowed(ui.ctx()) {
+            ui.memory_mut(|m| m.request_focus(field));
+        }
         select_all = !input.changed();
     }
     // A held opening arrow can regain focus on release; keep the name selected through it.
@@ -996,7 +999,7 @@ fn family_picker_with(
         edit.opening = false;
         edit.composing = false;
     }
-    if picked {
+    if picked && crate::widgets::autofocus_allowed(ui.ctx()) {
         ui.memory_mut(|m| m.request_focus(field));
         select_all = true;
     }

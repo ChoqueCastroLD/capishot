@@ -97,7 +97,7 @@ fn prompt_field(ui: &mut egui::Ui, id: &str, prompt: &mut String, width: f32, fo
     let r = ui.add(
         egui::TextEdit::singleline(prompt).id(egui::Id::unique(id)).char_limit(1000).desired_width(width).hint_text(tl!("Describe what to add (optional)")),
     );
-    if focus {
+    if focus && crate::widgets::autofocus_allowed(ui.ctx()) {
         r.request_focus();
     }
     r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))

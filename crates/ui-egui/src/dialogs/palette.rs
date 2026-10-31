@@ -313,7 +313,8 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                         let resp = ui.add(te);
                         // Only when focus is missing: every request_focus interrupts the IME, and
                         // doing that each frame makes Wayland input methods drop key releases (#585).
-                        if !resp.has_focus() {
+                        // On a phone only a tap on it focuses it (and brings up the keyboard).
+                        if !resp.has_focus() && crate::widgets::autofocus_allowed(ui.ctx()) {
                             resp.request_focus();
                         }
                     });

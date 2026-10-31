@@ -45,7 +45,7 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
         let mut name = f.get("name").and_then(Value::as_str).unwrap_or_default().to_string();
         let r = ui.add(egui::TextEdit::singleline(&mut name).desired_width(260.0));
         // Opens on the name, selected, so typing replaces it (Photoshop).
-        if !ui.is_sizing_pass() && !f.contains_key("__named") {
+        if !ui.is_sizing_pass() && !f.contains_key("__named") && crate::widgets::autofocus_allowed(ui.ctx()) {
             r.request_focus();
             if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), r.id) {
                 let all = egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(name.chars().count()));

@@ -406,7 +406,9 @@ pub(super) fn editor(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<Str
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(tl!("Name:")).color(t.text_dim));
                         let r = widgets::text_field(ui, mem.with("name-field"), name, "", 150.0, false).accessible_name(tl!("Name:"));
-                        r.request_focus();
+                        if widgets::autofocus_allowed(ui.ctx()) {
+                            r.request_focus();
+                        }
                         if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                             commit_name = true;
                         }

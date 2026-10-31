@@ -82,7 +82,7 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
             f.insert("name".into(), json!(name));
         }
         // Photoshop opens on the name, selected, so typing replaces it.
-        if !ui.is_sizing_pass() && !flag(f, "__nameFocused") {
+        if !ui.is_sizing_pass() && !flag(f, "__nameFocused") && crate::widgets::autofocus_allowed(ui.ctx()) {
             field.request_focus();
             crate::field_tab::select_all(ui.ctx(), field.id, &name);
             f.insert("__nameFocused".into(), json!(true));

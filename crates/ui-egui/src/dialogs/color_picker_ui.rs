@@ -708,10 +708,13 @@ fn fields(ui: &mut egui::Ui, f: &mut Map<String, Value>, mode: &str, now: &Compo
                 crate::field_tab::register(ui.ctx(), id);
                 if !f.contains_key("__focused") {
                     f.insert("__focused".into(), json!(true));
-                    crate::field_tab::focus(ui.ctx(), id);
-                    let current_hex = hex(rgb);
-                    crate::field_tab::select_all(ui.ctx(), id, current_hex.trim_start_matches('#'));
-                    ui.memory_mut(|m| m.request_focus(id));
+                    // On a phone the picker opens without the hex field focused (no keyboard).
+                    if crate::widgets::autofocus_allowed(ui.ctx()) {
+                        crate::field_tab::focus(ui.ctx(), id);
+                        let current_hex = hex(rgb);
+                        crate::field_tab::select_all(ui.ctx(), id, current_hex.trim_start_matches('#'));
+                        ui.memory_mut(|m| m.request_focus(id));
+                    }
                 }
                 let focused = ui.memory(|m| m.has_focus(id));
                 let pasted = if focused { take_hex_paste(ui) } else { None };

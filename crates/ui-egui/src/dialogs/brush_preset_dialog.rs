@@ -100,7 +100,7 @@ pub fn body(app: &PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>, 
                 let r = widgets::text_field(ui, id, &mut text, "", 220.0, false).accessible_name(tl!("Name:"));
                 // Photoshop opens on the name, all of it selected, so typing replaces it.
                 let once = id.with("focused");
-                if !ui.ctx().data(|d| d.get_temp::<bool>(once).unwrap_or(false)) {
+                if !ui.ctx().data(|d| d.get_temp::<bool>(once).unwrap_or(false)) && widgets::autofocus_allowed(ui.ctx()) {
                     r.request_focus();
                     if egui::TextEdit::load_state(ui.ctx(), id).is_some() {
                         crate::field_tab::select_all(ui.ctx(), id, &text);

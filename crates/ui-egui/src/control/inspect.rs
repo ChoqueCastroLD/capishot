@@ -42,6 +42,11 @@ pub fn inspect(app: &PhotocraftApp, ctx: &egui::Context) -> Value {
         "strokeEditor": app.ui.stroke_editor,
         "magnetic": app.ui.magnetic,
         "textEdit": app.ui.text_edit,
+        // The widget with the keyboard focus (a text field: the phone keyboard is up for it).
+        "focusedWidget": ctx.memory(|m| m.focused()).map(|id| format!("{id:?}")),
+        "textFieldFocused": ctx.text_edit_focused(),
+        // The last dialog's text and number fields on screen (`[x0, y0, x1, y1]`), in Tab order.
+        "dialogFieldRects": crate::field_tab::fields(ctx).into_iter().filter_map(|id| ctx.read_response(id)).map(|r| [r.rect.min.x, r.rect.min.y, r.rect.max.x, r.rect.max.y]).collect::<Vec<_>>(),
         "typeTransform": app.ui.type_transform,
         "fonts": app.ui.fonts,
         "camTransform": app.ui.cam_transform,

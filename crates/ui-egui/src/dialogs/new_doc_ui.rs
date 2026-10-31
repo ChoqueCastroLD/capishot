@@ -657,9 +657,12 @@ pub fn body(app: &mut crate::PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<Strin
             crate::field_tab::register(ui.ctx(), r.id);
             // Photoshop opens the dialog with the name selected, so typing replaces it and Tab goes
             // straight on to Width. (`__focused` marks that this instance has had its turn.)
+            // On a phone it opens without (the keyboard would come up over it).
             if !f.contains_key("__focused") {
                 f.insert("__focused".into(), json!(true));
-                crate::field_tab::focus(ui.ctx(), r.id);
+                if crate::widgets::autofocus_allowed(ui.ctx()) {
+                    crate::field_tab::focus(ui.ctx(), r.id);
+                }
             }
             if r.gained_focus() {
                 crate::field_tab::select_all(ui.ctx(), r.id, &name);

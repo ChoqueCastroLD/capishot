@@ -435,6 +435,9 @@ impl Boot {
             lost_at: None,
             typing_view: None,
             was_typing: false,
+            text_focus: None,
+            viewport_height: 0.0,
+            viewport_changed_at: 0.0,
         }
     }
 }
@@ -703,27 +706,46 @@ thread_local! {
 
 /// The on-screen keyboard: Android Chrome shrinks the page (`interactive-widget` in index.html);
 /// iOS Safari shrinks only the visual viewport, so the page is fitted to it and the app's bars stay
-/// above the keyboard.
+/// above the keyboard. The page's height follows only real changes of the viewport's height, and
+/// a scroll the browser made (to bring the focused field into view while the keyboard slides up)
+/// is undone once, after the viewport has settled: undoing every scroll event as it came fought
+/// the browser's own scrolling while the keyboard animated, and the page jumped.
 fn fit_to_visual_viewport() {
+    use std::cell::Cell;
+    use std::rc::Rc;
     use wasm_bindgen::closure::Closure;
     let Some(window) = web_sys::window() else { return };
     let Ok(vv) = js_sys::Reflect::get(&window, &"visualViewport".into()) else { return };
     let Ok(vv) = vv.dyn_into::<web_sys::EventTarget>() else { return };
     let target = vv.clone();
+    let last_height = Rc::new(Cell::new(-1.0f64));
+    let settle = Rc::new(Cell::new(None::<i32>));
+    let unscroll: Rc<Closure<dyn FnMut()>> = Rc::new(Closure::new(|| {
+        if let Some(window) = web_sys::window()
+            && window.scroll_y().unwrap_or(0.0) != 0.0
+        {
+            window.scroll_to_with_x_and_y(0.0, 0.0);
+        }
+    }));
     let fit = Closure::<dyn FnMut()>::new(move || {
         let Some(window) = web_sys::window() else { return };
         let Some(h) = js_sys::Reflect::get(&target, &"height".into()).ok().and_then(|h| h.as_f64()) else { return };
-        let Some(document) = window.document() else { return };
-        let px = format!("{h}px");
-        if let Some(root) = document.document_element().and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok()) {
-            root.style().set_property("height", &px).ok();
+        if (h - last_height.get()).abs() >= 1.0 {
+            last_height.set(h);
+            let Some(document) = window.document() else { return };
+            let px = format!("{h}px");
+            if let Some(root) = document.document_element().and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok()) {
+                root.style().set_property("height", &px).ok();
+            }
+            if let Some(body) = document.body() {
+                body.style().set_property("height", &px).ok();
+            }
         }
-        if let Some(body) = document.body() {
-            body.style().set_property("height", &px).ok();
+        if let Some(t) = settle.take() {
+            window.clear_timeout_with_handle(t);
         }
-        if window.scroll_y().unwrap_or(0.0) != 0.0 {
-            window.scroll_to_with_x_and_y(0.0, 0.0);
-        }
+        let f: &js_sys::Function = (*unscroll).as_ref().unchecked_ref();
+        settle.set(window.set_timeout_with_callback_and_timeout_and_arguments_0(f, 250).ok());
     });
     for ev in ["resize", "scroll"] {
         vv.add_event_listener_with_callback(ev, fit.as_ref().unchecked_ref()).ok();
@@ -1020,6 +1042,11 @@ struct WebShell {
     typing_view: Option<(f64, Option<f64>)>,
     /// Text was being edited last frame.
     was_typing: bool,
+    /// The text field that had the keyboard focus last frame, the visual viewport's height and
+    /// when it last changed (ms): see [`WebShell::keep_text_focus`].
+    text_focus: Option<egui::Id>,
+    viewport_height: f64,
+    viewport_changed_at: f64,
     /// When the graphics context was lost (ms), while the page saves for recovery (gpu_lost.rs).
     lost_at: Option<f64>,
     served: Served,
@@ -1065,12 +1092,46 @@ impl WebShell {
     /// again; and a keyboard closed while typing (its own button, Back) ends the edit, keeping
     /// the text, so the bars come back. A dialog or menu open meanwhile (the colour picker, the
     /// font menu) doesn't count.
+    /// A phone's text field keeps the keyboard focus while the keyboard changes the window: when
+    /// the viewport has just changed height and the field lost the focus with no tap and no key
+    /// (Enter, Esc and Tab leave a field on purpose), it gets it back. A field that lost it in a
+    /// relayout as the keyboard came up let the keyboard go down again, which gave the room back,
+    /// and the next tap started the loop over: the keyboard flickered and the layout jumped.
+    fn keep_text_focus(&mut self, ctx: &egui::Context, height: Option<f64>) {
+        let now = js_sys::Date::now();
+        if let Some(h) = height
+            && (h - self.viewport_height).abs() >= 1.0
+        {
+            self.viewport_height = h;
+            self.viewport_changed_at = now;
+        }
+        let focused = ctx.memory(|m| m.focused()).filter(|_| ctx.text_edit_focused());
+        if let Some(id) = focused {
+            self.text_focus = Some(id);
+            return;
+        }
+        let Some(id) = self.text_focus.take() else { return };
+        let deliberate = ctx.input(|i| {
+            i.pointer.any_pressed()
+                || i.events.iter().any(|e| matches!(e, egui::Event::Touch { phase: egui::TouchPhase::Start, .. }))
+                || i.key_pressed(egui::Key::Enter)
+                || i.key_pressed(egui::Key::Escape)
+                || i.key_pressed(egui::Key::Tab)
+        });
+        if !deliberate && now - self.viewport_changed_at < 800.0 && photocraft_ui_egui::touch_ui::active(&self.app) {
+            ctx.memory_mut(|m| m.request_focus(id));
+            self.text_focus = Some(id);
+            ctx.request_repaint();
+        }
+    }
+
     fn keyboard(&mut self, ctx: &egui::Context) {
         let typing = self.app.ui.text_edit.is_some();
         let height = web_sys::window()
             .and_then(|w| js_sys::Reflect::get(&w, &"visualViewport".into()).ok())
             .and_then(|v| js_sys::Reflect::get(&v, &"height".into()).ok())
             .and_then(|h| h.as_f64());
+        self.keep_text_focus(ctx, height);
         if typing && photocraft_ui_egui::touch_ui::active(&self.app) {
             if let Some(h) = height {
                 let now = js_sys::Date::now();

@@ -122,6 +122,15 @@ pub(super) fn first_field_id() -> egui::Id {
     egui::Id::unique("pc-focus-first-field")
 }
 
+/// Whether a text field may take the keyboard focus by itself (a dialog opening on its name or
+/// first value, a search box): not on the touch interface, where focusing a field brings up the
+/// on-screen keyboard. There a field is focused only by a tap on it: a field focused on open
+/// raised the keyboard over the dialog it opened with, and one that took the focus back every
+/// frame bounced the keyboard open and shut.
+pub fn autofocus_allowed(ctx: &egui::Context) -> bool {
+    !crate::touch_ui::flagged(ctx)
+}
+
 /// While `on`, the next number field drawn takes the keyboard focus with its text selected (a
 /// dialog opening on its first value, as in Photoshop). Turn it off once the body is laid out.
 pub fn focus_first_field(ctx: &egui::Context, on: bool) {

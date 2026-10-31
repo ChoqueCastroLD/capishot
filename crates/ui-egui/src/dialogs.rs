@@ -48,7 +48,7 @@ fn fill_field(app: &mut PhotocraftApp, id: u64, key: &str, path: String) -> Resu
 /// Where this frame's dialogs are on screen (the canvas reads last frame's: it draws first).
 const RECTS: &str = "pc-dialog-rects";
 
-fn rects(ctx: &egui::Context) -> Vec<egui::Rect> {
+pub(crate) fn rects(ctx: &egui::Context) -> Vec<egui::Rect> {
     ctx.data(|m| m.get_temp(egui::Id::unique(RECTS))).unwrap_or_default()
 }
 
@@ -146,6 +146,33 @@ pub fn free_press(ctx: &egui::Context, canvas: egui::Rect) -> Option<egui::Pos2>
     })
 }
 
+/// How long the window's height must hold still before a phone's dialogs follow it (seconds): the
+/// soft keyboard slides in over a few hundred milliseconds, and a dialog re-placed on every frame
+/// of that slide jumps about and can move its focused field out from under the finger.
+const KEYBOARD_SETTLE: f64 = 0.3;
+
+/// The window rect a phone's dialogs are placed in: the current one once its height has held for
+/// [`KEYBOARD_SETTLE`], the previous settled one while it is changing (the keyboard opening or
+/// closing). The width follows at once (a rotation is not a keyboard).
+fn settled_screen(ctx: &egui::Context) -> egui::Rect {
+    let id = egui::Id::unique("pc-dialog-settled-screen");
+    let now = ctx.input(|i| i.time);
+    let raw = ctx.content_rect();
+    let (mut settled, mut last, mut since) = ctx.data(|d| d.get_temp::<(egui::Rect, f32, f64)>(id)).unwrap_or((raw, raw.height(), now));
+    if (raw.height() - last).abs() >= 1.0 {
+        last = raw.height();
+        since = now;
+    }
+    if now - since >= KEYBOARD_SETTLE || (raw.width() - settled.width()).abs() >= 1.0 {
+        settled = raw;
+    } else {
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(KEYBOARD_SETTLE - (now - since)));
+        settled = egui::Rect::from_min_size(raw.min, egui::vec2(raw.width(), settled.height()));
+    }
+    ctx.data_mut(|d| d.insert_temp(id, (settled, last, since)));
+    settled
+}
+
 /// Height of a dialog's title, rule, button row and frame margins (points), around a body that
 /// scrolls.
 const DIALOG_CHROME: f32 = 150.0;
@@ -160,7 +187,8 @@ fn first_field_focused<R>(ui: &mut egui::Ui, id: egui::Id, body: impl FnOnce(&mu
     if first {
         ctx.data_mut(|m| m.insert_temp(focused, true));
     }
-    crate::widgets::focus_first_field(&ctx, first);
+    // On a phone the dialog opens without a focused field (the keyboard stays down until a tap).
+    crate::widgets::focus_first_field(&ctx, first && crate::widgets::autofocus_allowed(&ctx));
     let r = body(ui);
     crate::widgets::focus_first_field(&ctx, false);
     r
@@ -605,6 +633,9 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         // A phone: dialogs fit the window's width and open centred (a place remembered on a wider
         // window could leave one half off the screen).
         let narrow = ctx.content_rect().width() < crate::simple_ui::PHONE_BELOW;
+        // A phone's dialogs are placed in the settled window: once above the keyboard, not on
+        // every frame of its slide.
+        let screen_now = if narrow { settled_screen(ctx) } else { ctx.content_rect() };
         let cap = if narrow { (ctx.content_rect().width() - 40.0).max(220.0) } else { f32::INFINITY };
         let start = if narrow {
             pinned
@@ -635,6 +666,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             ctx.move_to_top(area.layer());
         }
         let color_picker = crate::color_picker_ui::owns(&fields);
+        let area = if narrow { area.constrain_to(screen_now) } else { area };
         let mut modal = egui::Modal::new(id).area(area).backdrop_color(egui::Color32::TRANSPARENT);
         if color_picker {
             modal = modal.frame(egui::Frame::popup(&ctx.global_style()).inner_margin(16));
@@ -701,7 +733,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             }
             if sheet {
                 // The whole window, inside the frame's margin.
-                let size = ctx.content_rect().size() - egui::Vec2::splat(2.0 * crate::prefs_ui::SHEET_MARGIN);
+                let size = screen_now.size() - egui::Vec2::splat(2.0 * crate::prefs_ui::SHEET_MARGIN);
                 ui.set_min_size(size);
                 ui.set_max_size(size);
             }
@@ -727,7 +759,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             crate::field_tab::begin(ui.ctx());
             // A phone: the body scrolls (sideways too, for a body wider than the window), so the
             // dialog keeps to the window and its buttons stay on the screen.
-            let phone_room = (ctx.content_rect().height() - 190.0).max(160.0);
+            let phone_room = (screen_now.height() - 190.0).max(160.0);
             let mut body = |ui: &mut egui::Ui| dialog_body(app, ui, &d, &mut fields, id, interactive);
             let done = if narrow && !sheet && !color_picker {
                 egui::ScrollArea::both()
@@ -786,7 +818,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         }
         // Pin once laid out at its real size (the first frame is an invisible sizing pass).
         if !sizing && !sheet && (web || pinned.is_none() || drag != egui::Vec2::ZERO) {
-            let screen = ctx.content_rect();
+            let screen = screen_now;
             // Keep the whole dialog (and so its title bar) on screen.
             let room = (screen.size() - modal.response.rect.size()).max(egui::Vec2::ZERO);
             let offset = (pinned.unwrap_or(modal.response.rect.min - screen.min) + drag).clamp(egui::Vec2::ZERO, room);
@@ -1241,6 +1273,9 @@ pub mod stroke_ui;
 pub mod targa_options_ui;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+#[path = "dialogs/keyboard_focus_tests.rs"]
+mod keyboard_focus_tests;
 pub mod tiff_options_ui;
 pub mod vp_ui;
 pub mod wide_angle_ui;

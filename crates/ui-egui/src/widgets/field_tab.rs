@@ -91,6 +91,11 @@ pub fn end(ctx: &Context, step: i32) -> Option<Id> {
     Some(id)
 }
 
+/// The text and number fields of the dialog laid out last, in Tab order (for automation).
+pub fn fields(ctx: &Context) -> Vec<Id> {
+    ctx.data(|d| d.get_temp(list_id()).unwrap_or_default())
+}
+
 /// Select all of a text field's text (so typing replaces it), as Photoshop does when a field is
 /// reached with Tab or stepped with the arrow keys.
 pub fn select_all(ctx: &Context, id: Id, text: &str) {

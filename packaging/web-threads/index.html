@@ -14,7 +14,13 @@
     #photocraft_loading p { margin: 0 0 8px; max-width: 420px; line-height: 1.5; white-space: pre-line; }
     #photocraft_loading a { color: #e0e0e0; pointer-events: auto; }
     #photocraft_loading.error p { color: #f0a0a0; }
-  </style>
+      /* Touch screens: the hidden input that holds the on-screen keyboard (eframe's text agent)
+       stays at the top-left, inside the view, so the browser never scrolls the page to bring it
+       into view while the keyboard slides up. */
+    @media (pointer: coarse) {
+      input[autocapitalize="off"] { position: fixed !important; top: 0 !important; left: 0 !important; }
+    }
+</style>
   <!-- The loader around the WebAssembly start (progress, a broken load's reason, the fall back to
        the single-threaded build): boot.js, shared with that build's page. -->
   <script src="boot.js" data-build="threads"></script>

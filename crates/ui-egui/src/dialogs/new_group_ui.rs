@@ -91,7 +91,9 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
         // Photoshop opens the dialog with the name selected, so typing replaces it.
         if !f.contains_key("__focused") {
             f.insert("__focused".into(), json!(true));
-            crate::field_tab::focus(ui.ctx(), r.id);
+            if crate::widgets::autofocus_allowed(ui.ctx()) {
+                crate::field_tab::focus(ui.ctx(), r.id);
+            }
         }
         if r.gained_focus() {
             crate::field_tab::select_all(ui.ctx(), r.id, &name);
