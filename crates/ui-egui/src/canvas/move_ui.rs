@@ -396,7 +396,13 @@ pub(crate) fn damage(app: &PhotocraftApp, doc: DocId, revision: u64, seen: u64, 
     if seen == now || (seen < BASE && seen != 0) || (now < BASE && now != 0) {
         return None;
     }
-    let (a, b) = (p.area(p.offset_of(seen)?)?, p.area(p.offset_of(now)?)?);
+    let (from, to) = (p.offset_of(seen)?, p.offset_of(now)?);
+    // The press: the preview shows the layers where they are (the same offset), nothing to
+    // redraw. Redrawing their area there built the drag's composites before anything moved.
+    if from == to {
+        return Some(Rect::EMPTY);
+    }
+    let (a, b) = (p.area(from)?, p.area(to)?);
     Some(if a.is_empty() {
         b
     } else if b.is_empty() {

@@ -75,14 +75,22 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let Some(key) = target(app) else { return };
     let ctx = ui.ctx().clone();
     let mut strip: Strip = ctx.data_mut(|d| d.get_temp::<Strip>(strip_id())).unwrap_or_default();
-    if strip.key != Some(key) {
+    let open_id = egui::Id::unique("typer-textshaper-open");
+    let mut open = ctx.data_mut(|d| *d.get_persisted_mut_or_insert_with(open_id, || true));
+    // New shapes only while the strip is open, and only once the page the bubble is found on
+    // is ready: compositing it took a frame of a third of a second (more in the browser) after
+    // every edit to the page's pixels. It is composited off the frame (`page_tick`); the strip
+    // keeps its last shapes until then.
+    if strip.key != Some(key) && open && {
+        let _s = crate::perf_span::span("typer.page");
+        page_tick(app, &ctx)
+    } {
+        let _s = crate::perf_span::span("typer.shape_text");
         let r = app.session.execute("typer.shapeText", json!({"layer": key.1, "limit": 12}));
         let (variants, no_bubble) = r.as_ref().map(parse).unwrap_or_default();
         strip = Strip { key: Some(key), variants, no_bubble, page: 0 };
     }
     let t = Tokens::get(ui.ctx());
-    let open_id = egui::Id::unique("typer-textshaper-open");
-    let mut open = ctx.data_mut(|d| *d.get_persisted_mut_or_insert_with(open_id, || true));
     let pages = strip.variants.len().div_ceil(PER_PAGE).max(1);
     strip.page %= pages;
     ui.horizontal(|ui| {
@@ -262,5 +270,78 @@ mod tests {
         assert_eq!(variants[1], Variant { lines: vec!["c".into()], fits: Some(false) });
         assert!(no_bubble);
         assert_eq!(parse(&json!({})), (Vec::new(), false));
+    }
+}
+
+/// TypeR's page image being composited off the frame (see [`page_tick`]).
+pub(crate) enum PageJob {
+    /// A band of rows per frame, within a few milliseconds (the single-threaded browser build).
+    Bands(Box<photocraft_engine::TyperPageBuild>, i32),
+    /// On another thread; the slot holds the page when it's done.
+    Thread(std::sync::Arc<wasm_sync::Mutex<Option<photocraft_engine::TyperPageBuild>>>),
+}
+
+/// The time a frame may spend on TypeR's page in bands (ms).
+const PAGE_BAND_MS: f64 = 8.0;
+
+/// Whether TypeR's page image (what its bubble detection reads) is ready for the active
+/// document; if not, its composite goes on, on another thread or a band per frame.
+fn page_tick(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
+    use photocraft_engine::TyperPageBuild;
+    if photocraft_engine::typer_page_ready(&app.session) {
+        app.typer_page = None;
+        return true;
+    }
+    ctx.request_repaint_after(std::time::Duration::from_millis(16));
+    match app.typer_page.take() {
+        None => {
+            let Some(mut build) = TyperPageBuild::start(&app.session) else { return false };
+            if crate::jobs_ui::OFF_THREAD {
+                let slot: std::sync::Arc<wasm_sync::Mutex<Option<TyperPageBuild>>> = std::sync::Arc::default();
+                let out = std::sync::Arc::clone(&slot);
+                // Natively the thread wakes the UI; a browser worker can't (egui's repaint
+                // callback is the page's), so there the panel polls (`request_repaint_after`).
+                #[cfg(not(target_arch = "wasm32"))]
+                let waker = ctx.clone();
+                crate::jobs_ui::off_thread(move || {
+                    while !build.step(256) {}
+                    *out.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(build);
+                    #[cfg(not(target_arch = "wasm32"))]
+                    waker.request_repaint();
+                });
+                app.typer_page = Some(PageJob::Thread(slot));
+            } else {
+                app.typer_page = Some(PageJob::Bands(Box::new(build), 32));
+            }
+            false
+        }
+        Some(PageJob::Thread(slot)) => {
+            let done = slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+            match done {
+                // A page of an older state is dropped; the next frame starts the current one.
+                Some(build) => build.install(&mut app.session),
+                None => {
+                    app.typer_page = Some(PageJob::Thread(slot));
+                    false
+                }
+            }
+        }
+        Some(PageJob::Bands(mut build, mut rows)) => {
+            if !build.current(&app.session) {
+                return false;
+            }
+            let t0 = crate::gpu_canvas::now_ms();
+            while !build.done() && crate::gpu_canvas::now_ms() - t0 < PAGE_BAND_MS {
+                let b0 = crate::gpu_canvas::now_ms();
+                build.step(rows);
+                let took = (crate::gpu_canvas::now_ms() - b0).max(0.1);
+                rows = ((f64::from(rows) * (PAGE_BAND_MS / 2.0) / took) as i32).clamp(4, 1024);
+            }
+            if build.done() {
+                return build.install(&mut app.session);
+            }
+            app.typer_page = Some(PageJob::Bands(build, rows));
+            false
+        }
     }
 }

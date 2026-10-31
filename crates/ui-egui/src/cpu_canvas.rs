@@ -437,9 +437,13 @@ pub fn paint(
                 l.mips.document(d, level)
             };
             if !tc.move_split.as_ref().is_some_and(|s| s.is_for(plan, level)) {
+                let _s = crate::perf_span::span("move.split_new");
                 tc.move_split = crate::move_cpu::Split::new(plan, level, &mut reduce);
             }
-            split_bufs = tc.move_split.as_mut().and_then(|s| s.render(plan.offset, &held));
+            split_bufs = {
+                let _s = crate::perf_span::span("move.split_render");
+                tc.move_split.as_mut().and_then(|s| s.render(plan.offset, &held))
+            };
             if split_bufs.is_some() {
                 move_split_frames += 1;
             }

@@ -179,11 +179,15 @@ pub fn navigator_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usiz
                 let slot: std::sync::Arc<wasm_sync::Mutex<Option<egui::ColorImage>>> = std::sync::Arc::default();
                 let out = std::sync::Arc::clone(&slot);
                 let (doc, display) = (doc.clone(), display.clone());
+                // Natively the thread wakes the UI; a browser worker can't (egui's repaint
+                // callback is the page's), so there the panel polls (`request_repaint_after`).
+                #[cfg(not(target_arch = "wasm32"))]
                 let waker = ctx.clone();
                 app.perf_counters.navigator_full += 1;
                 off_thread(move || {
                     let image = display_image(display.as_deref(), &photocraft_compose::thumbnail_buffer(&doc, NAVIGATOR_SIDE));
                     *out.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(image);
+                    #[cfg(not(target_arch = "wasm32"))]
                     waker.request_repaint();
                 });
                 app.navigator_pending.insert(id, NavigatorPending { snapshot, key: preview_key, image: slot });
@@ -213,15 +217,11 @@ fn shown(app: &mut PhotocraftApp, id: photocraft_doc::DocId, revision: u64) {
     app.navigator_damage.insert(id, NavigatorDamage { base: revision, seen: revision, area: Some(DRect::EMPTY) });
 }
 
-/// Whole Navigator images are composited off the UI thread: the browser threads build's worker
-/// pool, or a native thread. Not in tests, which read the image the frame they ask for it.
-const NAVIGATOR_OFF_THREAD: bool = crate::jobs_ui::POOL_THREADS || cfg!(all(not(target_arch = "wasm32"), not(test)));
+/// Whole Navigator images are composited off the UI thread where there is another one.
+const NAVIGATOR_OFF_THREAD: bool = crate::jobs_ui::OFF_THREAD;
 
 fn off_thread(f: impl FnOnce() + Send + 'static) {
-    #[cfg(not(target_arch = "wasm32"))]
-    rayon::spawn(f);
-    #[cfg(target_arch = "wasm32")]
-    crate::jobs_ui::on_pool(f);
+    crate::jobs_ui::off_thread(f);
 }
 
 /// The next bands of `region` (document pixels) of the Navigator image `t` drawn (see
@@ -249,7 +249,7 @@ fn navigator_bands(
                 app.perf_counters.navigator_full += 1;
             }
             // About a sixteenth of the page a band to start with; the time each takes sizes the next.
-            NavigatorBands { snapshot: snapshot.clone(), key, revision, region, next: region.y0, rows: (doc.size.height as i32 / 16).max(16) }
+            NavigatorBands { snapshot: snapshot.clone(), key, revision, region, next: region.y0, rows: (doc.size.height as i32 / 64).max(8) }
         }
     };
     let region = bands.region;

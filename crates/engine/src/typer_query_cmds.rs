@@ -189,8 +189,9 @@ fn shape_bubble(s: &mut Session, id: LayerId, rows: usize) -> Result<ShapeBubble
     let size = crate::typer_place_cmds::layer_size_px(&doc, id);
     let page = page_image(s)?;
     let seed = bubble::seed_left_of(&ink);
-    let Some((mask, outline)) = bubble::wand_bubble(&page.img, page.area, seed, bubble::WAND_TOLERANCE, Some(ink.center())) else {
-        return Ok(Err("noSelection"));
+    let (mask, outline) = match bubble::wand_bubble_limited(&page.img, page.area, seed, bubble::WAND_TOLERANCE, Some(ink.center()), bubble::text_area(&ink, size)) {
+        Ok(found) => found,
+        Err(why) => return Ok(Err(why)),
     };
     let Some((o, r)) = bubble::body_rows(&mask, rows) else { return Ok(Err("noSelection")) };
     let judge = bubble::Judge { text: Some((&ink, size)), seed: bubble::pixel(&page.img, page.area, seed), page: Some(page.rect()), outline: Some(outline) };

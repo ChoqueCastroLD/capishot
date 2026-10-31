@@ -30,6 +30,7 @@ pub(crate) use input::read_dropped;
 pub(crate) use targets::adjustment_layer_active;
 #[cfg(test)]
 pub(crate) use thumbs::layer_thumb_frame;
+pub(crate) use thumbs::SnapshotBands;
 pub use thumbs::{THUMBS_PER_FRAME, surface_fingerprint};
 
 impl PhotocraftApp {
@@ -44,6 +45,7 @@ impl PhotocraftApp {
             navigator_pending: HashMap::new(),
             navigator_damage: HashMap::new(),
             navigator_bands: HashMap::new(),
+            typer_page: None,
             display_memo: HashMap::new(),
             navigator_gpu: HashMap::new(),
             navigator_plain: std::collections::HashSet::new(),
@@ -114,6 +116,7 @@ impl PhotocraftApp {
             blank_thumb: None,
             thumb_frames: HashMap::new(),
             snapshot_thumbs: HashMap::new(),
+            snapshot_bands: HashMap::new(),
             thumb_documents: Vec::new(),
             bounds_cache: HashMap::new(),
             proxy: None,
