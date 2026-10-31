@@ -134,15 +134,25 @@ pub(super) fn edit_contents(s: &mut Session, p: &Value) -> Result<Value> {
 /// Writes an Edit Contents document back into all its parent instances (one undoable step in the
 /// parent) and marks it saved. Returns false if `index` isn't an Edit Contents document.
 pub fn commit_child(s: &mut Session, index: usize) -> Result<bool> {
-    let Some(st) = s.docs.get(index) else { return Ok(false) };
+    commit_child_fitting(s, index).map(|(updated, _)| updated)
+}
+
+/// [`commit_child`], also saying whether type contents had to stay cut off: their text left the
+/// canvas, and growing it would have carried the text past an instance's perspective horizon.
+pub fn commit_child_fitting(s: &mut Session, index: usize) -> Result<(bool, bool)> {
+    let Some(st) = s.docs.get(index) else { return Ok((false, false)) };
     let child_id = st.doc.id;
-    let Some(link) = s.smart_links.iter().find(|l| l.child == child_id).copied() else { return Ok(false) };
+    let Some(link) = s.smart_links.iter().find(|l| l.child == child_id).copied() else { return Ok((false, false)) };
     let parent = s.docs.iter().position(|d| d.doc.id == link.parent).ok_or_else(|| other("the smart object's document was closed"))?;
     // Type contents whose text outgrew its canvas (or shrank well inside it): the canvas follows
     // the text, and each instance's placement takes the shift, so nothing is clipped and what
     // was there stays where it was on the page.
-    let shift = fit_type_canvas(s, index, parent, link.contents_id)?;
-    let Some(st) = s.docs.get(index) else { return Ok(false) };
+    let (shift, cut) = match fit_type_canvas(s, index, parent, link.contents_id)? {
+        Fit::Same => (None, false),
+        Fit::Moved(x0, y0) => (Some((x0, y0)), false),
+        Fit::Cut => (None, true),
+    };
+    let Some(st) = s.docs.get(index) else { return Ok((false, cut)) };
     let child = st.doc.clone();
     let bytes = Arc::new(encode_source(&child)?);
     let prev = s.active;
@@ -175,27 +185,41 @@ pub fn commit_child(s: &mut Session, index: usize) -> Result<bool> {
     if let Some(st) = s.docs.get_mut(index) {
         st.saved_revision = st.revision;
     }
-    Ok(true)
+    Ok((true, cut))
 }
 
 /// Room left around the text when the canvas is fitted to it: a tenth of the text's height, at
 /// least this many pixels.
 const TYPE_PAD_MIN: i32 = 4;
 
+/// What [`fit_type_canvas`] did to the contents' canvas.
+enum Fit {
+    /// Left as it was (not type contents, or the text fits it).
+    Same,
+    /// Fitted to the text: the new canvas's origin in the old one's pixels.
+    Moved(i32, i32),
+    /// Left as it was although the text leaves it: grown, it would reach an instance's horizon.
+    Cut,
+}
+
 /// Edit Contents of type (every layer of the contents a type layer, as Type › Perspective makes
 /// it): when the text's bounds leave the canvas, or the canvas reaches past the text by more than
 /// the padding, the contents document's canvas becomes the text's bounds plus padding (a "Canvas
-/// Size" step there). Returns where the new canvas's origin was in the old one's pixels, for
-/// [`place_after_shift`]; `None` when nothing changed. An instance with a warp keeps its canvas
-/// (the warp is laid out over it).
-fn fit_type_canvas(s: &mut Session, index: usize, parent: usize, contents_id: SmartContentsId) -> Result<Option<(i32, i32)>> {
-    let (Some(st), Some(pst)) = (s.docs.get(index), s.docs.get(parent)) else { return Ok(None) };
-    let warped = instances(&pst.doc, contents_id)
+/// Size" step there), and [`place_after_shift`] keeps each instance's pixels in place. An instance
+/// with a warp keeps its canvas (the warp is laid out over it), and so does a perspective whose
+/// horizon the grown canvas would reach or come near ([`before_horizon`]).
+fn fit_type_canvas(s: &mut Session, index: usize, parent: usize, contents_id: SmartContentsId) -> Result<Fit> {
+    let (Some(st), Some(pst)) = (s.docs.get(index), s.docs.get(parent)) else { return Ok(Fit::Same) };
+    let placed: Vec<&photocraft_doc::SmartObject> = instances(&pst.doc, contents_id)
         .into_iter()
-        .any(|id| matches!(pst.doc.layer(id).map(|l| &l.content), Some(LayerContent::Smart(sm)) if sm.warp.is_some()));
+        .filter_map(|id| match pst.doc.layer(id).map(|l| &l.content) {
+            Some(LayerContent::Smart(sm)) => Some(sm),
+            _ => None,
+        })
+        .collect();
     let layers = st.doc.walk();
-    if warped || layers.is_empty() || !layers.iter().all(|(_, _, l)| matches!(l.content, LayerContent::Text(_))) {
-        return Ok(None);
+    if placed.iter().any(|sm| sm.warp.is_some()) || layers.is_empty() || !layers.iter().all(|(_, _, l)| matches!(l.content, LayerContent::Text(_))) {
+        return Ok(Fit::Same);
     }
     let ink = layers
         .iter()
@@ -203,13 +227,16 @@ fn fit_type_canvas(s: &mut Session, index: usize, parent: usize, contents_id: Sm
         .filter_map(|(_, _, l)| crate::layer_multi_cmds::layer_bounds(l))
         .fold(photocraft_geom::Rect::EMPTY, |a, b| if a.is_empty() { b } else { a.union(&b) });
     if ink.is_empty() {
-        return Ok(None);
+        return Ok(Fit::Same);
     }
     let pad = (ink.height() as i32 / 10).max(TYPE_PAD_MIN);
     let target = ink.inflate(pad);
     let canvas = st.doc.bounds();
     if canvas.contains_rect(&ink) && target.contains_rect(&canvas) {
-        return Ok(None);
+        return Ok(Fit::Same);
+    }
+    if !placed.iter().all(|sm| sm.perspective.is_none_or(|h| before_horizon(&h, canvas, target))) {
+        return Ok(if canvas.contains_rect(&ink) { Fit::Same } else { Fit::Cut });
     }
     let (x0, y0) = (target.x0, target.y0);
     let prev = s.active;
@@ -223,7 +250,22 @@ fn fit_type_canvas(s: &mut Session, index: usize, parent: usize, contents_id: Sm
     s.active = prev;
     s.note_active_change();
     r?;
-    Ok(Some((x0, y0)))
+    Ok(Fit::Moved(x0, y0))
+}
+
+/// The most a grown canvas may be magnified, at its far end, against its least magnified point:
+/// beyond this the perspective's horizon is close (the text would grow without bound).
+const MAX_PERSPECTIVE_SPREAD: f64 = 32.0;
+
+/// Does `target` (in the old contents' pixels, plus the sampler's pixel) stay on the near side of
+/// the projective map `h`'s horizon, as `canvas` does, and short of it by [`MAX_PERSPECTIVE_SPREAD`]?
+fn before_horizon(h: &[f64; 9], canvas: photocraft_geom::Rect, target: photocraft_geom::Rect) -> bool {
+    let w = |x: i32, y: i32| h[6] * f64::from(x) + h[7] * f64::from(y) + h[8];
+    let corners = |r: photocraft_geom::Rect| [(r.x0 - 1, r.y0 - 1), (r.x1 + 1, r.y0 - 1), (r.x1 + 1, r.y1 + 1), (r.x0 - 1, r.y1 + 1)];
+    let side = if w(canvas.x0, canvas.y0) < 0.0 { -1.0 } else { 1.0 };
+    let ws: Vec<f64> = corners(target).iter().map(|&(x, y)| side * w(x, y)).collect();
+    let (lo, hi) = ws.iter().fold((f64::MAX, 0.0f64), |(lo, hi), &v| (lo.min(v), hi.max(v)));
+    lo > 0.0 && lo.is_finite() && hi / lo <= MAX_PERSPECTIVE_SPREAD
 }
 
 /// The contents' canvas moved its origin to `(x0, y0)` of the old canvas: the placement maps each

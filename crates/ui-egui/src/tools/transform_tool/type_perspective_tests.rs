@@ -168,3 +168,28 @@ fn the_type_perspective_box_survives_frames() {
         assert!(t.is_some_and(|t| t.made == Some(super::MadeLayer::SmartType)), "frame {k}: {:?} status {}", t.map(|t| (t.made, t.layer)), h.state().ui.status);
     }
 }
+
+/// Longer text typed into a perspective type isn't clipped: the smart object reaches further.
+#[test]
+fn longer_text_typed_in_grows_the_perspective_type() {
+    let (mut app, _) = app_with_type();
+    let ctx = egui::Context::default();
+    crate::menus::invoke(&mut app, &ctx, super::TYPE_PERSPECTIVE, json!({})).unwrap();
+    pull_top_in(&mut app);
+    super::commit(&mut app);
+    let smart = app.session.active().unwrap().active_layer.unwrap();
+    let bounds = |app: &mut PhotocraftApp| {
+        let list = app.run("layer.list", json!({"flat": true})).unwrap();
+        let b = list["layers"].as_array().unwrap().iter().find(|l| l["id"] == json!(smart.0)).unwrap()["bounds"].clone();
+        b.as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect::<Vec<_>>()
+    };
+    let b0 = bounds(&mut app);
+    let (x, y) = (b0[0] + 10.0, b0[1] + b0[3] / 2.0);
+    assert!((0..60).any(|dx| crate::type_tool::edit_smart_type_at(&mut app, x + f64::from(dx), y)));
+    // The whole text is selected when the edit starts: this replaces it.
+    crate::type_tool::insert(&mut app, "PERSPECTIVA Y MÁS TEXTO");
+    crate::type_tool::commit(&mut app);
+    crate::type_tool::smart_type_tick(&mut app);
+    let b1 = bounds(&mut app);
+    assert!(b1[2] > b0[2] * 1.5, "wider, not clipped: {b0:?} → {b1:?}");
+}

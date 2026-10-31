@@ -159,14 +159,23 @@ pub fn smart_type_tick(app: &mut PhotocraftApp) {
     if app.session.active_index() != Some(index) {
         return;
     }
-    if let Err(e) = app.run("layer.smartObjects.saveContents", json!({})) {
-        app.ui.status = e;
-        app.ui.status_error = true;
-        return;
-    }
+    let cut = match app.run("layer.smartObjects.saveContents", json!({})) {
+        Ok(r) => r.get("cut").and_then(serde_json::Value::as_bool).unwrap_or(false),
+        Err(e) => {
+            app.ui.status = e;
+            app.ui.status_error = true;
+            return;
+        }
+    };
     app.session.close(index);
     app.sync_views();
     app.ui.tool = crate::state::Tool::Move;
+    if cut {
+        // The contents grow with their text, except where the grown text would reach the
+        // perspective's horizon (it would get endlessly large there).
+        app.ui.status = tl!("The text was cut off: longer, it would run past the perspective's vanishing point. Make the perspective gentler or the text shorter").into();
+        app.ui.status_error = true;
+    }
 }
 
 /// Copy the selected characters to the system clipboard. Returns the copied range. Shared by the

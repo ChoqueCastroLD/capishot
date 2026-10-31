@@ -138,3 +138,26 @@ fn other_contents_keep_their_canvas() {
     s.execute("layer.smartObjects.saveContents", json!({})).unwrap();
     assert_eq!(s.documents()[child].doc.size, size);
 }
+
+#[test]
+fn text_that_would_pass_the_horizon_stays_cut_and_says_so() {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 900, "height": 600, "background": "white"})).unwrap();
+    s.execute("type.create", json!({"text": "ABC", "size": 60, "x": 100, "y": 300})).unwrap();
+    let id = LayerId(s.execute("layer.smartObjects.convertToSmartObject", json!({})).unwrap()["layer"].as_u64().unwrap());
+    let r = active_smart(&s).cache.unwrap().content_bounds();
+    let (x0, y0, x1, y1) = (f64::from(r.x0), f64::from(r.y0), f64::from(r.x1), f64::from(r.y1));
+    // The right edge five times the left's: the horizon is just past the text's right end.
+    let h = y1 - y0;
+    let quad = json!([[x0, y0], [x1, y0 - 2.0 * h], [x1, y1 + 2.0 * h], [x0, y1]]);
+    s.execute("edit.transform", json!({"layer": id, "rect": [x0, y0, x1, y1], "quad": quad})).unwrap();
+    let child = s.execute("layer.smartObjects.editContents", json!({})).unwrap()["document"].as_u64().unwrap() as usize;
+    let size = s.active().unwrap().doc.size;
+    let t = text_layer(&s);
+    s.execute("type.edit", json!({"layer": t.0, "text": "ABCDEFGHIJKL"})).unwrap();
+    let out = s.execute("layer.smartObjects.saveContents", json!({})).unwrap();
+    assert_eq!(out["cut"], json!(true), "{out}");
+    assert_eq!(s.documents()[child].doc.size, size, "the canvas stays");
+    s.set_active(0);
+    assert!(!active_smart(&s).cache.unwrap().content_bounds().is_empty(), "the visible part still shows");
+}
