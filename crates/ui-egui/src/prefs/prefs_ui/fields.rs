@@ -356,13 +356,17 @@ fn settings_column(
             && crate::widgets::secondary_button(ui, tl!("Reset Section"), 110.0).clicked()
             && let Some(mut def) = prefs::Preferences::default().get(section)
         {
-            // The favourite fonts are the user's library, not a Type setting: kept, as
-            // `prefs.reset {"path": "type"}` keeps them.
+            // The favourite fonts and font folders are the user's library, not Type settings: kept,
+            // as `prefs.reset {"path": "type"}` keeps them.
             if section == "type"
-                && let Some(favorites) = values.get(section).and_then(|v| v.get("favoriteFonts")).cloned()
                 && let Some(def) = def.as_object_mut()
             {
-                def.insert("favoriteFonts".into(), favorites);
+                // So are its font folders.
+                for key in ["favoriteFonts", "fontFolders"] {
+                    if let Some(kept) = values.get(section).and_then(|v| v.get(key)).cloned() {
+                        def.insert(key.into(), kept);
+                    }
+                }
             }
             values[section] = def;
         }

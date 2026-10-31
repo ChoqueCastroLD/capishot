@@ -59,6 +59,7 @@ pub mod code_gate;
 pub(crate) mod clone_overlay;
 pub mod cpu_canvas;
 pub mod floaters;
+pub mod font_folders_ui;
 pub mod font_projects_ui;
 pub mod fonts_ui;
 pub mod genfill_ui;

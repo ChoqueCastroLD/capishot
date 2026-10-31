@@ -5171,3 +5171,19 @@ navigator	Zoom	Zoom
 	Color Picker (Outer Glow)	Selector de color (resplandor exterior)
 	Perspective is for type layers and smart objects	Perspectiva es para capas de texto y objetos inteligentes
 	The text was fitted inside the perspective so it isn't cut off	El texto se ajustó dentro de la perspectiva para no cortarse.
+fontTab	System	Sistema
+fontTab	Custom	Personalizadas
+fontTab	Favorites	Favoritas
+fontTab	Find More	Buscar más
+	Move {font} to…	Mover {font} a…
+	Unfiled	Sin carpeta
+	New Folder…	Nueva carpeta…
+	No folders yet: make one with New Folder…	Aún no hay carpetas: crea una con Nueva carpeta…
+	Folder actions	Acciones de la carpeta
+	New Subfolder…	Nueva subcarpeta…
+	Delete Folder	Eliminar carpeta
+	Its fonts stay, unfiled	Sus fuentes se quedan, sin carpeta
+	Empty: press and hold a font, then Move to…	Vacía: mantén pulsada una fuente y elige Mover a…
+	Empty: drag a font here, or right-click it › Move to…	Vacía: arrastra una fuente aquí, o clic derecho › Mover a…
+	{name} (project)	{name} (proyecto)
+	Your own fonts (Load Fonts…) that are in no folder show here.	Aquí aparecen tus fuentes (Cargar fuentes…) que no están en ninguna carpeta.

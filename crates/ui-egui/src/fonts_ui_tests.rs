@@ -87,7 +87,13 @@ fn the_picker_tabs_switch_and_state_is_driven_through_ui_set_fields() {
     h.get_by_label("Find More").click();
     h.run_steps(2);
     assert_eq!(h.state().ui.fonts.tab, PickerTab::FindMore);
-    h.get_by_label("Fonts").click();
+    h.get_by_label("Favorites").click();
+    h.run_steps(2);
+    assert_eq!(h.state().ui.fonts.tab, PickerTab::Favorites);
+    h.get_by_label("Custom").click();
+    h.run_steps(2);
+    assert_eq!(h.state().ui.fonts.tab, PickerTab::Custom);
+    h.get_by_label("System").click();
     h.run_steps(2);
     assert_eq!(h.state().ui.fonts.tab, PickerTab::Fonts);
 

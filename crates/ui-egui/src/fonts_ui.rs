@@ -41,9 +41,13 @@ const HEADER_HEIGHT: f32 = 112.0;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PickerTab {
-    /// The fonts the document can use now.
+    /// System: the installed, bundled and served fonts (not the user's own).
     #[default]
     Fonts,
+    /// Custom: the user's own fonts, in their folders, and the font projects' fonts.
+    Custom,
+    /// Favorites: the starred fonts.
+    Favorites,
     /// Google Fonts, to download.
     FindMore,
 }
@@ -399,9 +403,13 @@ pub fn on_job(app: &mut PhotocraftApp, e: &JobEvent) -> bool {
 
 /// The picker's tab strip.
 pub fn tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
-    ui.horizontal(|ui| {
-        for (tab, label) in [(PickerTab::Fonts, "Fonts"), (PickerTab::FindMore, "Find More")] {
-            if named(crate::widgets::pill_tab(ui, label, app.ui.fonts.tab == tab), tl!(label)).clicked() {
+    // Sistema · Personalizadas · Favoritas: the font menu's own words (`fontTab` context), not
+    // the general "Custom" and "Favorites".
+    let lang = crate::i18n::current();
+    ui.horizontal_wrapped(|ui| {
+        for (tab, label) in [(PickerTab::Fonts, "System"), (PickerTab::Custom, "Custom"), (PickerTab::Favorites, "Favorites"), (PickerTab::FindMore, "Find More")] {
+            let shown = crate::i18n::tr_ctx(lang, "fontTab", label);
+            if named(crate::widgets::pill_tab(ui, shown, app.ui.fonts.tab == tab), label).clicked() {
                 app.ui.fonts.tab = tab;
             }
         }
@@ -996,7 +1004,7 @@ pub fn parse_set(current: &FontsUi, v: &Value) -> Result<FontsUi, String> {
     let mut next = current.clone();
     for (k, val) in o {
         match k.as_str() {
-            "tab" => next.tab = serde_json::from_value(val.clone()).map_err(|_| "fonts.tab must be fonts or findMore".to_string())?,
+            "tab" => next.tab = serde_json::from_value(val.clone()).map_err(|_| "fonts.tab must be fonts, custom, favorites or findMore".to_string())?,
             "query" | "category" | "subset" => {
                 let s = val.as_str().ok_or_else(|| format!("fonts.{k} must be a string"))?;
                 if s.chars().count() > 200 {

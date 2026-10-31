@@ -72,7 +72,7 @@ fn localized_families() -> Arc<HashMap<String, String>> {
 }
 
 /// The user's font families (lower case), cached by the store's generation.
-fn user_family_set() -> Arc<std::collections::HashSet<String>> {
+pub(crate) fn user_family_set() -> Arc<std::collections::HashSet<String>> {
     type Cached = Option<(u64, Arc<std::collections::HashSet<String>>)>;
     static USER: wasm_sync::Mutex<Cached> = wasm_sync::Mutex::new(None);
     let g = photocraft_text::user_fonts::generation();
@@ -314,6 +314,27 @@ pub(crate) struct FontLibrary {
     pub styles: Option<Arc<HashMap<String, Vec<String>>>>,
     /// The user's own text for the preview at the top of the menu (else it shows a sample).
     pub preview_text: Option<String>,
+    /// The picker tab's families (System, Favorites), listed while nothing is typed: a search
+    /// spans every font.
+    pub only: Option<TabFonts>,
+}
+
+/// Which families a font menu tab lists ([`FontLibrary::only`]).
+#[derive(Clone, Debug)]
+pub(crate) enum TabFonts {
+    /// System: every font but the user's own (`user_fonts`).
+    NotUser,
+    /// These families (Favorites).
+    These(Vec<String>),
+}
+
+impl TabFonts {
+    fn keeps(&self, family: &str, user: &std::collections::HashSet<String>) -> bool {
+        match self {
+            TabFonts::NotUser => !user.contains(&family.to_lowercase()),
+            TabFonts::These(v) => v.iter().any(|f| f == family),
+        }
+    }
 }
 
 /// The text the font menu's preview sets: the selected characters while typing, else the type
@@ -369,15 +390,23 @@ pub(crate) fn font_picker(app: &mut PhotocraftApp, ui: &mut egui::Ui, current: &
 pub(crate) fn font_picker_salted(app: &mut PhotocraftApp, ui: &mut egui::Ui, salt: &str, current: &mut String, width: f32) -> Option<Option<String>> {
     let preview = app.session.prefs().type_.font_preview;
     let mut library = FontLibrary { preview_text: preview_text(app), ..FontLibrary::of(app) };
+    // Sistema · Personalizadas · Favoritas (`fonts_ui::tabs`); Custom draws its own list.
+    library.only = match app.ui.fonts.tab {
+        crate::fonts_ui::PickerTab::Fonts => Some(TabFonts::NotUser),
+        crate::fonts_ui::PickerTab::Favorites => Some(TabFonts::These(library.favorites.clone())),
+        _ => None,
+    };
     let mut load_fonts = false;
     // Capishot's Find More tab replaces the family list; picking a font there closes the menu.
     // Font projects: a font's context menu adds it to the active project; the menu's top shows
     // the project's fonts and the recent ones.
     crate::font_projects_ui::offer_roles(app, ui.ctx());
     let mut role_pick: Option<Option<String>> = None;
-    let mut top = |ui: &mut egui::Ui, current: &mut String| -> Option<bool> {
+    let mut top = |ui: &mut egui::Ui, current: &mut String, query: &str| -> Option<bool> {
         crate::fonts_ui::tabs(app, ui);
         if app.ui.fonts.tab != crate::fonts_ui::PickerTab::FindMore {
+            // A row's "Move to…" (right-click, or press and hold).
+            crate::font_folders_ui::move_panel(app, ui);
             if let Some(role) = crate::font_projects_ui::menu_sections(app, ui, current) {
                 role_pick = Some(role);
                 return Some(true);
@@ -386,6 +415,17 @@ pub(crate) fn font_picker_salted(app: &mut PhotocraftApp, ui: &mut egui::Ui, sal
             if ui.add(egui::Button::new(tl!("Load Fonts…")).small()).on_hover_text(tl!("User fonts")).clicked() {
                 load_fonts = true;
                 ui.close();
+            }
+            // Custom: the folders, while nothing is typed (a search lists every font).
+            if app.ui.fonts.tab == crate::fonts_ui::PickerTab::Custom && query.is_empty() {
+                if let Some((family, role)) = crate::font_folders_ui::custom_tab(app, ui, current) {
+                    current.clone_from(&family);
+                    photocraft_text::served::request(&family);
+                    role_pick = Some(role);
+                    ui.close();
+                    return Some(true);
+                }
+                return Some(false);
             }
             return None;
         }
@@ -475,7 +515,7 @@ pub(crate) fn family_picker_in(
     preview: photocraft_engine::prefs::FontPreview,
     library: &mut FontLibrary,
 ) -> bool {
-    family_picker_with(ui, salt, current, width, families, preview, library, &mut |_, _| None)
+    family_picker_with(ui, salt, current, width, families, preview, library, &mut |_, _, _| None)
 }
 
 /// [`family_picker_in`] with a hook run first inside the menu: `Some(changed)` means the hook drew
@@ -489,7 +529,7 @@ fn family_picker_with(
     families: &[String],
     preview: photocraft_engine::prefs::FontPreview,
     library: &mut FontLibrary,
-    top: &mut dyn FnMut(&mut egui::Ui, &mut String) -> Option<bool>,
+    top: &mut dyn FnMut(&mut egui::Ui, &mut String, &str) -> Option<bool>,
 ) -> bool {
     let field = ui.make_persistent_id(egui::IdSalt::new(salt));
     let popup = field.with("popup");
@@ -584,7 +624,7 @@ fn family_picker_with(
     let response = crate::press_menu::show_with_close_behavior(&anchor, close, |ui, press| {
         // Capishot's hook first: the Find More tab draws the whole menu; the font projects' sections
         // and Load Fonts… head the list.
-        if let Some(c) = top(ui, current) {
+        if let Some(c) = top(ui, current, &edit.query) {
             changed = c;
             return None;
         }
@@ -629,9 +669,18 @@ fn family_picker_with(
         });
         let lookup = crate::font_filters::lookup_in(library.traits.clone());
         // No recent group while a filter is on: the filters narrow the alphabetical list alone.
-        let (mut rows, n_recent) = font_menu_rows(families, labels, &edit.query, if filters.any() { &[] } else { &edit.recents });
         // The user's own fonts (Type › Load Fonts…) head the alphabetical list, below the recents.
         let user = user_family_set();
+        // The tab's families while nothing is typed (a search spans every font).
+        let tab_families: Vec<String>;
+        let families: &[String] = match &library.only {
+            Some(only) if edit.query.is_empty() => {
+                tab_families = families.iter().filter(|f| only.keeps(f, &user)).cloned().collect();
+                &tab_families
+            }
+            _ => families,
+        };
+        let (mut rows, n_recent) = font_menu_rows(families, labels, &edit.query, if filters.any() { &[] } else { &edit.recents });
         if !user.is_empty() && n_recent <= rows.len() {
             let mut rest = rows.split_off(n_recent);
             partition_user_rows(&mut rest, &user);
@@ -690,6 +739,8 @@ fn family_picker_with(
         }
         let preview = crate::font_preview::sample(preview);
         let row_h = preview.map_or(28.0, |(_, [_, h])| (h + 4.0).max(28.0));
+        // A phone's rows are a finger's (48 pt).
+        let row_h = if crate::font_folders_ui::phone(ui.ctx()) { row_h.max(crate::font_folders_ui::PHONE_ROW) } else { row_h };
         let expanded_id = field.with("expanded");
         let mut expanded: Vec<String> = ui.data(|d| d.get_temp(expanded_id)).unwrap_or_default();
         let mut hovered: Option<String> = None;
@@ -729,7 +780,7 @@ fn family_picker_with(
                     if rows.is_empty() {
                         weak(
                             ui,
-                            if filters.favorites && library.favorites.is_empty() {
+                            if (filters.favorites || matches!(library.only, Some(TabFonts::These(_)))) && library.favorites.is_empty() {
                                 tl!("No favorite fonts yet: click the star beside a font to add it.")
                             } else if filters.any() {
                                 tl!("No fonts match these filters.")
@@ -785,6 +836,8 @@ fn family_picker_with(
                             .inner;
                         // A font's context menu: add it to the active font project as a role.
                         crate::font_projects_ui::row_menu(&response, f);
+                        // And its "Move to…" a folder.
+                        crate::font_folders_ui::row_menu(&response, f);
                         if stepped == Some(i) {
                             response.scroll_to_me(Some(egui::Align::Center));
                         } else if reveal.is_some() {
@@ -821,7 +874,7 @@ fn family_picker_with(
                         if response.hovered() {
                             hovered = Some(f.clone());
                         }
-                        if press.chosen(ui, &response) {
+                        if press.chosen(ui, &response) && !crate::font_folders_ui::swallow_pick(ui.ctx(), f) {
                             changed = true;
                             current.clone_from(f);
                             // A served family not fetched yet: start now, before any text needs it.

@@ -978,6 +978,20 @@ pub struct TypePrefs {
     /// Favourite font families, starred in the font menu (`type.font.favorite`), in the order
     /// they were added.
     pub favorite_fonts: Vec<String>,
+    /// The font menu's folders of the user's own fonts (`type.fontFolder.*`); a font in none is
+    /// "Unfiled".
+    #[serde(default)]
+    pub font_folders: Vec<FontFolder>,
+}
+
+/// A folder of the font menu's Custom tab: its name (unique), the folder it is in (one level of
+/// nesting), and the families filed in it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct FontFolder {
+    pub name: String,
+    pub parent: Option<String>,
+    pub fonts: Vec<String>,
 }
 
 impl Default for TypePrefs {
@@ -993,6 +1007,7 @@ impl Default for TypePrefs {
             recent_fonts: 10,
             allow_online_fonts: false,
             favorite_fonts: Vec::new(),
+            font_folders: Vec::new(),
         }
     }
 }
@@ -1371,12 +1386,13 @@ impl Preferences {
         }
         // The favourite fonts are the user's library, not a Type setting: resetting the Type
         // section keeps them (only `type.favoriteFonts` itself, or Reset All, clears them).
-        let favorites = (path == "type").then(|| self.type_.favorite_fonts.clone());
+        let favorites = (path == "type").then(|| (self.type_.favorite_fonts.clone(), self.type_.font_folders.clone()));
         let mut root = self.to_json();
         set_path(&mut root, path, def)?;
         *self = serde_json::from_value(root).map_err(|e| e.to_string())?;
-        if let Some(favorites) = favorites {
+        if let Some((favorites, folders)) = favorites {
             self.type_.favorite_fonts = favorites;
+            self.type_.font_folders = folders;
         }
         Ok(())
     }

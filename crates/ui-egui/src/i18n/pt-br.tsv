@@ -5139,3 +5139,19 @@ layerLabel	No Color	Sem cor
 	Color Picker (Outer Glow)	Seletor de cores (brilho externo)
 	Perspective is for type layers and smart objects	Perspectiva é para camadas de texto e objetos inteligentes
 	The text was fitted inside the perspective so it isn't cut off	O texto foi ajustado dentro da perspectiva para não ser cortado.
+fontTab	System	Sistema
+fontTab	Custom	Personalizadas
+fontTab	Favorites	Favoritas
+fontTab	Find More	Encontrar mais
+	Move {font} to…	Mover {font} para…
+	Unfiled	Sem pasta
+	New Folder…	Nova pasta…
+	No folders yet: make one with New Folder…	Ainda não há pastas: crie uma com Nova pasta…
+	Folder actions	Ações da pasta
+	New Subfolder…	Nova subpasta…
+	Delete Folder	Excluir pasta
+	Its fonts stay, unfiled	As fontes dela ficam, sem pasta
+	Empty: press and hold a font, then Move to…	Vazia: toque e segure uma fonte e escolha Mover para…
+	Empty: drag a font here, or right-click it › Move to…	Vazia: arraste uma fonte para cá, ou clique com o botão direito › Mover para…
+	{name} (project)	{name} (projeto)
+	Your own fonts (Load Fonts…) that are in no folder show here.	Aqui aparecem suas fontes (Carregar fontes…) que não estão em nenhuma pasta.

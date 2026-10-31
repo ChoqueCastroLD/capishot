@@ -55,7 +55,7 @@ pub(crate) use fonts::{Axis, axis_value, slider_axes};
 #[cfg(test)]
 use fonts::{FONT_LIST_HEIGHT, font_picker_in, preview_text, style_names, wheel_family_index};
 use fonts::{FontFieldEdit, accept_row, font_labels_id, font_menu_rows};
-pub(crate) use fonts::{FontLibrary, family_picker_in, font_picker, font_picker_salted, fonts_ready, selected_style};
+pub(crate) use fonts::{FontLibrary, family_picker_in, user_family_set, font_picker, font_picker_salted, fonts_ready, selected_style};
 pub use fonts::{families, invalidate_families, style_label, styles, sync_font_names, warm_fonts};
 pub(crate) use ime::{ImeState, controls_only, finish_reset_logic, finish_reset_pass, in_ui_pass, install_reset_hooks};
 #[cfg(test)]

@@ -228,7 +228,7 @@ fn popover(app: &mut PhotocraftApp, ui: &mut egui::Ui, button: &egui::Response, 
             ui.add_space(4.0);
             ui.spacing_mut().slider_width = w - 90.0;
             let num = |p: &Value, k: &str, d: f64| p.get(k).and_then(Value::as_f64).unwrap_or(d) as f32;
-            let mut slider = |ui: &mut egui::Ui, p: &mut Value, on: &mut bool, k: &str, label: &str, range: std::ops::RangeInclusive<f32>, suffix: &str, note: &str| {
+            let slider = |ui: &mut egui::Ui, p: &mut Value, on: &mut bool, k: &str, label: &str, range: std::ops::RangeInclusive<f32>, suffix: &str, note: &str| {
                 let mut v = num(p, k, *range.start() as f64);
                 ui.label(egui::RichText::new(tl!(label)).color(t.text_dim));
                 let r = ui.add(egui::Slider::new(&mut v, range).suffix(suffix));
