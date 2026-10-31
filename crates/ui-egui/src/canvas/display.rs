@@ -184,29 +184,40 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> (std::sync::Ar
         return (pv.doc.clone(), (1 << 40) + pv.session);
     }
     // Layer Style dialog: show its effects live (Cancel just drops the preview).
-    let style = app.ui.dialogs.iter().find(|d| d.kind == crate::state::DialogKind::LayerStyle);
+    let style = app.ui.dialogs.iter().find(|d| d.kind == crate::state::DialogKind::LayerStyle).map(|d| (d.id, d.fields.clone()));
     // The Preview checkbox off shows the document as it was when the dialog opened;
     // edits still land in the dialog state and OK applies them whatever it says.
-    let preview_on = style.and_then(|d| d.fields.get("preview")).and_then(serde_json::Value::as_bool).unwrap_or(true);
+    let preview_on = style.as_ref().and_then(|d| d.1.get("preview")).and_then(serde_json::Value::as_bool).unwrap_or(true);
     if style.is_none() || !preview_on {
         app.style_preview = None;
     }
     if let Some(d) = style.filter(|_| preview_on)
         && app.session.active_index() == Some(idx)
     {
-        let fields = crate::layer_style::color_picker::preview_fields(app, d.id, &d.fields);
+        let fields = crate::layer_style::color_picker::preview_fields(app, d.0, &d.1);
         let key = (crate::layer_style::preview_hash(&fields) ^ st.revision.wrapping_mul(0x9e37_79b9_7f4a_7c15)) | 1 << 63;
-        if app.style_preview.as_ref().map(|p| p.0) != Some(key) {
-            let shown = crate::layer_style::preview_document(&st.doc, &app.session.patterns, &fields).map(std::sync::Arc::new);
+        // While a slider or dial is being dragged the preview follows at most every
+        // `layer_style::DRAG_PREVIEW_MS`; the value it lands on is always shown.
+        let now = crate::gpu_canvas::now_ms();
+        let dragging = crate::layer_style::dragging(app);
+        let due = !dragging || app.style_preview.is_none() || now - app.style_preview_at >= crate::layer_style::DRAG_PREVIEW_MS;
+        if app.style_preview.as_ref().map(|p| p.0) != Some(key) && due {
+            let base = st.doc.clone();
+            let shown = crate::layer_style::preview_document(&base, &app.session.patterns, &fields).map(std::sync::Arc::new);
             if let Err(error) = &shown {
                 log::warn!("Layer Style preview: {error}");
             }
+            if let Ok(doc) = &shown {
+                crate::layer_style::note_region(app, idx, &fields, doc);
+            }
             app.style_preview = Some((key, shown));
+            app.style_preview_at = now;
         }
-        if let Some((_, Ok(doc))) = &app.style_preview {
-            return (doc.clone(), key);
+        if let Some((k, Ok(doc))) = &app.style_preview {
+            return (doc.clone(), *k);
         }
     }
+    let st = &app.session.documents()[idx];
     let revision = st.revision;
     let snapshot = st.doc.clone();
     if let Some((layer, params)) = app.live_adjust.clone()

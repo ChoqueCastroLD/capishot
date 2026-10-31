@@ -600,7 +600,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         let mut close_clicked = false;
         let mut sizing = false;
         // On a phone Preferences is a full-screen sheet (a section list, then a section).
-        let sheet = crate::prefs_ui::is_sheet(&d.fields, ctx);
+        let sheet = crate::prefs_ui::is_sheet(&d.fields, ctx) || (d.kind == DialogKind::LayerStyle && crate::layer_style::is_sheet(ctx));
         // A phone's previewed dialog (Warp Text, a filter) sits at the bottom, above the type bar
         // while typing, so the canvas it previews stays in view.
         let preview_low = narrow && start.is_none() && d.fields.get("__preview").and_then(Value::as_bool) == Some(true);

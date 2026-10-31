@@ -586,6 +586,13 @@ pub struct PhotocraftApp {
     pub(crate) nudge_bundle: nudge_bundle::NudgeBundle,
     /// Live Layer Style dialog preview: (key over revision + style fields, preview or validation error).
     pub(crate) style_preview: Option<(u64, Result<std::sync::Arc<Document>, String>)>,
+    /// The canvas area the Layer Style previews changed (document, revision, area): what a switch
+    /// between two previews, or back to the document, redraws ([`layer_style::switch_region`]).
+    pub(crate) style_region: Option<(photocraft_doc::DocId, u64, photocraft_geom::Rect)>,
+    /// When the Layer Style preview was last rebuilt, while a drag throttles it (ms).
+    pub(crate) style_preview_at: f64,
+    /// A pointer is down in the Layer Style dialog (a slider or dial drag): the preview throttles.
+    pub(crate) style_dragging: bool,
     pub(crate) solid_fill_preview: Option<solid_fill_ui::Preview>,
     /// Live Pattern Fill dialog preview (pattern_fill_ui).
     pub(crate) pattern_fill_preview: Option<pattern_fill_ui::Preview>,

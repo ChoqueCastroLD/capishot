@@ -1021,3 +1021,118 @@ fn style_click_does_not_mutate_document_until_confirm() {
     confirm(&mut app, &f).unwrap();
     assert_eq!(app.session.active().unwrap().doc.layer(id).unwrap().effects.items.len(), 1);
 }
+
+/// A phone-width Layer Style sheet: the body for `fields` in a 360 pt window, run a few frames.
+fn sheet_harness(fields: Map<String, Value>, size: egui::Vec2) -> egui_kittest::Harness<'static, (PhotocraftApp, Map<String, Value>)> {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    app.run("file.new", json!({"width": 32, "height": 32})).unwrap();
+    let mut h = egui_kittest::Harness::builder().with_size(size).build_ui_state(
+        move |ui, (app, f): &mut (PhotocraftApp, Map<String, Value>)| {
+            if !ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                return;
+            }
+            body(app, ui, f);
+        },
+        (app, fields),
+    );
+    PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ProMedium);
+    h.run_steps(3);
+    h
+}
+
+/// Phones (Sabry): under 600 pt the dialog is a list then a page, not two clipped columns. The
+/// list shows every effect with its toggle; a row opens its page ("← Effects" back); Esc (the
+/// Android Back button) goes up from the page to the list.
+#[test]
+fn phone_sheet_lists_effects_then_opens_a_page_and_back_goes_up() {
+    use egui_kittest::kittest::Queryable;
+    let l = Layer::raster("x", photocraft_doc::PixelFormat::RGBA8);
+    let fields = initial_fields(&l, Some("dropShadow"), 120.0);
+    for size in [vec2(360.0, 780.0), vec2(390.0, 844.0)] {
+        let mut h = sheet_harness(fields.clone(), size);
+        for &(_, label) in KINDS {
+            let row = h.get_by_role_and_label(egui::accesskit::Role::Button, label).rect();
+            assert!(row.right() <= size.x + 0.5 && row.height() >= 47.0, "{label} row at {size:?}: {row:?}");
+            let toggle = h.get_by_role_and_label(egui::accesskit::Role::CheckBox, label).rect();
+            assert!(toggle.width() >= 44.0, "{label} toggle is finger-sized: {toggle:?}");
+        }
+        // Drop Shadow's row opens its page, its controls inside the window.
+        h.get_by_role_and_label(egui::accesskit::Role::Button, "Drop Shadow").click();
+        h.run_steps(3);
+        assert_eq!(h.state().1.get("__open"), Some(&json!(true)));
+        let back = h.get_by_role_and_label(egui::accesskit::Role::Button, "Effects").rect();
+        assert!(back.left() >= 0.0);
+        let opacity = h.get_by_role_and_label(egui::accesskit::Role::Slider, "Opacity").rect();
+        assert!(opacity.right() <= size.x + 0.5 && opacity.width() >= size.x * 0.7, "a full-width slider: {opacity:?}");
+        // Back: to the list, the dialog stays open.
+        h.key_press(egui::Key::Escape);
+        h.run_steps(2);
+        assert_eq!(h.state().1.get("__open"), Some(&json!(false)));
+    }
+}
+
+/// A toggle on the list turns an effect on without opening its page; a second tap turns it off.
+#[test]
+fn phone_sheet_toggle_adds_and_switches_effects() {
+    use egui_kittest::kittest::Queryable;
+    let l = Layer::raster("x", photocraft_doc::PixelFormat::RGBA8);
+    let mut h = sheet_harness(initial_fields(&l, Some(BLENDING), 120.0), vec2(360.0, 780.0));
+    h.get_by_role_and_label(egui::accesskit::Role::CheckBox, "Outer Glow").click();
+    h.run_steps(3);
+    let on = |f: &Map<String, Value>| effects_of(f).iter().find(|e| e["kind"] == "outerGlow").map(|e| e["on"] == json!(true));
+    assert_eq!(on(&h.state().1), Some(true));
+    assert_ne!(h.state().1.get("__open"), Some(&json!(true)), "the toggle doesn't open the page");
+    h.get_by_role_and_label(egui::accesskit::Role::CheckBox, "Outer Glow").click();
+    h.run_steps(3);
+    assert_eq!(on(&h.state().1), Some(false));
+}
+
+/// The preview's scratch session is reused: later previews still apply only the dialog's style
+/// to their own document and leave no document behind.
+#[test]
+fn repeated_previews_reuse_the_scratch_session() {
+    let s = session();
+    let st = s.active().unwrap();
+    let id = st.active_layer.unwrap();
+    let mut f = initial_fields(st.doc.layer(id).unwrap(), Some(BLENDING), st.doc.global_light.angle);
+    add_instance(&mut f, "dropShadow");
+    let n = effects_of(&f).len();
+    for size in [5, 40, 0] {
+        let selected = f["selected"].as_str().unwrap().to_string();
+        set_param(&mut f, &selected, "size", json!(size));
+        let shown = preview_document(&st.doc, &s.patterns, &f).unwrap();
+        assert_eq!(shown.id, st.doc.id);
+        assert_eq!(shown.layer(id).unwrap().effects.items.len(), n, "only the dialog's effects, each preview");
+    }
+    assert!(st.doc.layer(id).unwrap().effects.items.is_empty());
+}
+
+/// Switching between previews (and back to the document) redraws only the styled layer's area,
+/// grown by every preview's effect reach so far; other keys and other revisions are not ours.
+#[test]
+fn switch_region_covers_the_layer_and_the_reach_of_every_preview() {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    app.run("file.new", json!({"width": 400, "height": 400})).unwrap();
+    app.run("layer.new.layer", json!({})).unwrap();
+    app.run("select.rect", json!({"x": 100, "y": 100, "width": 20, "height": 20})).unwrap();
+    app.run("edit.fill", json!({"color": "#ff0000"})).unwrap();
+    let (doc, revision, id) = {
+        let st = app.session.active().unwrap();
+        (st.doc.clone(), st.revision, st.active_layer.unwrap())
+    };
+    let mut f = initial_fields(doc.layer(id).unwrap(), Some("dropShadow"), 120.0);
+    add_instance(&mut f, "dropShadow");
+    let sel = f["selected"].as_str().unwrap().to_string();
+    set_param(&mut f, &sel, "size", json!(60));
+    let big = preview_document(&doc, &app.session.patterns, &f).unwrap();
+    note_region(&mut app, 0, &f, &big);
+    set_param(&mut f, &sel, "size", json!(2));
+    let small = preview_document(&doc, &app.session.patterns, &f).unwrap();
+    note_region(&mut app, 0, &f, &small);
+    let r = switch_region(&app, doc.id, revision, 1 << 63 | 7, 1 << 63 | 9).expect("between previews");
+    assert!(r.width() > 20 && r.width() < 400, "the layer's area with the large shadow's reach: {r:?}");
+    assert!(r.contains_rect(&photocraft_geom::Rect::new(100, 100, 120, 120)));
+    assert_eq!(switch_region(&app, doc.id, revision, 1 << 63 | 7, 0), Some(r), "back to the document");
+    assert_eq!(switch_region(&app, doc.id, revision, 3, 4), None, "not a Layer Style preview");
+    assert_eq!(switch_region(&app, doc.id, revision + 1, 1 << 63 | 7, 0), None, "another revision");
+}
