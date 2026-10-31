@@ -155,7 +155,9 @@ impl PerfWindow {
         worst.sort_by(|a, b| b.frame_ms.total_cmp(&a.frame_ms));
         v.push(format!("{} {}:", tl!("Slowest frames"), worst.len().min(SLOWEST)));
         for f in worst.into_iter().take(SLOWEST) {
-            v.push(format!("  {}", f.line()));
+            // The log line's wording without its "slow frame:" lead (not all of these are slow).
+            let line = f.line();
+            v.push(format!("  {}", line.strip_prefix("slow frame: ").unwrap_or(&line)));
         }
         v
     }
@@ -190,7 +192,7 @@ mod tests {
         let lines = w.lines(&info).join("\n");
         assert!(lines.contains("p50 10.0 ms") && lines.contains("max 120.0 ms"), "{lines}");
         assert!(lines.contains("pointer: mouse") && lines.contains("1280×720 pt × 1.50 = 1920×1080 px"), "{lines}");
-        assert!(lines.contains("Slowest frames 10:") && lines.matches("slow frame: 120.0 ms").count() >= 10, "{lines}");
+        assert!(lines.contains("Slowest frames 10:") && lines.matches("  120.0 ms on the").count() >= 10, "{lines}");
         assert!(lines.contains("presentation: autovsync, latency 1"), "{lines}");
     }
 
