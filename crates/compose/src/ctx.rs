@@ -193,7 +193,7 @@ pub(crate) fn prepare_effects(layers: &[Layer], rect: Rect, cx: &Ctx, setting: i
         });
     };
     #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
-    if todo.len() > 1 {
+    if todo.len() > 1 && crate::parallel_here() {
         use rayon::prelude::*;
         todo.par_iter().for_each(build);
         return;

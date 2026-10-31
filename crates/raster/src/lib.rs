@@ -154,10 +154,26 @@ fn last_difference(a: &[u8], b: &[u8]) -> Option<usize> {
 #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
 const PARALLEL_PIXELS: u64 = 1 << 18;
 
+/// Whether a parallel loop may hand work to the rayon pool from this thread. Not from the page's
+/// own thread in the browser threads build: it is no pool worker, so it would wait for the pool,
+/// which may be busy with background work (the canvas's tiles, panel images) for longer than the
+/// loop would take on its own. There it runs serially, as in the single-threaded build.
+#[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
+fn parallel_here() -> bool {
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+    {
+        rayon::current_thread_index().is_some()
+    }
+    #[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
+    {
+        true
+    }
+}
+
 /// Whether `r` is large enough, and spans more than one tile, to be worked in parallel.
 #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
 fn parallel(r: Rect) -> bool {
-    !r.is_empty() && u64::from(r.width()) * u64::from(r.height()) >= PARALLEL_PIXELS && r.tiles().nth(1).is_some()
+    !r.is_empty() && u64::from(r.width()) * u64::from(r.height()) >= PARALLEL_PIXELS && r.tiles().nth(1).is_some() && parallel_here()
 }
 
 /// Run `f(band, rows)` for each tile-row band of `r` (its rows of `out`, which holds `r` row by
@@ -290,6 +306,12 @@ fn write_tile(t: &mut Tile, tc: TileCoord, r: Rect, data: &[f32], w: usize, n: u
 #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
 fn convert_tiles(tiles: &mut [(TileCoord, Arc<Tile>)], r: Rect, data: &[f32], w: usize, n: usize, sample: SampleType) {
     use rayon::prelude::*;
+    if !parallel_here() {
+        for (tc, t) in tiles.iter_mut() {
+            write_tile(Arc::make_mut(t), *tc, r, data, w, n, sample);
+        }
+        return;
+    }
     tiles.par_iter_mut().for_each(|(tc, t)| write_tile(Arc::make_mut(t), *tc, r, data, w, n, sample));
 }
 
@@ -830,9 +852,11 @@ impl Surface {
             }
         };
         #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
-        {
+        if parallel_here() {
             use rayon::prelude::*;
             work.par_iter_mut().for_each(fix);
+        } else {
+            work.iter_mut().for_each(fix);
         }
         #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
         work.iter_mut().for_each(fix);
@@ -1157,9 +1181,11 @@ impl Surface {
             finished.map(|t| (dc, t))
         };
         #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
-        {
+        if parallel_here() {
             use rayon::prelude::*;
             out.tiles = targets.into_par_iter().filter_map(build_target).collect();
+        } else {
+            out.tiles = targets.into_iter().filter_map(build_target).collect();
         }
         #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
         {

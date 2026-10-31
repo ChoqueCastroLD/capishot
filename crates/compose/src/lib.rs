@@ -165,3 +165,19 @@ mod tests;
 
 #[cfg(test)]
 mod advanced_tests;
+
+/// Whether a parallel loop may hand work to the rayon pool from this thread. Not from the page's
+/// own thread in the browser threads build: it is no pool worker, so it would wait for the pool,
+/// which may be busy with background work (the canvas's tiles, panel images) for longer than the
+/// loop would take on its own. There it runs serially, as in the single-threaded build.
+#[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
+pub(crate) fn parallel_here() -> bool {
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+    {
+        rayon::current_thread_index().is_some()
+    }
+    #[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
+    {
+        true
+    }
+}

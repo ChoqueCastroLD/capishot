@@ -108,7 +108,7 @@ pub(crate) fn render_tiled_with(doc: &Document, rect: Rect, tile: i32, cx: &Ctx)
     };
     let band_len = w * tile as usize;
     #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
-    {
+    if crate::parallel_here() {
         use rayon::prelude::*;
         let bands = rect.height().div_ceil(tile as u32) as usize;
         if bands >= 2 * rayon::current_num_threads() {
@@ -133,8 +133,8 @@ pub(crate) fn render_tiled_with(doc: &Document, rect: Rect, tile: i32, cx: &Ctx)
                 });
             });
         }
+        return out;
     }
-    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     for (i, band) in out.px.chunks_mut(band_len).enumerate() {
         let y0 = rect.y0 + i as i32 * tile;
         for t in band_tiles(y0) {
@@ -174,7 +174,7 @@ pub fn render_rects(doc: &Document, rects: &[Rect]) -> Vec<Buffer> {
         })
     };
     #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
-    if rects.len() > 1 {
+    if rects.len() > 1 && crate::parallel_here() {
         use rayon::prelude::*;
         return rects.par_iter().map(run).collect();
     }
@@ -209,7 +209,7 @@ pub fn render_rects_over(doc: &Document, backdrops: Vec<Buffer>) -> Vec<Buffer> 
         b
     };
     #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
-    if backdrops.len() > 1 {
+    if backdrops.len() > 1 && crate::parallel_here() {
         use rayon::prelude::*;
         return backdrops.into_par_iter().map(run).collect();
     }

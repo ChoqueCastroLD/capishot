@@ -101,13 +101,26 @@ const NAVIGATOR_BAND_MS: f64 = 8.0;
 pub(crate) struct NavigatorPending {
     snapshot: std::sync::Weak<Document>,
     key: u64,
-    image: std::sync::Arc<wasm_sync::Mutex<Option<egui::ColorImage>>>,
+    image: std::sync::Arc<wasm_sync::Mutex<Option<NavigatorUpdate>>>,
 }
+
+/// A Navigator update made off the UI thread: where its pixels go in the image (`None`: the
+/// whole image) and the pixels.
+type NavigatorUpdate = (Option<[usize; 2]>, egui::ColorImage);
 
 pub fn navigator_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize) -> Option<egui::TextureId> {
     // Keyed by the document snapshot, not its revision: selecting a layer changes no pixels.
     let (snapshot, id, revision, last_damage) =
         app.session.documents().get(idx).map(|st| (std::sync::Arc::downgrade(&st.doc), st.doc.id, st.revision, st.last_damage))?;
+    // While a gesture on the canvas is under way the Navigator keeps its image: nothing a panel
+    // shows may cost a frame of the drag (it catches up on release). Before anything else, even
+    // the document it would show (during a Move, the drag's preview).
+    if let Some((_, _, _, t)) = app.navigator_textures.get(&id)
+        && (navigator_waits_for_drag(app, idx) || (ctx.input(|i| i.pointer.any_down()) && app.canvas_gesture_tool(ctx).is_some()))
+    {
+        ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        return Some(t.id());
+    }
     let (doc, preview_key) = display_doc(app, idx);
     let (display, display_key) = canvas_display(app, &doc, None);
     let preview_key = preview_key ^ display_key;
@@ -116,14 +129,6 @@ pub fn navigator_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usiz
         && r.ptr_eq(&snapshot)
         && *p == preview_key
     {
-        return Some(t.id());
-    }
-    // While a gesture on the canvas is under way the Navigator keeps its image: nothing a panel
-    // shows may cost a frame of the drag (it catches up on release).
-    if let Some((_, _, _, t)) = &cached
-        && (navigator_waits_for_drag(app, idx) || (ctx.input(|i| i.pointer.any_down()) && app.canvas_gesture_tool(ctx).is_some()))
-    {
-        ctx.request_repaint_after(std::time::Duration::from_millis(100));
         return Some(t.id());
     }
     // While an adjustment dialog's settings are changing, the navigator keeps its image and
@@ -143,31 +148,52 @@ pub fn navigator_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usiz
     let size = photocraft_compose::thumbnail_size(&doc, NAVIGATOR_SIDE);
     let tracked = cached.as_ref().and_then(|(_, _, rev, _)| navigator_damage(app, id, *rev, revision));
     let damage = tracked.or(last_damage.filter(|_| cached.as_ref().is_some_and(|(_, _, rev, _)| rev.checked_add(1) == Some(revision))));
-    // The image is there at this size and preview: update the area the edits changed (all of it
-    // when that isn't known), a band of rows per frame within a time budget, so even an edit
-    // across the whole page (a long stroke) never holds a frame for the whole composite. A whole
-    // new image goes to a thread instead where there is one.
-    if let Some((_, p, _, t)) = &cached
-        && *p == preview_key
-        && t.size() == [size.0 as usize, size.1 as usize]
-        && (damage.is_some() || !NAVIGATOR_OFF_THREAD)
+    // No pixel changed since the image's state (a layer selected, a rename, a selection): there
+    // is nothing to draw, whatever the revisions say.
+    let damage = damage.or_else(|| {
+        let old = cached.as_ref()?.0.upgrade()?;
+        let now = app.session.documents().get(idx)?.doc.clone();
+        photocraft_engine::layer_multi_cmds::same_pixels(&old, &now).then_some(DRect::EMPTY)
+    });
+    let fits = cached.as_ref().is_some_and(|(_, p, _, t)| *p == preview_key && t.size() == [size.0 as usize, size.1 as usize]);
+    if fits
+        && damage.is_some_and(|d| d.is_empty())
+        && let Some((_, _, _, t)) = &cached
     {
-        let region = match damage {
-            Some(d) if d.is_empty() => d,
-            Some(d) => d.inflate(effect_reach(&doc.layers)).intersect(&doc.bounds()),
-            None => doc.bounds(),
-        };
+        app.navigator_textures.insert(id, (snapshot, preview_key, revision, t.clone()));
+        shown(app, id, revision);
+        return Some(t.id());
+    }
+    // The image is there at this size and preview, on the single-threaded build: update the area
+    // the edits changed (all of it when that isn't known) a band of rows per frame within a time
+    // budget, so even an edit across the whole page (a long stroke) never holds a frame.
+    if fits
+        && !NAVIGATOR_OFF_THREAD
+        && let Some((_, _, _, t)) = &cached
+    {
+        let region = damage.map_or_else(|| doc.bounds(), |d| d.inflate(effect_reach(&doc.layers)).intersect(&doc.bounds()));
         let t = t.clone();
         let id = navigator_bands(app, ctx, &doc, display.as_deref(), (snapshot, preview_key, revision), size, t, region, damage.is_none());
         app.perf.span("navigator", crate::gpu_canvas::now_ms() - t0);
         return Some(id);
     }
-    // The browser threads build composites the whole thumbnail on its worker pool: the panel keeps
-    // its image (or none yet) for the frames that takes instead of the page waiting for it.
+    // Where there is another thread (native, the browser threads build), every update is made
+    // there: the edits' area, or a whole new image. The page only puts the pixels in. Rendering
+    // bands on the page there made the compositor's own parallel loops wait for a pool busy with
+    // canvas tiles: 120-140 ms frames at a Move's press.
     let image = if NAVIGATOR_OFF_THREAD {
         let pending = app.navigator_pending.get(&id).filter(|p| p.snapshot.ptr_eq(&snapshot) && p.key == preview_key);
         match pending.map(|p| p.image.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take()) {
-            Some(Some(image)) => {
+            Some(Some((Some(at), part))) => {
+                app.navigator_pending.remove(&id);
+                let (_, _, _, mut t) = cached.filter(|_| fits)?;
+                t.set_partial(at, part, TextureOptions::LINEAR);
+                app.perf.span("navigator", crate::gpu_canvas::now_ms() - t0);
+                app.navigator_textures.insert(id, (snapshot, preview_key, revision, t.clone()));
+                shown(app, id, revision);
+                return Some(t.id());
+            }
+            Some(Some((None, image))) => {
                 app.navigator_pending.remove(&id);
                 image
             }
@@ -176,17 +202,26 @@ pub fn navigator_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usiz
                 return cached.map(|(_, _, _, t)| t.id());
             }
             None => {
-                let slot: std::sync::Arc<wasm_sync::Mutex<Option<egui::ColorImage>>> = std::sync::Arc::default();
+                let slot: std::sync::Arc<wasm_sync::Mutex<Option<NavigatorUpdate>>> = std::sync::Arc::default();
                 let out = std::sync::Arc::clone(&slot);
                 let (doc, display) = (doc.clone(), display.clone());
+                let region = damage.filter(|_| fits).map(|d| d.inflate(effect_reach(&doc.layers)).intersect(&doc.bounds()));
+                if region.is_none() {
+                    app.perf_counters.navigator_full += 1;
+                }
                 // Natively the thread wakes the UI; a browser worker can't (egui's repaint
                 // callback is the page's), so there the panel polls (`request_repaint_after`).
                 #[cfg(not(target_arch = "wasm32"))]
                 let waker = ctx.clone();
-                app.perf_counters.navigator_full += 1;
                 off_thread(move || {
-                    let image = display_image(display.as_deref(), &photocraft_compose::thumbnail_buffer(&doc, NAVIGATOR_SIDE));
-                    *out.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(image);
+                    let update = match region {
+                        Some(r) => {
+                            let buf = photocraft_compose::render_reduced_damage(&doc, size.0, size.1, r);
+                            (Some([buf.rect.x0.max(0) as usize, buf.rect.y0.max(0) as usize]), display_image(display.as_deref(), &buf))
+                        }
+                        None => (None, display_image(display.as_deref(), &photocraft_compose::thumbnail_buffer(&doc, NAVIGATOR_SIDE))),
+                    };
+                    *out.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(update);
                     #[cfg(not(target_arch = "wasm32"))]
                     waker.request_repaint();
                 });

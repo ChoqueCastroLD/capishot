@@ -295,6 +295,14 @@ pub(crate) fn par_rows2<A: Send, B: Send>(a: &mut [A], b: &mut [B], w: usize, f:
 
 /// Maps `f` over `0..n` (in parallel on native targets), keeping order.
 pub(crate) fn par_map<T: Send>(n: usize, f: impl Fn(usize) -> T + Sync + Send) -> Vec<T> {
+    // In the browser threads build the page's own thread is no pool worker: a parallel map from
+    // it waits for the pool, which may be busy with background work (canvas tiles, panel images)
+    // for longer than the map would take on its own, so it runs serially there, as in the
+    // single-threaded build. Pool workers (jobs, filters) keep the parallel path.
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+    if rayon::current_thread_index().is_none() {
+        return (0..n).map(f).collect();
+    }
     #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
     {
         use rayon::prelude::*;

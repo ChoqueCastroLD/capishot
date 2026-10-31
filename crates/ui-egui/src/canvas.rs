@@ -302,8 +302,15 @@ fn paint_selection_outline(app: &mut PhotocraftApp, input: SelectionPaintInput<'
             let b = carried_bounds.unwrap_or_else(|| app.cached_bounds(bounds_key, sel).intersect(&vis));
             // Filters can occupy every worker in Rayon's global pool. A parallel scan here would
             // block the UI thread waiting for those workers, preventing job cancellation (#1554).
-            let mut segs =
-                if app.session.has_jobs() { crate::outline::outline_scaled_serial(sel, b, step) } else { crate::outline::outline_scaled(sel, b, step) };
+            // In the browser threads build the pool also runs the canvas tiles, the Navigator and
+            // TypeR's page, which no job counts: the page thread would wait behind them (a
+            // marquee's commit froze 170 ms there), so it traces serially, as the
+            // single-threaded build does in well under a frame.
+            let mut segs = if app.session.has_jobs() || crate::jobs_ui::POOL_THREADS {
+                crate::outline::outline_scaled_serial(sel, b, step)
+            } else {
+                crate::outline::outline_scaled(sel, b, step)
+            };
             if k > 1 {
                 let s = i32::try_from(k).unwrap_or(1);
                 let up = |p: [i32; 2]| [p[0].saturating_mul(s), p[1].saturating_mul(s)];
@@ -458,6 +465,7 @@ fn paint_canvas(app: &mut PhotocraftApp, ui: &egui::Ui, view: &View, xf: ViewXfo
         let rotated = view.rotation.abs() > 0.05;
         let checkerboard = app.session.prefs().transparency_and_gamut.square().map(|square| (checker(app, ctx), square));
         paint_cpu_document(painter, &xf, doc.bounds(), rotated, checkerboard, None, false);
+        let _s = crate::perf_span::span("canvas.cpu");
         crate::cpu_canvas::paint(app, ctx, painter, &xf, idx, output, render_zoom, visible_doc_rect(&xf));
         for &c in &pattern {
             let pxf = pattern_xf(&xf, c, size);
@@ -579,7 +587,10 @@ fn paint_canvas(app: &mut PhotocraftApp, ui: &egui::Ui, view: &View, xf: ViewXfo
     // in (`layer_edges_rect`), so a press that Auto-Selects a layer outlines that layer.
     let layer_edges = painter.add(egui::Shape::Noop);
 
-    paint_selection_outline(app, SelectionPaintInput { ctx, painter, ui, view, xf, rect, doc, idx });
+    {
+        let _s = crate::perf_span::span("canvas.ants");
+        paint_selection_outline(app, SelectionPaintInput { ctx, painter, ui, view, xf, rect, doc, idx });
+    }
 
     (beyond, layer_edges, edge_rect)
 }
@@ -867,6 +878,7 @@ fn handle_primary_canvas_input(app: &mut PhotocraftApp, ui: &mut egui::Ui, view:
         }
     }
 
+    let _s = crate::perf_span::span("canvas.tools");
     handle_canvas_tool_menus(app, input, mods, &mut buttons);
     handle_canvas_tool_navigation(app, ui, view, input, &mut buttons);
     handle_canvas_tool_stroke(app, ui, input, mods, capture_press, tool_press, &mut buttons);

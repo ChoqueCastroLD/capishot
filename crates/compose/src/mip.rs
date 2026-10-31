@@ -181,9 +181,11 @@ impl MipCache {
             Arc::new(t)
         };
         #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
-        let made: Vec<Arc<Tile>> = {
+        let made: Vec<Arc<Tile>> = if crate::parallel_here() {
             use rayon::prelude::*;
             todo.par_iter().map(|(_, _, c)| reduce(c)).collect()
+        } else {
+            todo.iter().map(|(_, _, c)| reduce(c)).collect()
         };
         #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
         let made: Vec<Arc<Tile>> = todo.iter().map(|(_, _, c)| reduce(c)).collect();

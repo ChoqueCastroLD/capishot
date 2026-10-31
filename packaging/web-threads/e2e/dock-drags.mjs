@@ -33,6 +33,8 @@ await p.waitForFunction(() => self.photocraft && self.photocraft.request, null, 
 const req = (m, pr = {}) => p.evaluate(([m, pr]) => self.photocraft.request(m, pr).then((r) => r, (e) => ({ err: String(e) })), [m, pr]);
 for (let i = 0; i < 400; i++) { if (!(await req('engine.commands')).err) break; await p.waitForTimeout(250); }
 const ex = (c, pr = {}) => req('engine.execute', { command: c, params: pr });
+// Which build this is: the threads build's wasm memory is shared (a SharedArrayBuffer).
+console.log(`build: ${(await p.evaluate(() => { try { return self.wasm_bindgen === undefined && typeof SharedArrayBuffer !== 'undefined' && [...performance.getEntriesByType('resource')].some((e) => e.name.includes('_mt') || e.name.includes('workerHelpers')); } catch (e) { return false; } })) ? 'threads' : 'single-threaded'}`);
 await req('ui.set', { panels: { layers: true, properties: true, navigator: true, history: true } });
 await ex('file.new', { width: 2000, height: 3000, background: 'white' });
 let seed = 1;

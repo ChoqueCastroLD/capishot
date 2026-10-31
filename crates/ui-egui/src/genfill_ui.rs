@@ -298,7 +298,11 @@ pub fn prompt_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
         egui::Frame::menu(ui.style()).show(ui, |ui| {
             ui.horizontal(|ui| {
                 if !app.ui.genfill.open {
-                    if ui.button(format!("✦ {}", tl!("Generative Fill"))).clicked() {
+                    // The sparkles icon, not a "✦" character: no bundled font has it, and the
+                    // browser's glyph fallback drew it through a canvas readback that held the
+                    // first frame of a selection for over 100 ms.
+                    let tint = crate::theme::Tokens::get(ui.ctx()).text;
+                    if ui.add(egui::Button::image_and_text(crate::icons::image("sparkles", 14.0, tint), tl!("Generative Fill"))).clicked() {
                         app.ui.genfill.open = true;
                     }
                 } else {

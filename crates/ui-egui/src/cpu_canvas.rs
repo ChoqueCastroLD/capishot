@@ -161,10 +161,14 @@ fn reduced(levels: &wasm_sync::Mutex<Levels>, doc: &Arc<Document>, level: u32) -
     if level == 0 {
         return doc.clone();
     }
-    let mut l = levels.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut l = {
+        let _s = crate::perf_span::span("cpu.levels_wait");
+        levels.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    };
     if let Some((_, _, r)) = l.docs.iter().find(|(lv, w, _)| *lv == level && w.upgrade().is_some_and(|d| Arc::ptr_eq(&d, doc))) {
         return r.clone();
     }
+    let _s = crate::perf_span::span("cpu.mips");
     l.mips.begin();
     let r = Arc::new(l.mips.document(doc, level));
     l.docs.retain(|(lv, w, _)| *lv != level && w.upgrade().is_some_and(|d| Arc::ptr_eq(&d, doc)));
@@ -300,12 +304,19 @@ pub fn paint(
     zoom: f32,
     visible: DRect,
 ) {
-    let Some(target) = crate::canvas::cpu_target(app, idx, output) else { return };
+    let target = {
+        let _s = crate::perf_span::span("cpu.target");
+        crate::canvas::cpu_target(app, idx, output)
+    };
+    let Some(target) = target else { return };
     let crate::canvas::CpuTarget { mut doc, revision, preview_key, display, display_key, damage, id } = target;
     let size = [doc.size.width, doc.size.height];
     let level = level_for(zoom, size);
     let key = crate::canvas::cache_key(id, output);
-    let move_plan = crate::move_ui::cpu_plan(app, idx, &doc);
+    let move_plan = {
+        let _s = crate::perf_span::span("cpu.plan");
+        crate::move_ui::cpu_plan(app, idx, &doc)
+    };
     // A lazy Move preview (`move_ui`: the document as it is, the canvas shifting the moving layers
     // itself) that the split can't draw this frame: shifted here, as `move_ui` would have.
     let mut lazy = move_plan.as_ref().is_some_and(|p| Arc::ptr_eq(&p.base, &doc) && p.offset != (0, 0));
@@ -357,6 +368,7 @@ pub fn paint(
         }
     }
     // Work for the tiles in view.
+    let setup = crate::perf_span::span("cpu.setup");
     let want = tiles_in(visible.intersect(&doc.bounds()), level, size);
     let mut stale = Vec::new();
     let mut missing = Vec::new();
@@ -382,6 +394,7 @@ pub fn paint(
             }
         }
     }
+    drop(setup);
     let t0 = crate::gpu_canvas::now_ms();
     // The document to composite the level from (`None`: reduce the full-resolution composite),
     // found when a tile needs drawing.
@@ -433,7 +446,11 @@ pub fn paint(
                 if level == 0 {
                     return d.clone();
                 }
-                let mut l = levels.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let mut l = {
+                    let _s = crate::perf_span::span("cpu.levels_wait");
+                    levels.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+                };
+                let _s = crate::perf_span::span("cpu.mips");
                 l.mips.document(d, level)
             };
             if !tc.move_split.as_ref().is_some_and(|s| s.is_for(plan, level)) {
@@ -456,6 +473,7 @@ pub fn paint(
                     source = None;
                 }
                 let source = source.get_or_insert_with(|| faithful.then(|| tc.reduced(&doc, level)));
+                let _s = crate::perf_span::span("cpu.render");
                 render_level(&doc, source.as_deref(), f, &rects)
             }
         };
