@@ -201,7 +201,10 @@ fn at_least_min_size(mut builder: egui::ViewportBuilder) -> egui::ViewportBuilde
 fn attach_log_file(logger: Option<&'static logging::AppLogger>) {
     if let (Some(logger), Some(dir)) = (logger, services::config_dir()) {
         match logger.attach_dir(&dir.join("logs")) {
-            Ok(path) => log::info!("Capishot {}, log file {}", photocraft_engine::build_info::long_version(), path.display()),
+            Ok(path) => {
+                log::info!("Capishot {}, log file {}", photocraft_engine::build_info::long_version(), path.display());
+                photocraft_ui_egui::gpu_status::set_log_file(path.display().to_string());
+            }
             // Standard error only by now (`attach_dir` gave up on the file); unlike `eprintln!`, never panics.
             Err(e) => log::warn!("no log file: {e}"),
         }

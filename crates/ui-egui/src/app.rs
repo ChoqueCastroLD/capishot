@@ -197,6 +197,7 @@ impl PhotocraftApp {
             stroke_trace: stroke_trace::StrokeTrace::from_env(),
             render_path: Default::default(),
             slow_frames: Default::default(),
+            perf_window: Default::default(),
             prefs_rt: Default::default(),
             recovery: Default::default(),
             last_command: None,
@@ -290,6 +291,7 @@ impl eframe::App for PhotocraftApp {
         // The OS's moves and the control channel's (injected just above).
         let moves = raw_input.events.iter().filter(|e| matches!(e, egui::Event::PointerMoved(_))).count();
         self.perf.stage.start(frame_start, moves);
+        self.perf_window.input(frame_start, raw_input, ctx.pixels_per_point(), self.stylus.feed.get().is_some());
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {

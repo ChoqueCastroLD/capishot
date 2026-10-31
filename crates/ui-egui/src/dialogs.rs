@@ -370,13 +370,28 @@ fn dialog_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, d: &Dialog, fields: &
         DialogKind::About if fields.get(crate::genfill_ui::TERMS_FIELD).and_then(Value::as_bool) == Some(true) => crate::genfill_ui::terms_body(app, ui),
         DialogKind::About if fields.get("systemInfo").and_then(Value::as_bool) == Some(true) => {
             let lines = crate::gpu_status::system_info_ui(app);
-            for l in &lines {
-                ui.add(egui::Label::new(egui::RichText::new(l).font(crate::theme::mono(12.0))).selectable(true));
-            }
+            // The Performance section makes the list long: it scrolls, the buttons stay in view.
+            let room = (ui.ctx().content_rect().height() - 220.0).max(160.0);
+            egui::ScrollArea::vertical().max_height(room).id_salt("system-info-lines").show(ui, |ui| {
+                for l in &lines {
+                    ui.add(egui::Label::new(egui::RichText::new(l).font(crate::theme::mono(12.0))).selectable(true));
+                }
+            });
             ui.add_space(8.0);
-            if crate::widgets::secondary_button(ui, tl!("Copy"), 84.0).clicked() {
-                ui.ctx().copy_text(crate::gpu_status::system_info(app).join("\n"));
-            }
+            ui.horizontal(|ui| {
+                if crate::widgets::secondary_button(ui, tl!("Copy"), 84.0).clicked() {
+                    ui.ctx().copy_text(crate::gpu_status::system_info(app).join("\n"));
+                }
+                // The folder the log file is in (Explorer, Finder, the file manager).
+                if let Some(dir) = crate::gpu_status::log_file().and_then(|p| std::path::Path::new(p).parent())
+                    && let Some(open) = app.services.open_url.as_ref()
+                    && crate::widgets::secondary_button(ui, tl!("Open Folder"), 110.0).clicked()
+                    && let Err(e) = open(&dir.to_string_lossy())
+                {
+                    app.ui.status = e;
+                    app.ui.status_error = true;
+                }
+            });
         }
         DialogKind::About => {
             // Tabs About · Contributors · Models (craftrules standards/contributors.md). The

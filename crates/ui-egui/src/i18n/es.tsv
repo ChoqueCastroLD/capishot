@@ -5143,3 +5143,16 @@ navigator	Zoom	Zoom
 	Bubble Type	Texto en globo
 	Loading Capishot…	Cargando Capishot…
 	Couldn't load a part of Capishot (network). Try again	No se pudo cargar una parte de Capishot (red). Reintenta
+	Performance (last 60 s)	Rendimiento (últimos 60 s)
+	No frames recorded yet.	Aún no hay fotogramas registrados.
+	Frames	Fotogramas
+	frame time	tiempo por fotograma
+	Slow frames	Fotogramas lentos
+	Input events	Eventos de entrada
+	pointer	puntero
+	monitor	monitor
+	frames drawn	fotogramas dibujados
+	presentation	presentación
+	Slowest frames	Fotogramas más lentos
+	Log file: {path}	Archivo de registro: {path}
+	Reset Performance Preferences	Restablecer preferencias de rendimiento
