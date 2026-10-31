@@ -236,7 +236,11 @@ fn type_layer_selected(app: &PhotocraftApp) -> bool {
 fn type_layer_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let t = Tokens::get(ctx);
     let area = canvas_area(app, ctx);
-    let actions = [("type.editText", tl!("Edit text"), "text-cursor"), ("type.warpText", tl!("Warp"), "spline")];
+    let actions = [
+        ("type.editText", tl!("Edit text"), "text-cursor"),
+        ("type.warpText", tl!("Warp"), "spline"),
+        (crate::transform_tool::TYPE_PERSPECTIVE, tl!("Perspective"), "perspective-crop"),
+    ];
     let w = actions.len() as f32 * (SEL_CELL.x + 2.0) + 12.0;
     let r = Rect::from_min_size(pos2(area.center().x - w / 2.0, area.top() + 8.0), vec2(w, SEL_CELL.y + 12.0));
     let mut run = None;
@@ -384,6 +388,33 @@ fn transform_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
             act = Some(true);
         }
     });
+    // Perspective (corners mirror) or Free (Distort: each corner on its own), between them.
+    let mode = app.ui.transform.as_ref().filter(|t| t.warp.is_none()).map(|t| t.mode);
+    if let Some(mode) = mode.filter(|m| matches!(m, crate::state::TransformMode::Perspective | crate::state::TransformMode::Distort)) {
+        use crate::state::TransformMode as M;
+        let room = (done.left() - cancel.right() - 16.0).min(220.0);
+        if room >= 120.0 {
+            let half = room / 2.0;
+            let x0 = (cancel.right() + done.left()) / 2.0 - half;
+            let persp = Rect::from_min_size(pos2(x0, cancel.top()), vec2(half - 2.0, h));
+            let free = Rect::from_min_size(pos2(x0 + half + 2.0, cancel.top()), vec2(half - 2.0, h));
+            let mut pick = None;
+            egui::Area::new(Id::unique("touch-transform-mode")).order(egui::Order::Foreground).fixed_pos(area.min).show(ctx, |ui| {
+                ui.set_min_size(Vec2::ZERO);
+                if round_button(ui, persp, None, crate::i18n::t("Perspective"), mode == M::Perspective).clicked() {
+                    pick = Some(M::Perspective);
+                }
+                if round_button(ui, free, None, crate::i18n::t("Free"), mode == M::Distort).clicked() {
+                    pick = Some(M::Distort);
+                }
+            });
+            note(ctx, "transformPerspective", persp);
+            note(ctx, "transformFree", free);
+            if let (Some(m), Some(t)) = (pick, app.ui.transform.as_mut()) {
+                t.mode = m;
+            }
+        }
+    }
     note(ctx, "transformCancel", cancel);
     note(ctx, "transformDone", done);
     match act {

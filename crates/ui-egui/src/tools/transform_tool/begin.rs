@@ -363,6 +363,50 @@ pub(super) fn take_back_made(app: &mut PhotocraftApp, document: DocId, layer: La
     app.sync_views();
 }
 
+/// Type → Perspective (the type layer's action bar, its context menu): type can't be distorted,
+/// so, as Photoshop asks, the type layer becomes a smart object, whose text stays editable
+/// inside, and Free Transform opens on it in Perspective mode (corners mirror; "Free" switches
+/// to Distort, each corner on its own). OK makes both one step; Cancel puts the type back. A
+/// smart object (one made by an earlier Perspective) just opens the box.
+pub fn begin_type_perspective(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String> {
+    use photocraft_doc::LayerContent;
+    if app.ui.text_edit.is_some() {
+        crate::type_tool::commit(app);
+    }
+    let (doc, layer, kind) = {
+        let st = app.session.active().ok_or("no document")?;
+        let id = st.active_layer.ok_or("no active layer")?;
+        let l = st.doc.layer(id).ok_or("no active layer")?;
+        (st.doc.id, id, match &l.content {
+            LayerContent::Text(_) => 0,
+            LayerContent::Smart(_) => 1,
+            _ => 2,
+        })
+    };
+    if kind == 2 {
+        return Err(tl!("Perspective is for type layers and smart objects").into());
+    }
+    let made = if kind == 0 {
+        let r = app.run("layer.smartObjects.convertToSmartObject", serde_json::json!({"layer": layer.0}))?;
+        Some(LayerId(r["layer"].as_u64().ok_or("the conversion made no layer")?))
+    } else {
+        None
+    };
+    if let Err(e) = begin(app, ctx) {
+        if let Some(smart) = made {
+            take_back_made(app, doc, smart);
+        }
+        return Err(e);
+    }
+    if let Some(t) = app.ui.transform.as_mut() {
+        t.mode = crate::state::TransformMode::Perspective;
+        if made.is_some() {
+            t.made = Some(MadeLayer::SmartType);
+        }
+    }
+    Ok(())
+}
+
 /// After the transform: the step that made the layer and the transform become one history step,
 /// the transform's for a copy and Place Embedded for a placed file.
 pub(super) fn fold_made(app: &mut PhotocraftApp, document: DocId, layer: LayerId, made: MadeLayer) {
@@ -378,6 +422,9 @@ pub(super) fn fold_made(app: &mut PhotocraftApp, document: DocId, layer: LayerId
         st.history.purge_last();
         if made == MadeLayer::Place {
             st.history.set_current_label(photocraft_engine::file_cmds::PLACE_EMBEDDED);
+        }
+        if made == MadeLayer::SmartType {
+            st.history.set_current_label("Perspective");
         }
     }
     if let Some(active) = active {

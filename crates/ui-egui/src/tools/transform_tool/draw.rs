@@ -200,9 +200,19 @@ pub fn draw_overlay(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform
     let pts: Vec<Pos2> = t.quad.iter().map(|q| scr(*q)).collect();
     painter.add(egui::Shape::closed_line(pts.clone(), Stroke::new(1.0, accent)));
     let mids: Vec<Pos2> = (0..4).map(|i| pts[i].lerp(pts[(i + 1) % 4], 0.5)).collect();
-    // Touch: handles a finger finds (drawn 14 pt, grabbed within 22).
-    let side = if crate::touch_ui::active(app) { 14.0 } else { 7.0 };
-    for p in pts.iter().chain(mids.iter()) {
+    // Touch: handles a finger finds (drawn 14 pt, grabbed within 22). Perspective and Distort
+    // move only the corners: there each is a 44 pt ring, the area that grabs it.
+    let touch = crate::touch_ui::active(app);
+    let corners_only = matches!(t.mode, crate::state::TransformMode::Perspective | crate::state::TransformMode::Distort) && t.warp.is_none();
+    if touch && corners_only {
+        for p in &pts {
+            painter.circle(*p, 22.0, Color32::from_rgba_unmultiplied(255, 255, 255, 60), Stroke::new(2.5, accent));
+            painter.circle_filled(*p, 6.0, Color32::WHITE);
+            painter.circle_stroke(*p, 6.0, Stroke::new(1.0, accent));
+        }
+    }
+    let side = if touch { 14.0 } else { 7.0 };
+    for p in pts.iter().chain(mids.iter()).filter(|_| !(touch && corners_only)) {
         let r = egui::Rect::from_center_size(*p, vec2(side, side));
         painter.rect_filled(r, 0.0, Color32::WHITE);
         painter.rect_stroke(r, 0.0, Stroke::new(1.0, accent), egui::StrokeKind::Inside);

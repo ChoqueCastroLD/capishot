@@ -23,6 +23,9 @@ use crate::canvas::{ToolEvent, ViewXform};
 use crate::state::{MadeLayer, Tool, TransformMode, TransformSession};
 
 mod begin;
+
+/// The type layer's Perspective action ([`begin_type_perspective`]).
+pub const TYPE_PERSPECTIVE: &str = "type.perspective";
 mod commit;
 mod drag_modes;
 mod draw;
@@ -35,7 +38,7 @@ pub(crate) use begin::begin_content_aware;
 pub(crate) use begin::moving_layers;
 #[cfg(test)]
 pub(crate) use begin::moving_texel;
-pub use begin::{WARP_ONE_LAYER, begin, begin_copy, begin_placed, begin_selection, begin_warp, enter_warp, leave_warp, warps_type};
+pub use begin::{WARP_ONE_LAYER, begin, begin_copy, begin_placed, begin_selection, begin_type_perspective, begin_warp, enter_warp, leave_warp, warps_type};
 pub(crate) use commit::{SAVE_FOR_WEB, committing, nudge};
 pub use commit::{cancel, commit, end_if_left, follow_edits, intercept, is_enabled, on_job_event, track_steps};
 #[cfg(test)]
@@ -325,3 +328,7 @@ pub(crate) fn corners(r: [f64; 4]) -> [[f64; 2]; 4] {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "transform_tool/type_perspective_tests.rs"]
+mod type_perspective_tests;
