@@ -13,7 +13,8 @@ import sys
 
 d = sys.argv[1]
 wasm = glob.glob(os.path.join(d, '*_bg.wasm'))[0]
-m = re.fullmatch(r'(.+)-([0-9a-f]{16})_bg\.wasm', os.path.basename(wasm))
+# Trunk's hash, 16 hex digits or fewer (it drops leading zeros).
+m = re.fullmatch(r'(.+)-([0-9a-f]{1,16})_bg\.wasm', os.path.basename(wasm))
 if not m:
     sys.exit(f'{wasm}: no content hash in the name')
 stem, old = m.groups()

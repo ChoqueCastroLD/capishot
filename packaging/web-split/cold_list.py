@@ -7,10 +7,14 @@ import gzip
 import re
 import sys
 
-HASH = re.compile(r'\[[0-9a-f]{16}\]')
+# As split.py's `norm`: the crates' disambiguators (16 hex digits or fewer) and LLVM's numeric
+# suffix of duplicated symbols go.
+HASH = re.compile(r'\[[0-9a-f]{1,16}\]')
+SUFFIX = re.compile(r'\.\d+$')
 lines = open(sys.argv[1], encoding='utf8').read().splitlines()
-ran = {HASH.sub('', l[2:]) for l in lines if l.startswith('+ ')}
-never = {HASH.sub('', l[2:]) for l in lines if l.startswith('- ')}
+norm = lambda n: SUFFIX.sub('', HASH.sub('', n))
+ran = {norm(l[2:]) for l in lines if l.startswith('+ ')}
+never = {norm(l[2:]) for l in lines if l.startswith('- ')}
 # A name shared by a function that ran stays (the list is by name), as do unnamed ones.
 cold = sorted(n for n in never if n not in ran and not n.isdigit())
 with gzip.GzipFile(sys.argv[2], 'wb', mtime=0) as f:
