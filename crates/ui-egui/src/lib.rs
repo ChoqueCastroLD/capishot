@@ -677,6 +677,9 @@ pub struct PhotocraftApp {
     pub(crate) font_projects: font_projects_ui::State,
     /// The AI progress card (`ai_progress`).
     pub(crate) ai_progress: ai_progress::State,
+    /// Documents whose missing fonts wait for served fonts, `fonts.preload` requests, and the
+    /// host's missing-fonts notice setting and events (`user_fonts_ui`).
+    pub font_checks: user_fonts_ui::FontChecks,
     /// Channel thumbnails for one document snapshot; view-only revisions reuse their pixels.
     channel_thumbs: Option<(DocId, std::sync::Weak<Document>, bool, Vec<egui::TextureHandle>)>,
     /// Channels panel overlays / channel views drawn over the canvas, per document id.

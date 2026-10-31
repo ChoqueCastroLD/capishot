@@ -52,6 +52,29 @@ export interface InitOptions {
   webgl?: boolean;
   /** Force the CPU canvas renderer. */
   cpu?: boolean;
+  /**
+   * `false`: never show the "Missing fonts" notice; the host gets `fontsMissing` events instead
+   * (they go out either way). Default `true` (feature `fonts.notice`).
+   */
+  fontsNotice?: boolean;
+}
+
+/** `request('fonts.preload', …)` params (feature `fonts.preload`). */
+export interface FontsPreloadParams {
+  /** Family names, matched as documents' are: case, spaces, punctuation and parentheses aside, PostScript names too. */
+  families: string[];
+  /** Give up on downloads still running after this long (those count as `failed`). Default 10000, at most 120000. */
+  timeoutMs?: number;
+}
+
+/** `request('fonts.preload', …)` result: each asked family in one of the lists. */
+export interface FontsPreloadResult {
+  /** Installed, bundled, or served and downloaded. */
+  ready: string[];
+  /** Nobody has it: not installed, not in the served fonts manifest. */
+  missing: string[];
+  /** Served, but its download failed or didn't finish in time. */
+  failed: string[];
 }
 
 export interface DocumentInfo {
@@ -133,6 +156,12 @@ export type EmbedEvent =
    * (document pixels) at the canvas centre; `rotation` is in degrees, (−180, 180].
    */
   | { type: 'viewChanged'; id: DocumentId; zoom: number; center: [x: number, y: number]; rotation: number }
+  /**
+   * An opened document uses fonts nobody serves, or whose download failed (once per document,
+   * after its served fonts arrived or failed). Goes out whether or not the notice shows
+   * (feature `events.fontsMissing`).
+   */
+  | { type: 'fontsMissing'; families: string[] }
   | { type: 'error'; message: string; source: 'init' | 'status'; fatal: boolean };
 
 /** The embedding API version (sync). */
@@ -159,6 +188,7 @@ export function getState(): Promise<EmbedState>;
 /** Runs a command by id (`engine.execute` of the control protocol); params: object or JSON string. */
 export function execute(command: string, params?: { [key: string]: Json } | string | null): Promise<Json>;
 /** Any control-protocol method (`ui.inspect`, `ui.pointer`, …). */
+export function request(method: 'fonts.preload', params: FontsPreloadParams): Promise<FontsPreloadResult>;
 export function request(method: string, params?: { [key: string]: Json } | null): Promise<Json>;
 export function listCommands(): Promise<CommandInfo[]>;
 /** Tool ids, e.g. `brush`, `eraser`, `cloneStamp` (sync). */

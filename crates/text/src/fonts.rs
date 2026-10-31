@@ -362,6 +362,26 @@ impl FontDb {
         names
     }
 
+    /// Registers font data as [`FontDb::register_font_data`] does, and also under each of
+    /// `aliases` the file doesn't already name itself (a served font a manifest or a document
+    /// calls by another name: "Hand Of Sean (Demo)" for the file's "Hand Of Sean Demo"). The data
+    /// is shared, not copied. Returns every family name registered.
+    pub fn register_font_data_as(&mut self, bytes: Vec<u8>, aliases: &[String]) -> Vec<String> {
+        let bytes = Arc::new(bytes);
+        let mut names = self.register_blob(Blob::new(bytes.clone()), None);
+        if names.is_empty() {
+            return names;
+        }
+        self.data.push(FontData::Shared(bytes.clone()));
+        for alias in aliases {
+            if alias.trim().is_empty() || names.iter().any(|n| n.eq_ignore_ascii_case(alias)) || self.has_family(alias) {
+                continue;
+            }
+            names.extend(self.register_blob(Blob::new(bytes.clone()), Some(alias)));
+        }
+        names
+    }
+
     /// Registers embedded font data without copying it.
     fn register_static_font(&mut self, bytes: &'static [u8]) -> Vec<String> {
         let names = self.register_blob(Blob::new(Arc::new(bytes)), None);

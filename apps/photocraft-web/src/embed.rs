@@ -9,6 +9,9 @@
 //! await photocraft.save("psd")            // the active document as a Uint8Array (pcraft, psd, png…)
 //! await photocraft.request("ui.inspect")  // a desktop control-channel method → its result
 //! window.addEventListener("photocraft-dirty", e => e.detail)   // true / false as it changes
+//! window.addEventListener("photocraft-fontsMissing", e => e.detail.families)  // fonts nobody serves
+//! await photocraft.request("fonts.preload", {families: ["Patrick Hand"]})    // {ready, missing, failed}
+//! await photocraft.request("ui.set", {fontsNotice: false})                   // no missing-fonts notice
 //! ```
 //!
 //! Over `postMessage` (only from the `?embed=` origin, replies only to it): send
@@ -119,6 +122,17 @@ pub fn process(app: &mut PhotocraftApp) {
     });
     for error in UPLOAD_ERRORS.with(|e| std::mem::take(&mut *e.borrow_mut())) {
         photocraft_ui_egui::notices::post(app, "The document wasn't saved to the server", vec![error], true, None);
+    }
+    // Fonts nobody serves (or whose download failed): `photocraft-fontsMissing` with the families.
+    for families in std::mem::take(&mut app.font_checks.events) {
+        if let Some(window) = web_sys::window() {
+            let init = web_sys::CustomEventInit::new();
+            init.set_detail(&to_js(&json!({ "families": families })));
+            if let Ok(event) = web_sys::CustomEvent::new_with_event_init_dict("photocraft-fontsMissing", &init) {
+                window.dispatch_event(&event).ok();
+            }
+        }
+        post(&json!({ "photocraft": "fontsMissing", "families": families }), None);
     }
     let dirty = app.has_unsaved_work();
     if DIRTY.with(|d| d.replace(dirty)) != dirty {

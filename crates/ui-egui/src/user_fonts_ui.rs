@@ -504,47 +504,247 @@ pub fn take_loads(idle: bool) -> Vec<String> {
 
 // ------------------------------------------------------------------ missing fonts notice
 
+/// How long a document's served fonts may take before those still on their way count as not
+/// downloaded (seconds).
+const FONT_WAIT_S: f64 = 30.0;
+
+/// The documents whose missing fonts are being decided (their served fonts are on their way, or
+/// the manifest is), the `fonts.preload` requests waiting, and what an embedding host asked for.
+pub struct FontChecks {
+    checks: Vec<Check>,
+    preloads: Vec<Preload>,
+    /// Show the missing fonts notice (an embedding host may turn it off: `ui.set {fontsNotice}`).
+    pub notice: bool,
+    /// Families reported missing since the shell last looked (`fontsMissing` events).
+    pub events: Vec<Vec<String>>,
+}
+
+impl Default for FontChecks {
+    fn default() -> Self {
+        Self { checks: Vec::new(), preloads: Vec::new(), notice: true, events: Vec::new() }
+    }
+}
+
+struct Check {
+    doc: DocId,
+    /// When the check first ran with a clock (egui time).
+    since: Option<f64>,
+}
+
+/// A `fonts.preload` waiting for its families.
+pub struct Preload {
+    pub families: Vec<String>,
+    pub timeout_s: f64,
+    pub reply: std::sync::mpsc::Sender<Value>,
+    since: Option<f64>,
+}
+
+impl Preload {
+    pub fn new(families: Vec<String>, timeout_s: f64, reply: std::sync::mpsc::Sender<Value>) -> Self {
+        Self { families, timeout_s, reply, since: None }
+    }
+}
+
+/// What a family a document asks for is, right now.
+enum Verdict {
+    /// Installed, bundled, arrived, or one of the user's stored fonts (read lazily).
+    Here,
+    /// On its way (or the manifest is): decide later.
+    Waiting,
+    /// The host serves it but every download failed.
+    Failed,
+    /// Nobody has it.
+    Missing,
+}
+
+fn verdict(family: &str, ps: &[String]) -> Verdict {
+    use photocraft_text::served::{Lookup, Status};
+    match photocraft_text::served::lookup(family, ps) {
+        Lookup::Served(served) => {
+            photocraft_text::served::request_with(family, ps.first().map(String::as_str));
+            if served != family {
+                photocraft_text::served::request(&served);
+            }
+            match photocraft_text::served::family_status(&served) {
+                Status::Ready => Verdict::Here,
+                Status::Failed(_) => Verdict::Failed,
+                Status::Pending | Status::NotRequested => Verdict::Waiting,
+            }
+        }
+        Lookup::ManifestPending => Verdict::Waiting,
+        Lookup::NotServed => {
+            let mut stored = user_fonts::request(family);
+            for p in ps {
+                stored |= user_fonts::request(p);
+            }
+            if stored { Verdict::Here } else { Verdict::Missing }
+        }
+    }
+}
+
 /// After a document opened: its missing fonts. Families the host serves (`fonts/manifest.txt`,
-/// the web build) are fetched and not listed: they re-render the layers when they arrive. The
-/// user's stored fonts that provide the others are read too; for the rest a notice offers Load
-/// Fonts… and Resolve Missing Fonts…
+/// the web build) are fetched first and only reported if their download fails; until the
+/// manifest is read nothing is reported. The user's stored fonts that provide the others are read
+/// too; for the rest a notice offers Load Fonts… and Resolve Missing Fonts… (unless the host
+/// turned it off; it gets a `fontsMissing` event either way). Decided now when nothing is on its
+/// way, else by [`tick_checks`] when it has arrived.
 pub fn after_open(app: &mut PhotocraftApp) {
     let Some(st) = app.session.active() else { return };
     let doc = st.doc.id;
-    let names = photocraft_engine::type_extra_cmds::missing_font_names(&st.doc);
-    let mut still = Vec::new();
-    for (family, ps) in names {
-        if let Some(served) = crate::served_fonts::served_family(&family, &ps) {
-            photocraft_text::served::request(&served);
-            continue;
+    if !app.font_checks.checks.iter().any(|c| c.doc == doc) {
+        app.font_checks.checks.push(Check { doc, since: None });
+    }
+    tick_checks(app, None);
+}
+
+/// Decides the documents whose fonts were on their way and answers `fonts.preload` requests:
+/// every frame (`now`: egui time), and right after an open (`None`).
+pub fn tick_checks(app: &mut PhotocraftApp, now: Option<f64>) {
+    if !app.font_checks.checks.is_empty() {
+        let checks = std::mem::take(&mut app.font_checks.checks);
+        let mut keep = Vec::new();
+        for mut c in checks {
+            let Some(d) = app.session.documents().iter().find(|d| d.doc.id == c.doc) else { continue };
+            let names = photocraft_engine::type_extra_cmds::missing_font_names(&d.doc);
+            let (mut missing, mut failed, mut waiting) = (Vec::new(), Vec::new(), false);
+            for (family, ps) in names {
+                match verdict(&family, &ps) {
+                    Verdict::Here => {}
+                    Verdict::Waiting => waiting = true,
+                    Verdict::Failed => failed.push(family),
+                    Verdict::Missing => missing.push(family),
+                }
+            }
+            if let Some(t) = now
+                && c.since.is_none()
+            {
+                c.since = Some(t);
+            }
+            let timed_out = matches!((now, c.since), (Some(t), Some(s)) if t - s > FONT_WAIT_S);
+            if waiting && !timed_out {
+                keep.push(c);
+                continue;
+            }
+            if timed_out {
+                // What is still on its way after the wait counts as not downloaded.
+                for (family, ps) in photocraft_engine::type_extra_cmds::missing_font_names(&d.doc) {
+                    if matches!(verdict(&family, &ps), Verdict::Waiting) && !failed.contains(&family) {
+                        failed.push(family);
+                    }
+                }
+            }
+            report_missing(app, c.doc, &missing, &failed);
         }
-        let mut stored = user_fonts::request(&family);
-        for p in &ps {
-            stored |= user_fonts::request(p);
-        }
-        if !stored {
-            still.push(family);
+        keep.append(&mut app.font_checks.checks);
+        app.font_checks.checks = keep;
+    }
+    if !app.font_checks.preloads.is_empty() {
+        let preloads = std::mem::take(&mut app.font_checks.preloads);
+        for mut p in preloads {
+            if let Some(t) = now
+                && p.since.is_none()
+            {
+                p.since = Some(t);
+            }
+            let timed_out = matches!((now, p.since), (Some(t), Some(s)) if t - s > p.timeout_s);
+            match preload_result(&p.families, timed_out) {
+                Some(v) => {
+                    let _ = p.reply.send(json!({"ok": true, "result": v}));
+                }
+                None => app.font_checks.preloads.push(p),
+            }
         }
     }
-    if still.is_empty() {
+}
+
+/// Something waits for fonts (a document's check or a `fonts.preload`).
+pub fn checks_pending(app: &PhotocraftApp) -> bool {
+    !app.font_checks.checks.is_empty() || !app.font_checks.preloads.is_empty()
+}
+
+/// A `fonts.preload` waits here until each family has arrived or failed.
+pub fn preload(app: &mut PhotocraftApp, p: Preload) {
+    for f in &p.families {
+        photocraft_text::served::request(f);
+    }
+    match preload_result(&p.families, false) {
+        Some(v) => {
+            let _ = p.reply.send(json!({"ok": true, "result": v}));
+        }
+        None => app.font_checks.preloads.push(p),
+    }
+}
+
+/// `{ready, missing, failed}` for `families`, or `None` while one is still on its way (unless
+/// `timed_out`: then those count as failed).
+fn preload_result(families: &[String], timed_out: bool) -> Option<Value> {
+    use photocraft_text::served::{Lookup, Status};
+    let (mut ready, mut missing, mut failed) = (Vec::new(), Vec::new(), Vec::new());
+    for f in families {
+        let installed = photocraft_text::shared().lock().unwrap_or_else(PoisonError::into_inner).fonts.has_family(f);
+        let state = match photocraft_text::served::lookup(f, &[]) {
+            _ if installed => Some(true),
+            Lookup::Served(served) => match photocraft_text::served::family_status(&served) {
+                Status::Ready => Some(true),
+                Status::Failed(_) => Some(false),
+                Status::Pending | Status::NotRequested => None,
+            },
+            Lookup::ManifestPending => None,
+            Lookup::NotServed => {
+                missing.push(f.clone());
+                continue;
+            }
+        };
+        match state {
+            Some(true) => ready.push(f.clone()),
+            Some(false) => failed.push(f.clone()),
+            None if timed_out => failed.push(f.clone()),
+            None => return None,
+        }
+    }
+    Some(json!({"ready": ready, "missing": missing, "failed": failed}))
+}
+
+/// The notice (unless turned off) and the `fontsMissing` event for `doc`'s truly missing families
+/// and those whose download failed.
+fn report_missing(app: &mut PhotocraftApp, doc: DocId, missing: &[String], failed: &[String]) {
+    if missing.is_empty() && failed.is_empty() {
+        return;
+    }
+    let mut all: Vec<String> = missing.to_vec();
+    all.extend(failed.iter().cloned());
+    app.font_checks.events.push(all);
+    if !app.font_checks.notice {
         return;
     }
     let tag = format!("{MISSING_TAG}{}", doc.0);
     app.ui.notices.retain(|n| n.tag.as_deref() != Some(tag.as_str()));
-    let id = crate::notices::post(app, tl!("Missing fonts"), names_lines(&still), false, None);
+    let id = crate::notices::post(app, tl!("Missing fonts"), names_lines(&notice_names(missing, failed)), false, None);
     set_actions(app, id, &[("Load Fonts…", "type.loadFonts"), ("Resolve Missing Fonts…", "type.resolveMissingFonts")]);
     if let Some(n) = app.ui.notices.iter_mut().find(|n| n.id == id) {
         n.tag = Some(tag);
     }
 }
 
-/// `doc`'s missing families, without those the host serves (being fetched).
+/// The notice's names: the missing families, then those that couldn't be downloaded, said so.
+fn notice_names(missing: &[String], failed: &[String]) -> Vec<String> {
+    let mut v: Vec<String> = missing.to_vec();
+    v.extend(failed.iter().map(|f| crate::i18n::fmt(tl!("{family} (couldn't download it)"), &[("family", f)])));
+    v
+}
+
+/// `doc`'s missing families still to report: without those the host serves (fetched or on their
+/// way), but with those whose download failed (said so).
 fn still_missing(doc: &photocraft_doc::Document) -> Vec<String> {
-    photocraft_engine::type_extra_cmds::missing_font_names(doc)
-        .into_iter()
-        .filter(|(family, ps)| crate::served_fonts::served_family(family, ps).is_none())
-        .map(|(family, _)| family)
-        .collect()
+    let (mut missing, mut failed) = (Vec::new(), Vec::new());
+    for (family, ps) in photocraft_engine::type_extra_cmds::missing_font_names(doc) {
+        match verdict(&family, &ps) {
+            Verdict::Missing => missing.push(family),
+            Verdict::Failed => failed.push(family),
+            Verdict::Here | Verdict::Waiting => {}
+        }
+    }
+    notice_names(&missing, &failed)
 }
 
 /// The served fonts changed (the manifest arrived, or font files did): the families each missing

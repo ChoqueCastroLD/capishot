@@ -147,6 +147,7 @@ impl PhotocraftApp {
             remove_ai: Default::default(),
             font_projects: crate::font_projects_ui::State::new(),
             ai_progress: Default::default(),
+            font_checks: Default::default(),
             guide_drag: None,
             layer_box: None,
             crop: Default::default(),

@@ -52,6 +52,8 @@ struct Host {
     /// Options applied on the first frame.
     locale: Option<String>,
     theme: Option<String>,
+    /// `fontsNotice: false`: no missing fonts notice (the `fontsMissing` event still goes out).
+    fonts_notice: Option<bool>,
     first_frame: bool,
     /// The full-mode chrome kept while embedded.
     saved_chrome: Option<Chrome>,
@@ -71,6 +73,7 @@ impl Default for Host {
             mode: Mode::Embedded,
             locale: None,
             theme: None,
+            fonts_notice: None,
             first_frame: true,
             saved_chrome: None,
             last: None,
@@ -223,6 +226,10 @@ pub fn process(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if HOST.with(|h| h.borrow().mode) == Mode::Embedded {
         core::hide_chrome(&mut app.ui.panels, &mut app.ui.view);
     }
+    // Fonts nobody serves (or whose download failed), once per document check.
+    for families in std::mem::take(&mut app.font_checks.events) {
+        emit(&json!({ "type": "fontsMissing", "families": families }));
+    }
     if first {
         let ready = HOST.with(|h| {
             let mut h = h.borrow_mut();
@@ -293,10 +300,13 @@ fn ask_view_frame() {
 }
 
 fn first_frame(app: &mut PhotocraftApp, ctx: &egui::Context) {
-    let (locale, theme, mode) = HOST.with(|h| {
+    let (locale, theme, mode, fonts_notice) = HOST.with(|h| {
         let h = h.borrow();
-        (h.locale.clone(), h.theme.clone(), h.mode)
+        (h.locale.clone(), h.theme.clone(), h.mode, h.fonts_notice)
     });
+    if let Some(on) = fonts_notice {
+        app.font_checks.notice = on;
+    }
     if let Some(locale) = locale
         && let Err(e) = app.run("prefs.set", json!({ "path": "interface.language", "value": locale }))
     {
@@ -445,7 +455,8 @@ pub fn init(options: JsValue) -> js_sys::Promise {
     let p = promise(|settle| {
         HOST.with(|h| {
             let mut h = h.borrow_mut();
-            *h = Host { phase: Phase::Starting, mode, locale: opt_str(&options, "locale"), theme: opt_str(&options, "theme"), ..Host::default() };
+            let fonts_notice = js_sys::Reflect::get(&options, &"fontsNotice".into()).ok().and_then(|v| v.as_bool());
+            *h = Host { phase: Phase::Starting, mode, locale: opt_str(&options, "locale"), theme: opt_str(&options, "theme"), fonts_notice, ..Host::default() };
             h.own_canvas = own.then(|| canvas.clone());
             h.ready.push(settle);
         });

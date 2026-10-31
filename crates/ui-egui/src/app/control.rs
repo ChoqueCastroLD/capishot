@@ -54,6 +54,9 @@ impl PhotocraftApp {
             }
             crate::control::Outcome::AfterInput => self.input_waiters.push(reply),
             crate::control::Outcome::AfterJob(job) => self.jobs.waiters.push((job, reply)),
+            crate::control::Outcome::AfterFonts { families, timeout_s } => {
+                crate::user_fonts_ui::preload(self, crate::user_fonts_ui::Preload::new(families, timeout_s, reply));
+            }
             crate::control::Outcome::Screenshot { token, path } => {
                 // Admission is budgeted here, after this pass's completed captures were
                 // drained, so a just-finished request never causes a false rejection.

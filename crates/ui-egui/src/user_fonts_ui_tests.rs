@@ -368,9 +368,14 @@ fn user_families_come_first_in_the_font_menu() {
 
 /// The host's `fonts/manifest.txt` lists `family` (the web shell reads it at start).
 fn serve(family: &str) {
-    let (fonts, skipped) = crate::served_fonts::parse_manifest(&format!("{family} | Regular | fonts/x/{}.ttf\n", family.replace(' ', "")));
+    let (fonts, skipped) = crate::served_fonts::parse_manifest(&format!("{family} | Regular | {}\n", served_file(family)));
     assert!(skipped.is_empty());
     crate::served_fonts::add_fonts(&fonts);
+}
+
+/// The file [`serve`] lists for `family` (a folder with spaces, as font libraries have).
+fn served_file(family: &str) -> String {
+    format!("fonts/Fuentes CON TILDE/{}.ttf", family.replace(' ', ""))
 }
 
 #[test]
@@ -384,7 +389,7 @@ fn fonts_the_host_serves_are_fetched_not_reported_missing() {
     assert!(notice(&app, "Missing fonts").is_none(), "every font is served: no notice");
     assert!(crate::served_fonts::take_requests().iter().any(|f| f == family), "and it is fetched");
     // The shell hands the file over: the layer is drawn with it.
-    crate::served_fonts::install(&mut app, &egui::Context::default(), vec![(family.into(), mono(family))]);
+    crate::served_fonts::install(&mut app, &egui::Context::default(), vec![(served_file(family), mono(family))]);
     assert!(registered(family));
     assert!(photocraft_engine::type_extra_cmds::missing_fonts(&app.session.active().unwrap().doc).is_empty());
     assert!(ink(&app, layer).width() > before.width(), "re-rendered with the served font");
@@ -406,4 +411,156 @@ fn the_missing_fonts_notice_drops_what_a_late_manifest_serves() {
     crate::served_fonts::install(&mut app, &egui::Context::default(), Vec::new());
     assert_eq!(notice(&app, "Missing fonts").expect("still one missing").lines, [other]);
     assert!(crate::served_fonts::take_requests().iter().any(|f| f == served));
+}
+
+/// A served family's file arrives: the shell's `install` (and the frame's check).
+fn arrive(app: &mut PhotocraftApp, file: &str, bytes: Vec<u8>) {
+    crate::served_fonts::install(app, &egui::Context::default(), vec![(file.to_string(), bytes)]);
+    tick_checks(app, Some(1.0));
+}
+
+/// A document whose fonts are all served opens with nothing downloaded yet: no notice while they
+/// come, none after, and the text is drawn in its font once it arrives.
+#[test]
+fn served_fonts_on_their_way_are_never_reported_missing() {
+    let family = "Served Mono GG";
+    serve(family);
+    let mut app = PhotocraftApp::new(Session::new(), Services::default());
+    let layer = doc_with_text(&mut app, family);
+    let before = ink(&app, layer);
+    after_open(&mut app);
+    tick_checks(&mut app, Some(0.0));
+    assert!(notice(&app, "Missing fonts").is_none(), "on its way: no notice");
+    assert!(crate::served_fonts::take_requests().iter().any(|f| f == family));
+    photocraft_text::served::fetch_started(&served_file(family));
+    tick_checks(&mut app, Some(5.0));
+    assert!(notice(&app, "Missing fonts").is_none(), "still on its way");
+    arrive(&mut app, &served_file(family), mono(family));
+    assert!(notice(&app, "Missing fonts").is_none(), "arrived: nothing missing");
+    assert!(app.font_checks.events.is_empty(), "no fontsMissing event");
+    assert!(ink(&app, layer).width() > before.width(), "drawn in its font");
+}
+
+/// A font nobody serves is reported, alone, once the served ones have arrived; a served font
+/// whose download failed is reported as not downloaded.
+#[test]
+fn only_absent_or_undownloadable_fonts_are_reported() {
+    let (served, absent, broken) = ("Served Mono HH", "Nowhere Mono I", "Served Mono JJ");
+    serve(served);
+    serve(broken);
+    let mut app = PhotocraftApp::new(Session::new(), Services::default());
+    doc_with_text(&mut app, served);
+    app.run("type.create", json!({"x": 10, "y": 40, "text": "x", "size": 12, "font": absent})).unwrap();
+    app.run("type.create", json!({"x": 10, "y": 60, "text": "y", "size": 12, "font": broken})).unwrap();
+    after_open(&mut app);
+    tick_checks(&mut app, Some(0.0));
+    assert!(notice(&app, "Missing fonts").is_none(), "decided once the served fonts are in or failed");
+    photocraft_text::served::fetch_started(&served_file(served));
+    photocraft_text::served::fetch_started(&served_file(broken));
+    photocraft_text::served::fetch_failed(&served_file(broken), "HTTP 404");
+    arrive(&mut app, &served_file(served), mono(served));
+    let n = notice(&app, "Missing fonts").expect("the notice");
+    assert_eq!(n.lines, [absent.to_string(), format!("{broken} (couldn't download it)")]);
+    assert_eq!(app.font_checks.events, [vec![absent.to_string(), broken.to_string()]], "the fontsMissing event");
+}
+
+/// The host turned the notice off: the event still goes out.
+#[test]
+fn a_host_can_turn_the_notice_off() {
+    let absent = "Nowhere Mono K";
+    let mut app = PhotocraftApp::new(Session::new(), Services::default());
+    app.font_checks.notice = false;
+    doc_with_text(&mut app, absent);
+    after_open(&mut app);
+    assert!(notice(&app, "Missing fonts").is_none());
+    assert_eq!(app.font_checks.events, [vec![absent.to_string()]]);
+}
+
+/// A PSD's "Sean Demo QQ12" is the manifest's "Sean Demo (QQ12)": fetched, registered under
+/// both names, never reported.
+#[test]
+fn a_family_named_differently_from_the_manifest_resolves() {
+    let (file_family, manifest_family) = ("Sean Demo QQ12", "Sean Demo (QQ12)");
+    let file = "fonts/1. Diálogos Principales/b. Puntas/Sean_Demo_QQ12.ttf";
+    let (fonts, skipped) = crate::served_fonts::parse_manifest(&format!("{manifest_family} | Regular | {file} | Latn | - | - | - | fuentes\n"));
+    assert!(skipped.is_empty(), "{skipped:?}");
+    crate::served_fonts::add_fonts(&fonts);
+    assert_eq!(photocraft_text::served::resolve(file_family, &[]).as_deref(), Some(manifest_family));
+    assert_eq!(photocraft_text::served::resolve("x", &["SeanDemoQQ12-Regular".into()]).as_deref(), Some(manifest_family), "by PostScript name");
+    let mut app = PhotocraftApp::new(Session::new(), Services::default());
+    let layer = doc_with_text(&mut app, file_family);
+    let before = ink(&app, layer);
+    after_open(&mut app);
+    assert!(notice(&app, "Missing fonts").is_none());
+    assert!(crate::served_fonts::take_requests().iter().any(|f| f == manifest_family), "the manifest's family is fetched");
+    arrive(&mut app, file, mono(file_family));
+    assert!(registered(file_family) && registered(manifest_family), "under both names");
+    assert!(notice(&app, "Missing fonts").is_none());
+    assert!(ink(&app, layer).width() > before.width(), "drawn in it");
+}
+
+/// A type layer copied into another document with `layer.copyToDocument` asks for its served
+/// font, raises no notice, and is drawn in it when it arrives.
+#[test]
+fn a_layer_copied_into_a_document_fetches_its_served_font() {
+    let family = "Served Mono LL";
+    serve(family);
+    let mut app = PhotocraftApp::new(Session::new(), Services::default());
+    app.run("file.new", json!({"width": 200, "height": 100})).unwrap();
+    let id = app.run("type.create", json!({"x": 10, "y": 40, "text": "Hola", "size": 20, "font": family})).unwrap()["layer"].as_u64().unwrap();
+    app.run("file.new", json!({"width": 200, "height": 100})).unwrap();
+    app.session.set_active(0);
+    let _ = crate::served_fonts::take_requests();
+    app.run("layer.copyToDocument", json!({"document": 1, "layers": [id]})).unwrap();
+    app.session.set_active(1);
+    let layers = app.run("layer.list", json!({"flat": true})).unwrap();
+    let copy = photocraft_doc::LayerId(layers["layers"].as_array().unwrap().iter().filter_map(|l| l["id"].as_u64()).max().unwrap());
+    let _ = app.run("type.edit", json!({"layer": copy.0, "text": "Hola!"}));
+    assert!(crate::served_fonts::take_requests().iter().any(|f| f == family), "the copy asks for its font");
+    assert!(notice(&app, "Missing fonts").is_none());
+    let before = ink(&app, copy);
+    arrive(&mut app, &served_file(family), mono(family));
+    assert!(notice(&app, "Missing fonts").is_none());
+    assert!(ink(&app, copy).width() > before.width(), "drawn in its font");
+}
+
+/// `fonts.preload` waits for the downloads and says what is ready, missing or failed.
+#[test]
+fn fonts_preload_waits_for_downloads() {
+    let (served, broken, absent) = ("Served Mono MM", "Served Mono NN", "Nowhere Mono O");
+    serve(served);
+    serve(broken);
+    let mut app = PhotocraftApp::new(Session::new(), Services::default());
+    let ctx = egui::Context::default();
+    let (req, rx) = crate::control::ControlRequest::new("fonts.preload", json!({"families": [served, broken, absent, "Inter"], "timeoutMs": 5000}));
+    let crate::control::Outcome::AfterFonts { families, timeout_s } = crate::control::handle(&mut app, &ctx, &req) else { panic!("waits for fonts") };
+    preload(&mut app, Preload::new(families, timeout_s, req.reply.clone()));
+    assert!(rx.try_recv().is_err(), "waits while the downloads run");
+    let asked = crate::served_fonts::take_requests();
+    assert!(asked.iter().any(|f| f == served) && asked.iter().any(|f| f == broken), "{asked:?}");
+    photocraft_text::served::fetch_started(&served_file(served));
+    photocraft_text::served::fetch_started(&served_file(broken));
+    tick_checks(&mut app, Some(0.0));
+    assert!(rx.try_recv().is_err());
+    photocraft_text::served::fetch_failed(&served_file(broken), "HTTP 500");
+    arrive(&mut app, &served_file(served), mono(served));
+    let v = rx.try_recv().expect("answered");
+    assert_eq!(v["result"], json!({"ready": [served, "Inter"], "missing": [absent], "failed": [broken]}));
+    // A download that never ends counts as failed after the timeout.
+    let slow = "Served Mono PP";
+    serve(slow);
+    let (req, rx) = crate::control::ControlRequest::new("fonts.preload", json!({"families": [slow], "timeoutMs": 1000}));
+    preload(&mut app, Preload::new(vec![slow.into()], 1.0, req.reply.clone()));
+    photocraft_text::served::fetch_started(&served_file(slow));
+    tick_checks(&mut app, Some(10.0));
+    assert!(rx.try_recv().is_err());
+    tick_checks(&mut app, Some(11.5));
+    assert_eq!(rx.try_recv().expect("timed out")["result"]["failed"], json!([slow]));
+    // Bad params are refused.
+    let bad_params =
+        [json!({}), json!({"families": "x"}), json!({"families": [""]}), json!({"families": ["a"], "timeoutMs": -1}), json!({"families": ["a"], "x": 1})];
+    for bad in bad_params {
+        let (req, _rx) = crate::control::ControlRequest::new("fonts.preload", bad.clone());
+        assert!(matches!(crate::control::handle(&mut app, &ctx, &req), crate::control::Outcome::Done(v) if v["ok"] == false), "{bad}");
+    }
 }

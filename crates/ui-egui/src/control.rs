@@ -30,6 +30,10 @@
 //! - `ui.focus`: bring the main window to the front
 //! - `app.open {path}` / `app.save {path}`: relative file I/O under the automation roots; reply with `warnings`
 //! - `app.quit`
+//! - `fonts.preload {families, timeoutMs?}`: fetch the served fonts of `families` (names matched as
+//!   documents' are: case, spaces and punctuation aside, PostScript names too) and reply once each
+//!   has arrived or failed: `{ready, missing, failed}` (`missing`: nobody serves it; `failed`: its
+//!   download failed or didn't finish in `timeoutMs`, default 10000)
 //! - `jobs.list` / `jobs.cancel {job?}`: background jobs (#210) with progress; cancel one (or all).
 //!   `engine.execute`, `ui.menu.invoke` and `ui.dialog.confirm` wait for a command that runs as a
 //!   job unless `wait: false` (then the reply is `{job, pending: true}`)
@@ -138,6 +142,11 @@ pub enum Outcome {
     /// A command started a background job and the caller waits for it: reply with its result
     /// once it has been applied (or with its error / "cancelled").
     AfterJob(photocraft_engine::jobs::JobId),
+    /// `fonts.preload`: reply once each family has arrived or failed (or `timeout_s` passed).
+    AfterFonts {
+        families: Vec<String>,
+        timeout_s: f64,
+    },
 }
 
 fn wrap(r: Result<Value, String>) -> Outcome {
