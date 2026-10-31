@@ -395,13 +395,14 @@ fn export_now(app: &mut PhotocraftApp, form: &ExportForm) -> bool {
 fn preview(ui: &mut egui::Ui, project: &Project, role: &str) {
     let style = project.role_style(role);
     let stroke = project.role(role).and_then(|r| r.settings.stroke_params());
-    let key = format!("{style:?}{stroke:?}");
+    let effects = project.role(role).map(|r| r.settings.effect_params()).unwrap_or_default();
+    let key = format!("{style:?}{stroke:?}{effects:?}");
     let id = egui::Id::unique(("font-role-preview", project.id.as_str(), role));
     let cached: Option<(String, Option<egui::TextureHandle>)> = ui.data(|d| d.get_temp(id));
     let tex = match cached {
         Some((k, tex)) if k == key => tex,
         _ => {
-            let img = render_role(&style, stroke.as_ref());
+            let img = render_role(&style, stroke.as_ref(), &effects);
             let tex = img.map(|img| ui.ctx().load_texture(format!("font-role-{role}"), img, egui::TextureOptions::LINEAR));
             ui.data_mut(|d| d.insert_temp(id, (key, tex.clone())));
             tex
@@ -414,7 +415,7 @@ fn preview(ui: &mut egui::Ui, project: &Project, role: &str) {
     }
 }
 
-fn render_role(style: &serde_json::Map<String, Value>, stroke: Option<&Value>) -> Option<egui::ColorImage> {
+fn render_role(style: &serde_json::Map<String, Value>, stroke: Option<&Value>, effects: &[(&str, Value)]) -> Option<egui::ColorImage> {
     let (w, h) = (420u32, 90u32);
     let mut s = photocraft_engine::Session::new();
     s.execute("file.new", json!({"width": w, "height": h, "background": "#d9d9d9"})).ok()?;
@@ -429,6 +430,11 @@ fn render_role(style: &serde_json::Map<String, Value>, stroke: Option<&Value>) -
         let mut st = st.clone();
         st["layer"] = r["layer"].clone();
         let _ = s.execute("layer.layerStyle.stroke", st);
+    }
+    for (kind, fx) in effects {
+        let mut fx = fx.clone();
+        fx["layer"] = r["layer"].clone();
+        let _ = s.execute(&format!("layer.layerStyle.{kind}"), fx);
     }
     let doc = &s.active()?.doc;
     let area = doc.bounds();
@@ -518,6 +524,56 @@ fn settings_editor(ui: &mut egui::Ui, salt: &str, s: &RoleSettings) -> Option<Ro
             });
         });
         n.stroke = st.then_some(k);
+        ui.end_row();
+        // The type bars' Efectos, kept with the role.
+        let color = |ui: &mut egui::Ui, c: &mut String| {
+            let mut rgb = hex3(c);
+            if ui.color_edit_button_srgb(&mut rgb).changed() {
+                *c = hex_of(rgb);
+            }
+        };
+        let mut on = n.gradient.is_some();
+        crate::widgets::checkbox(ui, &mut on, tl!("Gradient"));
+        let mut g = n.gradient.clone().unwrap_or_default();
+        ui.add_enabled_ui(on, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                color(ui, &mut g.from);
+                color(ui, &mut g.to);
+                ui.add(egui::DragValue::new(&mut g.angle).range(-180.0..=180.0).speed(1.0).suffix("°")).accessible_name(tl!("Angle"));
+                for (v, label) in [("linear", tl!("Linear")), ("radial", tl!("Radial"))] {
+                    if ui.selectable_label(g.style == v, label).clicked() {
+                        g.style = v.into();
+                    }
+                }
+            });
+        });
+        n.gradient = on.then_some(g);
+        ui.end_row();
+        let mut on = n.shadow.is_some();
+        crate::widgets::checkbox(ui, &mut on, tl!("Shadow"));
+        let mut d = n.shadow.clone().unwrap_or_default();
+        ui.add_enabled_ui(on, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                color(ui, &mut d.color);
+                ui.add(egui::DragValue::new(&mut d.distance).range(0.0..=300.0).speed(0.25).suffix(" px")).accessible_name(tl!("Distance"));
+                ui.add(egui::DragValue::new(&mut d.size).range(0.0..=250.0).speed(0.25).suffix(" px")).accessible_name(tl!("Size"));
+                ui.add(egui::DragValue::new(&mut d.angle).range(-180.0..=180.0).speed(1.0).suffix("°")).accessible_name(tl!("Angle"));
+                ui.add(egui::DragValue::new(&mut d.opacity).range(0.0..=100.0).speed(0.5).suffix(" %")).accessible_name(tl!("Opacity"));
+            });
+        });
+        n.shadow = on.then_some(d);
+        ui.end_row();
+        let mut on = n.glow.is_some();
+        crate::widgets::checkbox(ui, &mut on, tl!("Glow"));
+        let mut g = n.glow.clone().unwrap_or_default();
+        ui.add_enabled_ui(on, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                color(ui, &mut g.color);
+                ui.add(egui::DragValue::new(&mut g.size).range(0.0..=250.0).speed(0.25).suffix(" px")).accessible_name(tl!("Size"));
+                ui.add(egui::DragValue::new(&mut g.opacity).range(0.0..=100.0).speed(0.5).suffix(" %")).accessible_name(tl!("Opacity"));
+            });
+        });
+        n.glow = on.then_some(g);
         ui.end_row();
     });
     (n != *s).then_some(n)

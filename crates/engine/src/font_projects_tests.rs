@@ -215,3 +215,31 @@ fn typer_line_tags_use_the_projects_roles() {
     let photocraft_doc::LayerContent::Text(t) = &l.content else { panic!() };
     assert_ne!(t.font_family, "JetBrains Mono");
 }
+
+/// A role can carry the type bars' effects (gradient, shadow, glow): applying it makes them on
+/// the text in the same undo step, replacing an effect of the same kind rather than adding one.
+#[test]
+fn a_role_applies_its_gradient_shadow_and_glow() {
+    let (mut s, layer) = session_with_type();
+    s.execute("fontProjects.create", json!({"name": "Serie"})).unwrap();
+    let settings = json!({
+        "gradient": {"from": "#ff3b1f", "to": "#ffd23f", "angle": 90, "style": "radial"},
+        "shadow": {"color": "#000000", "distance": 6, "size": 3, "angle": 45, "opacity": 60},
+        "glow": {"color": "#ffffff", "size": 10, "opacity": 80}
+    });
+    s.execute("fontProjects.setRole", json!({"role": "shout", "settings": settings})).unwrap();
+    s.execute("layer.layerStyle.dropShadow", json!({"layer": layer, "distance": 20})).unwrap();
+    let past = s.active().unwrap().history.past_len();
+    s.execute("fontProjects.applyRole", json!({"role": "shout", "layer": layer})).unwrap();
+    let st = s.active().unwrap();
+    assert_eq!(st.history.past_len(), past + 1, "one undo step");
+    let l = st.doc.layer(photocraft_doc::LayerId(layer)).unwrap();
+    let kinds: Vec<&str> = l.effects.items.iter().map(crate::layer_style::kind_of).collect();
+    assert_eq!(kinds.iter().filter(|k| **k == "dropShadow").count(), 1, "replaced, not added: {kinds:?}");
+    assert!(kinds.contains(&"gradientOverlay") && kinds.contains(&"outerGlow"), "{kinds:?}");
+    let shadow = l.effects.items.iter().find_map(|e| if let photocraft_doc::Effect::DropShadow(d) = e { Some(d.clone()) } else { None }).unwrap();
+    assert!((shadow.distance - 6.0).abs() < 0.01 && !shadow.use_global_light && (shadow.angle - 45.0).abs() < 0.01, "{shadow:?}");
+    // Kept with the project (and in a .capiproj).
+    let role = active(&s).unwrap().role("shout").cloned().unwrap();
+    assert_eq!(role.settings.glow.as_ref().map(|g| g.size), Some(10.0));
+}

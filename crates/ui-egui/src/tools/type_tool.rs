@@ -21,6 +21,7 @@ use crate::state::{BoxResize, TextEdit};
 
 mod defaults;
 mod editing;
+mod effects;
 mod fonts;
 mod ime;
 mod ime_edit;
