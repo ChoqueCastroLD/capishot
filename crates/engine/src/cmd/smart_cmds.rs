@@ -184,13 +184,14 @@ pub fn specs() -> Vec<CommandSpec> {
             has_smart,
             edit_contents
         ),
-        spec!("layer.smartObjects.saveContents", "Save Contents", &[], r#"{} (in an Edit Contents document) → {"updated":bool,"cut":true? (type whose text leaves the canvas, kept cut off: grown, it would reach the perspective's horizon)}"#, is_smart_child, |s, _| {
+        spec!("layer.smartObjects.saveContents", "Save Contents", &[], r#"{} (in an Edit Contents document) → {"updated":bool,"fittedIn":true? (type whose longer text, grown in place, would pass the perspective's horizon: fitted into the old quad instead)}"#, is_smart_child, |s, _| {
             let i = s.active_index().ok_or(EngineError::NoDocument)?;
-            let (updated, cut) = contents::commit_child_fitting(s, i)?;
+            let (updated, fitted) = contents::commit_child_fitting(s, i)?;
             let mut out = json!({"updated": updated});
-            if cut {
-                // Type contents left cut off: grown, they would pass the perspective's horizon.
-                out["cut"] = json!(true);
+            if fitted {
+                // Type contents fitted into their quad: grown in place, they would pass the
+                // perspective's horizon.
+                out["fittedIn"] = json!(true);
             }
             Ok(out)
         }),

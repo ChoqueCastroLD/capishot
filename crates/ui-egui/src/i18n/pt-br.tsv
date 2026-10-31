@@ -5138,4 +5138,4 @@ layerLabel	No Color	Sem cor
 	Color Picker (Drop Shadow)	Seletor de cores (sombra projetada)
 	Color Picker (Outer Glow)	Seletor de cores (brilho externo)
 	Perspective is for type layers and smart objects	Perspectiva é para camadas de texto e objetos inteligentes
-	The text was cut off: longer, it would run past the perspective's vanishing point. Make the perspective gentler or the text shorter	O texto ficou cortado: mais longo, passaria do ponto de fuga da perspectiva. Suavize a perspectiva ou encurte o texto
+	The text was fitted inside the perspective so it isn't cut off	O texto foi ajustado dentro da perspectiva para não ser cortado.

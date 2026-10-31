@@ -140,7 +140,7 @@ fn other_contents_keep_their_canvas() {
 }
 
 #[test]
-fn text_that_would_pass_the_horizon_stays_cut_and_says_so() {
+fn text_that_would_pass_the_horizon_is_fitted_into_the_quad() {
     let mut s = Session::new();
     s.execute("file.new", json!({"width": 900, "height": 600, "background": "white"})).unwrap();
     s.execute("type.create", json!({"text": "ABC", "size": 60, "x": 100, "y": 300})).unwrap();
@@ -151,13 +151,22 @@ fn text_that_would_pass_the_horizon_stays_cut_and_says_so() {
     let h = y1 - y0;
     let quad = json!([[x0, y0], [x1, y0 - 2.0 * h], [x1, y1 + 2.0 * h], [x0, y1]]);
     s.execute("edit.transform", json!({"layer": id, "rect": [x0, y0, x1, y1], "quad": quad})).unwrap();
+    let b0 = active_smart(&s).cache.unwrap().content_bounds();
+    let steps = s.active().unwrap().history.past_len();
     let child = s.execute("layer.smartObjects.editContents", json!({})).unwrap()["document"].as_u64().unwrap() as usize;
     let size = s.active().unwrap().doc.size;
     let t = text_layer(&s);
     s.execute("type.edit", json!({"layer": t.0, "text": "ABCDEFGHIJKL"})).unwrap();
     let out = s.execute("layer.smartObjects.saveContents", json!({})).unwrap();
-    assert_eq!(out["cut"], json!(true), "{out}");
-    assert_eq!(s.documents()[child].doc.size, size, "the canvas stays");
+    assert_eq!(out["fittedIn"], json!(true), "{out}");
+    // Nothing cut: the contents hold all the text.
+    let cdoc = s.documents()[child].doc.clone();
+    let ink = cdoc.walk().iter().filter_map(|(_, _, l)| crate::layer_multi_cmds::layer_bounds(l)).fold(Rect::EMPTY, |a, b| a.union(&b));
+    assert!(cdoc.size.width > size.width * 2 && cdoc.bounds().contains_rect(&ink), "{size:?} → {:?}", cdoc.size);
+    // And it all shows inside the quad the short text had (give or take a pixel), across it.
     s.set_active(0);
-    assert!(!active_smart(&s).cache.unwrap().content_bounds().is_empty(), "the visible part still shows");
+    let b1 = active_smart(&s).cache.unwrap().content_bounds();
+    let quad_box = Rect::new(x0 as i32, (y0 - 2.0 * h) as i32, x1.ceil() as i32, (y1 + 2.0 * h).ceil() as i32).inflate(2);
+    assert!(!b1.is_empty() && quad_box.contains_rect(&b1) && b1.width() + 10 >= b0.width(), "{b0:?} → {b1:?} in {quad_box:?}");
+    assert_eq!(s.active().unwrap().history.past_len(), steps + 1, "one Edit Contents step");
 }

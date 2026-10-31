@@ -137,8 +137,8 @@ pub fn commit_child(s: &mut Session, index: usize) -> Result<bool> {
     commit_child_fitting(s, index).map(|(updated, _)| updated)
 }
 
-/// [`commit_child`], also saying whether type contents had to stay cut off: their text left the
-/// canvas, and growing it would have carried the text past an instance's perspective horizon.
+/// [`commit_child`], also saying whether type contents were fitted into their quad: their text
+/// left the canvas, and growing it in place would have carried it past a perspective's horizon.
 pub fn commit_child_fitting(s: &mut Session, index: usize) -> Result<(bool, bool)> {
     let Some(st) = s.docs.get(index) else { return Ok((false, false)) };
     let child_id = st.doc.id;
@@ -147,12 +147,9 @@ pub fn commit_child_fitting(s: &mut Session, index: usize) -> Result<(bool, bool
     // Type contents whose text outgrew its canvas (or shrank well inside it): the canvas follows
     // the text, and each instance's placement takes the shift, so nothing is clipped and what
     // was there stays where it was on the page.
-    let (shift, cut) = match fit_type_canvas(s, index, parent, link.contents_id)? {
-        Fit::Same => (None, false),
-        Fit::Moved(x0, y0) => (Some((x0, y0)), false),
-        Fit::Cut => (None, true),
-    };
-    let Some(st) = s.docs.get(index) else { return Ok((false, cut)) };
+    let fit = fit_type_canvas(s, index, parent, link.contents_id)?;
+    let fitted_in = matches!(fit, Fit::Squeezed { .. });
+    let Some(st) = s.docs.get(index) else { return Ok((false, fitted_in)) };
     let child = st.doc.clone();
     let bytes = Arc::new(encode_source(&child)?);
     let prev = s.active;
@@ -171,8 +168,10 @@ pub fn commit_child_fitting(s: &mut Session, index: usize) -> Result<(bool, bool
             };
             let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
             sm.source = SmartSource::Embedded { file_name: format!("{stem}.pcraft"), bytes: bytes.clone() };
-            if let Some((x0, y0)) = shift {
-                place_after_shift(sm, x0, y0);
+            match fit {
+                Fit::Same => {}
+                Fit::Moved(x0, y0) => place_after_shift(sm, x0, y0),
+                Fit::Squeezed { old, new } => squeeze_into_quad(sm, old, new),
             }
             detach_psd(doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?);
             refresh_or_fail(doc, id)?;
@@ -185,7 +184,7 @@ pub fn commit_child_fitting(s: &mut Session, index: usize) -> Result<(bool, bool
     if let Some(st) = s.docs.get_mut(index) {
         st.saved_revision = st.revision;
     }
-    Ok((true, cut))
+    Ok((true, fitted_in))
 }
 
 /// Room left around the text when the canvas is fitted to it: a tenth of the text's height, at
@@ -198,8 +197,9 @@ enum Fit {
     Same,
     /// Fitted to the text: the new canvas's origin in the old one's pixels.
     Moved(i32, i32),
-    /// Left as it was although the text leaves it: grown, it would reach an instance's horizon.
-    Cut,
+    /// Fitted to the text, but grown in place it would reach an instance's horizon: the grown
+    /// canvas (`new`: its size) goes into the quad the old one (`old`: its size) filled instead.
+    Squeezed { old: photocraft_geom::Size, new: photocraft_geom::Size },
 }
 
 /// Edit Contents of type (every layer of the contents a type layer, as Type › Perspective makes
@@ -235,8 +235,9 @@ fn fit_type_canvas(s: &mut Session, index: usize, parent: usize, contents_id: Sm
     if canvas.contains_rect(&ink) && target.contains_rect(&canvas) {
         return Ok(Fit::Same);
     }
-    if !placed.iter().all(|sm| sm.perspective.is_none_or(|h| before_horizon(&h, canvas, target))) {
-        return Ok(if canvas.contains_rect(&ink) { Fit::Same } else { Fit::Cut });
+    let in_place = placed.iter().all(|sm| sm.perspective.is_none_or(|h| before_horizon(&h, canvas, target)));
+    if !in_place && canvas.contains_rect(&ink) {
+        return Ok(Fit::Same);
     }
     let (x0, y0) = (target.x0, target.y0);
     let prev = s.active;
@@ -250,7 +251,7 @@ fn fit_type_canvas(s: &mut Session, index: usize, parent: usize, contents_id: Sm
     s.active = prev;
     s.note_active_change();
     r?;
-    Ok(Fit::Moved(x0, y0))
+    Ok(if in_place { Fit::Moved(x0, y0) } else { Fit::Squeezed { old: canvas.size(), new: target.size() } })
 }
 
 /// The most a grown canvas may be magnified, at its far end, against its least magnified point:
@@ -278,6 +279,21 @@ fn place_after_shift(sm: &mut photocraft_doc::SmartObject, x0: i32, y0: i32) {
         h[2] += h[0] * x + h[1] * y;
         h[5] += h[3] * x + h[4] * y;
         h[8] += h[6] * x + h[7] * y;
+    }
+}
+
+/// The contents' canvas grew from `old` to `new` (sizes) where growing in place would pass the
+/// perspective's horizon: the whole new canvas maps onto the quad the old one filled, so nothing
+/// is cut (the text comes out narrower).
+fn squeeze_into_quad(sm: &mut photocraft_doc::SmartObject, old: photocraft_geom::Size, new: photocraft_geom::Size) {
+    let h = super::placing::placement(sm);
+    let (w, hh) = (f64::from(old.width), f64::from(old.height));
+    let quad = [(0.0, 0.0), (w, 0.0), (w, hh), (0.0, hh)].map(|(x, y)| {
+        let (u, v) = h.apply(x, y);
+        [u, v]
+    });
+    if let Some(m) = super::Homography::rect_to_quad([0.0, 0.0, f64::from(new.width), f64::from(new.height)], quad) {
+        super::placing::set_placement(sm, m);
     }
 }
 

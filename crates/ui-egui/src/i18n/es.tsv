@@ -5170,4 +5170,4 @@ navigator	Zoom	Zoom
 	Color Picker (Drop Shadow)	Selector de color (sombra paralela)
 	Color Picker (Outer Glow)	Selector de color (resplandor exterior)
 	Perspective is for type layers and smart objects	Perspectiva es para capas de texto y objetos inteligentes
-	The text was cut off: longer, it would run past the perspective's vanishing point. Make the perspective gentler or the text shorter	El texto quedó cortado: más largo pasaría el punto de fuga de la perspectiva. Suaviza la perspectiva o acorta el texto
+	The text was fitted inside the perspective so it isn't cut off	El texto se ajustó dentro de la perspectiva para no cortarse.
