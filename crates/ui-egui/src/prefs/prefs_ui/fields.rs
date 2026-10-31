@@ -336,6 +336,14 @@ fn settings_column(
             }
             if section == "performance" {
                 gpu_status_rows(ui, f.get("__gpuInfo"), f.get("__gpuAdapters"), obj);
+                // Back to the factory settings of this section (GPU, rendering mode, memory,
+                // caches): applied with OK, like any other change here.
+                ui.add_space(8.0);
+                if crate::widgets::secondary_button(ui, tl!("Reset Performance Preferences"), 220.0).clicked()
+                    && let Some(defaults) = prefs::Preferences::default().to_json().get("performance").and_then(Value::as_object)
+                {
+                    *obj = defaults.clone();
+                }
             }
             if section == "type" && f.get("__fonts").and_then(Value::as_bool) == Some(true) {
                 ui.add_space(8.0);

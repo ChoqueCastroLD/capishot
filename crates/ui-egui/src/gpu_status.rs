@@ -157,7 +157,25 @@ pub fn system_info_ui(app: &PhotocraftApp) -> Vec<String> {
     }];
     v.extend(app.perf.gpu_info.lines());
     v.extend(crate::monitor_status::summary_lines(app));
+    if let Some(path) = log_file() {
+        let template = "Log file: {path}";
+        v.push(crate::i18n::fmt(tl!(template), &[("path", path)]));
+    }
+    v.push(String::new());
+    v.extend(app.perf_window.lines(&app.perf.gpu_info));
     v
+}
+
+static LOG_FILE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// The app's log file, for System Info (the desktop app sets it once it is open).
+pub fn set_log_file(path: String) {
+    let _ = LOG_FILE.set(path);
+}
+
+/// The log file [`set_log_file`] named.
+pub fn log_file() -> Option<&'static str> {
+    LOG_FILE.get().map(String::as_str)
 }
 
 /// The `help.systemInfo` result: the same facts as JSON.

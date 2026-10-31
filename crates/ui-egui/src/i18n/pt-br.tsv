@@ -5111,3 +5111,16 @@ layerLabel	No Color	Sem cor
 	Bubble Type	Texto no balão
 	Loading Capishot…	Carregando o Capishot…
 	Couldn't load a part of Capishot (network). Try again	Não foi possível carregar uma parte do Capishot (rede). Tente de novo
+	Performance (last 60 s)	Desempenho (últimos 60 s)
+	No frames recorded yet.	Nenhum quadro registrado ainda.
+	Frames	Quadros
+	frame time	tempo por quadro
+	Slow frames	Quadros lentos
+	Input events	Eventos de entrada
+	pointer	ponteiro
+	monitor	monitor
+	frames drawn	quadros desenhados
+	presentation	apresentação
+	Slowest frames	Quadros mais lentos
+	Log file: {path}	Arquivo de log: {path}
+	Reset Performance Preferences	Redefinir preferências de desempenho

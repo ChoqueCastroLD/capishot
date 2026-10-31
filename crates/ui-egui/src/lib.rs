@@ -69,6 +69,7 @@ pub mod overlay_guard;
 pub mod palette_search;
 pub mod perf_counters;
 pub mod perf_span;
+pub mod perf_window;
 pub mod recovery_ui;
 pub mod remove_ai_ui;
 pub mod safe_area;
@@ -702,6 +703,8 @@ pub struct PhotocraftApp {
     pub render_path: render_path::RenderPath,
     /// The last slow frames and their stages (`perf.slowFrames`, see `frame_stages`).
     pub slow_frames: frame_stages::SlowFrames,
+    /// The last minute of frames and input, for Help › System Info ([`perf_window`]).
+    pub perf_window: perf_window::PerfWindow,
     /// Preferences, autosave and snapping runtime state (see `prefs_ui`, `snap_ui`).
     pub(crate) prefs_rt: prefs_ui::Runtime,
     pub(crate) updates_rt: updates_ui::Runtime,
