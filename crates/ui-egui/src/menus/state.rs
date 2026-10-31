@@ -103,6 +103,12 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
             app.session.is_enabled(id) || (app.services.clipboard_get_image.is_some() && app.session.active().is_some_and(|d| d.doc.selection.is_some()))
         }
         "select.selectAndMask" => app.session.is_enabled("select.refineEdge"),
+        crate::transform_tool::TYPE_PERSPECTIVE => {
+            app.ui.transform.is_none()
+                && app.session.active().and_then(|s| s.active_layer.and_then(|id| s.doc.layer(id))).is_some_and(|l| {
+                    matches!(l.content, photocraft_doc::LayerContent::Text(_) | photocraft_doc::LayerContent::Smart(_))
+                })
+        }
         "type.editText" => app
             .session
             .active()

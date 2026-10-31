@@ -236,7 +236,11 @@ fn type_layer_selected(app: &PhotocraftApp) -> bool {
 fn type_layer_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let t = Tokens::get(ctx);
     let area = canvas_area(app, ctx);
-    let actions = [("type.editText", tl!("Edit text"), "text-cursor"), ("type.warpText", tl!("Warp"), "spline")];
+    let actions = [
+        ("type.editText", tl!("Edit text"), "text-cursor"),
+        ("type.warpText", tl!("Warp"), "spline"),
+        (crate::transform_tool::TYPE_PERSPECTIVE, tl!("Perspective"), "perspective-crop"),
+    ];
     let w = actions.len() as f32 * (SEL_CELL.x + 2.0) + 12.0;
     let r = Rect::from_min_size(pos2(area.center().x - w / 2.0, area.top() + 8.0), vec2(w, SEL_CELL.y + 12.0));
     let mut run = None;
@@ -370,11 +374,24 @@ fn selection_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
 
 /// The transform's Done and Cancel, big, at the top of the canvas.
 fn transform_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    use crate::state::TransformMode as M;
     let area = canvas_area(app, ctx);
     let (w, h) = (104.0, 44.0);
     let cancel = Rect::from_min_size(pos2(area.left() + 10.0, area.top() + 8.0), vec2(w, h));
     let done = Rect::from_min_size(pos2(area.right() - 10.0 - w, area.top() + 8.0), vec2(w, h));
+    // Perspective (corners mirror) or Free (Distort: each corner on its own): between Cancel and
+    // Done when there is room, else on a row of their own under them (phones). Drawn in the same
+    // area as Done and Cancel: an area of their own covered the canvas and took its touches.
+    let mode = app.ui.transform.as_ref().filter(|t| t.warp.is_none()).map(|t| t.mode).filter(|m| matches!(m, M::Perspective | M::Distort));
+    let modes = mode.map(|_| {
+        let between = (done.left() - cancel.right() - 16.0).min(220.0);
+        let (room, top) = if between >= 160.0 { (between, cancel.top()) } else { ((area.width() - 20.0).min(240.0), cancel.bottom() + 8.0) };
+        let half = room / 2.0;
+        let x0 = (cancel.right() + done.left()) / 2.0 - half;
+        (Rect::from_min_size(pos2(x0, top), vec2(half - 2.0, h)), Rect::from_min_size(pos2(x0 + half + 2.0, top), vec2(half - 2.0, h)))
+    });
     let mut act = None;
+    let mut pick = None;
     egui::Area::new(Id::unique("touch-transform-bar")).order(egui::Order::Foreground).fixed_pos(area.min).show(ctx, |ui| {
         ui.set_min_size(Vec2::ZERO);
         if round_button(ui, cancel, None, crate::i18n::t("Cancel"), false).clicked() {
@@ -383,7 +400,22 @@ fn transform_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
         if round_button(ui, done, None, crate::i18n::t("Done"), true).clicked() {
             act = Some(true);
         }
+        if let (Some((persp, free)), Some(mode)) = (modes, mode) {
+            if round_button(ui, persp, None, crate::i18n::t("Perspective"), mode == M::Perspective).clicked() {
+                pick = Some(M::Perspective);
+            }
+            if round_button(ui, free, None, crate::i18n::t("Free"), mode == M::Distort).clicked() {
+                pick = Some(M::Distort);
+            }
+        }
     });
+    if let Some((persp, free)) = modes {
+        note(ctx, "transformPerspective", persp);
+        note(ctx, "transformFree", free);
+    }
+    if let (Some(m), Some(t)) = (pick, app.ui.transform.as_mut()) {
+        t.mode = m;
+    }
     note(ctx, "transformCancel", cancel);
     note(ctx, "transformDone", done);
     match act {

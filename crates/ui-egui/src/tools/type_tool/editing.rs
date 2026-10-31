@@ -104,6 +104,71 @@ pub fn edit_at(app: &mut PhotocraftApp, x: f64, y: f64) -> bool {
     true
 }
 
+/// Move tool double-click on a smart object made from type (Type → Perspective, or any smart
+/// object whose contents are type): its contents open and the type edit starts there, on the
+/// glyph under the point when it maps to one. Ending the edit saves the contents back and
+/// returns ([`smart_type_tick`]). False (and nothing open) when there's no such type.
+pub fn edit_smart_type_at(app: &mut PhotocraftApp, x: f64, y: f64) -> bool {
+    let picked = app.run("layer.pickAt", json!({"x": x, "y": y, "list": true})).ok();
+    let Some(id) = picked.as_ref().and_then(|v| v["layers"].as_array()?.first()?.get("layer")?.as_u64()) else { return false };
+    let smart = app.session.active().and_then(|st| st.doc.layer(LayerId(id))).is_some_and(|l| matches!(l.content, photocraft_doc::LayerContent::Smart(_)));
+    if !smart {
+        return false;
+    }
+    let parent = app.session.active_index();
+    let Ok(r) = app.run("layer.smartObjects.editContents", json!({"layer": id})) else { return false };
+    let Some(index) = r["document"].as_u64().map(|i| i as usize) else { return false };
+    let child = app.session.documents().get(index).map(|st| st.doc.id);
+    // The contents' type layer (the topmost one).
+    let text = app.session.active().and_then(|st| st.doc.walk().into_iter().rev().find(|(_, _, l)| matches!(l.content, photocraft_doc::LayerContent::Text(_))).map(|(_, _, l)| l.id));
+    let Some(text) = text else {
+        // Not type: back to where it was, the contents unopened.
+        app.session.close(index);
+        if let Some(p) = parent {
+            app.session.set_active(p.min(app.session.documents().len().saturating_sub(1)));
+        }
+        app.sync_views();
+        return false;
+    };
+    app.sync_views();
+    if app.session.select_layer(text).is_err() || edit_active(app).is_err() {
+        return true;
+    }
+    app.ui.text_edit_return_tool = Some(crate::state::Tool::Move);
+    if let Some(child) = child {
+        app.ui.smart_type_edit = Some((child, true));
+    }
+    true
+}
+
+/// Every frame: a smart object's type edit ([`edit_smart_type_at`]) that has ended saves its
+/// contents into the smart object and closes the contents document, back to the page.
+pub fn smart_type_tick(app: &mut PhotocraftApp) {
+    let Some((child, started)) = app.ui.smart_type_edit else { return };
+    let Some(index) = app.session.documents().iter().position(|st| st.doc.id == child) else {
+        app.ui.smart_type_edit = None;
+        return;
+    };
+    if app.ui.text_edit.as_ref().is_some_and(|ed| ed.document == Some(child.0)) {
+        return;
+    }
+    if !started {
+        return;
+    }
+    app.ui.smart_type_edit = None;
+    if app.session.active_index() != Some(index) {
+        return;
+    }
+    if let Err(e) = app.run("layer.smartObjects.saveContents", json!({})) {
+        app.ui.status = e;
+        app.ui.status_error = true;
+        return;
+    }
+    app.session.close(index);
+    app.sync_views();
+    app.ui.tool = crate::state::Tool::Move;
+}
+
 /// Copy the selected characters to the system clipboard. Returns the copied range. Shared by the
 /// clipboard Copy event and Edit > Copy during a type edit.
 pub(crate) fn copy_selection(app: &PhotocraftApp, ctx: &egui::Context) -> Option<[usize; 2]> {

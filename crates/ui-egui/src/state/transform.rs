@@ -106,6 +106,10 @@ pub enum MadeLayer {
     Copy,
     /// A file dropped on the canvas: OK makes the place and the transform one Place Embedded step.
     Place,
+    /// Type → Perspective: the type layer became a smart object (its text editable inside) for
+    /// the box; OK makes the conversion and the transform one Perspective step, Cancel puts the
+    /// type layer back.
+    SmartType,
 }
 
 /// A paragraph-box handle drag: the handle, and the box (text-space) and layer transform as

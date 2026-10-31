@@ -143,6 +143,7 @@ pub const TYPE_EDIT_MENU: &[Row] = &[
     Some(("Convert to Paragraph Text", "type.convertToParagraphText")),
     Some(("Convert to Point Text", "type.convertToPointText")),
     Some(("Warp Text…", "type.warpText")),
+    Some(("Perspective", crate::transform_tool::TYPE_PERSPECTIVE)),
 ];
 
 /// Right-click with a Type tool over type that isn't being edited (#7324): the type edit menu's
@@ -170,6 +171,7 @@ pub const TYPE_LAYER_MENU: &[Row] = &[
     Some(("Convert to Paragraph Text", "type.convertToParagraphText")),
     Some(("Convert to Point Text", "type.convertToPointText")),
     Some(("Warp Text…", "type.warpText")),
+    Some(("Perspective", crate::transform_tool::TYPE_PERSPECTIVE)),
 ];
 
 /// The type edit menu's Faux Bold and Faux Italic rows.
@@ -177,8 +179,14 @@ pub const FAUX_BOLD: &str = "type.fauxBold";
 pub const FAUX_ITALIC: &str = "type.fauxItalic";
 
 /// Type edit rows that act on the whole layer (it may stop being type): the edit ends first.
-const ENDS_TYPE_EDIT: [&str; 5] =
-    ["type.rasterizeTypeLayer", "type.createWorkPath", "type.convertToShape", "type.convertToParagraphText", "type.convertToPointText"];
+const ENDS_TYPE_EDIT: [&str; 6] = [
+    "type.rasterizeTypeLayer",
+    "type.createWorkPath",
+    "type.convertToShape",
+    "type.convertToParagraphText",
+    "type.convertToPointText",
+    crate::transform_tool::TYPE_PERSPECTIVE,
+];
 
 /// The pasteboard menu's Select Custom Color… row.
 pub const PASTEBOARD_PICK: &str = "pasteboard.selectCustomColor";

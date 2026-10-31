@@ -44,7 +44,7 @@ pub(crate) use editing::insert;
 use editing::selected_styles;
 #[cfg(test)]
 pub(crate) use editing::{CharToggle, step_char_metric, toggle_char_style, toggle_hyphenate};
-pub use editing::{cancel, commit, commit_with, edit_active, edit_at, end_if_left};
+pub use editing::{cancel, commit, commit_with, edit_active, edit_at, edit_smart_type_at, end_if_left, smart_type_tick};
 pub(crate) use editing::{commit_shortcut, copy_selection, cut_selection, request_paste, select_all};
 #[cfg(test)]
 use editing::{insert_typed, smart_quotes};

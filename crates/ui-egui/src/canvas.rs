@@ -1247,7 +1247,10 @@ fn handle_canvas_tool_clicks(
         && let Some(p) = response.interact_pointer_pos()
     {
         let d = xf.to_doc(p);
-        crate::type_tool::edit_at(app, d[0], d[1]);
+        if !crate::type_tool::edit_at(app, d[0], d[1]) {
+            // A Perspective type (a smart object of type): its text, edited in its contents.
+            crate::type_tool::edit_smart_type_at(app, d[0], d[1]);
+        }
     }
     if app.ui.transform.is_some() && response.double_clicked() {
         crate::transform_tool::commit(app);

@@ -619,3 +619,42 @@ fn closing_the_options_popover_never_reaches_the_canvas() {
         }
     }
 }
+
+fn tap_rect(h: &mut H, label: &str) {
+    let t = crate::touch_ui::inspect(h.state(), &h.ctx);
+    let r: [f32; 4] = serde_json::from_value(
+        t["rects"].as_array().unwrap().iter().rev().find(|r| r["label"] == label).unwrap_or_else(|| panic!("{label} in {t}"))["rect"].clone(),
+    )
+    .unwrap();
+    let p = pos2((r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0);
+    frame(h, vec![touch(1, TouchPhase::Start, p)]);
+    frame(h, vec![touch(1, TouchPhase::End, p)]);
+    h.run_steps(4);
+}
+
+/// Type › Perspective on a phone: the type bar's Perspective opens the box with its
+/// Perspective / Free toggle, a finger drags a corner, Done applies it as one step.
+#[test]
+fn type_perspective_by_finger() {
+    let mut h = harness();
+    h.state_mut().run("type.create", json!({"text": "PERSPECTIVA", "size": 60, "x": 100, "y": 300})).unwrap();
+    h.state_mut().ui.tool = Tool::Move;
+    h.run_steps(3);
+    let past = history(&mut h).len();
+    tap_rect(&mut h, "typeLayer:type.perspective");
+    let t = h.state().ui.transform.clone().expect("the box is open");
+    assert_eq!(t.mode, crate::state::TransformMode::Perspective);
+    let xf = crate::canvas::ViewXform::active(h.state()).unwrap();
+    let c = xf.to_screen(t.quad[1][0] as f32, t.quad[1][1] as f32);
+    finger_drag(&mut h, &[c, c + vec2(-4.0, -10.0), c + vec2(-8.0, -20.0), c + vec2(-10.0, -30.0)]);
+    let q = h.state().ui.transform.as_ref().expect("still open").quad;
+    assert_ne!(q[1], t.quad[1], "the corner moved");
+    tap_rect(&mut h, "transformFree");
+    assert_eq!(h.state().ui.transform.as_ref().unwrap().mode, crate::state::TransformMode::Distort);
+    tap_rect(&mut h, "transformDone");
+    assert!(h.state().ui.transform.is_none(), "applied");
+    let hist = history(&mut h);
+    assert_eq!(hist.len(), past + 1, "{hist:?}");
+    assert_eq!(hist.last().map(String::as_str), Some("Perspective"));
+}
+

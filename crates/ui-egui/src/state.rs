@@ -239,6 +239,11 @@ pub struct UiState {
     /// Tool to restore when an inline type edit session commits or cancels (e.g. Move tool, #1132).
     #[serde(skip)]
     pub text_edit_return_tool: Option<Tool>,
+    /// A smart object's type being edited from the canvas (a double-click on a Perspective
+    /// type): its Edit Contents document, and whether the type edit has started there. When the
+    /// edit ends the contents are saved into the smart object and the document closes.
+    #[serde(skip)]
+    pub smart_type_edit: Option<(photocraft_doc::DocId, bool)>,
     /// Ctrl/Cmd Type-tool gesture, exposed to automation but never restored as a held pointer.
     #[serde(default, skip_deserializing)]
     pub type_transform: Option<TypeTransform>,
@@ -530,6 +535,7 @@ impl Default for UiState {
             type_insertion_style: None,
             caret_blink_time: 0.0,
             text_edit_return_tool: None,
+            smart_type_edit: None,
             type_transform: None,
             type_transform_pivot: None,
             cam_transform: None,
