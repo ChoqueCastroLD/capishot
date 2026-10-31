@@ -18,6 +18,8 @@ pub struct PerfCounters {
     pub rows_skipped: u64,
     /// Navigator thumbnail recomputes.
     pub navigator: u64,
+    /// Navigator images composited whole (a new document, a history jump), not just an edit's area.
+    pub navigator_full: u64,
     /// Histogram panel recomputes.
     pub histogram: u64,
     /// Move drag frames whose preview reused the last frame's document (only the moving layers
@@ -45,6 +47,7 @@ impl PerfCounters {
             ("rows_drawn", self.rows_drawn),
             ("rows_skipped", self.rows_skipped),
             ("navigator", self.navigator),
+            ("navigator_full", self.navigator_full),
             ("histogram", self.histogram),
             ("move_preview_reused", self.move_preview_reused),
             ("snap_builds", self.snap_builds),

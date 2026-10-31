@@ -388,6 +388,7 @@ fn run_inner(app: &mut PhotocraftApp, id: &str, params: Value) -> Result<Value, 
 const POOL_COMMANDS: [&str; 4] = ["paint.spotHealing", "select.quick", "paint.remove", photocraft_engine::ai_inpaint_cmds::ID];
 /// Runs `f` on the browser threads build's worker pool (callers check [`POOL_THREADS`]); here
 /// in the other builds.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub(crate) fn on_pool(f: impl FnOnce() + Send + 'static) {
     #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
     rayon::spawn(f);

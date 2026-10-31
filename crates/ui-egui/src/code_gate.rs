@@ -122,6 +122,9 @@ pub(crate) fn released(app: &mut PhotocraftApp) -> Option<Vec<ControlRequest>> {
     Some(std::mem::take(&mut app.code_waiting.requests))
 }
 
+/// What the load job's work hands back to this thread: its context and its completion.
+type Handoff = (JobCtx, Completion<()>);
+
 /// The load job (started if none runs).
 fn start(app: &mut PhotocraftApp) -> Result<JobId, String> {
     if let Some(job) = app.code_waiting.job {
@@ -129,9 +132,9 @@ fn start(app: &mut PhotocraftApp) -> Result<JobId, String> {
     }
     let Some(wait) = app.services.code_wait.as_ref() else { return Err("no code loader".into()) };
     // The job's work hands its context and completion back here; the loader runs on this thread.
-    let slot: Arc<Mutex<Option<(JobCtx, Completion<()>)>>> = Arc::default();
+    let slot: Arc<Mutex<Option<Handoff>>> = Arc::default();
     let s = slot.clone();
-    let started = app.session.start_async_job(JOB, json!({}), &tl!("Loading Capishot…"), move |ctx, done| {
+    let started = app.session.start_async_job(JOB, json!({}), tl!("Loading Capishot…"), move |ctx, done| {
         if let Ok(mut s) = s.lock() {
             *s = Some((ctx.clone(), done));
         }
@@ -142,6 +145,7 @@ fn start(app: &mut PhotocraftApp) -> Result<JobId, String> {
         Err(e) => return Err(e.to_string()),
     };
     // In the browser the work ran inline; natively (tests) on a thread that is about to.
+    #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
     let mut taken = slot.lock().ok().and_then(|mut s| s.take());
     #[cfg(not(target_arch = "wasm32"))]
     for _ in 0..2000 {

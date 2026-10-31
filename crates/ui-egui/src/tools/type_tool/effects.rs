@@ -26,8 +26,11 @@ pub(crate) const PRESETS: [(&str, &str, &str); 6] = [
     ("Black to Gray", "#000000", "#9a9a9a"),
 ];
 
-/// The target's effect of `kind`: the layer, and (index, params, shows) when it has one.
-fn current(app: &PhotocraftApp, kind: &str) -> Option<(u64, Option<(usize, Value, bool)>)> {
+/// An effect of a layer's style: its index in the style, its params, and whether it shows.
+type Effect = (usize, Value, bool);
+
+/// The target's effect of `kind`: the layer, and the effect when it has one.
+fn current(app: &PhotocraftApp, kind: &str) -> Option<(u64, Option<Effect>)> {
     let (layer, _) = target(app)?;
     let st = app.session.active()?;
     let l = st.doc.layer(LayerId(layer))?;

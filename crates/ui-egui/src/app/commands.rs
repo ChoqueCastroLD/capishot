@@ -27,6 +27,8 @@ impl PhotocraftApp {
             let _s = perf_span::span("cmd.run");
             self.run_command(id, params)
         };
+        // A gesture may commit in several commands: the Navigator learns each one's damage.
+        crate::canvas::navigator_track(self);
         scope.finish(id, &result, || self.session.active().map(|st| telemetry::megapixels(st.doc.size.width, st.doc.size.height)));
         if gate.is_some() {
             self.session.authorize = None;
@@ -317,6 +319,9 @@ impl PhotocraftApp {
         self.canvases.retain(|(doc, _), _| ids.contains(doc));
         self.navigator_textures.retain(|doc, _| ids.contains(doc));
         self.navigator_pending.retain(|doc, _| ids.contains(doc));
+        self.navigator_damage.retain(|doc, _| ids.contains(doc));
+        self.navigator_bands.retain(|doc, _| ids.contains(doc));
+        crate::canvas::navigator_track(self);
         // Preferences › Units & Rulers › Show Rulers in New Documents.
         if self.session.prefs().units_and_rulers.show_rulers_in_new_documents && ids.iter().any(|id| !self.view_docs.contains(id)) {
             self.ui.extras.rulers = true;

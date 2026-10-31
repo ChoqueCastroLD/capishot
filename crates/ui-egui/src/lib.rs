@@ -358,6 +358,10 @@ pub struct PhotocraftApp {
     navigator_textures: HashMap<DocId, canvas::NavigatorCache>,
     /// Navigator images being composited on the worker pool (the browser threads build).
     navigator_pending: HashMap<DocId, canvas::NavigatorPending>,
+    /// Edits since each Navigator image (`canvas::navigator_track`).
+    navigator_damage: HashMap<DocId, canvas::NavigatorDamage>,
+    /// Navigator images being redrawn a band per frame (the single-threaded browser build).
+    navigator_bands: HashMap<DocId, canvas::NavigatorBands>,
     /// `canvas::display_doc`'s live-adjust and Duotone documents per document: (snapshot,
     /// preview key, the document shown).
     display_memo: HashMap<DocId, (std::sync::Weak<Document>, u64, std::sync::Arc<Document>)>,

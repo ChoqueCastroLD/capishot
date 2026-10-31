@@ -42,6 +42,8 @@ impl PhotocraftApp {
             canvases: HashMap::new(),
             navigator_textures: HashMap::new(),
             navigator_pending: HashMap::new(),
+            navigator_damage: HashMap::new(),
+            navigator_bands: HashMap::new(),
             display_memo: HashMap::new(),
             navigator_gpu: HashMap::new(),
             navigator_plain: std::collections::HashSet::new(),
@@ -256,6 +258,9 @@ impl eframe::App for PhotocraftApp {
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         let frame_start = gpu_canvas::now_ms();
+        // The web's freeze watchdog starts each frame's spans; natively the frame does.
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::perf_span::begin_frame();
         // An undecorated window gets its caption back when the toolkit changes its flags
         // (maximize, restore, …): take it off again before the frame is laid out (#2246).
         if let Some(window_frame) = self.services.window_frame.as_mut() {

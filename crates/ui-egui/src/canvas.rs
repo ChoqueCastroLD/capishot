@@ -84,7 +84,7 @@ pub(crate) use gesture::{finish_gesture, selection_mode};
 #[cfg(test)]
 use navigator::navigator_waits_for_drag;
 pub use navigator::{NAVIGATOR_SIDE, navigator_gpu_view, navigator_texture, navigator_waits_for_gpu};
-pub(crate) use navigator::{NavigatorCache, NavigatorPending};
+pub(crate) use navigator::{NavigatorBands, NavigatorCache, NavigatorDamage, NavigatorPending, navigator_track};
 #[cfg(test)]
 use paint::draw_tool_state;
 pub(crate) use paint::{clip_line, marching_ants_lines, marching_ants_mapped};

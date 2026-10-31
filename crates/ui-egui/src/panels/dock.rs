@@ -424,6 +424,18 @@ pub(crate) fn dock_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, group: crate
         return;
     }
     let pro = Tokens::get(ui.ctx()).pro;
+    // Each panel's own span, so a slow dock frame says which panel took the time.
+    let _span = crate::perf_span::span(match group {
+        Group::Color => "dock.color",
+        Group::Properties => "dock.properties",
+        Group::Character => "dock.character",
+        Group::TypeR => "dock.typer",
+        Group::Navigator => "dock.navigator",
+        Group::History => "dock.history",
+        Group::Layers => "dock.layers",
+        Group::Brushes => "dock.brushes",
+        _ => "dock.other",
+    });
     match (group, tab) {
         (Group::Color, 2) => crate::preset_panels::gradients_panel(app, ui),
         (Group::Color, 3) => crate::preset_panels::patterns_panel(app, ui),
