@@ -135,9 +135,15 @@ pub(super) fn edit_contents(s: &mut Session, p: &Value) -> Result<Value> {
 /// parent) and marks it saved. Returns false if `index` isn't an Edit Contents document.
 pub fn commit_child(s: &mut Session, index: usize) -> Result<bool> {
     let Some(st) = s.docs.get(index) else { return Ok(false) };
-    let child = st.doc.clone();
-    let Some(link) = s.smart_links.iter().find(|l| l.child == child.id).copied() else { return Ok(false) };
+    let child_id = st.doc.id;
+    let Some(link) = s.smart_links.iter().find(|l| l.child == child_id).copied() else { return Ok(false) };
     let parent = s.docs.iter().position(|d| d.doc.id == link.parent).ok_or_else(|| other("the smart object's document was closed"))?;
+    // Type contents whose text outgrew its canvas (or shrank well inside it): the canvas follows
+    // the text, and each instance's placement takes the shift, so nothing is clipped and what
+    // was there stays where it was on the page.
+    let shift = fit_type_canvas(s, index, parent, link.contents_id)?;
+    let Some(st) = s.docs.get(index) else { return Ok(false) };
+    let child = st.doc.clone();
     let bytes = Arc::new(encode_source(&child)?);
     let prev = s.active;
     s.active = Some(parent);
@@ -155,6 +161,9 @@ pub fn commit_child(s: &mut Session, index: usize) -> Result<bool> {
             };
             let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
             sm.source = SmartSource::Embedded { file_name: format!("{stem}.pcraft"), bytes: bytes.clone() };
+            if let Some((x0, y0)) = shift {
+                place_after_shift(sm, x0, y0);
+            }
             detach_psd(doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?);
             refresh_or_fail(doc, id)?;
         }
@@ -167,6 +176,67 @@ pub fn commit_child(s: &mut Session, index: usize) -> Result<bool> {
         st.saved_revision = st.revision;
     }
     Ok(true)
+}
+
+/// Room left around the text when the canvas is fitted to it: a tenth of the text's height, at
+/// least this many pixels.
+const TYPE_PAD_MIN: i32 = 4;
+
+/// Edit Contents of type (every layer of the contents a type layer, as Type › Perspective makes
+/// it): when the text's bounds leave the canvas, or the canvas reaches past the text by more than
+/// the padding, the contents document's canvas becomes the text's bounds plus padding (a "Canvas
+/// Size" step there). Returns where the new canvas's origin was in the old one's pixels, for
+/// [`place_after_shift`]; `None` when nothing changed. An instance with a warp keeps its canvas
+/// (the warp is laid out over it).
+fn fit_type_canvas(s: &mut Session, index: usize, parent: usize, contents_id: SmartContentsId) -> Result<Option<(i32, i32)>> {
+    let (Some(st), Some(pst)) = (s.docs.get(index), s.docs.get(parent)) else { return Ok(None) };
+    let warped = instances(&pst.doc, contents_id)
+        .into_iter()
+        .any(|id| matches!(pst.doc.layer(id).map(|l| &l.content), Some(LayerContent::Smart(sm)) if sm.warp.is_some()));
+    let layers = st.doc.walk();
+    if warped || layers.is_empty() || !layers.iter().all(|(_, _, l)| matches!(l.content, LayerContent::Text(_))) {
+        return Ok(None);
+    }
+    let ink = layers
+        .iter()
+        .filter(|(_, _, l)| l.visible)
+        .filter_map(|(_, _, l)| crate::layer_multi_cmds::layer_bounds(l))
+        .fold(photocraft_geom::Rect::EMPTY, |a, b| if a.is_empty() { b } else { a.union(&b) });
+    if ink.is_empty() {
+        return Ok(None);
+    }
+    let pad = (ink.height() as i32 / 10).max(TYPE_PAD_MIN);
+    let target = ink.inflate(pad);
+    let canvas = st.doc.bounds();
+    if canvas.contains_rect(&ink) && target.contains_rect(&canvas) {
+        return Ok(None);
+    }
+    let (x0, y0) = (target.x0, target.y0);
+    let prev = s.active;
+    s.active = Some(index);
+    s.note_active_change();
+    let r = s.edit("Canvas Size", |doc, _| {
+        crate::image_cmds::translate_doc(doc, "layer.smartObjects.saveContents", -x0, -y0)?;
+        doc.size = target.size();
+        Ok(())
+    });
+    s.active = prev;
+    s.note_active_change();
+    r?;
+    Ok(Some((x0, y0)))
+}
+
+/// The contents' canvas moved its origin to `(x0, y0)` of the old canvas: the placement maps each
+/// old pixel where it went before (the same affine or projective map, just over more of it).
+fn place_after_shift(sm: &mut photocraft_doc::SmartObject, x0: i32, y0: i32) {
+    let (x, y) = (f64::from(x0), f64::from(y0));
+    sm.transform = sm.transform.mul(&photocraft_geom::Affine::translate(x, y));
+    if let Some(h) = sm.perspective.as_mut() {
+        // H · T(x, y): the third column takes the shift.
+        h[2] += h[0] * x + h[1] * y;
+        h[5] += h[3] * x + h[4] * y;
+        h[8] += h[6] * x + h[7] * y;
+    }
 }
 
 /// Called before a document closes: an edited Edit Contents document updates its parent.
