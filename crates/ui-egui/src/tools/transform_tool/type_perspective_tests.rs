@@ -131,3 +131,40 @@ fn a_double_click_edits_the_type_inside_and_saves_it_back() {
     assert_eq!(st.history.past_len(), past + 1, "the new text is one step on the page");
     assert!(matches!(st.doc.layer(smart).map(|l| &l.content), Some(LayerContent::Smart(_))), "still the smart object, with its perspective");
 }
+
+/// A drag on a corner of the box Type › Perspective opened moves that corner (the box stays).
+#[test]
+fn dragging_a_corner_of_the_type_perspective_box_moves_it() {
+    let (mut app, _) = app_with_type();
+    app.ui.tool = crate::state::Tool::Move;
+    let ctx = egui::Context::default();
+    crate::menus::invoke(&mut app, &ctx, super::TYPE_PERSPECTIVE, json!({})).unwrap();
+    let [x, y] = app.ui.transform.as_ref().unwrap().quad[1];
+    let ev = |kind: &str, dx: f64, dy: f64| json!({"kind": kind, "x": x + dx, "y": y + dy});
+    let events = json!([ev("down", 0.0, 0.0), ev("move", -10.0, -10.0), ev("move", -20.0, -30.0), ev("up", -20.0, -30.0)]);
+    let (req, _rx) = crate::control::ControlRequest::new("ui.pointer", json!({"events": events}));
+    let _ = crate::control::handle(&mut app, &ctx, &req);
+    let t = app.ui.transform.as_ref().expect("the box is still open");
+    assert_eq!(t.made, Some(super::MadeLayer::SmartType), "the same session");
+    assert_ne!(t.quad[1], [x, y], "the corner moved: {:?}", t.quad);
+}
+
+/// The box stays open across frames (nothing in the frame loop ends it).
+#[test]
+fn the_type_perspective_box_survives_frames() {
+    let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).with_step_dt(1.0 / 60.0).build_eframe(|cc| {
+        PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+        let (mut app, _) = app_with_type();
+        app.ui.tool = crate::state::Tool::Move;
+        app
+    });
+    h.run_steps(5);
+    let ctx = h.ctx.clone();
+    crate::menus::invoke(h.state_mut(), &ctx, super::TYPE_PERSPECTIVE, json!({})).unwrap();
+    assert!(h.state().ui.transform.is_some());
+    for k in 0..6 {
+        h.run_steps(1);
+        let t = h.state().ui.transform.as_ref();
+        assert!(t.is_some_and(|t| t.made == Some(super::MadeLayer::SmartType)), "frame {k}: {:?} status {}", t.map(|t| (t.made, t.layer)), h.state().ui.status);
+    }
+}
