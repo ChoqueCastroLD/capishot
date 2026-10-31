@@ -190,6 +190,26 @@ pub(crate) fn class_list(ui: &mut egui::Ui, filters: &mut FontFilters) -> bool {
     filters.class != before
 }
 
+/// A phone's classes: one row of chips above the list, scrolling sideways (the column beside the
+/// list leaves the list no room). Returns true when the class changed.
+pub(crate) fn class_chips(ui: &mut egui::Ui, id: egui::Id, filters: &mut FontFilters) -> bool {
+    let before = filters.class;
+    egui::ScrollArea::horizontal().id_salt(id).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            let chip = |ui: &mut egui::Ui, on: bool, label: &str| ui.add(egui::Button::selectable(on, label).min_size(egui::vec2(0.0, 36.0))).clicked();
+            if chip(ui, filters.class.is_none(), tl!("All Classes")) {
+                filters.class = None;
+            }
+            for class in FontClass::ALL {
+                if chip(ui, filters.class == Some(class), class_label(class)) {
+                    filters.class = Some(class);
+                }
+            }
+        });
+    });
+    filters.class != before
+}
+
 /// Traits a test hands the menu instead of reading installed fonts.
 pub(crate) fn lookup_in(map: Option<Arc<TraitsMap>>) -> impl Fn(&str) -> Option<FamilyTraits> {
     move |family| match &map {

@@ -406,6 +406,10 @@ pub fn tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     // Sistema · Personalizadas · Favoritas: the font menu's own words (`fontTab` context), not
     // the general "Custom" and "Favorites".
     let lang = crate::i18n::current();
+    // A phone's menu is the window's width: the tabs wrap onto a second row within it.
+    if let Some(w) = crate::type_tool::phone_menu_width(ui.ctx()) {
+        ui.set_max_width(w);
+    }
     ui.horizontal_wrapped(|ui| {
         for (tab, label) in [(PickerTab::Fonts, "System"), (PickerTab::Custom, "Custom"), (PickerTab::Favorites, "Favorites"), (PickerTab::FindMore, "Find More")] {
             let shown = crate::i18n::tr_ctx(lang, "fontTab", label);
@@ -428,8 +432,10 @@ fn card(ui: &mut egui::Ui, t: &Tokens, add: impl FnOnce(&mut egui::Ui)) {
 /// The Find More tab. Returns the family the user picked (an installed one), if any.
 pub fn find_more(app: &mut PhotocraftApp, ui: &mut egui::Ui, current: &str) -> Option<String> {
     let t = Tokens::get(ui.ctx());
-    ui.set_min_width(WIDTH);
-    ui.set_max_width(WIDTH);
+    // A phone's menu is narrower than the tab's usual width.
+    let width = crate::type_tool::phone_menu_width(ui.ctx()).map_or(WIDTH, |w| w.min(WIDTH));
+    ui.set_min_width(width);
+    ui.set_max_width(width);
     // Popups lay text out on one line; the cards and notes here wrap.
     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
     if !available(app) {

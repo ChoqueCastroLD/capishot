@@ -177,7 +177,7 @@ pub fn move_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             }
         });
         if folders.is_empty() {
-            ui.label(RichText::new(tl!("No folders yet: make one with New Folder…")).color(t.text_faint).size(11.0));
+            ui.add(egui::Label::new(RichText::new(tl!("No folders yet: make one with New Folder…")).color(t.text_faint).size(11.0)).wrap());
         }
     });
     if let Some(a) = action {
@@ -324,6 +324,13 @@ fn toggle(st: &mut TabState, name: &str) {
     }
 }
 
+/// A faint hint under a folder, `indent` in, wrapped to the list's width (a phone's is narrow).
+fn hint_line(ui: &mut egui::Ui, indent: f32, text: &str, color: Color32) {
+    egui::Frame::NONE.inner_margin(egui::Margin { left: indent.min(120.0) as i8, ..Default::default() }).show(ui, |ui| {
+        ui.add(egui::Label::new(RichText::new(text).color(color).size(11.0)).wrap());
+    });
+}
+
 /// The New Folder field (top level or in `parent`).
 fn create_field(ui: &mut egui::Ui, st: &mut TabState, width: f32, h: f32, actions: &mut Vec<Action>) {
     let focus = std::mem::take(&mut st.focus);
@@ -362,7 +369,7 @@ pub fn custom_tab(app: &mut PhotocraftApp, ui: &mut egui::Ui, current: &str) -> 
     let t = Tokens::get(ui.ctx());
     let phone = phone(ui.ctx());
     let h = if phone { PHONE_ROW } else { ROW };
-    let width = if phone { (ui.ctx().content_rect().width() - 48.0).clamp(240.0, 420.0) } else { 420.0 };
+    let width = crate::type_tool::phone_menu_width(ui.ctx()).map_or(420.0, |w| w - 14.0);
     let mut st: TabState = ui.data(|d| d.get_temp(state_id())).unwrap_or_default();
     let folders = app.session.prefs().type_.font_folders.clone();
     let favorites = photocraft_engine::font_library_cmds::favorite_fonts(&app.session);
@@ -442,11 +449,8 @@ pub fn custom_tab(app: &mut PhotocraftApp, ui: &mut egui::Ui, current: &str) -> 
                 row(ui, fam, None, indent + INDENT, None, &mut actions);
             }
             if f.fonts.is_empty() && !folders.iter().any(|x| x.parent.as_deref() == Some(f.name.as_str())) {
-                ui.horizontal(|ui| {
-                    ui.add_space(indent + INDENT + 8.0);
-                    let hint = if phone { tl!("Empty: press and hold a font, then Move to…") } else { tl!("Empty: drag a font here, or right-click it › Move to…") };
-                    ui.label(RichText::new(hint).color(t.text_faint).size(11.0));
-                });
+                let hint = if phone { tl!("Empty: press and hold a font, then Move to…") } else { tl!("Empty: drag a font here, or right-click it › Move to…") };
+                hint_line(ui, indent + INDENT + 8.0, hint, t.text_faint);
             }
         }
         // The font projects, as folders of their fonts (with each font's role). A project
@@ -475,10 +479,7 @@ pub fn custom_tab(app: &mut PhotocraftApp, ui: &mut egui::Ui, current: &str) -> 
                 row(ui, fam, None, INDENT, None, &mut actions);
             }
             if unfiled.is_empty() {
-                ui.horizontal(|ui| {
-                    ui.add_space(INDENT + 8.0);
-                    ui.label(RichText::new(tl!("Your own fonts (Load Fonts…) that are in no folder show here.")).color(t.text_faint).size(11.0));
-                });
+                hint_line(ui, INDENT + 8.0, tl!("Your own fonts (Load Fonts…) that are in no folder show here."), t.text_faint);
             }
         }
     });

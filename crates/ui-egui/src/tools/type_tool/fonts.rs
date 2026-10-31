@@ -463,6 +463,16 @@ pub(crate) fn font_picker_salted(app: &mut PhotocraftApp, ui: &mut egui::Ui, sal
 pub(super) const FONT_LIST_HEIGHT: f32 = 440.0;
 /// The font list's width: star, style expander, name, format badge and sample.
 const FONT_LIST_WIDTH: f32 = 420.0;
+/// On a phone (`font_folders_ui::phone`): the font menu's width, the window's less the popup's
+/// frame and a margin each side; `None` elsewhere.
+pub(crate) fn phone_menu_width(ctx: &egui::Context) -> Option<f32> {
+    crate::font_folders_ui::phone(ctx).then(|| (ctx.content_rect().width() - PHONE_MENU_MARGIN).max(200.0))
+}
+
+/// The window's width a phone's font menu leaves around it: the popup's frame (its margins and
+/// border) and a few points each side.
+pub(crate) const PHONE_MENU_MARGIN: f32 = 36.0;
+
 /// Room right of the font list's viewport for its scroll bar.
 const FONT_SCROLL_BAR_WIDTH: f32 = 14.0;
 /// Room for the format badge (O, TT, VAR) left of the sample.
@@ -655,11 +665,15 @@ fn family_picker_with(
         // frame: never wider, so the menu has no empty strip beside the list.
         let body_id = field.with("body");
         let class_w = crate::font_filters::CLASS_COLUMN_WIDTH;
-        let estimate = FONT_LIST_WIDTH + 16.0 + if filters.hide_classes { 0.0 } else { class_w + 14.0 };
+        // A phone's menu is the window's width (less the popup's margins): its classes are a row
+        // of chips above a full-width list ([`phone_menu_width`]).
+        let phone = phone_menu_width(ui.ctx());
+        let estimate = phone.unwrap_or(FONT_LIST_WIDTH + 16.0 + if filters.hide_classes { 0.0 } else { class_w + 14.0 });
         let body: Option<egui::Rect> = ui.data(|d| d.get_temp(body_id));
-        let menu_width = body.map_or(estimate, |b| b.width());
+        let menu_width = phone.unwrap_or_else(|| body.map_or(estimate, |b| b.width()));
+        let list_w = phone.map_or(FONT_LIST_WIDTH, |w| w - FONT_SCROLL_BAR_WIDTH);
         // Divider lines span the space they are given: cap it, or they stretch the menu.
-        if body.is_some() {
+        if body.is_some() || phone.is_some() {
             ui.set_max_width(menu_width);
         }
         crate::font_filters::preview_banner(ui, &previewed, &previewed_label, library.preview_text.as_deref(), menu_width);
@@ -667,6 +681,9 @@ fn family_picker_with(
             crate::font_filters::filter_buttons(ui, &mut filters);
             crate::font_filters::clear_all(ui, &mut filters);
         });
+        if phone.is_some() && !filters.hide_classes {
+            crate::font_filters::class_chips(ui, field.with("class-chips"), &mut filters);
+        }
         let lookup = crate::font_filters::lookup_in(library.traits.clone());
         // No recent group while a filter is on: the filters narrow the alphabetical list alone.
         // The user's own fonts (Type › Load Fonts…) head the alphabetical list, below the recents.
@@ -752,7 +769,7 @@ fn family_picker_with(
         // search result, so the row keeps its room and the line is drawn once the row is laid out.
         let mut divider: Option<f32> = None;
         let body = ui.horizontal_top(|ui| {
-            if !filters.hide_classes {
+            if !filters.hide_classes && phone.is_none() {
                 crate::font_filters::class_list(ui, &mut filters);
                 divider = Some(ui.cursor().min.x + 3.0);
                 ui.add_space(6.0 + ui.spacing().item_spacing.x);
@@ -770,7 +787,7 @@ fn family_picker_with(
             // Top to bottom, though the list sits beside the class list.
             let shown = list.show(ui, |ui| {
                 ui.vertical(|ui| {
-                    ui.set_width(FONT_LIST_WIDTH);
+                    ui.set_width(list_w);
                     let weak = |ui: &mut egui::Ui, text: &str| {
                         ui.label(egui::RichText::new(text).weak());
                     };
@@ -797,7 +814,7 @@ fn family_picker_with(
                         }
                         // Only rows on screen read their font's format and styles, and an expanded
                         // family: its style rows stay listed when its own row scrolls out of view.
-                        let visible = ui.is_rect_visible(egui::Rect::from_min_size(ui.cursor().min, egui::vec2(FONT_LIST_WIDTH, row_h)));
+                        let visible = ui.is_rect_visible(egui::Rect::from_min_size(ui.cursor().min, egui::vec2(list_w, row_h)));
                         let format = if visible { lookup(f).map(|t| t.format) } else { None };
                         let open = !recent_row && expanded.contains(f);
                         let styles = if visible || open { library.styles_of(f) } else { Vec::new() };
@@ -805,13 +822,16 @@ fn family_picker_with(
                         // Highlighted by its fill alone, as Photoshop's font menu is: a hovered or selected
                         // row's stroke grew it and pushed the rows below down (#7406).
                         let slot = preview.map_or(0.0, |(size, _)| crate::font_preview::slot_width(ui.ctx(), f, size));
+                        // A phone's row keeps most of its width for the name: a sample wider than
+                        // that is left out.
+                        let slot = if phone.is_some() && slot > list_w * 0.4 { 0.0 } else { slot };
                         // One row lit, though a recent family is listed twice.
                         let mut button = egui::Button::selectable(selected == Some(i), shown).truncate().stroke(egui::Stroke::NONE);
                         let [_, h] = preview.map_or([0.0, 16.0], |(_, b)| b);
                         button =
                             button.right_text(egui::Atom::custom(egui::IdSalt::new(("font-sample", f, recent_row)), egui::vec2(slot + FONT_BADGE_WIDTH, h)));
                         let response = ui
-                            .allocate_ui_with_layout(egui::vec2(FONT_LIST_WIDTH, row_h), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            .allocate_ui_with_layout(egui::vec2(list_w, row_h), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                                 ui.spacing_mut().item_spacing.x = 2.0;
                                 // The star adds the font to (or removes it from) the favourites; it never picks it.
                                 let tip = if favorite { tl!("Remove from Favorites") } else { tl!("Add to Favorites") };
@@ -858,6 +878,7 @@ fn family_picker_with(
                             }
                         }
                         if let Some((size, _)) = preview
+                            && (slot > 0.0 || phone.is_none())
                             && ui.is_rect_visible(response.rect)
                         {
                             crate::font_preview::paint(ui, f, response.rect, size);

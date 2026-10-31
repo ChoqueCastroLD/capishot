@@ -215,3 +215,48 @@ fn a_press_held_on_a_row_asks_move_to_and_picks_nothing() {
     h.run();
     assert_eq!(h.state().1, Some(("Bangers".into(), None)));
 }
+
+/// On phones (320–412 pt) every tab of the font menu fits in the window: nothing is cut at either
+/// edge, the classes are chips above the list, and the rows are a finger's.
+#[test]
+fn every_tab_of_the_font_menu_fits_a_phone() {
+    for width in [320.0f32, 360.0, 390.0, 412.0] {
+        for tab in [PickerTab::Fonts, PickerTab::Custom, PickerTab::Favorites, PickerTab::FindMore] {
+            let mut app = filed();
+            app.run("type.font.favorite", json!({"family": "Inter"})).unwrap();
+            app.run("fontProjects.create", json!({"name": "Serie"})).unwrap();
+            app.run("fontProjects.addFont", json!({"family": "Inter", "role": "dialogue"})).unwrap();
+            app.ui.fonts.tab = tab;
+            let mut h = Harness::builder().with_size(egui::vec2(width, 800.0)).with_max_steps(8).build_ui_state(
+                |ui, app: &mut PhotocraftApp| {
+                    if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                        ui.add_space(500.0);
+                        let mut current = "Inter".to_string();
+                        let _ = crate::type_tool::font_picker(app, ui, &mut current, 200.0);
+                    }
+                },
+                app,
+            );
+            crate::PhotocraftApp::setup_context(&h.ctx, Default::default());
+            h.run_steps(3);
+            h.get_by_role(egui::accesskit::Role::TextInput).click();
+            h.run_steps(4);
+            let window = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 800.0));
+            let areas: Vec<(egui::LayerId, egui::Rect)> = h.ctx.memory(|m| m.areas().visible_layer_ids().into_iter().filter_map(|l| Some((l, m.area_rect(l.id)?))).collect());
+            assert!(areas.iter().any(|(l, _)| l.order == egui::Order::Foreground), "{tab:?} at {width}: the menu is open");
+            for (l, r) in &areas {
+                assert!(window.expand(0.5).contains_rect(*r), "{tab:?} at {width}: {l:?} {r:?} leaves the window");
+            }
+            // Every tab's label shows (the tabs wrap rather than run off).
+            for label in ["System", "Custom", "Favorites", "Find More"] {
+                let r = h.get_by_label(label).rect();
+                assert!(window.contains_rect(r), "{tab:?} at {width}: tab {label} {r:?}");
+            }
+            if tab == PickerTab::Fonts {
+                assert!(h.query_by_label("Serif").is_some_and(|n| n.rect().height() >= 36.0), "classes are chips at {width}");
+                let row = h.query_all_by_label("JetBrains Mono").map(|n| n.rect()).find(|r| r.height() > 30.0);
+                assert!(row.is_some_and(|r| r.height() >= 47.5 && window.contains_rect(r)), "{width}: a font row {row:?}");
+            }
+        }
+    }
+}

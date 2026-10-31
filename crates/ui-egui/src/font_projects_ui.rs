@@ -214,7 +214,7 @@ pub fn menu_sections(app: &mut PhotocraftApp, ui: &mut egui::Ui, current: &mut S
             let label = if here { f.family.clone() } else { format!("{}  ({})", f.family, tl!("missing")) };
             let on = *current == f.family;
             let r = ui.add_sized(
-                [330.0, 26.0],
+                [ui.available_width().min(330.0), 26.0],
                 egui::Button::selectable(on, label)
                     .right_text(RichText::new(role_name(p, &f.role)).color(if on { Color32::WHITE } else { t.text_faint }).size(11.0)),
             );
@@ -232,7 +232,7 @@ pub fn menu_sections(app: &mut PhotocraftApp, ui: &mut egui::Ui, current: &mut S
     if !all.recent.is_empty() {
         ui.label(RichText::new(tl!("Recent fonts")).color(t.text_faint).size(11.0));
         for f in all.recent.iter().take(6) {
-            if ui.add_sized([330.0, 24.0], egui::Button::selectable(*current == *f, f.as_str())).clicked() {
+            if ui.add_sized([ui.available_width().min(330.0), 24.0], egui::Button::selectable(*current == *f, f.as_str())).clicked() {
                 current.clone_from(f);
                 picked = Some(None);
                 ui.close();
