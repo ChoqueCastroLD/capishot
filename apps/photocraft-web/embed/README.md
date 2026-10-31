@@ -49,6 +49,24 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
   Bubble Type tool does: in the speech bubble or narration box there, else floating text
   (`style` in the result: `bubble`, `narration` or `floating`).
 
+- Fonts the host serves (`fonts/manifest.txt` next to the page, craft-fonts' format
+  `family | style | file | …`; file paths may have spaces and other characters, they are
+  URL-encoded for the request). A family the manifest lists is never reported missing: a document
+  that uses one (opened, or reached by `layer.copyToDocument`, paste, place, `type.create`, a font
+  change) fetches it and draws with a fallback until it arrives, then re-renders. Until the
+  manifest itself is read nothing is called missing. Names match loosely: "Hand Of Sean Demo",
+  "Hand Of Sean (Demo)" and "HandOfSeanDemo" are one family, and a PSD's PostScript names
+  (`PatrickHand-Regular`) and the names in the font file (name IDs 1, 4, 6, 16, 17) find it too.
+  The "Missing fonts" notice lists only families nobody serves, and those whose download failed
+  ("couldn't download it").
+  - `request('fonts.preload', {families, timeoutMs?})` fetches families ahead and resolves once
+    each has arrived or failed: `{ready, missing, failed}` (feature `fonts.preload`).
+  - `init({fontsNotice: false})` (or `request('ui.set', {fontsNotice: false})`) hides the notice;
+    the `fontsMissing` event `{families}` goes out either way (features `fonts.notice`,
+    `events.fontsMissing`). A page using `window.photocraft` gets it as the
+    `photocraft-fontsMissing` window event (`detail.families`), and over `postMessage` as
+    `{photocraft: "fontsMissing", families}`.
+
 ## Versioning rules
 
 `EMBED_API_VERSION` (in `embed_api_core.rs`) is the contract hosts check. Adding a function, an

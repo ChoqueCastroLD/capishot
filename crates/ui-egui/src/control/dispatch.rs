@@ -34,6 +34,7 @@ fn engine_methods(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlReq
         "engine.commands" => wrap(app.run("command.list", json!({}))),
         // Background jobs (#210): running ones with progress, then the last few that ended.
         "jobs.list" => wrap(app.session.execute("jobs.list", json!({})).map_err(|e| e.to_string())),
+        "fonts.preload" => fonts_preload(&req.params),
         "jobs.cancel" => jobs_cancel(app, &req.params),
         "ui.menu.list" => {
             // Report the same enablement the native menu shows, so a listed item is invokable.
@@ -207,6 +208,34 @@ fn screenshot(app: &mut PhotocraftApp, ctx: &egui::Context, p: &Value) -> Outcom
 
 // ---- ui.set: every field is validated and materialized into a `UiSet` before the first one is applied ----
 
+/// `fonts.preload {families, timeoutMs?}` (control.rs).
+fn fonts_preload(p: &Value) -> Outcome {
+    if let Some(field) = p.as_object().and_then(|o| o.keys().find(|k| !matches!(k.as_str(), "families" | "timeoutMs"))) {
+        return err(format!("unknown field `{field}` (fields: families, timeoutMs)"));
+    }
+    let Some(list) = p.get("families").and_then(Value::as_array) else { return err("`families` must be a list of family names") };
+    if list.len() > 500 {
+        return err("at most 500 families");
+    }
+    let mut families: Vec<String> = Vec::new();
+    for f in list {
+        let Some(name) = f.as_str().map(str::trim).filter(|n| !n.is_empty() && n.chars().count() <= 200) else {
+            return err("each family must be a non-empty name of at most 200 characters");
+        };
+        if !families.iter().any(|x| x == name) {
+            families.push(name.to_string());
+        }
+    }
+    let timeout_ms = match p.get("timeoutMs") {
+        None => 10_000.0,
+        Some(v) => match v.as_f64().filter(|t| t.is_finite() && (0.0..=120_000.0).contains(t)) {
+            Some(t) => t,
+            None => return err("`timeoutMs` must be a number from 0 to 120000"),
+        },
+    };
+    Outcome::AfterFonts { families, timeout_s: timeout_ms / 1000.0 }
+}
+
 fn ui_set(app: &mut PhotocraftApp, ctx: &egui::Context, p: &Value) -> Outcome {
     if let Some(field) = p.as_object().and_then(|o| o.keys().find(|k| !UI_SET_FIELDS.contains(&k.as_str()))) {
         return err(format!("unknown field `{field}` (fields: {})", UI_SET_FIELDS.join(", ")));
@@ -227,6 +256,8 @@ struct UiSet {
     legacy_update: Option<crate::panel_docking::LegacyUpdate>,
     /// The font picker's view state (#412: validated here, assigned on apply).
     fonts: Option<crate::fonts_ui::FontsUi>,
+    /// Show the missing fonts notice (an embedding host may report missing fonts itself).
+    fonts_notice: Option<bool>,
 }
 
 impl UiSet {
@@ -244,7 +275,11 @@ impl UiSet {
             Some(v) => Some(crate::fonts_ui::parse_set(&app.ui.fonts, v)?),
             None => None,
         };
-        Ok(Self { tools, crop, panels, view, theme, brush, legacy_update, fonts })
+        let fonts_notice = match p.get("fontsNotice") {
+            None => None,
+            Some(v) => Some(v.as_bool().ok_or("`fontsNotice` must be true or false")?),
+        };
+        Ok(Self { tools, crop, panels, view, theme, brush, legacy_update, fonts, fonts_notice })
     }
 
     /// Apply (nothing but the final `brushSize` command can fail).
@@ -264,6 +299,9 @@ impl UiSet {
         self.brush.apply(app)?;
         if let Some(next) = self.fonts {
             app.ui.fonts = next;
+        }
+        if let Some(on) = self.fonts_notice {
+            app.font_checks.notice = on;
         }
         Ok(Value::Null)
     }

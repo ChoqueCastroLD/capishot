@@ -27,9 +27,10 @@ const FONTS_MANIFEST: &str = "fonts/manifest.txt";
 struct ServedFonts {
     /// Font files by family, each with its Subresource Integrity value when the manifest has one.
     files: HashMap<String, Vec<(String, Option<String>)>>,
-    /// Families fetched or being fetched: each one once per page load.
+    /// Files fetched or being fetched: each one once per page load (several families of the
+    /// manifest may share a file).
     fetched: HashSet<String>,
-    /// Downloaded files waiting for the next frame: (family, bytes).
+    /// Downloaded files waiting for the next frame: (file, bytes).
     arrived: Vec<(String, Vec<u8>)>,
 }
 
@@ -941,12 +942,20 @@ fn open_user_fonts(store: UserFontStore, ctx: egui::Context) {
 
 /// Reads the served font manifest, if the host has one, and lists its families in the font menus.
 fn load_font_manifest(served: Served, ctx: egui::Context) {
+    // Until it is read (or found missing) no font is called missing: it may serve it.
+    served_fonts::begin_manifest();
     wasm_bindgen_futures::spawn_local(async move {
         // Most hosts serve no fonts: a missing manifest is the normal case, not an error.
-        let Ok(bytes) = fetch_bytes(FONTS_MANIFEST, None).await else { return };
+        let Ok(bytes) = fetch_bytes(FONTS_MANIFEST, None).await else {
+            served_fonts::manifest_unavailable();
+            ctx.request_repaint();
+            return;
+        };
         let text = String::from_utf8_lossy(&bytes);
         // A host that answers unknown paths with its HTML page (single-page app fallback).
         if text.trim_start().starts_with('<') {
+            served_fonts::manifest_unavailable();
+            ctx.request_repaint();
             return;
         }
         let (fonts, skipped) = served_fonts::parse_manifest(&text);
@@ -1273,25 +1282,29 @@ impl WebShell {
             let mut s = self.served.lock().unwrap_or_else(PoisonError::into_inner);
             let mut fetch = Vec::new();
             for family in requested {
-                if let Some(files) = s.files.get(&family).cloned()
-                    && s.fetched.insert(family.clone())
-                {
-                    fetch.extend(files.into_iter().map(|(file, integrity)| (family.clone(), file, integrity)));
+                for (file, integrity) in s.files.get(&family).cloned().unwrap_or_default() {
+                    if s.fetched.insert(file.clone()) {
+                        fetch.push((file, integrity));
+                    }
                 }
             }
             (fetch, std::mem::take(&mut s.arrived))
         };
-        for (family, file, integrity) in fetch {
+        for (file, integrity) in fetch {
             let served = self.served.clone();
             let ctx = ctx.clone();
+            served_fonts::fetch_started(&file);
             wasm_bindgen_futures::spawn_local(async move {
-                match fetch_bytes(&file, integrity.as_deref()).await {
+                match fetch_bytes(&served_fonts::url_path(&file), integrity.as_deref()).await {
                     Ok(bytes) => {
-                        served.lock().unwrap_or_else(PoisonError::into_inner).arrived.push((family, bytes));
-                        ctx.request_repaint();
+                        served.lock().unwrap_or_else(PoisonError::into_inner).arrived.push((file, bytes));
                     }
-                    Err(e) => log::error!("couldn't fetch served font {file}: {e}"),
+                    Err(e) => {
+                        log::error!("couldn't fetch served font {file}: {e}");
+                        served_fonts::fetch_failed(&file, &e);
+                    }
                 }
+                ctx.request_repaint();
             });
         }
         served_fonts::install(&mut self.app, ctx, arrived);

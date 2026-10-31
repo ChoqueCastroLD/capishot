@@ -63,12 +63,13 @@ pub fn parse_manifest(text: &str) -> (Vec<ServedFont>, Vec<String>) {
 }
 
 /// A relative path that stays inside the site: no scheme, no leading `/`, no `..` segment, no
-/// query or fragment, no ASCII control characters or whitespace, and no percent-encoded control,
-/// whitespace or separator characters.
+/// query or fragment, no ASCII control characters, and no percent-encoded control, whitespace or
+/// separator characters. Spaces are allowed (a font library's folders have them: "Fuentes CON
+/// TILDE/…"); [`url_path`] encodes them for the request.
 pub fn is_relative_path(p: &str) -> bool {
     if p.is_empty()
         || p.starts_with('/')
-        || p.bytes().any(|b| b <= b' ' || b == 0x7f || matches!(b, b'\\' | b'?' | b'#' | b':'))
+        || p.bytes().any(|b| b < b' ' || b == 0x7f || matches!(b, b'\\' | b'?' | b'#' | b':'))
         || !p.split('/').all(|seg| !seg.is_empty() && seg != "." && seg != "..")
     {
         return false;
@@ -81,8 +82,8 @@ pub fn is_relative_path(p: &str) -> bool {
             let Some(hex) = p.get(i + 1..i + 3) else { return false };
             let Ok(byte) = u8::from_str_radix(hex, 16) else { return false };
             // Never allow encoded path syntax (including '%' for a second decode), ASCII
-            // separators, or controls. High bytes are allowed only as valid UTF-8 below.
-            if byte <= b' ' || byte == 0x7f || matches!(byte, b'%' | b'/' | b'\\' | b'.' | b'?' | b'#' | b':') {
+            // separators, or controls (an encoded space is a space). High bytes are allowed only as valid UTF-8 below.
+            if byte < b' ' || byte == 0x7f || matches!(byte, b'%' | b'/' | b'\\' | b'.' | b'?' | b'#' | b':') {
                 return false;
             }
             decoded.push(byte);
@@ -94,6 +95,25 @@ pub fn is_relative_path(p: &str) -> bool {
         i = i.saturating_add(1);
     }
     std::str::from_utf8(&decoded).is_ok()
+}
+
+/// `p` (a path [`is_relative_path`] accepts) as a URL path: spaces and other characters a URL
+/// path can't hold raw are percent-encoded; `%` escapes already in it are kept.
+pub fn url_path(p: &str) -> String {
+    let mut out = String::with_capacity(p.len());
+    for b in p.bytes() {
+        if b.is_ascii_alphanumeric()
+            || matches!(
+                b,
+                b'/' | b'-' | b'_' | b'.' | b'~' | b'%' | b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b',' | b';' | b'=' | b'@' | b'[' | b']'
+            )
+        {
+            out.push(char::from(b));
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
 }
 
 /// The scripts a served font can be the fallback for: those the bundled fonts (Inter, which covers
@@ -184,9 +204,62 @@ fn base64(data: &[u8]) -> String {
     s
 }
 
+/// Where the host's manifest stands: none (no shell serves fonts, or the host has no manifest),
+/// being read, or read.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ManifestState {
+    #[default]
+    None,
+    Loading,
+    Loaded,
+}
+
+/// Where a served family's download stands.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Status {
+    /// Not asked for yet.
+    NotRequested,
+    /// Asked for, on its way.
+    Pending,
+    /// Arrived and registered.
+    Ready,
+    /// Every file of the family failed to download (why).
+    Failed(String),
+}
+
+/// What a name a document asks for is, to the host.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Lookup {
+    /// The host serves it, as this manifest family.
+    Served(String),
+    /// The host doesn't serve it (the manifest is read, or there is none).
+    NotServed,
+    /// The manifest is still being read: not known yet.
+    ManifestPending,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum FileState {
+    Pending,
+    Arrived,
+    Failed(String),
+}
+
 struct State {
     /// Families the host can serve, installed or not.
     families: Vec<String>,
+    manifest: ManifestState,
+    /// Every manifest line, in order (several families may share a file).
+    fonts: Vec<ServedFont>,
+    /// Downloads by file.
+    files: Vec<(String, FileState)>,
+    /// Other names of manifest families, normalized ([`normalize`]): the names the font files
+    /// give themselves (name IDs 1, 4, 6, 16, 17) and the names documents asked for that resolved
+    /// to them. `(normalized name, manifest family)`.
+    aliases: Vec<(String, String)>,
+    /// Names documents asked for, as they spelled them, with the manifest family each resolved to:
+    /// the file is registered under them too, so the layout finds it by the document's name.
+    asked: Vec<(String, String)>,
     /// Script fallbacks, `(script, family)`: the first one per script is used.
     fallbacks: Vec<(String, String)>,
     /// Families to fetch, not yet taken by [`take_requests`].
@@ -195,7 +268,17 @@ struct State {
     generation: u64,
 }
 
-static STATE: wasm_sync::Mutex<State> = wasm_sync::Mutex::new(State { families: Vec::new(), fallbacks: Vec::new(), requested: Vec::new(), generation: 0 });
+static STATE: wasm_sync::Mutex<State> = wasm_sync::Mutex::new(State {
+    families: Vec::new(),
+    manifest: ManifestState::None,
+    fonts: Vec::new(),
+    files: Vec::new(),
+    aliases: Vec::new(),
+    asked: Vec::new(),
+    fallbacks: Vec::new(),
+    requested: Vec::new(),
+    generation: 0,
+});
 
 fn state() -> std::sync::MutexGuard<'static, State> {
     STATE.lock().unwrap_or_else(PoisonError::into_inner)
@@ -216,9 +299,16 @@ pub fn add_families(families: impl IntoIterator<Item = String>) {
 }
 
 /// Adds the fonts of a manifest: their families (as [`add_families`]) and their script fallbacks.
+/// The manifest counts as read.
 pub fn add_fonts(fonts: &[ServedFont]) {
     add_families(fonts.iter().map(|f| f.family.clone()));
     let mut s = state();
+    s.manifest = ManifestState::Loaded;
+    for f in fonts {
+        if !s.fonts.contains(f) {
+            s.fonts.push(f.clone());
+        }
+    }
     for pair in script_fallbacks(fonts) {
         if !s.fallbacks.contains(&pair) {
             s.fallbacks.push(pair);
@@ -302,14 +392,198 @@ pub fn generation() -> u64 {
 }
 
 /// Asks for a family to be fetched: picked in a font menu, or needed by a layout that doesn't
-/// have it. Families the host doesn't serve are ignored; asking again is harmless.
+/// have it. Families the host doesn't serve are ignored; asking again is harmless. The name is
+/// matched as [`resolve`] does: a document's "Hand Of Sean Demo" fetches the manifest's
+/// "Hand Of Sean (Demo)".
 pub fn request(family: &str) {
+    request_with(family, None);
+}
+
+/// [`request`] for a run that also names its face by PostScript name (a PSD's).
+pub fn request_with(family: &str, postscript: Option<&str>) {
     // The user's own fonts (Type › Load Fonts…) restore lazily too: read the file now.
     crate::user_fonts::request(family);
+    let ps: Vec<String> = postscript.filter(|p| !p.is_empty()).map(str::to_string).into_iter().collect();
     let mut s = state();
-    if s.families.iter().any(|f| f == family) && !s.requested.iter().any(|f| f == family) {
-        s.requested.push(family.to_string());
+    let Some(served) = resolve_in(&s, family, &ps) else { return };
+    if served != family && !family.is_empty() && !s.asked.iter().any(|(n, _)| n == family) {
+        s.asked.push((family.to_string(), served.clone()));
     }
+    if !s.requested.contains(&served) {
+        s.requested.push(served);
+    }
+}
+
+/// The host's manifest is being read (the web shell, before fetching it): until it is read or
+/// found missing, nothing is called missing ([`lookup`]).
+pub fn begin_manifest() {
+    state().manifest = ManifestState::Loading;
+}
+
+/// The host has no manifest (or it couldn't be read): it serves nothing.
+pub fn manifest_unavailable() {
+    let mut s = state();
+    if s.manifest == ManifestState::Loading {
+        s.manifest = ManifestState::None;
+        s.generation = s.generation.wrapping_add(1);
+    }
+}
+
+pub fn manifest_state() -> ManifestState {
+    state().manifest
+}
+
+/// A name without case, spaces, punctuation or parentheses: "Hand Of Sean (Demo)" and
+/// "HandOfSeanDemo" are the same.
+pub fn normalize(name: &str) -> String {
+    name.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
+}
+
+/// The manifest family a run asking for `family` (or one of the PostScript names `postscript`)
+/// gets: the family itself when the manifest lists it, else one whose name, or a name its file
+/// gives itself, is the same ignoring case, spaces and punctuation; a PostScript name also by the
+/// family it spells ("PatrickHand-Regular" asks for Patrick Hand).
+pub fn resolve(family: &str, postscript: &[String]) -> Option<String> {
+    resolve_in(&state(), family, postscript)
+}
+
+fn resolve_in(s: &State, family: &str, postscript: &[String]) -> Option<String> {
+    let mut names: Vec<String> = vec![family.to_string()];
+    for ps in postscript {
+        names.push(ps.clone());
+        names.push(crate::fonts::guess_from_postscript(ps).family);
+    }
+    if let Some(f) = names.iter().find_map(|n| s.families.iter().find(|f| *f == n)) {
+        return Some(f.clone());
+    }
+    for n in &names {
+        let want = normalize(n);
+        if want.is_empty() {
+            continue;
+        }
+        if let Some(f) = s.families.iter().find(|f| normalize(f) == want) {
+            return Some(f.clone());
+        }
+        if let Some((_, f)) = s.aliases.iter().find(|(a, _)| *a == want) {
+            return Some(f.clone());
+        }
+    }
+    None
+}
+
+/// [`resolve`], saying also when it can't be known yet (the manifest is still on its way).
+pub fn lookup(family: &str, postscript: &[String]) -> Lookup {
+    let s = state();
+    match resolve_in(&s, family, postscript) {
+        Some(f) => Lookup::Served(f),
+        None if s.manifest == ManifestState::Loading => Lookup::ManifestPending,
+        None => Lookup::NotServed,
+    }
+}
+
+/// The manifest's files for `family`.
+pub fn files_of(family: &str) -> Vec<ServedFont> {
+    state().fonts.iter().filter(|f| f.family == family).cloned().collect()
+}
+
+/// The names a downloaded `file` registers under besides its own: every manifest family listing
+/// it, and the names documents asked for that resolved to one of those.
+pub fn names_for_file(file: &str) -> Vec<String> {
+    let s = state();
+    let mut out: Vec<String> = Vec::new();
+    for f in s.fonts.iter().filter(|f| f.file == file) {
+        if !out.contains(&f.family) {
+            out.push(f.family.clone());
+        }
+    }
+    for (name, fam) in &s.asked {
+        if out.contains(fam) && !out.contains(name) {
+            out.push(name.clone());
+        }
+    }
+    out
+}
+
+fn set_file(s: &mut State, file: &str, st: FileState) {
+    match s.files.iter_mut().find(|(f, _)| f == file) {
+        Some((_, old)) => *old = st,
+        None => s.files.push((file.to_string(), st)),
+    }
+}
+
+/// The web shell started downloading `file`.
+pub fn fetch_started(file: &str) {
+    set_file(&mut state(), file, FileState::Pending);
+}
+
+/// `file` arrived and was registered.
+pub fn fetch_arrived(file: &str) {
+    set_file(&mut state(), file, FileState::Arrived);
+}
+
+/// `file` couldn't be downloaded (`why`).
+pub fn fetch_failed(file: &str, why: &str) {
+    let mut s = state();
+    set_file(&mut s, file, FileState::Failed(why.to_string()));
+    s.generation = s.generation.wrapping_add(1);
+}
+
+/// Where the download of manifest family `family` stands: ready once one of its files arrived,
+/// failed once all of them failed.
+pub fn family_status(family: &str) -> Status {
+    let s = state();
+    let files: Vec<&str> = s.fonts.iter().filter(|f| f.family == family).map(|f| f.file.as_str()).collect();
+    let states: Vec<&FileState> = files.iter().filter_map(|file| s.files.iter().find(|(f, _)| f == file).map(|(_, st)| st)).collect();
+    if states.iter().any(|st| **st == FileState::Arrived) {
+        return Status::Ready;
+    }
+    if !files.is_empty() && states.len() == files.len() && states.iter().all(|st| matches!(st, FileState::Failed(_))) {
+        let why = states.iter().find_map(|st| if let FileState::Failed(w) = st { Some(w.clone()) } else { None }).unwrap_or_default();
+        return Status::Failed(why);
+    }
+    if !states.is_empty() || s.requested.contains(&family.to_string()) {
+        return Status::Pending;
+    }
+    Status::NotRequested
+}
+
+/// Records the names a downloaded file of `family` gives itself ([`face_names`]), so a document
+/// asking by one of them finds the family.
+pub fn learn_aliases(family: &str, names: &[String]) {
+    let mut s = state();
+    for n in names {
+        let k = normalize(n);
+        if !k.is_empty() && !s.aliases.iter().any(|(a, _)| *a == k) {
+            s.aliases.push((k, family.to_string()));
+        }
+    }
+}
+
+/// The names a font file gives each of its faces: family (name ID 1), full name (4), PostScript
+/// name (6), typographic family (16), and family with subfamily (1+2, 16+17).
+pub fn face_names(data: &[u8]) -> Vec<String> {
+    use skrifa::{MetadataProvider, raw::FileRef, string::StringId};
+    let Ok(file) = FileRef::new(data) else { return Vec::new() };
+    let mut out: Vec<String> = Vec::new();
+    for font in file.fonts().flatten().take(64) {
+        let name = |id| font.localized_strings(id).english_or_first().map(|s| s.chars().take(200).collect::<String>()).filter(|s| !s.trim().is_empty());
+        let family = name(StringId::FAMILY_NAME);
+        let typo = name(StringId::TYPOGRAPHIC_FAMILY_NAME);
+        let mut add = |n: Option<String>| {
+            if let Some(n) = n
+                && !out.contains(&n)
+            {
+                out.push(n);
+            }
+        };
+        add(family.clone());
+        add(name(StringId::FULL_NAME));
+        add(name(StringId::POSTSCRIPT_NAME));
+        add(typo.clone());
+        add(family.zip(name(StringId::SUBFAMILY_NAME)).map(|(f, s)| format!("{f} {s}")));
+        add(typo.zip(name(StringId::TYPOGRAPHIC_SUBFAMILY_NAME)).map(|(f, s)| format!("{f} {s}")));
+    }
+    out
 }
 
 /// The families asked for since the last call (the web shell fetches each one once).
@@ -368,7 +642,8 @@ mod tests {
             "fonts%5cprivate.ttf",
             "fonts/%00.ttf",
             "fonts/a%7F.ttf",
-            "fonts/%20.ttf",
+            "fonts/%09.ttf",
+            "fonts/a\tb.ttf",
             "fonts/%zz.ttf",
             "fonts/%2.ttf",
             "fonts/%C0%AF.ttf",
@@ -377,7 +652,7 @@ mod tests {
         ] {
             assert!(!is_relative_path(path), "accepted {path}");
         }
-        for path in ["fonts/OpenSans[wdth,wght].ttf", "fonts/é.ttf", "fonts/%C3%A9.ttf"] {
+        for path in ["fonts/OpenSans[wdth,wght].ttf", "fonts/é.ttf", "fonts/%C3%A9.ttf", "fonts/%20.ttf", "fonts/Fuentes CON TILDE/Manga & Comic.ttf"] {
             assert!(is_relative_path(path), "rejected {path}");
         }
         let (fonts, skipped) = parse_manifest("A | Regular | fonts/%2e%2e/a.ttf\nB | Regular | fonts/%zz.ttf\n");
@@ -508,6 +783,57 @@ mod tests {
         ] {
             assert_eq!(language_script(tag), want, "{tag}");
         }
+    }
+
+    /// A font library's folders have spaces, accents and `&`: the lines are kept and the paths
+    /// encoded for the request.
+    #[test]
+    fn paths_with_spaces_are_served_and_encoded() {
+        let (fonts, skipped) = parse_manifest("Komika Axis | Regular | fonts/Fuentes Para Manga & Comic/KOMIKAX_.ttf | Latn | - | - | - | fuentes\n");
+        assert!(skipped.is_empty(), "{skipped:?}");
+        assert_eq!(fonts[0].file, "fonts/Fuentes Para Manga & Comic/KOMIKAX_.ttf");
+        assert_eq!(
+            url_path("fonts/1. Diálogos Principales/b. Puntas/Hand_Of_Sean_Demo.ttf"),
+            "fonts/1.%20Di%C3%A1logos%20Principales/b.%20Puntas/Hand_Of_Sean_Demo.ttf"
+        );
+        assert_eq!(url_path("fonts/Fuentes Para Manga & Comic/KOMIKAX_.ttf"), "fonts/Fuentes%20Para%20Manga%20&%20Comic/KOMIKAX_.ttf");
+        assert_eq!(url_path("fonts/a%20b.ttf"), "fonts/a%20b.ttf", "escapes kept");
+        assert!(is_relative_path(&url_path("fonts/1. Diálogos Principales/x.ttf")));
+    }
+
+    /// Names match without case, spaces, punctuation or parentheses, and by PostScript name; until
+    /// the manifest is read nothing is "not served"; a family is ready once a file arrived and
+    /// failed once all of them failed.
+    #[test]
+    fn served_names_resolve_loosely_and_downloads_have_a_status() {
+        assert_eq!(normalize("Hand Of Sean (Demo)"), "handofseandemo");
+        begin_manifest();
+        assert_eq!(lookup("Test Absent Face", &[]), Lookup::ManifestPending, "not known before the manifest");
+        let (fonts, _) = parse_manifest(
+            "Test Hand (Demo) | Regular | fonts/a b/Test_Hand.ttf\nTest Hand Demo | Regular | fonts/a b/Test_Hand.ttf\nTest Komika Axis | Regular | fonts/k/K1.ttf\nTest Komika Axis | Bold | fonts/k/K2.ttf\n",
+        );
+        add_fonts(&fonts);
+        assert_eq!(manifest_state(), ManifestState::Loaded);
+        assert_eq!(lookup("Test Absent Face", &[]), Lookup::NotServed);
+        assert_eq!(resolve("Test Hand Demo", &[]).as_deref(), Some("Test Hand Demo"), "an exact line wins");
+        assert_eq!(resolve("TestHandDemo", &[]).as_deref(), Some("Test Hand (Demo)"), "loose");
+        assert_eq!(resolve("Unknown", &["TestKomikaAxis-Bold".into()]).as_deref(), Some("Test Komika Axis"), "PostScript name");
+        assert_eq!(names_for_file("fonts/a b/Test_Hand.ttf"), ["Test Hand (Demo)", "Test Hand Demo"], "both lines name the file");
+        request_with("TEST hand demo!", None);
+        assert!(names_for_file("fonts/a b/Test_Hand.ttf").contains(&"TEST hand demo!".to_string()), "and the name a document asked by");
+        learn_aliases("Test Komika Axis", &["KomikaAxisFull Regular".into()]);
+        assert_eq!(resolve("Komika Axis Full Regular", &[]).as_deref(), Some("Test Komika Axis"), "a name the file gives itself");
+        assert_eq!(family_status("Test Komika Axis"), Status::NotRequested);
+        fetch_started("fonts/k/K1.ttf");
+        fetch_started("fonts/k/K2.ttf");
+        assert_eq!(family_status("Test Komika Axis"), Status::Pending);
+        fetch_failed("fonts/k/K1.ttf", "HTTP 404");
+        assert_eq!(family_status("Test Komika Axis"), Status::Pending, "one file still coming");
+        fetch_arrived("fonts/k/K2.ttf");
+        assert_eq!(family_status("Test Komika Axis"), Status::Ready);
+        fetch_started("fonts/a b/Test_Hand.ttf");
+        fetch_failed("fonts/a b/Test_Hand.ttf", "HTTP 500");
+        assert_eq!(family_status("Test Hand (Demo)"), Status::Failed("HTTP 500".into()));
     }
 
     #[test]

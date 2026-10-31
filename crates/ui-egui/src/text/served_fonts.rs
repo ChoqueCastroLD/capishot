@@ -11,7 +11,10 @@ use egui::{FontData, FontFamily};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use photocraft_doc::{DocId, LayerContent, LayerId, TextLayer};
-pub use photocraft_text::served::{ServedFont, add_families, add_fonts, is_relative_path, parse_manifest, request_for_languages, take_requests};
+pub use photocraft_text::served::{
+    ServedFont, add_families, add_fonts, begin_manifest, fetch_failed, fetch_started, is_relative_path, manifest_unavailable, parse_manifest,
+    request_for_languages, take_requests, url_path,
+};
 
 use crate::PhotocraftApp;
 
@@ -81,7 +84,8 @@ fn add_ui_face(ctx: &egui::Context, family: &str, bytes: &[u8]) {
     ctx.add_font(FontInsert { name, data, families });
 }
 
-/// Registers delivered font files (`(family, bytes)`, the family as the manifest lists it) and
+/// Registers delivered font files (`(file, bytes)`, the file as the manifest lists it: it
+/// registers under its own names and every name the manifest or a document gives it) and
 /// re-renders the type layers that use those families, or whose text falls back to them (a script
 /// fallback, e.g. Arabic set in Inter), and show our own layout. A PSD layer still
 /// showing Photoshop's pixels (not edited yet) keeps them, as it does when its font is installed
@@ -94,7 +98,21 @@ pub fn install(app: &mut PhotocraftApp, ctx: &egui::Context, delivered: Vec<(Str
     let arrived = !delivered.is_empty();
     let mut layers = std::mem::take(&mut *PENDING.lock().unwrap_or_else(PoisonError::into_inner));
     if !delivered.is_empty() {
-        let families: Vec<String> = delivered.iter().map(|(f, _)| f.clone()).collect();
+        // Every name each file goes by: the manifest's families for it, the names documents asked
+        // for that resolved to them, and the names the file gives itself.
+        let delivered: Vec<(Vec<String>, String, Vec<u8>)> = delivered
+            .into_iter()
+            .map(|(file, bytes)| {
+                let mut names = photocraft_text::served::names_for_file(&file);
+                let own = photocraft_text::served::face_names(&bytes);
+                if let Some(family) = names.first().cloned() {
+                    photocraft_text::served::learn_aliases(&family, &own);
+                }
+                names.extend(own.into_iter().filter(|n| !names.contains(n)).collect::<Vec<_>>());
+                (names, file, bytes)
+            })
+            .collect();
+        let families: Vec<String> = delivered.iter().flat_map(|(n, _, _)| n.iter().cloned()).collect();
         // Decided before the fonts are in: "shows our own layout" compares the layer's pixels
         // with what the engine draws now, that is with the fallback font.
         for st in app.session.documents() {
@@ -109,16 +127,19 @@ pub fn install(app: &mut PhotocraftApp, ctx: &egui::Context, delivered: Vec<(Str
             }
         }
         let fallbacks = photocraft_text::served::script_fallback_families();
-        for (family, bytes) in &delivered {
-            if fallbacks.contains(family) {
+        for (names, _, bytes) in &delivered {
+            if let Some(family) = names.iter().find(|n| fallbacks.contains(n)) {
                 add_ui_face(ctx, family, bytes);
             }
         }
         let mut eng = photocraft_text::shared().lock().unwrap_or_else(PoisonError::into_inner);
-        for (family, bytes) in delivered {
-            let added = eng.fonts.register_font_data(bytes);
-            if !added.contains(&family) {
-                log::warn!("a served font file listed as {family:?} registers {added:?}; the family in fonts/manifest.txt must be the font's own");
+        for (names, file, bytes) in delivered {
+            let added = eng.fonts.register_font_data_as(bytes, &names);
+            if added.is_empty() {
+                log::warn!("the served font file {file:?} is not a font this build reads");
+                photocraft_text::served::fetch_failed(&file, "not a readable font file");
+            } else {
+                photocraft_text::served::fetch_arrived(&file);
             }
         }
     }
@@ -160,10 +181,9 @@ fn names_match(served: &str, family: &str, postscript: &[String]) -> bool {
 }
 
 /// The family the host serves (`fonts/manifest.txt`, as it spells it) for a run that asks for
-/// `family` or one of `postscript`, if it serves one.
+/// `family` or one of `postscript`, if it serves one (`photocraft_text::served::resolve`).
 pub fn served_family(family: &str, postscript: &[String]) -> Option<String> {
-    let served = photocraft_text::served::families();
-    served.iter().find(|f| *f == family).or_else(|| served.iter().find(|f| names_match(f, family, postscript))).cloned()
+    photocraft_text::served::resolve(family, postscript)
 }
 
 #[cfg(test)]

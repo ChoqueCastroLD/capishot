@@ -156,6 +156,11 @@ impl PhotocraftApp {
         {
             let _s = perf_span::span("fonts.tick");
             user_fonts_ui::tick(self, Some(ctx));
+            // Documents whose served fonts are on their way, and `fonts.preload` requests.
+            if user_fonts_ui::checks_pending(self) {
+                user_fonts_ui::tick_checks(self, Some(ctx.input(|i| i.time)));
+                ctx.request_repaint_after(std::time::Duration::from_millis(250));
+            }
         }
         // The control transport wakes the UI on arrival (ctx.request_repaint); only poll while a
         // screenshot is pending. (Polling every 50 ms here made idle apps render at 20 fps.)
