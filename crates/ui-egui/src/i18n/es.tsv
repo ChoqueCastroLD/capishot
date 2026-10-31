@@ -5156,3 +5156,16 @@ navigator	Zoom	Zoom
 	Slowest frames	Fotogramas más lentos
 	Log file: {path}	Archivo de registro: {path}
 	Reset Performance Preferences	Restablecer preferencias de rendimiento
+	Gradient start color	Color inicial del degradado
+	Gradient end color	Color final del degradado
+	Shadow color	Color de la sombra
+	Glow color	Color del resplandor
+	More Options…	Más opciones…
+	Fire	Fuego
+	Ocean	Océano
+	Gold	Oro
+	Dark Red	Rojo oscuro
+	Black to Gray	Negro a gris
+	Color Picker (Gradient)	Selector de color (degradado)
+	Color Picker (Drop Shadow)	Selector de color (sombra paralela)
+	Color Picker (Outer Glow)	Selector de color (resplandor exterior)

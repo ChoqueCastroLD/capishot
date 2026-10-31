@@ -224,7 +224,7 @@ fn hex(c: &photocraft_doc::Color) -> String {
 /// only the keys this dialog models. Everything else (gradient strokes, multi-stop
 /// gradients, imported contours) is left out so the apply overlay can't clobber it.
 /// `light` is the document's global light angle: an effect that uses it shows that angle.
-fn values_of(e: &Effect, light: f32) -> Value {
+pub(crate) fn values_of(e: &Effect, light: f32) -> Value {
     let mut v = defaults(kind_of(e));
     let set = |v: &mut Value, k: &str, x: Value| {
         v[k] = x;

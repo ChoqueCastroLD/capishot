@@ -185,6 +185,16 @@ pub fn open_for_command(app: &mut PhotocraftApp, label: &str, rgb: [f32; 3], com
     app.ui.open_dialog(DialogKind::Command, f)
 }
 
+/// [`open_for_command`] whose command takes the colour in `key` instead of `color` (a gradient's
+/// `from` or `to`).
+pub fn open_for_command_key(app: &mut PhotocraftApp, label: &str, rgb: [f32; 3], command: &str, params: Value, key: &str) -> u64 {
+    let id = open_for_command(app, label, rgb, command, params);
+    if let Some(d) = app.ui.dialog_mut(id) {
+        d.fields.insert("__colorKey".into(), json!(key));
+    }
+    id
+}
+
 /// Open the picker on `rgb` for a colour field of another dialog (e.g. Edit › Fill's Color…): OK
 /// writes `"#rrggbb"` into `field` of dialog `dialog`, which stays open; Cancel leaves it alone.
 pub fn open_for_field(app: &mut PhotocraftApp, label: &str, rgb: [f32; 3], dialog: u64, field: &str) -> u64 {
@@ -819,7 +829,8 @@ pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value,
     let color = f.get("color").and_then(Value::as_str).unwrap_or("#000000");
     if let Some(cmd) = f.get("__command").and_then(Value::as_str) {
         let mut p = f.get("__params").cloned().filter(Value::is_object).unwrap_or_else(|| json!({}));
-        p["color"] = json!(color);
+        let key = f.get("__colorKey").and_then(Value::as_str).unwrap_or("color").to_string();
+        p[key.as_str()] = json!(color);
         return app.run(cmd, p);
     }
     if target == "field" {

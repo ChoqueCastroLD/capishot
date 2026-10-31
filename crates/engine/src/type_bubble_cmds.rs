@@ -197,6 +197,26 @@ fn apply_role(q: &mut Value, project: &crate::font_projects::Project, role: &str
     if let Some(st) = project.role(role).and_then(|r| r.settings.stroke.as_ref()) {
         m.insert("stroke".into(), if st.width > 0.0 { json!({"width": st.width, "color": st.color}) } else { Value::Null });
     }
+    // The role's layer effects (gradient, shadow, glow), made on the new layer with its stroke.
+    let fx: Vec<Value> = project.role(role).map(|r| r.settings.effect_params()).unwrap_or_default().into_iter().map(|(k, p)| json!([k, p])).collect();
+    if !fx.is_empty() {
+        m.insert(ROLE_EFFECTS.into(), Value::Array(fx));
+    }
+}
+
+/// The key [`apply_role`] passes the role's effects on in (`[[kind, params], …]`).
+const ROLE_EFFECTS: &str = "__roleEffects";
+
+/// The role effects [`apply_role`] put in `q`, as effects.
+fn role_effects(q: &Value) -> Vec<photocraft_doc::Effect> {
+    q.get(ROLE_EFFECTS)
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|e| crate::layer_style::effect_from_params(e.get(0)?.as_str()?, e.get(1)?))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// The keys of one style (`styles.<kind>`) over the command's own: character keys, "align",
@@ -320,7 +340,7 @@ fn create_in_bubble(s: &mut Session, p: &Value) -> Result<Value> {
     let (inset, valign) = crate::type_cmds::in_path_props(&q).map_err(bad)?;
     let mut base = q.clone();
     if let Value::Object(m) = &mut base {
-        for k in ["inset", "vertical", "stroke"] {
+        for k in ["inset", "vertical", "stroke", ROLE_EFFECTS] {
             m.remove(k);
         }
         m.insert("x".into(), json!(fx));
@@ -360,7 +380,11 @@ fn create_in_bubble(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     t.sync_summary();
-    let mut out = crate::type_cmds::add_type_layer_with(s, &base, t, |layer, mode| crate::typer_place_cmds::set_stroke(layer, stroke.as_ref(), mode))?;
+    let effects = role_effects(&q);
+    let mut out = crate::type_cmds::add_type_layer_with(s, &base, t, |layer, mode| {
+        crate::typer_place_cmds::set_stroke(layer, stroke.as_ref(), mode);
+        layer.effects.items.extend(effects.into_iter().map(|e| e.in_mode(mode)));
+    })?;
     out["style"] = json!(kind.name());
     if let Some(r) = &used {
         out["styleRef"] = json!(r.key());
@@ -651,6 +675,23 @@ mod tests {
         assert_eq!(t.runs[0].style.font_family, "JetBrains Mono");
         assert!((t.runs[0].style.size_pt - 26.0).abs() < 0.01);
         assert_eq!(t.runs[0].style.caps, photocraft_doc::text::Caps::AllCaps);
+    }
+
+    /// A role's effects (the type bars' Efectos) come with it into the bubble's text, in the same step.
+    #[test]
+    fn a_project_role_brings_its_effects_into_the_bubble() {
+        let mut s = page();
+        outlined(&mut s, "ellipse", [100, 80, 400, 240], json!({}));
+        s.execute("fontProjects.create", json!({"name": "Serie"})).unwrap();
+        let settings = json!({"stroke": {"width": 3, "color": "#ffffff"}, "gradient": {"from": "#ff3b1f", "to": "#ffd23f"}, "glow": {"size": 6}});
+        s.execute("fontProjects.setRole", json!({"role": "shout", "settings": settings})).unwrap();
+        let past = s.active().unwrap().history.past_len();
+        let r = s.execute(CMD, json!({"x": 300, "y": 200, "text": "No!", "style": "project:shout"})).unwrap();
+        let st = s.active().unwrap();
+        assert_eq!(st.history.past_len(), past + 1);
+        let l = st.doc.layer(LayerId(r["layer"].as_u64().unwrap())).unwrap();
+        let kinds: Vec<&str> = l.effects.items.iter().map(crate::layer_style::kind_of).collect();
+        assert_eq!(kinds, ["stroke", "gradientOverlay", "outerGlow"], "{kinds:?}");
     }
 
     /// Auto with shapes mapped to other styles: a bubble found takes the TypeR style mapped to

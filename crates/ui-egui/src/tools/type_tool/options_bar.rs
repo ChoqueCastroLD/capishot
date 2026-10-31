@@ -2,6 +2,7 @@ use super::defaults::{apply, drag_key, formatting_params, open_color_picker, sho
 use super::editing::{cancel, commit, commit_with};
 use super::fonts::{font_picker, fonts_ready, selected_style, style_label, styles};
 use super::keys::is_vertical;
+use super::effects::effects_control;
 use super::stroke::stroke_control;
 use super::{Color32, LayerId, PhotocraftApp, Stroke, byte_of, insertion_style, json, selected_styles, text_layer};
 
@@ -506,6 +507,8 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
     // Contorno: the type target's stroke (its Stroke layer effect).
     stroke_control(app, ui, false);
+    // Efectos: gradient, shadow and glow on the type target (its layer effects).
+    effects_control(app, ui, false);
     // Photoshop's button at the end of the bar: shows or hides the Character and Paragraph panels.
     let shown = app.ui.panels.character;
     if crate::icons::button(ui, "panels-top-left", 24.0, shown, tl!("Toggle the Character and Paragraph panels")).clicked() {
@@ -534,7 +537,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 
 /// Width the phone's type bar needs to fit in one row (the font field at 120 points); narrower,
 /// it takes two rows ([`touch_bar_rows`]).
-pub const TOUCH_BAR_ONE_ROW: f32 = 120.0 + 64.0 + 5.0 * 44.0 + 70.0 + 7.0 * 6.0;
+pub const TOUCH_BAR_ONE_ROW: f32 = 120.0 + 64.0 + 6.0 * 44.0 + 70.0 + 8.0 * 6.0;
 /// The height of one of the bar's rows.
 pub const TOUCH_BAR_ROW: f32 = 44.0;
 
@@ -557,6 +560,7 @@ pub fn touch_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             font_and_size(app, ui, font_w);
             color_button(app, ui);
             stroke_control(app, ui, true);
+            effects_control(app, ui, true);
             align_button(app, ui);
             touch_leading(app, ui);
             warp_button(app, ui);
@@ -574,8 +578,8 @@ pub fn touch_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             font_and_size(app, ui, font_w);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| done_button(app, ui));
         });
-        // Five buttons (six with Bubble Type's style), evenly spaced across the width.
-        let n = if app.ui.tool == crate::state::Tool::BubbleType { 6 } else { 5 };
+        // Six buttons (seven with Bubble Type's style), evenly spaced across the width.
+        let n = if app.ui.tool == crate::state::Tool::BubbleType { 7 } else { 6 };
         let (row, _) = ui.allocate_exact_size(egui::vec2(w, TOUCH_BAR_ROW), egui::Sense::hover());
         let slot = w / n as f32;
         for i in 0..n {
@@ -585,9 +589,10 @@ pub fn touch_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             match i {
                 0 => color_button(app, &mut child),
                 1 => stroke_control(app, &mut child, true),
-                2 => align_button(app, &mut child),
-                3 => touch_leading(app, &mut child),
-                4 => warp_button(app, &mut child),
+                2 => effects_control(app, &mut child, true),
+                3 => align_button(app, &mut child),
+                4 => touch_leading(app, &mut child),
+                5 => warp_button(app, &mut child),
                 _ => bubble_style_button(app, &mut child),
             }
         }

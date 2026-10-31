@@ -49,6 +49,57 @@ pub struct RoleStroke {
     pub position: String,
 }
 
+/// A role's Gradient Overlay: two colours, the angle and linear or radial.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RoleGradient {
+    pub from: String,
+    pub to: String,
+    pub angle: f32,
+    /// "linear" or "radial".
+    pub style: String,
+}
+
+impl Default for RoleGradient {
+    fn default() -> Self {
+        RoleGradient { from: "#ff3b1f".into(), to: "#ffd23f".into(), angle: 90.0, style: "linear".into() }
+    }
+}
+
+/// A role's Drop Shadow.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RoleShadow {
+    pub color: String,
+    pub distance: f32,
+    pub size: f32,
+    pub angle: f32,
+    /// 0-100.
+    pub opacity: f32,
+}
+
+impl Default for RoleShadow {
+    fn default() -> Self {
+        RoleShadow { color: "#000000".into(), distance: 4.0, size: 4.0, angle: 135.0, opacity: 75.0 }
+    }
+}
+
+/// A role's Outer Glow.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RoleGlow {
+    pub color: String,
+    pub size: f32,
+    /// 0-100.
+    pub opacity: f32,
+}
+
+impl Default for RoleGlow {
+    fn default() -> Self {
+        RoleGlow { color: "#ffffff".into(), size: 8.0, opacity: 75.0 }
+    }
+}
+
 /// What a role sets on its text; `None` leaves that alone.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -65,6 +116,10 @@ pub struct RoleSettings {
     pub stroke: Option<RoleStroke>,
     /// "left", "center", "right" or "justify".
     pub align: Option<String>,
+    /// Layer effects (the type bars' Effects popover): each made or replaced on the text.
+    pub gradient: Option<RoleGradient>,
+    pub shadow: Option<RoleShadow>,
+    pub glow: Option<RoleGlow>,
 }
 
 impl RoleSettings {
@@ -101,6 +156,32 @@ impl RoleSettings {
             _ => "outside",
         };
         Some(json!({"size": s.width.clamp(0.0, 250.0), "color": if is_hex(&s.color) { s.color.as_str() } else { "#ffffff" }, "position": position}))
+    }
+}
+
+impl RoleSettings {
+    /// The `layer.layerStyle.<kind>` commands and params of its effects (gradient, shadow, glow).
+    pub fn effect_params(&self) -> Vec<(&'static str, Value)> {
+        let col = |c: &str, d: &str| if is_hex(c) { c.to_string() } else { d.to_string() };
+        let mut v = Vec::new();
+        if let Some(g) = &self.gradient {
+            let style = if g.style == "radial" { "radial" } else { "linear" };
+            v.push((
+                "gradientOverlay",
+                json!({"from": col(&g.from, "#000000"), "to": col(&g.to, "#ffffff"), "angle": g.angle.clamp(-180.0, 180.0), "style": style, "method": "classic"}),
+            ));
+        }
+        if let Some(d) = &self.shadow {
+            v.push((
+                "dropShadow",
+                json!({"color": col(&d.color, "#000000"), "distance": d.distance.clamp(0.0, 300.0), "size": d.size.clamp(0.0, 250.0),
+                    "angle": d.angle.clamp(-180.0, 180.0), "useGlobalLight": false, "opacity": d.opacity.clamp(0.0, 100.0)}),
+            ));
+        }
+        if let Some(g) = &self.glow {
+            v.push(("outerGlow", json!({"color": col(&g.color, "#ffffff"), "size": g.size.clamp(0.0, 250.0), "opacity": g.opacity.clamp(0.0, 100.0)})));
+        }
+        v
     }
 }
 
@@ -771,6 +852,11 @@ fn apply_role(s: &mut Session, p: &Value) -> Result<Value> {
         if st["size"].as_f64().unwrap_or(0.0) > 0.0 {
             s.execute("layer.layerStyle.stroke", st)?;
         }
+    }
+    for (kind, mut fx) in r.settings.effect_params() {
+        fx["layer"] = json!(layer.0);
+        fx["coalesce"] = json!(key);
+        s.execute(&format!("layer.layerStyle.{kind}"), fx)?;
     }
     out["applied"] = json!(true);
     Ok(out)

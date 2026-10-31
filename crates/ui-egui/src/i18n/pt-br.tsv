@@ -5124,3 +5124,16 @@ layerLabel	No Color	Sem cor
 	Slowest frames	Quadros mais lentos
 	Log file: {path}	Arquivo de log: {path}
 	Reset Performance Preferences	Redefinir preferências de desempenho
+	Gradient start color	Cor inicial do gradiente
+	Gradient end color	Cor final do gradiente
+	Shadow color	Cor da sombra
+	Glow color	Cor do brilho
+	More Options…	Mais opções…
+	Fire	Fogo
+	Ocean	Oceano
+	Gold	Ouro
+	Dark Red	Vermelho escuro
+	Black to Gray	Preto para cinza
+	Color Picker (Gradient)	Seletor de cores (gradiente)
+	Color Picker (Drop Shadow)	Seletor de cores (sombra projetada)
+	Color Picker (Outer Glow)	Seletor de cores (brilho externo)
