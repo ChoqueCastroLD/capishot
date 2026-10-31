@@ -156,7 +156,12 @@ pub struct SlowFrames {
 
 impl Default for SlowFrames {
     fn default() -> Self {
-        Self { frames: VecDeque::with_capacity(SLOW_FRAMES), threshold_ms: SLOW_FRAME_MS, prev_ui_ms: None, logged_at: None, unlogged: 0 }
+        // PHOTOCRAFT_SLOW_FRAME_MS lowers the bar for a diagnosis (a fast machine's slow frames).
+        #[cfg(not(target_arch = "wasm32"))]
+        let threshold_ms = std::env::var("PHOTOCRAFT_SLOW_FRAME_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(SLOW_FRAME_MS);
+        #[cfg(target_arch = "wasm32")]
+        let threshold_ms = SLOW_FRAME_MS;
+        Self { frames: VecDeque::with_capacity(SLOW_FRAMES), threshold_ms, prev_ui_ms: None, logged_at: None, unlogged: 0 }
     }
 }
 
@@ -202,7 +207,7 @@ impl SlowFrames {
             self.frames.pop_front();
         }
         self.frames.push_back(s.clone());
-        if self.logged_at.is_some_and(|at| s.t - at < LOG_EVERY_MS) {
+        if self.threshold_ms >= SLOW_FRAME_MS && self.logged_at.is_some_and(|at| s.t - at < LOG_EVERY_MS) {
             self.unlogged += 1;
             return None;
         }

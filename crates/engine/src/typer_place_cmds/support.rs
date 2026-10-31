@@ -116,6 +116,65 @@ pub fn page_image(s: &mut Session) -> Result<PageImage> {
     Ok(page)
 }
 
+/// Is the page image of the active document cached and current (TypeR's bubble detection can
+/// run without compositing the page first)?
+pub fn page_ready(s: &Session) -> bool {
+    let Some(d) = s.active() else { return false };
+    s.typer.place.page.as_ref().is_some_and(|p| p.doc_id == d.doc.id && crate::layer_multi_cmds::same_pixels(&p.stripped, &without_text(&d.doc)))
+}
+
+/// The page image of the active document being composited a band at a time, so a caller can
+/// spread it over frames or run it on another thread ([`PageBuild::step`]), then hand it to the
+/// cache ([`PageBuild::install`]).
+pub struct PageBuild {
+    doc_id: DocId,
+    stripped: Arc<Document>,
+    area: photocraft_geom::Rect,
+    img: Vec<[u8; 4]>,
+    next: i32,
+}
+
+impl PageBuild {
+    /// A build of the active document's page (`None` without a document).
+    pub fn start(s: &Session) -> Option<PageBuild> {
+        let d = s.active()?;
+        let stripped = without_text(&d.doc);
+        let area = stripped.bounds();
+        Some(PageBuild { doc_id: d.doc.id, stripped: Arc::new(stripped), area, img: Vec::with_capacity(area.width() as usize * area.height() as usize), next: area.y0 })
+    }
+
+    /// Composite the next `rows` rows of the page. True once it is all there.
+    pub fn step(&mut self, rows: i32) -> bool {
+        if self.next < self.area.y1 {
+            let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+            let y1 = (self.next + rows.max(1)).min(self.area.y1);
+            let band = photocraft_compose::render(&self.stripped, photocraft_geom::Rect::new(self.area.x0, self.next, self.area.x1, y1));
+            self.img.extend(band.px.iter().map(|p| p.map(q)));
+            self.next = y1;
+        }
+        self.done()
+    }
+
+    /// The whole page has been composited.
+    pub fn done(&self) -> bool {
+        self.next >= self.area.y1
+    }
+
+    /// Is this still the page of the active document (its non-type pixels unchanged)?
+    pub fn current(&self, s: &Session) -> bool {
+        s.active().is_some_and(|d| d.doc.id == self.doc_id && crate::layer_multi_cmds::same_pixels(&self.stripped, &without_text(&d.doc)))
+    }
+
+    /// Hand the finished page to the cache, when it's still the active document's. True if it was.
+    pub fn install(self, s: &mut Session) -> bool {
+        if !self.done() || !self.current(s) {
+            return false;
+        }
+        s.typer.place.page = Some(PageImage { doc_id: self.doc_id, stripped: self.stripped, area: self.area, img: Arc::new(self.img) });
+        true
+    }
+}
+
 /// Forget the cached page of a closed document.
 pub fn forget_doc(s: &mut Session, id: DocId) {
     if s.typer.place.page.as_ref().is_some_and(|p| p.doc_id == id) {

@@ -362,6 +362,8 @@ pub struct PhotocraftApp {
     navigator_damage: HashMap<DocId, canvas::NavigatorDamage>,
     /// Navigator images being redrawn a band per frame (the single-threaded browser build).
     navigator_bands: HashMap<DocId, canvas::NavigatorBands>,
+    /// TypeR's page image being composited off the frame (`typer::shaper_ui`).
+    typer_page: Option<typer::PageJob>,
     /// `canvas::display_doc`'s live-adjust and Duotone documents per document: (snapshot,
     /// preview key, the document shown).
     display_memo: HashMap<DocId, (std::sync::Weak<Document>, u64, std::sync::Arc<Document>)>,
@@ -522,6 +524,8 @@ pub struct PhotocraftApp {
     /// History snapshot thumbnails by (document, snapshot id): a snapshot never changes, so each
     /// is made once (`snapshot_thumb`, #2966).
     snapshot_thumbs: HashMap<(DocId, u64), egui::TextureHandle>,
+    /// History snapshot thumbnails being composited a band per frame (`app::thumbs`).
+    snapshot_bands: HashMap<(DocId, u64), app::SnapshotBands>,
     /// Snapshots whose live layer/mask keys were last used to prune thumbnail handles.
     thumb_documents: Vec<(DocId, std::sync::Weak<Document>)>,
     /// Content bounds cached per (key, revision): scanning a 36 MP layer every frame cost ~77 ms.

@@ -447,6 +447,43 @@ pub fn wand_bubble(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32
     Some((crate::pagedetect::lobe_at(&mask, x, y).unwrap_or(mask), outline))
 }
 
+/// How much larger than the [`Judge`]'s limit a wand region may grow before
+/// [`wand_bubble_limited`] gives up on it: room for a joined double bubble, which the lobe cut
+/// splits before the judge measures it.
+const LIMIT_MARGIN: f64 = 1.25;
+
+/// The largest region [`wand_bubble_limited`] takes for a bubble, whatever the text: about
+/// 1200 × 1250 pixels, beyond a splash bubble on a large page. Bigger regions are open art or
+/// background (shaped without an outline), and flooding them cost a second on the page.
+pub const MAX_BUBBLE_PIXELS: usize = 1_500_000;
+
+/// [`wand_bubble`] for text of area `text_area` ([`text_area`]): a region well over the size
+/// the [`Judge`] accepts for that text (`MAX_BUBBLE_TO_TEXT`) is refused at once, `"noBubble"`,
+/// before its outline and lobes are worked out. Those passes over a region the size of the page
+/// (text on a large flat area) took half a second for an answer the judge refuses anyway.
+/// `"noSelection"` when the seed is off the page.
+pub fn wand_bubble_limited(
+    img: &[[u8; 4]],
+    area: photocraft_geom::Rect,
+    seed: (i32, i32),
+    tolerance: f32,
+    at: Option<(f64, f64)>,
+    text_area: f64,
+) -> std::result::Result<(Mask, f64), &'static str> {
+    if !area.contains(seed.0, seed.1) {
+        return Err("noSelection");
+    }
+    let limit = if text_area > 0.0 { (LIMIT_MARGIN * MAX_BUBBLE_TO_TEXT * text_area).min(usize::MAX as f64) as usize } else { usize::MAX };
+    let limit = limit.min(MAX_BUBBLE_PIXELS);
+    let tol = if tolerance.is_finite() { tolerance.clamp(0.0, 255.0) } else { WAND_TOLERANCE };
+    let region = sel::wand_region_limited(img, area, seed, 1, tol, true, true, limit).ok_or("noBubble")?;
+    let (w, h) = (region.bbox.width() as usize, region.bbox.height() as usize);
+    let mask = Mask::from_coverage(region.bbox.x0, region.bbox.y0, w, h, &region.mask).ok_or("noSelection")?;
+    let outline = outline_dark(&mask, img, area);
+    let (x, y) = at.unwrap_or((f64::from(seed.0), f64::from(seed.1)));
+    Ok((crate::pagedetect::lobe_at(&mask, x, y).unwrap_or(mask), outline))
+}
+
 /// TypeR's wand seed for a text layer whose ink box is `ink`: 5 px left of it, at its middle
 /// height, clamped to the page.
 pub fn seed_left_of(ink: &Rect) -> (i32, i32) {
@@ -772,5 +809,28 @@ mod tests {
         assert!(Rect::from_xywh(&[1.0, 2.0]).is_none());
         let m = Mask::new(-5, -5, 3, 3).unwrap();
         assert!(!m.get(i32::MIN, i32::MAX));
+    }
+
+    #[test]
+    fn the_limited_wand_refuses_a_flat_page_and_agrees_on_a_bubble() {
+        let (w, h) = (400usize, 300usize);
+        let mut img = vec![[255u8, 255, 255, 255]; w * h];
+        let area = photocraft_geom::Rect::from_xywh(0, 0, w as u32, h as u32);
+        // Small text on a flat page: the whole page floods; far over 60x the text, refused early.
+        let ink = Rect::new(100.0, 100.0, 20.0, 10.0);
+        assert_eq!(wand_bubble_limited(&img, area, (95, 105), WAND_TOLERANCE, Some(ink.center()), text_area(&ink, 5.0)).err(), Some("noBubble"));
+        // A closed bubble (a dark ring) around the text: the same region as the unlimited wand.
+        for y in 0..h {
+            for x in 0..w {
+                let d = ((x as f64 - 110.0).powi(2) + (y as f64 - 105.0).powi(2)).sqrt();
+                if (40.0..44.0).contains(&d) {
+                    img[y * w + x] = [0, 0, 0, 255];
+                }
+            }
+        }
+        let (a, oa) = wand_bubble(&img, area, (95, 105), WAND_TOLERANCE, Some(ink.center())).unwrap();
+        let (b, ob) = wand_bubble_limited(&img, area, (95, 105), WAND_TOLERANCE, Some(ink.center()), text_area(&ink, 5.0)).unwrap();
+        assert_eq!((a.x0, a.y0, a.width, a.height, &a.px), (b.x0, b.y0, b.width, b.height, &b.px));
+        assert!((oa - ob).abs() < 1e-9);
     }
 }

@@ -170,6 +170,7 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, compact: bool) {
     let text = line.as_ref().map(|l| if settings.interpret_markdown { photocraft_typer::markdown::parse_runs(&l.text).text } else { l.text.clone() });
     match text.filter(|s| !s.trim().is_empty()) {
         Some(text) => {
+            let _s = crate::perf_span::span("typer.line");
             let family = style.as_ref().and_then(|s| font_label::family_of(ui.ctx(), s));
             let drawn = family.is_some_and(|f| font_label::paint(ui, &f, &text, 20.0, inner, t.text));
             if !drawn {
@@ -192,5 +193,6 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, compact: bool) {
     {
         super::script_editor::scroll_to(ui.ctx(), l.raw_index);
     }
+    let _s = crate::perf_span::span("typer.shaper");
     super::shaper_ui::show(app, ui);
 }

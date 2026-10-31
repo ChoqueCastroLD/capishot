@@ -76,20 +76,45 @@ impl PhotocraftApp {
     /// centred in a square. Thumbnails of `doc`'s snapshots not in `live` are dropped.
     pub fn snapshot_thumb(&mut self, ctx: &egui::Context, doc: DocId, snap: &photocraft_engine::history_cmds::Snapshot, live: &[u64]) -> egui::TextureId {
         self.snapshot_thumbs.retain(|(d, id), _| *d != doc || live.contains(id));
+        self.snapshot_bands.retain(|(d, id), _| *d != doc || live.contains(id));
         if let Some(tex) = self.snapshot_thumbs.get(&(doc, snap.id)) {
             return tex.id();
         }
-        let comp = photocraft_compose::thumbnail(&snap.doc, 56);
-        let (w, h) = (comp.width as usize, comp.height as usize);
-        let side = w.max(h);
-        let (ox, oy) = ((side - w) / 2, (side - h) / 2);
-        let mut px = vec![egui::Color32::TRANSPARENT; side * side];
-        for (i, &[r, g, b, a]) in comp.pixels.as_chunks::<4>().0.iter().enumerate() {
-            if let Some(out) = px.get_mut((i / w + oy) * side + i % w + ox) {
-                *out = egui::Color32::from_rgba_unmultiplied(r, g, b, a);
+        // Composited a band of rows per frame within a few milliseconds (a whole-document
+        // composite in one frame held a new document's first frame for a quarter of a second on
+        // a large page); the row shows a blank square until the image is done.
+        let (w, h) = photocraft_compose::thumbnail_size(&snap.doc, SNAPSHOT_SIDE);
+        let side = w.max(h) as usize;
+        let (ox, oy) = ((side - w as usize) / 2, (side - h as usize) / 2);
+        let height = snap.doc.size.height as i32;
+        let bands = self.snapshot_bands.entry((doc, snap.id)).or_insert_with(|| SnapshotBands {
+            image: egui::ColorImage::new([side, side], vec![egui::Color32::TRANSPARENT; side * side]),
+            next: 0,
+            rows: (height / 64).max(8),
+        });
+        let t0 = crate::gpu_canvas::now_ms();
+        while bands.next < height && crate::gpu_canvas::now_ms() - t0 < SNAPSHOT_BAND_MS {
+            let b0 = crate::gpu_canvas::now_ms();
+            let band = photocraft_geom::Rect::new(0, bands.next, snap.doc.size.width as i32, (bands.next + bands.rows).min(height));
+            let buf = photocraft_compose::render_reduced_damage(&snap.doc, w, h, band);
+            let part = crate::canvas::display_image(None, &buf);
+            let (bx, by) = (buf.rect.x0.max(0) as usize, buf.rect.y0.max(0) as usize);
+            for (i, px) in part.pixels.iter().enumerate() {
+                let (x, y) = (ox + bx + i % part.size[0], oy + by + i / part.size[0]);
+                if let Some(out) = bands.image.pixels.get_mut(y * side + x).filter(|_| x < side) {
+                    *out = *px;
+                }
             }
+            bands.next = band.y1;
+            let took = (crate::gpu_canvas::now_ms() - b0).max(0.1);
+            bands.rows = ((f64::from(bands.rows) * (SNAPSHOT_BAND_MS / 2.0) / took) as i32).clamp(8, height.max(8));
         }
-        let tex = ctx.load_texture(format!("snapshot-{}", snap.id), egui::ColorImage::new([side, side], px), egui::TextureOptions::LINEAR);
+        if bands.next < height {
+            ctx.request_repaint();
+            return self.blank_thumb(ctx);
+        }
+        let Some(done) = self.snapshot_bands.remove(&(doc, snap.id)) else { return self.blank_thumb(ctx) };
+        let tex = ctx.load_texture(format!("snapshot-{}", snap.id), done.image, egui::TextureOptions::LINEAR);
         let id = tex.id();
         self.snapshot_thumbs.insert((doc, snap.id), tex);
         id
@@ -170,6 +195,20 @@ impl PhotocraftApp {
             }
         }
     }
+}
+
+/// The History panel's snapshot thumbnails: their side (pixels), and the time a frame may spend
+/// compositing one (ms).
+const SNAPSHOT_SIDE: u32 = 56;
+const SNAPSHOT_BAND_MS: f64 = 4.0;
+
+/// A History snapshot thumbnail being composited a band of rows per frame.
+pub(crate) struct SnapshotBands {
+    image: egui::ColorImage,
+    /// The next document row to draw.
+    next: i32,
+    /// Document rows per band, sized by the last band's time.
+    rows: i32,
 }
 
 /// Layer and mask thumbnails rebuilt per frame at most (see `PhotocraftApp::thumb_budget`).

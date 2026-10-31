@@ -398,6 +398,19 @@ pub(crate) fn on_pool(f: impl FnOnce() + Send + 'static) {
 
 pub(crate) const POOL_THREADS: bool = cfg!(all(target_arch = "wasm32", target_feature = "atomics"));
 
+/// Whether work the UI only needs eventually (a panel's image, TypeR's page) can go to another
+/// thread: the browser threads build's worker pool, or a native thread. Not in tests, which read
+/// the result the frame they ask for it.
+pub(crate) const OFF_THREAD: bool = POOL_THREADS || cfg!(all(not(target_arch = "wasm32"), not(test)));
+
+/// Runs `f` on another thread where [`OFF_THREAD`] (here, without one).
+pub(crate) fn off_thread(f: impl FnOnce() + Send + 'static) {
+    #[cfg(not(target_arch = "wasm32"))]
+    rayon::spawn(f);
+    #[cfg(target_arch = "wasm32")]
+    on_pool(f);
+}
+
 /// Open a file in the background: a tab appears at once and shows the progress; the document
 /// replaces it when decoded. `path` is remembered for File › Save and Open Recent.
 pub fn start_open(app: &mut PhotocraftApp, name: &str, path: Option<String>, source: OpenSource) -> Result<(), String> {

@@ -315,6 +315,23 @@ pub fn wand_reference(img: &[[u8; 4]], area: Rect, seed: (i32, i32), sample: u32
 
 /// [`wand_region`] comparing against [`wand_reference`] with Sample Size `sample`.
 pub fn wand_region_sampled(img: &[[u8; 4]], area: Rect, seed: (i32, i32), sample: u32, tolerance: f32, contiguous: bool, anti_alias: bool) -> Option<Region> {
+    wand_region_limited(img, area, seed, sample, tolerance, contiguous, anti_alias, usize::MAX)
+}
+
+/// [`wand_region_sampled`] giving up (`None`) once a contiguous fill passes `max_pixels`: for
+/// callers that refuse a region that large anyway (TypeR's bubble finder), without filling and
+/// anti-aliasing a whole page first.
+#[allow(clippy::too_many_arguments)]
+pub fn wand_region_limited(
+    img: &[[u8; 4]],
+    area: Rect,
+    seed: (i32, i32),
+    sample: u32,
+    tolerance: f32,
+    contiguous: bool,
+    anti_alias: bool,
+    max_pixels: usize,
+) -> Option<Region> {
     if !area.contains(seed.0, seed.1) || img.len() < area.width() as usize * area.height() as usize {
         return None;
     }
@@ -332,6 +349,7 @@ pub fn wand_region_sampled(img: &[[u8; 4]], area: Rect, seed: (i32, i32), sample
     if contiguous {
         // Span fill: fill a run, then scan the rows above and below it for new seeds.
         let mut stack = vec![((seed.0 - area.x0) as usize, (seed.1 - area.y0) as usize)];
+        let mut filled = 0usize;
         while let Some((x, y)) = stack.pop() {
             let row = y * w;
             if marks[row + x] != 0 {
@@ -345,6 +363,10 @@ pub fn wand_region_sampled(img: &[[u8; 4]], area: Rect, seed: (i32, i32), sample
                 r += 1;
             }
             marks[row + l..=row + r].fill(255);
+            filled += r - l + 1;
+            if filled > max_pixels {
+                return None;
+            }
             (bx0, bx1, by0, by1) = (bx0.min(l), bx1.max(r), by0.min(y), by1.max(y));
             for ny in [y.wrapping_sub(1), y + 1] {
                 if ny >= h {

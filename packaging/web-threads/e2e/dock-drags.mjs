@@ -4,8 +4,11 @@
 // must not hold the page for more than `limit` ms (the browser's `longtask` entries), from the
 // press to a moment after the release, so the frame that commits the gesture counts too. That
 // frame used to rebuild the Navigator's image of the whole page on the UI thread: hundreds of
-// milliseconds after every stroke or move. Prints each drag's tasks and the app's slow frames
-// with what they spent their time on (`perf_span`), and fails when a task went over the limit.
+// milliseconds after every stroke or move. Then the same with the Navigator, History, Character
+// and TypeR panels floating: Hand pans, a Move, and new type layers after a pixel edit (TypeR's
+// TextShapeR composited the whole page for its bubble on the frame after each). Prints each
+// step's tasks and the app's slow frames with what they spent their time on (`perf_span`), and
+// fails when a task went over the limit. Works on either web build (single-threaded or threads).
 //
 //   CHROME=<chromium> node dock-drags.mjs <url> [limit ms = 100] [cpu throttle = 1]
 import { chromium } from 'playwright-core';
@@ -88,6 +91,35 @@ await ex('select.deselect');
 const pixel = layers.filter((l) => l.kind === 'Pixel').at(-1);
 await drag('brush', 'brush', [300, 400], [1700, 2600], async () => { await ex('layer.select', { layer: pixel.id }); });
 await drag('remove with AI', 'removeAi', [500, 500], [900, 1500]);
+// The panels floating, TypeR among them.
+await req('ui.set', { panels: { navigator: true, history: true, character: true, typer: true }, dock: { floating: { navigator: [180, 140], history: [180, 460], character: [420, 140], typer: [420, 460] } } });
+await req('ui.set', { fit: true });
+await p.waitForTimeout(1500);
+await drag('hand (floating panels)', 'hand', [1000, 1500], [700, 1100]);
+await req('ui.set', { fit: true });
+await drag('move (floating panels)', 'move', [bx + bw / 2 + 400, by + bh / 2 + 300], [bx + bw / 2, by + bh / 2], async () => { await ex('layer.select', { layer: type.id }); });
+// New type layers after a pixel edit each, as a typesetter goes from cleaning to lettering.
+const step = async (name, run) => {
+  await p.evaluate((s) => { self.__step = s; }, name);
+  const mark = slow.length;
+  await run();
+  await p.waitForTimeout(2000);
+  await p.evaluate(() => { self.__step = 'idle'; });
+  const tasks = await p.evaluate((s) => self.__long.filter((x) => x.step === s).map((x) => x.ms), name);
+  const max = Math.max(0, ...tasks);
+  results.push({ name, max, tasks: tasks.length });
+  console.log(`${max <= limit ? 'PASS' : 'FAIL'} ${name}: longest task ${max} ms (${tasks.length} over 50 ms)`);
+  for (const s of slow.slice(mark)) console.log(`  ${s.text}`);
+};
+for (let i = 0; i < 3; i++) {
+  await ex('layer.select', { layer: pixel.id });
+  await ex('select.rect', { x: 200 + i * 300, y: 300, width: 200, height: 200 });
+  await ex('edit.fill', { color: '#ffffff' });
+  await ex('select.deselect');
+  await step(`new type layer ${i + 1} (TypeR floating)`, async () => {
+    await ex('type.create', { text: `Linea ${i + 1}: un globo de prueba con texto`, x: 300 + i * 300, y: 400, size: 48 });
+  });
+}
 await b.close();
 const failed = results.filter((r) => r.max > limit);
 console.log(failed.length ? `FAIL ${failed.length} of ${results.length} drags held the page over ${limit} ms` : `PASS all ${results.length} drags under ${limit} ms`);

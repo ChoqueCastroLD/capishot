@@ -29,6 +29,7 @@ mod preview;
 pub mod script_editor;
 mod settings;
 mod shaper_ui;
+pub(crate) use shaper_ui::PageJob;
 pub(crate) mod style_editor;
 mod styles;
 pub(crate) mod tabs;
@@ -186,10 +187,16 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let full = ui.available_rect_before_wrap();
     egui::Frame::NONE.inner_margin(egui::Margin::symmetric(6, 4)).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        tabs::show(app, ui);
+        {
+            let _s = crate::perf_span::span("typer.tabs");
+            tabs::show(app, ui);
+        }
         // A short group (Essentials with TypeR on a small screen) shows the line as one row, so
         // the script and the styles keep some room.
-        preview::show(app, ui, full.height() < COMPACT_BELOW);
+        {
+            let _s = crate::perf_span::span("typer.preview");
+            preview::show(app, ui, full.height() < COMPACT_BELOW);
+        }
         if !app.ui.typer.message.is_empty() {
             let msg = app.ui.typer.message.clone();
             ui.horizontal(|ui| {
@@ -210,12 +217,17 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             (true, false) => lists,
             _ => 0.0,
         };
-        script_editor::show(app, ui, script_h);
+        {
+            let _s = crate::perf_span::span("typer.script");
+            script_editor::show(app, ui, script_h);
+        }
         styles_bar(app, ui, lists, script_open && styles_open);
         if styles_open {
             let styles_h = if script_open { (lists - script_h).max(30.0) } else { lists };
+            let _s = crate::perf_span::span("typer.styles");
             styles::show(app, ui, styles_h);
         }
+        let _s = crate::perf_span::span("typer.footer");
         footer_row(app, ui);
     });
 }
