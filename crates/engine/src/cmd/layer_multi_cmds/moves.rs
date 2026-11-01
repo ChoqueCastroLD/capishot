@@ -286,7 +286,7 @@ fn shift_shown(doc: &Document, l: &mut Layer, dx: i32, dy: i32) {
     match &mut l.content {
         LayerContent::Raster(s) => *s = translate_surface(s, dx, dy),
         LayerContent::Text(t) => {
-            t.transform = a.mul(&t.transform);
+            t.translate(f64::from(dx), f64::from(dy));
             if let Some(c) = &mut t.cache {
                 *c = translate_surface(c, dx, dy);
             }

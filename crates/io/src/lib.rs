@@ -62,6 +62,7 @@ pub mod pattern_map;
 mod pcraft_cache;
 pub mod pdf;
 mod pdn;
+mod perspective_type;
 pub use pcraft_cache::PcraftExportCache;
 pub mod pixels;
 mod psd_export;

@@ -298,7 +298,7 @@ pub fn text_path(doc: &Document, t: &TextLayer) -> Path {
     let l = layout(doc, t);
     let warp = photocraft_text::render::layout_deform(&l, t);
     let mut subpaths = Vec::new();
-    for glyph in photocraft_text::render::outlines(&l, &t.transform, warp.as_ref()) {
+    for glyph in photocraft_text::render::outlines_deformed(&l, &t.transform, warp.as_ref(), t.perspective.as_ref().filter(|p| p.is_valid())) {
         let cs = contours(&glyph);
         let Some(outer) = cs.iter().map(|k| signed_area(k)).max_by(|a, b| a.abs().total_cmp(&b.abs())) else { continue };
         let (fills, holes): (Vec<_>, Vec<_>) = cs.into_iter().partition(|k| signed_area(k).signum() == outer.signum());

@@ -29,6 +29,10 @@ pub(crate) fn box_shape(app: &PhotocraftApp, id: LayerId) -> Option<(f32, f32, f
 
 /// The paragraph-box handle under the document point, if the layer is paragraph text.
 pub(crate) fn box_handle_at(app: &mut PhotocraftApp, id: LayerId, x: f64, y: f64) -> Option<u8> {
+    // Type in perspective has no box handles: the box is resized in its own space, not the page's.
+    if super::layout::perspective(app, id).is_some() {
+        return None;
+    }
     let (bx, by, w, h) = box_shape(app, id)?;
     let (_, aff, _) = layout(app, id)?;
     let (r, b) = (bx + w, by + h);
@@ -99,6 +103,7 @@ fn resize_box(app: &mut PhotocraftApp, ed: &TextEdit, r: BoxResize, x: f64, y: f
 pub(crate) fn inside_box(app: &mut PhotocraftApp, id: LayerId, x: f64, y: f64) -> bool {
     // Type in a path: anywhere inside the path.
     let area = app.session.active().and_then(|s| text_layer(&s.doc, id)).and_then(|t| photocraft_text::in_path::Area::of(&t.shape));
+    let (x, y) = super::layout::unproject(app, id, x, y);
     if let Some(area) = area {
         let Some((_, aff, _)) = layout(app, id) else { return false };
         let (tx, ty) = to_text(&aff, x, y);
@@ -535,6 +540,7 @@ pub fn multi_click(app: &mut PhotocraftApp, egui_count: u32, x: f64, y: f64) {
     let id = LayerId(ed.layer);
     let Some(text) = current_text(app, id) else { return };
     let laid = layout(app, id);
+    let (x, y) = super::layout::unproject(app, id, x, y);
     let (caret, line) = match &laid {
         Some((l, aff, t)) if *t == text && x.is_finite() && y.is_finite() => {
             let (tx, ty) = to_text(aff, x, y);

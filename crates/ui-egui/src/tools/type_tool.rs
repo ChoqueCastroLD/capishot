@@ -68,6 +68,7 @@ pub use ime_edit::caret_screen_rect;
 pub(crate) use keys::flow_key;
 pub use keys::handle_keys;
 pub use layout::layout;
+pub(crate) use layout::perspective as perspective_of;
 pub(crate) use layout::{hit_layer, offset_at, shows_own_layout};
 #[cfg(test)]
 use options_bar::num_field;

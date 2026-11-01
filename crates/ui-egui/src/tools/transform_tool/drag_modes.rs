@@ -53,7 +53,10 @@ pub(super) fn handle_indicator(app: &PhotocraftApp, t: &TransformSession, h: Hit
 /// Distort and Perspective in `enable_rules::disabled`, for the box's own layer. A box on a path,
 /// on the selection outline or on a lone mask or channel moves no type.
 fn distort_refused(app: &PhotocraftApp, t: &TransformSession) -> bool {
-    t.path.is_none() && !t.selection && t.target.is_none() && moves_kind(app, t, |c| matches!(c, LayerContent::Text(_)))
+    // Type in a vector box (Type › Perspective, Edit › Transform › Distort or Perspective) is
+    // distorted as type; so is type among several layers. A plain Free Transform of type scales.
+    let vector = app.transform_preview.as_ref().is_some_and(|pv| pv.vector_type.is_some());
+    !vector && t.layers.is_empty() && t.path.is_none() && !t.selection && t.target.is_none() && moves_kind(app, t, |c| matches!(c, LayerContent::Text(_)))
 }
 
 /// Where Distort and Perspective are refused ([`distort_refused`]), ⌘-drag and ⌘⌥⇧-drag of a

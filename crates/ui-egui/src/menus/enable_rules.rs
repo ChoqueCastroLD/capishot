@@ -131,30 +131,22 @@ pub fn disabled(app: &crate::PhotocraftApp, id: &str) -> bool {
     if transform {
         let targets = photocraft_engine::transform_cmds::selection_targets(st);
         if targets.len() > 1 || targets.first() != st.active_layer.as_ref() {
-            let text = targets.iter().any(|t| st.doc.layer(*t).is_some_and(|l| matches!(l.content, LayerContent::Text(_))));
             return match id {
                 "edit.transform.warp"
                 | "edit.transform.splitWarpCrosswise"
                 | "edit.transform.splitWarpHorizontally"
                 | "edit.transform.splitWarpVertically"
                 | "edit.transform.removeWarpSplit" => true,
-                "edit.transform.distort" | "edit.transform.perspective" => text,
                 _ => false,
             };
         }
     }
-    // Editable type can be scaled, rotated and skewed but not distorted (#2630): Photoshop greys
-    // Distort and Perspective until the type is rasterized, and the split warps (Warp on type
-    // offers only the warp styles, #3004). A targeted unlinked mask or channel of the type layer
-    // is pixels, and can be.
+    // Type is distorted and put in perspective as type (it stays editable), but the split warps
+    // don't apply to it (Warp on type offers only the warp styles, #3004). A targeted unlinked
+    // mask or channel of the type layer is pixels, and can be.
     if matches!(
         id,
-        "edit.transform.distort"
-            | "edit.transform.perspective"
-            | "edit.transform.splitWarpCrosswise"
-            | "edit.transform.splitWarpHorizontally"
-            | "edit.transform.splitWarpVertically"
-            | "edit.transform.removeWarpSplit"
+        "edit.transform.splitWarpCrosswise" | "edit.transform.splitWarpHorizontally" | "edit.transform.splitWarpVertically" | "edit.transform.removeWarpSplit"
     ) && active.is_some_and(|l| matches!(l.content, LayerContent::Text(_)))
         && photocraft_engine::transform_cmds::lone_target(&st.doc, st.active_layer, &serde_json::json!({ "target": crate::canvas::paint_target(app) }))
             .is_ok_and(|t| t.is_none())

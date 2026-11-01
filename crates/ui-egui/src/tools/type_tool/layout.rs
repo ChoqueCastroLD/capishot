@@ -18,6 +18,26 @@ pub fn layout(app: &mut PhotocraftApp, id: LayerId) -> Option<(Arc<TextLayout>, 
     Some((l, transform, t.text.clone()))
 }
 
+/// Type layer `id`'s perspective, when it has one (Type › Perspective): the drawn text is its
+/// layout through the transform, then this map.
+pub(crate) fn perspective(app: &PhotocraftApp, id: LayerId) -> Option<photocraft_doc::text::TextPerspective> {
+    app.session.active().and_then(|st| text_layer(&st.doc, id)).and_then(|t| t.perspective).filter(|p| p.is_valid())
+}
+
+/// A document point on type layer `id` back before its perspective (where its layout's transform
+/// puts the text): what a tap on perspective type hits.
+pub(crate) fn unproject(app: &PhotocraftApp, id: LayerId, x: f64, y: f64) -> (f64, f64) {
+    perspective(app, id).and_then(|p| p.unapply(x, y)).unwrap_or((x, y))
+}
+
+/// A point the layout's transform placed, through the layer's perspective (if any).
+pub(crate) fn project(p: Option<&photocraft_doc::text::TextPerspective>, pt: Point) -> Point {
+    match p.and_then(|p| p.apply(pt.x, pt.y)) {
+        Some((x, y)) => Point::new(x, y),
+        None => pt,
+    }
+}
+
 pub(super) fn to_text(aff: &Affine, x: f64, y: f64) -> (f32, f32) {
     let p = aff.inverse().unwrap_or(Affine::IDENTITY).apply(Point::new(x, y));
     (p.x as f32, p.y as f32)
@@ -57,7 +77,8 @@ pub(crate) fn hit_layer(app: &mut PhotocraftApp, x: f64, y: f64) -> Option<Layer
             return true;
         }
         let Some((l, aff, _)) = layout(app, *id) else { return false };
-        let (tx, ty) = to_text(&aff, x, y);
+        let (ux, uy) = unproject(app, *id, x, y);
+        let (tx, ty) = to_text(&aff, ux, uy);
         // Type in a path: a click anywhere inside its path edits it, as in Photoshop.
         let in_area = app
             .session
@@ -87,6 +108,7 @@ pub(super) fn hit_offset(app: &mut PhotocraftApp, id: LayerId, x: f64, y: f64) -
 /// The character offset of the caret position nearest document point (`x`, `y`) in layer `id`.
 pub(crate) fn offset_at(app: &mut PhotocraftApp, id: LayerId, x: f64, y: f64) -> usize {
     let Some((l, aff, text)) = layout(app, id) else { return 0 };
+    let (x, y) = unproject(app, id, x, y);
     let (tx, ty) = to_text(&aff, x, y);
     // Type on a path: the point's place along the path is the position in the (single) line.
     let shape = app.session.active().and_then(|s| text_layer(&s.doc, id).map(|t| t.shape.clone()));

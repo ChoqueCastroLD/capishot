@@ -43,7 +43,9 @@ pub(super) fn document_to_psd_sized(doc: &Document, opts: &PsdExportOptions, dep
         return file;
     }
     let fmt = doc.pixel_format();
-    export_supported_document(doc, opts, depth, ctl, fmt, size_limit)
+    // Type in perspective goes out as the smart object Photoshop can show it as.
+    let wrapped = crate::perspective_type::wrap_for_psd(doc);
+    export_supported_document(wrapped.as_ref().unwrap_or(doc), opts, depth, ctl, fmt, size_limit)
 }
 
 fn export_supported_document(

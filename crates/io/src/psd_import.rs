@@ -1232,6 +1232,7 @@ fn finish_import(mut doc: Document, mut cx: Ctx<'_>, ctl: &photocraft_raster::In
     cx.warnings.extend(warnings);
     crate::slices_map::import(&mut doc);
     cx.warnings.extend(crate::text_styles_map::import(&mut doc));
+    crate::perspective_type::unwrap_after_import(&mut doc);
     if ctl.cancelled() {
         return None;
     }
