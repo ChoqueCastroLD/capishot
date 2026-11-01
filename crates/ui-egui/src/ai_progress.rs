@@ -116,7 +116,7 @@ fn percent_in(s: &str) -> Option<f32> {
 /// `(3, 8)` from "… (3 of 8)" or "… (step 3 of 8)".
 fn step_in(s: &str) -> Option<(usize, usize)> {
     let open = s.rfind('(')?;
-    let inner = s[open + 1..].strip_suffix(')')?.trim_start_matches("step ").trim();
+    let inner = s[open + 1..].strip_suffix(')')?.trim_start_matches("step ").trim_start_matches("tile ").trim();
     let (a, b) = inner.split_once(" of ")?;
     let (i, n) = (a.trim().parse().ok()?, b.trim().parse().ok()?);
     (n > 1 && i >= 1 && i <= n).then_some((i, n))

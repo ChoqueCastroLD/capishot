@@ -21,6 +21,8 @@ fn stages_are_read_from_the_progress_messages() {
     assert_eq!(stage("Remove with AI (2 of 5)", 0.3), Stage::Processing { step: Some((2, 5)) });
     assert_eq!(stage("Generating (WebGPU) (step 4 of 20)", 0.3), Stage::Processing { step: Some((4, 20)) });
     assert_eq!(stage("Upscaling with 2x Manga (CPU)", 0.5), Stage::Processing { step: None });
+    assert_eq!(stage("Upscaling with 2x Manga (GPU, DirectML) (tile 3 of 24)", 0.2), Stage::Processing { step: Some((3, 24)) });
+    assert_eq!(stage("Upscaling with 2x Manga (GPU, DirectML) (tile 0 of 24)", 0.1), Stage::Processing { step: None });
     assert_eq!(stage("Remove with AI", 0.0), Stage::Preparing, "nothing reported yet");
     assert_eq!(stage("Remove with AI", 0.999), Stage::Applying);
     assert_eq!(stage(photocraft_engine::ai_cmds::SWITCHING_TO_CPU, 0.5), Stage::Preparing);
