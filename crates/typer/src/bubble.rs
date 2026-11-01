@@ -541,6 +541,15 @@ const OUTLINE_LUMA: f64 = 170.0;
 /// image covering `area`) within 3 px, as TypeR's page detector probes a bubble's outline. Text
 /// left inside the region counts as outline. 1 for an empty mask.
 pub fn outline_dark(mask: &Mask, img: &[[u8; 4]], area: photocraft_geom::Rect) -> f64 {
+    outline_dark_with(mask, img, area, false)
+}
+
+/// [`outline_dark`] where the image's edge seals too (a bubble cut by it).
+pub fn outline_dark_walled(mask: &Mask, img: &[[u8; 4]], area: photocraft_geom::Rect) -> f64 {
+    outline_dark_with(mask, img, area, true)
+}
+
+fn outline_dark_with(mask: &Mask, img: &[[u8; 4]], area: photocraft_geom::Rect, walls: bool) -> f64 {
     let (mut samples, mut sealed) = (0usize, 0usize);
     for y in 0..mask.height as i32 {
         for x in 0..mask.width as i32 {
@@ -560,7 +569,10 @@ pub fn outline_dark(mask: &Mask, img: &[[u8; 4]], area: photocraft_geom::Rect) -
                             break;
                         }
                         Some(_) => {}
-                        None => break,
+                        None => {
+                            sealed += usize::from(walls);
+                            break;
+                        }
                     }
                 }
             }

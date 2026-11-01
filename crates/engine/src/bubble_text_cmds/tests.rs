@@ -344,3 +344,99 @@ fn a_real_page_when_given() {
         std::fs::write(out, png.bytes).unwrap();
     }
 }
+
+/// A bubble cut by the image's left edge: still cleaned (its edge is its wall there).
+#[test]
+fn a_bubble_cut_by_the_image_edge_is_cleaned() {
+    let e = ell(120.0, 600.0, 260.0, 170.0);
+    let s0 = page(&|x, y| {
+        let v = e(x, y);
+        if v < 0.97 {
+            [1.0; 3]
+        } else if v < 1.03 {
+            [0.0; 3]
+        } else {
+            [0.9; 3]
+        }
+    });
+    let mut s = s0;
+    let clean = pixels(&s);
+    letter(&mut s, "HELLO", 60.0, 620.0, 56.0, "#000000");
+    let r = s.execute(ID, json!({"x": 150, "y": 520})).unwrap();
+    assert_ne!(r["region"], "bubble", "{r}");
+    let got = pixels(&s);
+    let inside = |x: i32, y: i32| e(x, y) < 0.9;
+    let (mean, off) = residue(&got, &clean, [0, 430, 390, 770], &inside);
+    assert!(mean < 0.002 && off < 0.002, "mean {mean} off {off}");
+    assert_eq!(outline_changed(&got, &clean, &|x, y| (0.97..1.03).contains(&e(x, y))), 0);
+}
+
+/// A page of two panels and a caption that breaks out of the upper one into the gutter (no
+/// outline on that side): the lettering's block is found and cleaned; the panel lines stay.
+fn caption_page() -> (Session, Box<dyn Fn(i32, i32) -> bool>) {
+    // Panel frames: 4 px black, the inside a light grey art fill, the gutter white.
+    let frame = |x: i32, y: i32| {
+        let r1 = (40..960).contains(&x) && (40..700).contains(&y);
+        let r1i = (44..956).contains(&x) && (44..696).contains(&y);
+        let r2 = (40..960).contains(&x) && (740..1460).contains(&y);
+        let r2i = (44..956).contains(&x) && (744..1456).contains(&y);
+        (r1 && !r1i) || (r2 && !r2i)
+    };
+    // The caption: a white quadrilateral over the upper panel's right edge, its outline only on
+    // the panel's side (left and top), open to the gutter on the right.
+    let caption = |x: i32, y: i32| (700..1000).contains(&x) && (300..560).contains(&y) && (x - 700) * 2 >= (300 - y).max(0);
+    let caption_edge = |x: i32, y: i32| ((697..700).contains(&x) && (300..560).contains(&y)) || ((700..958).contains(&x) && (297..300).contains(&y));
+    let s = page(&move |x, y| {
+        if caption_edge(x, y) {
+            [0.0; 3]
+        } else if caption(x, y) {
+            [1.0; 3]
+        } else if frame(x, y) {
+            [0.0; 3]
+        } else if (44..956).contains(&x) && ((44..696).contains(&y) || (744..1456).contains(&y)) {
+            [0.75; 3]
+        } else {
+            [1.0; 3]
+        }
+    });
+    (s, Box::new(frame))
+}
+
+#[test]
+fn a_caption_open_to_the_gutter_is_cleaned_and_the_panel_lines_stay() {
+    let (mut s, frame) = caption_page();
+    let clean = pixels(&s);
+    letter(&mut s, "WHO", 760.0, 400.0, 44.0, "#000000");
+    letter(&mut s, "DID IT", 740.0, 460.0, 44.0, "#000000");
+    let r = s.execute(ID, json!({"x": 800, "y": 420})).unwrap();
+    assert_eq!(r["region"], "textCluster", "{r}");
+    let got = pixels(&s);
+    let (mean, off) = residue(&got, &clean, [720, 330, 990, 540], &|_, _| true);
+    assert!(mean < 0.003 && off < 0.003, "mean {mean} off {off}");
+    let lines = (0..H as i32).flat_map(|y| (0..W as i32).map(move |x| (x, y))).filter(|&(x, y)| frame(x, y)).filter(|&(x, y)| {
+        let k = y as usize * W as usize + x as usize;
+        diff(&got[k], &clean[k]) > 1.0 / 255.0
+    });
+    assert_eq!(lines.count(), 0, "the panel lines untouched");
+}
+
+#[test]
+fn vertical_text_with_furigana_is_one_block() {
+    let (mut s, _) = caption_page();
+    let clean = pixels(&s);
+    // Two columns of letters, each with small "furigana" beside it.
+    for (col, x) in [(0, 900.0), (1, 858.0)] {
+        for (row, ch) in ["A", "B", "C", "D"].iter().enumerate() {
+            let y = 360.0 + row as f64 * 44.0;
+            letter(&mut s, ch, x, y, 38.0, "#000000");
+            if col == 0 {
+                letter(&mut s, "k", x + 30.0, y - 14.0, 12.0, "#000000");
+            }
+        }
+    }
+    let r = s.execute(ID, json!({"x": 905, "y": 400})).unwrap();
+    assert_ne!(r["region"], "bubble", "{r}");
+    let got = pixels(&s);
+    let (mean, off) = residue(&got, &clean, [830, 310, 958, 545], &|_, _| true);
+    assert!(mean < 0.003 && off < 0.004, "every column and its furigana gone: mean {mean} off {off}");
+}

@@ -211,11 +211,7 @@ const ROLE_EFFECTS: &str = "__roleEffects";
 fn role_effects(q: &Value) -> Vec<photocraft_doc::Effect> {
     q.get(ROLE_EFFECTS)
         .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(|e| crate::layer_style::effect_from_params(e.get(0)?.as_str()?, e.get(1)?))
-                .collect()
-        })
+        .map(|a| a.iter().filter_map(|e| crate::layer_style::effect_from_params(e.get(0)?.as_str()?, e.get(1)?)).collect())
         .unwrap_or_default()
 }
 
@@ -268,11 +264,41 @@ fn box_path(mask: &photocraft_typer::bubble::Mask) -> Result<Subpath> {
     Ok(Subpath { closed: true, knots, op: Default::default() })
 }
 
+/// The bubble that opens onto a panel border or the gutter at `(x, y)`: the light area around the
+/// lettering there, inside the lettering's box ([`photocraft_typer::text_cluster`]).
+pub(crate) fn open_bubble(page: &crate::typer_place_cmds::support::PageImage, x: i32, y: i32) -> Option<bubble_find::Found> {
+    let c = photocraft_typer::text_cluster::find(&page.img, page.area, (x, y))?;
+    let [bx0, by0, bx1, by1] = c.rect;
+    let pw = page.area.width() as usize;
+    let sub: Vec<[u8; 4]> = (by0..by1)
+        .flat_map(|y| (bx0..bx1).map(move |x| (x, y)))
+        .map(|(x, y)| page.img[(y - page.area.y0) as usize * pw + (x - page.area.x0) as usize])
+        .collect();
+    let area = photocraft_geom::Rect::new(bx0, by0, bx1, by1);
+    match bubble_find::find_in_box(&sub, area, (x, y)) {
+        Ok(f) if f.interior.count() * 6 > (bx1 - bx0) as usize * (by1 - by0) as usize => Some(f),
+        _ => {
+            let mut m = c.walls.clone();
+            m.px.iter_mut().for_each(|v| *v = !*v);
+            Some(bubble_find::Found { body: m.clone(), interior: m })
+        }
+    }
+}
+
 /// The bubble's path and kind at `(x, y)`: a box (rectangularity above
 /// [`bubble_find::BOX_RECTANGULARITY`]) is narration, anything else a bubble. `want` forces one.
 fn region_at(s: &mut Session, x: i32, y: i32, want: Option<Kind>) -> Result<(Kind, Subpath, f64)> {
     let page = crate::typer_place_cmds::page_image(s)?;
-    let found = bubble_find::find(&page.img, page.area, (x, y)).map_err(no_bubble)?;
+    let found = match bubble_find::find(&page.img, page.area, (x, y)) {
+        Ok(f) => f,
+        // A bubble that opens onto the page edge (its edge a wall), or onto a panel border or
+        // the gutter: the lettering's box bounds it (its sides walls); a box with no light
+        // area to trace is the box itself.
+        Err(miss) => match bubble_find::find_walled(&page.img, page.area, (x, y)) {
+            Ok(f) => f,
+            Err(_) => open_bubble(&page, x, y).ok_or_else(|| no_bubble(miss))?,
+        },
+    };
     let rect = bubble_find::rectangularity(&found.interior).map_or(0.0, |(r, _)| r);
     let kind = want.unwrap_or(if rect > bubble_find::BOX_RECTANGULARITY { Kind::Narration } else { Kind::Bubble });
     let path = if kind == Kind::Narration { box_path(&found.interior)? } else { traced(&found.body)? };
@@ -459,6 +485,32 @@ mod tests {
             }
         }
         b
+    }
+
+    /// A bubble cut by the page's edge: its edge is its wall, and the type goes in it.
+    #[test]
+    fn a_bubble_cut_by_the_page_edge_takes_type() {
+        let mut s = page();
+        outlined(&mut s, "ellipse", [-150, 80, 400, 240], json!({}));
+        let r = s.execute(CMD, json!({"x": 100, "y": 200, "style": "bubble", "text": "Hi there", "size": 18})).unwrap();
+        assert_eq!(r["style"], "bubble", "{r}");
+        let b = knots_box(&r["path"]);
+        assert!(b[0] >= -3.0 && b[2] <= 252.0 && b[1] >= 78.0 && b[3] <= 322.0, "inside the visible bubble: {b:?}");
+    }
+
+    /// Lettering with no outline around it at all (a caption open onto the gutter): the
+    /// lettering's box takes the type, as a box.
+    #[test]
+    fn lettering_with_no_outline_takes_type_in_its_box() {
+        let mut s = page();
+        let bg = s.active().unwrap().doc.layers[0].id;
+        s.execute("type.create", json!({"text": "OLD TEXT", "x": 380, "y": 200, "size": 24})).unwrap();
+        s.execute("layer.mergeDown", json!({})).unwrap();
+        assert_eq!(s.active().unwrap().active_layer, Some(bg));
+        let r = s.execute(CMD, json!({"x": 400, "y": 192, "style": "auto", "text": "New", "size": 14})).unwrap();
+        assert_eq!(r["style"], "narration", "{r}");
+        let b = knots_box(&r["path"]);
+        assert!(b[0] > 330.0 && b[2] < 560.0 && b[1] > 140.0 && b[3] < 240.0, "the lettering's box: {b:?}");
     }
 
     #[test]

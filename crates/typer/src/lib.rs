@@ -31,6 +31,7 @@ pub mod state;
 #[doc(hidden)]
 pub mod synth;
 pub mod tabs;
+pub mod text_cluster;
 pub mod tpl;
 
 pub use bubble::{BubbleHit, Rect, Row, StoredSelection};

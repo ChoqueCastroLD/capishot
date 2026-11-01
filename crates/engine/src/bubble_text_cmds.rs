@@ -434,46 +434,86 @@ fn remove_bubble_text(s: &mut Session, p: &Value) -> Result<Value> {
         new_layer = true;
     }
     let page = crate::typer_place_cmds::page_image(s)?;
-    let found = bubble_find::find(&page.img, page.area, (x, y)).map_err(crate::type_bubble_cmds::no_bubble)?;
-    let interior = found.interior;
-    let region = Rect::new(interior.x0, interior.y0, interior.x0 + interior.width as i32, interior.y0 + interior.height as i32);
-    let (w, h) = (interior.width, interior.height);
-    let d = s.active().ok_or(EngineError::NoDocument)?;
-    let layer_fmt = active.and_then(|id| d.doc.layer(id)).and_then(|l| l.surface()).map(|s| s.format());
-    let layer_px = match (active, layer_fmt) {
-        (Some(id), Some(_)) if editable => d.doc.layer(id).and_then(|l| l.surface()).map(|s| s.read_region(region)),
-        _ => None,
-    };
+    let layer_fmt =
+        s.active().ok_or(EngineError::NoDocument)?.doc.layer(active.unwrap_or(photocraft_doc::LayerId(u64::MAX))).and_then(|l| l.surface()).map(|s| s.format());
     let premul = |c: [f32; 4]| {
         let a = if c[3].is_finite() { c[3].clamp(0.0, 1.0) } else { 0.0 };
         let v = |x: f32| if x.is_finite() { x.clamp(0.0, 1.0) * a } else { 0.0 };
         [v(c[0]), v(c[1]), v(c[2]), a]
     };
-    let src = if sample_all || layer_px.is_none() {
-        // The page image (without type layers), the box clipped to it.
-        let pa = page.area;
-        let pw = pa.width() as usize;
-        let mut px = vec![[0f32; 4]; w * h];
-        for yy in 0..h {
-            for xx in 0..w {
-                let (dx, dy) = (region.x0 + xx as i32, region.y0 + yy as i32);
-                if pa.contains(dx, dy) {
-                    let q = page.img[(dy - pa.y0) as usize * pw + (dx - pa.x0) as usize];
-                    px[yy * w + xx] = premul(q.map(|v| f32::from(v) / 255.0));
+    // The bubble: closed, else cut by the image's edge, else (it opens onto a panel border or the
+    // gutter) the block of lettering under the click with a margin, its panel lines kept as walls.
+    let plan_in = |interior: &Mask| -> Result<Plan> {
+        let s = &*s;
+        let region = Rect::new(interior.x0, interior.y0, interior.x0 + interior.width as i32, interior.y0 + interior.height as i32);
+        let (w, h) = (interior.width, interior.height);
+        let d = s.active().ok_or(EngineError::NoDocument)?;
+        let layer_fmt = active.and_then(|id| d.doc.layer(id)).and_then(|l| l.surface()).map(|s| s.format());
+        let layer_px = match (active, layer_fmt) {
+            (Some(id), Some(_)) if editable => d.doc.layer(id).and_then(|l| l.surface()).map(|s| s.read_region(region)),
+            _ => None,
+        };
+        let premul = |c: [f32; 4]| {
+            let a = if c[3].is_finite() { c[3].clamp(0.0, 1.0) } else { 0.0 };
+            let v = |x: f32| if x.is_finite() { x.clamp(0.0, 1.0) * a } else { 0.0 };
+            [v(c[0]), v(c[1]), v(c[2]), a]
+        };
+        let src = if sample_all || layer_px.is_none() {
+            // The page image (without type layers), the box clipped to it.
+            let pa = page.area;
+            let pw = pa.width() as usize;
+            let mut px = vec![[0f32; 4]; w * h];
+            for yy in 0..h {
+                for xx in 0..w {
+                    let (dx, dy) = (region.x0 + xx as i32, region.y0 + yy as i32);
+                    if pa.contains(dx, dy) {
+                        let q = page.img[(dy - pa.y0) as usize * pw + (dx - pa.x0) as usize];
+                        px[yy * w + xx] = premul(q.map(|v| f32::from(v) / 255.0));
+                    }
                 }
             }
-        }
-        Source { px }
-    } else {
-        let fmt = layer_fmt.ok_or_else(|| EngineError::Other("not a pixel layer".into()))?;
-        let n = fmt.channels().max(1);
-        let raw = layer_px.as_deref().unwrap_or(&[]);
-        if raw.len() != w * h * n {
-            return Err(EngineError::Other("could not read the layer's pixels".into()));
-        }
-        Source { px: raw.chunks_exact(n).map(|c| premul(to_rgba(&fmt, c))).collect() }
+            Source { px }
+        } else {
+            let fmt = layer_fmt.ok_or_else(|| EngineError::Other("not a pixel layer".into()))?;
+            let n = fmt.channels().max(1);
+            let raw = layer_px.as_deref().unwrap_or(&[]);
+            if raw.len() != w * h * n {
+                return Err(EngineError::Other("could not read the layer's pixels".into()));
+            }
+            Source { px: raw.chunks_exact(n).map(|c| premul(to_rgba(&fmt, c))).collect() }
+        };
+        plan(interior, &src, tolerance)
     };
-    let plan = plan(&interior, &src, tolerance)?;
+    let (plan, region_kind) = match bubble_find::find(&page.img, page.area, (x, y)) {
+        Ok(found) => (plan_in(&found.interior)?, "bubble"),
+        Err(miss) => {
+            let mut first: Option<EngineError> = None;
+            let mut out = None;
+            if let Ok(found) = bubble_find::find_walled(&page.img, page.area, (x, y)) {
+                match plan_in(&found.interior) {
+                    Ok(p) => out = Some((p, "edge")),
+                    Err(e) => first = Some(e),
+                }
+            }
+            if out.is_none()
+                && let Some(c) = photocraft_typer::text_cluster::find(&page.img, page.area, (x, y))
+            {
+                let m = crate::type_bubble_cmds::open_bubble(&page, x, y).map(|f| f.interior).unwrap_or_else(|| {
+                    let mut m = c.walls.clone();
+                    m.px.iter_mut().for_each(|v| *v = !*v);
+                    m
+                });
+                match plan_in(&m) {
+                    Ok(p) => out = Some((p, "textCluster")),
+                    Err(e) => first = first.or(Some(e)),
+                }
+            }
+            match out {
+                Some(o) => o,
+                None => return Err(first.unwrap_or_else(|| crate::type_bubble_cmds::no_bubble(miss))),
+            }
+        }
+    };
     let Plan { region, weight, fill, pixels, gradient } = plan;
     let layer = s.edit(LABEL, |doc, act| {
         if new_layer {
@@ -522,12 +562,14 @@ fn remove_bubble_text(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(st) = s.active_mut() {
         st.last_damage = Some(region);
     }
+    let bounds = s.active().map_or(region, |d| region.intersect(&d.doc.bounds()));
     Ok(json!({
         "ok": true,
         "layer": layer.0,
-        "bubbleBounds": [region.x0, region.y0, region.width(), region.height()],
+        "bubbleBounds": [bounds.x0, bounds.y0, bounds.width(), bounds.height()],
         "pixels": pixels,
         "background": if gradient { "gradient" } else { "solid" },
+        "region": region_kind,
         "newLayer": new_layer,
     }))
 }
@@ -542,7 +584,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: LABEL,
         menu: &[],
         shortcut: None,
-        params: r##"{"x":px,"y":px (the click),"tolerance"?:1..255|"auto" (how far from the background, as a colour difference, a pixel counts as text; default auto: from the bubble's noise),"sampleAll"?:bool (model the background from every visible layer, not the active one; default false),"newLayer"?:bool (the result on a new layer above; default false)} → {"ok":true,"layer","bubbleBounds":[x,y,w,h],"pixels" (painted),"background":"solid"|"gradient","newLayer"}. The Bubble Text Remover tool's click: the text in the speech bubble, narration box or SFX bubble at the point is removed without AI. The bubble is found as for type.createInBubble (a click on a letter still finds it); its background is a solid colour or a smooth gradient fitted around the lettering, and only the pixels that differ from it (with their anti-aliased edge, a 1 px feather) are painted with it plus matching noise; a 2 px band along the outline is never touched. Errors: "noBubble (…)" with no bubble there, "notPlain: …" when the background isn't plain (screentone, art: use Remove with AI), "noText: …" when nothing in it differs; none changes anything. A type, shape or other non-pixel active layer gets the result on a new layer. One undo step"##,
+        params: r##"{"x":px,"y":px (the click),"tolerance"?:1..255|"auto" (how far from the background, as a colour difference, a pixel counts as text; default auto: from the bubble's noise),"sampleAll"?:bool (model the background from every visible layer, not the active one; default false),"newLayer"?:bool (the result on a new layer above; default false)} → {"ok":true,"layer","bubbleBounds":[x,y,w,h],"pixels" (painted),"background":"solid"|"gradient","newLayer"}. The Bubble Text Remover tool's click: the text in the speech bubble, narration box or SFX bubble at the point is removed without AI. The bubble is found as for type.createInBubble (a click on a letter still finds it; a bubble cut by the page edge, or one that opens onto a panel border or the gutter, is bounded by the edge or by its lettering's block, its panel lines kept as walls; "region" says which: "bubble", "edge" or "textCluster"); its background is a solid colour or a smooth gradient fitted around the lettering, and only the pixels that differ from it (with their anti-aliased edge, a 1 px feather) are painted with it plus matching noise; a 2 px band along the outline is never touched. Errors: "noBubble (…)" with no bubble there, "notPlain: …" when the background isn't plain (screentone, art: use Remove with AI), "noText: …" when nothing in it differs; none changes anything. A type, shape or other non-pixel active layer gets the result on a new layer. One undo step"##,
         enabled,
         journal: true,
         run: remove_bubble_text,

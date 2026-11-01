@@ -79,6 +79,25 @@ fn luma(p: [u8; 4]) -> f64 {
 /// the outline). What counts as light is relative to the start, so a bubble lighter than a grey
 /// or toned page is found as well as a white one.
 pub fn find(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32)) -> Result<Found, Miss> {
+    find_with(img, area, seed, false, MAX_PAGE_SHARE)
+}
+
+/// [`find`] for a bubble cut by the image's edge (it opens onto the page edge or a panel drawn to
+/// it): the edge counts as the bubble's wall, so a light region reaching it is not refused as
+/// touching it, and its stretch of edge counts as dark outline. Still refused when too large,
+/// too small or without an outline elsewhere (the page background is still no bubble: it leaks
+/// along the gutters to [`MAX_PAGE_SHARE`]).
+pub fn find_walled(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32)) -> Result<Found, Miss> {
+    find_with(img, area, seed, true, MAX_PAGE_SHARE)
+}
+
+/// [`find_walled`] inside a box known to hold one bubble (the lettering's box, when the bubble
+/// opens onto the gutter): the box's sides are walls too, and the region may fill the box.
+pub fn find_in_box(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32)) -> Result<Found, Miss> {
+    find_with(img, area, seed, true, 1.0)
+}
+
+fn find_with(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32), walls: bool, share: f64) -> Result<Found, Miss> {
     let (w, h) = (area.width() as usize, area.height() as usize);
     if w == 0 || h == 0 || img.len() != w * h || !area.contains(seed.0, seed.1) {
         return Err(Miss::Dark);
@@ -114,7 +133,7 @@ pub fn find(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32)) -> R
             }
         }
         let light_min = (f64::from(paper) - LIGHT_TOLERANCE.min(0.4 * f64::from(paper))).ceil().clamp(0.0, 255.0) as u8;
-        match flood_from(img, area, &lum, start, light_min) {
+        match flood_from(img, area, &lum, start, light_min, walls, share) {
             Ok(found) => return Ok(found),
             // Too dark to start here (a letter's edge): not a try.
             Err(Miss::Dark) => continue,
@@ -128,7 +147,7 @@ pub fn find(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32)) -> R
 }
 
 /// The flood from `start` over pixels with no pixel darker than `light_min` within the radius.
-fn flood_from(img: &[[u8; 4]], area: photocraft_geom::Rect, lum: &[u8], start: (i32, i32), light_min: u8) -> Result<Found, Miss> {
+fn flood_from(img: &[[u8; 4]], area: photocraft_geom::Rect, lum: &[u8], start: (i32, i32), light_min: u8, walls: bool, share: f64) -> Result<Found, Miss> {
     let (w, h) = (area.width() as usize, area.height() as usize);
     let at = |x: i32, y: i32| (y - area.y0) as usize * w + (x - area.x0) as usize;
     let r = GAP_RADIUS;
@@ -138,7 +157,7 @@ fn flood_from(img: &[[u8; 4]], area: photocraft_geom::Rect, lum: &[u8], start: (
     let passable = |x: i32, y: i32| {
         disc.iter().all(|(dx, dy)| {
             let (px, py) = (x + dx, y + dy);
-            !area.contains(px, py) || lum[at(px, py)] >= light_min
+            if area.contains(px, py) { lum[at(px, py)] >= light_min } else { !walls }
         })
     };
     if !passable(start.0, start.1) {
@@ -147,7 +166,7 @@ fn flood_from(img: &[[u8; 4]], area: photocraft_geom::Rect, lum: &[u8], start: (
     let seed = start;
     // The flood over passable pixels; the core stays `r` inside the page, so one that gets
     // there touches the edge.
-    let cap = MAX_PIXELS.min(((w * h) as f64 * MAX_PAGE_SHARE) as usize).max(1);
+    let cap = MAX_PIXELS.min(((w * h) as f64 * share) as usize).max(1);
     let mut seen = vec![false; w * h];
     let mut core: Vec<(i32, i32)> = vec![seed];
     seen[at(seed.0, seed.1)] = true;
@@ -155,7 +174,7 @@ fn flood_from(img: &[[u8; 4]], area: photocraft_geom::Rect, lum: &[u8], start: (
     let (mut x0, mut y0, mut x1, mut y1) = (seed.0, seed.1, seed.0, seed.1);
     while let Some(&(x, y)) = core.get(i) {
         i += 1;
-        if x - r <= area.x0 || y - r <= area.y0 || x + r >= area.x1 - 1 || y + r >= area.y1 - 1 {
+        if !walls && (x - r <= area.x0 || y - r <= area.y0 || x + r >= area.x1 - 1 || y + r >= area.y1 - 1) {
             return Err(Miss::Edge);
         }
         if core.len() > cap {
@@ -186,20 +205,21 @@ fn flood_from(img: &[[u8; 4]], area: photocraft_geom::Rect, lum: &[u8], start: (
         }
     }
     interior.fill_holes();
-    judge(img, area, interior)
+    judge(img, area, interior, walls, share)
 }
 
-fn judge(img: &[[u8; 4]], area: photocraft_geom::Rect, interior: Mask) -> Result<Found, Miss> {
+fn judge(img: &[[u8; 4]], area: photocraft_geom::Rect, interior: Mask, walls: bool, share: f64) -> Result<Found, Miss> {
     let b = interior.bounds().ok_or(Miss::TooSmall)?;
     let count = interior.count();
     if (count as f64) < bubble::MIN_AREA || f64::from(b.width().min(b.height())) < bubble::MIN_SIDE {
         return Err(Miss::TooSmall);
     }
-    if (count as f64) > MAX_PAGE_SHARE * f64::from(area.width()) * f64::from(area.height()) {
+    if (count as f64) > share * f64::from(area.width()) * f64::from(area.height()) {
         return Err(Miss::TooBig);
     }
     let fill = count as f64 / (f64::from(b.width()) * f64::from(b.height())).max(1.0);
-    if fill < bubble::MIN_FILL || bubble::outline_dark(&interior, img, area) < bubble::MIN_OUTLINE_DARK {
+    let dark = if walls { bubble::outline_dark_walled(&interior, img, area) } else { bubble::outline_dark(&interior, img, area) };
+    if fill < bubble::MIN_FILL || dark < bubble::MIN_OUTLINE_DARK {
         return Err(Miss::NotBubble);
     }
     let radius = bubble::opening_radius(f64::from(b.width()), f64::from(b.height()));
