@@ -151,6 +151,7 @@ pub fn run_entry(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str) {
     if let Some(name) = id.strip_prefix("tool:") {
         if let Some(t) = Tool::from_name(name) {
             crate::tool_memory::select(app, t);
+            crate::tool_toast::show_picked(app, ctx, t);
         }
         return;
     }
@@ -981,6 +982,7 @@ fn master_sheet(app: &mut PhotocraftApp, ctx: &egui::Context, screen: Rect) {
     }
     if let Some(tool) = pick_tool {
         crate::tool_memory::select(app, tool);
+        crate::tool_toast::show_picked(app, ctx, tool);
         set_sheet(ctx, Sheet::Closed);
     }
     if let Some(g) = panel {

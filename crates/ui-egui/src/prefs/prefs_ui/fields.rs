@@ -61,6 +61,10 @@ pub(super) fn humanize(key: &str) -> String {
     if key == "notificationDurationSeconds" {
         return "Notification Duration (seconds)".into();
     }
+    // Tools: repeating a group's letter steps through it, ⇧ backwards (off: Photoshop's keys).
+    if key == "repeatLetterCycles" {
+        return "Repeat the Letter to Switch Tools; Shift Goes Back".into();
+    }
     // Tools: arrow-key nudges bundle into one History state (#2259).
     if key == "bundleNudges" {
         return "Bundle Arrow-Key Nudges".into();
@@ -393,8 +397,14 @@ pub(super) fn export_field_visible(obj: &Map<String, Value>, key: &str) -> bool 
 }
 
 /// The pause that bundles arrow-key nudges means nothing with Bundle Arrow-Key Nudges off (#2259).
+/// Use Shift Key for Tool Switch is Photoshop's classic choice: it only applies with Repeat the
+/// Letter to Switch Tools off.
 pub(super) fn tools_field_visible(obj: &Map<String, Value>, key: &str) -> bool {
-    key != "nudgeBundlePauseMs" || obj.get("bundleNudges").and_then(Value::as_bool) != Some(false)
+    match key {
+        "nudgeBundlePauseMs" => obj.get("bundleNudges").and_then(Value::as_bool) != Some(false),
+        "useShiftKeyForToolSwitch" => obj.get("repeatLetterCycles").and_then(Value::as_bool) == Some(false),
+        _ => true,
+    }
 }
 
 /// A titled, outlined group of settings (Photoshop's Interface page has Appearance,

@@ -120,6 +120,82 @@ pub fn bindings(app: &PhotocraftApp) -> Vec<(String, KeyboardShortcut)> {
     all
 }
 
+/// Whether the keyboard belongs to text being typed, so no single-key shortcut (a tool letter,
+/// cycling a tool group, D, X, digits, a bare ⇧+letter) may fire: the one check every single-key
+/// shortcut goes through. True while
+/// - a type layer is being edited (Type, Bubble Type, in a path or in perspective);
+/// - any text field has focus (dialogs, panel fields, a layer rename, the palette and font search,
+///   the TypeR script and style editors, number and hex fields, Preferences);
+/// - an input method is composing;
+/// - a menu or dropdown list is open (its letters pick an item);
+/// - a text input outside the app has the keyboard (the web page's own fields).
+pub fn keyboard_captured_by_text(app: &PhotocraftApp, ctx: &egui::Context) -> bool {
+    app.ui.text_edit.is_some()
+        || app.ui.palette_open
+        || app.external_text_focus
+        || Focus::of(ctx) == Focus::Text
+        || ime_composing(ctx)
+        || crate::menu_nav::is_open(ctx)
+        || crate::menu_keys::is_focused(ctx)
+        || crate::widgets::dropdown_list_open(ctx)
+}
+
+/// Whether an input method composition is under way (a pre-edit since the last commit), kept
+/// across frames from this frame's IME events.
+fn ime_composing(ctx: &egui::Context) -> bool {
+    let id = egui::Id::unique("shortcut_dispatch::ime_composing");
+    let was = ctx.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
+    let (on, active) = ctx.input(|i| {
+        let mut on = was;
+        let mut active = false;
+        for e in &i.events {
+            match e {
+                egui::Event::Ime(egui::ImeEvent::Preedit { text: t, .. }) => {
+                    on = !t.is_empty();
+                    active = true;
+                }
+                // The key events that come with a commit are the composition's, too.
+                egui::Event::Ime(egui::ImeEvent::Commit(_)) => {
+                    on = false;
+                    active = true;
+                }
+                _ => {}
+            }
+        }
+        (on, active)
+    });
+    if on != was {
+        ctx.data_mut(|d| d.insert_temp(id, on));
+    }
+    on || active
+}
+
+/// A shortcut with no ⌘, Ctrl or ⌥: a letter, digit or symbol alone or with ⇧, which typing produces.
+pub fn single_key(sc: &KeyboardShortcut) -> bool {
+    !(sc.modifiers.command || sc.modifiers.ctrl || sc.modifiers.mac_cmd || sc.modifiers.alt) && !is_function_or_navigation(sc.logical_key)
+}
+
+fn is_function_or_navigation(k: Key) -> bool {
+    matches!(
+        k,
+        Key::F1
+            | Key::F2
+            | Key::F3
+            | Key::F4
+            | Key::F5
+            | Key::F6
+            | Key::F7
+            | Key::F8
+            | Key::F9
+            | Key::F10
+            | Key::F11
+            | Key::F12
+            | Key::Escape
+            | Key::Enter
+            | Key::Tab
+    )
+}
+
 /// Where keyboard focus is: nowhere (the canvas), on a widget (a slider, the Curves graph, a
 /// button reached with Tab), or in a text field.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -238,8 +314,11 @@ pub fn dispatch_pressed(app: &mut PhotocraftApp, ctx: &egui::Context, focus: Foc
         return false;
     }
     const TEXT_OWNED: [&str; 6] = ["edit.copy", "edit.cut", "edit.paste", "edit.copyMerged", "select.all", "edit.pasteSpecial.pasteInPlace"];
-    let table: Vec<(String, KeyboardShortcut)> =
-        bindings(app).into_iter().filter(|(id, sc)| focus.allows(sc) && !(editing && TEXT_OWNED.contains(&id.as_str()))).collect();
+    let captured = keyboard_captured_by_text(app, ctx);
+    let table: Vec<(String, KeyboardShortcut)> = bindings(app)
+        .into_iter()
+        .filter(|(id, sc)| focus.allows(sc) && !(editing && TEXT_OWNED.contains(&id.as_str())) && !(captured && single_key(sc)))
+        .collect();
     let command = |e: &egui::Event| match e {
         egui::Event::Key { key, physical_key, pressed: true, modifiers, .. } => {
             let by_position = physical_key

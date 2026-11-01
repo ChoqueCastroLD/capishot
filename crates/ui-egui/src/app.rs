@@ -28,9 +28,9 @@ mod window;
 pub(crate) use files::remember_new_document;
 pub(crate) use input::read_dropped;
 pub(crate) use targets::adjustment_layer_active;
+pub(crate) use thumbs::SnapshotBands;
 #[cfg(test)]
 pub(crate) use thumbs::layer_thumb_frame;
-pub(crate) use thumbs::SnapshotBands;
 pub use thumbs::{THUMBS_PER_FRAME, surface_fingerprint};
 
 impl PhotocraftApp {
@@ -91,6 +91,7 @@ impl PhotocraftApp {
             control_rx: None,
             captures: crate::screenshot::Captures::default(),
             type_ime: type_tool::ImeState::default(),
+            external_text_focus: false,
             input_waiters: Vec::new(),
             live_adjust: None,
             frame: 0,

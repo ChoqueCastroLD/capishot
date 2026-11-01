@@ -413,6 +413,7 @@ impl PhotocraftApp {
         canvas::extra_windows(self, &ctx);
         touch_ui::overlays(self, &ctx);
         notices::show(self, &ctx);
+        crate::tool_toast::draw(self, &ctx);
         gpu_status::warm_up(self, &ctx);
         updates_ui::show(self, &ctx);
         gpu_status::show_fallback(self, &ctx);

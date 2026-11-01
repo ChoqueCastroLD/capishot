@@ -137,7 +137,10 @@ fn hold_z_click_zooms_then_a_quick_release_restores() {
 #[test]
 fn shift_letter_cycles_and_never_springs() {
     let mut h = harness(Tool::Brush);
-    h.state_mut().session.edit_prefs(|p| p.tools.use_shift_key_for_tool_switch = true);
+    h.state_mut().session.edit_prefs(|p| {
+        p.tools.repeat_letter_cycles = false;
+        p.tools.use_shift_key_for_tool_switch = true;
+    });
     key_event(&mut h, Key::B, true, false, Modifiers::SHIFT);
     assert_eq!(h.state().ui.tool, Tool::Pencil);
     assert_eq!(h.state().ui.spring, None);

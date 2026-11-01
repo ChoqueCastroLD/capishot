@@ -893,6 +893,11 @@ fn handle_escape_and_view_keys(app: &mut PhotocraftApp, ctx: &egui::Context) {
         }
         return;
     }
+    // Everything below is a single key (tool letters, digits, ⇧+ / ⇧−): never while text has the
+    // keyboard, wherever it is typed.
+    if crate::shortcut_dispatch::keyboard_captured_by_text(app, ctx) {
+        return;
+    }
     // ⇧+ / ⇧− step the blend mode and ⇧⌥ letters pick one (`blend_keys`). Before the tool
     // letters: `consume_key` ignores extra ⇧ and ⌥, so ⇧⌥M would otherwise pick a tool.
     crate::blend_keys::handle(app, ctx);
@@ -913,26 +918,46 @@ fn handle_escape_and_view_keys(app: &mut PhotocraftApp, ctx: &egui::Context) {
     crate::opacity_keys::handle(app, ctx);
 }
 
-/// Selects a tool from its letter key. Pressing the key of the current group cycles within it; with
-/// the Shift-switch preference only ⇧+key cycles. Returns true when a tool key was handled.
+/// Selects a tool from its letter key. From another group the key picks the group's last-used
+/// tool. Within the group in use:
+/// - with Repeat the Letter to Switch Tools (Capishot's default) the key moves to the next tool
+///   and ⇧+key to the previous one, both wrapping; ⇧+key of a letter whose ⇧ combination is a
+///   shortcut of its own ([`shift_conflicts`]) never gets here (that shortcut ran first) and
+///   doesn't cycle;
+/// - without it, Photoshop's classic keys: the key cycles forward, or with Use Shift Key for Tool
+///   Switch only ⇧+key does and the plain key keeps the tool.
+///
+/// Returns true when a tool key was handled.
 fn select_tool_by_key(app: &mut PhotocraftApp, ctx: &egui::Context, pressed: &impl Fn(Key) -> bool) -> bool {
-    let shift_switch = app.session.prefs().tools.use_shift_key_for_tool_switch;
+    if crate::shortcut_dispatch::keyboard_captured_by_text(app, ctx) {
+        return false;
+    }
+    let prefs = &app.session.prefs().tools;
+    let (repeat, shift_switch) = (prefs.repeat_letter_cycles, prefs.use_shift_key_for_tool_switch);
     for t in Tool::ALL {
         if !crate::tool_shortcuts::uses_default(app, t) {
             continue;
         }
         let Some(k) = crate::spring_tools::key_of(t.key()) else { continue };
-        let cycle_shift = shift_switch && ctx.input_mut(|i| i.consume_key(Modifiers::SHIFT, k));
-        if cycle_shift || pressed(k) {
+        let shift_press =
+            ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Key { key, pressed: true, modifiers, .. } if *key == k && modifiers.shift)));
+        let back = shift_press && (repeat || shift_switch) && !shift_conflicts(app, k) && ctx.input_mut(|i| i.consume_key(Modifiers::SHIFT, k));
+        if back || pressed(k) {
             let before = app.ui.tool;
-            let group: Vec<Tool> = Tool::ALL.iter().copied().filter(|x| x.key() == t.key() && crate::tool_shortcuts::uses_default(app, *x)).collect();
-            app.ui.tool = match group.iter().position(|x| *x == app.ui.tool) {
-                Some(i) if shift_switch && !cycle_shift => group[i],
+            let group = group_of(app, t.key());
+            let next = match group.iter().position(|x| *x == app.ui.tool) {
+                Some(i) if repeat && back => group[(i + group.len() - 1) % group.len()],
+                Some(i) if repeat => group[(i + 1) % group.len()],
+                Some(i) if shift_switch && !back => group[i],
                 Some(i) => group[(i + 1) % group.len()],
                 None => app.ui.group_tool(t.key()).filter(|last| group.contains(last)).unwrap_or(group[0]),
             };
+            app.ui.tool = next;
+            if next != before {
+                crate::tool_toast::show(ctx, &group, next, if repeat && back { -1 } else { 1 });
+            }
             // `consume_key` ignores extra ⇧ and ⌥: a ⇧/⌥ switch is never spring-loaded.
-            let (plain, now) = ctx.input(|i| (!cycle_shift && !i.modifiers.shift && !i.modifiers.alt, i.time));
+            let (plain, now) = ctx.input(|i| (!back && !i.modifiers.shift && !i.modifiers.alt, i.time));
             crate::spring_tools::pressed(app, t.key(), before, plain, now);
             if app.ui.spring.is_none() {
                 // Permanent key choices own the tool; held-key switches keep the pen marker.
@@ -942,6 +967,19 @@ fn select_tool_by_key(app: &mut PhotocraftApp, ctx: &egui::Context, pressed: &im
         }
     }
     false
+}
+
+/// The tools a letter cycles through, in toolbar order (those still on their default key).
+pub fn group_of(app: &PhotocraftApp, letter: char) -> Vec<Tool> {
+    Tool::ALL.iter().copied().filter(|x| x.key() == letter && crate::tool_shortcuts::uses_default(app, *x)).collect()
+}
+
+/// Whether ⇧ with the letter `k` is a shortcut of its own (a command or a TypeR key bound to the
+/// bare ⇧+letter): then ⇧+letter keeps doing that and never cycles a tool group back.
+pub fn shift_conflicts(app: &PhotocraftApp, k: Key) -> bool {
+    crate::shortcut_dispatch::bindings(app)
+        .iter()
+        .any(|(_, sc)| sc.logical_key == k && sc.modifiers.shift && !(sc.modifiers.command || sc.modifiers.ctrl || sc.modifiers.mac_cmd || sc.modifiers.alt))
 }
 
 #[cfg(test)]

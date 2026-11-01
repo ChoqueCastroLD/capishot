@@ -18,8 +18,11 @@ fn tool_key_brings_back_the_groups_last_used_tool() {
         handle(app, &ctx);
         ctx.end_pass().textures_delta.clear();
     };
-    // Plain-key cycling (the pref is on by default, as in Photoshop).
-    app.session.edit_prefs(|p| p.tools.use_shift_key_for_tool_switch = false);
+    // Photoshop's classic keys (Repeat the Letter to Switch Tools off), plain-key cycling.
+    app.session.edit_prefs(|p| {
+        p.tools.repeat_letter_cycles = false;
+        p.tools.use_shift_key_for_tool_switch = false;
+    });
     // Polygonal Lasso picked from the toolbar flyout, then the Brush (#2608).
     app.ui.tool = Tool::PolygonLasso;
     press(&mut app, Key::B, Modifiers::NONE);
@@ -65,6 +68,8 @@ fn shift_key_tool_switch_is_the_default() {
         handle(app, &ctx);
         ctx.end_pass().textures_delta.clear();
     };
+    // With Repeat the Letter to Switch Tools off, Photoshop's classic default.
+    app.session.edit_prefs(|p| p.tools.repeat_letter_cycles = false);
     app.ui.tool = Tool::Type;
     press(&mut app, Modifiers::NONE);
     press(&mut app, Modifiers::NONE);

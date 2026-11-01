@@ -426,6 +426,10 @@ impl Workspace {
 #[serde(default, rename_all = "camelCase")]
 pub struct Tools {
     pub show_tooltips: bool,
+    /// Tool keys: pressing the letter of the group in use again moves to its next tool and
+    /// ⇧+letter to the previous one, both wrapping (on by default in Capishot). Off: Photoshop's
+    /// classic behaviour, with [`Tools::use_shift_key_for_tool_switch`].
+    pub repeat_letter_cycles: bool,
     /// Tool keys cycle a tool group only with ⇧ held (Photoshop's "Use Shift Key for Tool Switch", on by default there too).
     pub use_shift_key_for_tool_switch: bool,
     pub zoom_clicked_point_to_center: bool,
@@ -460,6 +464,7 @@ impl Default for Tools {
     fn default() -> Self {
         Self {
             show_tooltips: true,
+            repeat_letter_cycles: true,
             // On in Photoshop: ⇧+key cycles a tool group, the plain key keeps the group's tool.
             use_shift_key_for_tool_switch: true,
             zoom_clicked_point_to_center: false,

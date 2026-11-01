@@ -1424,6 +1424,7 @@ impl eframe::App for WebShell {
             return;
         }
         self.keyboard(ctx);
+        self.app.external_text_focus = page_input_focused();
         back_history::sync(photocraft_ui_egui::simple_ui::back_target(&self.app, ctx), ctx);
         // Startup timings: the first frame starts, and the second starts once it is drawn.
         if self.startup_frames < 2 {
@@ -2034,4 +2035,18 @@ mod back_history {
     pub fn take_back() -> bool {
         BACK.with(|b| b.replace(false))
     }
+}
+
+/// Whether an input, text area, select or editable element of the page has the keyboard, other
+/// than the app's own hidden text input (the one placed right after the canvas): the embedding
+/// host's form fields, for one. Tool letters typed there must not switch tools.
+fn page_input_focused() -> bool {
+    let Some(active) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.active_element()) else { return false };
+    let tag = active.tag_name().to_ascii_lowercase();
+    let editable = active.dyn_ref::<web_sys::HtmlElement>().is_some_and(|e| e.is_content_editable());
+    if !(matches!(tag.as_str(), "input" | "textarea" | "select") || editable) {
+        return false;
+    }
+    let ours = tag == "input" && active.previous_element_sibling().is_some_and(|p| p.tag_name().eq_ignore_ascii_case("canvas"));
+    !ours
 }

@@ -115,11 +115,20 @@ fn in_the_j_group_after_remove_with_ai_and_shift_j_reaches_it() {
     app.run("file.new", json!({"width": 20, "height": 10})).unwrap();
     app.ui.tool = Tool::RemoveAi;
     let ctx = egui::Context::default();
-    let key = |pressed| Event::Key { key: Key::J, physical_key: None, pressed, repeat: false, modifiers: Modifiers::SHIFT };
-    ctx.begin_pass(egui::RawInput { events: vec![Event::ModifiersChanged(Modifiers::SHIFT), key(true), key(false)], ..Default::default() });
-    crate::shortcuts::handle(&mut app, &ctx);
-    ctx.end_pass().textures_delta.clear();
-    assert_eq!(app.ui.tool, Tool::BubbleTextRemover, "⇧J after Remove with AI");
+    let key = |pressed, modifiers| Event::Key { key: Key::J, physical_key: None, pressed, repeat: false, modifiers };
+    let mut press = |app: &mut PhotocraftApp, m: Modifiers| {
+        ctx.begin_pass(egui::RawInput { events: vec![Event::ModifiersChanged(m), key(true, m), key(false, m)], ..Default::default() });
+        crate::shortcuts::handle(app, &ctx);
+        ctx.end_pass().textures_delta.clear();
+    };
+    press(&mut app, Modifiers::NONE);
+    assert_eq!(app.ui.tool, Tool::BubbleTextRemover, "J after Remove with AI");
+    press(&mut app, Modifiers::SHIFT);
+    assert_eq!(app.ui.tool, Tool::RemoveAi, "⇧J back");
+    // Photoshop's classic keys: ⇧J steps forward to it.
+    app.session.edit_prefs(|p| p.tools.repeat_letter_cycles = false);
+    press(&mut app, Modifiers::SHIFT);
+    assert_eq!(app.ui.tool, Tool::BubbleTextRemover, "⇧J after Remove with AI (classic)");
 }
 
 #[test]

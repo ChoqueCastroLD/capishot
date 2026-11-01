@@ -174,7 +174,7 @@ fn held(i: &InputState, sc: &KeyboardShortcut) -> bool {
 /// Space). Never while a text field has the keyboard, or while editing type on the canvas
 /// (Space must insert a space, not grab the Hand tool).
 pub fn held_tool(app: &PhotocraftApp, ctx: &egui::Context) -> Option<Temporary> {
-    if ctx.text_edit_focused() || app.ui.text_edit.is_some() {
+    if crate::shortcut_dispatch::keyboard_captured_by_text(app, ctx) {
         return None;
     }
     let count = |sc: &KeyboardShortcut| {

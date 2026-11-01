@@ -43,6 +43,7 @@ pub mod texel_guard;
 pub mod theme;
 pub use titlebar::{Caption, CaptionFamily, CaptionIcon, CaptionIcons, CaptionStyle, RenderIconFn};
 pub(crate) mod tool_memory;
+pub mod tool_toast;
 pub mod updates_ui;
 pub mod widgets;
 pub mod work_area;
@@ -468,6 +469,10 @@ pub struct PhotocraftApp {
     captures: screenshot::Captures,
     /// The custom Type tool's IME owner/generation/receipt tracker (`type_tool::sync_ime`).
     pub(crate) type_ime: type_tool::ImeState,
+    /// A text input outside the app has the keyboard (on the web: a focused input, text area or
+    /// editable element of the page, other than the app's own hidden input). Set by the shell
+    /// each frame; single-key shortcuts never fire while it is (`keyboard_captured_by_text`).
+    pub external_text_focus: bool,
     /// Control replies waiting for queued synthetic input to be processed.
     input_waiters: Vec<Sender<ControlResponse>>,
     /// Live (uncommitted) adjustment edit shown on canvas while a slider is dragged.
@@ -822,6 +827,8 @@ mod phone_dialog_tests;
 mod phone_polish_tests;
 #[cfg(test)]
 mod phone_select_tests;
+#[cfg(test)]
+mod tool_cycle_tests;
 
 #[cfg(test)]
 mod color_swatch_tests;

@@ -3433,3 +3433,6 @@ fontWeight	Italic	Itálico
 	On a new layer	Em nova camada
 	How different from the bubble's background a pixel must be to count as text; Auto measures it from the bubble	Quanto um pixel deve diferir do fundo do balão para contar como texto; Automático mede no balão
 	Click inside a speech bubble to remove its text	Clique dentro de um balão para remover o texto
+
+# Tool letters: repeat to cycle
+	Repeat the Letter to Switch Tools; Shift Goes Back	Repetir a letra troca de ferramenta; Shift volta

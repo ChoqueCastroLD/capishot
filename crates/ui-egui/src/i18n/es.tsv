@@ -5214,3 +5214,6 @@ fontTab	Find More	Buscar más
 	On a new layer	En capa nueva
 	How different from the bubble's background a pixel must be to count as text; Auto measures it from the bubble	Cuánto debe diferir un píxel del fondo del globo para contar como texto; Automático lo mide en el globo
 	Click inside a speech bubble to remove its text	Haz clic dentro de un globo para quitar su texto
+
+# Tool letters: repeat to cycle
+	Repeat the Letter to Switch Tools; Shift Goes Back	Repetir la letra cambia de herramienta; Mayús retrocede

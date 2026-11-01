@@ -94,6 +94,8 @@ fn toolbar_shortcut_overrides_remove_old_keys_and_skip_removed_group_members() {
         crate::shortcuts::handle(app, &ctx);
         ctx.end_pass().textures_delta.clear();
     };
+    // Photoshop's classic keys (Repeat the Letter to Switch Tools off).
+    app.session.edit_prefs(|p| p.tools.repeat_letter_cycles = false);
     app.run("edit.keyboardShortcuts", json!({"set": {"tools.select.move": "F6", "tools.select.pencil": ""}, "allowUnknown": true})).unwrap();
     app.ui.tool = Tool::Zoom;
     press(&mut app, Key::V, Modifiers::NONE);

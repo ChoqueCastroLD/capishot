@@ -97,6 +97,7 @@ pub fn inspect(app: &PhotocraftApp, ctx: &egui::Context) -> Value {
         // Screen pixels per point of the canvas: a view's `zoom` over this is points per document
         // pixel (what maps a document point into `canvasRect`).
         "canvasPpp": app.canvas_ppp(),
+        "toolToast": crate::tool_toast::view(ctx),
         "simpleUi": crate::simple_ui::inspect(app, ctx),
         "aiProgress": crate::ai_progress::inspect(ctx),
         "touch": crate::touch_ui::inspect(app, ctx),
