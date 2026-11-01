@@ -67,10 +67,14 @@ pub fn commit(app: &mut PhotocraftApp) {
         }
         app.run("edit.transform.warp", json!({"layer": t.layer, "rect": t.rect, "warp": w, "interpolation": t.interpolation}))
     } else {
-        if t.quad == corners(t.rect) {
+        let from = preview.as_ref().and_then(|pv| pv.vector_type.as_ref()).map(|v| v.from);
+        if t.quad == from.unwrap_or_else(|| corners(t.rect)) {
             return; // untouched: nothing to do and no history step; a ⌥⌘T copy or a place stays
         }
         let mut p = json!({"rect": t.rect, "quad": t.quad, "interpolation": t.interpolation});
+        if let Some(from) = from {
+            p["from"] = json!(from);
+        }
         if t.layers.is_empty() {
             p["layer"] = json!(t.layer);
         } else {
@@ -91,11 +95,19 @@ pub fn commit(app: &mut PhotocraftApp) {
         app.transform_preview = preview;
         return;
     }
+    // Type › Perspective (or Distort) on type: the step is named for what it did.
+    let perspective_type = preview.as_ref().is_some_and(|pv| pv.vector_type.is_some())
+        && matches!(t.mode, crate::state::TransformMode::Perspective | crate::state::TransformMode::Distort);
     match r {
         // Nothing changed (an untouched cylinder or Warp Text): no step to fold a copy into, so
         // it stays its own step, as for an untouched box.
         Ok(v) if v.get("changed") == Some(&json!(false)) => {}
-        Ok(_) => finish(app, document, LayerId(t.layer), made, true),
+        Ok(_) => {
+            if perspective_type && let Some(st) = app.session.active_mut() {
+                st.history.set_current_label("Perspective");
+            }
+            finish(app, document, LayerId(t.layer), made, true)
+        }
         Err(e) => keep_open(app, t, preview, e),
     }
 }
@@ -312,8 +324,6 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> Option<bool> {
         {
             Some(false)
         }
-        // Editable type can't be distorted (#2630, as #2701 rules for the menus outside a box).
-        "edit.transform.distort" | "edit.transform.perspective" if moves_type(app, t) => Some(false),
         _ => None,
     }
 }

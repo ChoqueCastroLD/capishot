@@ -332,6 +332,73 @@ pub struct TextWarp {
     pub horizontal: bool,
 }
 
+/// Perspective / Distort on live type: the drawn text (after the layer's transform and warp, in
+/// document pixels) is mapped through the projective map `h` (row-major 3×3, `[a, b, c, d, e, f,
+/// g, h, i]`: `x' = (a·x + b·y + c) / (g·x + h·y + i)`, `y'` with `d, e, f`). The glyph outlines
+/// go through it as vectors, so the type stays sharp and editable. `frame` is the rectangle
+/// (pre-projection document pixels, `[x0, y0, x1, y1]`) the map was last fitted on: text that
+/// grows past the map's horizon is fitted back into the quad `frame` maps to.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TextPerspective {
+    pub h: [f64; 9],
+    pub frame: [f64; 4],
+}
+
+impl TextPerspective {
+    /// Is the map usable: every entry finite and not degenerate at the frame's corners?
+    pub fn is_valid(&self) -> bool {
+        self.h.iter().all(|v| v.is_finite()) && self.h.iter().any(|v| *v != 0.0) && self.frame.iter().all(|v| v.is_finite())
+    }
+
+    /// `(x, y)` mapped, or `None` at or past the horizon.
+    pub fn apply(&self, x: f64, y: f64) -> Option<(f64, f64)> {
+        let m = &self.h;
+        let w = m[6] * x + m[7] * y + m[8];
+        if !(w.is_finite() && w > 1e-9) {
+            return None;
+        }
+        Some(((m[0] * x + m[1] * y + m[2]) / w, (m[3] * x + m[4] * y + m[5]) / w))
+    }
+
+    /// The inverse map, if there is one.
+    pub fn inverse(&self) -> Option<[f64; 9]> {
+        let m = &self.h;
+        let det = m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6]) + m[2] * (m[3] * m[7] - m[4] * m[6]);
+        if !(det.is_finite() && det.abs() > 1e-15) {
+            return None;
+        }
+        let inv = [
+            (m[4] * m[8] - m[5] * m[7]) / det,
+            (m[2] * m[7] - m[1] * m[8]) / det,
+            (m[1] * m[5] - m[2] * m[4]) / det,
+            (m[5] * m[6] - m[3] * m[8]) / det,
+            (m[0] * m[8] - m[2] * m[6]) / det,
+            (m[2] * m[3] - m[0] * m[5]) / det,
+            (m[3] * m[7] - m[4] * m[6]) / det,
+            (m[1] * m[6] - m[0] * m[7]) / det,
+            (m[0] * m[4] - m[1] * m[3]) / det,
+        ];
+        inv.iter().all(|v| v.is_finite()).then_some(inv)
+    }
+
+    /// A drawn point (document pixels) back in pre-projection document pixels.
+    pub fn unapply(&self, x: f64, y: f64) -> Option<(f64, f64)> {
+        let inv = TextPerspective { h: self.inverse()?, frame: self.frame };
+        inv.apply(x, y)
+    }
+
+    /// Where the frame's corners go (top-left, top-right, bottom-right, bottom-left).
+    pub fn quad(&self) -> Option<[[f64; 2]; 4]> {
+        let [x0, y0, x1, y1] = self.frame;
+        let mut q = [[0.0; 2]; 4];
+        for (i, (x, y)) in [(x0, y0), (x1, y0), (x1, y1), (x0, y1)].into_iter().enumerate() {
+            let (a, b) = self.apply(x, y)?;
+            q[i] = [a, b];
+        }
+        Some(q)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

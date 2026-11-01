@@ -20,9 +20,10 @@ pub fn draw_overlay(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewX
         draw_mask_overlay(app, painter, xf, id);
     }
     let t = crate::theme::Tokens::get(painter.ctx());
-    // Text space → screen.
+    // Text space → screen (through the layer's perspective, if it has one).
+    let persp = super::layout::perspective(app, id);
     let scr_t = |x: f32, y: f32| -> Pos2 {
-        let p = aff.apply(Point::new(x as f64, y as f64));
+        let p = super::layout::project(persp.as_ref(), aff.apply(Point::new(x as f64, y as f64)));
         xf.to_screen(p.x as f32, p.y as f32)
     };
     let shape = app.session.active().and_then(|s| text_layer(&s.doc, id).map(|t| t.shape.clone()));

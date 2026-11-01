@@ -111,6 +111,43 @@ impl<S: LineSink> LineSink for WarpSink<'_, S> {
     }
 }
 
+/// Maps document-space lines through a perspective (a projective map, which keeps lines
+/// straight, so the endpoints are enough), then through `post` into `inner`. A segment reaching
+/// the map's horizon is dropped.
+struct ProjSink<'a, S: LineSink> {
+    inner: &'a mut S,
+    persp: &'a photocraft_doc::text::TextPerspective,
+    post: Xform,
+}
+
+impl<S: LineSink> LineSink for ProjSink<'_, S> {
+    fn line(&mut self, p0: (f64, f64), p1: (f64, f64)) {
+        let (Some(a), Some(b)) = (self.persp.apply(p0.0, p0.1), self.persp.apply(p1.0, p1.1)) else { return };
+        self.inner.line(self.post.apply(a.0, a.1), self.post.apply(b.0, b.1));
+    }
+}
+
+/// [`draw`] through `pre` (text space → document pixels), then the perspective `persp` when
+/// there is one, then `post` (document pixels → the sink's).
+#[allow(clippy::too_many_arguments)]
+fn draw_mapped(
+    layout: &TextLayout,
+    pre: &Xform,
+    post: &Xform,
+    persp: Option<&photocraft_doc::text::TextPerspective>,
+    sink: &mut impl LineSink,
+    only_color: Option<&Color>,
+    warp: Option<&Warp>,
+) {
+    match persp {
+        None => draw(layout, &post.mul(pre), sink, only_color, warp),
+        Some(p) => {
+            let mut ps = ProjSink { inner: sink, persp: p, post: *post };
+            draw(layout, pre, &mut ps, only_color, warp);
+        }
+    }
+}
+
 fn is_bold(layout: &TextLayout, g: &PlacedGlyph) -> bool {
     let face_bold = layout.faces.get(g.face as usize).is_some_and(|f| f.embolden);
     layout.styles.get(g.style as usize).is_some_and(|s| s.faux_bold) || face_bold
@@ -333,9 +370,26 @@ pub fn ink_bounds(layout: &TextLayout) -> Option<[f64; 4]> {
 
 /// [`ink_rect`] of warped text.
 pub fn ink_rect_warped(layout: &TextLayout, transform: &Affine, warp: Option<&Warp>) -> Rect {
+    ink_rect_deformed(layout, transform, warp, None)
+}
+
+/// [`ink_rect`] of warped text in perspective (`persp`, after the transform and warp).
+pub fn ink_rect_deformed(layout: &TextLayout, transform: &Affine, warp: Option<&Warp>, persp: Option<&photocraft_doc::text::TextPerspective>) -> Rect {
     let mut b = Bounds::default();
-    draw(layout, &Xform(transform.m), &mut b, None, warp);
+    draw_mapped(layout, &Xform(transform.m), &Xform::IDENTITY, persp, &mut b, None, warp);
     b.rect.map(rect_from_bounds).unwrap_or(Rect::EMPTY)
+}
+
+/// Unrounded document-space bounds of the drawn text in perspective (`[x0, y0, x1, y1]`).
+pub fn ink_bounds_deformed(
+    layout: &TextLayout,
+    transform: &Affine,
+    warp: Option<&Warp>,
+    persp: Option<&photocraft_doc::text::TextPerspective>,
+) -> Option<[f64; 4]> {
+    let mut b = Bounds::default();
+    draw_mapped(layout, &Xform(transform.m), &Xform::IDENTITY, persp, &mut b, None, warp);
+    b.rect
 }
 
 /// Rasterizes `layout` through `transform` (text space → document pixels). The result always
@@ -346,7 +400,26 @@ pub fn rasterize(layout: &TextLayout, transform: &Affine, format: PixelFormat, a
 
 /// [`rasterize`] with the glyph outlines bent by `warp` (Type › Warp Text).
 pub fn rasterize_warped(layout: &TextLayout, transform: &Affine, format: PixelFormat, antialias: AntiAlias, warp: Option<&Warp>) -> Rendered {
-    rasterize_passes(layout, transform, format, antialias, warp, true)
+    rasterize_passes(layout, transform, format, antialias, warp, None, true)
+}
+
+/// [`rasterize_warped`] in perspective: the outlines go through `persp` as vectors, so the type is
+/// as sharp as flat type (no resampling of pixels).
+pub fn rasterize_deformed(
+    layout: &TextLayout,
+    transform: &Affine,
+    format: PixelFormat,
+    antialias: AntiAlias,
+    warp: Option<&Warp>,
+    persp: Option<&photocraft_doc::text::TextPerspective>,
+) -> Rendered {
+    rasterize_passes(layout, transform, format, antialias, warp, persp, true)
+}
+
+/// A type layer's pixels from its layout: its transform, warp or path, and perspective.
+pub fn rasterize_layer(layout: &TextLayout, layer: &photocraft_doc::TextLayer, format: PixelFormat) -> Rendered {
+    let warp = layout_deform(layout, layer);
+    rasterize_deformed(layout, &layer.transform, format, layer.antialias, warp.as_ref(), layer.perspective.as_ref().filter(|p| p.is_valid()))
 }
 
 /// [`rasterize_warped`] with every colour's coverage either confined to that colour's own ink
@@ -357,10 +430,11 @@ pub(crate) fn rasterize_passes(
     format: PixelFormat,
     antialias: AntiAlias,
     warp: Option<&Warp>,
+    persp: Option<&photocraft_doc::text::TextPerspective>,
     per_colour: bool,
 ) -> Rendered {
     let format = PixelFormat { alpha: true, ..format };
-    let rect = ink_rect_warped(layout, transform, warp);
+    let rect = ink_rect_deformed(layout, transform, warp, persp);
     let (w, h) = (rect.width() as usize, rect.height() as usize);
     let mut surface = Surface::new(format);
     if w == 0 || h == 0 || (w as u64) * (h as u64) > MAX_PIXELS {
@@ -380,7 +454,8 @@ pub(crate) fn rasterize_passes(
     let Some(mut acc) = zeroed(w * h * stride) else {
         return nothing(format);
     };
-    let xf = Xform([1.0, 0.0, 0.0, 1.0, -rect.x0 as f64, -rect.y0 as f64]).mul(&Xform(transform.m));
+    let pre = Xform(transform.m);
+    let to_rect = Xform([1.0, 0.0, 0.0, 1.0, -rect.x0 as f64, -rect.y0 as f64]);
     let whole = Rect::new(0, 0, w as i32, h as i32);
     let mut pass_pixels = 0u64;
     for &(c, _) in &colors {
@@ -389,7 +464,7 @@ pub(crate) fn rasterize_passes(
         // (#8602). Outside its ink a colour's coverage is zero, so the result is the same.
         let sub = if per_colour {
             let mut b = Bounds::default();
-            draw(layout, &xf, &mut b, Some(&c), warp);
+            draw_mapped(layout, &pre, &to_rect, persp, &mut b, Some(&c), warp);
             b.rect.map(rect_from_bounds).unwrap_or(Rect::EMPTY).intersect(&whole)
         } else {
             whole
@@ -406,11 +481,11 @@ pub(crate) fn rasterize_passes(
             return nothing(format);
         };
         pass_pixels = total;
-        let xf = Xform([1.0, 0.0, 0.0, 1.0, -sub.x0 as f64, -sub.y0 as f64]).mul(&xf);
+        let post = Xform([1.0, 0.0, 0.0, 1.0, -sub.x0 as f64, -sub.y0 as f64]).mul(&to_rect);
         let Some(mut cov) = Coverage::try_new(sw, sh) else {
             return nothing(format);
         };
-        draw(layout, &xf, &mut cov, Some(&c), warp);
+        draw_mapped(layout, &pre, &post, persp, &mut cov, Some(&c), warp);
         let Some(cov) = cov.finish() else {
             return nothing(format);
         };
@@ -526,6 +601,35 @@ impl skrifa::outline::OutlinePen for Recorder<'_> {
     fn close(&mut self) {
         self.out.push(PathEl::Close);
     }
+}
+
+/// [`outlines`] mapped through a perspective (each point, control points included: close to the
+/// projected curve for glyph-sized segments). Elements past the map's horizon are dropped.
+pub fn outlines_deformed(
+    layout: &TextLayout,
+    transform: &Affine,
+    warp: Option<&Warp>,
+    persp: Option<&photocraft_doc::text::TextPerspective>,
+) -> Vec<Vec<PathEl>> {
+    let glyphs = outlines(layout, transform, warp);
+    let Some(p) = persp else { return glyphs };
+    let m = |q: [f64; 2]| p.apply(q[0], q[1]).map(|(x, y)| [x, y]);
+    glyphs
+        .into_iter()
+        .map(|els| {
+            els.into_iter()
+                .filter_map(|e| {
+                    Some(match e {
+                        PathEl::MoveTo(a) => PathEl::MoveTo(m(a)?),
+                        PathEl::LineTo(a) => PathEl::LineTo(m(a)?),
+                        PathEl::QuadTo(a, b) => PathEl::QuadTo(m(a)?, m(b)?),
+                        PathEl::CurveTo(a, b, c) => PathEl::CurveTo(m(a)?, m(b)?, m(c)?),
+                        PathEl::Close => PathEl::Close,
+                    })
+                })
+                .collect()
+        })
+        .collect()
 }
 
 /// Glyph outlines of `layout` in document space (through `transform`, bent by `warp`), one

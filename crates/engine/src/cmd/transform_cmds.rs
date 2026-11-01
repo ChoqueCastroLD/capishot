@@ -482,12 +482,14 @@ fn apply_transform(
                 apply_transform(None, locks, c, h, affine, interp, ctl)?;
             }
         }
-        LayerContent::Text(t) => {
-            let Some(a) = affine else {
-                return Err(EngineError::Other("Distort and Perspective need rasterized type (Type › Rasterize Type Layer)".into()));
-            };
-            t.transform = a.mul(&t.transform);
-        }
+        LayerContent::Text(t) => match (affine, t.perspective) {
+            // Flat type keeps an affine transform.
+            (Some(a), None) => t.transform = a.mul(&t.transform),
+            // Distort and Perspective keep it type: the drawn text goes through the projective
+            // map (`TextLayer::perspective`); a later transform of type in perspective composes
+            // with it, so the text's own layout space never changes.
+            _ => t.perspective = Some(compose_text_perspective(t, h)?),
+        },
         LayerContent::Shape(sh) => match affine {
             Some(a) => crate::vector_cmds::transform_shape(sh, &a),
             // Distort and Perspective map the path and keep the shape (#3009).
@@ -547,6 +549,43 @@ fn apply_transform(
         };
     }
     Ok(())
+}
+
+/// `t` after the projective map `h` (document pixels), drawn: Distort and Perspective on type, as
+/// `edit.transform` applies them, for previews that show the text sharp while the box moves.
+pub fn type_in_perspective(doc: &Document, t: &photocraft_doc::TextLayer, h: &Homography) -> Result<photocraft_doc::TextLayer> {
+    let mut out = t.clone();
+    out.perspective = Some(compose_text_perspective(t, h)?);
+    crate::type_cmds::refresh(doc, &mut out);
+    Ok(out)
+}
+
+/// `t`'s perspective after the projective map `h` (document pixels): composed with the one it has,
+/// or a new one framed on its drawn bounds. The map is kept with `w > 0` over its frame (the side of
+/// the horizon the text is drawn on).
+fn compose_text_perspective(t: &photocraft_doc::TextLayer, h: &Homography) -> Result<photocraft_doc::text::TextPerspective> {
+    let (cur, frame) = match t.perspective.filter(|p| p.is_valid()) {
+        Some(p) => (Homography(p.h), p.frame),
+        None => {
+            let r = t.cache.as_ref().map(|c| c.content_bounds()).filter(|r| !r.is_empty()).unwrap_or(photocraft_geom::Rect::new(0, 0, 1, 1));
+            (Homography::IDENTITY, [f64::from(r.x0), f64::from(r.y0), f64::from(r.x1), f64::from(r.y1)])
+        }
+    };
+    let mut m = h.mul(&cur).0;
+    let w = Homography(m).w((frame[0] + frame[2]) / 2.0, (frame[1] + frame[3]) / 2.0);
+    if w < 0.0 {
+        m.iter_mut().for_each(|v| *v = -*v);
+    }
+    // Scale so the frame's centre has w = 1 (numbers stay tame over repeated transforms).
+    let w = w.abs();
+    if w > 1e-12 && w.is_finite() {
+        m.iter_mut().for_each(|v| *v /= w);
+    }
+    let p = photocraft_doc::text::TextPerspective { h: m, frame };
+    if !p.is_valid() || p.quad().is_none() {
+        return Err(EngineError::Other("the type would reach past the perspective's horizon; the document was not changed".into()));
+    }
+    Ok(p)
 }
 
 /// Split a layer surface by a selection: (selected pixels, everything else), both with alpha.
@@ -777,7 +816,11 @@ fn relative_matrix(p: &Value, rect: [f64; 4]) -> Result<Option<Homography>> {
 }
 
 fn quad_param(p: &Value) -> Option<[[f64; 2]; 4]> {
-    let a = p.get("quad")?.as_array()?;
+    quad_named(p, "quad")
+}
+
+fn quad_named(p: &Value, key: &str) -> Option<[[f64; 2]; 4]> {
+    let a = p.get(key)?.as_array()?;
     if a.len() != 4 {
         return None;
     }
@@ -847,7 +890,13 @@ fn transform(s: &mut Session, p: &Value) -> Result<Value> {
             [b.x0 as f64, b.y0 as f64, b.x1 as f64, b.y1 as f64]
         }
     };
-    let h = if let Some(q) = quad_param(p) {
+    let h = if let (Some(q), Some(from)) = (quad_param(p), quad_named(p, "from")) {
+        // A box that started as a quad (type in perspective): the map takes that quad to this one.
+        let unit = [0.0, 0.0, 1.0, 1.0];
+        let to = Homography::rect_to_quad(unit, q).ok_or_else(|| bad("degenerate quad"))?;
+        let from = Homography::rect_to_quad(unit, from).and_then(|h| h.inverse()).ok_or_else(|| bad("degenerate `from` quad"))?;
+        to.mul(&from)
+    } else if let Some(q) = quad_param(p) {
         Homography::rect_to_quad(rect, q).ok_or_else(|| bad("degenerate quad"))?
     } else if let Some(m) = p.get("matrix").and_then(Value::as_array) {
         let v: Vec<f64> = m.iter().filter_map(Value::as_f64).collect();
@@ -961,7 +1010,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: "Free Transform",
         menu: &[],
         shortcut: None,
-        params: r##"{"layer":id?,"layers":[id,…]? (several layers moved by one box, one step; default with neither = the selected layers but the Background, as Photoshop's Free Transform with several selected),"rect":[x0,y0,x1,y1]? (source frame; default = the layers' content ∩ selection),"quad":[[x,y]×4]? (where the frame's corners go, clockwise from top-left),"matrix":[a,b,c,d,e,f]? (affine alternative),"scaleX":%?,"scaleY":%?,"rotate":deg?,"dx":px?,"dy":px? (relative alternative: scale and rotate about the frame's centre, then move, as a Photoshop action records a Free Transform),"interpolation":"bicubic|bilinear|nearest|bicubicSharper|bicubicSmoother|bicubicAutomatic"="bicubic" (Photoshop's bicubic variants render as Bicubic),"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target (an unlinked mask, an alpha channel or the Quick Mask transforms alone; a linked mask moves with its layer)}"##,
+        params: r##"{"layer":id?,"layers":[id,…]? (several layers moved by one box, one step; default with neither = the selected layers but the Background, as Photoshop's Free Transform with several selected),"rect":[x0,y0,x1,y1]? (source frame; default = the layers' content ∩ selection),"quad":[[x,y]×4]? (where the frame's corners go, clockwise from top-left),"from":[[x,y]×4]? (with quad: the box started as this quad, not the rect: the map takes it to quad; type in perspective),"matrix":[a,b,c,d,e,f]? (affine alternative),"scaleX":%?,"scaleY":%?,"rotate":deg?,"dx":px?,"dy":px? (relative alternative: scale and rotate about the frame's centre, then move, as a Photoshop action records a Free Transform),"interpolation":"bicubic|bilinear|nearest|bicubicSharper|bicubicSmoother|bicubicAutomatic"="bicubic" (Photoshop's bicubic variants render as Bicubic),"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target (an unlinked mask, an alpha channel or the Quick Mask transforms alone; a linked mask moves with its layer)}"##,
         enabled: has_layer,
         journal: true,
         run: transform,

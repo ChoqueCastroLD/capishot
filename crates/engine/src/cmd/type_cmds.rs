@@ -653,7 +653,7 @@ pub fn refresh(doc: &Document, t: &mut TextLayer) {
 /// document to pass it, once per keystroke and pointer move while typing (#7092).
 pub fn refresh_at(dpi: f32, format: PixelFormat, t: &mut TextLayer) {
     let mut eng = photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner());
-    let (layout, r) = eng.render(t, dpi, format);
+    let (layout, r) = eng.render_fitted(t, dpi, format);
     rendered::mark(&r.surface);
     t.cache = Some(r.surface);
     t.psd_raw = Some(Arc::new(photocraft_text::psd::build_tysh(t, dpi, layout.bounds())));

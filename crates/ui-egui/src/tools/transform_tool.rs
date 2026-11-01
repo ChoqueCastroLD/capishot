@@ -39,6 +39,7 @@ pub(crate) use begin::moving_layers;
 #[cfg(test)]
 pub(crate) use begin::moving_texel;
 pub use begin::{WARP_ONE_LAYER, begin, begin_copy, begin_placed, begin_selection, begin_type_perspective, begin_warp, enter_warp, leave_warp, warps_type};
+pub(crate) use begin::{refresh_vector_type, vectorize_type_box};
 pub(crate) use commit::{SAVE_FOR_WEB, committing, nudge};
 pub use commit::{cancel, commit, end_if_left, follow_edits, intercept, is_enabled, on_job_event, track_steps};
 #[cfg(test)]
@@ -145,6 +146,19 @@ pub struct TransformPreview {
     pub(crate) content_aware: Option<crate::cas_transform::Live>,
     /// A box over several layers (#6501): their composite, which `texture` holds.
     several: Option<Several>,
+    /// Type in perspective: the box started as a quad, and the preview draws the text itself
+    /// through the box's map, sharp, instead of resampling its pixels ([`refresh_vector_type`]).
+    pub(crate) vector_type: Option<VectorType>,
+}
+
+/// A type layer's box drawn as vectors (Type › Perspective, or type already in perspective).
+pub(crate) struct VectorType {
+    /// The box's quad when it opened: the commit maps it to the box's quad then.
+    pub(crate) from: [[f64; 2]; 4],
+    /// The quad and the session document's revision the preview document was last drawn for.
+    shown: Option<([[f64; 2]; 4], u64)>,
+    /// How many times it was drawn (the canvas's key for the preview document).
+    pub(crate) drawn: u64,
 }
 
 /// The moving pixels of a box over several layers ([`begin_several`]): the layers composited on

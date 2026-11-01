@@ -149,7 +149,7 @@ pub(crate) fn transform_layer_geometry(l: &mut Layer, a: &Affine, content: bool,
             }
         }
         LayerContent::Text(t) if content => {
-            t.transform = a.mul(&t.transform);
+            t.transform_by(a);
             retag_text(dpi, t);
         }
         LayerContent::Smart(sm) if content => crate::smart_cmds::transform_placement(sm, a),

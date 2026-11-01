@@ -3385,8 +3385,8 @@ fn per_colour_passes_match_full_size_passes() {
         let l = e.layout(t, 72.0);
         let warp = crate::render::layout_deform(&l, t);
         for format in [PixelFormat::RGBA8, PixelFormat::CMYKA8] {
-            let fast = crate::render::rasterize_passes(&l, &t.transform, format, t.antialias, warp.as_ref(), true);
-            let full = crate::render::rasterize_passes(&l, &t.transform, format, t.antialias, warp.as_ref(), false);
+            let fast = crate::render::rasterize_passes(&l, &t.transform, format, t.antialias, warp.as_ref(), None, true);
+            let full = crate::render::rasterize_passes(&l, &t.transform, format, t.antialias, warp.as_ref(), None, false);
             assert_eq!(fast.rect, full.rect, "case {k}");
             let (a, b) = (fast.surface.read_region(fast.rect), full.surface.read_region(full.rect));
             assert!(!a.is_empty());

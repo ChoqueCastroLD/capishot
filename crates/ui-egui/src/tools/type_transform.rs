@@ -39,7 +39,9 @@ pub(crate) fn active(app: &PhotocraftApp) -> bool {
 }
 
 pub(crate) fn visible(app: &PhotocraftApp, mods: Modifiers) -> bool {
-    app.ui.tool.is_type() && app.ui.text_edit.is_some() && (mods.command || active(app))
+    // Type in perspective has no affine frame to drag while typing (Free Transform moves it).
+    let flat = app.ui.text_edit.as_ref().is_some_and(|ed| crate::type_tool::perspective_of(app, LayerId(ed.layer)).is_none());
+    app.ui.tool.is_type() && flat && (mods.command || active(app))
 }
 
 /// Drop pointer capture when its source changed externally. Never apply to another document.
@@ -303,6 +305,10 @@ pub(crate) fn finish(app: &mut PhotocraftApp) {
 pub(crate) fn pointer(app: &mut PhotocraftApp, ev: ToolEvent, mods: Modifiers) -> bool {
     cancel_stale(app);
     if !app.ui.tool.is_type() || app.ui.text_edit.is_none() {
+        return false;
+    }
+    // Type in perspective is moved and reshaped with Free Transform, not while typing.
+    if app.ui.text_edit.as_ref().is_some_and(|ed| crate::type_tool::perspective_of(app, LayerId(ed.layer)).is_some()) {
         return false;
     }
     match ev {

@@ -105,7 +105,7 @@ pub(crate) fn translate_layer(doc: &Document, l: &mut Layer, dx: i32, dy: i32) {
     match &mut l.content {
         LayerContent::Raster(s) => *s = translate_surface(s, dx, dy),
         LayerContent::Text(t) => {
-            t.transform = photocraft_geom::Affine::translate(dx as f64, dy as f64).mul(&t.transform);
+            t.translate(dx as f64, dy as f64);
             // A whole-pixel move shifts the rendered text and its PSD position as they are.
             // Re-rendering would replace Photoshop's rendering of imported type, and drop the
             // text when its font is missing (artboard export, moving type with the Move tool).

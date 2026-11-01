@@ -99,6 +99,10 @@ pub fn draw_content(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform
         draw_warp_content(painter, xf, t, w, pv, display);
         return;
     }
+    // Type drawn through the box: the preview document has it (`refresh_vector_type`).
+    if pv.vector_type.is_some() {
+        return;
+    }
     let ctx = painter.ctx();
     let styled =
         styled_frame(app, xf.zoom * ctx.pixels_per_point(), ctx.input(|i| i.pointer.any_down())).and_then(|(s, frame)| s.texture(ctx, &frame, display));

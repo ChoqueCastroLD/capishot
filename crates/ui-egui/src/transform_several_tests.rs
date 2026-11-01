@@ -102,21 +102,23 @@ fn cancel_leaves_every_layer_as_it_was() {
 }
 
 #[test]
-fn warp_is_greyed_and_distort_too_while_type_is_among_them() {
+fn warp_is_greyed_while_type_is_among_them() {
     let (mut app, paint, text) = app();
     for id in ["edit.freeTransform", "edit.transform.scale", "edit.transform.rotate", "edit.transform.skew", "edit.transform.flipHorizontal"] {
         assert!(crate::menus::is_enabled(&app, id), "{id}");
     }
-    for id in ["edit.transform.warp", "edit.transform.distort", "edit.transform.perspective"] {
+    for id in ["edit.transform.warp"] {
         assert!(!crate::menus::is_enabled(&app, id), "{id} is greyed");
+    }
+    // Distort and Perspective distort the type as type.
+    for id in ["edit.transform.distort", "edit.transform.perspective"] {
+        assert!(crate::menus::is_enabled(&app, id), "{id}");
     }
     assert_eq!(crate::transform_tool::begin_warp(&mut app, &egui::Context::default()), Err(crate::transform_tool::WARP_ONE_LAYER.into()));
     assert!(app.ui.transform.is_none(), "no box is left open");
     // In an open box too.
     free_transform(&mut app);
-    for id in ["edit.transform.warp", "edit.transform.distort", "edit.transform.perspective"] {
-        assert!(!crate::menus::is_enabled(&app, id), "{id} is greyed in the box");
-    }
+    assert!(!crate::menus::is_enabled(&app, "edit.transform.warp"), "Warp is greyed in the box");
     crate::transform_tool::cancel(&mut app);
     // Two pixel layers distort.
     app.run("layer.select", json!({"layer": text.0})).unwrap();

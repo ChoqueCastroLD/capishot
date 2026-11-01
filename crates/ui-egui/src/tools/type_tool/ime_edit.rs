@@ -224,8 +224,9 @@ pub(super) fn ime_geometry(app: &mut PhotocraftApp, ed: &TextEdit, xf: ViewXform
     let (l, aff, text) = layout(app, id)?;
     let shape = app.session.active().and_then(|s| text_layer(&s.doc, id).map(|t| t.shape.clone()));
     let bend = shape.as_ref().and_then(photocraft_text::warp::Warp::on_path);
+    let persp = super::layout::perspective(app, id);
     let scr_t = |x: f32, y: f32| -> Pos2 {
-        let p = aff.apply(Point::new(f64::from(x), f64::from(y)));
+        let p = super::layout::project(persp.as_ref(), aff.apply(Point::new(f64::from(x), f64::from(y))));
         xf.to_screen(p.x as f32, p.y as f32)
     };
     let scr = |x: f32, y: f32| -> Pos2 {

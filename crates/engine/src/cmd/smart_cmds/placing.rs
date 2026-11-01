@@ -95,7 +95,7 @@ pub(super) fn shift_layer(l: &mut Layer, dx: i32, dy: i32) -> Result<()> {
             d.y += dy;
         }
         LayerContent::Text(t) => {
-            t.transform = a.mul(&t.transform);
+            t.transform_by(&a);
             if let Some(c) = &mut t.cache {
                 *c = mv(c);
             }

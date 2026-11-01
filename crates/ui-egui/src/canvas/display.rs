@@ -162,6 +162,7 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> (std::sync::Ar
         return shown;
     }
     crate::transform_tool::follow_edits(app);
+    crate::transform_tool::refresh_vector_type(app);
     // The brush throttles its tail preview between pointer moves; the frame shows it complete.
     if live_stroke(app, idx).is_some()
         && let Some(l) = app.live_stroke.as_mut()
@@ -181,7 +182,8 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> (std::sync::Ar
         && pv.doc.id == st.doc.id
         && st.doc.layer(photocraft_doc::LayerId(t.layer)).is_some()
     {
-        return (pv.doc.clone(), (1 << 40) + pv.session);
+        let drawn = pv.vector_type.as_ref().map_or(0, |v| v.drawn);
+        return (pv.doc.clone(), ((1 << 40) + pv.session) ^ (drawn << 44));
     }
     // Layer Style dialog: show its effects live (Cancel just drops the preview).
     let style = app.ui.dialogs.iter().find(|d| d.kind == crate::state::DialogKind::LayerStyle).map(|d| (d.id, d.fields.clone()));

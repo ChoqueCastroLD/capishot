@@ -306,8 +306,14 @@ fn type_layers_transform_as_vectors() {
     let st = s.active().unwrap();
     let LayerContent::Text(t) = &st.doc.layer(LayerId(id)).unwrap().content else { panic!() };
     assert!((t.transform.m[0] - 2.0).abs() < 1e-9);
-    // Perspective on type is refused, like Photoshop.
-    assert!(s.execute("edit.transform", json!({"layer": id, "quad": [[0, 0], [10, 0], [12, 10], [-2, 10]]})).is_err());
+    // Perspective keeps it type: the drawn text goes through the projective map.
+    let b = active_bounds(&s);
+    let (x0, y0, x1, y1) = (f64::from(b.x0), f64::from(b.y0), f64::from(b.x1), f64::from(b.y1));
+    s.execute("edit.transform", json!({"layer": id, "rect": [x0, y0, x1, y1], "quad": [[x0 + 4.0, y0], [x1 - 4.0, y0], [x1, y1], [x0, y1]]})).unwrap();
+    let st = s.active().unwrap();
+    let LayerContent::Text(t) = &st.doc.layer(LayerId(id)).unwrap().content else { panic!("still type") };
+    assert!(t.perspective.is_some_and(|p| p.is_valid()), "in perspective");
+    assert!(t.cache.as_ref().is_some_and(|c| !c.content_bounds().is_empty()), "drawn");
 }
 
 #[test]

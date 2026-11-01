@@ -28,7 +28,7 @@ fn select_left_half(app: &mut PhotocraftApp) {
 }
 
 #[test]
-fn type_layers_offer_free_transform_but_not_distort_or_perspective() {
+fn type_layers_offer_free_transform_distort_and_perspective() {
     let mut app = app();
     for selection in [false, true] {
         if selection {
@@ -37,8 +37,9 @@ fn type_layers_offer_free_transform_but_not_distort_or_perspective() {
         for id in ["edit.freeTransform", "edit.transform.scale", "edit.transform.rotate", "edit.transform.skew"] {
             assert!(crate::menus::is_enabled(&app, id), "{id} (selection: {selection})");
         }
+        // Type is distorted as type (it stays editable: `TextLayer::perspective`).
         for id in ["edit.transform.distort", "edit.transform.perspective"] {
-            assert!(!crate::menus::is_enabled(&app, id), "{id} is greyed for editable type (selection: {selection})");
+            assert!(crate::menus::is_enabled(&app, id), "{id} for editable type (selection: {selection})");
         }
     }
     // The same rows in the marquee's canvas context menu.
@@ -58,11 +59,14 @@ fn type_layers_offer_free_transform_but_not_distort_or_perspective() {
         crop: None,
     };
     assert!(crate::canvas_tool_menu::available(&app, &menu, "edit.freeTransform"));
-    assert!(!crate::canvas_tool_menu::available(&app, &menu, "edit.transform.distort"));
-    assert!(!crate::canvas_tool_menu::available(&app, &menu, "edit.transform.perspective"));
-    // Rasterized, the type is pixels and can be distorted.
-    app.run("layer.rasterize.type", json!({})).unwrap();
-    assert!(crate::menus::is_enabled(&app, "edit.transform.distort") && crate::menus::is_enabled(&app, "edit.transform.perspective"));
+    assert!(crate::canvas_tool_menu::available(&app, &menu, "edit.transform.distort"));
+    assert!(crate::canvas_tool_menu::available(&app, &menu, "edit.transform.perspective"));
+    // Edit › Transform › Perspective on type opens a vector box: it stays type.
+    let ctx = egui::Context::default();
+    app.run("select.deselect", json!({})).unwrap();
+    crate::menus::invoke(&mut app, &ctx, "edit.transform.perspective", json!({})).unwrap();
+    assert!(app.transform_preview.as_ref().is_some_and(|pv| pv.vector_type.is_some()));
+    crate::transform_tool::cancel(&mut app);
 }
 
 #[test]

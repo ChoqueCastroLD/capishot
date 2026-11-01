@@ -413,6 +413,8 @@ pub struct TextLayer {
     pub antialias: text::AntiAlias,
     /// Warp Text settings (applied to the glyph outlines when rendering).
     pub warp: Option<text::TextWarp>,
+    /// Perspective / Distort applied after the transform and warp (Type › Perspective).
+    pub perspective: Option<text::TextPerspective>,
 }
 
 impl Default for TextLayer {
@@ -431,6 +433,7 @@ impl Default for TextLayer {
             orientation: text::Orientation::Horizontal,
             antialias: text::AntiAlias::Smooth,
             warp: None,
+            perspective: None,
         }
     }
 }
@@ -459,6 +462,34 @@ impl TextLayer {
         }
         runs.into_iter().map(|(len, style)| text::ParagraphRun { len, style }).collect()
     }
+    /// Moves the drawn text by `(dx, dy)` document pixels: its transform, or, in perspective, the
+    /// projective map (so the text moves rigidly on the page, perspective and all).
+    pub fn translate(&mut self, dx: f64, dy: f64) {
+        match self.perspective.as_mut() {
+            Some(p) => {
+                let m = p.h;
+                // T · H, with T the translation.
+                p.h = [m[0] + dx * m[6], m[1] + dx * m[7], m[2] + dx * m[8], m[3] + dy * m[6], m[4] + dy * m[7], m[5] + dy * m[8], m[6], m[7], m[8]];
+            }
+            None => self.transform = Affine::translate(dx, dy).mul(&self.transform),
+        }
+    }
+
+    /// Applies the affine map `a` (document pixels) to the drawn text: to its transform, or, in
+    /// perspective, after the projective map.
+    pub fn transform_by(&mut self, a: &Affine) {
+        match self.perspective.as_mut() {
+            Some(p) => {
+                let [a0, b0, c0, d0, e0, f0] = a.m;
+                let m = p.h;
+                let row = |x: f64, y: f64, z: f64, j: usize| x * m[j] + y * m[3 + j] + z * m[6 + j];
+                p.h =
+                    [row(a0, c0, e0, 0), row(a0, c0, e0, 1), row(a0, c0, e0, 2), row(b0, d0, f0, 0), row(b0, d0, f0, 1), row(b0, d0, f0, 2), m[6], m[7], m[8]];
+            }
+            None => self.transform = a.mul(&self.transform),
+        }
+    }
+
     /// Copies the first run's family, size and colour into the summary fields.
     pub fn sync_summary(&mut self) {
         if let Some(r) = self.runs.first() {

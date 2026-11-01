@@ -151,12 +151,13 @@ fn one_layer_past_the_pixel_budget_leaves_every_layer_as_it_was() {
 }
 
 #[test]
-fn distort_with_type_among_the_layers_is_refused() {
-    let (mut s, _, _) = two_layers();
-    let before = s.active().unwrap().doc.clone();
+fn distort_with_type_among_the_layers_keeps_the_type() {
+    let (mut s, _, text) = two_layers();
     let quad = json!({"rect": [0, 0, 100, 100], "quad": [[0, 0], [100, 0], [120, 100], [-20, 100]]});
-    assert!(s.execute("edit.transform", quad).is_err());
-    assert!(s.active().unwrap().doc == before);
+    s.execute("edit.transform", quad).unwrap();
+    let st = s.active().unwrap();
+    let Some(LayerContent::Text(t)) = st.doc.layer(text).map(|l| &l.content) else { panic!("still type") };
+    assert!(t.perspective.is_some(), "the type is distorted as type");
 }
 
 #[test]

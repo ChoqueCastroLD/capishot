@@ -12,12 +12,13 @@ pub(crate) const MAX_RENDER_PIXELS: u64 = 64 * 1024 * 1024;
 fn render_bounded(eng: &mut photocraft_text::TextEngine, t: &mut TextLayer, dpi: f32, format: photocraft_color::PixelFormat) {
     let layout = eng.layout(t, dpi);
     let warp = photocraft_text::render::layout_deform(&layout, t);
-    let ink = photocraft_text::render::ink_rect_warped(&layout, &t.transform, warp.as_ref());
+    let persp = t.perspective.filter(|p| p.is_valid());
+    let ink = photocraft_text::render::ink_rect_deformed(&layout, &t.transform, warp.as_ref(), persp.as_ref());
     if u64::from(ink.width()).saturating_mul(u64::from(ink.height())) > MAX_RENDER_PIXELS {
         t.cache = Some(photocraft_raster::Surface::new(photocraft_color::PixelFormat { alpha: true, ..format }));
         return;
     }
-    let r = photocraft_text::render::rasterize_warped(&layout, &t.transform, format, t.antialias, warp.as_ref());
+    let r = photocraft_text::render::rasterize_deformed(&layout, &t.transform, format, t.antialias, warp.as_ref(), persp.as_ref());
     t.cache = Some(r.surface);
 }
 

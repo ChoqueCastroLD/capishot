@@ -66,6 +66,39 @@ impl Default for TextEngine {
     }
 }
 
+/// Type in perspective whose text grew towards the map's horizon (where the far side would run
+/// to infinity) is fitted into the quad its perspective frame fills instead: the map then takes
+/// the text's new bounds to that same quad. Returns whether it was fitted.
+pub fn fit_perspective(layout: &TextLayout, layer: &mut TextLayer) -> bool {
+    let Some(p) = layer.perspective.filter(|p| p.is_valid()) else { return false };
+    let warp = render::layout_deform(layout, layer);
+    let Some(b) = render::ink_bounds_deformed(layout, &layer.transform, warp.as_ref(), None) else { return false };
+    let w = |x: f64, y: f64| p.h[6] * x + p.h[7] * y + p.h[8];
+    let corners = |r: [f64; 4]| [(r[0], r[1]), (r[2], r[1]), (r[2], r[3]), (r[0], r[3])];
+    let near = corners(p.frame).iter().map(|&(x, y)| w(x, y)).fold(f64::INFINITY, f64::min);
+    let reach = corners(b).iter().map(|&(x, y)| w(x, y)).fold(f64::INFINITY, f64::min);
+    // Grown in place it stays well this side of the horizon: nothing to do.
+    if !(near.is_finite() && near > 0.0) || reach > 0.25 * near {
+        return false;
+    }
+    let f = p.frame;
+    let (bw, bh) = (b[2] - b[0], b[3] - b[1]);
+    if !(bw > 1e-6 && bh > 1e-6) {
+        return false;
+    }
+    let (sx, sy) = ((f[2] - f[0]) / bw, (f[3] - f[1]) / bh);
+    // The new bounds onto the old frame, then the old map.
+    let s = [sx, 0.0, f[0] - b[0] * sx, 0.0, sy, f[1] - b[1] * sy, 0.0, 0.0, 1.0];
+    let mut h = [0.0; 9];
+    for r in 0..3 {
+        for c in 0..3 {
+            h[r * 3 + c] = (0..3).map(|k| p.h[r * 3 + k] * s[k * 3 + c]).sum();
+        }
+    }
+    layer.perspective = Some(photocraft_doc::text::TextPerspective { h, frame: b });
+    true
+}
+
 impl TextEngine {
     /// Bundled fonts only: deterministic output (tests, web).
     pub fn new() -> Self {
@@ -137,8 +170,16 @@ impl TextEngine {
     /// Lays out and rasterizes a text layer into document space.
     pub fn render(&mut self, layer: &TextLayer, dpi: f32, format: PixelFormat) -> (TextLayout, Rendered) {
         let l = self.layout(layer, dpi);
-        let warp = render::layout_deform(&l, layer);
-        let r = render::rasterize_warped(&l, &layer.transform, format, layer.antialias, warp.as_ref());
+        let r = render::rasterize_layer(&l, layer, format);
+        (l, r)
+    }
+
+    /// [`TextEngine::render`] for a layer whose text may have grown: type in perspective that
+    /// would reach the map's horizon is fitted back into its quad first ([`fit_perspective`]).
+    pub fn render_fitted(&mut self, layer: &mut TextLayer, dpi: f32, format: PixelFormat) -> (TextLayout, Rendered) {
+        let l = self.layout(layer, dpi);
+        fit_perspective(&l, layer);
+        let r = render::rasterize_layer(&l, layer, format);
         (l, r)
     }
 

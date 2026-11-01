@@ -89,6 +89,7 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String>
         path: None,
         content_aware: None,
         several: None,
+        vector_type: None,
     });
     app.ui.transform = Some(TransformSession {
         session,
@@ -107,8 +108,74 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String>
         skew_v: 0.0,
         layers: Vec::new(),
     });
+    // Type already in perspective: the box is its quad and the text is drawn through it.
+    if lifted.is_none() && matches!(&layer.content, LayerContent::Text(t) if t.perspective.is_some()) {
+        make_vector_type(app);
+    }
     start_steps(app);
     Ok(())
+}
+
+/// Turn the open box over a type layer into a vector one ([`super::VectorType`]): the box is the
+/// text's quad (its perspective's, or its frame's corners), the preview document shows the layer
+/// itself, re-drawn through the box as it moves, and nothing is resampled.
+pub(crate) fn vectorize_type_box(app: &mut PhotocraftApp) {
+    let single_type =
+        app.ui.transform.as_ref().is_some_and(|t| t.layers.is_empty() && t.warp.is_none() && !t.selection && t.target.is_none() && t.path.is_none())
+            && app.transform_preview.as_ref().is_some_and(|pv| pv.vector_type.is_none() && pv.several.is_none())
+            && app
+                .session
+                .active()
+                .zip(app.ui.transform.as_ref())
+                .is_some_and(|(st, t)| matches!(st.doc.layer(LayerId(t.layer)).map(|l| &l.content), Some(LayerContent::Text(_))));
+    // Only an untouched box: one moved already has its own source rectangle.
+    if single_type && app.ui.transform.as_ref().is_some_and(|t| t.quad == corners(t.rect)) {
+        make_vector_type(app);
+    }
+}
+
+fn make_vector_type(app: &mut PhotocraftApp) {
+    let (Some(t), Some(pv)) = (app.ui.transform.as_mut(), app.transform_preview.as_mut()) else { return };
+    let Some(st) = app.session.active().filter(|st| st.doc.id == pv.doc.id) else { return };
+    let Some(LayerContent::Text(text)) = st.doc.layer(LayerId(t.layer)).map(|l| &l.content) else { return };
+    let quad = text.perspective.and_then(|p| p.quad()).unwrap_or_else(|| corners(t.rect));
+    let (min, max) = quad.iter().fold(([f64::MAX; 2], [f64::MIN; 2]), |(lo, hi), q| ([lo[0].min(q[0]), lo[1].min(q[1])], [hi[0].max(q[0]), hi[1].max(q[1])]));
+    t.rect = [min[0], min[1], max[0], max[1]];
+    t.quad = quad;
+    t.pivot = [(min[0] + max[0]) / 2.0, (min[1] + max[1]) / 2.0];
+    // The layer in its place in the stack: nothing hidden, nothing drawn over it apart.
+    pv.doc = st.doc.clone();
+    pv.above = None;
+    if let Some(f) = pv.follow.as_mut() {
+        f.hidden.clear();
+    }
+    pv.vector_type = Some(super::VectorType { from: quad, shown: None, drawn: 0 });
+}
+
+/// A vector type box moved (or the document changed under it): the preview document gets the
+/// layer drawn through the box's map now. Called before the canvas reads the preview document.
+pub(crate) fn refresh_vector_type(app: &mut PhotocraftApp) {
+    let (Some(t), Some(pv)) = (app.ui.transform.as_ref(), app.transform_preview.as_mut()) else { return };
+    let Some(vt) = pv.vector_type.as_mut() else { return };
+    let Some(st) = app.session.active().filter(|st| st.doc.id == pv.doc.id) else { return };
+    if vt.shown == Some((t.quad, st.revision)) {
+        return;
+    }
+    vt.shown = Some((t.quad, st.revision));
+    let id = LayerId(t.layer);
+    let Some(LayerContent::Text(text)) = st.doc.layer(id).map(|l| &l.content) else { return };
+    let unit = [0.0, 0.0, 1.0, 1.0];
+    let map = Homography::rect_to_quad(unit, t.quad).zip(Homography::rect_to_quad(unit, vt.from).and_then(|h| h.inverse())).map(|(to, from)| to.mul(&from));
+    let mut pd = (*st.doc).clone();
+    // A box past the horizon (or collapsed) shows the text as it was.
+    if let Some(h) = map
+        && let Ok(drawn) = photocraft_engine::transform_cmds::type_in_perspective(&st.doc, text, &h)
+        && let Some(l) = pd.layer_mut(id)
+    {
+        l.content = LayerContent::Text(drawn);
+    }
+    pv.doc = Arc::new(pd);
+    vt.drawn = vt.drawn.wrapping_add(1);
 }
 
 /// Free Transform of the selected layers `ids` together (#6501): the box frames them all, and the
@@ -186,6 +253,7 @@ fn begin_several(app: &mut PhotocraftApp, ctx: &egui::Context, doc: Arc<Document
         path: None,
         content_aware: None,
         several: Some(several),
+        vector_type: None,
     });
     app.ui.transform = Some(TransformSession {
         session,
@@ -315,6 +383,7 @@ pub(crate) fn begin_content_aware(
         content_aware: Some(live),
         styled: None,
         several: None,
+        vector_type: None,
     });
     app.ui.transform = Some(TransformSession {
         session,
@@ -377,32 +446,27 @@ pub fn begin_type_perspective(app: &mut PhotocraftApp, ctx: &egui::Context) -> R
         let st = app.session.active().ok_or("no document")?;
         let id = st.active_layer.ok_or("no active layer")?;
         let l = st.doc.layer(id).ok_or("no active layer")?;
-        (st.doc.id, id, match &l.content {
-            LayerContent::Text(_) => 0,
-            LayerContent::Smart(_) => 1,
-            _ => 2,
-        })
+        (
+            st.doc.id,
+            id,
+            match &l.content {
+                LayerContent::Text(_) => 0,
+                LayerContent::Smart(_) => 1,
+                _ => 2,
+            },
+        )
     };
     if kind == 2 {
         return Err(tl!("Perspective is for type layers and smart objects").into());
     }
-    let made = if kind == 0 {
-        let r = app.run("layer.smartObjects.convertToSmartObject", serde_json::json!({"layer": layer.0}))?;
-        Some(LayerId(r["layer"].as_u64().ok_or("the conversion made no layer")?))
-    } else {
-        None
-    };
-    if let Err(e) = begin(app, ctx) {
-        if let Some(smart) = made {
-            take_back_made(app, doc, smart);
-        }
-        return Err(e);
+    let _ = (doc, layer);
+    begin(app, ctx)?;
+    // Type stays type: the box maps the text itself, drawn as vectors (sharp, still editable).
+    if kind == 0 && app.transform_preview.as_ref().is_some_and(|pv| pv.vector_type.is_none()) {
+        make_vector_type(app);
     }
     if let Some(t) = app.ui.transform.as_mut() {
         t.mode = crate::state::TransformMode::Perspective;
-        if made.is_some() {
-            t.made = Some(MadeLayer::SmartType);
-        }
     }
     Ok(())
 }
@@ -490,6 +554,7 @@ fn begin_lone(
         path: None,
         content_aware: None,
         several: None,
+        vector_type: None,
     });
     app.ui.transform = Some(TransformSession {
         session,
@@ -545,6 +610,7 @@ fn begin_path(app: &mut PhotocraftApp, ctx: &egui::Context, params: serde_json::
         follow: None,
         committing: None,
         several: None,
+        vector_type: None,
     });
     app.ui.transform = Some(TransformSession {
         session,
@@ -632,6 +698,7 @@ pub fn begin_selection(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(
         path: None,
         content_aware: None,
         several: None,
+        vector_type: None,
     });
     app.ui.transform = Some(TransformSession {
         session,

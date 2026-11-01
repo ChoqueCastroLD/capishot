@@ -694,13 +694,19 @@ fn invoke_view_command(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, p
             if app.ui.transform.is_none() {
                 crate::transform_tool::begin(app, ctx)?;
             }
+            // Distort and Perspective on type keep it type: the box draws the text through it.
+            if matches!(id, "edit.transform.distort" | "edit.transform.perspective") {
+                crate::transform_tool::vectorize_type_box(app);
+            }
             if let Some(transform) = app.ui.transform.as_mut() {
                 transform.mode = crate::state::TransformMode::for_command(id);
             }
             Ok(json!({"transform": app.ui.transform}))
         })()),
         "edit.freeTransformCopy" => Some(crate::transform_tool::begin_copy(app, ctx).map(|_| json!({"transform": app.ui.transform}))),
-        crate::transform_tool::TYPE_PERSPECTIVE => Some(crate::transform_tool::begin_type_perspective(app, ctx).map(|_| json!({"transform": app.ui.transform}))),
+        crate::transform_tool::TYPE_PERSPECTIVE => {
+            Some(crate::transform_tool::begin_type_perspective(app, ctx).map(|_| json!({"transform": app.ui.transform})))
+        }
         "edit.transform.warp" | "layer.smartObjects.warp" if params.as_object().is_none_or(|object| object.is_empty()) => {
             Some(crate::transform_tool::begin_warp(app, ctx).map(|_| json!({"transform": app.ui.transform})))
         }
