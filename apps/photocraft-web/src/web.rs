@@ -1813,7 +1813,9 @@ pub(crate) async fn read_array(data: &js_sys::Uint8Array) -> Vec<u8> {
     let mut at = 0;
     while at < n {
         let end = (at + READ_CHUNK).min(n);
-        out.extend_from_slice(&data.subarray(at as u32, end as u32).to_vec());
+        // Straight into place: one copy (a slice copied to a new vector, then into this one, was two).
+        out.resize(end, 0);
+        data.subarray(at as u32, end as u32).copy_to(&mut out[at..end]);
         at = end;
         if at < n {
             next_task().await;

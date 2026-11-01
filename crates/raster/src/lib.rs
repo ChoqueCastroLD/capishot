@@ -983,7 +983,40 @@ impl Surface {
         let bpp = self.format.bytes_per_pixel();
         let w = r.width() as usize;
         assert_eq!(bytes.len(), w * r.height() as usize * bpp, "interleaved length mismatch");
+        // A tile `r` covers whole and the surface doesn't have yet is built straight from its
+        // rows (opening a file writes mostly those): no fill with the default pixel to overwrite.
+        let whole: Vec<TileCoord> = r.tiles().filter(|tc| tc.rect().intersect(&r) == tc.rect() && !self.tiles.contains_key(tc)).collect();
+        if !whole.is_empty() {
+            let build = |tc: &TileCoord| {
+                let tr = tc.rect();
+                let span = TILE_SIZE as usize * bpp;
+                let mut data = Vec::with_capacity(span * TILE_SIZE as usize);
+                for y in tr.y0..tr.y1 {
+                    let src = (((y - r.y0) as usize) * w + (tr.x0 - r.x0) as usize) * bpp;
+                    data.extend_from_slice(&bytes[src..src + span]);
+                }
+                (*tc, Arc::new(Tile { data: data.into_boxed_slice() }))
+            };
+            #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
+            let built: Vec<(TileCoord, Arc<Tile>)> = if parallel(r) {
+                use rayon::prelude::*;
+                whole.par_iter().map(build).collect()
+            } else {
+                whole.iter().map(build).collect()
+            };
+            #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
+            let built: Vec<(TileCoord, Arc<Tile>)> = whole.iter().map(build).collect();
+            let all_whole = built.len() == r.tiles().count();
+            self.tiles.extend(built);
+            if all_whole {
+                return;
+            }
+        }
+        let skip: std::collections::BTreeSet<TileCoord> = whole.into_iter().collect();
         self.edit_tiles(r, |tc, t| {
+            if skip.contains(&tc) {
+                return;
+            }
             let tr = tc.rect().intersect(&r);
             let span = tr.width() as usize * bpp;
             for y in tr.y0..tr.y1 {

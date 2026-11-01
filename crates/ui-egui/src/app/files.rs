@@ -53,12 +53,23 @@ impl PhotocraftApp {
     /// shown to the user). Files from disk go through [`open_file`](Self::open_file), which also
     /// remembers the path. Brush and gradient files go to the preset libraries instead.
     pub fn open_bytes(&mut self, name: &str, bytes: &[u8]) -> Result<Vec<String>, String> {
-        self.open_bytes_from(name, bytes, None)
+        self.open_data(name, OpenData::Borrowed(bytes), None)
+    }
+
+    /// [`Self::open_bytes`] for bytes the caller hands over (the web's picked, dropped and
+    /// embedded files): a PSD/PSB is decoded from them in place, never copied first.
+    pub fn open_owned(&mut self, name: &str, bytes: Vec<u8>) -> Result<Vec<String>, String> {
+        self.open_data(name, OpenData::Shared(std::sync::Arc::new(bytes)), None)
     }
 
     /// [`Self::open_bytes`] for a file read from `path` (File › Save writes back there; it goes
     /// to Open Recent), when known.
     pub(crate) fn open_bytes_from(&mut self, name: &str, bytes: &[u8], path: Option<&str>) -> Result<Vec<String>, String> {
+        self.open_data(name, OpenData::Borrowed(bytes), path)
+    }
+
+    fn open_data(&mut self, name: &str, data: OpenData<'_>, path: Option<&str>) -> Result<Vec<String>, String> {
+        let bytes = data.bytes();
         if let Some(r) = preset_files_ui::open(self, name, bytes) {
             return r.map(|()| Vec::new());
         }
@@ -74,7 +85,7 @@ impl PhotocraftApp {
         // Decoded on a worker: a tab with progress appears now, the document when it's ready
         // (warnings are shown then).
         if self.background_jobs {
-            jobs_ui::start_open(self, name, path.map(str::to_string), jobs_ui::bytes(bytes))?;
+            jobs_ui::start_open(self, name, path.map(str::to_string), photocraft_engine::jobs::OpenSource::Bytes(data.shared()))?;
             return Ok(Vec::new());
         }
         let import = self.services.import.as_ref().ok_or("no importer configured")?;
@@ -82,7 +93,11 @@ impl PhotocraftApp {
         let (mut doc, warnings, damaged) = if photocraft_io::is_psd(bytes) {
             // Read PSD damage as structured information in the same decode, not by
             // retrying an error or matching the text of a compatibility warning.
-            let (r, damaged) = photocraft_io::import_for_open(name, bytes, &opts).map_err(|e| e.to_string())?;
+            let (r, damaged) = match &data {
+                OpenData::Shared(shared) => photocraft_io::import_shared_for_open_with(name, shared, &opts, &photocraft_raster::Interrupt::NONE),
+                OpenData::Borrowed(bytes) => photocraft_io::import_for_open(name, bytes, &opts),
+            }
+            .map_err(|e| e.to_string())?;
             (r.document, r.warnings, damaged)
         } else {
             let (doc, warnings) = import(name, bytes, &opts)?;
@@ -724,4 +739,27 @@ pub(crate) fn ensure_memory_to_save(doc: &photocraft_engine::doc::Document, path
     let name = file_open::display_name(path);
     photocraft_engine::memory_gate::ensure_for_save(&format!("save \u{201c}{name}\u{201d}"), photocraft_io::estimate_export_bytes(doc, path))
         .map_err(|e| e.to_string())
+}
+
+/// A file's bytes to open: borrowed, or handed over (then a PSD is decoded from them in place).
+enum OpenData<'a> {
+    Borrowed(&'a [u8]),
+    Shared(std::sync::Arc<Vec<u8>>),
+}
+
+impl OpenData<'_> {
+    fn bytes(&self) -> &[u8] {
+        match self {
+            OpenData::Borrowed(b) => b,
+            OpenData::Shared(b) => b,
+        }
+    }
+
+    /// The bytes as a shared buffer (borrowed ones copied).
+    fn shared(&self) -> std::sync::Arc<Vec<u8>> {
+        match self {
+            OpenData::Borrowed(b) => std::sync::Arc::new(b.to_vec()),
+            OpenData::Shared(b) => b.clone(),
+        }
+    }
 }

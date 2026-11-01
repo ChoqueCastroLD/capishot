@@ -88,7 +88,7 @@ pub fn process(app: &mut PhotocraftApp) {
     let ready = photocraft_ui_egui::code_gate::files_ready(app) && names.iter().all(|n| photocraft_ui_egui::code_gate::open_ready(app, n));
     let opens = if ready && photocraft_ui_egui::code_gate::files_ready(app) { OPENS.with(|o| std::mem::take(&mut *o.borrow_mut())) } else { Vec::new() };
     for (name, bytes, (resolve, reject)) in opens {
-        match app.open_bytes(&name, &bytes) {
+        match app.open_owned(&name, bytes) {
             Ok(warnings) => resolve.call1(&JsValue::NULL, &to_js(&json!({ "warnings": warnings }))).ok(),
             Err(e) => {
                 app.open_failed(&name, &e);

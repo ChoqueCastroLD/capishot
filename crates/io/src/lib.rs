@@ -416,6 +416,22 @@ pub fn import_for_open_with(name: &str, bytes: &[u8], opts: &ImportOptions, ctl:
     Ok((result, damaged))
 }
 
+/// [`import_for_open_with`] for bytes the caller shares (a file picked or dropped in the browser):
+/// a PSD/PSB is decoded from them in place, as from a file ([`import_source_for_open_with`]): its
+/// layers' channel data isn't copied out of the file first, nor the merged image unless it is
+/// read, which halves the memory an open holds and saves those copies' time.
+pub fn import_shared_for_open_with(
+    name: &str,
+    bytes: &std::sync::Arc<Vec<u8>>,
+    opts: &ImportOptions,
+    ctl: &photocraft_raster::Interrupt,
+) -> Result<(ImportResult, bool), IoError> {
+    if !has_extension(name, photocraft_format::EXTENSION) && !photocraft_format::is_pcraft(bytes) && is_psd(bytes) {
+        return import_source_for_open_with(name, photocraft_psd::Source::new(bytes.clone()), ctl);
+    }
+    import_for_open_with(name, bytes, opts, ctl)
+}
+
 /// The PSD/PSB part of an import, from a parse that takes [`PsdFile::from_bytes_and_merged_recovering`]'s
 /// `want` and `recover`: of the file's bytes, or of the file itself ([`import_file_for_open_with`]).
 fn import_psd(
@@ -793,6 +809,40 @@ pub fn merged_composite(file: &PsdFile) -> Result<Vec<[f32; 4]>, IoError> {
 mod tests {
     use super::{ImportOptions, import, import_for_open, is_psd_input, is_svg_input};
     use photocraft_psd::{Compression, Version, testgen};
+
+    /// Shared bytes decode a PSD in place (as a file is) to the same document, damage flag and
+    /// warnings as the bytes copied, for every compression and both versions; a damaged channel
+    /// too.
+    #[test]
+    fn shared_bytes_open_a_psd_as_the_copied_bytes_do() {
+        let mut cases = Vec::new();
+        for v in [Version::Psd, Version::Psb] {
+            for c in [Compression::Raw, Compression::Rle, Compression::Zip, Compression::ZipPrediction] {
+                cases.push(testgen::small(v, c).to_bytes().unwrap());
+            }
+        }
+        let mut damaged = testgen::small(Version::Psd, Compression::Rle);
+        damaged.layers_mut()[0].channels.iter_mut().find(|c| c.id == 0).unwrap().data.truncate(3);
+        cases.push(damaged.to_bytes().unwrap());
+        for bytes in cases {
+            let (a, da) = import_for_open("x.psd", &bytes, &ImportOptions::default()).unwrap();
+            let shared = std::sync::Arc::new(bytes.clone());
+            let (b, db) = super::import_shared_for_open_with("x.psd", &shared, &ImportOptions::default(), &photocraft_raster::Interrupt::NONE).unwrap();
+            assert_eq!(da, db, "damage");
+            assert_eq!(a.warnings, b.warnings);
+            let (wa, wb) = (a.document.walk(), b.document.walk());
+            assert_eq!(wa.len(), wb.len());
+            for ((_, _, la), (_, _, lb)) in wa.iter().zip(&wb) {
+                assert_eq!(la.name, lb.name);
+                let r = a.document.bounds();
+                match (la.surface(), lb.surface()) {
+                    (Some(x), Some(y)) => assert_eq!(x.to_interleaved(r), y.to_interleaved(r), "{}", la.name),
+                    (None, None) => {}
+                    _ => panic!("{}: one has pixels", la.name),
+                }
+            }
+        }
+    }
 
     /// Verifies a valid PSD remains editable after import.
     #[test]

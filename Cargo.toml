@@ -157,8 +157,17 @@ opt-level = "s"
 # (runs when a pipeline is created). "z" keeps the wasm well under the size gate.
 [profile.wasm-release.package.photocraft-doc]
 opt-level = "z"
+# Opening a PSD/PSB decodes every channel (PackBits and Deflate) and interleaves it into the
+# layers: at "z" that took four to six times as long as natively, the whole open on the page's
+# thread. The decoders and the pixel shuffling are built for speed.
 [profile.wasm-release.package.photocraft-psd]
-opt-level = "z"
+opt-level = 3
+[profile.wasm-release.package.photocraft-io]
+opt-level = 3
+[profile.wasm-release.package.zlib-rs]
+opt-level = 3
+[profile.wasm-release.package.flate2]
+opt-level = 3
 [profile.wasm-release.package.photocraft-format]
 opt-level = "z"
 [profile.wasm-release.package.photocraft-affinity]
