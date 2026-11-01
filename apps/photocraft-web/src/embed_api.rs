@@ -540,7 +540,7 @@ pub fn open_document(data: JsValue, filename: Option<String>) -> js_sys::Promise
         let bytes = bytes_of(data).await.map_err(|e| error(&e))?;
         JsFuture::from(queue(move |app, _| {
             let before: Vec<u64> = app.session.documents().iter().map(|st| st.doc.id.0).collect();
-            let warnings = app.open_bytes(&name, &bytes).inspect_err(|e| app.open_failed(&name, e))?;
+            let warnings = app.open_owned(&name, bytes).inspect_err(|e| app.open_failed(&name, e))?;
             app.sync_views();
             let opened = app.session.documents().iter().find(|st| !before.contains(&st.doc.id.0)).map(|st| st.doc.id.0);
             let Some(id) = opened else {

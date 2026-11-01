@@ -114,7 +114,25 @@ pub mod packbits {
     /// `-128` no-op bytes (which are always permitted). Errors, rather than
     /// overflowing, when `out.len() + expected` does not fit in `usize`.
     pub(crate) fn decode_into(src: &[u8], expected: usize, out: &mut Vec<u8>) -> Result<()> {
-        let target = out.len().checked_add(expected).ok_or(PsdError::LimitExceeded("PackBits output length overflows usize"))?;
+        let start = out.len();
+        let target = start.checked_add(expected).ok_or(PsdError::LimitExceeded("PackBits output length overflows usize"))?;
+        // The row is decoded into its place, packets copied and filled as slices: no per-packet
+        // length bookkeeping of a growing vector (most of the time a channel took, in the browser).
+        // A length no memory could hold decodes as it grows, up to the input.
+        if out.try_reserve(expected).is_err() {
+            return decode_growing(src, target, out);
+        }
+        out.resize(target, 0);
+        let (r, done) = decode_slice(src, &mut out[start..]);
+        if r.is_err() {
+            // What was decoded stays, as when decoding grows the output.
+            out.truncate(start + done);
+        }
+        r
+    }
+
+    /// [`decode_into`] appending packet by packet, up to `target` bytes in `out`.
+    fn decode_growing(src: &[u8], target: usize, out: &mut Vec<u8>) -> Result<()> {
         let mut i = 0;
         while out.len() < target {
             let Some(&h) = src.get(i) else {
@@ -133,8 +151,7 @@ pub mod packbits {
                 out.extend_from_slice(lit);
                 i += len;
             } else if h != -128 {
-                let len = 1 - h as isize;
-                let len = len as usize;
+                let len = (1 - h as isize) as usize;
                 let Some(&b) = src.get(i) else {
                     return Err(PsdError::Decompress("PackBits run truncated".into()));
                 };
@@ -146,6 +163,44 @@ pub mod packbits {
             }
         }
         Ok(())
+    }
+
+    /// Decodes `src` into exactly `dst.len()` bytes (the errors of [`decode_into`]), and how many
+    /// bytes were decoded.
+    fn decode_slice(src: &[u8], dst: &mut [u8]) -> (Result<()>, usize) {
+        let (mut i, mut o) = (0usize, 0usize);
+        let n = dst.len();
+        while o < n {
+            let Some(&h) = src.get(i) else {
+                return (Err(PsdError::Decompress("PackBits row ended early".into())), o);
+            };
+            i += 1;
+            let h = h as i8;
+            if h >= 0 {
+                let len = h as usize + 1;
+                let Some(lit) = src.get(i..i + len) else {
+                    return (Err(PsdError::Decompress("PackBits literal truncated".into())), o);
+                };
+                if len > n - o {
+                    return (Err(PsdError::Decompress("PackBits literal overflows row".into())), o);
+                }
+                dst[o..o + len].copy_from_slice(lit);
+                o += len;
+                i += len;
+            } else if h != -128 {
+                let len = (1 - h as isize) as usize;
+                let Some(&b) = src.get(i) else {
+                    return (Err(PsdError::Decompress("PackBits run truncated".into())), o);
+                };
+                i += 1;
+                if len > n - o {
+                    return (Err(PsdError::Decompress("PackBits run overflows row".into())), o);
+                }
+                dst[o..o + len].fill(b);
+                o += len;
+            }
+        }
+        (Ok(()), o)
     }
 
     /// Decodes into a new vector of exactly `expected` bytes.

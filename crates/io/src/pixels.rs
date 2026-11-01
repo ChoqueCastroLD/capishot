@@ -57,6 +57,11 @@ pub fn interleave(planes: &[Option<&[u8]>], fill: &[Vec<u8>], n: usize, s: Sampl
     let bs = bands(n);
     let step = bs.first().map_or(n, ExactSizeIterator::len) * row;
     par_map(bs.into_iter().zip(out.chunks_mut(step)).collect(), |(band, part)| {
+        // 8-bit, up to five channels (gray, RGB, CMYK, each with transparency): every pixel
+        // written once, all its channels together, the channel count a constant.
+        if s == SampleType::U8 && interleave_u8(part, planes, fill, invert, band.start, band.len()) {
+            return;
+        }
         for (c, plane) in planes.iter().enumerate() {
             let src = plane.and_then(|p| p.get(band.start * bps..)).unwrap_or_default();
             let inv = src.len() >= bps && invert[c];
@@ -75,6 +80,53 @@ pub fn interleave(planes: &[Option<&[u8]>], fill: &[Vec<u8>], n: usize, s: Sampl
         }
     });
     out
+}
+
+/// [`interleave`] of 8-bit planes, pixels `start..start + len` into `out`; false (nothing written)
+/// for a channel count it has no fast path for.
+fn interleave_u8(out: &mut [u8], planes: &[Option<&[u8]>], fill: &[Vec<u8>], invert: &[bool], start: usize, len: usize) -> bool {
+    // Per channel: its samples for the band (a short or missing plane: its fill byte from where it
+    // ends) and the XOR that inverts it (255 - v).
+    let mut srcs: [(&[u8], u8, u8); 5] = [(&[], 0, 0); 5];
+    let ch = planes.len();
+    if !(1..=5).contains(&ch) {
+        return false;
+    }
+    for (c, plane) in planes.iter().enumerate() {
+        let src = plane.and_then(|p| p.get(start..)).unwrap_or_default();
+        let src = &src[..src.len().min(len)];
+        let f = fill.get(c).and_then(|f| f.first().copied()).unwrap_or(0);
+        let x = if !src.is_empty() && invert.get(c).copied().unwrap_or(false) { 0xFF } else { 0 };
+        srcs[c] = (src, f, x);
+    }
+    fn run<const CH: usize>(out: &mut [u8], srcs: &[(&[u8], u8, u8); 5], len: usize) {
+        let out = &mut out[..len * CH];
+        // The full stretch every plane covers, then the tail with the fills.
+        let full = srcs[..CH].iter().map(|s| s.0.len()).min().unwrap_or(0);
+        let (head, tail) = out.split_at_mut(full * CH);
+        for (i, px) in head.as_chunks_mut::<CH>().0.iter_mut().enumerate() {
+            for c in 0..CH {
+                px[c] = srcs[c].0[i] ^ srcs[c].2;
+            }
+        }
+        for (k, px) in tail.as_chunks_mut::<CH>().0.iter_mut().enumerate() {
+            let i = full + k;
+            for c in 0..CH {
+                px[c] = match srcs[c].0.get(i) {
+                    Some(v) => v ^ srcs[c].2,
+                    None => srcs[c].1,
+                };
+            }
+        }
+    }
+    match ch {
+        1 => run::<1>(out, &srcs, len),
+        2 => run::<2>(out, &srcs, len),
+        3 => run::<3>(out, &srcs, len),
+        4 => run::<4>(out, &srcs, len),
+        _ => run::<5>(out, &srcs, len),
+    }
+    true
 }
 
 fn write_channel<const N: usize>(out: &mut [u8], ch: usize, c: usize, src: &[u8], fill: &[u8], decode: impl Fn([u8; N]) -> [u8; N]) {

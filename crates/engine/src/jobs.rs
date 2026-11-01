@@ -702,7 +702,7 @@ impl Session {
                     OpenSource::Bytes(bytes) => {
                         ctx.check()?;
                         ctx.progress(0.02, "Decoding");
-                        ctx.stage(0.02, 0.95, "Decoding", |ctl| photocraft_io::import_for_open_with(&name_w, &bytes, &opts, ctl))
+                        ctx.stage(0.02, 0.95, "Decoding", |ctl| photocraft_io::import_shared_for_open_with(&name_w, &bytes, &opts, ctl))
                     }
                     // A PSD/PSB is decoded straight from the file, which is never read whole.
                     OpenSource::Path(p) => ctx.stage(0.0, 0.95, "Decoding", |ctl| import_path(&name_w, &p, &opts, ctl)),

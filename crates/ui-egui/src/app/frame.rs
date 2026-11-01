@@ -127,7 +127,7 @@ impl PhotocraftApp {
         };
         let _open_span = (!arrived.is_empty()).then(|| perf_span::span("open.bytes"));
         for (name, bytes) in arrived {
-            if let Err(e) = self.open_bytes(&name, &bytes) {
+            if let Err(e) = self.open_owned(&name, bytes) {
                 self.open_failed(&name, &e);
             }
         }
