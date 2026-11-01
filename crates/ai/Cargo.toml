@@ -22,6 +22,16 @@ cpu = ["runtime", "burn/flex", "burn/rayon", "burn/simd", "dep:rayon"]
 # its kernel trials can hit shaders a WebGPU implementation rejects (SwiftShader), which poisons
 # the device for every later model.
 gpu = ["runtime", "burn/wgpu"]
+# The native (desktop, CLI) GPU path on top of `gpu`: burn's autotune (convolutions as implicit
+# GEMMs, on tensor cores where the device has cooperative matrices) and its SPIR-V compiler for
+# Vulkan; networks in f16 where the adapter has shader-f16. Never in a wasm build: the browser
+# keeps `gpu` alone. Only real adapters run here (`native::pick_runtime` skips software ones).
+gpu-native = ["gpu", "burn/autotune", "burn/vulkan"]
+# Windows: MangaJaNai's ESRGAN in fp32 on DirectML through ONNX Runtime (several times faster
+# than burn's fp32 convolutions, same results), loaded at run time: `onnxruntime.dll` (a DirectML
+# build, 1.24 or later) and `DirectML.dll` next to the executable or in PHOTOCRAFT_AI_ONNXRUNTIME.
+# Without them, and on every other platform, the burn path runs. Never in a wasm build.
+directml = ["runtime", "dep:ort"]
 # Native model downloads (blocking HTTPS, rustls) for `native::NativeUpscaler`.
 download = ["dep:ureq"]
 
@@ -38,12 +48,20 @@ rayon = { workspace = true, optional = true }
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 ureq = { version = "3", default-features = false, features = ["rustls"], optional = true }
 
+[target.'cfg(windows)'.dependencies]
+# Dynamically loaded (no download at build time, nothing linked): see the `directml` feature.
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic", "directml", "api-24"], optional = true }
+
 [dev-dependencies]
 photocraft-ai = { path = ".", features = ["cpu"] }
 image = { workspace = true, features = ["png", "jpeg"] }
 
 [[example]]
 name = "ai_bench"
+required-features = ["cpu", "gpu"]
+
+[[example]]
+name = "bench_upscale"
 required-features = ["cpu", "gpu"]
 
 [lints]

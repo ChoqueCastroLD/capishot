@@ -99,6 +99,28 @@ pub fn plan(width: usize, height: usize, opts: TileOptions) -> Result<Plan> {
     Ok(Plan { tiles, overlap })
 }
 
+/// `plan` with every tile grown to the largest tile's size, by taking more context on the sides
+/// away from the image border (seams, and so the blend, stay the same). For backends that
+/// compile per input shape (DirectML): one shape for the whole image instead of up to nine.
+pub fn uniform(plan: &Plan, width: usize, height: usize) -> Plan {
+    let tw = plan.tiles.iter().map(Tile::width).max().unwrap_or(0).min(width);
+    let th = plan.tiles.iter().map(Tile::height).max().unwrap_or(0).min(height);
+    let grow = |a: usize, n: usize, size: usize| -> (usize, usize) {
+        let a = a.min(n - size);
+        (a, a + size)
+    };
+    let tiles = plan
+        .tiles
+        .iter()
+        .map(|t| {
+            let (x0, x1) = grow(t.x0, width, tw);
+            let (y0, y1) = grow(t.y0, height, th);
+            Tile { x0, x1, y0, y1, ..*t }
+        })
+        .collect();
+    Plan { tiles, overlap: plan.overlap }
+}
+
 /// Near-equal cores of at most `tile` along a side of `n`, and the smallest core size.
 fn cores(n: usize, tile: usize) -> (Vec<(usize, usize)>, usize) {
     let count = n.div_ceil(tile).max(1);
@@ -214,6 +236,28 @@ mod tests {
                 for v in &out.data {
                     assert!((v - 1.0).abs() < 1e-5, "{w}x{h} tile {tile} ov {ov} s {s}: {v}");
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn uniform_tiles_share_one_size_and_still_blend_to_one() {
+        for &(w, h, tile, ov) in &[(10, 7, 4, 2), (300, 123, 128, 16), (5, 5, 8, 16), (1000, 1500, 256, 16), (33, 17, 5, 9)] {
+            let p = plan(w, h, TileOptions { tile, overlap: ov }).unwrap();
+            let u = uniform(&p, w, h);
+            let (tw, th) = (u.tiles[0].width(), u.tiles[0].height());
+            for (a, b) in p.tiles.iter().zip(&u.tiles) {
+                assert!(b.x0 <= a.x0 && b.x1 >= a.x1 && b.y0 <= a.y0 && b.y1 >= a.y1 && b.x1 <= w && b.y1 <= h);
+                assert_eq!((b.width(), b.height()), (tw, th));
+                assert_eq!((a.seam_left, a.seam_right, a.seam_top, a.seam_bottom), (b.seam_left, b.seam_right, b.seam_top, b.seam_bottom));
+            }
+            let img = Planar::new(w, h, 1, (0..w * h).map(|i| (i % 89) as f32 / 89.0).collect()).unwrap();
+            let mut b = Blender::new(w, h, 1, 1, &u).unwrap();
+            for t in &u.tiles {
+                b.add(t, &img.crop(t.x0, t.y0, t.width(), t.height())).unwrap();
+            }
+            for (a, b) in b.finish().data.iter().zip(&img.data) {
+                assert!((a - b).abs() < 1e-5, "{w}x{h} tile {tile} ov {ov}");
             }
         }
     }

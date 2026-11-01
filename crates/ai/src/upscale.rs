@@ -46,16 +46,28 @@ impl Network for Net {
     fn multiple_of(&self) -> usize {
         self.get().multiple_of()
     }
+    fn float_dtype(&self) -> burn::tensor::FloatDType {
+        self.get().float_dtype()
+    }
     fn forward(&self, x: Tensor<4>) -> Tensor<4> {
         self.get().forward(x)
     }
+}
+
+/// Where a loaded network runs.
+enum Backend {
+    /// burn, on the runtime it was loaded on (wgpu or the CPU).
+    Burn(Box<Net>),
+    /// ONNX Runtime on DirectML (Windows; ESRGAN only).
+    #[cfg(all(feature = "directml", windows))]
+    DirectMl(crate::directml::DmlEsrgan),
 }
 
 /// A network loaded from a catalog model's weight file.
 pub struct Loaded {
     pub id: &'static str,
     pub grayscale: bool,
-    pub net: Net,
+    backend: Backend,
 }
 
 impl Loaded {
@@ -70,18 +82,74 @@ impl Loaded {
             Arch::Fdat => Net::Fdat(Fdat::load(rt, &w)?),
             Arch::Lama | Arch::Migan | Arch::Generative => return Err(crate::AiError::UnknownModel(format!("{} is not an upscaler", model.id))),
         };
-        Ok(Self { id: model.id, grayscale, net })
+        Ok(Self { id: model.id, grayscale, backend: Backend::Burn(Box::new(net)) })
+    }
+
+    /// Whether `model` can run on DirectML ([`Self::new_directml`]): ESRGAN (MangaJaNai and
+    /// IllustrationJaNai V1).
+    pub fn directml_supports(model: &ModelInfo) -> bool {
+        model.arch == Arch::Esrgan
+    }
+
+    /// Parses `bytes` for `model` and builds its ONNX Runtime session on DirectML (Windows).
+    #[cfg(all(feature = "directml", windows))]
+    pub fn new_directml(model: &'static ModelInfo, bytes: &[u8], grayscale: bool) -> Result<Self> {
+        if !Self::directml_supports(model) {
+            return Err(crate::AiError::Device(format!("{} doesn't run on DirectML", model.id)));
+        }
+        let w = Weights::from_safetensors(bytes)?;
+        let net = crate::directml::DmlEsrgan::load(&Esrgan::host(&w, grayscale)?)?;
+        Ok(Self { id: model.id, grayscale, backend: Backend::DirectMl(net) })
+    }
+
+    /// Whether this runs on DirectML (else on burn).
+    pub fn is_directml(&self) -> bool {
+        match self.backend {
+            Backend::Burn(_) => false,
+            #[cfg(all(feature = "directml", windows))]
+            Backend::DirectMl(_) => true,
+        }
+    }
+
+    /// Output channels (1 for a grayscale MangaJaNai, else 3).
+    pub fn out_channels(&self) -> usize {
+        match &self.backend {
+            Backend::Burn(n) => n.out_channels(),
+            #[cfg(all(feature = "directml", windows))]
+            Backend::DirectMl(n) => n.out_channels(),
+        }
     }
 }
 
 /// Upscales `input` (one gray channel when the model was loaded for grayscale, else RGB; values
-/// `0..=1`, preprocessed as [`crate::mangajanai`] says) and clamps the result to `0..=1`.
+/// `0..=1`, preprocessed as [`crate::mangajanai`] says) and clamps the result to `0..=1`. `rt`
+/// is the runtime the model was loaded on (unused for a DirectML model).
 pub async fn upscale(rt: &Runtime, model: &Loaded, input: &Planar, tiles: TileOptions, progress: &dyn Progress) -> Result<Planar> {
     let input = if model.grayscale && input.channels != 1 { crate::mangajanai::to_gray(input) } else { input.clone() };
-    let mut out = run_tiled(rt, &model.net, &input, tiles, progress).await?;
+    let out = match &model.backend {
+        Backend::Burn(net) => run_tiled(rt, net.as_ref(), &input, tiles, progress).await?,
+        #[cfg(all(feature = "directml", windows))]
+        Backend::DirectMl(_) => return upscale_directml(model, &input, tiles, progress),
+    };
+    Ok(clamped(out, model))
+}
+
+/// [`upscale`] for a model loaded with [`Loaded::new_directml`] (no burn runtime involved).
+#[cfg(all(feature = "directml", windows))]
+pub fn upscale_directml(model: &Loaded, input: &Planar, tiles: TileOptions, progress: &dyn Progress) -> Result<Planar> {
+    let Backend::DirectMl(net) = &model.backend else {
+        return Err(crate::AiError::Inference(format!("{} isn't loaded on DirectML", model.id)));
+    };
+    let input = if model.grayscale && input.channels != 1 { crate::mangajanai::to_gray(input) } else { input.clone() };
+    let input = if input.channels == net.in_channels() { input } else { input.with_channels(net.in_channels()) };
+    let out = net.run_tiled(&input, tiles, progress)?;
+    Ok(clamped(out, model))
+}
+
+fn clamped(mut out: Planar, model: &Loaded) -> Planar {
     for v in &mut out.data {
         *v = if v.is_nan() { 0.0 } else { v.clamp(0.0, 1.0) };
     }
-    debug_assert_eq!(out.channels, model.net.out_channels());
-    Ok(out)
+    debug_assert_eq!(out.channels, model.out_channels());
+    out
 }

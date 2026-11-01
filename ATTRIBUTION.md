@@ -115,6 +115,8 @@ restrictions bind every user (Help › Terms of Use…, with the licence text).
 | SDXS-512-DreamShaper (Ultra-light tier, 4-bit) | Edit › Generative Fill, Quality Ultra-light | IDKiro (Song et al.) | <https://huggingface.co/IDKiro/sdxs-512-dreamshaper> | CreativeML OpenRAIL++-M (same use restrictions) |
 | TAESD (tiny autoencoder: previews, light tiers) | as above | madebyollin | <https://github.com/madebyollin/taesd> | MIT |
 | burn (inference runtime, compiled in) | both | Tracel AI and the burn contributors | <https://github.com/tracel-ai/burn> | MIT/Apache-2.0 |
+| ort (ONNX Runtime bindings, compiled in on Windows; loads the library at run time) | Image › Upscale with AI on DirectML | pyke.io and the ort contributors | <https://github.com/pykeio/ort> | MIT/Apache-2.0 |
+| ONNX Runtime with DirectML (`onnxruntime.dll`, `DirectML.dll`; not in this repository, optional, placed next to the executable by whoever deploys it) | as above | Microsoft | <https://www.nuget.org/packages/Microsoft.ML.OnnxRuntime.DirectML> | ONNX Runtime: MIT; DirectML: Microsoft's DirectML license (redistributable) |
 
 ## Documentation and README
 
