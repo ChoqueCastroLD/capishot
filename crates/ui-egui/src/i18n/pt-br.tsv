@@ -5185,3 +5185,19 @@ fontTab	Find More	Encontrar mais
 
 # Tool letters: repeat to cycle
 	Repeat the Letter to Switch Tools; Shift Goes Back	Repetir a letra troca de ferramenta; Shift volta
+
+# Export Open Documents as ZIP
+	Export Open Documents as ZIP…	Exportar documentos abertos como ZIP…
+	Export Open Documents as ZIP	Exportar documentos abertos como ZIP
+	Page	Página
+	Exported {count} pages to {name}	{count} páginas exportadas em {name}
+	Some pages couldn't be exported	Algumas páginas não puderam ser exportadas
+	Drag a row, or use its arrows, to change the order of the pages	Arraste uma linha, ou use as setas, para mudar a ordem das páginas
+	Max width	Largura máxima
+	File names	Nomes de arquivo
+	Document names	Nomes dos documentos
+	Numbered	Numerados
+	Prefix	Prefixo
+	none	nenhum
+	ZIP name	Nome do ZIP
+	Export {count}	Exportar {count}

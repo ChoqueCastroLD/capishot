@@ -147,6 +147,7 @@ impl PhotocraftApp {
             bubble_flash: None,
             remove_ai: Default::default(),
             font_projects: crate::font_projects_ui::State::new(),
+            zip_export: crate::zip_export_ui::State::default(),
             ai_progress: Default::default(),
             font_checks: Default::default(),
             guide_drag: None,

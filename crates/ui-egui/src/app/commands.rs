@@ -91,6 +91,13 @@ impl PhotocraftApp {
         if let Some(r) = crate::crop_ui::intercept(self, id) {
             return r;
         }
+        // In the browser the ZIP of open documents is a download made by a background job
+        // (the engine command writes files).
+        if cfg!(target_arch = "wasm32") && id == photocraft_engine::zip_export_cmds::ID && params.as_object().is_some_and(|o| !o.is_empty()) {
+            let name = params.get("path").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string);
+            let name = name.unwrap_or_else(|| photocraft_engine::zip_export_cmds::default_zip_name(&self.session));
+            return crate::zip_export_ui::start(self, &params, &name);
+        }
         let t0 = gpu_canvas::now_ms();
         // The OS clipboard is read only on an explicit paste, never in the background (privacy, CPU).
         if is_os_paste(id) {

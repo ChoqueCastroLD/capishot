@@ -127,7 +127,11 @@ pub fn is_favorite(app: &PhotocraftApp, id: &str) -> bool {
 
 /// A menu command's label in the UI language (the catalog's English label translated).
 pub fn command_label(id: &str) -> Option<String> {
-    let (_, label, _, _) = crate::menu_catalog::CATALOG.iter().find(|c| c.3 == id)?;
+    // Photoshop's tree, else our own commands' labels.
+    let label = match crate::menu_catalog::CATALOG.iter().find(|c| c.3 == id) {
+        Some((_, label, _, _)) => *label,
+        None => photocraft_engine::command_specs().iter().find(|c| c.id == id)?.label,
+    };
     Some(crate::i18n::tr_id(crate::i18n::current(), id, label).trim_end_matches('…').to_string())
 }
 
@@ -141,6 +145,7 @@ fn command_icon(id: &str) -> Option<&'static str> {
         "file.save" | "file.export.quickExportAsPng" => "download",
         "edit.search" => "search",
         "edit.inpaintAi" => "sparkles",
+        "file.export.openDocsZip" => "download",
         "layer.new.layer" => "layers",
         _ => return None,
     })
@@ -939,9 +944,15 @@ fn master_sheet(app: &mut PhotocraftApp, ctx: &egui::Context, screen: Rect) {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
                 let undo: &[&str] = if bar_icons(ui.ctx()) { &[] } else { &["edit.undo", "edit.redo"] };
-                for &id in
-                    undo.iter().chain(&["file.new", "file.open", "file.save", "file.export.quickExportAsPng", "edit.inpaintAi", "edit.preferences.general"])
-                {
+                for &id in undo.iter().chain(&[
+                    "file.new",
+                    "file.open",
+                    "file.save",
+                    "file.export.quickExportAsPng",
+                    "file.export.openDocsZip",
+                    "edit.inpaintAi",
+                    "edit.preferences.general",
+                ]) {
                     let label = command_label(id).unwrap_or_else(|| id.into());
                     if chip(ui, &label, 36.0).clicked() {
                         action = Some(id.into());

@@ -400,6 +400,7 @@ impl PhotocraftApp {
         crate::ai_progress::show(self, &ctx);
         ai_models_ui::window(self, &ctx);
         crate::font_projects_ui::window(self, &ctx);
+        crate::zip_export_ui::window(self, &ctx);
         crate::bubble_type_ui::picker(self, &ctx);
         discard_ui::show(self, &ctx);
         recovery_ui::show(self, &ctx);

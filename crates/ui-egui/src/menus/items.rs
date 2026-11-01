@@ -50,6 +50,9 @@ const PLACE_AFTER: &[(&str, &str)] = &[
     ("type.loadFontFolder", "type.loadFonts"),
     ("type.manageFonts", "type.loadFontFolder"),
     ("image.upscaleAi", "image.imageSize"),
+    // Together after Save for Web: pages out as one ZIP (Compile Folder: PSD files compiled).
+    ("file.automate.compileFolder", "file.export.saveForWebLegacy"),
+    ("file.export.openDocsZip", "file.export.saveForWebLegacy"),
 ];
 
 pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {

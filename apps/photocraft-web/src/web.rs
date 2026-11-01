@@ -1501,6 +1501,7 @@ impl eframe::App for WebShell {
         {
             let _s = photocraft_ui_egui::perf_span::span("save.deliver");
             self.deliver_saves(ctx);
+            crate::download_stream::drain();
         }
         self.app.logic_frame(ctx, frame);
         self.app.finish_type_reset_logic(ctx);
@@ -1716,6 +1717,8 @@ fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig
         })),
         // Embedded in Photopea's way with a save server: documents in its formats go there.
         write: Some(Box::new(move |path: &str, bytes: &[u8]| deliver(photopea.as_ref(), path, bytes))),
+        // Exports of many pages (a ZIP) grow their download a piece at a time.
+        download_stream: Some(Box::new(crate::download_stream::open)),
         // Exports encoded in the background count in the usage statistics like inline saves.
         file_saved: Some(Box::new(crate::usage_stats::doc_saved_stats)),
         // A download may be cancelled and never reports back: it doesn't save the document.
@@ -1830,7 +1833,7 @@ async fn next_task() {
 }
 
 /// A Blob of `parts` (byte arrays and Blobs, in order) typed for `path`.
-fn blob_of(path: &str, parts: &js_sys::Array) -> Result<web_sys::Blob, String> {
+pub(crate) fn blob_of(path: &str, parts: &js_sys::Array) -> Result<web_sys::Blob, String> {
     let opts = web_sys::BlobPropertyBag::new();
     opts.set_type(mime_for(path));
     web_sys::Blob::new_with_blob_sequence_and_options(parts, &opts).map_err(|e| format!("{e:?}"))
@@ -1839,7 +1842,7 @@ fn blob_of(path: &str, parts: &js_sys::Array) -> Result<web_sys::Blob, String> {
 /// A download of `blob`, or, for a file picked with Save As where the browser can write files
 /// (`save_handles`), a write in place. A failed write downloads instead and says why in a notice
 /// ([`take_write_failures`]).
-fn deliver_blob(path: &str, blob: &web_sys::Blob) -> Result<(), String> {
+pub(crate) fn deliver_blob(path: &str, blob: &web_sys::Blob) -> Result<(), String> {
     if !crate::save_handles::has(path) {
         return download_blob(path, blob);
     }

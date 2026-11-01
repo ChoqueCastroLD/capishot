@@ -23,6 +23,8 @@ pub struct ZipWriter {
     out: Vec<u8>,
     central: Vec<u8>,
     count: u16,
+    /// Bytes already handed out by [`ZipWriter::take_written`] (the archive written so far).
+    taken: usize,
 }
 
 impl Default for ZipWriter {
@@ -34,7 +36,7 @@ impl Default for ZipWriter {
 impl ZipWriter {
     /// Creates an empty archive of STORE entries.
     pub fn new() -> Self {
-        ZipWriter { out: Vec::new(), central: Vec::new(), count: 0 }
+        ZipWriter { out: Vec::new(), central: Vec::new(), count: 0, taken: 0 }
     }
 
     /// Reserves the complete archive from its entry names and payload sizes.
@@ -57,7 +59,7 @@ impl ZipWriter {
             return Err(FormatError::Unsupported("more than 65535 zip entries (ZIP64 not supported)".into()));
         }
         let size = u32::try_from(data.len()).map_err(|_| FormatError::Unsupported("zip entry over 4 GiB".into()))?;
-        let offset = u32::try_from(self.out.len()).map_err(|_| FormatError::Unsupported("zip over 4 GiB".into()))?;
+        let offset = u32::try_from(self.taken + self.out.len()).map_err(|_| FormatError::Unsupported("zip over 4 GiB".into()))?;
         let name_b = name.as_bytes();
         let name_len = u16::try_from(name_b.len()).map_err(|_| FormatError::Unsupported("zip entry path exceeds the 65535-byte format limit".into()))?;
         let local_len = 30usize
@@ -103,9 +105,18 @@ impl ZipWriter {
         Ok(())
     }
 
-    /// Appends the central directory and returns the complete archive.
+    /// The archive's bytes written since the last call (local headers and data of the entries
+    /// added), so a big archive can go to a file or a download as it is made: then
+    /// [`ZipWriter::finish`] returns only the rest (the central directory).
+    pub fn take_written(&mut self) -> Vec<u8> {
+        self.taken += self.out.len();
+        std::mem::take(&mut self.out)
+    }
+
+    /// Appends the central directory and returns the complete archive (or, after
+    /// [`ZipWriter::take_written`], what is left of it).
     pub fn finish(mut self) -> Result<Vec<u8>, FormatError> {
-        let cd_offset = u32::try_from(self.out.len()).map_err(|_| FormatError::Unsupported("zip over 4 GiB".into()))?;
+        let cd_offset = u32::try_from(self.taken + self.out.len()).map_err(|_| FormatError::Unsupported("zip over 4 GiB".into()))?;
         let cd_size = u32::try_from(self.central.len()).map_err(|_| FormatError::Unsupported("zip directory over 4 GiB".into()))?;
         self.out.try_reserve(self.central.len().saturating_add(22)).map_err(|_| FormatError::LimitExceeded("not enough memory to finish zip".into()))?;
         self.out.extend_from_slice(&self.central);
@@ -281,6 +292,23 @@ impl<'a> ZipReader<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_archive_taken_as_it_is_written_is_the_same() {
+        let mut whole = ZipWriter::new();
+        let mut parts = ZipWriter::new();
+        let mut streamed = Vec::new();
+        for (name, data) in [("001.png", &b"first page"[..]), ("002.png", b"second"), ("003.png", b"")] {
+            whole.add(name, data).unwrap();
+            parts.add(name, data).unwrap();
+            streamed.extend(parts.take_written());
+        }
+        streamed.extend(parts.finish().unwrap());
+        let whole = whole.finish().unwrap();
+        assert_eq!(streamed, whole);
+        let r = ZipReader::new(&streamed).unwrap();
+        assert_eq!(r.read_by_name("002.png", 100).unwrap(), b"second");
+    }
 
     #[test]
     fn crc_known_value() {

@@ -175,6 +175,10 @@ fn invoke_shell_commands(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str,
     if let Some(r) = crate::capishot_ui::invoke(app, id, params) {
         return Some(r);
     }
+    // File › Export › Export Open Documents as ZIP…: its dialog, or the export at once.
+    if let Some(r) = crate::zip_export_ui::invoke(app, id, params) {
+        return Some(r);
+    }
     // Window › Font Projects….
     if let Some(r) = crate::font_projects_ui::invoke(app, id) {
         return Some(r);

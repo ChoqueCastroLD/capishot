@@ -186,6 +186,19 @@ pub type ExportFn = Box<dyn Fn(&Document, &str, &ExportSettings) -> Result<(Vec<
 
 pub type WriteFn = Box<dyn FnMut(&str, &[u8]) -> Result<(), String>>;
 
+/// A download written a piece at a time (the browser's: a Blob grown chunk by chunk), so a big
+/// export (a ZIP of pages) is never whole in the app's memory. Made on the page's thread, used
+/// from a worker. Dropping it without [`DownloadStream::finish`] discards what it got.
+pub trait DownloadStream: Send {
+    /// The next piece of the file.
+    fn push(&mut self, chunk: Vec<u8>) -> Result<(), String>;
+    /// The file is complete: hand it to the user.
+    fn finish(self: Box<Self>) -> Result<(), String>;
+}
+
+/// Starts a [`DownloadStream`] for a download named `name`.
+pub type DownloadStreamFn = Box<dyn Fn(&str) -> Result<Box<dyn DownloadStream>, String>>;
+
 /// What a file on disk looked like when a document last read or wrote it: File › Save asks
 /// before replacing a file another app changed since (#6596).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -347,6 +360,9 @@ pub struct Services {
     pub file_dialog: Option<FileDialogFn>,
     /// Write bytes to a path (native) or trigger a download (web).
     pub write: Option<WriteFn>,
+    /// A download written as it is made ([`DownloadStream`]), where the platform has one (the
+    /// web); without it such exports are written with [`Self::write`] once complete.
+    pub download_stream: Option<DownloadStreamFn>,
     /// A file encoded in the background (Export As, Save a Copy, Compile PSD) was written or
     /// failed: its path, the document's size and layer count, and how long it took (ms). The web
     /// counts it in the usage statistics, as its `export` service does for inline saves.

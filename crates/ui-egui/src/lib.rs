@@ -85,6 +85,7 @@ pub mod typer;
 pub mod update_notice;
 pub mod user_fonts_ui;
 mod view_scroll;
+pub mod zip_export_ui;
 
 use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender};
@@ -270,10 +271,10 @@ use prefs::pressure_curve_ui;
 
 pub use services::{
     AppendTextFn, AutomationCommandFn, AutomationOpenPcraftFn, AutomationReadFn, AutomationWriteFn, AutosaveCompletion, AutosaveFn, CapsLockFn, CaptionStyleFn,
-    ClipboardGetFn, ClipboardRefreshFn, ClipboardSetFn, ClipboardUnreadableFn, CursorPosFn, DiscardAutosaveFn, DiscoverRecoveryFn, EncodePngFn, ExportFn,
-    ExportSettings, FileSavedFn, FileStamp, FileStampFn, FormatChoices, ImportFn, Inbox, LoadTextFn, OpenUrlFn, OsEventsFn, PhotoshopShortcutsFn,
-    PollAutosaveFn, QuitFn, RecoverFn, Recoverable, RecoveredDocument, RecoveryBatch, RecoveryDiscovery, RightButtonDownFn, SameFileFn, SaveFileFn, SaveTextFn,
-    Services, SystemThemeFn, WindowFrameFn, WriteFn, WritesInPlaceFn,
+    ClipboardGetFn, ClipboardRefreshFn, ClipboardSetFn, ClipboardUnreadableFn, CursorPosFn, DiscardAutosaveFn, DiscoverRecoveryFn, DownloadStream,
+    DownloadStreamFn, EncodePngFn, ExportFn, ExportSettings, FileSavedFn, FileStamp, FileStampFn, FormatChoices, ImportFn, Inbox, LoadTextFn, OpenUrlFn,
+    OsEventsFn, PhotoshopShortcutsFn, PollAutosaveFn, QuitFn, RecoverFn, Recoverable, RecoveredDocument, RecoveryBatch, RecoveryDiscovery, RightButtonDownFn,
+    SameFileFn, SaveFileFn, SaveTextFn, Services, SystemThemeFn, WindowFrameFn, WriteFn, WritesInPlaceFn,
 };
 pub(crate) use services::{SAVE_OPTIONS_OPEN, saved_revision_after_write};
 pub use text::bidi_text;
@@ -681,6 +682,8 @@ pub struct PhotocraftApp {
     pub(crate) remove_ai: remove_ai_ui::Pending,
     /// Window › Font Projects and the font menus' project sections (`font_projects_ui`).
     pub(crate) font_projects: font_projects_ui::State,
+    /// File › Export › Export Open Documents as ZIP… (`zip_export_ui`).
+    pub(crate) zip_export: zip_export_ui::State,
     /// The AI progress card (`ai_progress`).
     pub(crate) ai_progress: ai_progress::State,
     /// Documents whose missing fonts wait for served fonts, `fonts.preload` requests, and the
@@ -829,6 +832,8 @@ mod phone_polish_tests;
 mod phone_select_tests;
 #[cfg(test)]
 mod tool_cycle_tests;
+#[cfg(test)]
+mod zip_export_ui_tests;
 
 #[cfg(test)]
 mod color_swatch_tests;
