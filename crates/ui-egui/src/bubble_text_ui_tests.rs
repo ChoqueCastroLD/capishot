@@ -116,7 +116,7 @@ fn in_the_j_group_after_remove_with_ai_and_shift_j_reaches_it() {
     app.ui.tool = Tool::RemoveAi;
     let ctx = egui::Context::default();
     let key = |pressed, modifiers| Event::Key { key: Key::J, physical_key: None, pressed, repeat: false, modifiers };
-    let mut press = |app: &mut PhotocraftApp, m: Modifiers| {
+    let press = |app: &mut PhotocraftApp, m: Modifiers| {
         ctx.begin_pass(egui::RawInput { events: vec![Event::ModifiersChanged(m), key(true, m), key(false, m)], ..Default::default() });
         crate::shortcuts::handle(app, &ctx);
         ctx.end_pass().textures_delta.clear();

@@ -57,7 +57,11 @@ pub fn is_hidden(path: &str) -> bool {
     HIDDEN_UNTIL_IMPLEMENTED.contains(&path)
         || (!cfg!(target_os = "linux") && LINUX_ONLY.contains(&path))
         || (!cfg!(target_arch = "wasm32") && WEB_ONLY.contains(&path))
+        || (!cfg!(windows) && WINDOWS_ONLY.contains(&path))
 }
+
+/// Preferences that only do something in the Windows app (it updates itself); hidden elsewhere.
+pub const WINDOWS_ONLY: &[&str] = &["interface.autoInstallUpdates"];
 
 /// Preferences that only do something in the web build; other builds don't show them. They
 /// still load, save and round-trip everywhere.

@@ -341,6 +341,13 @@ fn main() -> eframe::Result {
     // First, so the panic hook and every start-up warning are recorded (`logging`).
     let logger = logging::install();
     crash_guard::install_hook();
+    // `--apply-update`: the helper that installs a downloaded Capishot once the app has exited.
+    if let Some(done) = photocraft_ui_egui::win_update::run_helper(&std::env::args_os().skip(1).collect::<Vec<_>>()) {
+        if let Err(e) = done {
+            log::warn!("Capishot update failed: {e}");
+        }
+        return Ok(());
+    }
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(done) = craft_update::self_update::finish(&craft_update::suite::PHOTOCRAFT, &std::env::args_os().skip(1).collect::<Vec<_>>()) {
         if let Err(e) = done {
@@ -691,6 +698,8 @@ fn main() -> eframe::Result {
             if let Some(w) = &app_dirs::current().warning {
                 photocraft_ui_egui::notices::post(&mut app, "Portable mode is off", vec![w.clone()], false, None);
             }
+            // The last update: a failed install or a declined administrator prompt is reported.
+            photocraft_ui_egui::win_update::report_last(&mut app, app_dirs::current().mode == app_dirs::Mode::Portable);
             Ok(Box::new(app))
         }),
     );
@@ -700,6 +709,12 @@ fn main() -> eframe::Result {
     #[cfg(not(target_os = "macos"))]
     if let Some(primary) = single_instance {
         primary.shutdown();
+    }
+    // Restart and Update: the helper installs once this process has exited, then starts Capishot.
+    if let Some(plan) = photocraft_ui_egui::win_update::take_pending()
+        && let Err(e) = photocraft_ui_egui::win_update::spawn_helper(&plan)
+    {
+        log::error!("couldn't start the update helper: {e}");
     }
     // Closed or failed outside graphics initialization: not a driver crash. A renderer error
     // keeps the marker, so the next start tries a safer backend, unless there is no safer one:

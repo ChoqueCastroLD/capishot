@@ -40,6 +40,7 @@ pub(super) fn humanize(key: &str) -> String {
         "lightTheme" => return "Light Theme".into(),
         "automaticallyCheckUpdates" => return "Automatically Check for Updates".into(),
         "simpleUi" => return "Simple UI".into(),
+        "autoInstallUpdates" => return "Install Updates Automatically".into(),
         "touchShortcut" => return "Touch Modifier Button".into(),
         "simpleModifierButton" => return "Touch Modifier Button (Simple UI)".into(),
         "simpleTwoFingerRotate" => return "Rotate with Two Fingers (Simple UI)".into(),

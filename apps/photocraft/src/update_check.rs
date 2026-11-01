@@ -1,7 +1,8 @@
 //! The launch-time update check: one small GET of the release manifest on a background thread,
-//! handed to `photocraft_ui_egui::update_notice`, which compares versions and shows the notice.
-//! It sends nothing but the request itself (no identifiers, no usage data) and never downloads
-//! or installs the update.
+//! handed to `photocraft_ui_egui::update_notice`, which compares versions and shows the notice
+//! (and checks again every few hours). It sends nothing but the request itself (no identifiers,
+//! no usage data). On Windows the notice's Update downloads and installs it
+//! (`photocraft_ui_egui::win_update`).
 //!
 //! On by default in the Windows app only (the manifest lists Windows downloads).
 //! `CAPISHOT_UPDATE_URL` points it at another manifest on any platform (`off` turns it off).
@@ -21,7 +22,9 @@ fn manifest_url(var: Option<String>) -> Option<String> {
 /// logged.
 pub fn start(portable: bool) -> Option<UpdateCheck> {
     let url = manifest_url(std::env::var("CAPISHOT_UPDATE_URL").ok())?;
-    let check = UpdateCheck { portable, ..Default::default() };
+    // Re-checked every few hours by the app; Windows copies download and install updates
+    // themselves (`win_update`).
+    let check = UpdateCheck { portable, url: Some(url.clone()), installs: cfg!(windows), ..Default::default() };
     let slot = check.manifest.clone();
     let spawned =
         std::thread::Builder::new().name("capishot-update-check".into()).spawn(move || match photocraft_fontfetch::get_small(&url, MAX_MANIFEST_BYTES) {

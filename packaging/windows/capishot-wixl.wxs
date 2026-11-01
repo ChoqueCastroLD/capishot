@@ -41,6 +41,7 @@
     <Feature Id="Main" Title="Capishot" Level="1">
       <ComponentRef Id="CapishotApp" />
       <ComponentRef Id="CapishotCli" />
+      <!-- DIRECTML_REF: package-linux.sh puts the DirectML runtime's ComponentRef here. -->
     </Feature>
 
     <UIRef Id="CapishotUI" />
@@ -153,6 +154,8 @@
       <Component Id="CapishotCli" Guid="92993EE2-AD2B-4BB6-B662-8F25E2A081B2" Win64="yes">
         <File Id="CapishotCliExe" Name="capishot-cli.exe" Source="$(var.BinDir)/capishot-cli.exe" KeyPath="yes" />
       </Component>
+      <!-- DIRECTML_COMPONENT: package-linux.sh puts the DirectML runtime here (onnxruntime.dll,
+           DirectML.dll and their licences beside the executables). -->
     </DirectoryRef>
   </Fragment>
 </Wix>

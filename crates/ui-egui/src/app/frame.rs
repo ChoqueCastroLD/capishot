@@ -137,7 +137,9 @@ impl PhotocraftApp {
         self.drop_places.extend(to_place.into_iter().map(|(name, bytes)| file_open::DropPlace::Bytes(name, bytes)));
         // Finder double-click / Open With / Dock drops (macOS open-documents events).
         self.drain_os_events(ctx);
-        crate::update_notice::poll(self);
+        crate::update_notice::poll(self, ctx.input(|i| i.time));
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::win_update::tick(self);
         // While files are dragged over the window it gets no pointer events: keep frames coming so
         // the tab strip can follow the pointer.
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {

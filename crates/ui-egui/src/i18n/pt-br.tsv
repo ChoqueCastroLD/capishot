@@ -5201,3 +5201,23 @@ fontTab	Find More	Encontrar mais
 	none	nenhum
 	ZIP name	Nome do ZIP
 	Export {count}	Exportar {count}
+
+# Updater (Windows)
+	Skip This Version	Ignorar esta versão
+	Release Notes	Notas da versão
+	You have {current}.	Você tem a {current}.
+	This version is required: yours is no longer supported.	Esta versão é obrigatória: a sua não é mais suportada.
+	Capishot {version} is up to date	O Capishot {version} está atualizado
+	Updates are checked in the Windows app only	As atualizações só são verificadas no app do Windows
+	Downloading Capishot {version}	Baixando o Capishot {version}
+	This update publishes no checksum: download it from the website	Esta atualização não publica a soma de verificação: baixe-a pelo site
+	No update has been downloaded	Nenhuma atualização foi baixada
+	Capishot {version} is ready to install	O Capishot {version} está pronto para instalar
+	It will be installed when you close Capishot.	Será instalado quando você fechar o Capishot.
+	Capishot restarts to install it; open documents ask to be saved first.	O Capishot reinicia para instalá-la; antes pede para salvar os documentos abertos.
+	Restart and Update	Reiniciar e atualizar
+	Updated to Capishot {version}	Atualizado para o Capishot {version}
+	Capishot {version} wasn't installed	O Capishot {version} não foi instalado
+	The update was cancelled (the administrator prompt was declined).	A atualização foi cancelada (o pedido de administrador foi recusado).
+	No release notes	Sem notas da versão
+	Install Updates Automatically	Instalar atualizações automaticamente

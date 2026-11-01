@@ -4941,7 +4941,7 @@ navigator	Zoom	Zoom
 	Recent commands	Comandos recientes
 	Tool options	Opciones de herramienta
 	More menus	Más menús
-	Capishot {version} is available	Capishot {version} está disponible
+	Capishot {version} is available	Capishot {version} disponible
 	You have {current}. Nothing is installed automatically.	Tienes la {current}. No se instala nada automáticamente.
 	No update is available	No hay ninguna actualización disponible
 	Show the interface	Mostrar la interfaz
@@ -5233,3 +5233,23 @@ fontTab	Find More	Buscar más
 	none	ninguno
 	ZIP name	Nombre del ZIP
 	Export {count}	Exportar {count}
+
+# Updater (Windows)
+	Skip This Version	Omitir esta versión
+	Release Notes	Notas de la versión
+	You have {current}.	Tienes la {current}.
+	This version is required: yours is no longer supported.	Esta versión es obligatoria: la tuya ya no tiene soporte.
+	Capishot {version} is up to date	Capishot {version} está actualizado
+	Updates are checked in the Windows app only	Las actualizaciones solo se buscan en la app de Windows
+	Downloading Capishot {version}	Descargando Capishot {version}
+	This update publishes no checksum: download it from the website	Esta actualización no publica su suma de verificación: descárgala desde la web
+	No update has been downloaded	No se ha descargado ninguna actualización
+	Capishot {version} is ready to install	Capishot {version} está listo para instalarse
+	It will be installed when you close Capishot.	Se instalará cuando cierres Capishot.
+	Capishot restarts to install it; open documents ask to be saved first.	Capishot se reinicia para instalarla; antes te pedirá guardar los documentos abiertos.
+	Restart and Update	Reiniciar y actualizar
+	Updated to Capishot {version}	Actualizado a Capishot {version}
+	Capishot {version} wasn't installed	Capishot {version} no se instaló
+	The update was cancelled (the administrator prompt was declined).	Se canceló la actualización (se rechazó la solicitud de administrador).
+	No release notes	No hay notas de la versión
+	Install Updates Automatically	Instalar automáticamente las actualizaciones

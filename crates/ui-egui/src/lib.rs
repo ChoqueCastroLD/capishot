@@ -85,6 +85,8 @@ pub mod typer;
 pub mod update_notice;
 pub mod user_fonts_ui;
 mod view_scroll;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod win_update;
 pub mod zip_export_ui;
 
 use std::collections::HashMap;

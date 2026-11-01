@@ -324,6 +324,9 @@ pub struct Interface {
     /// Menus, popups and collapsing sections fade and slide, and scroll areas glide to a new
     /// position. Off, everything changes at once (a reduced-motion mode; #1218, #3273).
     pub enable_animations: bool,
+    /// Windows: a newer version is downloaded as soon as it is found and installed when the app
+    /// closes (off: the notice asks first).
+    pub auto_install_updates: bool,
     /// Move tool drags show only the layer's outline and an arrow, leaving its pixels in place
     /// until release. Off (the default), the pixels follow the pointer live inside the outline.
     pub show_bounding_box_when_dragging_layer: bool,
@@ -375,6 +378,7 @@ impl Default for Interface {
             clip_thumbnails_to_layer_bounds: false,
             show_tooltips: true,
             enable_animations: true,
+            auto_install_updates: false,
             show_bounding_box_when_dragging_layer: false,
             system_title_bar: false,
             show_file_name_in_title: true,

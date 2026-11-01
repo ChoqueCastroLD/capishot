@@ -71,7 +71,10 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
         "type.loadFonts" | "type.loadFontFolder" | "type.manageFonts" => true,
         crate::ai_models_ui::COMMAND => true,
         crate::font_projects_ui::COMMAND => true,
-        crate::update_notice::COMMAND => app.ui.update.is_some(),
+        crate::update_notice::COMMAND | crate::update_notice::SKIP | crate::update_notice::LATER | crate::update_notice::NOTES => app.ui.update.is_some(),
+        "help.checkForUpdates" if app.services.update_check.is_some() => true,
+        "help.updateNow" => app.ui.update.is_some(),
+        "help.restartAndUpdate" => true,
         crate::recovery_ui::COMMAND => crate::recovery_ui::available(app),
         i if i.starts_with("file.openRecent.") => true,
         i if i.starts_with(DOCUMENT_ITEM) => true,
@@ -105,9 +108,11 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {
         "select.selectAndMask" => app.session.is_enabled("select.refineEdge"),
         crate::transform_tool::TYPE_PERSPECTIVE => {
             app.ui.transform.is_none()
-                && app.session.active().and_then(|s| s.active_layer.and_then(|id| s.doc.layer(id))).is_some_and(|l| {
-                    matches!(l.content, photocraft_doc::LayerContent::Text(_) | photocraft_doc::LayerContent::Smart(_))
-                })
+                && app
+                    .session
+                    .active()
+                    .and_then(|s| s.active_layer.and_then(|id| s.doc.layer(id)))
+                    .is_some_and(|l| matches!(l.content, photocraft_doc::LayerContent::Text(_) | photocraft_doc::LayerContent::Smart(_)))
         }
         "type.editText" => app
             .session

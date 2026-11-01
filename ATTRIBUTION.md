@@ -90,6 +90,15 @@ The other built-in ICC profiles and the generated LUT looks are produced by code
 (`crates/cms/src/builtin.rs`, `crates/cms/src/lutfile.rs`) and dedicated to the public domain
 (CC0-1.0); they are not separate files.
 
+## Windows packages only
+
+| Path | Title | Author | Source | License |
+|---|---|---|---|---|
+| `onnxruntime.dll` (Windows MSI and portable ZIP, beside `capishot.exe`) | ONNX Runtime with the DirectML execution provider, 1.24.4 (NuGet `Microsoft.ML.OnnxRuntime.DirectML`), the GPU runtime for the AI models on Windows | Microsoft Corporation | <https://www.nuget.org/packages/Microsoft.ML.OnnxRuntime.DirectML/1.24.4> | MIT, `licenses/LICENSE-onnxruntime.txt`; its third-party notices in `licenses/ThirdPartyNotices-onnxruntime.txt` |
+| `DirectML.dll` (Windows MSI and portable ZIP, beside `capishot.exe`) | DirectML 1.15.4 (NuGet `Microsoft.AI.DirectML`) | Microsoft Corporation | <https://www.nuget.org/packages/Microsoft.AI.DirectML/1.15.4> | Microsoft DirectML license (redistributable), `licenses/LICENSE-DirectML.txt`; notices in `licenses/ThirdPartyNotices-DirectML.txt` |
+
+Both are downloaded at packaging time by `packaging/windows/package-linux.sh` from the pinned packages, checked against their SHA-256; nothing of them is in this repository.
+
 ## AI models (downloaded on demand, not bundled)
 
 The weights are not in this repository or in the app: the web build downloads them from the

@@ -75,6 +75,10 @@ fn invoke_early_commands(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str,
         crate::tool_memory::select(app, tool);
         return Some(Ok(json!({"tool": tool})));
     }
+    // Capishot's own update check (Windows): the manifest, fetched now.
+    if id == "help.checkForUpdates" && app.services.update_check.is_some() {
+        return Some(crate::update_notice::check_now(app));
+    }
     if id == "help.checkForUpdates" {
         return Some(crate::updates_ui::check(app, ctx, params.clone()));
     }
@@ -102,6 +106,16 @@ fn invoke_early_commands(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str,
     }
     if id == crate::update_notice::COMMAND {
         return Some(crate::update_notice::download(app, ctx));
+    }
+    match id {
+        crate::update_notice::SKIP => return Some(crate::update_notice::skip(app)),
+        crate::update_notice::LATER => return Some(crate::update_notice::later(app)),
+        crate::update_notice::NOTES => return Some(crate::update_notice::notes(app, ctx)),
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::win_update::DOWNLOAD => return Some(crate::win_update::download(app)),
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::win_update::APPLY => return Some(crate::win_update::apply(app, ctx)),
+        _ => {}
     }
     // Help › GitHub, Report an Issue, psd-compiler, upstream project.
     if let Some(url) = crate::links::url_for(id) {
