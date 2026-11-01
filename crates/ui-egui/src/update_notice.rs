@@ -30,6 +30,8 @@ pub const SKIP: &str = "help.skipUpdate";
 pub const LATER: &str = "help.updateLater";
 /// Opens the release notes.
 pub const NOTES: &str = "help.updateNotes";
+/// Downloads the update to install it (desktop: `win_update::download`).
+pub const UPDATE_NOW: &str = "help.updateNow";
 /// How often (seconds) a running app checks again.
 pub const RECHECK_SECS: f64 = 6.0 * 3600.0;
 /// `prefs.dialogs` key holding the version whose notice was dismissed: it isn't offered again.
@@ -261,7 +263,7 @@ pub fn offer(app: &mut PhotocraftApp, update: Update) {
     lines.extend(update.notes.clone());
     let id = crate::notices::post(app, "Capishot {version} is available", lines, false, None);
     let action = |label: &str, command: &str| crate::notices::NoticeAction { label: label.into(), command: command.into() };
-    let mut actions = if installs { vec![action("Update", crate::win_update::DOWNLOAD), action("Later", LATER)] } else { vec![action("Download", COMMAND)] };
+    let mut actions = if installs { vec![action("Update", UPDATE_NOW), action("Later", LATER)] } else { vec![action("Download", COMMAND)] };
     if installs && !update.required {
         actions.push(action("Skip This Version", SKIP));
     }
@@ -275,6 +277,7 @@ pub fn offer(app: &mut PhotocraftApp, update: Update) {
         n.sticky = true;
     }
     // Install Updates Automatically: download it at once (it installs when the app closes).
+    #[cfg(not(target_arch = "wasm32"))]
     if installs && app.session.prefs().interface.auto_install_updates && crate::win_update::ready().is_none() {
         let _ = crate::win_update::download(app);
     }

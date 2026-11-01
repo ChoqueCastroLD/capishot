@@ -14,9 +14,12 @@ fn app() -> PhotocraftApp {
 }
 
 /// The Custom tab alone, `width` wide (under 600: a phone's), picks going to `picked`.
-fn tab_harness(app: PhotocraftApp, width: f32) -> Harness<'static, (PhotocraftApp, Option<(String, Option<String>)>)> {
+/// The app and the pick (family, face) the tab made.
+type Picked = (PhotocraftApp, Option<(String, Option<String>)>);
+
+fn tab_harness(app: PhotocraftApp, width: f32) -> Harness<'static, Picked> {
     let mut h = Harness::builder().with_size(egui::vec2(width, 700.0)).with_max_steps(8).build_ui_state(
-        |ui, (app, picked): &mut (PhotocraftApp, Option<(String, Option<String>)>)| {
+        |ui, (app, picked): &mut Picked| {
             if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
                 super::move_panel(app, ui);
                 if let Some(p) = super::custom_tab(app, ui, "Inter") {
@@ -242,7 +245,8 @@ fn every_tab_of_the_font_menu_fits_a_phone() {
             h.get_by_role(egui::accesskit::Role::TextInput).click();
             h.run_steps(4);
             let window = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 800.0));
-            let areas: Vec<(egui::LayerId, egui::Rect)> = h.ctx.memory(|m| m.areas().visible_layer_ids().into_iter().filter_map(|l| Some((l, m.area_rect(l.id)?))).collect());
+            let areas: Vec<(egui::LayerId, egui::Rect)> =
+                h.ctx.memory(|m| m.areas().visible_layer_ids().into_iter().filter_map(|l| Some((l, m.area_rect(l.id)?))).collect());
             assert!(areas.iter().any(|(l, _)| l.order == egui::Order::Foreground), "{tab:?} at {width}: the menu is open");
             for (l, r) in &areas {
                 assert!(window.expand(0.5).contains_rect(*r), "{tab:?} at {width}: {l:?} {r:?} leaves the window");

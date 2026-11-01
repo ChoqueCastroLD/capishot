@@ -130,15 +130,7 @@ impl PerfWindow {
         ));
         if let Some((size, ppp, monitor)) = self.screen {
             let monitor = monitor.map_or(String::new(), |m| format!(", {} {:.0}×{:.0}", tl!("monitor"), m[0], m[1]));
-            v.push(format!(
-                "{}: {:.0}×{:.0} pt × {:.2} = {:.0}×{:.0} px{monitor}",
-                tl!("Window"),
-                size[0],
-                size[1],
-                ppp,
-                size[0] * ppp,
-                size[1] * ppp
-            ));
+            v.push(format!("{}: {:.0}×{:.0} pt × {:.2} = {:.0}×{:.0} px{monitor}", tl!("Window"), size[0], size[1], ppp, size[0] * ppp, size[1] * ppp));
         }
         let paths = |p: &str| self.frames.iter().filter(|f| f.path == p).count();
         v.push(format!(
@@ -184,9 +176,11 @@ mod tests {
             w.frame(&frame(t, if k % 100 == 0 { 120.0 } else { 10.0 }, if k % 2 == 0 { "gpu" } else { "cpu" }));
         }
         assert!(w.frames.front().unwrap().t >= 99_950.0 - WINDOW_MS, "older frames dropped");
-        let mut raw = egui::RawInput::default();
-        raw.screen_rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0)));
-        raw.events = vec![egui::Event::PointerMoved(egui::pos2(1.0, 1.0)); 3];
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0))),
+            events: vec![egui::Event::PointerMoved(egui::pos2(1.0, 1.0)); 3],
+            ..Default::default()
+        };
         w.input(99_950.0, &raw, 1.5, false);
         let info = crate::gpu_canvas::GpuInfo { canvas: "gpu".into(), present: "autovsync, latency 1".into(), ..Default::default() };
         let lines = w.lines(&info).join("\n");
@@ -199,8 +193,7 @@ mod tests {
     #[test]
     fn a_pen_is_reported_as_the_pointer() {
         let mut w = PerfWindow::default();
-        let mut raw = egui::RawInput::default();
-        raw.events = vec![egui::Event::PointerMoved(egui::pos2(1.0, 1.0))];
+        let raw = egui::RawInput { events: vec![egui::Event::PointerMoved(egui::pos2(1.0, 1.0))], ..Default::default() };
         w.input(0.0, &raw, 1.0, true);
         assert_eq!(w.last_kind, PointerKind::Pen);
     }

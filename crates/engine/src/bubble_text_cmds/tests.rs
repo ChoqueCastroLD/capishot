@@ -290,7 +290,7 @@ fn fast_on_a_page() {
 #[test]
 fn a_noisy_scan_bubble_is_cleaned_with_matching_noise() {
     let grain = |x: i32, y: i32| [0.97 + 0.012 * noise(x + 7, y + 3, 0); 3];
-    let mut s = oval_page(move |x, y| grain(x, y));
+    let mut s = oval_page(grain);
     let clean = pixels(&s);
     letter(&mut s, "HELLO THERE!", 330.0, 590.0, 48.0, "#000000");
     letter(&mut s, "HOW ARE YOU?", 340.0, 660.0, 48.0, "#000000");

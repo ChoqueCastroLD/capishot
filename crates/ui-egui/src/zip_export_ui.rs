@@ -50,9 +50,12 @@ pub struct State {
     pending: Option<Pending>,
 }
 
+/// An export's report and, when collected in memory, its ZIP.
+type Outcome = Option<Result<(Value, Option<Vec<u8>>), String>>;
+
 struct Pending {
     name: String,
-    result: Arc<wasm_sync::Mutex<Option<Result<(Value, Option<Vec<u8>>), String>>>>,
+    result: Arc<wasm_sync::Mutex<Outcome>>,
 }
 
 fn settings(st: &State) -> Value {
@@ -154,7 +157,7 @@ pub fn start(app: &mut PhotocraftApp, params: &Value, target: &str) -> Result<Va
     };
     let collect = web && stream.is_none();
     let path = target.clone();
-    let result: Arc<wasm_sync::Mutex<Option<Result<(Value, Option<Vec<u8>>), String>>>> = Arc::default();
+    let result: Arc<wasm_sync::Mutex<Outcome>> = Arc::default();
     let out = Arc::clone(&result);
     let label = crate::i18n::fmt(tl!("Exporting {name}"), &[("name", &crate::file_open::display_name(&target))]);
     let started = app.session.start_job(
@@ -274,12 +277,11 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     app.zip_export.rows.retain(|r| open_ids.contains(&r.doc));
     for d in app.session.documents() {
         let id = d.doc.id.0;
-        if !app.zip_export.thumbs.contains_key(&id) {
+        app.zip_export.thumbs.entry(id).or_insert_with(|| {
             let t = photocraft_compose::thumbnail(&d.doc, 96);
             let img = egui::ColorImage::from_rgba_unmultiplied([t.width as usize, t.height as usize], &t.pixels);
-            let tex = ctx.load_texture(format!("zip-thumb-{id}"), img, egui::TextureOptions::LINEAR);
-            app.zip_export.thumbs.insert(id, tex);
-        }
+            ctx.load_texture(format!("zip-thumb-{id}"), img, egui::TextureOptions::LINEAR)
+        });
     }
     let screen = crate::safe_area::rect(ctx);
     let phone = screen.width() < 600.0;

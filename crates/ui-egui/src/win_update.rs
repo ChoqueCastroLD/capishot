@@ -309,7 +309,7 @@ pub fn run_helper(args: &[OsString]) -> Option<Result<(), String>> {
 // ------------------------------------------------------------------ in the app
 
 /// The command that downloads the offered update.
-pub const DOWNLOAD: &str = "help.updateNow";
+pub const DOWNLOAD: &str = crate::update_notice::UPDATE_NOW;
 /// The command that quits and installs a downloaded update.
 pub const APPLY: &str = "help.restartAndUpdate";
 const READY_TAG: &str = "update-ready";

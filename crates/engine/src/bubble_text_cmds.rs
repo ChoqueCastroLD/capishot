@@ -110,6 +110,7 @@ fn robust_sigma(res: &[f32]) -> f32 {
     1.4826 * median(&mut r)
 }
 
+#[allow(clippy::needless_range_loop)] // Gaussian elimination reads two rows of `m` at once.
 /// Least squares of `terms` basis functions over the `use_` samples, by normal equations (in f64).
 fn solve(model: &Model, samples: &[Sample], use_: &[bool], terms: usize) -> Option<[[f32; 6]; 4]> {
     let mut a = [[0f64; 6]; 6];
@@ -122,8 +123,8 @@ fn solve(model: &Model, samples: &[Sample], use_: &[bool], terms: usize) -> Opti
             for j in 0..terms {
                 a[i][j] += b[i] * b[j];
             }
-            for c in 0..4 {
-                rhs[c][i] += b[i] * f64::from(s.px[c]);
+            for (r, v) in rhs.iter_mut().zip(s.px) {
+                r[i] += b[i] * f64::from(v);
             }
         }
     }
@@ -311,7 +312,7 @@ fn plan(interior: &Mask, src: &Source, tolerance: Option<f32>) -> Result<Plan> {
     let best = fits.iter().map(|f| f.sigma).fold(f32::INFINITY, f32::min);
     let chosen = fits.iter().find(|f| f.sigma <= best * 1.25 + 0.004 && f.ring_fit >= MIN_RING_FIT).or_else(|| fits.first());
     let Some(fit) = chosen else { return Err(EngineError::Other(format!("notPlain: {NOT_PLAIN}"))) };
-    if !(fit.sigma <= MAX_NOISE) || fit.ring_fit < MIN_RING_FIT {
+    if fit.sigma.is_nan() || fit.sigma > MAX_NOISE || fit.ring_fit < MIN_RING_FIT {
         return Err(EngineError::Other(format!("notPlain: {NOT_PLAIN}")));
     }
     // The lettering: far from the model (core), and its weaker anti-aliased edge next to it.

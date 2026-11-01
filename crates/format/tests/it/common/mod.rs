@@ -138,6 +138,7 @@ pub fn rich_doc(mode: ColorMode, depth: SampleType) -> Document {
             orientation: text::Orientation::Vertical,
             antialias: text::AntiAlias::Crisp,
             warp: Some(TextWarp { style: "warpArc".into(), value: 25.0, ..Default::default() }),
+            perspective: None,
         }),
     );
     let mut shape = Layer::new(

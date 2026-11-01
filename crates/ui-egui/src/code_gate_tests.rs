@@ -20,14 +20,16 @@ fn app() -> (PhotocraftApp, Loader) {
     let done: Rc<RefCell<Option<CodeDone>>> = Rc::default();
     let waits = Rc::new(Cell::new(0));
     let (l, d, w) = (loaded.clone(), done.clone(), waits.clone());
-    let mut services = Services::default();
-    services.code_wait = Some(CodeWait {
-        ready: Box::new(move |id| l.get() || id == "file.new" || id == "open:jpg"),
-        wait: Box::new(move |_ctx, f| {
-            w.set(w.get() + 1);
-            *d.borrow_mut() = Some(f);
+    let services = Services {
+        code_wait: Some(CodeWait {
+            ready: Box::new(move |id| l.get() || id == "file.new" || id == "open:jpg"),
+            wait: Box::new(move |_ctx, f| {
+                w.set(w.get() + 1);
+                *d.borrow_mut() = Some(f);
+            }),
         }),
-    });
+        ..Default::default()
+    };
     let mut app = PhotocraftApp::new(Session::new(), services);
     app.run("file.new", json!({"width": 16, "height": 16})).expect("a document");
     (app, Loader { loaded, done, waits })
