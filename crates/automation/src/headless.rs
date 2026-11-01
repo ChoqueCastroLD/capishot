@@ -393,6 +393,25 @@ impl Headless {
 }
 
 impl Headless {
+    /// Job `job`'s progress (0–1) and message while it runs; `None` once it has ended (or if
+    /// there is no such job). Applies the jobs that finished first, as every request does.
+    pub fn job_progress(&mut self, job: u64) -> Option<(f32, String)> {
+        self.sync_jobs();
+        self.session.job(photocraft_engine::jobs::JobId(job)).filter(|j| j.state == "running").map(|j| (j.progress, j.message))
+    }
+
+    /// Block until job `job` ends and return its result, as a waited `engine.execute` does.
+    pub fn wait_job(&mut self, job: u64) -> Result<Value, AutomationError> {
+        Ok(self.session.wait_job(photocraft_engine::jobs::JobId(job))?)
+    }
+
+    /// Cancel job `job` (false if it isn't running).
+    pub fn cancel_job(&mut self, job: u64) -> bool {
+        self.session.cancel_job(photocraft_engine::jobs::JobId(job))
+    }
+}
+
+impl Headless {
     /// A direct automation Render Video uses only the launch-time write capability. Nested
     /// engine actions still reject this filesystem command until they can carry capabilities.
     pub(crate) fn render_video(&mut self, params: Value, progress: impl FnMut(usize, usize) -> bool) -> Result<Value, AutomationError> {
