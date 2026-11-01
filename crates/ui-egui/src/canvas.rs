@@ -123,6 +123,11 @@ pub use tool_input::{ToolEvent, selection_drag_kind, tool_event};
 pub(crate) use tool_input::{command_guide_at, command_moves_layer, event_tool};
 pub(crate) use transform_controls::{LAYER_EDGES, layer_edges_rect};
 use transform_controls::{begin_transform_controls_at, draw_transform_controls, transform_controls_cursor, transform_controls_rect, transform_controls_turn};
+
+/// The selected layers' Move-tool box on screen, when it shows ([`transform_controls_rect`]).
+pub(crate) fn transform_controls_rect_pub(app: &PhotocraftApp, xf: &ViewXform) -> Option<Rect> {
+    transform_controls_rect(app, xf)
+}
 #[cfg(test)]
 use transform_controls::{transform_controls_hit, transform_controls_layers};
 pub use view_xform::{ViewXform, doc_point_at, fill_view, fit_view};

@@ -219,7 +219,9 @@ fn handle_move_pointer(app: &mut PhotocraftApp, ev: ToolEvent, tool: Tool, mods:
             }
             // Auto-Select (or ⌘-click while it is off) picks the layer under the pointer first
             // (not when the selected pixels move: those are the active layer's).
-            if !crate::move_ui::moves_selected_pixels_with(app, tool) && app.ui.tool_options.move_auto_select != mods.command {
+            // A phone has no ⌘: a tap always picks the layer under the finger.
+            let auto_select = app.ui.tool_options.move_auto_select || app.simple;
+            if !crate::move_ui::moves_selected_pixels_with(app, tool) && auto_select != mods.command {
                 let target = app.ui.tool_options.move_target.clone();
                 let mode = if mods.shift { "add" } else { "replace" };
                 let before = app.session.active().map(|st| st.selected_layers());
@@ -235,7 +237,11 @@ fn handle_move_pointer(app: &mut PhotocraftApp, ev: ToolEvent, tool: Tool, mods:
                     })
                 });
                 if locked_hit || (probe.as_ref().is_ok_and(|v| v["layer"].is_null()) && crate::move_box::empty_at(app, [x, y])) {
-                    if locked_hit {
+                    if app.simple && !mods.shift {
+                        // A phone: a tap on an empty spot (or on the page's locked Background)
+                        // deselects, and the layer's box and actions go.
+                        let _ = app.run("select.deselectLayers", json!({}));
+                    } else if locked_hit {
                         // A click still selects the locked layer, as in Photoshop; a drag's
                         // marquee then replaces that selection on release.
                         let _ = app.run("layer.pickAt", json!({"x": x, "y": y, "target": target, "mode": mode}));

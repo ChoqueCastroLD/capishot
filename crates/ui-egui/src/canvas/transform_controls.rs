@@ -22,13 +22,39 @@ pub(crate) fn layer_edges_rect(app: &PhotocraftApp, idx: usize) -> Option<photoc
     Some(b.translate(dx, dy))
 }
 
+/// Move › Show Transform Controls: the option, or a phone (the simple interface), where the box
+/// on the selected layer is how it is scaled and turned (no keys, no menus at hand).
+pub(crate) fn shows_controls(app: &PhotocraftApp) -> bool {
+    app.ui.tool_options.move_show_transform || app.simple
+}
+
+/// On a touch screen the controls are finger-sized: four corners grabbed within
+/// [`crate::transform_tool::TOUCH_HANDLE_PX`] and a rotate handle above the box.
+fn touch(app: &PhotocraftApp) -> bool {
+    crate::touch_ui::active(app)
+}
+
+/// How far above the box's top edge the touch rotate handle sits (screen points).
+pub(crate) const ROTATE_HANDLE_GAP: f32 = 36.0;
+
+/// The touch rotate handle's centre for the box `r`.
+pub(crate) fn rotate_handle(r: Rect) -> Pos2 {
+    r.center_top() - vec2(0.0, ROTATE_HANDLE_GAP)
+}
+
+/// A touch press on the controls: a corner (scales) or the rotate handle (turns).
+fn touch_hit(r: Rect, p: Pos2) -> bool {
+    let grab = crate::transform_tool::TOUCH_HANDLE_PX as f32;
+    [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), rotate_handle(r)].into_iter().any(|h| h.distance(p) <= grab)
+}
+
 /// The layers Move › Show Transform Controls frames: every selected layer but the Background.
 /// A corner radius drag hides the box, as in Photoshop. So does View › Extras (⌘H, #6699): the
 /// controls are an Extra, hidden and inert until Extras comes back, while Show Transform Controls
 /// keeps its setting.
 pub(super) fn transform_controls_layers(app: &PhotocraftApp) -> Vec<&photocraft_doc::Layer> {
     if app.ui.tool != Tool::Move
-        || !app.ui.tool_options.move_show_transform
+        || !shows_controls(app)
         || !app.ui.view.extras
         || app.ui.transform.is_some()
         || app.drag.is_some()
@@ -108,11 +134,18 @@ pub(super) fn transform_controls_hit(r: Rect, p: Pos2) -> bool {
 /// every selected layer, as the frame shows them (#6501).
 pub(super) fn begin_transform_controls_at(app: &mut PhotocraftApp, ctx: &egui::Context, xf: &ViewXform, p: Pos2) -> bool {
     let Some(r) = transform_controls_rect(app, xf) else { return false };
-    if !transform_controls_hit(r, p) {
+    let finger = touch(app);
+    if !(if finger { touch_hit(r, p) } else { transform_controls_hit(r, p) }) {
         return false;
     }
     match crate::transform_tool::begin(app, ctx) {
-        Ok(()) => true,
+        Ok(()) => {
+            // A finger's handle drag is a quick transform: it commits when the finger lifts.
+            if finger && let Some(t) = app.ui.transform.as_ref() {
+                crate::touch_ui::commit_when_lifted(ctx, t.session);
+            }
+            true
+        }
         Err(e) => {
             app.ui.status = e;
             false
@@ -132,6 +165,30 @@ pub(super) fn draw_transform_controls(app: &mut PhotocraftApp, painter: &egui::P
         }
     }
     painter.rect_stroke(r, 0.0, Stroke::new(1.0, accent), egui::StrokeKind::Middle);
+    if touch(app) {
+        // Finger-sized: a 44 pt ring at each corner and a rotate handle above the box.
+        for p in [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom()] {
+            painter.circle(p, crate::transform_tool::TOUCH_HANDLE_PX as f32, Color32::from_rgba_unmultiplied(255, 255, 255, 50), Stroke::new(2.0, accent));
+            painter.circle(p, 6.0, Color32::WHITE, Stroke::new(1.5, accent));
+        }
+        let h = rotate_handle(r);
+        painter.line_segment([r.center_top(), h], Stroke::new(1.5, accent));
+        painter.circle(h, 14.0, Color32::WHITE, Stroke::new(1.5, accent));
+        // A turning arrow: three quarters of a circle with a head.
+        let arc: Vec<Pos2> = (0..=18)
+            .map(|k| {
+                let a = -1.2 + 4.4 * k as f32 / 18.0;
+                h + vec2(a.cos(), a.sin()) * 7.0
+            })
+            .collect();
+        if let Some(&end) = arc.last() {
+            painter.add(egui::Shape::line(arc, Stroke::new(1.8, accent)));
+            painter.line_segment([end, end + vec2(4.0, -1.0)], Stroke::new(1.8, accent));
+            painter.line_segment([end, end + vec2(-0.5, -4.0)], Stroke::new(1.8, accent));
+        }
+        crate::touch_ui::note_rect(painter.ctx(), "layerRotate", Rect::from_center_size(h, vec2(28.0, 28.0)));
+        return;
+    }
     for p in [r.left_top(), r.center_top(), r.right_top(), r.right_center(), r.right_bottom(), r.center_bottom(), r.left_bottom(), r.left_center()] {
         let h = Rect::from_center_size(p, vec2(7.0, 7.0));
         painter.rect_filled(h, 0.0, Color32::WHITE);

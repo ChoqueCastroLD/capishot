@@ -127,18 +127,18 @@ pub fn disabled(app: &crate::PhotocraftApp, id: &str) -> bool {
         return false;
     }
     // Several layers selected: one box moves them all, the Background left out (#6501). It doesn't
-    // warp, and doesn't distort while editable type is among them.
+    // warp (type among them is distorted as type).
     if transform {
         let targets = photocraft_engine::transform_cmds::selection_targets(st);
         if targets.len() > 1 || targets.first() != st.active_layer.as_ref() {
-            return match id {
+            return matches!(
+                id,
                 "edit.transform.warp"
-                | "edit.transform.splitWarpCrosswise"
-                | "edit.transform.splitWarpHorizontally"
-                | "edit.transform.splitWarpVertically"
-                | "edit.transform.removeWarpSplit" => true,
-                _ => false,
-            };
+                    | "edit.transform.splitWarpCrosswise"
+                    | "edit.transform.splitWarpHorizontally"
+                    | "edit.transform.splitWarpVertically"
+                    | "edit.transform.removeWarpSplit"
+            );
         }
     }
     // Type is distorted and put in perspective as type (it stays editable), but the split warps

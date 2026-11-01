@@ -107,9 +107,7 @@ fn warp_is_greyed_while_type_is_among_them() {
     for id in ["edit.freeTransform", "edit.transform.scale", "edit.transform.rotate", "edit.transform.skew", "edit.transform.flipHorizontal"] {
         assert!(crate::menus::is_enabled(&app, id), "{id}");
     }
-    for id in ["edit.transform.warp"] {
-        assert!(!crate::menus::is_enabled(&app, id), "{id} is greyed");
-    }
+    assert!(!crate::menus::is_enabled(&app, "edit.transform.warp"), "Warp is greyed");
     // Distort and Perspective distort the type as type.
     for id in ["edit.transform.distort", "edit.transform.perspective"] {
         assert!(crate::menus::is_enabled(&app, id), "{id}");

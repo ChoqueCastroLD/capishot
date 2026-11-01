@@ -107,7 +107,9 @@ fn controls(h: &H) -> Vec<(String, Rect)> {
     }
     // Drawn over the canvas on purpose, for a moment, by the finger that asked for them; and the
     // selection bar's buttons, which scroll inside it (the bar itself is checked).
-    all.retain(|(l, _)| !matches!(l.as_str(), "brushPreview" | "loupe" | "sliderBubble" | "selectionBarMore") && !l.starts_with("sel:"));
+    all.retain(|(l, _)| {
+        !matches!(l.as_str(), "brushPreview" | "loupe" | "sliderBubble" | "selectionBarMore") && !l.starts_with("sel:") && !l.starts_with("layer:")
+    });
     all
 }
 

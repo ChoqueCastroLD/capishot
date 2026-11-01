@@ -94,6 +94,9 @@ pub fn inspect(app: &PhotocraftApp, ctx: &egui::Context) -> Value {
         // The main canvas area in screen points (`[x0, y0, x1, y1]`): with a view's zoom and
         // centre, where a document point is on screen for real pointer input.
         "canvasRect": canvas_rect,
+        // Screen pixels per point of the canvas: a view's `zoom` over this is points per document
+        // pixel (what maps a document point into `canvasRect`).
+        "canvasPpp": app.canvas_ppp(),
         "simpleUi": crate::simple_ui::inspect(app, ctx),
         "aiProgress": crate::ai_progress::inspect(ctx),
         "touch": crate::touch_ui::inspect(app, ctx),

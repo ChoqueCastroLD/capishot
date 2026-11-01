@@ -642,7 +642,7 @@ fn type_perspective_by_finger() {
     h.state_mut().ui.tool = Tool::Move;
     h.run_steps(3);
     let past = history(&mut h).len();
-    tap_rect(&mut h, "typeLayer:type.perspective");
+    tap_rect(&mut h, "layer:type.perspective");
     let t = h.state().ui.transform.clone().expect("the box is open");
     assert_eq!(t.mode, crate::state::TransformMode::Perspective);
     let xf = crate::canvas::ViewXform::active(h.state()).unwrap();

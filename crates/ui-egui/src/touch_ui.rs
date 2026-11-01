@@ -145,8 +145,36 @@ fn bottom_reserve(app: &PhotocraftApp) -> f32 {
     if app.simple { 8.0 + 54.0 + 6.0 + 54.0 } else { 24.0 }
 }
 
+fn auto_commit_id() -> Id {
+    Id::unique("touch-transform-auto-commit")
+}
+
+/// The Free Transform session `session` was opened by a finger on the selected layer's box (a
+/// corner, the rotate handle, a pinch inside it): it commits, as one step, once the fingers lift.
+pub fn commit_when_lifted(ctx: &egui::Context, session: u64) {
+    ctx.data_mut(|d| d.insert_temp(auto_commit_id(), session));
+}
+
+/// Commits a finger's quick transform ([`commit_when_lifted`]) once no finger is down and no
+/// handle is held.
+fn finish_quick_transform(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let Some(session) = ctx.data(|d| d.get_temp::<u64>(auto_commit_id())) else { return };
+    if app.ui.transform.as_ref().is_none_or(|t| t.session != session) {
+        ctx.data_mut(|d| d.remove::<u64>(auto_commit_id()));
+        return;
+    }
+    let down = ctx.input(|i| i.pointer.any_down() || i.any_touches()) || app.touch.finger_count() > 0;
+    if down || crate::transform_tool::gesture_held(app) {
+        ctx.request_repaint();
+        return;
+    }
+    ctx.data_mut(|d| d.remove::<u64>(auto_commit_id()));
+    crate::transform_tool::commit(app);
+}
+
 /// The touch pieces over the canvas, after it and the simple interface's bars.
 pub fn overlays(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    finish_quick_transform(app, ctx);
     // A finger lifted from the canvas (the tools have seen it by now) ends a one-gesture chip
     // (Duplicate, Set Source).
     let canvas = app.last_canvas_rect;
@@ -195,6 +223,8 @@ pub fn overlays(app: &mut PhotocraftApp, ctx: &egui::Context) {
         }
         if !busy && has_selection(app) && crate::simple_ui::sheet(ctx) == crate::simple_ui::Sheet::Closed && !app.ui.palette_open {
             selection_bar(app, ctx);
+        } else if !busy && app.ui.tool == crate::state::Tool::Move && crate::simple_ui::sheet(ctx) == crate::simple_ui::Sheet::Closed && !app.ui.palette_open {
+            layer_bar(app, ctx);
         } else if !busy && type_layer_selected(app) && crate::simple_ui::sheet(ctx) == crate::simple_ui::Sheet::Closed && !app.ui.palette_open {
             type_layer_bar(app, ctx);
         }
@@ -256,6 +286,122 @@ fn type_layer_selected(app: &PhotocraftApp) -> bool {
             .session
             .active()
             .is_some_and(|d| d.active_layer.and_then(|id| d.doc.layer(id)).is_some_and(|l| matches!(l.content, photocraft_doc::LayerContent::Text(_))))
+}
+
+/// The selected layer (the Move tool's, on a phone): what can be done to it, one tap away. Only
+/// while a layer is really selected (a tap on an empty spot deselects and the bar goes).
+fn layer_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let Some((hidden, locked, text)) = app.session.active().and_then(|st| {
+        let id = st.active_layer.filter(|id| st.is_layer_selected(*id))?;
+        let l = st.doc.layer(id)?;
+        if crate::doc_props_ui::is_background(&st.doc, l) {
+            return None;
+        }
+        Some((!l.visible, l.locks.all, matches!(l.content, photocraft_doc::LayerContent::Text(_))))
+    }) else {
+        return;
+    };
+    // Type first (what is done to type most), then what every layer has.
+    let mut items: Vec<(&str, &str, &str)> = Vec::new();
+    if text {
+        items.extend([
+            ("type.editText", tl!("Edit text"), "text-cursor"),
+            ("type.warpText", tl!("Warp"), "spline"),
+            (crate::transform_tool::TYPE_PERSPECTIVE, tl!("Perspective"), "perspective-crop"),
+        ]);
+    }
+    items.extend([
+        ("layer.duplicate", tl!("Duplicate"), "copy"),
+        ("layer.delete", tl!("Delete"), "trash"),
+        ("layer.hideLayers", if hidden { tl!("Show") } else { tl!("Hide") }, if hidden { "eye" } else { "eye-off" }),
+        ("layer.lockLayers", if locked { tl!("Unlock") } else { tl!("Lock") }, if locked { "lock-open" } else { "lock" }),
+    ]);
+    items.extend([
+        ("layer.layerStyle.blendingOptions", tl!("Style"), "sparkles"),
+        ("layer.arrange.bringForward", tl!("Bring Forward"), "arrow-up"),
+        ("layer.arrange.sendBackward", tl!("Send Backward"), "arrow-down"),
+        ("edit.freeTransform", tl!("Transform"), "scaling"),
+    ]);
+    if let Some(id) = action_bar(ctx, canvas_area(app, ctx), "touch-layer-bar", "layer", &items)
+        && let Err(e) = crate::menus::invoke(app, ctx, id, json!({}))
+        && e != crate::file_dialog::CANCELLED
+    {
+        app.ui.status = e;
+        app.ui.status_error = true;
+    }
+}
+
+/// A row of actions over the top of the canvas `area`, scrolling sideways when it doesn't fit
+/// (with a fade at the edge that has more): each an icon in a circle over its name. Returns the
+/// command tapped. Each button is noted as `{key}:{command}`.
+fn action_bar<'a>(ctx: &egui::Context, area: Rect, id: &str, key: &str, items: &[(&'a str, &str, &str)]) -> Option<&'a str> {
+    let t = Tokens::get(ctx);
+    let gap = 2.0;
+    let n = items.len() as f32;
+    let full = n * SEL_CELL.x + (n - 1.0) * gap + 12.0;
+    let width = full.min(area.width() - 16.0);
+    let r = Rect::from_min_size(pos2(area.center().x - width / 2.0, area.top() + 8.0), vec2(width, SEL_CELL.y + 12.0));
+    let mut run = None;
+    egui::Area::new(Id::unique(id)).order(egui::Order::Middle).fixed_pos(r.min).show(ctx, |ui| {
+        egui::Frame::NONE.fill(t.card).stroke(Stroke::new(1.0, t.card_border)).corner_radius(CornerRadius::same(18)).inner_margin(egui::Margin::same(6)).show(
+            ui,
+            |ui| {
+                ui.set_width(width - 12.0);
+                let out = egui::ScrollArea::horizontal()
+                    .id_salt((id, "scroll"))
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = gap;
+                            for &(cmd, name, icon) in items {
+                                let (rect, resp) = ui.allocate_exact_size(SEL_CELL, Sense::click());
+                                let c = pos2(rect.center().x, rect.top() + 20.0);
+                                ui.painter().circle(
+                                    c,
+                                    19.0,
+                                    if resp.is_pointer_button_down_on() { t.hover } else { t.chrome },
+                                    Stroke::new(1.0, t.card_border),
+                                );
+                                crate::icons::paint(ui, Rect::from_center_size(c, Vec2::splat(30.0)), icon, 19.0, t.text);
+                                let room = SEL_CELL.x - 2.0;
+                                let one = ui.painter().layout_no_wrap(name.to_string(), crate::theme::medium(10.0), t.text_dim).size().x;
+                                let size = if one > room { (10.0 * room / one).max(8.0) } else { 10.0 };
+                                let mut job = egui::text::LayoutJob::simple(name.to_string(), crate::theme::medium(size), t.text_dim, room);
+                                job.wrap.max_rows = 2;
+                                job.halign = egui::Align::Center;
+                                let g = ui.painter().layout_job(job);
+                                ui.painter().galley(pos2(rect.center().x, rect.top() + 42.0), g, t.text_dim);
+                                resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name));
+                                note(ctx, &format!("{key}:{cmd}"), rect);
+                                if resp.clicked() {
+                                    run = Some(cmd);
+                                }
+                            }
+                        });
+                    });
+                let view = out.inner_rect;
+                let x = out.state.clamped_offset().x;
+                let fade = |ui: &egui::Ui, right: bool| {
+                    let steps = 12;
+                    let w = 28.0;
+                    for k in 0..steps {
+                        let a = ((k + 1) as f32 / steps as f32 * 230.0) as u8;
+                        let xk = if right { view.right() - w + w * k as f32 / steps as f32 } else { view.left() + w - w * (k + 1) as f32 / steps as f32 };
+                        let col = Color32::from_rgba_unmultiplied(t.card.r(), t.card.g(), t.card.b(), a);
+                        ui.painter().rect_filled(Rect::from_min_max(pos2(xk, view.top()), pos2(xk + w / steps as f32 + 0.5, view.bottom())), 0.0, col);
+                    }
+                };
+                if x + view.width() < out.content_size.x - 1.0 {
+                    fade(ui, true);
+                }
+                if x > 1.0 {
+                    fade(ui, false);
+                }
+            },
+        );
+    });
+    note(ctx, &format!("{key}Bar"), r);
+    run
 }
 
 /// The selected type layer's action bar: edit its text, warp it (Arc, Arch, Flag…).
@@ -860,6 +1006,25 @@ fn pick_point(app: &mut PhotocraftApp, ctx: &egui::Context) -> Option<Pos2> {
 pub fn transform_pinch(app: &mut PhotocraftApp, ctx: &egui::Context, xf: &crate::canvas::ViewXform) -> bool {
     let id = Id::unique("touch-box-pinch");
     let m = ctx.input(|i| i.multi_touch()).filter(|m| m.num_touches >= 2);
+    // A phone, the Move tool, no box open: two fingers that land on the selected layer's box
+    // scale and turn the layer (a quick transform, committed when they lift); elsewhere they
+    // navigate, as in Photoshop on the iPad.
+    if let Some(m) = m
+        && app.simple
+        && app.ui.transform.is_none()
+        && app.ui.tool == crate::state::Tool::Move
+        && ctx.data(|d| d.get_temp::<bool>(id)).is_none()
+        && crate::canvas::transform_controls_rect_pub(app, xf).is_some_and(|r| r.contains(m.center_pos) || r.contains(m.start_pos))
+    {
+        match crate::transform_tool::begin(app, ctx) {
+            Ok(()) => {
+                if let Some(t) = app.ui.transform.as_ref() {
+                    commit_when_lifted(ctx, t.session);
+                }
+            }
+            Err(e) => app.ui.status = e,
+        }
+    }
     let Some(m) = m.filter(|_| active(app) && app.ui.transform.as_ref().is_some_and(|t| t.warp.is_none())) else {
         ctx.data_mut(|d| d.remove::<bool>(id));
         return false;

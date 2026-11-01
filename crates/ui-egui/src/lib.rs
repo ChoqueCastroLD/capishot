@@ -55,8 +55,8 @@ pub mod ai_upscale_ui;
 pub mod bubble_type_ui;
 mod capishot_ui;
 pub mod chrome_freeze;
-pub mod code_gate;
 pub(crate) mod clone_overlay;
+pub mod code_gate;
 pub mod cpu_canvas;
 pub mod floaters;
 pub mod font_folders_ui;
@@ -815,6 +815,8 @@ mod navigator_gpu_tests;
 mod phone_dialog_tests;
 #[cfg(test)]
 mod phone_polish_tests;
+#[cfg(test)]
+mod phone_select_tests;
 
 #[cfg(test)]
 mod color_swatch_tests;

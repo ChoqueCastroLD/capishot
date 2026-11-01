@@ -151,6 +151,11 @@ pub struct TransformPreview {
     pub(crate) vector_type: Option<VectorType>,
 }
 
+/// A handle of the box is being dragged (the press that grabbed it hasn't been released).
+pub(crate) fn gesture_held(app: &PhotocraftApp) -> bool {
+    app.transform_preview.as_ref().is_some_and(|pv| pv.gesture.is_some())
+}
+
 /// A type layer's box drawn as vectors (Type › Perspective, or type already in perspective).
 pub(crate) struct VectorType {
     /// The box's quad when it opened: the commit maps it to the box's quad then.
