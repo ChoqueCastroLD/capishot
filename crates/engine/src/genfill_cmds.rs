@@ -36,7 +36,7 @@ const LABEL: &str = "Generative Fill";
 pub const UNAVAILABLE: &str = "Generative Fill is not available in this build";
 /// Why it can't run with little memory.
 pub const LOW_MEMORY: &str =
-    "Not enough memory for Generative Fill on this device (the light model needs about 1 GB free); use Edit › Clean with AI to remove things";
+    "Not enough memory for Generative Fill on this device (the light model needs about 1 GB free); use Edit › Clean Selected Area with AI to remove things";
 /// Why Standard (and up) can't run on a phone or with little memory.
 pub const LOW_MEMORY_STANDARD: &str = "Not enough memory for this Generative Fill quality on this device (it needs about 8 GB); choose Quality: Ultra-light";
 /// How much an empty-prompt fill re-draws Manga LaMa's result (variants differ, the background
@@ -390,7 +390,7 @@ fn generative_fill(s: &mut Session, p: &Value) -> Result<Value> {
             let Some(lama) = inpainter else { return generate(plan, done, hooks) };
             let cleaner_device = lama.device();
             // Manga LaMa first (the background), then the model re-draws it partly.
-            ctx.progress(0.0, "Clean with AI");
+            ctx.progress(0.0, "Clean Selected Area with AI");
             let binary: Vec<f32> = plan.req.mask.iter().map(|m| if *m >= 0.5 { 1.0 } else { 0.0 }).collect();
             let tile = photocraft_ai_lama::tiles::TileInput { rgb: plan.req.rgb.clone(), mask: binary, w: plan.req.width, h: plan.req.height };
             let lreq = photocraft_ai_lama::service::Request {

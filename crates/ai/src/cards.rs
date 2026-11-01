@@ -10,7 +10,7 @@ use crate::models::Status;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Section {
-    /// Erase text and objects (Clean with AI, the Remove tool).
+    /// Erase text and objects (Clean Selected Area with AI, the Remove tool).
     Clean,
     /// Enlarge pages (Upscale with AI).
     Upscale,

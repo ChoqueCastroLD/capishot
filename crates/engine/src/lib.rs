@@ -44,6 +44,7 @@ pub mod snap;
 pub mod ai_cmds;
 pub mod ai_inpaint_cmds;
 pub mod ai_models_cmds;
+pub mod bubble_text_cmds;
 pub mod capishot_cmds;
 mod compact_move;
 pub mod font_download_cmds;

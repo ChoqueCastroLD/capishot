@@ -131,7 +131,7 @@
 	Fill…	Выполнить заливку…
 	Stroke…	Обвести…
 	Content-Aware Fill…	Заливка с учётом содержимого…
-	Clean with AI	Очистить с ИИ
+	Clean Selected Area with AI	Очистить с ИИ
 	Use AI (Manga LaMa)	Использовать ИИ (Manga LaMa)
 	Clean Selection with AI	Очистить выделение с ИИ
 	Fill strokes with Manga LaMa instead of nearby patches: better on screentone and line art. The first use downloads the model (about 100 MB).	Заполнять мазки с помощью Manga LaMa вместо соседних фрагментов: лучше для скринтона и контуров. При первом использовании загружается модель (около 100 МБ).
@@ -3338,7 +3338,7 @@ curves	Smooth	Сгладить
 	Clear Downloaded Models	Удалить загруженные модели
 	Downloaded models cleared; they download again (after asking) when next used.	Загруженные модели удалены; при следующем использовании они загрузятся снова (после запроса).
 	AI Cleaning Options	Параметры очистки с ИИ
-	Quality and device for Clean with AI and the Remove tool's AI mode.	Качество и устройство для «Очистить с ИИ» и режима ИИ инструмента «Удаление».
+	Quality and device for Clean Selected Area with AI and the Remove tool's AI mode.	Качество и устройство для «Очистить с ИИ» и режима ИИ инструмента «Удаление».
 	AI Options…	Параметры ИИ…
 	Use AI	Использовать ИИ
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Заполняет мазки с помощью ИИ, а не соседними участками: лучше на растрах и линейной графике. «Параметры ИИ…» выбирают качество и устройство.

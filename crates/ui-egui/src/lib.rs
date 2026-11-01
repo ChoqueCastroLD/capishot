@@ -289,6 +289,7 @@ pub use tools::artboard_tool;
 pub(crate) use tools::brush_cursor;
 pub use tools::brush_picker;
 pub use tools::brush_resize;
+pub use tools::bubble_text_ui;
 use tools::cam_transform;
 pub use tools::cas_transform;
 pub use tools::corner_radius;
@@ -809,6 +810,8 @@ mod lifecycle_tests;
 #[cfg(test)]
 mod screenshot_tests;
 
+#[cfg(test)]
+mod bubble_text_ui_tests;
 #[cfg(test)]
 mod navigator_gpu_tests;
 #[cfg(test)]

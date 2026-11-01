@@ -1,4 +1,4 @@
-//! Edit › Clean with AI (`edit.inpaintAi`): erase what the selection covers (text, SFX,
+//! Edit › Clean Selected Area with AI (`edit.inpaintAi`): erase what the selection covers (text, SFX,
 //! watermarks) and fill it with plausible manga background and screentone, using Manga LaMa
 //! (`photocraft-ai-lama`). The Remove tool's `ai` option runs the same fill on its brushed hole.
 //!
@@ -38,7 +38,7 @@ use crate::{EngineError, Result, Session};
 
 /// The command id.
 pub const ID: &str = "edit.inpaintAi";
-const LABEL: &str = "Clean with AI";
+const LABEL: &str = "Clean Selected Area with AI";
 /// Why the command fails in a build without an inpainting service.
 pub const UNAVAILABLE: &str = "AI cleaning (Manga LaMa) is not available in this build";
 /// Largest region (selection plus context) read for one run.
@@ -485,7 +485,7 @@ fn apply(s: &mut Session, label: &str, plan: Plan, generated: &[f32], device: St
 pub fn specs() -> Vec<CommandSpec> {
     vec![CommandSpec {
         id: ID,
-        label: "Clean with AI",
+        label: "Clean Selected Area with AI",
         menu: &["Edit"],
         shortcut: None,
         params: r#"{"output"?: "new" (default: the result on a new layer above, alpha = selection coverage) | "current" (paint it into the layer), "layer"?: layer id (default: the active pixel layer), "maxSide"?: 64..2048, multiple of 8 (default 512: larger crops are downscaled to this working size), "margin"?: 0..1024 px of context around each masked blob (default 64), "allowDownload"?: bool (fetch the model's weights when not cached: Manga LaMa about 100 MB, MI-GAN 13 MB; default false), "quality"?: "auto"|"fast"|"best" (fast: the lite MI-GAN, at most 512 px tiles; auto: Manga LaMa on a capable GPU, MI-GAN on the CPU, phones and weak machines), "device"?: "auto"|"gpu"|"cpu", "model"?: "auto"|"manga-lama"|"migan-512", "threads"?: 0..64 (CPU threads, 0 = one per core), "keepLoaded"?: bool (default true)} -> {"layer", "pixels", "region": [x,y,w,h], "device", "model", "lite"}. Erases what the selection covers (text, SFX) and fills it with Manga LaMa (or MI-GAN). Background job, one undo step."#,

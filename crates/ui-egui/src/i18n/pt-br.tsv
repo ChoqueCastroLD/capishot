@@ -161,7 +161,7 @@
 	Fill…	Preencher…
 	Stroke…	Traçado…
 	Content-Aware Fill…	Preenchimento sensível ao conteúdo…
-	Clean with AI	Limpar com IA
+	Clean Selected Area with AI	Limpar área selecionada com IA
 	Use AI (Manga LaMa)	Usar IA (Manga LaMa)
 	Clean Selection with AI	Limpar seleção com IA
 	Fill strokes with Manga LaMa instead of nearby patches: better on screentone and line art. The first use downloads the model (about 100 MB).	Preenche os traços com o Manga LaMa em vez de amostras próximas: melhor em retículas e arte-final. O primeiro uso baixa o modelo (cerca de 100 MB).
@@ -4372,7 +4372,7 @@ layerLabel	No Color	Sem cor
 	Clear Downloaded Models	Apagar modelos baixados
 	Downloaded models cleared; they download again (after asking) when next used.	Modelos baixados apagados; serão baixados de novo (após perguntar) no próximo uso.
 	AI Cleaning Options	Opções de limpeza com IA
-	Quality and device for Clean with AI and the Remove tool's AI mode.	Qualidade e dispositivo para Limpar com IA e o modo IA da ferramenta Remover.
+	Quality and device for Clean Selected Area with AI and the Remove tool's AI mode.	Qualidade e dispositivo para Limpar área selecionada com IA e o modo IA da ferramenta Remover.
 	AI Options…	Opções de IA…
 	Use AI	Usar IA
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Preenche os traços com IA em vez de áreas vizinhas: melhor em retículas e arte-final. Opções de IA… escolhe a qualidade e o dispositivo.
@@ -5170,3 +5170,15 @@ fontTab	Find More	Encontrar mais
 	Touch Modifier Button (Simple UI)	Botão modificador de toque
 	Rotate with Two Fingers (Simple UI)	Girar com dois dedos
 	{family} (couldn't download it)	{family} (não foi possível baixar)
+
+# Bubble Text Remover tool
+	Bubble Text Remover Tool	Ferramenta Remover texto do balão
+	Remove Bubble Text	Remover texto do balão
+	This bubble has no plain background; use Remove with AI	Este balão não tem fundo liso; use Remover com IA
+	No speech bubble here: tap inside one	Não há balão aqui: toque dentro de um
+	No text found in this bubble	Nenhum texto encontrado neste balão
+	The layer is locked	A camada está bloqueada
+	Couldn't remove the text in this bubble	Não foi possível remover o texto deste balão
+	On a new layer	Em nova camada
+	How different from the bubble's background a pixel must be to count as text; Auto measures it from the bubble	Quanto um pixel deve diferir do fundo do balão para contar como texto; Automático mede no balão
+	Click inside a speech bubble to remove its text	Clique dentro de um balão para remover o texto

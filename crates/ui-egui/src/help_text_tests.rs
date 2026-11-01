@@ -63,7 +63,9 @@ fn the_palette_searches_the_descriptions() {
     assert_eq!(hits(&app, "borrar texto").first().map(String::as_str), Some("tool:RemoveAi"));
     assert_eq!(hits(&app, "apagar texto").first().map(String::as_str), Some("tool:RemoveAi"), "Portuguese in a Spanish UI");
     assert_eq!(hits(&app, "erase text").first().map(String::as_str), Some("tool:RemoveAi"), "English");
-    assert_eq!(hits(&app, "globo texto").first().map(String::as_str), Some("tool:BubbleType"));
+    let bubble = hits(&app, "globo texto");
+    assert!(bubble.iter().take(2).any(|h| h == "tool:BubbleType"), "{bubble:?}");
+    assert_eq!(hits(&app, "quitar texto globo").first().map(String::as_str), Some("tool:BubbleTextRemover"));
     // One everyday word still finds its synonym first.
     assert_eq!(hits(&app, "borrar").first().map(String::as_str), Some("tool:Eraser"));
 }

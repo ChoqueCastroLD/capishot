@@ -166,7 +166,7 @@
 	Fill…	Remplir…
 	Stroke…	Contourner…
 	Content-Aware Fill…	Remplissage d'après le contenu…
-	Clean with AI	Nettoyer avec l'IA
+	Clean Selected Area with AI	Nettoyer avec l'IA
 	Use AI (Manga LaMa)	Utiliser l'IA (Manga LaMa)
 	Clean Selection with AI	Nettoyer la sélection avec l'IA
 	Fill strokes with Manga LaMa instead of nearby patches: better on screentone and line art. The first use downloads the model (about 100 MB).	Remplit les tracés avec Manga LaMa au lieu de pièces voisines : meilleur sur les trames et le trait. La première utilisation télécharge le modèle (environ 100 Mo).
@@ -3407,7 +3407,7 @@ curves	Smooth	Lisser
 	Clear Downloaded Models	Effacer les modèles téléchargés
 	Downloaded models cleared; they download again (after asking) when next used.	Modèles téléchargés effacés ; ils seront de nouveau téléchargés (après confirmation) à la prochaine utilisation.
 	AI Cleaning Options	Options de nettoyage par IA
-	Quality and device for Clean with AI and the Remove tool's AI mode.	Qualité et appareil pour Nettoyer avec l'IA et le mode IA de l'outil Retirer.
+	Quality and device for Clean Selected Area with AI and the Remove tool's AI mode.	Qualité et appareil pour Nettoyer avec l'IA et le mode IA de l'outil Retirer.
 	AI Options…	Options IA…
 	Use AI	Utiliser l'IA
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Remplit les traits avec l'IA plutôt qu'avec des zones voisines : meilleur sur les trames et le dessin au trait. Options IA… choisit la qualité et l'appareil.

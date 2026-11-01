@@ -178,7 +178,7 @@ fn texts() {
     let s = status_text(&Status::Downloading { done: 42, total: 100, bytes_per_sec: 3e6 });
     assert!(s.starts_with("Downloading 42%") && s.contains("3.0 MB/s") && s.contains("left"), "{s}");
     assert_eq!(status_text(&Status::Failed("HTTP 404".into())), "Failed: HTTP 404");
-    assert_eq!(tools_text(model(LAMA_ID).unwrap()), "Clean with AI, Remove Tool");
+    assert_eq!(tools_text(model(LAMA_ID).unwrap()), "Clean Selected Area with AI, Remove Tool");
 }
 
 /// Every string this module adds.

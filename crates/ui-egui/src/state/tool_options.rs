@@ -317,6 +317,12 @@ pub struct ToolOptions {
     pub magnetic_contrast: f32,
     pub magnetic_frequency: f32,
     pub magnetic_pressure: bool,
+    /// Bubble Text Remover: the result on a new layer, and the text tolerance (a colour
+    /// difference, 1–255; 0 = automatic, from the bubble's noise).
+    #[serde(default)]
+    pub bubble_text_new_layer: bool,
+    #[serde(default)]
+    pub bubble_text_tolerance: f32,
     /// Red Eye: pupil search size (1–100) and how far corrected pixels darken (0–100).
     #[serde(default = "fifty")]
     pub red_eye_pupil_size: f32,
@@ -409,6 +415,7 @@ fn default_eyedropper_sample() -> String {
 pub struct SampleAllLayers {
     /// Remove with AI (its own, as every tool's).
     pub remove_ai: bool,
+    pub bubble_text: bool,
     pub magic_wand: bool,
     pub quick_selection: bool,
     pub object_selection: bool,
@@ -442,6 +449,7 @@ impl SampleAllLayers {
             Tool::ContentAwareMove => &mut self.content_aware_move,
             Tool::Remove => &mut self.remove,
             Tool::RemoveAi => &mut self.remove_ai,
+            Tool::BubbleTextRemover => &mut self.bubble_text,
             Tool::Blur => &mut self.blur,
             Tool::Sharpen => &mut self.sharpen,
             Tool::Smudge => &mut self.smudge,
@@ -564,6 +572,8 @@ impl Default for ToolOptions {
             magnetic_contrast: 10.0,
             magnetic_frequency: 57.0,
             magnetic_pressure: false,
+            bubble_text_new_layer: false,
+            bubble_text_tolerance: 0.0,
             red_eye_pupil_size: 50.0,
             red_eye_darken: 50.0,
             eyedropper_size: 1,

@@ -44,6 +44,8 @@ pub enum Tool {
     Remove,
     /// Remove with AI: paint over something (or select it) and Manga LaMa fills it.
     RemoveAi,
+    /// Bubble Text Remover: a click in a speech bubble removes its text, without AI.
+    BubbleTextRemover,
     SpotHealing,
     Healing,
     Patch,
@@ -83,7 +85,7 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Tool; 70] = [
+    pub const ALL: [Tool; 71] = [
         Tool::Move,
         Tool::Artboard,
         Tool::RectMarquee,
@@ -120,6 +122,7 @@ impl Tool {
         Tool::Zoom,
         Tool::Remove,
         Tool::RemoveAi,
+        Tool::BubbleTextRemover,
         Tool::SpotHealing,
         Tool::Healing,
         Tool::Patch,
@@ -197,6 +200,7 @@ impl Tool {
             Tool::Zoom => "Zoom Tool",
             Tool::Remove => "Remove Tool",
             Tool::RemoveAi => "Remove with AI Tool",
+            Tool::BubbleTextRemover => "Bubble Text Remover Tool",
             Tool::SpotHealing => "Spot Healing Brush Tool",
             Tool::Healing => "Healing Brush Tool",
             Tool::Patch => "Patch Tool",
@@ -285,7 +289,14 @@ impl Tool {
             Tool::Hand => 'H',
             Tool::RotateView => 'R',
             Tool::Zoom => 'Z',
-            Tool::Remove | Tool::RemoveAi | Tool::SpotHealing | Tool::Healing | Tool::Patch | Tool::ContentAwareMove | Tool::RedEye => 'J',
+            Tool::Remove
+            | Tool::RemoveAi
+            | Tool::BubbleTextRemover
+            | Tool::SpotHealing
+            | Tool::Healing
+            | Tool::Patch
+            | Tool::ContentAwareMove
+            | Tool::RedEye => 'J',
             Tool::CloneStamp | Tool::PatternStamp => 'S',
             Tool::HistoryBrush | Tool::ArtHistoryBrush => 'Y',
             Tool::Blur | Tool::Sharpen | Tool::Smudge => '\0',

@@ -121,7 +121,7 @@
 	Fill…	Заливка…
 	Stroke…	Обведення…
 	Content-Aware Fill…	Заливка з урахуванням вмісту…
-	Clean with AI	Очистити за допомогою ШІ
+	Clean Selected Area with AI	Очистити за допомогою ШІ
 	Use AI (Manga LaMa)	Використовувати ШІ (Manga LaMa)
 	Clean Selection with AI	Очистити виділення за допомогою ШІ
 	Fill strokes with Manga LaMa instead of nearby patches: better on screentone and line art. The first use downloads the model (about 100 MB).	Заповнювати мазки за допомогою Manga LaMa замість сусідніх фрагментів: краще для скринтону та контурів. Під час першого використання завантажується модель (близько 100 МБ).
@@ -4087,7 +4087,7 @@ curves	Smooth	Згладити
 	Clear Downloaded Models	Видалити завантажені моделі
 	Downloaded models cleared; they download again (after asking) when next used.	Завантажені моделі видалено; під час наступного використання вони завантажаться знову (після запиту).
 	AI Cleaning Options	Параметри очищення зі ШІ
-	Quality and device for Clean with AI and the Remove tool's AI mode.	Якість і пристрій для «Очистити за допомогою ШІ» та режиму ШІ інструмента «Вилучення».
+	Quality and device for Clean Selected Area with AI and the Remove tool's AI mode.	Якість і пристрій для «Очистити за допомогою ШІ» та режиму ШІ інструмента «Вилучення».
 	AI Options…	Параметри ШІ…
 	Use AI	Використовувати ШІ
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Заповнює мазки за допомогою ШІ, а не сусідніми ділянками: краще на растрах і лінійній графіці. «Параметри ШІ…» вибирають якість і пристрій.

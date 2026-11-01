@@ -1,4 +1,4 @@
-//! The AI progress card: while an AI tool runs (Remove with AI, Clean with AI, Upscale with AI,
+//! The AI progress card: while an AI tool runs (Remove with AI, Clean Selected Area with AI, Upscale with AI,
 //! Generative Fill, the Remove tool's AI mode) or its model downloads, a card floats near the top
 //! (under the simple interface's bars; bottom right on the desktop) with the tool, the stage in
 //! plain words ("Downloading model 45% · 12 MB/s", "Preparing AI…", "Processing 3/8",
@@ -168,7 +168,7 @@ pub fn started(app: &mut PhotocraftApp, id: &str, params: &Value, job: JobId) {
 fn title_of(id: &str) -> String {
     match id {
         photocraft_engine::remove_ai_cmds::ID | "paint.remove" => tl!("Remove with AI").to_string(),
-        photocraft_engine::ai_inpaint_cmds::ID => tl!("Clean with AI").to_string(),
+        photocraft_engine::ai_inpaint_cmds::ID => tl!("Clean Selected Area with AI").to_string(),
         photocraft_engine::ai_cmds::COMMAND => tl!("Upscale with AI…").trim_end_matches('…').to_string(),
         _ => tl!("Generative Fill").to_string(),
     }

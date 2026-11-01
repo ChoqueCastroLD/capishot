@@ -654,7 +654,7 @@ fn sd_err(e: AiError) -> photocraft_ai_sd::SdError {
         AiError::Cancelled => SdError::Cancelled,
         AiError::Inference(m) if m.contains("isn't downloaded") => SdError::Unavailable(m),
         // Generative Fill has no CPU fallback in the browser (minutes per image): say so.
-        AiError::Gpu(m) => SdError::Device(format!("the GPU failed ({m}); try fewer variants or a smaller selection, or use Clean with AI")),
+        AiError::Gpu(m) => SdError::Device(format!("the GPU failed ({m}); try fewer variants or a smaller selection, or use Clean Selected Area with AI")),
         other => SdError::Device(other.to_string()),
     }
 }

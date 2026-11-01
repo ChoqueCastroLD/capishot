@@ -123,6 +123,7 @@ pub fn tool_icon(t: Tool) -> &'static str {
         Tool::SpotHealing | Tool::Healing => "bandage",
         Tool::Remove => "bandage-sparkle",
         Tool::RemoveAi => "eraser-sparkle",
+        Tool::BubbleTextRemover => "bubble-text-remove",
         Tool::Patch => "lasso-select",
         Tool::ContentAwareMove => "arrow-left-right",
         Tool::RedEye => "eye",

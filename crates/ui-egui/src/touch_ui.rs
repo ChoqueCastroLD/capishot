@@ -452,7 +452,7 @@ const SELECTION_ACTIONS: [(&str, &str, &str, &str); 9] = [
     ("select.deselect", "Deselect", "Deselect", "x"),
     ("select.inverse", "Invert", "Invert", "contrast"),
     ("edit.fill", "Fill", "Fill", "paint-bucket"),
-    ("edit.inpaintAi", "Clean with AI", "AI clean", "sparkles"),
+    ("edit.inpaintAi", "Clean Selected Area with AI", "AI clean", "sparkles"),
     ("edit.copy", "Copy", "Copy", "copy"),
     ("edit.cut", "Cut", "Cut", "scissors"),
     ("edit.freeTransform", "Transform", "Transform", "scaling"),

@@ -1,6 +1,6 @@
 //! The AI model download service (`ai.models.*`): which model weights are on this device,
 //! downloading them (a queue, one file at a time, cancellable), deleting them. Separate from
-//! running models: Clean with AI, the Remove tool's AI mode and Upscale with AI only use
+//! running models: Clean Selected Area with AI, the Remove tool's AI mode and Upscale with AI only use
 //! downloaded models (an agent may still pass `allowDownload` / `download` to them), and the
 //! AI Model Manager (Window › AI Models…) drives these commands, as automation can.
 //!

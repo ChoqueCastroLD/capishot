@@ -166,7 +166,7 @@
 	Fill…	Füllen…
 	Stroke…	Nachziehen…
 	Content-Aware Fill…	Inhaltsbasiert füllen…
-	Clean with AI	Mit KI bereinigen
+	Clean Selected Area with AI	Mit KI bereinigen
 	Use AI (Manga LaMa)	KI verwenden (Manga LaMa)
 	Clean Selection with AI	Auswahl mit KI bereinigen
 	Fill strokes with Manga LaMa instead of nearby patches: better on screentone and line art. The first use downloads the model (about 100 MB).	Füllt Striche mit Manga LaMa statt mit benachbarten Bereichen: besser bei Rastern und Linienzeichnungen. Bei der ersten Verwendung wird das Modell heruntergeladen (etwa 100 MB).
@@ -3040,7 +3040,7 @@ curves	Smooth	Glätten
 	Clear Downloaded Models	Geladene Modelle löschen
 	Downloaded models cleared; they download again (after asking) when next used.	Geladene Modelle gelöscht; beim nächsten Gebrauch werden sie (nach Rückfrage) erneut geladen.
 	AI Cleaning Options	Optionen für KI-Bereinigung
-	Quality and device for Clean with AI and the Remove tool's AI mode.	Qualität und Gerät für „Mit KI bereinigen“ und den KI-Modus des Entfernen-Werkzeugs.
+	Quality and device for Clean Selected Area with AI and the Remove tool's AI mode.	Qualität und Gerät für „Mit KI bereinigen“ und den KI-Modus des Entfernen-Werkzeugs.
 	AI Options…	KI-Optionen…
 	Use AI	KI verwenden
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Striche mit KI statt mit benachbarten Flicken füllen: besser bei Rastern und Strichzeichnungen. KI-Optionen… wählt Qualität und Gerät.

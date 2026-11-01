@@ -160,7 +160,7 @@ fn a_background_run_that_finds_its_model_missing_shows_the_dialog() {
     let lama = Arc::new(Lama::default());
     let mut app = app_with(&lama);
     app.ai_model_last = Some(ID.into());
-    assert!(on_job_failed(&mut app, ID, "Clean with AI: Manga LaMa: Manga LaMa isn't downloaded"));
+    assert!(on_job_failed(&mut app, ID, "Clean Selected Area with AI: Manga LaMa: Manga LaMa isn't downloaded"));
     let d = dialog(&app).expect("the dialog").clone();
     assert_eq!(d.fields["model"], "manga-lama");
     assert!(!on_job_failed(&mut app, ID, "device lost"));
@@ -247,7 +247,7 @@ fn the_remove_tool_button_shows_the_dialog_and_ok_opens_the_manager() {
     h.get_by_label("Clean Selection with AI").click();
     h.run_steps(4);
     assert!(dialog(h.state()).is_some(), "status: {}", h.state().ui.status);
-    assert!(h.query_by_label_contains("Clean with AI needs Manga LaMa (102 MB), which isn't on this device yet.").is_some());
+    assert!(h.query_by_label_contains("Clean Selected Area with AI needs Manga LaMa (102 MB), which isn't on this device yet.").is_some());
     assert!(h.query_by_label_contains("Using a tool never downloads anything").is_some());
     assert!(h.query_by_label_contains("Download and").is_none(), "no download button");
     h.get_by_label("Open Model Manager").click();
@@ -267,7 +267,7 @@ fn the_edit_menu_item_shows_the_dialog_and_cancel_does_nothing() {
     let before = layers(h.state());
     h.get_by_label("Edit").click();
     h.run_steps(4);
-    h.get_by_label("Clean with AI").click();
+    h.get_by_label("Clean Selected Area with AI").click();
     h.run_steps(4);
     assert!(dialog(h.state()).is_some(), "status: {}", h.state().ui.status);
     h.get_by_label("Cancel").click();

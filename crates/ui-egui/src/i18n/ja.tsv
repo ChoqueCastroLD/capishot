@@ -162,7 +162,7 @@
 	Fill…	塗りつぶし…
 	Stroke…	境界線を描く…
 	Content-Aware Fill…	コンテンツに応じた塗りつぶし…
-	Clean with AI	AIでクリーンアップ
+	Clean Selected Area with AI	AIでクリーンアップ
 	Use AI (Manga LaMa)	AIを使用 (Manga LaMa)
 	Clean Selection with AI	選択範囲をAIでクリーンアップ
 	Fill strokes with Manga LaMa instead of nearby patches: better on screentone and line art. The first use downloads the model (about 100 MB).	近くのパッチの代わりに Manga LaMa でストロークを塗りつぶします。スクリーントーンや線画に適しています。初回はモデル（約 100 MB）をダウンロードします。
@@ -3998,7 +3998,7 @@ curves	Smooth	スムーズ
 	Clear Downloaded Models	ダウンロード済みモデルを削除
 	Downloaded models cleared; they download again (after asking) when next used.	ダウンロード済みモデルを削除しました。次に使うときに（確認のうえ）再ダウンロードされます。
 	AI Cleaning Options	AI クリーンのオプション
-	Quality and device for Clean with AI and the Remove tool's AI mode.	「AIでクリーンアップ」と削除ツールの AI モードの品質とデバイス。
+	Quality and device for Clean Selected Area with AI and the Remove tool's AI mode.	「AIでクリーンアップ」と削除ツールの AI モードの品質とデバイス。
 	AI Options…	AI オプション…
 	Use AI	AI を使用
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	近くのパッチではなく AI でストロークを埋めます。スクリーントーンや線画に向いています。品質とデバイスは「AI オプション…」で選びます。

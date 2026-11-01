@@ -171,7 +171,7 @@
 	Fill…	填滿…
 	Stroke…	筆畫…
 	Content-Aware Fill…	內容感知填滿…
-	Clean with AI	AI 清理
+	Clean Selected Area with AI	AI 清理
 	Use AI (Manga LaMa)	使用 AI (Manga LaMa)
 	Clean Selection with AI	以 AI 清理選取範圍
 	Fill strokes with Manga LaMa instead of nearby patches: better on screentone and line art. The first use downloads the model (about 100 MB).	以 Manga LaMa 而非附近的圖塊填滿筆畫：更適合網點和線稿。首次使用會下載模型（約 100 MB）。
@@ -3004,7 +3004,7 @@ curves	Smooth	平滑
 	Clear Downloaded Models	清除已下載的模型
 	Downloaded models cleared; they download again (after asking) when next used.	已清除下載的模型；下次使用時會（詢問後）重新下載。
 	AI Cleaning Options	AI 清理選項
-	Quality and device for Clean with AI and the Remove tool's AI mode.	「AI 清理」和移除工具 AI 模式的品質與裝置。
+	Quality and device for Clean Selected Area with AI and the Remove tool's AI mode.	「AI 清理」和移除工具 AI 模式的品質與裝置。
 	AI Options…	AI 選項…
 	Use AI	使用 AI
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	用 AI 而不是附近的圖塊填充筆畫：在網點和線稿上效果更好。「AI 選項…」可選擇品質和裝置。

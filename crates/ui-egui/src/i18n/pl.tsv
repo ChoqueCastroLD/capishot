@@ -162,7 +162,7 @@
 	Fill…	Wypełnij…
 	Stroke…	Obrys…
 	Content-Aware Fill…	Wypełnienie z uwzględnieniem zawartości…
-	Clean with AI	Wyczyść za pomocą AI
+	Clean Selected Area with AI	Wyczyść za pomocą AI
 	Use AI (Manga LaMa)	Użyj AI (Manga LaMa)
 	Clean Selection with AI	Wyczyść zaznaczenie za pomocą AI
 	Fill strokes with Manga LaMa instead of nearby patches: better on screentone and line art. The first use downloads the model (about 100 MB).	Wypełnia pociągnięcia za pomocą Manga LaMa zamiast pobliskich łat: lepsze na rastrach i lineartach. Przy pierwszym użyciu pobierany jest model (ok. 100 MB).
@@ -4018,7 +4018,7 @@ curves	Smooth	Wygładź
 	Clear Downloaded Models	Usuń pobrane modele
 	Downloaded models cleared; they download again (after asking) when next used.	Usunięto pobrane modele; przy następnym użyciu zostaną pobrane ponownie (po pytaniu).
 	AI Cleaning Options	Opcje czyszczenia AI
-	Quality and device for Clean with AI and the Remove tool's AI mode.	Jakość i urządzenie dla Wyczyść za pomocą AI oraz trybu AI narzędzia Usuń.
+	Quality and device for Clean Selected Area with AI and the Remove tool's AI mode.	Jakość i urządzenie dla Wyczyść za pomocą AI oraz trybu AI narzędzia Usuń.
 	AI Options…	Opcje AI…
 	Use AI	Użyj AI
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Wypełnia pociągnięcia za pomocą AI zamiast pobliskich łatek: lepsze na rastrach i rysunku liniowym. Opcje AI… wybierają jakość i urządzenie.

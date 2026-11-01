@@ -529,7 +529,7 @@ fn main() -> eframe::Result {
                 app.session.set_ai_upscaler(Some(std::sync::Arc::new(photocraft_ai::native::NativeUpscaler::from_env(dir))));
                 app.session.set_ai_models(Some(std::sync::Arc::new(photocraft_ai::native_store::NativeModelStore::from_env(dir))));
             }
-            // Edit › Clean with AI: Manga LaMa on this machine (feature `ai`).
+            // Edit › Clean Selected Area with AI: Manga LaMa on this machine (feature `ai`).
             #[cfg(feature = "ai")]
             if let Some(i) = photocraft_ai_lama::native::NativeInpainter::locate(models.as_deref()) {
                 app.session.set_inpainter(Some(std::sync::Arc::new(i)));

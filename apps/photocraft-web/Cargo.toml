@@ -37,7 +37,7 @@ photocraft-raster = { workspace = true }
 photocraft-ops = { workspace = true }
 # Image › Upscale with AI: the upscaler seam the AI worker bridge implements (no inference here).
 photocraft-ai = { workspace = true }
-# Edit › Clean with AI: the Inpainter seam (tiling half only; the model runs in the AI worker).
+# Edit › Clean Selected Area with AI: the Inpainter seam (tiling half only; the model runs in the AI worker).
 photocraft-ai-lama = { workspace = true }
 photocraft-ai-sd = { workspace = true }
 egui = { workspace = true }

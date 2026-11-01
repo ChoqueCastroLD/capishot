@@ -162,7 +162,7 @@ fn every_ai_command_gets_the_card_and_done_taps_the_phone() {
     let held = Arc::new(Held::default());
     let mut h = phone(held);
     for (id, title) in [
-        (photocraft_engine::ai_inpaint_cmds::ID, "Limpiar con IA"),
+        (photocraft_engine::ai_inpaint_cmds::ID, "Limpiar área seleccionada con IA"),
         (photocraft_engine::ai_cmds::COMMAND, "Escalar con IA"),
         (photocraft_engine::genfill_cmds::ID, "Relleno generativo"),
         (photocraft_engine::remove_ai_cmds::ID, "Quitar con IA"),

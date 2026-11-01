@@ -422,6 +422,10 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
                     crate::eraser_ui::click(app, tool, x, y);
                     return;
                 }
+                Tool::BubbleTextRemover => {
+                    crate::bubble_text_ui::click(app, tool, x, y);
+                    return;
+                }
                 Tool::PaintBucket => {
                     let o = app.ui.tool_options.clone();
                     let contents = if o.bucket_fill_pattern { "pattern" } else { "foreground" };

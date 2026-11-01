@@ -1,6 +1,6 @@
 //! Using an AI tool never downloads: a tool whose model isn't on this device says so.
 //!
-//! Clean with AI, the Remove tool's AI mode and Upscale with AI run their models only once they
+//! Clean Selected Area with AI, the Remove tool's AI mode and Upscale with AI run their models only once they
 //! are downloaded, and downloading is the AI Model Manager's job (Window › AI Models…,
 //! `ai_models_ui`). Every UI entry point (menu item, command palette, shortcut, the Remove tool's
 //! button and brush, the upscale dialog) runs these commands through [`invoke`]: when the model
@@ -185,13 +185,13 @@ pub fn forget_old_consents(app: &mut PhotocraftApp) {
     }
 }
 
-/// The tool's name in the UI language ("Clean with AI", "Remove Tool", "Upscale with AI").
+/// The tool's name in the UI language ("Clean Selected Area with AI", "Remove Tool", "Upscale with AI").
 pub fn tool_name(id: &str) -> String {
     match id {
         "paint.remove" => tl!("Remove Tool").to_string(),
         ai_cmds::COMMAND => tl!("Upscale with AI…").trim_end_matches('…').trim_end_matches("...").to_string(),
         genfill_cmds::ID => tl!("Generative Fill").to_string(),
-        _ => tl!("Clean with AI").to_string(),
+        _ => tl!("Clean Selected Area with AI").to_string(),
     }
 }
 

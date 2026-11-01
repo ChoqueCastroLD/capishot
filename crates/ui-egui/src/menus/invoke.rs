@@ -191,7 +191,7 @@ fn invoke_shell_commands(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str,
     if let Some(r) = crate::genfill_ui::invoke(app, id, params) {
         return Some(r);
     }
-    // Clean with AI, the Remove tool's AI mode, Upscale with AI with params: a model that isn't
+    // Clean Selected Area with AI, the Remove tool's AI mode, Upscale with AI with params: a model that isn't
     // downloaded opens the missing-model dialog instead of running.
     if let Some(r) = crate::ai_model_gate::invoke(app, id, params) {
         return Some(r);

@@ -167,7 +167,7 @@
 	Fill…	Vyplnit…
 	Stroke…	Tah…
 	Content-Aware Fill…	Výplň s ohledem na obsah…
-	Clean with AI	Vyčistit pomocí AI
+	Clean Selected Area with AI	Vyčistit pomocí AI
 	Use AI (Manga LaMa)	Použít AI (Manga LaMa)
 	Clean Selection with AI	Vyčistit výběr pomocí AI
 	Fill strokes with Manga LaMa instead of nearby patches: better on screentone and line art. The first use downloads the model (about 100 MB).	Vyplní tahy pomocí Manga LaMa místo okolních záplat: lepší na rastry a kresbu. Při prvním použití se stáhne model (asi 100 MB).
@@ -4007,7 +4007,7 @@ navigator	Zoom	Zvětšení
 	Clear Downloaded Models	Vymazat stažené modely
 	Downloaded models cleared; they download again (after asking) when next used.	Stažené modely byly vymazány; při dalším použití se znovu stáhnou (po dotazu).
 	AI Cleaning Options	Možnosti čištění pomocí AI
-	Quality and device for Clean with AI and the Remove tool's AI mode.	Kvalita a zařízení pro Vyčistit pomocí AI a režim AI nástroje odstranění.
+	Quality and device for Clean Selected Area with AI and the Remove tool's AI mode.	Kvalita a zařízení pro Vyčistit pomocí AI a režim AI nástroje odstranění.
 	AI Options…	Možnosti AI…
 	Use AI	Použít AI
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Vyplnit tahy pomocí AI místo okolních záplat: lepší na rastry a kresbu. Možnosti AI… volí kvalitu a zařízení.

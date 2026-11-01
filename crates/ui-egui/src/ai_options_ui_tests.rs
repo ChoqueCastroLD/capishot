@@ -121,7 +121,7 @@ fn the_options_dialog_shows_simple_choices_and_advanced_on_demand() {
     let app = h.state();
     assert!(!app.ui.dialogs.iter().any(|d| owns(&d.fields)));
     assert_eq!(app.session.prefs().dialogs["ai.inpaint"]["quality"], "best");
-    // Clean with AI and the Remove tool's brush now run Manga LaMa.
+    // Clean Selected Area with AI and the Remove tool's brush now run Manga LaMa.
     let p = with_saved(app, ai_inpaint_cmds::ID, &json!({}));
     let (m, _) = ai_inpaint_cmds::model_for(&app.session, &p, ai_inpaint_cmds::ID).unwrap();
     assert_eq!(m.id, "manga-lama");
@@ -184,7 +184,7 @@ const STRINGS: &[&str] = &[
     "AI Models…",
     "Download and delete AI models",
     "AI Cleaning Options",
-    "Quality and device for Clean with AI and the Remove tool's AI mode.",
+    "Quality and device for Clean Selected Area with AI and the Remove tool's AI mode.",
     "AI Options…",
     "Use AI",
     "Nothing is uploaded: it runs on this device.",

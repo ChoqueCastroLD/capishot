@@ -160,7 +160,7 @@
 	Fill…	Riempi…
 	Stroke…	Traccia…
 	Content-Aware Fill…	Riempimento in base al contenuto…
-	Clean with AI	Pulisci con l'IA
+	Clean Selected Area with AI	Pulisci con l'IA
 	Use AI (Manga LaMa)	Usa l'IA (Manga LaMa)
 	Clean Selection with AI	Pulisci selezione con l'IA
 	Fill strokes with Manga LaMa instead of nearby patches: better on screentone and line art. The first use downloads the model (about 100 MB).	Riempie i tratti con Manga LaMa invece che con porzioni vicine: migliore su retini e linee. Al primo utilizzo scarica il modello (circa 100 MB).
@@ -3061,7 +3061,7 @@ curves	Smooth	Leviga
 	Clear Downloaded Models	Cancella modelli scaricati
 	Downloaded models cleared; they download again (after asking) when next used.	Modelli scaricati cancellati; verranno riscaricati (dopo la richiesta) al prossimo utilizzo.
 	AI Cleaning Options	Opzioni di pulizia con IA
-	Quality and device for Clean with AI and the Remove tool's AI mode.	Qualità e dispositivo per Pulisci con l'IA e la modalità IA dello strumento Rimuovi.
+	Quality and device for Clean Selected Area with AI and the Remove tool's AI mode.	Qualità e dispositivo per Pulisci con l'IA e la modalità IA dello strumento Rimuovi.
 	AI Options…	Opzioni IA…
 	Use AI	Usa IA
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Riempie i tratti con l'IA invece che con zone vicine: meglio su retini e linee. Opzioni IA… sceglie qualità e dispositivo.

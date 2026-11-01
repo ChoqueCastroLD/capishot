@@ -1,5 +1,5 @@
 //! Quality, Device and the Advanced settings of the local AI commands: Image › Upscale with AI
-//! (in its dialog) and Clean with AI / the Remove tool's AI mode (in the AI Options… dialog).
+//! (in its dialog) and Clean Selected Area with AI / the Remove tool's AI mode (in the AI Options… dialog).
 //!
 //! The simple part is two choices, **Quality** (Auto, Fast (lite), Best (full)) and **Device**
 //! (Auto, GPU, CPU), plus one line saying what that resolves to on this machine and why, with the
@@ -30,7 +30,7 @@ pub enum Kind {
     Inpaint,
 }
 
-/// Marks the AI Options… dialog (Clean with AI and the Remove tool's AI mode).
+/// Marks the AI Options… dialog (Clean Selected Area with AI and the Remove tool's AI mode).
 const MARK: &str = "__aiInpaintOptions";
 /// The dialog field that keeps Advanced open.
 pub const ADVANCED: &str = "__aiAdvanced";
@@ -314,7 +314,7 @@ pub fn owns(fields: &Map<String, Value>) -> bool {
     fields.contains_key(MARK)
 }
 
-/// Opens AI Options… for Clean with AI and the Remove tool's AI mode.
+/// Opens AI Options… for Clean Selected Area with AI and the Remove tool's AI mode.
 pub fn open_inpaint_options(app: &mut PhotocraftApp) -> u64 {
     let mut f = Map::new();
     f.insert(MARK.into(), json!(true));
@@ -326,7 +326,7 @@ pub fn open_inpaint_options(app: &mut PhotocraftApp) -> u64 {
 /// Draws AI Options…; true when it should close (the user opened the AI Model Manager).
 pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) -> bool {
     let tokens = crate::theme::Tokens::for_kind(app.ui.theme);
-    ui.label(egui::RichText::new(tl!("Quality and device for Clean with AI and the Remove tool's AI mode.")).color(tokens.text_dim));
+    ui.label(egui::RichText::new(tl!("Quality and device for Clean Selected Area with AI and the Remove tool's AI mode.")).color(tokens.text_dim));
     ui.add_space(8.0);
     egui::Grid::new("ai-inpaint-opts").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| simple_rows(ui, f));
     ui.add_space(6.0);

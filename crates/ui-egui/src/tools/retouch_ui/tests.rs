@@ -752,7 +752,10 @@ fn red_eye_is_in_the_j_flyout() {
 fn j_cycles_from_remove() {
     // J from another group picks the first J tool, and repeated J goes on in this order.
     let group: Vec<Tool> = Tool::ALL.iter().copied().filter(|t| t.key() == 'J').collect();
-    assert_eq!(group, [Tool::Remove, Tool::RemoveAi, Tool::SpotHealing, Tool::Healing, Tool::Patch, Tool::ContentAwareMove, Tool::RedEye]);
+    assert_eq!(
+        group,
+        [Tool::Remove, Tool::RemoveAi, Tool::BubbleTextRemover, Tool::SpotHealing, Tool::Healing, Tool::Patch, Tool::ContentAwareMove, Tool::RedEye]
+    );
 }
 
 #[test]

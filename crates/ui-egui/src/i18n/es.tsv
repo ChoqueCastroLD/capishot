@@ -163,7 +163,7 @@
 	Fill…	Rellenar…
 	Stroke…	Contornear…
 	Content-Aware Fill…	Relleno según el contenido…
-	Clean with AI	Limpiar con IA
+	Clean Selected Area with AI	Limpiar área seleccionada con IA
 	Use AI (Manga LaMa)	Usar IA (Manga LaMa)
 	Clean Selection with AI	Limpiar selección con IA
 	Fill strokes with Manga LaMa instead of nearby patches: better on screentone and line art. The first use downloads the model (about 100 MB).	Rellena los trazos con Manga LaMa en vez de parches cercanos: mejor en tramas y líneas. La primera vez descarga el modelo (unos 100 MB).
@@ -3286,7 +3286,7 @@ curves	Smooth	Suavizar
 	Clear Downloaded Models	Borrar modelos descargados
 	Downloaded models cleared; they download again (after asking) when next used.	Modelos descargados borrados; se volverán a descargar (tras preguntar) cuando se usen de nuevo.
 	AI Cleaning Options	Opciones de limpieza con IA
-	Quality and device for Clean with AI and the Remove tool's AI mode.	Calidad y dispositivo para Limpiar con IA y el modo IA de la herramienta Quitar.
+	Quality and device for Clean Selected Area with AI and the Remove tool's AI mode.	Calidad y dispositivo para Limpiar área seleccionada con IA y el modo IA de la herramienta Quitar.
 	AI Options…	Opciones de IA…
 	Use AI	Usar IA
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Rellena los trazos con IA en lugar de con parches cercanos: mejor en tramas y dibujo de líneas. Opciones de IA… elige la calidad y el dispositivo.
@@ -5202,3 +5202,15 @@ fontTab	Find More	Buscar más
 	Touch Modifier Button (Simple UI)	Botón modificador táctil
 	Rotate with Two Fingers (Simple UI)	Girar con dos dedos
 	{family} (couldn't download it)	{family} (no se pudo descargar)
+
+# Bubble Text Remover tool
+	Bubble Text Remover Tool	Herramienta Quitar texto en globo
+	Remove Bubble Text	Quitar texto en globo
+	This bubble has no plain background; use Remove with AI	Este globo no tiene fondo liso; usa Quitar con IA
+	No speech bubble here: tap inside one	Aquí no hay un globo: toca dentro de uno
+	No text found in this bubble	No se encontró texto en este globo
+	The layer is locked	La capa está bloqueada
+	Couldn't remove the text in this bubble	No se pudo quitar el texto de este globo
+	On a new layer	En capa nueva
+	How different from the bubble's background a pixel must be to count as text; Auto measures it from the bubble	Cuánto debe diferir un píxel del fondo del globo para contar como texto; Automático lo mide en el globo
+	Click inside a speech bubble to remove its text	Haz clic dentro de un globo para quitar su texto

@@ -82,6 +82,7 @@ pub const HELP: &[Help] = &[
     h("tool:Zoom", "Tap or drag to zoom in and out", "Toca o arrastra para acercar y alejar", "Toque ou arraste para aproximar e afastar"),
     h("tool:Remove", "Erase by painting over it, without AI (faster, less precise)", "Borra pintando, sin IA (más rápido, menos preciso)", "Apaga pintando, sem IA (mais rápido, menos preciso)"),
     h("tool:RemoveAi", "Paint over text or objects and the AI erases them, filling in the background", "Pinta sobre texto u objetos y la IA los borra rellenando el fondo", "Pinte sobre texto ou objetos e a IA os apaga preenchendo o fundo"),
+    h("tool:BubbleTextRemover", "Tap inside a speech bubble and only its text is removed, no AI (plain or gradient bubbles)", "Toca dentro de un globo y se quita solo su texto, sin IA (globos lisos o en degradado)", "Toque dentro de um balão e só o texto é removido, sem IA (balões lisos ou em degradê)"),
     h("tool:SpotHealing", "Tap a small spot and it blends with what is around it", "Toca una mancha pequeña y se mezcla con lo de alrededor", "Toque uma mancha pequena e ela se mistura com o redor"),
     h("tool:Healing", "Pick a source with Alt, then paint to repair with its texture", "Elige un origen con Alt y pinta para reparar con esa textura", "Escolha uma origem com Alt e pinte para reparar com essa textura"),
     h("tool:Patch", "Circle an area and drag it onto clean texture to repair it", "Rodea una zona y arrástrala sobre textura limpia para repararla", "Contorne uma área e arraste sobre textura limpa para repará-la"),
@@ -404,10 +405,10 @@ impl Which {
 #[rustfmt::skip]
 pub const WHICH: &[Which] = &[
     Which {
-        members: &["tool:RemoveAi", "edit.inpaintAi", "tool:Remove", "tool:SpotHealing", "tool:Healing", "tool:Patch", "tool:CloneStamp", "edit.contentAwareFill"],
-        en: "Remove with AI: paint over text or objects, the best result. Clean with AI: the same on a selection. Remove Tool: no AI, fast, for plain backgrounds. Spot Healing: small spots and specks.",
-        es: "Quitar con IA: pinta sobre textos u objetos, el mejor resultado. Limpiar con IA: lo mismo sobre una selección. Herramienta Quitar: sin IA, rápida, para fondos simples. Pincel corrector puntual: manchas y motas pequeñas.",
-        pt: "Remover com IA: pinte sobre textos ou objetos, o melhor resultado. Limpar com IA: o mesmo sobre uma seleção. Ferramenta Remover: sem IA, rápida, para fundos simples. Pincel de recuperação para manchas: manchas e pontinhos pequenos.",
+        members: &["tool:RemoveAi", "tool:BubbleTextRemover", "edit.inpaintAi", "tool:Remove", "tool:SpotHealing", "tool:Healing", "tool:Patch", "tool:CloneStamp", "edit.contentAwareFill"],
+        en: "Remove with AI: paint over text or objects, the best result. Bubble Text Remover: tap a plain bubble and its text goes, no AI, instant. Clean Selected Area with AI: the same as Remove with AI on a selection. Remove Tool: no AI, fast, for plain backgrounds. Spot Healing: small spots and specks.",
+        es: "Quitar con IA: pinta sobre textos u objetos, el mejor resultado. Quitar texto en globo: toca un globo liso y su texto se va, sin IA, al instante. Limpiar área seleccionada con IA: lo mismo que Quitar con IA sobre una selección. Herramienta Quitar: sin IA, rápida, para fondos simples. Pincel corrector puntual: manchas y motas pequeñas.",
+        pt: "Remover com IA: pinte sobre textos ou objetos, o melhor resultado. Remover texto do balão: toque um balão liso e o texto some, sem IA, na hora. Limpar área selecionada com IA: o mesmo que Remover com IA sobre uma seleção. Ferramenta Remover: sem IA, rápida, para fundos simples. Pincel de recuperação para manchas: manchas e pontinhos pequenos.",
     },
     Which {
         members: &["tool:QuickSelection", "tool:MagicWand", "tool:ObjectSelection", "select.subject", "tool:Lasso", "select.colorRange"],

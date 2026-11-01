@@ -153,7 +153,7 @@
 	Fill…	Vullen…
 	Stroke…	Omlijnen…
 	Content-Aware Fill…	Inhoudsbewust vullen…
-	Clean with AI	Opschonen met AI
+	Clean Selected Area with AI	Opschonen met AI
 	Use AI (Manga LaMa)	AI gebruiken (Manga LaMa)
 	Clean Selection with AI	Selectie opschonen met AI
 	Fill strokes with Manga LaMa instead of nearby patches: better on screentone and line art. The first use downloads the model (about 100 MB).	Vult streken met Manga LaMa in plaats van nabije stukken: beter op rasters en lijnwerk. Bij het eerste gebruik wordt het model gedownload (ongeveer 100 MB).
@@ -4142,7 +4142,7 @@ curves	Smooth	Vloeiend maken
 	Clear Downloaded Models	Gedownloade modellen wissen
 	Downloaded models cleared; they download again (after asking) when next used.	Gedownloade modellen gewist; ze worden bij het volgende gebruik (na een vraag) opnieuw gedownload.
 	AI Cleaning Options	Opties voor opschonen met AI
-	Quality and device for Clean with AI and the Remove tool's AI mode.	Kwaliteit en apparaat voor Opschonen met AI en de AI-modus van het verwijdergereedschap.
+	Quality and device for Clean Selected Area with AI and the Remove tool's AI mode.	Kwaliteit en apparaat voor Opschonen met AI en de AI-modus van het verwijdergereedschap.
 	AI Options…	AI-opties…
 	Use AI	AI gebruiken
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Vult streken met AI in plaats van nabije stukken: beter bij rasters en lijnwerk. AI-opties… kiest kwaliteit en apparaat.

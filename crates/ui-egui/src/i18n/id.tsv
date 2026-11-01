@@ -159,7 +159,7 @@
 	Fill…	Isi…
 	Stroke…	Stroke…
 	Content-Aware Fill…	Isi Content-Aware…
-	Clean with AI	Bersihkan dengan AI
+	Clean Selected Area with AI	Bersihkan dengan AI
 	Use AI (Manga LaMa)	Gunakan AI (Manga LaMa)
 	Clean Selection with AI	Bersihkan Seleksi dengan AI
 	Fill strokes with Manga LaMa instead of nearby patches: better on screentone and line art. The first use downloads the model (about 100 MB).	Isi goresan dengan Manga LaMa, bukan tambalan di sekitarnya: lebih baik untuk screentone dan line art. Penggunaan pertama mengunduh model (sekitar 100 MB).
@@ -3411,7 +3411,7 @@ curves	Smooth	Haluskan
 	Clear Downloaded Models	Hapus model yang diunduh
 	Downloaded models cleared; they download again (after asking) when next used.	Model yang diunduh telah dihapus; akan diunduh lagi (setelah bertanya) saat dipakai berikutnya.
 	AI Cleaning Options	Opsi pembersihan AI
-	Quality and device for Clean with AI and the Remove tool's AI mode.	Kualitas dan perangkat untuk Bersihkan dengan AI dan mode AI alat Hapus.
+	Quality and device for Clean Selected Area with AI and the Remove tool's AI mode.	Kualitas dan perangkat untuk Bersihkan dengan AI dan mode AI alat Hapus.
 	AI Options…	Opsi AI…
 	Use AI	Gunakan AI
 	Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device.	Isi goresan dengan AI, bukan tambalan di sekitarnya: lebih baik untuk screentone dan line art. Opsi AI… memilih kualitas dan perangkat.

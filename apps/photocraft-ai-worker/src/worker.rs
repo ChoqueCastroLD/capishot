@@ -799,13 +799,16 @@ async fn genfill_inner(msg: &JsValue, id: f64) -> std::result::Result<(Vec<Vec<f
             let on_gpu = rt.accel() == photocraft_ai::runtime::Accel::Gpu;
             // The light tiers run on the CPU too (quantized weights dequantized per layer); the others need WebGPU.
             if !on_gpu && !matches!(tier, Tier::Ultra | Tier::Fast) {
-                return Err("This Generative Fill quality needs WebGPU (no usable GPU here); choose Quality: Fast or Ultra-light, or use Clean with AI".into());
+                return Err(
+                    "This Generative Fill quality needs WebGPU (no usable GPU here); choose Quality: Fast or Ultra-light, or use Clean Selected Area with AI"
+                        .into(),
+                );
             }
             let force_f32 = get(msg, "f32").as_bool().unwrap_or(false) || !on_gpu;
             let dtype = if force_f32 { photocraft_ai_sd::burn::tensor::DType::F32 } else { precision(rt.device(), false) };
             // f32 weights would need 4.5 GB of GPU memory: refuse unless asked for (Advanced).
             if dtype != photocraft_ai_sd::burn::tensor::DType::F16 && !force_f32 && !matches!(tier, Tier::Ultra | Tier::Fast) {
-                return Err("Generative Fill needs a GPU with 16-bit float shaders (WebGPU shader-f16), which this browser or GPU doesn't offer; use Clean with AI instead".into());
+                return Err("Generative Fill needs a GPU with 16-bit float shaders (WebGPU shader-f16), which this browser or GPU doesn't offer; use Clean Selected Area with AI instead".into());
             }
             let mut loader = Loader::new(rt.device(), dtype).map_err(|e| e.to_string())?;
             let total: u64 = files.bytes().max(1);
