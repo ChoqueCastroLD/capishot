@@ -216,7 +216,10 @@ pub fn draw_overlay(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform
         }
     }
     let side = if touch { 14.0 } else { 7.0 };
-    for p in pts.iter().chain(mids.iter()).filter(|_| !(touch && corners_only)) {
+    // A thin box (thin type) shows no edge handles: the corners take the grab areas.
+    let tol = handle_px(app) / f64::from(xf.zoom.max(0.01));
+    let edges = !(touch && super::pointer::edges_hidden(t, tol));
+    for p in pts.iter().chain(mids.iter().filter(|_| edges)).filter(|_| !(touch && corners_only)) {
         let r = egui::Rect::from_center_size(*p, vec2(side, side));
         painter.rect_filled(r, 0.0, Color32::WHITE);
         painter.rect_stroke(r, 0.0, Stroke::new(1.0, accent), egui::StrokeKind::Inside);

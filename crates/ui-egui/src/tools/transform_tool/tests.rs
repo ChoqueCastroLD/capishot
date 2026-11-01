@@ -3222,3 +3222,28 @@ fn applying_the_box_hides_no_pointer() {
     assert_eq!(cursor(&app, &xf, [32.0, 32.0], cmd()), Some(CursorIcon::ResizeNwSe));
     assert_eq!(cursor(&app, &xf, [96.0, 32.0], cmd()), Some(CursorIcon::ResizeVertical));
 }
+
+/// Thin type: the middle of an edge sits on the corners' grab areas, so a thin box has no edge
+/// handles and the corners win; a box of ordinary size keeps them. Perspective and Distort move
+/// only the corners.
+#[test]
+fn a_thin_box_gives_its_corners_the_grab_and_hides_its_edge_handles() {
+    // A phone: the touch grab radius at 100 %.
+    let tol = TOUCH_HANDLE_PX;
+    let mut t = session();
+    t.quad = corners([0.0, 0.0, 200.0, 20.0]);
+    t.pivot = [100.0, 10.0];
+    assert!(pointer::edges_hidden(&t, tol), "20 px is under three handles");
+    assert_eq!(pointer::hit_with(&t, [2.0, 8.0], tol, true), pointer::Hit::Corner(0), "the corner, not the left edge's middle");
+    assert_eq!(pointer::hit_with(&t, [198.0, 3.0], tol, true), pointer::Hit::Corner(1));
+    let mut big = session();
+    big.quad = corners([0.0, 0.0, 200.0, 200.0]);
+    big.pivot = [100.0, 100.0];
+    assert!(!pointer::edges_hidden(&big, tol));
+    assert_eq!(pointer::hit_with(&big, [100.0, 2.0], tol, true), pointer::Hit::Edge(0), "an ordinary box keeps its edge handles");
+    big.mode = crate::state::TransformMode::Perspective;
+    assert!(pointer::edges_hidden(&big, tol), "Perspective moves only the corners");
+    assert_ne!(pointer::hit_with(&big, [100.0, 2.0], tol, true), pointer::Hit::Edge(0));
+    // With a mouse the nearest handle still wins, as before.
+    assert_eq!(pointer::hit(&t, [2.0, 8.0], 12.0), pointer::Hit::Edge(3));
+}

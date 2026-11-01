@@ -17,16 +17,46 @@ pub(crate) enum Hit {
     Outside,
 }
 
+/// Whether a touch screen's box leaves its edge handles out: Perspective and Distort move only the
+/// corners, and on a box thinner than about three (drawn) handles, thin type, the middle of an
+/// edge sits on the corners' 44 pt grab areas, so the corners take the whole of them. `tol` is the
+/// touch grab radius ([`super::TOUCH_HANDLE_PX`] in document pixels).
+pub(crate) fn edges_hidden(t: &TransformSession, tol: f64) -> bool {
+    if matches!(t.mode, TransformMode::Perspective | TransformMode::Distort) && t.warp.is_none() {
+        return true;
+    }
+    let len = |i: usize| {
+        let (a, b) = (t.quad[i], t.quad[(i + 1) % 4]);
+        (a[0] - b[0]).hypot(a[1] - b[1])
+    };
+    // The drawn handle is 14 pt for a 22 pt grab radius.
+    let handle = tol * 14.0 / super::TOUCH_HANDLE_PX;
+    (0..4).map(len).fold(f64::INFINITY, f64::min) < 3.0 * handle
+}
+
 /// The nearest handle within `tol` (on a small box their grab areas overlap), else inside or
 /// outside the box.
 pub(crate) fn hit(t: &TransformSession, p: [f64; 2], tol: f64) -> Hit {
+    hit_with(t, p, tol, false)
+}
+
+/// [`hit`] for the box under `app`'s pointer: on a touch screen the corners (and the reference
+/// point) come first and a thin box's edges have no handles ([`edges_hidden`]), so a finger always
+/// finds a corner of thin type.
+pub(crate) fn hit_for(app: &PhotocraftApp, t: &TransformSession, p: [f64; 2], tol: f64) -> Hit {
+    hit_with(t, p, tol, crate::touch_ui::active(app))
+}
+
+pub(super) fn hit_with(t: &TransformSession, p: [f64; 2], tol: f64, touch: bool) -> Hit {
     let d = |a: [f64; 2]| ((a[0] - p[0]).powi(2) + (a[1] - p[1]).powi(2)).sqrt();
     let mid = |i: usize| {
         let (a, b) = (t.quad[i], t.quad[(i + 1) % 4]);
         [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0]
     };
-    let handles = (0..4).map(|i| (t.quad[i], Hit::Corner(i))).chain((0..4).map(|i| (mid(i), Hit::Edge(i)))).chain([(t.pivot, Hit::Pivot)]);
-    let nearest = handles.map(|(q, h)| (d(q), h)).filter(|(dist, _)| *dist < tol).min_by(|a, b| a.0.total_cmp(&b.0));
+    let near = |hs: Vec<([f64; 2], Hit)>| hs.into_iter().map(|(q, h)| (d(q), h)).filter(|(dist, _)| *dist < tol).min_by(|a, b| a.0.total_cmp(&b.0));
+    let corners: Vec<([f64; 2], Hit)> = (0..4).map(|i| (t.quad[i], Hit::Corner(i))).chain([(t.pivot, Hit::Pivot)]).collect();
+    let edges: Vec<([f64; 2], Hit)> = if touch && edges_hidden(t, tol) { Vec::new() } else { (0..4).map(|i| (mid(i), Hit::Edge(i))).collect() };
+    let nearest = if touch { near(corners).or_else(|| near(edges)) } else { near(corners.into_iter().chain(edges).collect()) };
     match nearest {
         Some((_, h)) => h,
         None if inside(&t.quad, p) => Hit::Inside,
@@ -72,10 +102,12 @@ pub fn pointer(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers) ->
         warp_pointer(app, ev, tol, mods);
         return true;
     }
+    // A finger: corners first, no edge handles on a thin box (`hit_for`).
+    let touch = crate::touch_ui::active(app);
     let Some(pv) = app.transform_preview.as_mut() else { return false };
     match ev {
         ToolEvent::Down { x, y, .. } => {
-            let mut h = hit(&t, [x, y], tol);
+            let mut h = hit_with(&t, [x, y], tol, touch);
             // ⌥-click away from the handles moves the reference point there (and drags it).
             if mods.alt
                 && matches!(h, Hit::Inside | Hit::Outside)
@@ -266,7 +298,7 @@ pub(super) fn rotate_dir(t: &TransformSession, pv: Option<&TransformPreview>, p:
 
 /// The handle a drag in progress holds, else the one under document point `p`.
 pub(super) fn handle_at(app: &PhotocraftApp, t: &TransformSession, p: [f64; 2], tol: f64) -> Hit {
-    app.transform_preview.as_ref().and_then(|pv| pv.gesture.map(|g| g.hit)).unwrap_or_else(|| hit(t, p, tol))
+    app.transform_preview.as_ref().and_then(|pv| pv.gesture.map(|g| g.hit)).unwrap_or_else(|| hit_for(app, t, p, tol))
 }
 
 /// Cursor for hovering a document point while transforming. `xf` is the canvas's view;
