@@ -156,6 +156,36 @@ fn runs_on_a_gpu_with_little_workgroup_memory() {
     }
 }
 
+/// The ONNX graph on DirectML gives the PyTorch reference too, at two tile sizes in one session.
+/// Skipped without ONNX Runtime (`PHOTOCRAFT_AI_ONNXRUNTIME` or next to the test binary).
+#[cfg(all(feature = "directml", windows))]
+#[test]
+fn directml_matches_pytorch() {
+    use photocraft_ai_lama::directml::{DmlLama, available};
+    if let Err(why) = available() {
+        return eprintln!("DirectML skipped: {why}");
+    }
+    let bytes = tiny_safetensors("lama-ffc");
+    let dml = DmlLama::from_safetensors(&bytes).unwrap();
+    let (rgb, mask) = tiny_input();
+    let out = dml.generate(&rgb, &mask, W, H).unwrap();
+    assert_eq!(out.len(), W * H * 3);
+    for &(i, c, want) in EXPECTED {
+        let got = out[i * 3 + c];
+        assert!((got - want).abs() < 1e-4, "pixel {i} channel {c}: {got} vs {want}");
+    }
+    let mean = out.iter().sum::<f32>() / out.len() as f32;
+    assert!((mean - EXPECTED_MEAN).abs() < 1e-5, "mean {mean} vs {EXPECTED_MEAN}");
+    // Another size in the same session (other DFT inputs) matches burn.
+    let (w, h) = (W + 16, H + 8);
+    let rgb2: Vec<f32> = (0..w * h * 3).map(|i| rgb[i % rgb.len()]).collect();
+    let mask2: Vec<f32> = (0..w * h).map(|i| mask[i % mask.len()]).collect();
+    let want = Lama::from_safetensors(&bytes, &Device::flex()).unwrap().generate(&rgb2, &mask2, w, h).unwrap();
+    let got = dml.generate(&rgb2, &mask2, w, h).unwrap();
+    let d = want.iter().zip(&got).map(|(a, b)| (a - b).abs()).fold(0f32, f32::max);
+    assert!(d < 1e-4, "{w}x{h}: off by {d}");
+}
+
 #[test]
 fn bad_weights_and_sizes_are_errors() {
     let device = Device::flex();

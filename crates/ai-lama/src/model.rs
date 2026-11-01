@@ -84,24 +84,9 @@ impl Lama {
         Ok(())
     }
 
-    /// Builds the model input on the device: `[rgb·(1−m), m]`, with the mask binarized (> 0).
-    /// `rgb` is interleaved RGB in 0..=1 (`w·h·3`), `mask` is `w·h` coverage.
+    /// Builds the model input on the device (see [`planar_input`]).
     fn input(&self, rgb: &[f32], mask: &[f32], w: usize, h: usize) -> Result<Tensor<4>> {
-        Self::check_size(w, h)?;
-        let n = w * h;
-        if rgb.len() != n * 3 || mask.len() != n {
-            return Err(LamaError::Input(format!("expected {} RGB and {n} mask samples, got {} and {}", n * 3, rgb.len(), mask.len())));
-        }
-        let mut planar = vec![0f32; n * 4];
-        for i in 0..n {
-            let m = if mask[i] > 0.0 { 1.0 } else { 0.0 };
-            for c in 0..3 {
-                let v = rgb[i * 3 + c];
-                let v = if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 };
-                planar[c * n + i] = v * (1.0 - m);
-            }
-            planar[3 * n + i] = m;
-        }
+        let planar = planar_input(rgb, mask, w, h)?;
         Ok(Tensor::from_data(TensorData::new(planar, [1, 4, h, w]), &self.device))
     }
 
@@ -189,6 +174,27 @@ impl Lama {
         let data = t.into_data_async().await.map_err(|e| LamaError::Device(format!("{e:?}")))?;
         to_vec(data, w * h * 3)
     }
+}
+
+/// The model input, planar `(4, h, w)`: `[rgb·(1−m), m]` with the mask binarized (> 0), after
+/// [`Lama::check_size`]. `rgb` is interleaved RGB in 0..=1 (`w·h·3`), `mask` is `w·h` coverage.
+pub(crate) fn planar_input(rgb: &[f32], mask: &[f32], w: usize, h: usize) -> Result<Vec<f32>> {
+    Lama::check_size(w, h)?;
+    let n = w * h;
+    if rgb.len() != n * 3 || mask.len() != n {
+        return Err(LamaError::Input(format!("expected {} RGB and {n} mask samples, got {} and {}", n * 3, rgb.len(), mask.len())));
+    }
+    let mut planar = vec![0f32; n * 4];
+    for i in 0..n {
+        let m = if mask[i] > 0.0 { 1.0 } else { 0.0 };
+        for c in 0..3 {
+            let v = rgb[i * 3 + c];
+            let v = if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 };
+            planar[c * n + i] = v * (1.0 - m);
+        }
+        planar[3 * n + i] = m;
+    }
+    Ok(planar)
 }
 
 pub(crate) fn to_vec(data: TensorData, n: usize) -> Result<Vec<f32>> {

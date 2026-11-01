@@ -14,9 +14,9 @@
 //! original stays untouched), or on the layer itself (`output: "current"`). Only pixels the
 //! selection covers change; soft selection edges blend.
 //!
-//! `quality` (auto, fast, best) and `device` (auto, gpu, cpu) choose between Manga LaMa and the
-//! lite MI-GAN (512 px tiles, a fraction of the work: phones, weak machines, CPUs), as
-//! `image.upscaleAi` does; `model` names one explicitly. `threads` and `keepLoaded` are Advanced
+//! `quality` (auto, fast, best) and `device` (auto, gpu, cpu; natively also directml, wgpu: the
+//! GPU runtime) choose between Manga LaMa and the lite MI-GAN (512 px tiles, a fraction of the
+//! work: phones, weak machines, CPUs), as `image.upscaleAi` does; `model` names one explicitly. `threads` and `keepLoaded` are Advanced
 //! settings, like `maxSide` and `margin`.
 
 use std::sync::Arc;
@@ -75,7 +75,26 @@ pub(crate) struct AiOptions {
 
 impl AiOptions {
     fn request(&self, tile: tiles::TileInput) -> Request {
-        Request { tile, allow_download: self.allow_download, model: self.model.id, cpu: self.run.choice.cpu, threads: self.threads, unload: self.unload }
+        Request {
+            tile,
+            allow_download: self.allow_download,
+            model: self.model.id,
+            cpu: self.run.choice.cpu,
+            threads: self.threads,
+            unload: self.unload,
+            backend: lama_backend(self.run.backend),
+        }
+    }
+}
+
+/// The `device` param's GPU runtime (`directml`, `wgpu`) for LaMa's service.
+pub(crate) fn lama_backend(b: photocraft_ai::service::GpuBackend) -> photocraft_ai_lama::service::GpuBackend {
+    use photocraft_ai::service::GpuBackend as Ai;
+    use photocraft_ai_lama::service::GpuBackend as Lama;
+    match b {
+        Ai::Auto => Lama::Auto,
+        Ai::Wgpu => Lama::Wgpu,
+        Ai::DirectMl => Lama::DirectMl,
     }
 }
 
@@ -488,7 +507,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: "Clean Selected Area with AI",
         menu: &["Edit"],
         shortcut: None,
-        params: r#"{"output"?: "new" (default: the result on a new layer above, alpha = selection coverage) | "current" (paint it into the layer), "layer"?: layer id (default: the active pixel layer), "maxSide"?: 64..2048, multiple of 8 (default 512: larger crops are downscaled to this working size), "margin"?: 0..1024 px of context around each masked blob (default 64), "allowDownload"?: bool (fetch the model's weights when not cached: Manga LaMa about 100 MB, MI-GAN 13 MB; default false), "quality"?: "auto"|"fast"|"best" (fast: the lite MI-GAN, at most 512 px tiles; auto: Manga LaMa on a capable GPU, MI-GAN on the CPU, phones and weak machines), "device"?: "auto"|"gpu"|"cpu", "model"?: "auto"|"manga-lama"|"migan-512", "threads"?: 0..64 (CPU threads, 0 = one per core), "keepLoaded"?: bool (default true)} -> {"layer", "pixels", "region": [x,y,w,h], "device", "model", "lite"}. Erases what the selection covers (text, SFX) and fills it with Manga LaMa (or MI-GAN). Background job, one undo step."#,
+        params: r#"{"output"?: "new" (default: the result on a new layer above, alpha = selection coverage) | "current" (paint it into the layer), "layer"?: layer id (default: the active pixel layer), "maxSide"?: 64..2048, multiple of 8 (default 512: larger crops are downscaled to this working size), "margin"?: 0..1024 px of context around each masked blob (default 64), "allowDownload"?: bool (fetch the model's weights when not cached: Manga LaMa about 100 MB, MI-GAN 13 MB; default false), "quality"?: "auto"|"fast"|"best" (fast: the lite MI-GAN, at most 512 px tiles; auto: Manga LaMa on a capable GPU, MI-GAN on the CPU, phones and weak machines), "device"?: "auto"|"gpu"|"cpu"|"directml"|"wgpu" (directml, wgpu: natively, that GPU runtime; auto picks DirectML on Windows for Manga LaMa when ONNX Runtime is installed), "model"?: "auto"|"manga-lama"|"migan-512", "threads"?: 0..64 (CPU threads, 0 = one per core), "keepLoaded"?: bool (default true)} -> {"layer", "pixels", "region": [x,y,w,h], "device", "model", "lite"}. Erases what the selection covers (text, SFX) and fills it with Manga LaMa (or MI-GAN). Background job, one undo step."#,
         enabled,
         run: inpaint_ai,
         journal: true,

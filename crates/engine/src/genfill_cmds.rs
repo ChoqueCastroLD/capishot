@@ -400,6 +400,7 @@ fn generative_fill(s: &mut Session, p: &Value) -> Result<Value> {
                 cpu: plan.req.cpu,
                 threads: plan.req.threads,
                 unload: false,
+                backend: photocraft_ai_lama::service::GpuBackend::Auto,
             };
             lama.run(
                 lreq,

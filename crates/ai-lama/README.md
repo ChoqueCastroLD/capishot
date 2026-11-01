@@ -3,7 +3,8 @@
 Manga LaMa inpainting for Capishot: erase text and SFX under a selection or a Remove-tool
 stroke and redraw plausible manga background (screentone, hatching, line art). Pure Rust on
 [burn](https://burn.dev) 0.22: WebGPU in the browser, Vulkan/Metal/DX12 natively, or the
-pure-Rust CPU backend (`flex`, wasm included). No Python, no ONNX Runtime.
+pure-Rust CPU backend (`flex`, wasm included). No Python. On Windows (feature `directml`) Manga
+LaMa can also run on DirectML through ONNX Runtime, loaded at run time (below).
 
 ## Public API
 
@@ -15,7 +16,8 @@ pure-Rust CPU backend (`flex`, wasm included). No Python, no ONNX Runtime.
 | `Lama::{from_safetensors, generate, generate_async, check_size, arch}` | `model` (`flex` / `wgpu`) | The generator. |
 | `Migan::{from_safetensors, generate, generate_async, resolution}` | `model` | The lite generator (MI-GAN, below): tiles up to 512 px a side, mirror-padded to a multiple of 128. |
 | `Generator` | `model` | Either one, picked by the file's `arch` metadata (`lama-ffc`, `migan`). |
-| `native::NativeInpainter` | `model`, not wasm | Desktop/CLI runner: weights from `CAPISHOT_LAMA_WEIGHTS` or the app's models folder (`manga-lama-f16.safetensors`) (MI-GAN: `CAPISHOT_MIGAN_WEIGHTS` or `migan-512-places2-f16.safetensors` beside it); wgpu unless the adapter is software, `CAPISHOT_AI_DEVICE=cpu` or the request asks for the CPU, else CPU. |
+| `native::NativeInpainter` | `model`, not wasm | Desktop/CLI runner: weights from `CAPISHOT_LAMA_WEIGHTS` or the app's models folder (`manga-lama-f16.safetensors`) (MI-GAN: `CAPISHOT_MIGAN_WEIGHTS` or `migan-512-places2-f16.safetensors` beside it); wgpu unless the adapter is software, `CAPISHOT_AI_DEVICE=cpu` or the request asks for the CPU, else CPU. With `directml` on Windows, Manga LaMa on DirectML first (request `backend`). |
+| `directml::{DmlLama, available}` | `directml`, Windows | Manga LaMa as ONNX on DirectML (below). |
 
 Without features the crate has no ML dependency: the engine (and the main web bundle) uses only
 the tiling and service halves.
@@ -68,6 +70,29 @@ mirror-padded like IOPaint; 7 crops: 4 synthetic text-over-screentone, 3 from a 
 
 `tests/tiny_model.rs` checks a tiny random-weight LaMa against an independent PyTorch
 implementation using `torch.fft` (`tests/tiny_reference.py`) to 2e-5.
+
+`directml_matches_pytorch` checks the DirectML graph against the same reference to 1e-4 (and
+against burn at a second size in the same session) when ONNX Runtime is available.
+
+## DirectML (Windows)
+
+burn's fp32 convolutions on wgpu are direct convolutions; DirectML's are far faster on the same
+GPU with the same fp32 weights. `src/onnx.rs` writes the generator to ONNX in memory (Pad
+reflect, Conv, ConvTranspose, Relu, Add, Sigmoid; the Fourier unit as MatMul over the same DFT
+matrices as `dft::Dft2`, fed as graph inputs so one dynamic-shape session takes every crop
+size). `onnxruntime.dll` (a DirectML build, 1.24 or later) and `DirectML.dll` are loaded at run
+time from `PHOTOCRAFT_AI_ONNXRUNTIME` or the executable's folder; without them the burn path
+runs. RTX 3060 Ti, generator alone, fp32:
+
+| crop | burn wgpu (Vulkan) | DirectML | raw max diff | 8-bit PSNR (masked) |
+|---|---|---|---|---|
+| 512² | 1.73 s | 0.09 s | 0.0017/255 | 94.7 dB |
+| 768² | 4.17 s | 0.4 s | — | 97.4 dB |
+| 1000² | 6.79 s | 0.5 s | — | 92.7 dB |
+
+A crop size the session hasn't run yet costs about 0.3–0.5 s once. (Sessions with fixed
+shapes run 1000² in 0.25 s but take 1.4–5 s to build per size.) Through `capishot-cli serve`,
+an `edit.removeAi` over a 1000×1500 page takes 0.9–1.3 s instead of 7.8–10.5 s.
 
 Run it:
 

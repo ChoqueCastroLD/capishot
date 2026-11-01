@@ -29,38 +29,77 @@ impl Arch {
     }
 }
 
-/// A convolution with its (folded) bias.
+/// A convolution with its (folded) bias, on the device.
 #[derive(Debug, Clone)]
 pub(crate) struct Conv {
     pub w: Tensor<4>,
     pub b: Option<Tensor<1>>,
 }
 
-/// One FFC + folded BN + ReLU, global ratio 0.75 in and out.
+/// A convolution's weights in host memory: `shape` (`[out, in, kh, kw]`; transposed convs
+/// `[in, out, kh, kw]`), the weights and the bias (`shape[bias_dim]` values).
 #[derive(Debug, Clone)]
-pub(crate) struct Ffc {
-    pub l2l: Conv,
-    pub g2l: Conv,
-    pub l2g: Conv,
-    /// Spectral transform: 1×1 reduce (+BN+ReLU).
-    pub st1: Conv,
-    /// Fourier unit 1×1 conv on `[re…, im…]` (+BN+ReLU).
-    pub fu: Conv,
-    /// Spectral transform: 1×1 expand (scaled by the FFC's global BN).
-    pub st2: Conv,
+pub(crate) struct HostConv {
+    pub shape: [usize; 4],
+    pub w: Vec<f32>,
+    pub b: Option<Vec<f32>>,
 }
 
+/// One FFC + folded BN + ReLU, global ratio 0.75 in and out.
 #[derive(Debug, Clone)]
-pub(crate) struct Weights {
+pub(crate) struct Ffc<C = Conv> {
+    pub l2l: C,
+    pub g2l: C,
+    pub l2g: C,
+    /// Spectral transform: 1×1 reduce (+BN+ReLU).
+    pub st1: C,
+    /// Fourier unit 1×1 conv on `[re…, im…]` (+BN+ReLU).
+    pub fu: C,
+    /// Spectral transform: 1×1 expand (scaled by the FFC's global BN).
+    pub st2: C,
+}
+
+/// The generator's layers: on the device (`Conv`, what [`load`] gives) or in host memory
+/// ([`HostConv`], what [`parse`] gives).
+#[derive(Debug, Clone)]
+pub(crate) struct Weights<C = Conv> {
     pub arch: Arch,
-    pub stem: Conv,
-    pub down1: Conv,
-    pub down2: Conv,
-    pub down3_l: Conv,
-    pub down3_g: Conv,
-    pub blocks: Vec<[Ffc; 2]>,
-    pub up: [Conv; 3],
-    pub out: Conv,
+    pub stem: C,
+    pub down1: C,
+    pub down2: C,
+    pub down3_l: C,
+    pub down3_g: C,
+    pub blocks: Vec<[Ffc<C>; 2]>,
+    pub up: [C; 3],
+    pub out: C,
+}
+
+impl<C> Ffc<C> {
+    fn map<D>(self, f: &mut impl FnMut(C) -> Result<D>) -> Result<Ffc<D>> {
+        Ok(Ffc { l2l: f(self.l2l)?, g2l: f(self.g2l)?, l2g: f(self.l2g)?, st1: f(self.st1)?, fu: f(self.fu)?, st2: f(self.st2)? })
+    }
+}
+
+impl<C> Weights<C> {
+    /// Every layer through `f`, in order.
+    fn map<D>(self, mut f: impl FnMut(C) -> Result<D>) -> Result<Weights<D>> {
+        let mut blocks = Vec::with_capacity(self.blocks.len());
+        for [a, b] in self.blocks {
+            blocks.push([a.map(&mut f)?, b.map(&mut f)?]);
+        }
+        let [u1, u2, u3] = self.up;
+        Ok(Weights {
+            arch: self.arch,
+            stem: f(self.stem)?,
+            down1: f(self.down1)?,
+            down2: f(self.down2)?,
+            down3_l: f(self.down3_l)?,
+            down3_g: f(self.down3_g)?,
+            blocks,
+            up: [f(u1)?, f(u2)?, f(u3)?],
+            out: f(self.out)?,
+        })
+    }
 }
 
 /// Upper bounds that keep a hostile header from asking for absurd allocations.
@@ -85,24 +124,7 @@ impl<'a> Reader<'a> {
     }
 
     pub fn floats(&self, name: &str, shape: &[usize]) -> Result<Vec<f32>> {
-        let t = self.st.tensor(name).map_err(|_| LamaError::Weights(format!("missing tensor `{name}`")))?;
-        if t.shape() != shape {
-            return Err(LamaError::Weights(format!("`{name}` has shape {:?}, expected {shape:?}", t.shape())));
-        }
-        let n: usize = shape.iter().product();
-        let data = t.data();
-        let v: Vec<f32> = match t.dtype() {
-            Dtype::F32 if data.len() == n * 4 => data.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect(),
-            Dtype::F16 if data.len() == n * 2 => data.as_chunks::<2>().0.iter().map(|b| half::f16::from_le_bytes(*b).to_f32()).collect(),
-            Dtype::BF16 if data.len() == n * 2 => data.as_chunks::<2>().0.iter().map(|b| half::bf16::from_le_bytes(*b).to_f32()).collect(),
-            other => {
-                return Err(LamaError::Weights(format!("`{name}`: unsupported dtype {other:?} or wrong byte length")));
-            }
-        };
-        if v.iter().any(|x| !x.is_finite()) {
-            return Err(LamaError::Weights(format!("`{name}` has non-finite values")));
-        }
-        Ok(v)
+        floats(&self.st, name, shape)
     }
 
     pub fn t4(&self, name: &str, shape: [usize; 4]) -> Result<Tensor<4>> {
@@ -114,20 +136,59 @@ impl<'a> Reader<'a> {
         let v = self.floats(name, &[len])?;
         Ok(Tensor::from_data(TensorData::new(v, [len]), &self.device))
     }
+}
 
-    /// `name.w` with `shape` and, when `bias`, `name.b` with `shape[bias_dim]` entries.
-    fn conv(&self, name: &str, shape: [usize; 4], bias: Option<usize>) -> Result<Conv> {
-        let w = self.t4(&format!("{name}.w"), shape)?;
+/// The tensors of a safetensors file as host `f32` (see [`Reader::floats`]); no device.
+struct Host<'a>(SafeTensors<'a>);
+
+impl Host<'_> {
+    /// `name.w` with `shape` and, when `bias`, `name.b` with that many entries.
+    fn conv(&self, name: &str, shape: [usize; 4], bias: Option<usize>) -> Result<HostConv> {
+        let w = floats(&self.0, &format!("{name}.w"), &shape)?;
         let b = match bias {
-            Some(n) => Some(self.t1(&format!("{name}.b"), n)?),
+            Some(n) => Some(floats(&self.0, &format!("{name}.b"), &[n])?),
             None => None,
         };
-        Ok(Conv { w, b })
+        Ok(HostConv { shape, w, b })
     }
+}
+
+/// Tensor `name` as `f32` (from f32, f16 or bf16), checked to have exactly `shape` and finite values.
+fn floats(st: &SafeTensors<'_>, name: &str, shape: &[usize]) -> Result<Vec<f32>> {
+    let t = st.tensor(name).map_err(|_| LamaError::Weights(format!("missing tensor `{name}`")))?;
+    if t.shape() != shape {
+        return Err(LamaError::Weights(format!("`{name}` has shape {:?}, expected {shape:?}", t.shape())));
+    }
+    let n: usize = shape.iter().product();
+    let data = t.data();
+    let v: Vec<f32> = match t.dtype() {
+        Dtype::F32 if data.len() == n * 4 => data.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect(),
+        Dtype::F16 if data.len() == n * 2 => data.as_chunks::<2>().0.iter().map(|b| half::f16::from_le_bytes(*b).to_f32()).collect(),
+        Dtype::BF16 if data.len() == n * 2 => data.as_chunks::<2>().0.iter().map(|b| half::bf16::from_le_bytes(*b).to_f32()).collect(),
+        other => {
+            return Err(LamaError::Weights(format!("`{name}`: unsupported dtype {other:?} or wrong byte length")));
+        }
+    };
+    if v.iter().any(|x| !x.is_finite()) {
+        return Err(LamaError::Weights(format!("`{name}` has non-finite values")));
+    }
+    Ok(v)
 }
 
 /// Parses and uploads the weights.
 pub(crate) fn load(bytes: &[u8], device: &Device) -> Result<Weights> {
+    parse(bytes)?.map(|c| {
+        let w = Tensor::from_data(TensorData::new(c.w, c.shape), device);
+        let b = c.b.map(|b| {
+            let n = b.len();
+            Tensor::from_data(TensorData::new(b, [n]), device)
+        });
+        Ok(Conv { w, b })
+    })
+}
+
+/// Parses the weights into host memory, every tensor checked against the architecture.
+pub(crate) fn parse(bytes: &[u8]) -> Result<Weights<HostConv>> {
     let (_, header) = SafeTensors::read_metadata(bytes).map_err(|e| LamaError::Weights(format!("not a safetensors file: {e}")))?;
     let meta = header.metadata().as_ref();
     if let Some(arch) = meta.and_then(|m| m.get("arch"))
@@ -161,7 +222,7 @@ pub(crate) fn load(bytes: &[u8], device: &Device) -> Result<Weights> {
         }
     }
     let arch = Arch { ngf, blocks };
-    let r = Reader { st, device: device.clone() };
+    let r = Host(st);
     let (c, cl, cg) = (ngf * 8, arch.cl(), arch.cg());
     let ch = cg / 2;
     let stem = r.conv("in", [ngf, 4, 7, 7], Some(ngf))?;
@@ -169,7 +230,7 @@ pub(crate) fn load(bytes: &[u8], device: &Device) -> Result<Weights> {
     let down2 = r.conv("down2", [ngf * 4, ngf * 2, 3, 3], Some(ngf * 4))?;
     let down3_l = r.conv("down3.l", [cl, ngf * 4, 3, 3], Some(cl))?;
     let down3_g = r.conv("down3.g", [cg, ngf * 4, 3, 3], Some(cg))?;
-    let ffc = |p: &str| -> Result<Ffc> {
+    let ffc = |p: &str| -> Result<Ffc<HostConv>> {
         Ok(Ffc {
             l2l: r.conv(&format!("{p}.l2l"), [cl, cl, 3, 3], Some(cl))?,
             g2l: r.conv(&format!("{p}.g2l"), [cl, cg, 3, 3], None)?,

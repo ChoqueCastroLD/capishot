@@ -45,6 +45,20 @@ pub struct Request {
     pub threads: usize,
     /// Free the model after the run instead of keeping it loaded.
     pub unload: bool,
+    /// Which GPU runtime (natively; ignored for CPU runs, MI-GAN and in the browser).
+    pub backend: GpuBackend,
+}
+
+/// The native GPU runtimes (as `photocraft_ai::service::GpuBackend`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GpuBackend {
+    /// DirectML where it can run Manga LaMa (Windows, ONNX Runtime present), else wgpu.
+    #[default]
+    Auto,
+    /// burn on wgpu (Vulkan, DX12, Metal).
+    Wgpu,
+    /// ONNX Runtime on DirectML (Windows; Manga LaMa): an error where it can't run.
+    DirectMl,
 }
 
 /// Catalog id of Manga LaMa (as `photocraft_ai::catalog::LAMA_ID`).
@@ -55,7 +69,7 @@ pub const MIGAN: &str = "migan-512";
 impl Request {
     /// Manga LaMa on `tile`, automatic device.
     pub fn lama(tile: TileInput, allow_download: bool) -> Self {
-        Self { tile, allow_download, model: LAMA, cpu: false, threads: 0, unload: false }
+        Self { tile, allow_download, model: LAMA, cpu: false, threads: 0, unload: false, backend: GpuBackend::Auto }
     }
 }
 

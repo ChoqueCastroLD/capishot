@@ -1,6 +1,7 @@
 //! [`NativeInpainter`]: the desktop/CLI [`Inpainter`], running LaMa (or the lite MI-GAN) in the
-//! calling thread (the engine's job worker) on the GPU through wgpu when there is a real one,
-//! else on the CPU.
+//! calling thread (the engine's job worker) on the GPU when there is a real one, else on the CPU.
+//! On Windows with feature `directml`, Manga LaMa runs on DirectML through ONNX Runtime when its
+//! library loads ([`crate::directml`], much faster); else, and for MI-GAN, burn on wgpu.
 //!
 //! The weights come from local files: the AI Model Manager's downloads (the app's models
 //! folder, `photocraft-ai`'s cache) first, else `CAPISHOT_LAMA_WEIGHTS`; MI-GAN from `CAPISHOT_MIGAN_WEIGHTS`, else
@@ -13,7 +14,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use burn::tensor::Device;
 
-use crate::service::{Done, Hooks, Inpainter, LAMA, MIGAN, ModelState, Request};
+use crate::service::{Done, GpuBackend, Hooks, Inpainter, LAMA, MIGAN, ModelState, Request};
 use crate::{Generator, LamaError, Result};
 
 /// The weights' file name in the models folder.
@@ -26,6 +27,11 @@ pub const MIGAN_BYTES: u64 = 13_198_644;
 /// Larger files are refused before reading (the f32 file is 204 MB).
 const MAX_WEIGHTS_BYTES: u64 = 512 << 20;
 
+#[cfg(all(feature = "directml", windows))]
+type Dml = crate::directml::DmlLama;
+#[cfg(not(all(feature = "directml", windows)))]
+type Dml = ();
+
 /// See the module docs.
 pub struct NativeInpainter {
     path: PathBuf,
@@ -34,13 +40,27 @@ pub struct NativeInpainter {
     downloads: Option<PathBuf>,
     /// The loaded model: its id, whether it is on the CPU, the generator.
     model: Mutex<Option<(&'static str, bool, Arc<Generator>)>>,
+    /// Manga LaMa on DirectML, once loaded.
+    #[cfg_attr(not(all(feature = "directml", windows)), allow(dead_code))]
+    dml: Mutex<Option<Arc<Dml>>>,
+    /// Why DirectML couldn't load Manga LaMa: automatic runs use burn after that.
+    #[cfg_attr(not(all(feature = "directml", windows)), allow(dead_code))]
+    dml_failed: Mutex<Option<String>>,
     device_name: Mutex<String>,
 }
 
 impl NativeInpainter {
     /// An inpainter loading LaMa from `path` on first use (MI-GAN: [`NativeInpainter::with_migan`]).
     pub fn new(path: PathBuf) -> Self {
-        Self { path, migan: None, downloads: None, model: Mutex::new(None), device_name: Mutex::new(String::new()) }
+        Self {
+            path,
+            migan: None,
+            downloads: None,
+            model: Mutex::new(None),
+            dml: Mutex::new(None),
+            dml_failed: Mutex::new(None),
+            device_name: Mutex::new(String::new()),
+        }
     }
 
     /// Also offers MI-GAN, loaded from `path`.
@@ -127,6 +147,87 @@ impl NativeInpainter {
         }))
     }
 
+    /// The weight file's bytes for model `id`.
+    fn weights(&self, id: &str) -> Result<Vec<u8>> {
+        let path = self.path_of(id).ok_or_else(|| LamaError::Unavailable(format!("{id} isn't available here")))?;
+        let path = path.as_path();
+        let len = std::fs::metadata(path).map_err(|e| LamaError::Unavailable(format!("{id} weights not found at {}: {e}", path.display())))?.len();
+        if len > MAX_WEIGHTS_BYTES {
+            return Err(LamaError::Weights(format!("{} is {len} bytes, more than any inpainting model", path.display())));
+        }
+        std::fs::read(path).map_err(|e| LamaError::Unavailable(format!("{}: {e}", path.display())))
+    }
+
+    /// Whether `req` goes to DirectML: Manga LaMa on the GPU, not asked for wgpu, and (when
+    /// automatic) DirectML hasn't failed to load it before.
+    fn wants_directml(&self, req: &Request) -> bool {
+        let cpu = req.cpu || std::env::var("CAPISHOT_AI_DEVICE").is_ok_and(|v| v.eq_ignore_ascii_case("cpu"));
+        req.model == LAMA
+            && !cpu
+            && match req.backend {
+                GpuBackend::Wgpu => false,
+                GpuBackend::DirectMl => true,
+                GpuBackend::Auto => self.dml_failed.lock().unwrap_or_else(PoisonError::into_inner).is_none(),
+            }
+    }
+
+    /// Runs `req` on DirectML when [`Self::wants_directml`]; `None` runs it on burn instead (an
+    /// automatic run where DirectML can't: no ONNX Runtime library, a failed session or run).
+    #[cfg(all(feature = "directml", windows))]
+    fn run_directml(&self, req: &Request) -> Option<Result<Vec<f32>>> {
+        if !self.wants_directml(req) {
+            return None;
+        }
+        let auto = req.backend == GpuBackend::Auto;
+        let mut slot = self.dml.lock().unwrap_or_else(PoisonError::into_inner);
+        let dml = match slot.as_ref() {
+            Some(d) => d.clone(),
+            None => {
+                let bytes = match self.weights(LAMA) {
+                    Ok(b) => b,
+                    Err(e) => return Some(Err(e)),
+                };
+                match crate::directml::DmlLama::from_safetensors(&bytes) {
+                    Ok(d) => {
+                        // The burn copy on the GPU isn't needed while DirectML runs the model.
+                        let mut m = self.model.lock().unwrap_or_else(PoisonError::into_inner);
+                        if m.as_ref().is_some_and(|(id, cpu, _)| *id == LAMA && !*cpu) {
+                            *m = None;
+                        }
+                        let d = Arc::new(d);
+                        *slot = Some(d.clone());
+                        d
+                    }
+                    Err(e) if auto => {
+                        *self.dml_failed.lock().unwrap_or_else(PoisonError::into_inner) = Some(e.to_string());
+                        return None;
+                    }
+                    Err(e) => return Some(Err(e)),
+                }
+            }
+        };
+        let t = &req.tile;
+        let out = dml.generate(&t.rgb, &t.mask, t.w, t.h);
+        if out.is_err() || req.unload {
+            // Frees its device memory (after a tile too large for it, too): the next tile builds it again.
+            *slot = None;
+        }
+        match out {
+            Ok(o) => {
+                *self.device_name.lock().unwrap_or_else(PoisonError::into_inner) = "DirectML".into();
+                Some(Ok(o))
+            }
+            Err(_) if auto => None,
+            Err(e) => Some(Err(e)),
+        }
+    }
+
+    #[cfg(not(all(feature = "directml", windows)))]
+    fn run_directml(&self, req: &Request) -> Option<Result<Vec<f32>>> {
+        (req.backend == GpuBackend::DirectMl && self.wants_directml(req))
+            .then(|| Err(LamaError::Unavailable("DirectML runs only in Windows builds with the `directml` feature".into())))
+    }
+
     fn model(&self, id: &'static str, cpu: bool) -> Result<Arc<Generator>> {
         let mut slot = self.model.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some((i, c, m)) = slot.as_ref()
@@ -136,13 +237,7 @@ impl NativeInpainter {
             return Ok(m.clone());
         }
         *slot = None;
-        let path = self.path_of(id).ok_or_else(|| LamaError::Unavailable(format!("{id} isn't available here")))?;
-        let path = path.as_path();
-        let len = std::fs::metadata(path).map_err(|e| LamaError::Unavailable(format!("{id} weights not found at {}: {e}", path.display())))?.len();
-        if len > MAX_WEIGHTS_BYTES {
-            return Err(LamaError::Weights(format!("{} is {len} bytes, more than any inpainting model", path.display())));
-        }
-        let bytes = std::fs::read(path).map_err(|e| LamaError::Unavailable(format!("{}: {e}", path.display())))?;
+        let bytes = self.weights(id)?;
         let (device, name) = Self::pick_device(cpu)?;
         let m = Arc::new(Generator::from_safetensors(&bytes, &device)?);
         *self.device_name.lock().unwrap_or_else(PoisonError::into_inner) = name;
@@ -181,6 +276,9 @@ impl Inpainter for NativeInpainter {
         // burn panics on device failures (out of memory, a lost GPU): report it as an error and
         // drop the model so the next request loads it again.
         let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if let Some(r) = self.run_directml(&req) {
+                return r;
+            }
             self.model(req.model, req.cpu).and_then(|m| {
                 if hooks.cancelled() {
                     return Err(LamaError::Cancelled);
