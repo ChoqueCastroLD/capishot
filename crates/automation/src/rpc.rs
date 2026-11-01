@@ -242,25 +242,82 @@ impl Headless {
 
 /// Answer one request line. Malformed JSON gets an error reply with `id: null`.
 pub fn respond(h: &Mutex<Headless>, line: &str) -> Value {
+    respond_with_progress(h, line, &mut |_| Ok(())).unwrap_or_else(|e| json!({"id": null, "ok": false, "error": e.to_string()}))
+}
+
+/// How often a request with `"progress": true` looks at its job.
+const PROGRESS_POLL: Duration = Duration::from_millis(100);
+
+/// [`respond`], with progress: an `engine.execute` request that carries `"progress": true` (and
+/// waits, the default) runs its command as a background job and hands `emit` one
+/// `{"id", "event": "progress", "progress": 0–1, "message"}` line each time the job's progress or
+/// message changes, before the usual reply. Other requests (and commands that don't run as jobs)
+/// emit nothing. When `emit` fails (the client went away) the job is cancelled and the error
+/// returned.
+pub fn respond_with_progress(h: &Mutex<Headless>, line: &str, emit: &mut dyn FnMut(&Value) -> std::io::Result<()>) -> std::io::Result<Value> {
     let req: Value = match serde_json::from_str(line) {
         Ok(v) => v,
-        Err(e) => return json!({"id": null, "ok": false, "error": format!("bad JSON: {e}")}),
+        Err(e) => return Ok(json!({"id": null, "ok": false, "error": format!("bad JSON: {e}")})),
     };
     let id = req.get("id").cloned().unwrap_or(Value::Null);
     let Some(method) = req.get("method").and_then(Value::as_str) else {
-        return json!({"id": id, "ok": false, "error": "missing `method`"});
+        return Ok(json!({"id": id, "ok": false, "error": "missing `method`"}));
     };
-    let params = req.get("params").cloned().unwrap_or(Value::Null);
-    // Last-resort guard (AGENTS.md, Never crash): a command that panics answers this request
-    // with an error instead of taking down the connection (or the whole stdio server). Edits
-    // run on a copy of the document (`Session::edit`), so the session stays consistent and a
-    // poisoned lock is safe to keep using, the same as the MCP server does.
-    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| h.lock().unwrap_or_else(PoisonError::into_inner).handle(method, params)))
-        .unwrap_or_else(|_| Err(AutomationError::Other(format!("internal error: `{method}` panicked"))));
-    match r {
+    let mut params = req.get("params").cloned().unwrap_or(Value::Null);
+    let progress = req.get("progress").and_then(Value::as_bool).unwrap_or(false)
+        && method == "engine.execute"
+        && params.get("wait").and_then(Value::as_bool).unwrap_or(true);
+    if progress && let Some(p) = params.as_object_mut() {
+        p.insert("wait".into(), Value::Bool(false));
+    }
+    let mut r = guarded(method, || h.lock().unwrap_or_else(PoisonError::into_inner).handle(method, params));
+    let job = r
+        .as_ref()
+        .ok()
+        .filter(|v| progress && v.get("pending").and_then(Value::as_bool) == Some(true))
+        .and_then(|v| v.get("job"))
+        .and_then(Value::as_u64);
+    if let Some(job) = job {
+        r = follow_job(h, method, &id, job, emit)?;
+    }
+    Ok(match r {
         Ok(v) => json!({"id": id, "ok": true, "result": v}),
         Err(e) => json!({"id": id, "ok": false, "error": e.to_string()}),
+    })
+}
+
+/// Last-resort guard (AGENTS.md, Never crash): a command that panics answers its request with
+/// an error instead of taking down the connection (or the whole stdio server). Edits run on a
+/// copy of the document (`Session::edit`), so the session stays consistent and a poisoned lock
+/// is safe to keep using, the same as the MCP server does.
+fn guarded(method: &str, f: impl FnOnce() -> Result<Value, AutomationError>) -> Result<Value, AutomationError> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or_else(|_| Err(AutomationError::Other(format!("internal error: `{method}` panicked"))))
+}
+
+/// Reports job `job`'s progress through `emit` until it ends (the session is unlocked between
+/// looks, so other connections keep being served), then applies it and returns its result.
+fn follow_job(
+    h: &Mutex<Headless>,
+    method: &str,
+    id: &Value,
+    job: u64,
+    emit: &mut dyn FnMut(&Value) -> std::io::Result<()>,
+) -> std::io::Result<Result<Value, AutomationError>> {
+    let lock = || h.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut last: Option<(f32, String)> = None;
+    loop {
+        let Some(now) = lock().job_progress(job) else { break };
+        if last.as_ref() != Some(&now) {
+            let event = json!({"id": id, "event": "progress", "progress": now.0, "message": now.1});
+            if let Err(e) = emit(&event) {
+                lock().cancel_job(job);
+                return Err(e);
+            }
+            last = Some(now);
+        }
+        std::thread::sleep(PROGRESS_POLL);
     }
+    Ok(guarded(method, || lock().wait_job(job)))
 }
 
 /// Serve JSON lines from `r` to `w` until EOF. Blank lines are ignored. An over-long or non-UTF-8
@@ -274,7 +331,13 @@ pub fn serve_lines(h: &Mutex<Headless>, mut r: impl BufRead, mut w: impl Write) 
             Err(e) if e.kind() == std::io::ErrorKind::InvalidData => (json!({"id": null, "ok": false, "error": "request is not valid UTF-8"}), false),
             Err(e) => return Err(e),
             Ok(LineRead::Line) if line.trim().is_empty() => continue,
-            Ok(LineRead::Line) => (respond(h, &line), false),
+            Ok(LineRead::Line) => {
+                let mut emit = |event: &Value| -> std::io::Result<()> {
+                    write_reply(&mut w, event)?;
+                    w.flush()
+                };
+                (respond_with_progress(h, &line, &mut emit)?, false)
+            }
         };
         write_reply(&mut w, &reply)?;
         w.flush()?;
@@ -310,7 +373,16 @@ fn serve_tcp_connection(h: &Mutex<Headless>, stream: std::net::TcpStream, token:
             LineRead::Line => {}
         }
         let reply = if authenticated {
-            repeat_auth_reply(&line).unwrap_or_else(|| respond(h, &line))
+            match repeat_auth_reply(&line) {
+                Some(reply) => reply,
+                None => {
+                    let mut emit = |event: &Value| -> std::io::Result<()> {
+                        write_reply(&mut out, event)?;
+                        out.flush()
+                    };
+                    respond_with_progress(h, &line, &mut emit)?
+                }
+            }
         } else {
             let (reply, ok) = authentication_reply(&line, token);
             authenticated = ok;

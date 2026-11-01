@@ -450,6 +450,38 @@ stdio, and a value that is not a port is a usage error naming the variable. Impl
 | `batch` | `{steps: [{command, params?, wait?} \| {method, params?}], stopOnError? (true)}` → `{completed, failed, results}` (a step with `wait: false` starts a long command as a background job, like `engine.execute`) |
 | `methods` | the list above |
 
+**Progress events.** An `engine.execute` request that waits (the default) may add `"progress": true`
+next to `id` and `method` (an envelope field, not a param). A command that runs as a background job
+(filters, `image.upscaleAi`, `edit.inpaintAi`, …) then gets progress lines before its usual reply,
+one each time the job's progress or message changes (looked at every 100 ms):
+
+```json
+{"id": 7, "event": "progress", "progress": 0.33, "message": "Upscaling with 2x MangaJaNai (GPU, DirectML) (tile 3 of 12)"}
+{"id": 7, "event": "progress", "progress": 0.4, "message": "Upscaling with 2x MangaJaNai (GPU, DirectML) (tile 4 of 12)"}
+{"id": 7, "ok": true, "result": { ... }}
+```
+
+A line with `event` is never a reply: a client that doesn't send the flag never sees one, and one
+that does reads lines until the one with `ok`. Commands that don't run as jobs, `wait: false`
+requests and other methods emit no events. The session is unlocked between looks, so other TCP
+connections are served meanwhile; when a progress line can't be written (the client went away) the
+job is cancelled. `image.upscaleAi` reports per tile (`… (tile N of M)`).
+
+**DirectML (Windows).** `image.upscaleAi` with an ESRGAN model (MangaJaNai, the 2x/4x defaults) runs
+on ONNX Runtime's DirectML execution provider when `onnxruntime.dll` (a DirectML build, 1.24 or
+later, from the `Microsoft.ML.OnnxRuntime.DirectML` NuGet package) and its `DirectML.dll` sit next
+to the executable, or in the folder (or at the file) `PHOTOCRAFT_AI_ONNXRUNTIME` names. Nothing is
+linked: without the DLLs the wgpu path runs as before. The network is the same, in fp32, written to
+ONNX in memory from the same weights. `device`: `auto` and `gpu` use DirectML when it loads (and
+fall back to wgpu if it fails), `directml` requires it, `wgpu` skips it, `cpu` is the CPU. The status
+says `(GPU, DirectML)`. The tiles are the wgpu path's (the same `tile` default and seams, so the
+same picture), each tile size on an ONNX Runtime session built for it (about a second, on the first
+page of that size). The sessions kept stay within about 3 GiB of video memory (2x on a 1000 × 1500
+page: 2.1 GiB, 4x: 2.9 GiB); sizes past that, a single page of another size among others, run on a
+session built for them and dropped after, so such a page takes a few seconds more; two pages of
+the new size in a row take the room. A tile that fails on the device (out of memory) is split in
+four and run again.
+
 An `index` targets that one call: `doc.place`, `doc.exportLayers`, `doc.exportDataSets`,
 `doc.importDataSets`, `doc.save`, `doc.inspect` and `doc.render` act on the document at `index`
 without making it the active one, so the next call without `index` still runs on the document

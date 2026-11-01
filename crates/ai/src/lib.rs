@@ -32,6 +32,9 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+#[cfg(all(feature = "gpu-native", target_family = "wasm"))]
+compile_error!("`gpu-native` is the desktop GPU path (autotune, SPIR-V): the web build uses `gpu`");
+
 pub mod cache;
 pub mod cards;
 pub mod catalog;
@@ -47,12 +50,16 @@ pub mod weights;
 
 #[cfg(feature = "runtime")]
 pub mod compact;
+#[cfg(all(feature = "directml", windows))]
+pub mod directml;
 #[cfg(feature = "runtime")]
 pub mod esrgan;
 #[cfg(feature = "runtime")]
 pub mod fdat;
 #[cfg(all(feature = "runtime", not(target_family = "wasm")))]
 pub mod native;
+#[cfg(all(feature = "directml", windows))]
+mod onnx;
 #[cfg(feature = "runtime")]
 pub mod runtime;
 #[cfg(feature = "runtime")]

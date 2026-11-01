@@ -25,7 +25,7 @@ use std::sync::Arc;
 use photocraft_ai::catalog::{self, Content, ModelInfo};
 use photocraft_ai::mangajanai;
 use photocraft_ai::profile::{self, Choice, DevicePref, DeviceProfile, Quality};
-use photocraft_ai::service::{Hooks, ModelState, Request, RunOptions, Upscaler};
+use photocraft_ai::service::{GpuBackend, Hooks, ModelState, Request, RunOptions, Upscaler};
 use photocraft_ai::tile::TileOptions;
 use photocraft_ai::{AiError, Planar};
 use photocraft_color::ColorMode;
@@ -63,6 +63,8 @@ impl Session {
 pub struct RunChoice {
     pub quality: Quality,
     pub device: DevicePref,
+    /// `device` named a GPU runtime (`directml`, `wgpu`): a GPU run on it.
+    pub backend: GpuBackend,
     pub choice: Choice,
     pub profile: DeviceProfile,
 }
@@ -72,10 +74,12 @@ pub(crate) fn run_choice(s: &Session, p: &Value, cmd: &str) -> Result<RunChoice>
     let bad = |m: String| EngineError::BadParams { cmd: cmd.into(), msg: m };
     let text = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("auto");
     let quality = Quality::parse(text("quality")).ok_or_else(|| bad("`quality` must be auto, fast or best".into()))?;
-    let device = DevicePref::parse(text("device")).ok_or_else(|| bad("`device` must be auto, gpu or cpu".into()))?;
+    let backend = GpuBackend::parse(text("device")).unwrap_or_default();
+    let device = if backend == GpuBackend::Auto { DevicePref::parse(text("device")) } else { Some(DevicePref::Gpu) };
+    let device = device.ok_or_else(|| bad("`device` must be auto, gpu, cpu, directml or wgpu".into()))?;
     let profile = s.ai_profile();
     let choice = profile::choose(&profile, quality, device);
-    Ok(RunChoice { quality, device, choice, profile })
+    Ok(RunChoice { quality, device, backend, choice, profile })
 }
 
 /// The notice when a run fell back to the CPU after the GPU failed ([`crate::jobs::JobCtx::notice`]).
@@ -251,7 +255,7 @@ fn run_options(p: &Value, run: &RunChoice, model: &ModelInfo) -> Result<RunOptio
     }
     let threads = uint_param(p, "threads", 0, 64, COMMAND)?.unwrap_or(0) as usize;
     let tiles = (tile != d.tile || overlap != d.overlap).then_some(TileOptions { tile, overlap });
-    Ok(RunOptions { cpu: run.choice.cpu, tiles, threads, unload: !keep_loaded(p, COMMAND)? })
+    Ok(RunOptions { cpu: run.choice.cpu, tiles, threads, unload: !keep_loaded(p, COMMAND)?, backend: run.backend })
 }
 
 fn ids() -> String {
@@ -537,7 +541,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: "Upscale with AI…",
         menu: &["Image"],
         shortcut: None,
-        params: r##"{"scale":2|4=2,"model":"auto|<id from photocraft_ai::catalog>"="auto","quality":"auto|fast|best"="auto" (fast: the lite Real-ESRGAN Compact; auto: full models on a capable GPU, lite on the CPU, phones and weak machines),"device":"auto|gpu|cpu"="auto","tile":32..1024 (input pixels per tile; default the model's),"overlap":0..128=16,"threads":0..64=0 (CPU threads, 0 = one per core),"keepLoaded":bool=true,"content":"auto|grayscale|color"="auto","autoLevels":bool=true (grayscale only, as MangaJaNai),"output":"auto|replace|newDocument"="auto" (auto: replace a single-layer document, else open a new one),"download":bool=false (agents: fetch the model's weights when they aren't downloaded; the UI downloads with ai.models.download)} → {width,height,model,scale,content,document?} (a background job: MangaJaNai for grayscale pages by page height, IllustrationJaNai for colour)"##,
+        params: r##"{"scale":2|4=2,"model":"auto|<id from photocraft_ai::catalog>"="auto","quality":"auto|fast|best"="auto" (fast: the lite Real-ESRGAN Compact; auto: full models on a capable GPU, lite on the CPU, phones and weak machines),"device":"auto|gpu|cpu|directml|wgpu"="auto" (directml, wgpu: natively, that GPU runtime; auto picks DirectML on Windows for the ESRGAN models when ONNX Runtime is installed),"tile":32..1024 (input pixels per tile; default the model's),"overlap":0..128=16,"threads":0..64=0 (CPU threads, 0 = one per core),"keepLoaded":bool=true,"content":"auto|grayscale|color"="auto","autoLevels":bool=true (grayscale only, as MangaJaNai),"output":"auto|replace|newDocument"="auto" (auto: replace a single-layer document, else open a new one),"download":bool=false (agents: fetch the model's weights when they aren't downloaded; the UI downloads with ai.models.download)} → {width,height,model,scale,content,document?} (a background job: MangaJaNai for grayscale pages by page height, IllustrationJaNai for colour)"##,
         enabled,
         run: upscale_ai,
         journal: true,

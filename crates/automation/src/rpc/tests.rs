@@ -1010,3 +1010,34 @@ fn invalid_document_index_is_rejected_not_the_active_document() {
     assert_eq!(reply["ok"], true, "{reply}");
     assert_eq!(count(&h), 1);
 }
+
+/// `"progress": true` on a waited `engine.execute`: progress events for the job, then the reply.
+#[test]
+fn progress_events_precede_the_reply() {
+    let h = session();
+    let input = [
+        json!({"id": 1, "method": "doc.new", "params": {"width": 4000, "height": 3000}}),
+        json!({"id": 2, "method": "engine.execute", "params": {"command": "layer.new.layer"}}),
+        json!({"id": 3, "method": "engine.execute", "params": {"command": "edit.fill", "params": {"color": "#808080"}}}),
+        json!({"id": 4, "method": "engine.execute", "progress": true, "params": {"command": "filter.noise.addNoise", "params": {"amount": 20}}}),
+        json!({"id": 5, "method": "engine.execute", "params": {"command": "filter.noise.addNoise", "params": {"amount": 20}}}),
+    ]
+    .iter()
+    .map(|v| format!("{v}\n"))
+    .collect::<String>();
+    let mut out = Vec::new();
+    serve_lines(&h, input.as_bytes(), &mut out).unwrap();
+    let lines: Vec<Value> = String::from_utf8(out).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    let of = |id: i64| lines.iter().filter(|l| l["id"] == id).cloned().collect::<Vec<_>>();
+    let four = of(4);
+    let (reply, events) = four.split_last().unwrap();
+    assert!(reply["ok"].as_bool().unwrap() && reply["result"]["filter"].is_object(), "{reply}");
+    assert!(!events.is_empty(), "{lines:?}");
+    for e in events {
+        assert_eq!(e["event"], "progress");
+        assert!((0.0..=1.0).contains(&e["progress"].as_f64().unwrap()), "{e}");
+    }
+    // Without the flag: just the reply.
+    assert_eq!(of(5).len(), 1);
+    assert!(of(5)[0]["ok"].as_bool().unwrap());
+}

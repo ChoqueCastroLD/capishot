@@ -25,6 +25,31 @@ pub struct RunOptions {
     pub threads: usize,
     /// Free the model after the run instead of keeping it loaded for the next one.
     pub unload: bool,
+    /// Which GPU runtime (natively; ignored for CPU runs and in the browser).
+    pub backend: GpuBackend,
+}
+
+/// The native GPU runtimes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GpuBackend {
+    /// DirectML where it can run the model (Windows, ESRGAN, ONNX Runtime present), else wgpu.
+    #[default]
+    Auto,
+    /// burn on wgpu (Vulkan, DX12, Metal).
+    Wgpu,
+    /// ONNX Runtime on DirectML (Windows; the ESRGAN models): an error where it can't run.
+    DirectMl,
+}
+
+impl GpuBackend {
+    /// The `device` param values that pick a GPU runtime: `directml`, `wgpu`.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "directml" => Some(Self::DirectMl),
+            "wgpu" => Some(Self::Wgpu),
+            _ => None,
+        }
+    }
 }
 
 /// Whether a model can run right now.

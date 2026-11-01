@@ -8,10 +8,10 @@
 //! `shuffle = 2` (the 2x releases) pixel-unshuffle their input first, so they run the ×4 network
 //! at half resolution.
 
-use burn::tensor::Tensor;
 use burn::tensor::activation::leaky_relu;
 use burn::tensor::module::{conv2d, interpolate};
 use burn::tensor::ops::{ConvOptions, InterpolateMode, InterpolateOptions};
+use burn::tensor::{FloatDType, Tensor};
 
 use crate::runtime::{Network, Runtime};
 use crate::weights::Weights;
@@ -57,6 +57,10 @@ pub struct Esrgan {
     config: Config,
     /// Image channels the network takes (before unshuffling).
     image_in: usize,
+    /// The float type of the weights and the convolutions ([`Runtime::float_dtype`]). The
+    /// residual streams (the trunk and each dense block's input) stay f32 even when the
+    /// convolutions run in f16, so 69 small residual updates aren't rounded away.
+    dtype: FloatDType,
     conv_first: Conv,
     body: Vec<[[Conv; 5]; 3]>,
     conv_body: Conv,
@@ -67,10 +71,28 @@ pub struct Esrgan {
 }
 
 /// Mutable host-side weights before upload, so they can be specialised (grayscale folding).
-struct HostConv {
-    w: Vec<f32>,
-    shape: [usize; 4],
-    b: Vec<f32>,
+#[derive(Clone, Debug)]
+pub(crate) struct HostConv {
+    pub w: Vec<f32>,
+    /// `[out, in, 3, 3]`.
+    pub shape: [usize; 4],
+    pub b: Vec<f32>,
+}
+
+/// The whole network's weights on the host, specialised for its input ([`Esrgan::host`]): what
+/// [`Esrgan::load`] uploads and what the ONNX export (`crate::onnx`) writes.
+#[derive(Clone, Debug)]
+pub(crate) struct HostEsrgan {
+    pub config: Config,
+    /// Image channels the network takes (before unshuffling).
+    pub image_in: usize,
+    pub conv_first: HostConv,
+    pub body: Vec<[[HostConv; 5]; 3]>,
+    pub conv_body: HostConv,
+    pub conv_up1: HostConv,
+    pub conv_up2: HostConv,
+    pub conv_hr: HostConv,
+    pub conv_last: HostConv,
 }
 
 impl Esrgan {
@@ -102,18 +124,17 @@ impl Esrgan {
         Ok(Config { in_nc, out_nc, nf, nb, shuffle })
     }
 
-    /// Uploads the network. With `grayscale`, the network takes one channel (the image's gray
-    /// value, which the model would see repeated in R, G and B: `conv_first` sums its input
+    /// The weights, specialised: with `grayscale`, the network takes one channel (the image's
+    /// gray value, which the model would see repeated in R, G and B: `conv_first` sums its input
     /// weights accordingly) and outputs only its first channel (as MangaJaNaiConverterGui keeps
     /// for grayscale pages). The result is the same arithmetic, minus work.
-    pub fn load(rt: &Runtime, w: &Weights, grayscale: bool) -> Result<Self> {
+    pub(crate) fn host(w: &Weights, grayscale: bool) -> Result<HostEsrgan> {
         let c = Self::config(w)?;
         let host = |name: &str, o: usize, i: usize| -> Result<HostConv> {
             let wt = w.get(&format!("{name}.weight"), &[o, i, 3, 3])?;
             let bt = w.get(&format!("{name}.bias"), &[o])?;
             Ok(HostConv { w: wt.data.clone(), shape: [o, i, 3, 3], b: bt.data.clone() })
         };
-        let up = |h: HostConv| -> Result<Conv> { Ok(Conv { weight: rt.tensor(h.w, h.shape)?, bias: rt.tensor(h.b, [h.shape[0]])? }) };
         let nf = c.nf;
         let gc = 32;
         let mut first = host("conv_first", nf, c.in_nc)?;
@@ -127,29 +148,55 @@ impl Esrgan {
         }
         let mut body = Vec::with_capacity(c.nb);
         for i in 0..c.nb {
-            let rdb = |j: usize| -> Result<[Conv; 5]> {
+            let rdb = |j: usize| -> Result<[HostConv; 5]> {
                 let n = |k: usize| format!("body.{i}.rdb{j}.conv{k}");
                 Ok([
-                    up(host(&n(1), gc, nf)?)?,
-                    up(host(&n(2), gc, nf + gc)?)?,
-                    up(host(&n(3), gc, nf + 2 * gc)?)?,
-                    up(host(&n(4), gc, nf + 3 * gc)?)?,
-                    up(host(&n(5), nf, nf + 4 * gc)?)?,
+                    host(&n(1), gc, nf)?,
+                    host(&n(2), gc, nf + gc)?,
+                    host(&n(3), gc, nf + 2 * gc)?,
+                    host(&n(4), gc, nf + 3 * gc)?,
+                    host(&n(5), nf, nf + 4 * gc)?,
                 ])
             };
             body.push([rdb(1)?, rdb(2)?, rdb(3)?]);
         }
-        let config = Config { in_nc: image_in * c.shuffle * c.shuffle, out_nc: last.shape[0], ..c };
-        Ok(Self {
-            config,
+        Ok(HostEsrgan {
+            config: Config { in_nc: image_in * c.shuffle * c.shuffle, out_nc: last.shape[0], ..c },
             image_in,
-            conv_first: up(first)?,
+            conv_first: first,
             body,
-            conv_body: up(host("conv_body", nf, nf)?)?,
-            conv_up1: up(host("conv_up1", nf, nf)?)?,
-            conv_up2: up(host("conv_up2", nf, nf)?)?,
-            conv_hr: up(host("conv_hr", nf, nf)?)?,
-            conv_last: up(last)?,
+            conv_body: host("conv_body", nf, nf)?,
+            conv_up1: host("conv_up1", nf, nf)?,
+            conv_up2: host("conv_up2", nf, nf)?,
+            conv_hr: host("conv_hr", nf, nf)?,
+            conv_last: last,
+        })
+    }
+
+    /// Uploads the network ([`Self::host`] says what `grayscale` does) in the runtime's float
+    /// type ([`Runtime::float_dtype`]).
+    pub fn load(rt: &Runtime, w: &Weights, grayscale: bool) -> Result<Self> {
+        let h = Self::host(w, grayscale)?;
+        let up = |h: HostConv| -> Result<Conv> { Ok(Conv { weight: rt.param(h.w, h.shape)?, bias: rt.param(h.b, [h.shape[0]])? }) };
+        let dense = |r: [HostConv; 5]| -> Result<[Conv; 5]> {
+            let [c1, c2, c3, c4, c5] = r;
+            Ok([up(c1)?, up(c2)?, up(c3)?, up(c4)?, up(c5)?])
+        };
+        let mut body = Vec::with_capacity(h.body.len());
+        for [r1, r2, r3] in h.body {
+            body.push([dense(r1)?, dense(r2)?, dense(r3)?]);
+        }
+        Ok(Self {
+            config: h.config,
+            image_in: h.image_in,
+            dtype: rt.float_dtype(),
+            conv_first: up(h.conv_first)?,
+            body,
+            conv_body: up(h.conv_body)?,
+            conv_up1: up(h.conv_up1)?,
+            conv_up2: up(h.conv_up2)?,
+            conv_hr: up(h.conv_hr)?,
+            conv_last: up(h.conv_last)?,
         })
     }
 
@@ -182,13 +229,15 @@ fn lrelu(x: Tensor<4>) -> Tensor<4> {
     leaky_relu(x, SLOPE)
 }
 
-fn rdb(c: &[Conv; 5], x: Tensor<4>) -> Tensor<4> {
-    let x1 = lrelu(c[0].forward(x.clone()));
-    let x2 = lrelu(c[1].forward(Tensor::cat(vec![x.clone(), x1.clone()], 1)));
-    let x3 = lrelu(c[2].forward(Tensor::cat(vec![x.clone(), x1.clone(), x2.clone()], 1)));
-    let x4 = lrelu(c[3].forward(Tensor::cat(vec![x.clone(), x1.clone(), x2.clone(), x3.clone()], 1)));
-    let x5 = c[4].forward(Tensor::cat(vec![x.clone(), x1, x2, x3, x4], 1));
-    x5.mul_scalar(RES).add(x)
+/// A residual dense block: `x` (the residual stream, f32) through five convs in `dtype`.
+fn rdb(c: &[Conv; 5], x: Tensor<4>, dtype: FloatDType) -> Tensor<4> {
+    let h = x.clone().cast(dtype);
+    let x1 = lrelu(c[0].forward(h.clone()));
+    let x2 = lrelu(c[1].forward(Tensor::cat(vec![h.clone(), x1.clone()], 1)));
+    let x3 = lrelu(c[2].forward(Tensor::cat(vec![h.clone(), x1.clone(), x2.clone()], 1)));
+    let x4 = lrelu(c[3].forward(Tensor::cat(vec![h.clone(), x1.clone(), x2.clone(), x3.clone()], 1)));
+    let x5 = c[4].forward(Tensor::cat(vec![h, x1, x2, x3, x4], 1));
+    x5.cast(FloatDType::F32).mul_scalar(RES).add(x)
 }
 
 fn up2(x: Tensor<4>) -> Tensor<4> {
@@ -214,15 +263,19 @@ impl Network for Esrgan {
     fn multiple_of(&self) -> usize {
         self.config.shuffle
     }
+    fn float_dtype(&self) -> FloatDType {
+        self.dtype
+    }
     fn forward(&self, x: Tensor<4>) -> Tensor<4> {
         let x = if self.config.shuffle > 1 { pixel_unshuffle(x, self.config.shuffle) } else { x };
-        let fea = self.conv_first.forward(x);
+        let dt = self.dtype;
+        let fea = self.conv_first.forward(x).cast(FloatDType::F32);
         let mut t = fea.clone();
         for b in &self.body {
-            let o = rdb(&b[2], rdb(&b[1], rdb(&b[0], t.clone())));
+            let o = rdb(&b[2], rdb(&b[1], rdb(&b[0], t.clone(), dt), dt), dt);
             t = o.mul_scalar(RES).add(t);
         }
-        let fea = fea.add(self.conv_body.forward(t));
+        let fea = fea.add(self.conv_body.forward(t.cast(dt)).cast(FloatDType::F32)).cast(dt);
         let fea = lrelu(self.conv_up1.forward(up2(fea)));
         let fea = lrelu(self.conv_up2.forward(up2(fea)));
         self.conv_last.forward(lrelu(self.conv_hr.forward(fea)))
@@ -230,7 +283,7 @@ impl Network for Esrgan {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::weights::to_safetensors;
 
