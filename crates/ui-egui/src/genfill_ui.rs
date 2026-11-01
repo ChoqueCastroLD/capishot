@@ -294,6 +294,8 @@ pub fn prompt_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let pos = egui::pos2(x.min(screen.right() - size.x).max(screen.left()), y.min(screen.bottom() - size.y).max(screen.top()));
     let mut action: Option<Value> = None;
     let mut dismiss = false;
+    // A contextual bar, not a popover: a press on the canvas beside it reaches the tool.
+    crate::overlay_guard::non_modal(ctx, id);
     egui::Area::new(id).order(egui::Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
         egui::Frame::menu(ui.style()).show(ui, |ui| {
             ui.horizontal(|ui| {

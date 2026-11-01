@@ -436,6 +436,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             let w = width.min(300.0);
             let r = Rect::from_min_size(pos2(pos.x - w / 2.0, pos.y), vec2(w, COMPACT_H));
             let mut open = false;
+            crate::overlay_guard::non_modal(ctx, Id::unique("ai-progress-compact"));
             egui::Area::new(Id::unique("ai-progress-compact")).order(egui::Order::Foreground).fixed_pos(r.min).show(ctx, |ui| {
                 let (rect, resp) = ui.allocate_exact_size(r.size(), Sense::click());
                 let p = ui.painter();
@@ -541,6 +542,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
             let text = crate::i18n::fmt(tl!("{tool}: done"), &[("tool", title)]);
             ctx.data_mut(|d| d.insert_temp(inspect_id(), serde_json::json!({"kind": "done", "title": title, "text": text})));
+            crate::overlay_guard::non_modal(ctx, Id::unique("ai-progress-done"));
             egui::Area::new(Id::unique("ai-progress-done")).order(egui::Order::Foreground).pivot(align).fixed_pos(pos).interactable(false).show(ctx, |ui| {
                 egui::Frame::NONE
                     .fill(t.card)
@@ -593,6 +595,8 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
 
 /// A card at `pos`.
 fn area(ctx: &egui::Context, id: &str, pos: egui::Pos2, align: Align2, width: f32, t: &Tokens, add: impl FnOnce(&mut egui::Ui)) -> Rect {
+    // A progress card is no overlay: the canvas stays usable beside it.
+    crate::overlay_guard::non_modal(ctx, Id::unique(id));
     egui::Area::new(Id::unique(id))
         .order(egui::Order::Foreground)
         .pivot(align)

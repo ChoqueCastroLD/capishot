@@ -264,6 +264,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     } else {
         (egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -36.0))
     };
+    crate::overlay_guard::non_modal(ctx, egui::Id::unique("photocraft-notices"));
     let area =
         egui::Area::new(egui::Id::unique("photocraft-notices")).order(egui::Order::Foreground).anchor(align, offset).interactable(true).show(ctx, |ui| {
             ui.set_max_width(width);

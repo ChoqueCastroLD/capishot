@@ -4,9 +4,14 @@
 //! click outside them (or on their ✕). That press, its drag and its release are swallowed for
 //! the canvas until the button or finger is up, for every tool, so closing a popover never paints
 //! a dab, makes a selection or creates a layer. The rule is general: any interactable overlay
-//! (an egui popup, or a Foreground or Tooltip area other than the always-shown bars and toasts)
-//! that was showing when the press came, or a frame or two before (the touch router can carry a
-//! quick tap's press into the next frame), makes the press a dismissal.
+//! (an egui popup, or a Foreground or Tooltip area not marked [`non_modal`]) that was showing when
+//! the press came, or a frame or two before (the touch router can carry a quick tap's press into
+//! the next frame), makes the press a dismissal.
+//!
+//! Contextual bars are not overlays to dismiss: the Generative Fill bar under a selection, the AI
+//! progress cards, notices, the phone's Capi button and its type and transform bars. Each marks
+//! its area [`non_modal`] every frame it shows, so a press on the canvas beside it goes straight
+//! to the tool (a new lasso, a deselecting click, a move) while it is up.
 
 use egui::{Id, Order};
 
@@ -18,10 +23,34 @@ const GRACE_FRAMES: u64 = 2;
 /// a later frame than the tap that closed the overlay.
 const GRACE_SECONDS: f64 = 0.4;
 
-/// Foreground areas that are always there while their mode is on (bars, the Capi button,
-/// toasts, the AI progress card): a press beside them is a normal press.
-const PERSISTENT: [&str; 8] =
-    ["simple-capi", "touch-type-bar", "touch-transform-bar", "touch-show-ui", "photocraft-notices", "ai-progress", "ai-progress-error", "ai-progress-done"];
+/// The areas marked [`non_modal`], and the frame each was last marked in.
+#[derive(Clone, Default)]
+struct NonModal(Vec<(Id, u64)>);
+
+fn non_modal_id() -> Id {
+    Id::unique("overlay-guard-non-modal")
+}
+
+/// Marks the area `id` (shown this frame) as a non-modal, contextual bar: while it shows, a press
+/// on the canvas beside it is a normal press, not a dismissal. Call it each frame the area shows.
+pub fn non_modal(ctx: &egui::Context, id: Id) {
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data_mut(|d| {
+        let m = d.get_temp_mut_or_default::<NonModal>(non_modal_id());
+        // Forget areas not shown for a while (a bar gone for good).
+        m.0.retain(|(_, f)| frame <= f + 120);
+        match m.0.iter_mut().find(|(i, _)| *i == id) {
+            Some(e) => e.1 = frame,
+            None => m.0.push((id, frame)),
+        }
+    });
+}
+
+/// Whether the area `id` was marked [`non_modal`] this frame or the one before.
+pub fn is_non_modal(ctx: &egui::Context, id: Id) -> bool {
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data(|d| d.get_temp::<NonModal>(non_modal_id())).is_some_and(|m| m.0.iter().any(|(i, f)| *i == id && frame <= f + 1))
+}
 
 #[derive(Clone, Copy, Default)]
 struct State {
@@ -45,7 +74,6 @@ fn state_id() -> Id {
 pub fn overlay_open(app: &PhotocraftApp, ctx: &egui::Context) -> bool {
     let narrow = ctx.content_rect().width() < crate::simple_ui::PHONE_BELOW;
     let dialogs: Vec<Id> = app.ui.dialogs.iter().map(|d| Id::unique(("dialog", d.id))).collect();
-    let persistent: Vec<Id> = PERSISTENT.iter().map(|s| Id::unique(*s)).collect();
     if egui::Popup::is_any_open(ctx) {
         return true;
     }
@@ -53,7 +81,7 @@ pub fn overlay_open(app: &PhotocraftApp, ctx: &egui::Context) -> bool {
     visible.into_iter().any(|l| {
         matches!(l.order, Order::Foreground | Order::Tooltip)
             && egui::AreaState::load(ctx, l.id).is_some_and(|a| a.interactable)
-            && !persistent.contains(&l.id)
+            && !is_non_modal(ctx, l.id)
             // A desktop dialog stays open while the canvas is used (its eyedroppers);
             // on a phone a tap outside closes it.
             && (narrow || !dialogs.contains(&l.id))

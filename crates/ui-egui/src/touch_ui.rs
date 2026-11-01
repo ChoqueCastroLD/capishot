@@ -342,6 +342,7 @@ fn action_bar<'a>(ctx: &egui::Context, area: Rect, id: &str, key: &str, items: &
     let width = full.min(area.width() - 16.0);
     let r = Rect::from_min_size(pos2(area.center().x - width / 2.0, area.top() + 8.0), vec2(width, SEL_CELL.y + 12.0));
     let mut run = None;
+    crate::overlay_guard::non_modal(ctx, Id::unique(id));
     egui::Area::new(Id::unique(id)).order(egui::Order::Middle).fixed_pos(r.min).show(ctx, |ui| {
         egui::Frame::NONE.fill(t.card).stroke(Stroke::new(1.0, t.card_border)).corner_radius(CornerRadius::same(18)).inner_margin(egui::Margin::same(6)).show(
             ui,
@@ -416,6 +417,7 @@ fn type_layer_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let w = actions.len() as f32 * (SEL_CELL.x + 2.0) + 12.0;
     let r = Rect::from_min_size(pos2(area.center().x - w / 2.0, area.top() + 8.0), vec2(w, SEL_CELL.y + 12.0));
     let mut run = None;
+    crate::overlay_guard::non_modal(ctx, Id::unique("touch-type-layer-bar"));
     egui::Area::new(Id::unique("touch-type-layer-bar")).order(egui::Order::Middle).fixed_pos(r.min).show(ctx, |ui| {
         egui::Frame::NONE.fill(t.card).stroke(Stroke::new(1.0, t.card_border)).corner_radius(CornerRadius::same(18)).inner_margin(egui::Margin::same(6)).show(
             ui,
@@ -472,6 +474,7 @@ fn selection_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let width = full.min(area.width() - 16.0);
     let r = Rect::from_min_size(pos2(area.center().x - width / 2.0, area.top() + 8.0), vec2(width, SEL_CELL.y + 12.0));
     let mut run = None;
+    crate::overlay_guard::non_modal(ctx, Id::unique("touch-selection-bar"));
     egui::Area::new(Id::unique("touch-selection-bar")).order(egui::Order::Middle).fixed_pos(r.min).show(ctx, |ui| {
         egui::Frame::NONE.fill(t.card).stroke(Stroke::new(1.0, t.card_border)).corner_radius(CornerRadius::same(18)).inner_margin(egui::Margin::same(6)).show(
             ui,
@@ -564,6 +567,7 @@ fn transform_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
     });
     let mut act = None;
     let mut pick = None;
+    crate::overlay_guard::non_modal(ctx, Id::unique("touch-transform-bar"));
     egui::Area::new(Id::unique("touch-transform-bar")).order(egui::Order::Foreground).fixed_pos(area.min).show(ctx, |ui| {
         ui.set_min_size(Vec2::ZERO);
         if round_button(ui, cancel, None, crate::i18n::t("Cancel"), false).clicked() {
@@ -656,6 +660,7 @@ fn quick_sliders(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let mut b = before.clone();
     let mut held = 0u8;
     let mut bubble = None;
+    crate::overlay_guard::non_modal(ctx, Id::unique("touch-quick-sliders"));
     egui::Area::new(Id::unique("touch-quick-sliders")).order(egui::Order::Middle).fixed_pos(size_r.min).show(ctx, |ui| {
         for (k, rect) in [(1u8, size_r), (2u8, opac_r)] {
             // Slim to see, a finger wide to grab: the touch area reaches past its right edge.
@@ -817,6 +822,7 @@ fn show_ui_button(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let t = Tokens::get(ctx);
     let screen = ctx.content_rect();
     let r = Rect::from_min_size(pos2(screen.right() - 52.0, screen.top() + 8.0), Vec2::splat(44.0));
+    crate::overlay_guard::non_modal(ctx, Id::unique("touch-show-ui"));
     egui::Area::new(Id::unique("touch-show-ui")).order(egui::Order::Foreground).fixed_pos(r.min).show(ctx, |ui| {
         let (rect, resp) = ui.allocate_exact_size(r.size(), Sense::click());
         ui.painter().circle_filled(rect.center(), 20.0, Color32::from_black_alpha(110));
@@ -1115,6 +1121,7 @@ fn type_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let screen = crate::safe_area::rect(ctx);
     let h = type_bar_height(ctx);
     let r = Rect::from_min_size(pos2(screen.left() + 6.0, screen.bottom() - h - 6.0), vec2(screen.width() - 12.0, h));
+    crate::overlay_guard::non_modal(ctx, Id::unique("touch-type-bar"));
     egui::Area::new(Id::unique("touch-type-bar")).order(egui::Order::Foreground).fixed_pos(r.min).show(ctx, |ui| {
         egui::Frame::NONE
             .fill(t.card)

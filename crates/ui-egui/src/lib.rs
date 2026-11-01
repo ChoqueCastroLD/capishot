@@ -815,6 +815,8 @@ mod bubble_text_ui_tests;
 #[cfg(test)]
 mod navigator_gpu_tests;
 #[cfg(test)]
+mod nonmodal_bar_tests;
+#[cfg(test)]
 mod phone_dialog_tests;
 #[cfg(test)]
 mod phone_polish_tests;

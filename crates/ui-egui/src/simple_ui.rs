@@ -809,6 +809,7 @@ fn chip(ui: &mut Ui, label: &str, height: f32) -> Response {
 fn capi_button(app: &mut PhotocraftApp, ctx: &egui::Context, rect: Rect) {
     let t = Tokens::get(ctx);
     let busy = crate::ai_progress::busy(app);
+    crate::overlay_guard::non_modal(ctx, Id::unique("simple-capi"));
     egui::Area::new(Id::unique("simple-capi")).order(egui::Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
         let (r, resp) = ui.allocate_exact_size(rect.size(), Sense::click());
         let open = sheet(ctx) != Sheet::Closed;
