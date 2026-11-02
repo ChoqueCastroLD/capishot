@@ -729,9 +729,62 @@ thread_local! {
     /// Handlers of killed workers: dropped only when the next worker starts, never from inside
     /// one of their own invocations (or while queued events of the old worker still arrive).
     static RETIRED: RefCell<Vec<Live>> = const { RefCell::new(Vec::new()) };
+    /// The pending [`retire_idle`] timeout and its handler.
+    static RETIRE: RefCell<Option<(i32, Handler)>> = const { RefCell::new(None) };
+    /// The last [`retire_idle`] handler that ran (it can't drop itself while running).
+    static RETIRED_HANDLER: RefCell<Option<Handler>> = const { RefCell::new(None) };
+}
+
+/// A browser callback without arguments.
+type Handler = Closure<dyn FnMut()>;
+
+/// On a phone or a machine with 4 GB or less, the AI worker goes this long after its last run.
+/// A WebAssembly memory never shrinks, so a worker kept alive holds its peak (some 400 MB with
+/// MI-GAN on the CPU) next to the page's; together they got Android pages killed out of memory
+/// right after a clean. A new run starts a new worker (the weights come back from Cache Storage).
+const LOW_MEMORY_RETIRE_MS: i32 = 3000;
+
+/// Ends the idle worker after [`LOW_MEMORY_RETIRE_MS`] on a device with little memory.
+fn schedule_retire(shared: &Arc<Mutex<Shared>>) {
+    let low = {
+        let s = shared.lock().unwrap_or_else(PoisonError::into_inner);
+        s.profile.mobile || s.profile.memory_gb.is_some_and(|m| m <= 4.0)
+    };
+    if !low {
+        return;
+    }
+    cancel_retire();
+    let Some(w) = web_sys::window() else { return };
+    let cb = Closure::<dyn FnMut()>::new(retire_idle);
+    if let Ok(t) = w.set_timeout_with_callback_and_timeout_and_arguments_0(cb.as_ref().unchecked_ref(), LOW_MEMORY_RETIRE_MS) {
+        RETIRE.with(|r| *r.borrow_mut() = Some((t, cb)));
+    }
+}
+
+fn cancel_retire() {
+    if let Some((t, cb)) = RETIRE.with(|r| r.borrow_mut().take()) {
+        if let Some(w) = web_sys::window() {
+            w.clear_timeout_with_handle(t);
+        }
+        // Never its own invocation: `retire_idle` takes it out first.
+        drop(cb);
+    }
+}
+
+fn retire_idle() {
+    // Keep the handler alive until this call returns (dropped with the next schedule).
+    let handler = RETIRE.with(|r| r.borrow_mut().take());
+    let idle = LIVE.with(|l| l.borrow().as_ref().is_some_and(|l| l.run.is_none() && l.queued.is_none()));
+    if idle {
+        kill(AiError::Cancelled);
+    }
+    if let Some((_, cb)) = handler {
+        RETIRED_HANDLER.with(|r| *r.borrow_mut() = Some(cb));
+    }
 }
 
 fn start(target: &Target, msg: (Object, JsValue), run: Run) -> Result<(), String> {
+    cancel_retire();
     let busy = LIVE.with(|l| l.borrow().as_ref().is_some_and(|l| l.run.is_some()));
     if busy {
         let mut run = run;
@@ -935,14 +988,19 @@ fn end_run(f: impl FnOnce(&mut Run)) {
 
 /// Takes the run in flight off the live worker (and stops its cancel timer).
 fn take_run() -> Option<Run> {
-    LIVE.with(|l| {
+    let run = LIVE.with(|l| {
         let mut l = l.borrow_mut();
         let live = l.as_mut()?;
         if let (Some(t), Some(w)) = (live.timer.take(), web_sys::window()) {
             w.clear_interval_with_handle(t);
         }
         live.run.take()
-    })
+    });
+    if let Some(r) = &run {
+        // The next tile's run (started from the reply) cancels it.
+        schedule_retire(&r.shared);
+    }
+    run
 }
 
 /// Drops the worker (cancelled, crashed) and ends its run with `why`.
