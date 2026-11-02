@@ -87,6 +87,47 @@ localStorage, and there is no server-side storage.
 Browser support: current Chrome, Edge, Firefox and Safari (Wasm threads, SIMD and cross-origin
 isolation). WebGPU is used where available, WebGL2 otherwise; `?webgl` and `?cpu` work as in the single-threaded build.
 
+## Building both for a deploy (`packaging/web-release.sh`)
+
+```sh
+packaging/web-release.sh             # -> dist/web (st) + dist/web-threads, both with their AI workers
+packaging/web-release.sh --preview   # quick test build: thin LTO (not for a release, see below)
+```
+
+The same output as Trunk, `build.sh` (with `PHOTOCRAFT_WEB_FALLBACK=st/`) and
+`packaging/web-ai/build.sh` for each site, one after the other, but faster:
+
+- **Concurrent.** The single-threaded build, the threads build and the AI workers build at the
+  same time. Each ends in a fat-LTO link and a `wasm-opt` run on one core, so in sequence the
+  machine mostly idles. `PHOTOCRAFT_WEB_JOBS` (default 10) is the total of cargo jobs, split
+  between them.
+- **AI workers cached.** They are built once (not once per site) and kept in
+  `<target>/web-release/ai/<key>`, keyed by the content of everything they are built from: their
+  workspace crates (from cargo's resolve), `Cargo.lock`, `Cargo.toml`, `.cargo/`,
+  `packaging/web-ai/build.sh`, the toolchains and `wasm-bindgen`/`wasm-opt` versions. A hit skips
+  their two fat-LTO links and `wasm-opt -O3` runs. `PHOTOCRAFT_AI_CACHE=0` rebuilds them anyway.
+- **`wasm-opt` cached** (when it is on `PATH`): the same input module and arguments reuse the
+  earlier output (`<target>/web-release/wasm-opt`, 3 days), so a rebuild whose Rust didn't change
+  skips its `-Oz` passes.
+- **Fails fast.** The first stage that fails stops the others and the script exits non-zero
+  with that stage's log tail: `dist/` is then incomplete, never deploy it. Each stage's full log
+  is in `<target>/web-release/logs/`, and its time is printed.
+
+- **Memory-aware.** Each site's fat-LTO link peaks near 10 GB. With less than
+  `PHOTOCRAFT_WEB_MEM_GB` (default 24) available the two sites build one after the other instead
+  (swapping costs far more than the overlap saves).
+
+Measured on a 14-core server shared with other builds (`PHOTOCRAFT_WEB_JOBS=6`), against the
+four commands in sequence: no change 285 s → 38 s; a one-line `ui-egui` change 1068 s → 459 s;
+a one-line `crates/ai` change 1194 s → 442 s. The fat-LTO link of the slower module (one core,
+about 7 minutes) is the floor for any Rust change.
+
+`--preview` builds both sites with thin LTO and 16 codegen units: a one-line change relinks in
+about 1.5 minutes instead of 6.5, but the module is about 10% bigger (gzip +9%; the split's
+first-load part 14.6 → 18.2 MB, as the cold-function lists were profiled on fat-LTO builds) and
+`wasm-opt` takes twice as long, so it stays out of releases (fat LTO keeps the module small). Switching
+between the two recompiles every crate once.
+
 ## Release checklist
 
 Before building a release of either web build ([`docs/releasing.md`](../../docs/releasing.md)):

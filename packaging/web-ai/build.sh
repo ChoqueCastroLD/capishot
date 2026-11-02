@@ -4,6 +4,12 @@
 # runs, so the main module stays the same size.
 #
 #   packaging/web-ai/build.sh <site-dir> [--threads]     e.g. dist/web, or dist/web-threads --threads
+#   packaging/web-ai/build.sh --stage <dir> plain|threads
+#                                  build one variant into <dir> only (no site; packaging/web-release.sh
+#                                  builds both at once and caches them)
+#   packaging/web-ai/build.sh <site-dir> [--threads] --prebuilt <dir>
+#                                  install from <dir> holding the variant(s) built with --stage
+#                                  (both merged for --threads) instead of building
 #
 # Writes <site-dir>/ai/<hash>/ (content-addressed, so it can be cached forever; .gz copies for
 # servers with precompressed files) and adds <meta> tags to index.html:
@@ -25,12 +31,24 @@
 # for -Zbuild-std: current nightlies don't build burn's `branches` dependency).
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SITE="${1:?usage: packaging/web-ai/build.sh <site-dir> [--threads]}"
-THREADS=0
-if [ "${2:-}" = "--threads" ] && [ "${PHOTOCRAFT_WEB_AI_THREADS:-1}" != "0" ]; then
-  THREADS=1
+USAGE="usage: packaging/web-ai/build.sh <site-dir> [--threads] [--prebuilt <dir>] | --stage <dir> plain|threads"
+SITE="" STAGE="" PREBUILT="" ONLY="" THREADS=0
+if [ "${1:-}" = "--stage" ]; then
+  STAGE="$(realpath -m "${2:?$USAGE}")" ONLY="${3:?$USAGE}"
+  case "$ONLY" in plain|threads) ;; *) echo "$USAGE" >&2; exit 1 ;; esac
+else
+  SITE="${1:?$USAGE}"
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --threads) [ "${PHOTOCRAFT_WEB_AI_THREADS:-1}" = "0" ] || THREADS=1 ;;
+      --prebuilt) PREBUILT="$(realpath -m "${2:?$USAGE}")"; shift ;;
+      *) echo "$USAGE" >&2; exit 1 ;;
+    esac
+    shift
+  done
+  [ -f "$SITE/index.html" ] || { echo "error: $SITE/index.html missing (build the site first)" >&2; exit 1; }
 fi
-[ -f "$SITE/index.html" ] || { echo "error: $SITE/index.html missing (build the site first)" >&2; exit 1; }
 cd "$ROOT"
 unset RUSTFLAGS CARGO_ENCODED_RUSTFLAGS
 TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
@@ -47,22 +65,20 @@ fi
 WASM_OPT=$(command -v wasm-opt || find "$HOME/.cache/trunk" -name wasm-opt -type f 2>/dev/null | head -1 || true)
 OPT_FEATURES="--enable-bulk-memory --enable-mutable-globals --enable-sign-ext --enable-nontrapping-float-to-int --enable-simd --enable-reference-types --enable-multivalue"
 
-STAGE="$TARGET_DIR/ai-worker-bindgen"
-rm -rf "$STAGE"
-mkdir -p "$STAGE"
-
 # The plain worker. SIMD128: every browser with WebGPU has it (Chrome 91, Firefox 89, Safari 16.4).
-RUSTFLAGS="-C target-feature=+simd128" \
-  cargo build --profile "$PROFILE" -p photocraft-ai-worker --target wasm32-unknown-unknown --target-dir "$TARGET_DIR/web-ai"
-"$BINDGEN" --target web --no-typescript --out-dir "$STAGE" --out-name photocraft_ai_worker \
-  "$TARGET_DIR/web-ai/wasm32-unknown-unknown/$PROFILE/photocraft-ai-worker.wasm"
-if [ -n "$WASM_OPT" ]; then
-  # shellcheck disable=SC2086
-  "$WASM_OPT" -O3 $OPT_FEATURES "$STAGE/photocraft_ai_worker_bg.wasm" -o "$STAGE/opt.wasm"
-  mv "$STAGE/opt.wasm" "$STAGE/photocraft_ai_worker_bg.wasm"
-fi
+build_plain() {
+  RUSTFLAGS="-C target-feature=+simd128" \
+    cargo build --profile "$PROFILE" -p photocraft-ai-worker --target wasm32-unknown-unknown --target-dir "$TARGET_DIR/web-ai"
+  "$BINDGEN" --target web --no-typescript --out-dir "$STAGE" --out-name photocraft_ai_worker \
+    "$TARGET_DIR/web-ai/wasm32-unknown-unknown/$PROFILE/photocraft-ai-worker.wasm"
+  if [ -n "$WASM_OPT" ]; then
+    # shellcheck disable=SC2086
+    "$WASM_OPT" -O3 $OPT_FEATURES "$STAGE/photocraft_ai_worker_bg.wasm" -o "$STAGE/opt.wasm"
+    mv "$STAGE/opt.wasm" "$STAGE/photocraft_ai_worker_bg.wasm"
+  fi
+}
 
-if [ "$THREADS" = 1 ]; then
+build_threads() {
   # As packaging/web-threads: shared, imported memory (up to 4 GiB) and the TLS exports
   # wasm-bindgen needs to start each pool worker.
   link=""
@@ -80,6 +96,31 @@ if [ "$THREADS" = 1 ]; then
     "$WASM_OPT" -O3 --enable-threads $OPT_FEATURES "$STAGE/photocraft_ai_worker_mt_bg.wasm" -o "$STAGE/opt.wasm"
     mv "$STAGE/opt.wasm" "$STAGE/photocraft_ai_worker_mt_bg.wasm"
   fi
+}
+
+if [ -n "$ONLY" ]; then
+  rm -rf "$STAGE"
+  mkdir -p "$STAGE"
+  "build_$ONLY"
+  exit 0
+fi
+if [ -n "$PREBUILT" ]; then
+  STAGE="$PREBUILT"
+  for f in photocraft_ai_worker.js photocraft_ai_worker_bg.wasm; do
+    [ -f "$STAGE/$f" ] || { echo "error: $STAGE/$f missing (build it with --stage)" >&2; exit 1; }
+  done
+  if [ "$THREADS" = 1 ] && [ ! -f "$STAGE/photocraft_ai_worker_mt_bg.wasm" ]; then
+    echo "error: $STAGE has no threads variant (build it with --stage $STAGE threads)" >&2; exit 1
+  fi
+  if [ "$THREADS" = 0 ] && [ -f "$STAGE/photocraft_ai_worker_mt_bg.wasm" ]; then
+    echo "error: $STAGE holds the threads variant too: the plain site takes the plain one alone" >&2; exit 1
+  fi
+else
+  STAGE="$TARGET_DIR/ai-worker-bindgen"
+  rm -rf "$STAGE"
+  mkdir -p "$STAGE"
+  build_plain
+  if [ "$THREADS" = 1 ]; then build_threads; fi
 fi
 
 hash=$(find "$STAGE" -type f | LC_ALL=C sort | xargs cat | sha256sum | cut -c1-16)
