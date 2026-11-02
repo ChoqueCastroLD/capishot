@@ -467,8 +467,8 @@ requests and other methods emit no events. The session is unlocked between looks
 connections are served meanwhile; when a progress line can't be written (the client went away) the
 job is cancelled. `image.upscaleAi` reports per tile (`… (tile N of M)`).
 
-**DirectML (Windows).** `image.upscaleAi` with an ESRGAN model (MangaJaNai, the 2x/4x defaults) runs
-on ONNX Runtime's DirectML execution provider when `onnxruntime.dll` (a DirectML build, 1.24 or
+**DirectML (Windows).** `image.upscaleAi` with an ESRGAN model (MangaJaNai, the 2x/4x defaults) or
+an FDAT one (IllustrationJaNai V3 detail, colour pages) runs on ONNX Runtime's DirectML execution provider when `onnxruntime.dll` (a DirectML build, 1.24 or
 later, from the `Microsoft.ML.OnnxRuntime.DirectML` NuGet package) and its `DirectML.dll` sit next
 to the executable, or in the folder (or at the file) `PHOTOCRAFT_AI_ONNXRUNTIME` names. Nothing is
 linked: without the DLLs the wgpu path runs as before. The network is the same, in fp32, written to
@@ -480,7 +480,9 @@ page of that size). The sessions kept stay within about 3 GiB of video memory (2
 page: 2.1 GiB, 4x: 2.9 GiB); sizes past that, a single page of another size among others, run on a
 session built for them and dropped after, so such a page takes a few seconds more; two pages of
 the new size in a row take the room. A tile that fails on the device (out of memory) is split in
-four and run again.
+four and run again. FDAT's graph is written per tile size with every shape fixed, and its tiles
+are all grown to one size (as on wgpu), so a page takes one session (about 2.4 s to build at 4x,
+1.1 GiB of video memory); a 760 × 1200 colour page at 4x runs in about 6.5 s instead of 27 s.
 
 Manga LaMa (`edit.inpaintAi`, `edit.removeAi`, `paint.remove` with `ai`) runs on DirectML the same
 way: the generator, in fp32 from the same weights, is written to ONNX in memory with its Fourier

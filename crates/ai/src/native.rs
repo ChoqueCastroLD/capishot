@@ -144,7 +144,7 @@ impl NativeUpscaler {
         }
         let loaded = inner.loaded.as_ref().ok_or_else(|| AiError::Inference("model not loaded".into()))?;
         let progress = TileHooks { hooks, lo: 0.1, status: format!("Upscaling with {} (GPU, DirectML)", req.model.title) };
-        let tiles = req.opts.tiles.unwrap_or_else(|| default_tiles(req.model));
+        let tiles = req.opts.tiles.unwrap_or_else(|| gpu_tiles(req.model));
         let out = crate::upscale::upscale_directml(loaded, &req.input, tiles, &progress);
         if req.opts.unload {
             inner.loaded = None;
@@ -171,7 +171,9 @@ mod backend {
         match req.opts.backend {
             GpuBackend::Wgpu => Ok(false),
             GpuBackend::Auto => Ok(supported && inner.directml_failed.is_none() && crate::directml::available().is_ok()),
-            GpuBackend::DirectMl if !supported => Err(AiError::Device(format!("{} doesn't run on DirectML (only the ESRGAN models do)", req.model.title))),
+            GpuBackend::DirectMl if !supported => {
+                Err(AiError::Device(format!("{} doesn't run on DirectML (only the ESRGAN and FDAT models do)", req.model.title)))
+            }
             GpuBackend::DirectMl => crate::directml::available().map(|()| true).map_err(AiError::Device),
         }
     }
@@ -245,7 +247,8 @@ pub fn pick_runtime(choice: DeviceChoice) -> Result<(Runtime, String)> {
 /// The tiling on a native GPU (wgpu): the model's default, but 192 input pixels for 4x FDAT
 /// (IllustrationJaNai V3 detail) instead of 128: about 10 % faster on an RTX 3060 Ti (fewer,
 /// fuller dispatches: a 760 × 1200 page in 27–29 s instead of 28–32; 0.65 GiB of video memory at
-/// the peak), the output 41 dB PSNR from the 128 tiling's.
+/// the peak), the output 41 dB PSNR from the 128 tiling's. DirectML runs the same tiles (FDAT grown
+/// to one size there too, so its output is the wgpu path's).
 fn gpu_tiles(model: &ModelInfo) -> TileOptions {
     let d = default_tiles(model);
     if model.arch == Arch::Fdat && model.scale == 4 { TileOptions { tile: 192, ..d } } else { d }

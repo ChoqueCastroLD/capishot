@@ -19,12 +19,12 @@ use crate::runtime::{Network, Runtime};
 use crate::weights::Weights;
 use crate::{AiError, Result};
 
-const HEADS: usize = 4;
-const WINDOW: usize = 8;
+pub(crate) const HEADS: usize = 4;
+pub(crate) const WINDOW: usize = 8;
 /// `nn.LayerNorm`'s default.
-const LN_EPS: f64 = 1e-5;
+pub(crate) const LN_EPS: f64 = 1e-5;
 /// `F.normalize`'s default.
-const NORM_EPS: f64 = 1e-12;
+pub(crate) const NORM_EPS: f64 = 1e-12;
 
 /// A convolution's parameters (bias optional), with its padding and groups.
 #[derive(Clone, Debug)]

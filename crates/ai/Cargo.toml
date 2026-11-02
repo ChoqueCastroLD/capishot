@@ -27,9 +27,10 @@ gpu = ["runtime", "burn/wgpu"]
 # Vulkan; networks in f16 where the adapter has shader-f16. Never in a wasm build: the browser
 # keeps `gpu` alone. Only real adapters run here (`native::pick_runtime` skips software ones).
 gpu-native = ["gpu", "burn/autotune", "burn/vulkan"]
-# Windows: MangaJaNai's ESRGAN in fp32 on DirectML through ONNX Runtime (several times faster
-# than burn's fp32 convolutions, same results), loaded at run time: `onnxruntime.dll` (a DirectML
-# build, 1.24 or later) and `DirectML.dll` next to the executable or in PHOTOCRAFT_AI_ONNXRUNTIME.
+# Windows: MangaJaNai's ESRGAN and IllustrationJaNai V3's FDAT in fp32 on DirectML through ONNX
+# Runtime (several times faster than burn's fp32 convolutions, same results), loaded at run
+# time: `onnxruntime.dll` (a DirectML build, 1.24 or later) and `DirectML.dll` next to the
+# executable or in PHOTOCRAFT_AI_ONNXRUNTIME.
 # Without them, and on every other platform, the burn path runs. Never in a wasm build.
 directml = ["runtime", "dep:ort"]
 # Native model downloads (blocking HTTPS, rustls) for `native::NativeUpscaler`.

@@ -58,9 +58,9 @@ impl Network for Net {
 enum Backend {
     /// burn, on the runtime it was loaded on (wgpu or the CPU).
     Burn(Box<Net>),
-    /// ONNX Runtime on DirectML (Windows; ESRGAN only).
+    /// ONNX Runtime on DirectML (Windows; ESRGAN and FDAT).
     #[cfg(all(feature = "directml", windows))]
-    DirectMl(crate::directml::DmlEsrgan),
+    DirectMl(crate::directml::DmlUpscaler),
 }
 
 /// A network loaded from a catalog model's weight file.
@@ -86,9 +86,9 @@ impl Loaded {
     }
 
     /// Whether `model` can run on DirectML ([`Self::new_directml`]): ESRGAN (MangaJaNai and
-    /// IllustrationJaNai V1).
+    /// IllustrationJaNai V1) and FDAT (IllustrationJaNai V3).
     pub fn directml_supports(model: &ModelInfo) -> bool {
-        model.arch == Arch::Esrgan
+        matches!(model.arch, Arch::Esrgan | Arch::Fdat)
     }
 
     /// Parses `bytes` for `model` and builds its ONNX Runtime session on DirectML (Windows).
@@ -98,7 +98,12 @@ impl Loaded {
             return Err(crate::AiError::Device(format!("{} doesn't run on DirectML", model.id)));
         }
         let w = Weights::from_safetensors(bytes)?;
-        let net = crate::directml::DmlEsrgan::load(&Esrgan::host(&w, grayscale)?)?;
+        // FDAT always takes RGB, as in [`Self::new`].
+        let grayscale = grayscale && model.arch != Arch::Fdat;
+        let net = match model.arch {
+            Arch::Fdat => crate::directml::DmlUpscaler::fdat(w)?,
+            _ => crate::directml::DmlUpscaler::esrgan(&Esrgan::host(&w, grayscale)?)?,
+        };
         Ok(Self { id: model.id, grayscale, backend: Backend::DirectMl(net) })
     }
 

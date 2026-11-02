@@ -1,7 +1,9 @@
-//! ESRGAN as an ONNX model, written from its weights in memory (for the DirectML backend,
-//! `crate::directml`): the same graph as [`crate::esrgan::Esrgan::forward`] in fp32, with the
-//! grayscale folding already in the weights. Nothing is stored or downloaded: the model bytes
-//! are built when the network loads and handed to ONNX Runtime.
+//! The upscalers as ONNX models, written from their weights in memory (for the DirectML backend,
+//! `crate::directml`): ESRGAN, the same graph as [`crate::esrgan::Esrgan::forward`] in fp32 with
+//! the grayscale folding already in the weights, and FDAT ([`fdat`]), the same graph as
+//! [`crate::fdat::Fdat`]'s forward, built per input size. Nothing is stored or downloaded: the
+//! model bytes are built when the network loads (or a tile size first runs) and handed to ONNX
+//! Runtime.
 //!
 //! The encoder writes only the few protobuf messages an inference graph needs (`ModelProto`,
 //! `GraphProto`, `NodeProto`, `AttributeProto`, `TensorProto`, `ValueInfoProto`), by field
@@ -9,11 +11,15 @@
 
 use crate::esrgan::{HostConv, HostEsrgan};
 
+mod fdat;
+pub(crate) use fdat::fdat;
+
 /// ONNX IR version 8 and operator set 17 (ONNX Runtime 1.14 and later).
 const IR_VERSION: u64 = 8;
 const OPSET: u64 = 17;
-/// `TensorProto.DataType.FLOAT`.
+/// `TensorProto.DataType.FLOAT` and `INT64`.
 const FLOAT: u64 = 1;
+const INT64: u64 = 7;
 /// The graph's input and output names.
 pub const INPUT: &str = "input";
 pub const OUTPUT: &str = "output";
@@ -89,7 +95,7 @@ impl Attr<'_> {
     }
 }
 
-/// A graph being built: nodes, fp32 initializers, fresh value names.
+/// A graph being built: nodes, initializers, fresh value names.
 #[derive(Default)]
 struct Graph {
     nodes: Vec<Msg>,
@@ -120,16 +126,41 @@ impl Graph {
     }
     /// An fp32 initializer of this shape (`[]`: a scalar).
     fn init(&mut self, p: &str, dims: &[usize], data: &[f32]) -> String {
+        let raw: Vec<u8> = data.iter().flat_map(|v| v.to_le_bytes()).collect();
+        self.raw_init(p, dims, FLOAT, &raw)
+    }
+    /// A one-dimensional INT64 initializer (shapes, pads, slice bounds, axes).
+    fn ints(&mut self, p: &str, data: &[i64]) -> String {
+        let raw: Vec<u8> = data.iter().flat_map(|v| v.to_le_bytes()).collect();
+        self.raw_init(p, &[data.len()], INT64, &raw)
+    }
+    fn raw_init(&mut self, p: &str, dims: &[usize], ty: u64, raw: &[u8]) -> String {
         let name = self.fresh(p);
         let mut m = Msg::default();
         for d in dims {
             m.int(1, *d as u64);
         }
-        m.int(2, FLOAT).str(8, &name);
-        let raw: Vec<u8> = data.iter().flat_map(|v| v.to_le_bytes()).collect();
-        m.bytes(9, &raw);
+        m.int(2, ty).str(8, &name);
+        m.bytes(9, raw);
         self.inits.push(m);
         name
+    }
+    /// The finished `ModelProto`: this graph between `input` and `output`.
+    fn model(&self, name: &str, input: &Msg, output: &Msg) -> Vec<u8> {
+        let mut graph = Msg::default();
+        for n in &self.nodes {
+            graph.msg(1, n);
+        }
+        graph.str(2, name);
+        for i in &self.inits {
+            graph.msg(5, i);
+        }
+        graph.msg(11, input).msg(12, output);
+        let mut opset = Msg::default();
+        opset.str(1, "").int(2, OPSET);
+        let mut model = Msg::default();
+        model.int(1, IR_VERSION).str(2, "capishot").msg(7, &graph).msg(8, &opset);
+        model.0
     }
     /// A 3×3 convolution, padding 1 (into `out` when named).
     fn conv_to(&mut self, x: &str, c: &HostConv, out: Option<&str>) -> String {
@@ -148,13 +179,23 @@ impl Graph {
 
 /// A `ValueInfoProto` for a `[1, channels, H, W]` fp32 tensor with free `H`, `W`.
 fn image_value(name: &str, channels: usize, dims: [&str; 2]) -> Msg {
+    value(name, &[Dim::Fixed(1), Dim::Fixed(channels), Dim::Free(dims[0]), Dim::Free(dims[1])])
+}
+
+/// One dimension of a [`value`]: a number, or a name ONNX Runtime binds at run time.
+enum Dim<'a> {
+    Fixed(usize),
+    Free(&'a str),
+}
+
+/// A `ValueInfoProto` for an fp32 tensor of these dimensions.
+fn value(name: &str, dims: &[Dim<'_>]) -> Msg {
     let mut shape = Msg::default();
-    for d in ["1", "c", dims[0], dims[1]] {
+    for d in dims {
         let mut dim = Msg::default();
         match d {
-            "1" => dim.int(1, 1),
-            "c" => dim.int(1, channels as u64),
-            _ => dim.str(2, d),
+            Dim::Fixed(n) => dim.int(1, *n as u64),
+            Dim::Free(s) => dim.str(2, s),
         };
         shape.msg(1, &dim);
     }
@@ -167,6 +208,27 @@ fn image_value(name: &str, channels: usize, dims: [&str; 2]) -> Msg {
     v
 }
 
+/// A first convolution's weights (`[out, ch·r², kh, kw]`, `w`) reordered for ONNX's
+/// `SpaceToDepth`, which orders channels position-major ((dy·r + dx)·C + c), from PyTorch's
+/// `pixel_unshuffle` order, channel-major (c·r² + dy·r + dx).
+fn space_to_depth_order(w: &[f32], shape: [usize; 4], ch: usize, r: usize) -> Vec<f32> {
+    let r2 = r * r;
+    let [o, i, kh, kw] = shape;
+    let k = kh * kw;
+    let mut out = vec![0.0; w.len()];
+    for oc in 0..o {
+        for pos in 0..r2 {
+            for ic in 0..ch {
+                let (dst, src) = ((oc * i + pos * ch + ic) * k, (oc * i + ic * r2 + pos) * k);
+                if let (Some(d), Some(s)) = (out.get_mut(dst..dst + k), w.get(src..src + k)) {
+                    d.copy_from_slice(s);
+                }
+            }
+        }
+    }
+    out
+}
+
 /// The network as ONNX model bytes: `input` `[1, image_in, H, W]` (sides multiples of the
 /// unshuffle factor) → `output` `[1, out_nc, H·scale, W·scale]`, fp32 throughout.
 pub(crate) fn esrgan(h: &HostEsrgan) -> Vec<u8> {
@@ -175,23 +237,7 @@ pub(crate) fn esrgan(h: &HostEsrgan) -> Vec<u8> {
     let mut x = INPUT.to_string();
     let mut first = h.conv_first.clone();
     if c.shuffle > 1 {
-        // ONNX's SpaceToDepth orders channels position-major ((dy·r + dx)·C + c), PyTorch's
-        // pixel_unshuffle channel-major (c·r² + dy·r + dx): permute conv_first's inputs to match.
-        let (r2, ch) = (c.shuffle * c.shuffle, h.image_in);
-        let [o, i, kh, kw] = first.shape;
-        let k = kh * kw;
-        let mut w = vec![0.0; first.w.len()];
-        for oc in 0..o {
-            for pos in 0..r2 {
-                for ic in 0..ch {
-                    let (dst, src) = ((oc * i + pos * ch + ic) * k, (oc * i + ic * r2 + pos) * k);
-                    if let (Some(d), Some(s)) = (w.get_mut(dst..dst + k), first.w.get(src..src + k)) {
-                        d.copy_from_slice(s);
-                    }
-                }
-            }
-        }
-        first.w = w;
+        first.w = space_to_depth_order(&first.w, first.shape, h.image_in, c.shuffle);
         x = g.node("SpaceToDepth", &[&x], &[Attr::Int("blocksize", c.shuffle as i64)]);
     }
     let fea = g.conv(&x, &first);
@@ -233,22 +279,7 @@ pub(crate) fn esrgan(h: &HostEsrgan) -> Vec<u8> {
     let hr = g.conv(&fea, &h.conv_hr);
     let hr = g.lrelu(&hr);
     g.conv_to(&hr, &h.conv_last, Some(OUTPUT));
-
-    let mut graph = Msg::default();
-    for n in &g.nodes {
-        graph.msg(1, n);
-    }
-    graph.str(2, "esrgan");
-    for i in &g.inits {
-        graph.msg(5, i);
-    }
-    graph.msg(11, &image_value(INPUT, h.image_in, ["h", "w"]));
-    graph.msg(12, &image_value(OUTPUT, c.out_nc, ["oh", "ow"]));
-    let mut opset = Msg::default();
-    opset.str(1, "").int(2, OPSET);
-    let mut model = Msg::default();
-    model.int(1, IR_VERSION).str(2, "capishot").msg(7, &graph).msg(8, &opset);
-    model.0
+    g.model("esrgan", &image_value(INPUT, h.image_in, ["h", "w"]), &image_value(OUTPUT, c.out_nc, ["oh", "ow"]))
 }
 
 #[cfg(test)]
@@ -276,5 +307,52 @@ mod tests {
         // Every weight is in there as raw fp32.
         let weights: usize = h.body.iter().flatten().flatten().map(|c| c.w.len() + c.b.len()).sum();
         assert!(bytes.len() > weights * 4);
+    }
+
+    #[test]
+    fn int64_initializers_and_fixed_dims() {
+        let mut g = Graph::default();
+        let name = g.ints("s", &[-1, 2]);
+        assert_eq!(name, "s1");
+        // dims [2] (field 1), INT64 (field 2 = 7), name, raw_data: two little-endian i64s.
+        let mut want = vec![0x08, 0x02, 0x10, 0x07, 0x42, 0x02, b's', b'1', 0x4a, 16];
+        want.extend_from_slice(&(-1i64).to_le_bytes());
+        want.extend_from_slice(&2i64.to_le_bytes());
+        assert_eq!(g.inits[0].0, want);
+        // A fixed dimension is dim_value (field 1), a free one dim_param (field 2).
+        let v = value("x", &[Dim::Fixed(3), Dim::Free("h")]);
+        let text = String::from_utf8_lossy(&v.0);
+        assert!(text.contains('x') && text.contains('h'));
+        assert!(v.0.windows(2).any(|w| w == [0x08, 0x03]));
+    }
+
+    #[test]
+    fn space_to_depth_reorders_channel_major_inputs() {
+        // One output, 2 channels unshuffled by 2 (8 inputs), 1×1 kernel: input c·4 + pos moves to
+        // pos·2 + c.
+        let w: Vec<f32> = (0..8).map(|i| i as f32).collect();
+        assert_eq!(space_to_depth_order(&w, [1, 8, 1, 1], 2, 2), [0.0, 4.0, 1.0, 5.0, 2.0, 6.0, 3.0, 7.0]);
+    }
+
+    #[test]
+    fn tiny_fdat_graph() {
+        let count = |b: &[u8], op: &str| String::from_utf8_lossy(b).matches(op).count();
+        for shuffle in [1, 2] {
+            let w = crate::directml::tests::tiny_fdat(shuffle);
+            // 22 × 14 at ×4 (11 × 7 at ×2): window padding and its crop in the spatial block.
+            let bytes = fdat(&w, (22, 14)).unwrap();
+            assert_eq!(count(&bytes, "LayerNormalization"), 4);
+            assert_eq!(count(&bytes, "ConvTranspose"), 2);
+            assert_eq!((count(&bytes, "Pad"), count(&bytes, "Slice")), (1, 1));
+            assert_eq!(count(&bytes, "SpaceToDepth"), usize::from(shuffle > 1));
+            assert_eq!(count(&bytes, "ReduceL2"), 2);
+            assert_eq!(count(&bytes, "Erf"), 6);
+            // Multiples of the window: no padding.
+            let bytes = fdat(&w, (16 * shuffle, 8 * shuffle)).unwrap();
+            assert_eq!((count(&bytes, "Pad"), count(&bytes, "Slice")), (0, 0));
+        }
+        let w = crate::directml::tests::tiny_fdat(2);
+        assert!(fdat(&w, (15, 16)).is_err() && fdat(&w, (0, 16)).is_err() && fdat(&w, (1 << 20, 16)).is_err());
+        assert!(fdat(&crate::weights::Weights::default(), (16, 16)).is_err());
     }
 }
