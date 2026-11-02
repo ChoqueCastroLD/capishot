@@ -23,7 +23,7 @@
 //! shade off the paper: where the hole meets flat paper, the fill that is near the paper's tone
 //! takes it ([`settle_paper`]).
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use photocraft_algo::remove::dilate;
 
@@ -52,38 +52,74 @@ impl Grow {
 /// Ink is darker than its local background by at least this share of it (and 0.06).
 const INK_CONTRAST: f32 = 0.2;
 
-/// The brightest value within `r` of each pixel (a square window; separable running maxima).
+fn max(a: f32, b: f32) -> f32 {
+    if b > a { b } else { a }
+}
+
+/// The brightest value within `r` of each pixel (a square window): separable running maxima
+/// (van Herk/Gil-Werman: per block of `2r+1`, the maxima from its start and from its end, so each
+/// output is the larger of two), the vertical pass over whole rows.
 fn local_max(w: usize, h: usize, v: &[f32], r: usize) -> Vec<f32> {
-    let pass = |src: &[f32], horizontal: bool| -> Vec<f32> {
-        let (lines, len) = if horizontal { (h, w) } else { (w, h) };
-        let at = |line: usize, k: usize| if horizontal { line * w + k } else { k * w + line };
-        let mut out = vec![0.0f32; src.len()];
-        let mut q: VecDeque<usize> = VecDeque::new();
-        for line in 0..lines {
-            q.clear();
-            // `q` holds positions with decreasing values; the window of output k is k-r..=k+r.
-            for k in 0..len + r {
-                if k < len {
-                    let x = src[at(line, k)];
-                    while q.back().is_some_and(|&b| src[at(line, b)] <= x) {
-                        q.pop_back();
-                    }
-                    q.push_back(k);
-                }
-                if k >= r {
-                    let c = k - r;
-                    while q.front().is_some_and(|&f| f + r < c) {
-                        q.pop_front();
-                    }
-                    if let Some(&f) = q.front() {
-                        out[at(line, c)] = src[at(line, f)];
-                    }
-                }
+    if w == 0 || v.len() != w.saturating_mul(h) {
+        return v.to_vec();
+    }
+    let k = 2 * r + 1;
+    // Rows, each padded by `r` on both sides with -inf.
+    let p = w + 2 * r;
+    let (mut padded, mut from_start, mut from_end) = (vec![f32::NEG_INFINITY; p], vec![0f32; p], vec![0f32; p]);
+    let mut rows = vec![0f32; v.len()];
+    for (src, out) in v.chunks_exact(w).zip(rows.chunks_exact_mut(w)) {
+        padded[r..r + w].copy_from_slice(src);
+        for ((s, e), x) in from_start.chunks_mut(k).zip(from_end.chunks_mut(k)).zip(padded.chunks(k)) {
+            let mut m = f32::NEG_INFINITY;
+            for (o, x) in s.iter_mut().zip(x) {
+                m = max(m, *x);
+                *o = m;
+            }
+            let mut m = f32::NEG_INFINITY;
+            for (o, x) in e.iter_mut().zip(x).rev() {
+                m = max(m, *x);
+                *o = m;
             }
         }
-        out
-    };
-    pass(&pass(v, true), false)
+        for ((o, a), b) in out.iter_mut().zip(&from_end).zip(&from_start[2 * r..]) {
+            *o = max(*a, *b);
+        }
+    }
+    // Columns: the same over rows (row `q` of the padded column is `rows`' row `q - r`).
+    let p = h + 2 * r;
+    let none = vec![f32::NEG_INFINITY; w];
+    let row = |q: usize| if (r..r + h).contains(&q) { &rows[(q - r) * w..(q - r + 1) * w] } else { &none[..] };
+    let (mut from_start, mut from_end) = (vec![0f32; p * w], vec![0f32; p * w]);
+    for q in 0..p {
+        let (done, cur) = from_start.split_at_mut(q * w);
+        let cur = &mut cur[..w];
+        if q % k == 0 {
+            cur.copy_from_slice(row(q));
+        } else {
+            for ((o, a), b) in cur.iter_mut().zip(&done[(q - 1) * w..]).zip(row(q)) {
+                *o = max(*a, *b);
+            }
+        }
+    }
+    for q in (0..p).rev() {
+        let (cur, done) = from_end.split_at_mut((q + 1) * w);
+        let cur = &mut cur[q * w..];
+        if q % k == k - 1 || q + 1 == p {
+            cur.copy_from_slice(row(q));
+        } else {
+            for ((o, a), b) in cur.iter_mut().zip(&done[..w]).zip(row(q)) {
+                *o = max(*a, *b);
+            }
+        }
+    }
+    let mut out = vec![0f32; v.len()];
+    for (c, o) in out.chunks_exact_mut(w).enumerate() {
+        for ((o, a), b) in o.iter_mut().zip(&from_end[c * w..]).zip(&from_start[(c + 2 * r) * w..]) {
+            *o = max(*a, *b);
+        }
+    }
+    out
 }
 
 /// Which pixels are dark ink: darker than the brightest value around them by [`INK_CONTRAST`].
@@ -92,13 +128,29 @@ fn ink(w: usize, h: usize, lum: &[f32], r: usize) -> Vec<bool> {
     lum.iter().zip(&bg).map(|(l, b)| b - l > (INK_CONTRAST * b).max(0.06)).collect()
 }
 
-/// The 8 neighbours of `i` on a `w×h` grid.
+/// The 8 neighbours of `i` on a `w×h` grid: the row above, the two beside, the row below, each
+/// left to right.
 fn neighbours(i: usize, w: usize, h: usize) -> impl Iterator<Item = usize> {
-    let (x, y) = ((i % w) as i64, (i / w) as i64);
-    (-1i64..=1)
-        .flat_map(move |dy| (-1i64..=1).map(move |dx| (x + dx, y + dy)))
-        .filter(move |&(nx, ny)| (nx, ny) != (x, y) && nx >= 0 && ny >= 0 && (nx as usize) < w && (ny as usize) < h)
-        .map(move |(nx, ny)| ny as usize * w + nx as usize)
+    let (x, y) = (i % w, i / w);
+    let (left, right) = (x > 0, x + 1 < w);
+    let mut n = [0usize; 8];
+    let mut len = 0;
+    let mut row = |c: usize, mid: bool| {
+        for (ok, j) in [(left, c.wrapping_sub(1)), (mid, c), (right, c + 1)] {
+            if ok {
+                n[len] = j;
+                len += 1;
+            }
+        }
+    };
+    if y > 0 {
+        row(i - w, true);
+    }
+    row(i, false);
+    if y + 1 < h {
+        row(i + w, true);
+    }
+    n.into_iter().take(len)
 }
 
 /// The hole and its paste-back weights.
@@ -242,25 +294,42 @@ pub(crate) fn settle_paper(w: usize, h: usize, orig: &[f32], hole: &[bool], gene
         return;
     }
     let lum = luminance(orig);
-    // The hole doesn't count for flatness: the brightest and the darkest around, without it.
-    let hi = local_max(w, h, &lum.iter().zip(hole).map(|(l, m)| if *m { 0.0 } else { *l }).collect::<Vec<_>>(), 2);
-    let lo = local_max(w, h, &lum.iter().zip(hole).map(|(l, m)| if *m { 0.0 } else { 1.0 - l }).collect::<Vec<_>>(), 2);
-    let edge = dilate(w, h, hole, 1);
+    // The pixels within 2 of `i` (clipped to the grid) outside the hole: what the flatness and the
+    // paper's tone look at. Only read at the hole's edge, so taken there rather than everywhere.
+    let around = |i: usize, f: &mut dyn FnMut(usize)| {
+        let (x, y) = (i % w, i / w);
+        for yy in y.saturating_sub(2)..(y + 3).min(h) {
+            let row = yy * w;
+            for (j, _) in hole.iter().enumerate().take(row + (x + 3).min(w)).skip(row + x.saturating_sub(2)).filter(|(_, h)| !**h) {
+                f(j);
+            }
+        }
+    };
     // From each flat paper pixel at the hole's edge, outward into the hole (breadth first, so each
     // pixel takes its nearest paper's colour).
     let mut from = vec![usize::MAX; n];
     let mut queue = VecDeque::new();
     for i in 0..n {
-        if edge[i] && !hole[i] && lum[i] >= PAPER && hi[i] - (1.0 - lo[i]) <= FLAT {
+        if hole[i] || lum[i] < PAPER || !neighbours(i, w, h).any(|j| hole[j]) {
+            continue;
+        }
+        // The brightest and the darkest around, without the hole (it counts as black for the
+        // brightest and as white for the darkest; it is always within reach of the edge).
+        let (mut hi, mut lo) = (0.0f32, 0.0f32);
+        around(i, &mut |j| {
+            hi = max(hi, lum[j]);
+            lo = max(lo, 1.0 - lum[j]);
+        });
+        if hi - (1.0 - lo) <= FLAT {
             from[i] = i;
             queue.push_back(i);
         }
     }
-    let glum = luminance(generated);
+    let glum = |j: usize| generated.get(j * 3..j * 3 + 3).map_or(f32::NAN, |c| 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]);
     while let Some(i) = queue.pop_front() {
         let src = from[i];
         for j in neighbours(i, w, h) {
-            if hole[j] && from[j] == usize::MAX && (glum[j] - lum[src]).abs() <= NEAR_PAPER {
+            if hole[j] && from[j] == usize::MAX && (glum(j) - lum[src]).abs() <= NEAR_PAPER {
                 from[j] = src;
                 queue.push_back(j);
             }
@@ -268,13 +337,23 @@ pub(crate) fn settle_paper(w: usize, h: usize, orig: &[f32], hole: &[bool], gene
     }
     // The paper's tone at each source: the brightest around it (ink and compression ringing only
     // darken paper), so one noisy pixel doesn't spread.
-    let tone: Vec<Vec<f32>> = (0..3).map(|c| local_max(w, h, &(0..n).map(|i| if hole[i] { 0.0 } else { orig[i * 3 + c] }).collect::<Vec<_>>(), 2)).collect();
+    let mut tone: HashMap<usize, [f32; 3]> = HashMap::new();
     for i in 0..n {
-        if hole[i] && from[i] != usize::MAX {
-            let src = from[i];
-            for (c, t) in tone.iter().enumerate() {
-                generated[i * 3 + c] = t[src];
-            }
+        let src = from[i];
+        if !hole[i] || src == usize::MAX {
+            continue;
+        }
+        let t = *tone.entry(src).or_insert_with(|| {
+            let mut t = [0.0f32; 3];
+            around(src, &mut |j| {
+                for (c, t) in t.iter_mut().enumerate() {
+                    *t = max(*t, orig[j * 3 + c]);
+                }
+            });
+            t
+        });
+        if let Some(g) = generated.get_mut(i * 3..i * 3 + 3) {
+            g.copy_from_slice(&t);
         }
     }
 }

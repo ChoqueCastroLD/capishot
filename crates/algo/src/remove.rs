@@ -54,34 +54,50 @@ pub fn close_loops(w: usize, h: usize, mask: &[bool]) -> Vec<bool> {
     outside.iter().map(|o| !*o).collect()
 }
 
-/// `mask` grown by `r` cells (a square structuring element), in two separable passes.
+/// `mask` grown by `r` cells (a square structuring element), in two separable passes. Each pass
+/// sets a cell when any cell within `r` along one axis is set (a running count); the vertical one
+/// keeps one count per column and walks whole rows, so it reads memory in order.
 pub fn dilate(w: usize, h: usize, mask: &[bool], r: usize) -> Vec<bool> {
-    if r == 0 || mask.len() != w.saturating_mul(h) {
+    if r == 0 || w == 0 || mask.len() != w.saturating_mul(h) {
         return mask.to_vec();
     }
-    // A pass sets each cell when any cell within `r` along one axis is set (a running count).
-    let pass = |src: &[bool], horizontal: bool| -> Vec<bool> {
-        let (lines, len) = if horizontal { (h, w) } else { (w, h) };
-        let at = |line: usize, k: usize| if horizontal { line * w + k } else { k * w + line };
-        let mut out = vec![false; src.len()];
-        for line in 0..lines {
-            let mut count = 0usize;
-            for k in 0..len.min(r) {
-                count += usize::from(src[at(line, k)]);
+    let mut rows = vec![false; mask.len()];
+    for (src, out) in mask.chunks_exact(w).zip(rows.chunks_exact_mut(w)) {
+        let mut count = src.iter().take(r).filter(|v| **v).count();
+        for (k, o) in out.iter_mut().enumerate() {
+            if let Some(v) = src.get(k + r) {
+                count += usize::from(*v);
             }
-            for k in 0..len {
-                if k + r < len {
-                    count += usize::from(src[at(line, k + r)]);
-                }
-                if k > r {
-                    count -= usize::from(src[at(line, k - r - 1)]);
-                }
-                out[at(line, k)] = count > 0;
+            if k > r {
+                count -= usize::from(src[k - r - 1]);
+            }
+            *o = count > 0;
+        }
+    }
+    let row = |k: usize| &rows[k * w..(k + 1) * w];
+    let mut out = vec![false; mask.len()];
+    let mut count = vec![0usize; w];
+    for k in 0..h.min(r) {
+        for (c, v) in count.iter_mut().zip(row(k)) {
+            *c += usize::from(*v);
+        }
+    }
+    for (k, o) in out.chunks_exact_mut(w).enumerate() {
+        if k + r < h {
+            for (c, v) in count.iter_mut().zip(row(k + r)) {
+                *c += usize::from(*v);
             }
         }
-        out
-    };
-    pass(&pass(mask, true), false)
+        if k > r {
+            for (c, v) in count.iter_mut().zip(row(k - r - 1)) {
+                *c -= usize::from(*v);
+            }
+        }
+        for (o, c) in o.iter_mut().zip(&count) {
+            *o = *c > 0;
+        }
+    }
+    out
 }
 
 /// The largest chessboard distance from a hole cell to the nearest cell outside the hole (cells
@@ -244,6 +260,27 @@ mod tests {
         assert_eq!(d.iter().filter(|m| **m).count(), 25);
         assert!(d[3 * w + 3] && d[7 * w + 7] && !d[2 * w + 5]);
         assert_eq!(dilate(w, h, &dot, 0), dot);
+    }
+
+    #[test]
+    fn dilate_matches_the_square_window_on_any_mask() {
+        let mut seed = 7u32;
+        for (w, h) in [(1, 1), (1, 9), (9, 1), (13, 7), (31, 40)] {
+            let mask: Vec<bool> = (0..w * h)
+                .map(|_| {
+                    seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                    seed >> 29 == 0
+                })
+                .collect();
+            for r in [1, 2, 3, 6, 50] {
+                let want = grid(w, h, |x, y| {
+                    let (xs, ys) = (x.saturating_sub(r)..=(x + r).min(w - 1), y.saturating_sub(r)..=(y + r).min(h - 1));
+                    ys.into_iter().any(|yy| xs.clone().any(|xx| mask[yy * w + xx]))
+                });
+                assert_eq!(dilate(w, h, &mask, r), want, "{w}x{h} r={r}");
+            }
+        }
+        assert!(dilate(0, 5, &[], 3).is_empty());
     }
 
     #[test]
