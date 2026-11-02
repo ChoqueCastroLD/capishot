@@ -1422,11 +1422,26 @@ pub fn use_adapter_limits_with(setup: &mut egui_wgpu::WgpuSetup, on_adapter: imp
     }
 }
 
-/// egui's base limits (WebGL2's on GL) with the adapter's maximum texture and buffer sizes.
+/// egui's base limits (WebGL2's on GL) with the adapter's maximum texture and buffer sizes,
+/// lowered wherever the adapter supports less than the base.
 pub fn device_limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
     let base = if adapter.get_info().backend == wgpu::Backend::Gl { wgpu::Limits::downlevel_webgl2_defaults() } else { wgpu::Limits::default() };
-    let a = adapter.limits();
-    wgpu::Limits { max_texture_dimension_2d: a.max_texture_dimension_2d, max_buffer_size: a.max_buffer_size, ..base }
+    clamp_limits(base, &adapter.limits())
+}
+
+/// `base`, with every limit the adapter does not reach lowered to the adapter's.
+///
+/// The WebGL2 base asks for 15 inter-stage shader variables, but some mobile GLES drivers
+/// report 14 (ANGLE on a phone), and `request_device` rejects the whole device when any
+/// requested limit is above the adapter's: Capishot showed "Limit
+/// 'max_inter_stage_shader_variables' value 15 is better than allowed 14" and never started.
+fn clamp_limits(base: wgpu::Limits, adapter: &wgpu::Limits) -> wgpu::Limits {
+    wgpu::Limits {
+        max_texture_dimension_2d: adapter.max_texture_dimension_2d,
+        max_buffer_size: adapter.max_buffer_size,
+        ..base
+    }
+    .or_worse_values_from(adapter)
 }
 
 /// The browser shell's millisecond clock (`std::time` is unavailable on wasm), see [`set_clock`].
