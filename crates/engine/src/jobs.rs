@@ -322,7 +322,13 @@ pub struct Jobs {
     draining: Vec<std::thread::JoinHandle<()>>,
     /// The context inline job work runs under (see [`Session::set_inline_job_ctx`]).
     inline: Option<JobCtx>,
+    /// Jobs done a step at a time on this thread ([`Session::start_stepped_job`]).
+    steppers: Vec<(JobId, Stepper)>,
 }
+
+/// One step of a [`Session::start_stepped_job`]: true once the job has delivered its result (or
+/// was cancelled).
+type Stepper = Box<dyn FnMut(&dyn Fn() -> bool) -> bool + Send>;
 
 const RECENT: usize = 16;
 
@@ -629,6 +635,107 @@ pub fn warm_layer_bounds(doc: &Document, mut check: impl FnMut() -> Result<()>) 
     Ok(())
 }
 
+/// A PSD/PSB's merged image, reduced ([`open_preview`]).
+pub use photocraft_psd::preview::Preview as OpenPreview;
+
+/// Where an open puts its PSD/PSB's merged image, reduced, for the shell to show meanwhile.
+pub type PreviewSlot = Arc<wasm_sync::Mutex<Option<OpenPreview>>>;
+
+/// The longest side of an open's preview at most: about a page at fit on a large screen (it shows
+/// for a moment; the fewer rows it reads the sooner it does).
+pub const PREVIEW_SIDE: u32 = 1280;
+
+fn put_preview(slot: &PreviewSlot, p: Option<OpenPreview>) {
+    *slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = p;
+}
+
+/// The merged-image preview of the file `source` holds, if it is a PSD/PSB with one that can
+/// stand for it ([`photocraft_psd::preview::merged_preview`]), in sRGB: an RGB file with another
+/// embedded profile is converted through it.
+pub fn open_preview(source: &OpenSource) -> Option<OpenPreview> {
+    let mut p = match source {
+        OpenSource::Bytes(b) => photocraft_io::is_psd(b).then(|| photocraft_psd::preview::merged_preview(&**b, PREVIEW_SIDE)).flatten(),
+        #[cfg(not(target_arch = "wasm32"))]
+        OpenSource::Path(path) => {
+            let f = photocraft_psd::FileSource::open(std::path::Path::new(path)).ok()?;
+            photocraft_psd::preview::merged_preview(&f, PREVIEW_SIDE)
+        }
+        #[cfg(target_arch = "wasm32")]
+        OpenSource::Path(_) => None,
+    }?;
+    if !p.gray
+        && let Some(icc) = &p.icc
+    {
+        // A profile that doesn't parse is the document's problem; its preview is shown as sRGB,
+        // as the document will be.
+        if let Ok(src) = photocraft_cms::Profile::parse(icc)
+            && src.color_space == photocraft_cms::ColorSpace::Rgb
+        {
+            let dst = photocraft_cms::Builtin::Srgb.profile();
+            if !src.same_colors(dst) {
+                let t = photocraft_cms::Transform::new(&src, dst, photocraft_cms::Intent::RelativeColorimetric, true).ok()?;
+                let mut px: Vec<f32> = p.rgba.iter().map(|&v| f32::from(v) / 255.0).collect();
+                t.apply(&mut px, 4);
+                for (o, v) in p.rgba.iter_mut().zip(px) {
+                    *o = (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+                }
+            }
+        }
+    }
+    Some(p)
+}
+
+fn open_error(e: photocraft_io::IoError) -> EngineError {
+    match e {
+        photocraft_io::IoError::Cancelled => EngineError::Cancelled,
+        e => EngineError::Other(e.to_string()),
+    }
+}
+
+/// What an open does with a decoded file before the document is shown: the layers' bounds and,
+/// for type, the fonts (see [`Session::start_open`]).
+fn prepare_opened(ctx: &JobCtx, imported: (photocraft_io::ImportResult, bool)) -> Result<(photocraft_io::ImportResult, bool)> {
+    ctx.progress(0.95, "Preparing layers");
+    warm_layer_bounds(&imported.0.document, || ctx.check())?;
+    // Type layers need the shared text engine, whose first use waits for the
+    // installed-font scan started at launch (minutes on some machines). Wait here,
+    // so the shell's missing-font check after the open finds it ready instead of
+    // freezing the window (#7332).
+    if crate::type_extra_cmds::has_type_layers(&imported.0.document) {
+        ctx.progress(0.97, "Loading fonts");
+        let _ = photocraft_text::shared();
+        ctx.check()?;
+    }
+    Ok(imported)
+}
+
+/// An open job's last part, on the session's thread: the document joins the session (or is held
+/// for the Color Settings or damage prompts); see [`Session::start_open`].
+fn open_apply(name: &str, confirm_damage: bool) -> impl FnOnce(&mut Session, (photocraft_io::ImportResult, bool)) -> Result<Value> + Send + 'static {
+    let name_a = name.to_string();
+    move |s, (mut r, damaged)| {
+        // File Handling's ACEScg option, before the colour prompt looks at the profile.
+        crate::file_cmds::tag_exr_colorspace(s, &name_a, &mut r.document);
+        crate::file_cmds::raw_defaults(s, &r.warnings, &mut r.document);
+        // Ask When Opening: held back until the prompt is answered (`take_held_open`). A
+        // developed raw has no embedded profile to ask about.
+        let raw = r.warnings.iter().any(|w| w.contains(photocraft_io::raw::DEVELOPED_NOTE));
+        let damaged = confirm_damage && damaged;
+        let question = s.color.open_question(&r.document).filter(|_| !raw);
+        if damaged || question.is_some() {
+            let held = s.hold_open(r.document, r.source_read_only);
+            return Ok(json!({"held": held, "name": name_a, "warnings": r.warnings, "color": question, "damaged": damaged}));
+        }
+        let (index, color) = s.open_document(r.document, None);
+        // Persisted IDs can collide: report the identity the session actually admitted.
+        let id = s.documents().get(index).ok_or(EngineError::NoDocument)?.doc.id;
+        if let Some(st) = s.active_mut() {
+            st.source_read_only = r.source_read_only;
+        }
+        Ok(json!({"document": index, "docId": id.0, "name": name_a, "warnings": r.warnings, "color": color}))
+    }
+}
+
 /// Where a background open reads its file from.
 #[derive(Clone, Debug)]
 pub enum OpenSource {
@@ -674,22 +781,32 @@ impl Session {
     /// result is `{held, name, warnings, color}` (`color` the question): take it with
     /// [`Session::take_held_open`] once answered.
     pub fn start_open(&mut self, name: &str, source: OpenSource) -> Result<Started> {
-        self.start_open_inner(name, source, false)
+        self.start_open_inner(name, source, false, None)
     }
 
     /// Interactive opening: hold a damaged PSD until the user answers a damage
     /// confirmation, without changing import or subsequent save behaviour.
     /// Headless callers keep using [`Self::start_open`].
     pub fn start_open_for_user(&mut self, name: &str, source: OpenSource) -> Result<Started> {
-        self.start_open_inner(name, source, true)
+        self.start_open_inner(name, source, true, None)
+    }
+
+    /// [`Session::start_open_for_user`] that first puts a PSD/PSB's merged image, reduced, in
+    /// `preview` (read straight from the file, before the layers are built), so the shell can
+    /// show the page while it opens. In the single-threaded browser build a PSD/PSB opens a step
+    /// at a time between frames ([`Self::start_stepped_open`]).
+    pub fn start_open_with_preview(&mut self, name: &str, source: OpenSource, preview: PreviewSlot) -> Result<Started> {
+        if !SPAWNS && matches!(&source, OpenSource::Bytes(b) if photocraft_io::is_psd(b)) {
+            return self.start_stepped_open(name, source, preview);
+        }
+        self.start_open_inner(name, source, true, Some(preview))
     }
 
     /// Decodes a file in a job and optionally holds damaged PSD content for
     /// interactive confirmation while leaving headless opens non-interactive.
-    fn start_open_inner(&mut self, name: &str, source: OpenSource, confirm_damage: bool) -> Result<Started> {
+    fn start_open_inner(&mut self, name: &str, source: OpenSource, confirm_damage: bool, preview: Option<PreviewSlot>) -> Result<Started> {
         let label = format!("Opening {name}");
         let name_w = name.to_string();
-        let name_a = name.to_string();
         let opts = import_options(self.prefs());
         self.start_job(
             OPEN_JOB,
@@ -698,6 +815,15 @@ impl Session {
             false,
             move |ctx| {
                 ctx.progress(0.0, "Reading");
+                // The merged image is read beside the layers (on the pool), not before them.
+                if let Some(slot) = preview {
+                    if SPAWNS {
+                        let source = source.clone();
+                        rayon::spawn(move || put_preview(&slot, open_preview(&source)));
+                    } else {
+                        put_preview(&slot, open_preview(&source));
+                    }
+                }
                 let imported = match source {
                     OpenSource::Bytes(bytes) => {
                         ctx.check()?;
@@ -707,44 +833,85 @@ impl Session {
                     // A PSD/PSB is decoded straight from the file, which is never read whole.
                     OpenSource::Path(p) => ctx.stage(0.0, 0.95, "Decoding", |ctl| import_path(&name_w, &p, &opts, ctl)),
                 }
-                .map_err(|e| match e {
-                    photocraft_io::IoError::Cancelled => EngineError::Cancelled,
-                    e => EngineError::Other(e.to_string()),
-                })?;
-                ctx.progress(0.95, "Preparing layers");
-                warm_layer_bounds(&imported.0.document, || ctx.check())?;
-                // Type layers need the shared text engine, whose first use waits for the
-                // installed-font scan started at launch (minutes on some machines). Wait here,
-                // so the shell's missing-font check after the open finds it ready instead of
-                // freezing the window (#7332).
-                if crate::type_extra_cmds::has_type_layers(&imported.0.document) {
-                    ctx.progress(0.97, "Loading fonts");
-                    let _ = photocraft_text::shared();
-                    ctx.check()?;
-                }
-                Ok(imported)
+                .map_err(open_error)?;
+                prepare_opened(ctx, imported)
             },
-            move |s, (mut r, damaged): (photocraft_io::ImportResult, bool)| {
-                // File Handling's ACEScg option, before the colour prompt looks at the profile.
-                crate::file_cmds::tag_exr_colorspace(s, &name_a, &mut r.document);
-                crate::file_cmds::raw_defaults(s, &r.warnings, &mut r.document);
-                // Ask When Opening: held back until the prompt is answered (`take_held_open`). A
-                // developed raw has no embedded profile to ask about.
-                let raw = r.warnings.iter().any(|w| w.contains(photocraft_io::raw::DEVELOPED_NOTE));
-                let damaged = confirm_damage && damaged;
-                let question = s.color.open_question(&r.document).filter(|_| !raw);
-                if damaged || question.is_some() {
-                    let held = s.hold_open(r.document, r.source_read_only);
-                    return Ok(json!({"held": held, "name": name_a, "warnings": r.warnings, "color": question, "damaged": damaged}));
+            open_apply(name, confirm_damage),
+        )
+    }
+
+    /// [`Session::start_open_with_preview`] for a PSD/PSB in `source`'s bytes, done a step at a
+    /// time on this thread ([`Self::start_stepped_job`]): the merged image first (into `preview`,
+    /// shown while the rest goes on), then the parse, the layers' pixels a band at a time, and the
+    /// document. The single-threaded browser build opens so, keeping the page responsive.
+    pub fn start_stepped_open(&mut self, name: &str, source: OpenSource, preview: PreviewSlot) -> Result<Started> {
+        enum Stage {
+            Preview(Arc<Vec<u8>>),
+            Parse(Arc<Vec<u8>>),
+            Decode(Box<photocraft_io::PsdOpen>),
+            Prepare(Box<photocraft_io::PsdBuilt>),
+            Done,
+        }
+        let OpenSource::Bytes(bytes) = source else {
+            return self.start_open_inner(name, source, true, Some(preview));
+        };
+        let label = format!("Opening {name}");
+        let name_w = name.to_string();
+        let mut stage = Stage::Preview(bytes);
+        self.start_stepped_job(
+            OPEN_JOB,
+            json!({"name": name}),
+            &label,
+            move |ctx, more| {
+                loop {
+                    stage = match std::mem::replace(&mut stage, Stage::Done) {
+                        Stage::Preview(bytes) => {
+                            ctx.progress(0.0, "Reading");
+                            put_preview(&preview, open_preview(&OpenSource::Bytes(Arc::clone(&bytes))));
+                            // Shown before anything else is done.
+                            stage = Stage::Parse(bytes);
+                            return None;
+                        }
+                        Stage::Parse(bytes) => {
+                            ctx.progress(0.02, "Decoding");
+                            match photocraft_io::PsdOpen::shared(&name_w, &bytes) {
+                                Some(Ok(open)) => Stage::Decode(Box::new(open)),
+                                Some(Err(e)) => return Some(Err(open_error(e))),
+                                None => return Some(Err(EngineError::Other(format!("{name_w} is not a PSD/PSB file")))),
+                            }
+                        }
+                        Stage::Decode(mut open) => {
+                            if !open.decoded() {
+                                open.step(more);
+                                ctx.progress(0.05 + 0.8 * open.progress(), "Decoding");
+                                stage = Stage::Decode(open);
+                                return None;
+                            }
+                            // The layers, their type and the rest each get a step (a frame).
+                            match ctx.stage(0.85, 0.9, "Decoding", |ctl| open.build(ctl)) {
+                                Ok(built) => {
+                                    stage = Stage::Prepare(Box::new(built));
+                                    return None;
+                                }
+                                Err(e) => return Some(Err(open_error(e))),
+                            }
+                        }
+                        Stage::Prepare(mut built) => {
+                            ctx.progress(0.9, "Preparing layers");
+                            if !built.prepare(more) {
+                                stage = Stage::Prepare(built);
+                                return None;
+                            }
+                            return Some(prepare_opened(ctx, built.finish()));
+                        }
+                        Stage::Done => return Some(Err(EngineError::Other("the open already ended".into()))),
+                    };
+                    if !more() {
+                        return None;
+                    }
                 }
-                let (index, color) = s.open_document(r.document, None);
-                // Persisted IDs can collide: report the identity the session actually admitted.
-                let id = s.documents().get(index).ok_or(EngineError::NoDocument)?.doc.id;
-                if let Some(st) = s.active_mut() {
-                    st.source_read_only = r.source_read_only;
-                }
-                Ok(json!({"document": index, "docId": id.0, "name": name_a, "warnings": r.warnings, "color": color}))
             },
+            open_apply(name, true),
         )
     }
 
@@ -849,6 +1016,66 @@ impl Session {
         }
     }
 
+    /// [`Self::start_job`] for work done a step at a time on this thread, between frames: the
+    /// single-threaded browser build, where a job would otherwise hold the page until it is done.
+    /// [`Self::step_jobs`] (the shell calls it every frame) calls `step` until it returns the
+    /// result; `step` does a little and returns `None` while its `more` says there is time left.
+    /// A job card with progress and Esc to cancel like any other; not journaled, no document
+    /// locked. [`Self::wait_job`] runs it to the end.
+    pub fn start_stepped_job<T: Send + 'static>(
+        &mut self,
+        command: &str,
+        params: Value,
+        label: &str,
+        mut step: impl FnMut(&JobCtx, &dyn Fn() -> bool) -> Option<Result<T>> + Send + 'static,
+        apply: impl FnOnce(&mut Session, T) -> Result<Value> + Send + 'static,
+    ) -> Result<Started> {
+        type Slot<T> = Arc<wasm_sync::Mutex<Option<(JobCtx, Completion<T>)>>>;
+        let slot: Slot<T> = Arc::default();
+        let put = Arc::clone(&slot);
+        let started = self.start_async_job(
+            command,
+            params,
+            label,
+            move |ctx, done| *put.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((ctx.clone(), done)),
+            apply,
+        )?;
+        let Started::Job(id) = started else { return Ok(started) };
+        let stepper: Stepper = Box::new(move |more| {
+            let mut held = slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            // Not handed over yet (the work starts on a thread natively): try again next time.
+            let Some((ctx, _)) = held.as_ref() else { return false };
+            if ctx.cancelled() {
+                return true;
+            }
+            let ctx = ctx.clone();
+            match step(&ctx, more) {
+                None => false,
+                Some(r) => {
+                    if let Some((_, done)) = held.take() {
+                        done.finish(r);
+                    }
+                    true
+                }
+            }
+        });
+        self.jobs.steppers.push((id, stepper));
+        Ok(Started::Job(id))
+    }
+
+    /// Advance the jobs done a step at a time ([`Self::start_stepped_job`]) while `more` says
+    /// there is time (each does at least a step). Their results are applied by
+    /// [`Self::poll_jobs`].
+    pub fn step_jobs(&mut self, more: &dyn Fn() -> bool) {
+        let running: Vec<JobId> = self.jobs.running.iter().map(|r| r.id).collect();
+        self.jobs.steppers.retain_mut(|(id, step)| running.contains(id) && !step(more));
+    }
+
+    /// Whether any job is done a step at a time by [`Self::step_jobs`].
+    pub fn has_stepped_jobs(&self) -> bool {
+        !self.jobs.steppers.is_empty()
+    }
+
     /// [`Self::start_job`] that runs `work` off the page's thread in the browser threads build
     /// too (on the rayon Web Worker pool), so a long job (a save) never freezes the page. `work`
     /// must not touch the browser's APIs, which only the page's thread may call. Inline in the
@@ -892,6 +1119,19 @@ impl Session {
     /// Block until job `id` ends, apply it, and return its result (the control channel's and
     /// MCP's default `wait`, and the CLI). `Err(Cancelled)` if it was cancelled.
     pub fn wait_job(&mut self, id: JobId) -> Result<Value> {
+        // A job done a step at a time is done here, to the end.
+        if let Some(i) = self.jobs.steppers.iter().position(|(j, _)| *j == id) {
+            let (_, mut step) = self.jobs.steppers.remove(i);
+            let mut tries = 0u32;
+            while !step(&|| true) {
+                // Its work hands it over from a thread natively: wait for that.
+                tries += 1;
+                if tries > 10_000 {
+                    break;
+                }
+                std::thread::yield_now();
+            }
+        }
         if let Some(i) = self.jobs.running.iter().position(|r| r.id == id) {
             let job = self.jobs.running.remove(i);
             let stopped = || Err(EngineError::Other(format!("`{}` stopped unexpectedly", job.label)));

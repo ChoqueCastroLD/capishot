@@ -156,14 +156,16 @@ impl PhotocraftApp {
         self.store_thumb(ctx, key, rev, img)
     }
 
-    /// Whether another thumbnail may be rebuilt this frame: at most [`THUMBS_PER_FRAME`], so
-    /// scrolling a long Layers panel or an edit touching many layers spreads the work over frames
+    /// Whether another thumbnail may be rebuilt this frame: at most [`THUMBS_PER_FRAME`], and
+    /// none started more than [`THUMB_MS`] after the frame's first, so scrolling a long Layers
+    /// panel, an edit touching many layers or a document just opened spreads the work over frames
     /// (the rest keep their previous image, or none yet, and the next frame continues).
     fn thumb_budget(&mut self, ctx: &egui::Context) -> bool {
+        let now = crate::gpu_canvas::now_ms();
         if self.thumb_frame.0 != self.frame {
-            self.thumb_frame = (self.frame, 0);
+            self.thumb_frame = (self.frame, 0, now);
         }
-        if self.thumb_frame.1 >= THUMBS_PER_FRAME {
+        if self.thumb_frame.1 >= THUMBS_PER_FRAME || (self.thumb_frame.1 > 0 && now - self.thumb_frame.2 > THUMB_MS) {
             self.perf_counters.thumbs_deferred += 1;
             ctx.request_repaint();
             return false;
@@ -213,6 +215,9 @@ pub(crate) struct SnapshotBands {
 
 /// Layer and mask thumbnails rebuilt per frame at most (see `PhotocraftApp::thumb_budget`).
 pub const THUMBS_PER_FRAME: u32 = 8;
+
+/// Milliseconds of a frame thumbnails may take: no more are started after that.
+const THUMB_MS: f64 = 4.0;
 
 /// Cheap identity of a surface's pixels: its default (untouched) pixel, tile coordinates and
 /// `Arc` pointers. The default pixel matters: inverting or filling a tile-less mask only changes

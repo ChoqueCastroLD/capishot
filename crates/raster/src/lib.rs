@@ -36,6 +36,17 @@ impl fmt::Display for AllocationError {
 
 impl std::error::Error for AllocationError {}
 
+/// Tiles of a surface found to be one pixel value throughout ([`Surface::prune_in`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct UniformAt(Vec<TileCoord>);
+
+impl UniformAt {
+    /// Adds the tiles of `other` (found on the same surface).
+    pub fn extend(&mut self, other: UniformAt) {
+        self.0.extend(other.0);
+    }
+}
+
 /// One shared tile per pixel value (and tile size), for [`Surface::share_uniform_tiles`].
 #[derive(Debug, Default)]
 pub struct TileInterner {
@@ -554,6 +565,46 @@ impl Surface {
             if !px.all(|p| p == p0) {
                 continue;
             }
+            let shared = interner.tiles.entry(t.data.len()).or_default().entry(p0.to_vec()).or_insert_with(|| t.clone());
+            if !Arc::ptr_eq(shared, t) {
+                saved += t.data.len();
+                *t = shared.clone();
+            }
+        }
+        saved
+    }
+
+    /// [`Self::prune`] for the tiles `r` touches (the tiles written by one band of a file being
+    /// decoded): those entirely the default pixel are dropped. Returns the others there that are
+    /// one pixel value throughout, for [`Self::share_uniform_tiles_at`], so neither scan has to be
+    /// done again over the whole surface.
+    pub fn prune_in(&mut self, r: Rect) -> UniformAt {
+        let bpp = self.default_pixel.len();
+        let mut uniform = Vec::new();
+        for tc in r.tiles() {
+            let Some(t) = self.tiles.get(&tc) else { continue };
+            let mut px = t.data.chunks_exact(bpp);
+            let Some(p0) = px.next() else { continue };
+            if !px.all(|p| p == p0) {
+                continue;
+            }
+            if *p0 == *self.default_pixel {
+                self.tiles.remove(&tc);
+            } else {
+                uniform.push(tc);
+            }
+        }
+        UniformAt(uniform)
+    }
+
+    /// [`Self::share_uniform_tiles`] for the tiles [`Self::prune_in`] found uniform (on this
+    /// surface, unchanged since): without scanning them again.
+    pub fn share_uniform_tiles_at(&mut self, at: &UniformAt, interner: &mut TileInterner) -> usize {
+        let bpp = self.format.bytes_per_pixel();
+        let mut saved = 0;
+        for tc in &at.0 {
+            let Some(t) = self.tiles.get_mut(tc) else { continue };
+            let Some(p0) = t.data.get(..bpp) else { continue };
             let shared = interner.tiles.entry(t.data.len()).or_default().entry(p0.to_vec()).or_insert_with(|| t.clone());
             if !Arc::ptr_eq(shared, t) {
                 saved += t.data.len();

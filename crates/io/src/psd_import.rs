@@ -8,7 +8,7 @@ use photocraft_doc::{
     TextLayer,
 };
 use photocraft_geom::{Rect, Size, TILE_SIZE};
-use photocraft_psd::layer::{CHANNEL_REAL_USER_MASK, CHANNEL_TRANSPARENCY, CHANNEL_USER_MASK};
+use photocraft_psd::layer::{CHANNEL_REAL_USER_MASK, CHANNEL_USER_MASK};
 use photocraft_psd::resources::ids;
 use photocraft_psd::tagged::BlockData;
 use photocraft_psd::{ColorMode as PsdMode, LayerNode, LayerRecord, PsdFile, TaggedBlock};
@@ -82,31 +82,16 @@ pub(crate) struct Ctx<'a> {
     /// Uniform tiles shared across imported layers.
     pub uniform: photocraft_raster::TileInterner,
     pub total: usize,
+    /// Records' pixels decoded ahead of the walk ([`decode`]), by record index, taken once.
+    pub pre: Vec<Option<decode::Decoded>>,
+    /// The record the walk is at (its pre-decoded pixels are the ones [`Self::record_surface`]
+    /// takes).
+    pub at: Option<usize>,
+    /// Progress the walk starts from (the pre-decoding reported the rest).
+    pub walk_from: f32,
 }
 
-/// Bytes of interleaved pixels a band decoded into tiles at once aims at: whole layers up to this
-/// size decode in one band, larger ones in bands of whole tile rows.
-const BAND_BYTES: usize = 32 << 20;
-
-/// Row ranges (`0..h`, relative to a layer whose first row is at document row `top`) to decode a
-/// layer in: each ends on a tile row boundary, so no tile is written by two bands, and holds
-/// about [`BAND_BYTES`] of `row_bytes`-byte rows.
-fn band_rows(top: i32, h: usize, row_bytes: usize) -> Vec<(usize, usize)> {
-    let tile = TILE_SIZE as usize;
-    let rows = (BAND_BYTES / row_bytes.max(1)).max(tile) / tile * tile;
-    // The first band ends at the first tile boundary at least `rows` rows in.
-    let into_tile = usize::try_from(top.rem_euclid(TILE_SIZE)).unwrap_or(0);
-    let mut out = Vec::new();
-    let mut r0 = 0;
-    let mut r1 = rows - into_tile;
-    while r0 < h {
-        let end = r1.min(h);
-        out.push((r0, end));
-        r0 = end;
-        r1 = end + rows;
-    }
-    out
-}
+pub(crate) mod decode;
 
 fn import_format(file: &PsdFile) -> (ColorMode, bool, bool, SampleType) {
     let mode = doc_mode(file.header.color_mode).unwrap_or(ColorMode::Rgb);
@@ -114,6 +99,13 @@ fn import_format(file: &PsdFile) -> (ColorMode, bool, bool, SampleType) {
     let multichannel = mode == ColorMode::Multichannel && file.header.depth != 1;
     let depth = if layered || multichannel { sample_for_depth(file.header.depth) } else { SampleType::U8 };
     (mode, layered, multichannel, depth)
+}
+
+/// The pixel format a layered file's layers are decoded in; `None` when it opens flattened or
+/// as multichannel (no layers are read).
+pub(crate) fn layered_pixel_format(file: &PsdFile) -> Option<PixelFormat> {
+    let (mode, layered, multichannel, depth) = import_format(file);
+    (layered && !multichannel).then(|| Document::pixel_format_for(mode, depth))
 }
 
 fn doc_mode(m: PsdMode) -> Option<ColorMode> {
@@ -256,71 +248,37 @@ impl Ctx<'_> {
     }
 
     /// Builds a raster surface from the layer channels, leaving the surface empty if
-    /// any present channel fails to decode rather than inventing replacement pixels.
+    /// any present channel fails to decode rather than inventing replacement pixels. Pixels
+    /// decoded ahead of the walk ([`decode`]) are taken as they are.
     fn record_surface(&mut self, rec: &LayerRecord, name: &str) -> Surface {
-        let r = rec.rect;
         // Once the file couldn't be read the open fails: nothing more is decoded.
-        if r.is_empty() || r.size().is_err() || self.read_error.is_some() {
+        if self.read_error.is_some() {
             return Surface::new(self.fmt);
         }
-        let (w, h) = r.size().unwrap_or((0, 0));
-        let s = self.fmt.sample;
-        let (depth, version) = (self.file.header.depth, self.file.header.version);
-        let ids: Vec<i16> = (0..self.cc as i16).chain([CHANNEL_TRANSPARENCY]).collect();
-        // A decoder per channel present (a ZIP channel is inflated here, the channels side by
+        let layers = self.file.layers();
+        let pre = self.at.filter(|&i| layers.get(i).is_some_and(|r| std::ptr::eq(r, rec))).and_then(|i| self.pre.get_mut(i)).and_then(Option::take);
+        // A decoder per channel present (a ZIP channel is inflated there, the channels side by
         // side); the rows are then decoded and interleaved a band at a time straight into the
         // tiles, so no buffer of the whole layer (planes or interleaved) is ever held.
-        // par_map reuses the crate's worker pool (one OS thread per channel per layer would
-        // spawn thousands on a file with many layers).
-        let decoders: Vec<Option<photocraft_psd::Result<photocraft_psd::RowDecoder<'_>>>> =
-            crate::pixels::par_map(ids.to_vec(), |id| rec.channel(id).map(|ch| ch.row_decoder(w, h, depth, version)));
-        let mut failed = false;
-        for (&id, d) in ids.iter().zip(&decoders) {
-            if let Some(Err(e)) = d {
-                self.channel_failed(name, id, e);
-                failed = true;
+        let decoded = pre.unwrap_or_else(|| decode::decode_record(rec, decode::Layout::of(self.file, self.fmt), true));
+        match decoded {
+            decode::Decoded::Pixels(mut surf, uniform) => {
+                // A white background, a solid fill's cache: one tile per value, shared across layers.
+                surf.share_uniform_tiles_at(&uniform, &mut self.uniform);
+                surf
             }
-        }
-        // A channel that is in the file but could not be decoded leaves the layer empty, as the
-        // warning says. Filling in for it would paint an opaque black layer over the document.
-        if failed {
-            return Surface::new(self.fmt);
-        }
-        // Only decoded channel data justifies a buffer: the decoders bound their output by the
-        // bytes in the file, but a bare rectangle can declare 300000² pixels in a few bytes (#755).
-        if decoders.iter().all(Option::is_none) {
-            self.warn_unreadable_data(format!("layer \"{name}\": no channel data for its {w}x{h} bounds; treated as empty"));
-            return Surface::new(self.fmt);
-        }
-        let mut fill: Vec<Vec<u8>> = vec![zero_sample(s); self.cc];
-        fill.push(max_sample(s));
-        let mut invert = vec![self.cmyk; self.cc];
-        invert.push(false);
-        let mut surf = Surface::new(self.fmt);
-        for (b0, b1) in band_rows(r.top, h, w * (self.cc + 1) * s.bytes()) {
-            let planes: Vec<Option<photocraft_psd::Result<Vec<u8>>>> =
-                crate::pixels::par_map(decoders.iter().collect(), |d| d.as_ref().and_then(|d| d.as_ref().ok()).map(|d| d.rows(b0, b1)));
-            let mut refs: Vec<Option<&[u8]>> = Vec::with_capacity(planes.len());
-            for (&id, p) in ids.iter().zip(&planes) {
-                match p {
-                    Some(Err(e)) => {
-                        self.channel_failed(name, id, e);
-                        return Surface::new(self.fmt);
-                    }
-                    Some(Ok(p)) => refs.push(Some(p)),
-                    None => refs.push(None),
+            decode::Decoded::Failed(failed) => {
+                for (id, e) in &failed {
+                    self.channel_failed(name, *id, e);
                 }
+                Surface::new(self.fmt)
             }
-            let mut bytes = interleave(&refs, &fill, w * (b1 - b0), s, &invert);
-            if self.fmt.mode == ColorMode::Lab && s == SampleType::U16 {
-                crate::pixels::lab16_chroma(&mut bytes, self.cc + 1, true);
+            decode::Decoded::NoData(w, h) => {
+                self.warn_unreadable_data(format!("layer \"{name}\": no channel data for its {w}x{h} bounds; treated as empty"));
+                Surface::new(self.fmt)
             }
-            surf.write_interleaved(Rect::new(r.left, r.top + b0 as i32, r.right, r.top + b1 as i32), &bytes);
+            decode::Decoded::Empty => Surface::new(self.fmt),
         }
-        surf.prune();
-        // A white background, a solid fill's cache: one tile per value, shared across layers.
-        surf.share_uniform_tiles(&mut self.uniform);
-        surf
     }
 
     /// Restores the selected user mask from its channel and metadata, recording an
@@ -692,10 +650,14 @@ impl Ctx<'_> {
             .take_while(|_| !ctl.cancelled())
             .map(|n| match n {
                 LayerNode::Layer { index } => {
+                    self.at = Some(*index);
                     let l = self.layer_from_record(&layers[*index]);
+                    self.at = None;
                     self.done += 1;
-                    // Layers are 10–95 % of an open (the merged image and channels the rest).
-                    self.ctl.progress(0.1 + 0.85 * self.done as f32 / self.total.max(1) as f32);
+                    // Layers are 10–95 % of an open (the merged image and channels the rest),
+                    // or what the pre-decoding left of it.
+                    let from = self.walk_from.clamp(0.1, 0.95);
+                    self.ctl.progress(from + (0.95 - from) * self.done as f32 / self.total.max(1) as f32);
                     l
                 }
                 LayerNode::Group { index, children, .. } => {
@@ -972,10 +934,14 @@ pub fn psd_to_document_with(file: &PsdFile, ctl: &photocraft_raster::Interrupt) 
 /// file). The file's channel data may still be in its source ([`PsdFile::from_source`]): the
 /// fourth value is a failure to read it, which fails the open (a layer is never left empty
 /// because its file became unreadable while it opened).
-pub(crate) fn psd_to_document_owned(
+///
+/// Records' pixels already decoded (`pre`, by record index; see [`decode`]) are taken instead of
+/// decoded by the walk.
+pub(crate) fn psd_to_document_predecoded(
     mut file: PsdFile,
     ctl: &photocraft_raster::Interrupt,
     decoded: Option<photocraft_psd::Result<Vec<u8>>>,
+    pre: Vec<Option<decode::Decoded>>,
 ) -> Option<(Document, Vec<String>, bool, Option<String>)> {
     let global = file
         .global_blocks
@@ -986,7 +952,7 @@ pub(crate) fn psd_to_document_owned(
             (b.signature, b.key, Arc::new(data))
         })
         .collect();
-    psd_to_document_global(&file, ctl, decoded, global)
+    psd_to_document_global(&file, ctl, decoded, global, pre)
 }
 
 /// Whether `file` stores spot planes the way earlier Capishot versions (releases 0.1.0 to
@@ -1158,7 +1124,7 @@ pub(crate) fn psd_to_document_decoded_integrity(
     decoded: Option<photocraft_psd::Result<Vec<u8>>>,
 ) -> Option<(Document, Vec<String>, bool)> {
     let global = file.global_blocks.iter().map(|b| (b.signature, b.key, Arc::new(b.data.clone()))).collect();
-    psd_to_document_global(file, ctl, decoded, global).map(|(doc, warnings, damaged, _)| (doc, warnings, damaged))
+    psd_to_document_global(file, ctl, decoded, global, Vec::new()).map(|(doc, warnings, damaged, _)| (doc, warnings, damaged))
 }
 
 fn psd_to_document_global(
@@ -1166,6 +1132,7 @@ fn psd_to_document_global(
     ctl: &photocraft_raster::Interrupt,
     decoded: Option<photocraft_psd::Result<Vec<u8>>>,
     global: Vec<PsdGlobalBlock>,
+    pre: Vec<Option<decode::Decoded>>,
 ) -> Option<(Document, Vec<String>, bool, Option<String>)> {
     let (mode, layered, multichannel, depth) = import_format(file);
     let h = &file.header;
@@ -1200,6 +1167,9 @@ fn psd_to_document_global(
         done: 0,
         uniform: Default::default(),
         total: file.layers().len(),
+        walk_from: if pre.is_empty() { 0.1 } else { 0.85 },
+        pre,
+        at: None,
     };
     for (_, key, data) in cx.global.clone().iter().filter(|(_, key, _)| matches!(key, b"FEid" | b"FXid")) {
         // Smart-filter caches can be large: a cancelled open stops between blocks.

@@ -343,7 +343,7 @@ fn the_opening_card_keeps_a_long_name_and_cancel_inside() {
     let long = "a7rv-test_2024_02_17_shot_30_3705_with_an_even_longer_suffix_that_never_ends.psb";
     for name in ["short.psd", long] {
         h.state_mut().jobs.opens.clear();
-        h.state_mut().jobs.opens.push(crate::jobs_ui::OpenTab { job, name: name.to_string(), path: None, slot: None, order: None });
+        h.state_mut().jobs.opens.push(crate::jobs_ui::OpenTab { job, name: name.to_string(), path: None, slot: None, order: None, preview: None, texture: None });
         h.state_mut().jobs.focus = Some(job);
         h.run_steps(4);
         let r = crate::jobs_ui::open_card_rects(&h.ctx).expect("the opening card was drawn");
@@ -357,6 +357,55 @@ fn the_opening_card_keeps_a_long_name_and_cancel_inside() {
     h.state_mut().jobs.focus = None;
     h.state_mut().jobs.opens.clear();
     h.run_steps(4);
+}
+
+/// An opening PSD's merged image shows in its tab as soon as the job has read it, the card below
+/// it; before that, the card alone in the middle. The texture goes with the tab.
+#[test]
+fn the_opening_card_shows_the_preview_once_read() {
+    let mut h = app_harness();
+    let gate = Arc::new(AtomicBool::new(false));
+    let job = slow_job(h.state_mut(), &gate);
+    let slot: photocraft_engine::jobs::PreviewSlot = Arc::default();
+    let tab = crate::jobs_ui::OpenTab { job, name: "page.psd".into(), path: None, slot: None, order: None, preview: Some(Arc::clone(&slot)), texture: None };
+    h.state_mut().jobs.opens.push(tab);
+    h.state_mut().jobs.focus = Some(job);
+    h.run_steps(3);
+    let before = crate::jobs_ui::open_card_rects(&h.ctx).expect("the opening card was drawn");
+    assert!(h.state().jobs.opens[0].texture.is_none(), "nothing read yet");
+    let (w, h_) = (60u32, 90u32);
+    let rgba: Vec<u8> = (0..w * h_).flat_map(|i| [(i % 251) as u8, 40, 200, 255]).collect();
+    *slot.lock().unwrap() =
+        Some(photocraft_engine::jobs::OpenPreview { width: w, height: h_, doc_width: 600, doc_height: 900, gray: false, icc: None, rgba });
+    h.run_steps(3);
+    assert!(h.state().jobs.opens[0].texture.is_some(), "the preview was uploaded");
+    let after = crate::jobs_ui::open_card_rects(&h.ctx).expect("the opening card was drawn");
+    assert!(after.card.center().y > before.card.center().y + 50.0, "the card moved below the page: {:?} → {:?}", before.card, after.card);
+    let inspect = crate::jobs_ui::inspect(h.state());
+    assert_eq!(inspect["opening"][0]["preview"], true);
+    gate.store(true, Ordering::Relaxed);
+    h.state_mut().jobs.focus = None;
+    h.state_mut().jobs.opens.clear();
+    h.run_steps(4);
+}
+
+/// The single-threaded browser build (no background jobs, opens a step at a time): a PSD handed
+/// over opens as a job with an opening tab, not inline; other files still open inline.
+#[test]
+fn handed_over_psds_open_as_a_job_when_opens_are_stepped() {
+    let mut h = app_harness();
+    h.state_mut().background_jobs = false;
+    h.state_mut().stepped_opens = true;
+    let docs = h.state().session.documents().len();
+    h.state_mut().open_owned("page.psd", psd_bytes()).unwrap();
+    assert_eq!(h.state().jobs.opens.len(), 1, "an opening tab");
+    assert_eq!(h.state().session.documents().len(), docs, "not open yet");
+    let t = Instant::now();
+    while !h.state().jobs.opens.is_empty() && t.elapsed() < Duration::from_secs(30) {
+        h.step();
+    }
+    assert_eq!(h.state().session.documents().len(), docs + 1);
+    assert!(h.state().jobs.opens.is_empty());
 }
 
 #[test]

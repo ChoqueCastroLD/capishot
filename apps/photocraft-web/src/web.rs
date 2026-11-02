@@ -305,6 +305,8 @@ impl Boot {
         // opening and saving files…) on its worker pool, with progress and Esc to cancel, as the
         // desktop does: the page's thread never waits for them.
         app.background_jobs = cfg!(target_feature = "atomics");
+        // The single-threaded build opens a PSD a step at a time between frames instead.
+        app.stepped_opens = !app.background_jobs;
         // Reloaded after the graphics context was lost (gpu_lost.rs): what was open comes back.
         let lost_notice = crate::gpu_lost::take_notice();
         if (app.session.prefs().file_handling.recover_on_launch || lost_notice.is_some()) && photopea.is_none() && !hosted {

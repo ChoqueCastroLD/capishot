@@ -34,6 +34,21 @@ use crate::{ControlResponse, ExportSettings, PhotocraftApp, SaveFileFn, notices}
 /// Delay before the modal progress dialog appears (quick jobs finish without it).
 pub const DIALOG_DELAY_MS: f64 = 250.0;
 
+/// Time a frame gives jobs done a step at a time on the UI thread (`Session::step_jobs`): three
+/// times what the rest of the last frame took, within these bounds. A frame that is quick to draw
+/// keeps the page at display rate; one slow to draw (a software-rendered page) doesn't make the
+/// job take many times longer than it would in one go.
+const STEP_BUDGET_MS: (f64, f64) = (8.0, 48.0);
+
+/// [`STEP_BUDGET_MS`] for a frame starting at `now`, from the last one (`JobsUi::stepped`).
+fn step_budget(jobs: &mut JobsUi, now: f64) -> f64 {
+    let (min, max) = STEP_BUDGET_MS;
+    match jobs.stepped {
+        Some((start, took)) => (3.0 * (now - start - took)).clamp(min, max),
+        None => min,
+    }
+}
+
 /// A file opening in the background: shown as a document tab with progress.
 #[derive(Clone, Debug)]
 pub struct OpenTab {
@@ -46,6 +61,21 @@ pub struct OpenTab {
     pub slot: Option<usize>,
     /// Its place in a set of files opened together, when it is one of several (see [`OpenOrder`]).
     pub order: Option<OpenOrder>,
+    /// A PSD/PSB's merged image, reduced, once the job has read it: shown in the tab while the
+    /// layers are built.
+    pub preview: Option<photocraft_engine::jobs::PreviewSlot>,
+    /// The preview on the GPU, and the document's size (drawn by [`open_card`]).
+    pub texture: Option<PreviewTexture>,
+}
+
+/// An opening file's preview on the GPU, and its document's size.
+#[derive(Clone)]
+pub struct PreviewTexture(egui::TextureHandle, egui::Vec2);
+
+impl std::fmt::Debug for PreviewTexture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("PreviewTexture").field(&self.1).finish()
+    }
 }
 
 /// A file's place in a set opened together (File › Open with several files, paths on the command
@@ -163,6 +193,9 @@ pub struct JobsUi {
     pub(crate) waiters: Vec<(JobId, Sender<ControlResponse>)>,
     /// Background opens, in tab order.
     pub opens: Vec<OpenTab>,
+    /// When the last frame's step of the jobs done a step at a time started, and how long it
+    /// took (see [`STEP_BUDGET_MS`]).
+    stepped: Option<(f64, f64)>,
     /// Sets of files opened together that still have members opening (see [`OpenOrder`]).
     pub(crate) batches: Vec<OpenBatch>,
     /// The id of the next set.
@@ -424,12 +457,13 @@ pub fn start_open_deep(app: &mut PhotocraftApp, name: &str, path: Option<String>
 
 fn start_open_inner(app: &mut PhotocraftApp, name: &str, path: Option<String>, source: OpenSource, deep: bool) -> Result<(), String> {
     let name = &app.open_name(name);
-    let started = if deep { app.session.start_open_deep(name, source) } else { app.session.start_open_for_user(name, source) };
+    let preview: photocraft_engine::jobs::PreviewSlot = Arc::default();
+    let started = if deep { app.session.start_open_deep(name, source) } else { app.session.start_open_with_preview(name, source, Arc::clone(&preview)) };
     match started.map_err(|e| e.to_string())? {
         // Inline (wasm): finish now, like a background open that ended at once.
         Started::Done(v) => finish_open(app, name, path.as_deref(), &v, None),
         Started::Job(job) => {
-            app.jobs.opens.push(OpenTab { job, name: name.to_string(), path, slot: None, order: None });
+            app.jobs.opens.push(OpenTab { job, name: name.to_string(), path, slot: None, order: None, preview: (!deep).then_some(preview), texture: None });
             app.jobs.focus = Some(job);
             app.ui.chrome.home = None;
             app.ui.status = crate::i18n::fmt(tl!("Opening {name}…"), &[("name", name)]);
@@ -610,6 +644,17 @@ pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
     if app.session.history_cache_busy() {
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
+    }
+    // Jobs done a step at a time on this thread (opening a PSD in the single-threaded browser
+    // build): a few milliseconds of them per frame.
+    if app.session.has_stepped_jobs() {
+        let _s = crate::perf_span::span("jobs.step");
+        let now = crate::telemetry::now_ms();
+        let until = now + step_budget(&mut app.jobs, now);
+        app.session.step_jobs(&|| crate::telemetry::now_ms() < until);
+        app.jobs.stepped = Some((now, crate::telemetry::now_ms() - now));
+    } else {
+        app.jobs.stepped = None;
     }
     let events = {
         let _s = crate::perf_span::span("jobs.apply");
@@ -1162,11 +1207,15 @@ pub fn open_card(app: &mut PhotocraftApp, ui: &mut egui::Ui, job: JobId) {
     let t = Tokens::get(ui.ctx());
     let area = ui.available_rect_before_wrap();
     ui.painter().rect_filled(area, 0.0, t.canvas);
+    // A PSD's merged image, as soon as the job has read it: the page shows at once, the card
+    // below it while the layers are built.
+    let shown = app.jobs.opens.iter_mut().find(|o| o.job == job).is_some_and(|tab| preview_image(ui, area, tab));
     // Centre the card at the height its content needed last frame; the background is painted
     // once the rows are laid out, so a taller content (a long translation) still gets a card.
     let height_id = egui::Id::unique(("open-card-height", job));
     let height = ui.ctx().data(|d| d.get_temp::<f32>(height_id)).unwrap_or(OPEN_CARD_MIN_HEIGHT);
-    let card = Rect::from_center_size(area.center(), vec2(OPEN_CARD_WIDTH, height));
+    let centre = if shown { egui::pos2(area.center().x, area.bottom() - height / 2.0 - OPEN_CARD_PAD) } else { area.center() };
+    let card = Rect::from_center_size(centre, vec2(OPEN_CARD_WIDTH, height));
     let fill = ui.painter().add(egui::Shape::Noop);
     let border = ui.painter().add(egui::Shape::Noop);
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(card.shrink(OPEN_CARD_PAD)));
@@ -1205,6 +1254,35 @@ pub fn open_card(app: &mut PhotocraftApp, ui: &mut egui::Ui, job: JobId) {
     }
 }
 
+/// Where a document of `size` pixels shows in a canvas `area` at fit on screen, as the canvas
+/// will show it once open (the preview it replaces doesn't jump).
+fn fit_rect(area: Rect, size: egui::Vec2, ppp: f32) -> Rect {
+    // As `view_xform::fit_view`: 20 points around, never past one image pixel per screen pixel.
+    let k = ((area.width() - 40.0) / size.x.max(1.0)).min((area.height() - 40.0) / size.y.max(1.0)).min(1.0 / ppp.max(0.01)).max(0.0);
+    Rect::from_center_size(area.center(), size * k)
+}
+
+/// Draws an opening PSD's preview at fit in `area` (true once there is one), uploading it once
+/// (the texture goes with the tab).
+fn preview_image(ui: &egui::Ui, area: Rect, tab: &mut OpenTab) -> bool {
+    if tab.texture.is_none() {
+        let Some(slot) = &tab.preview else { return false };
+        let guard = slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(p) = guard.as_ref() else { return false };
+        let (w, h) = (p.width as usize, p.height as usize);
+        if w == 0 || h == 0 || p.rgba.len() != w * h * 4 {
+            return false;
+        }
+        let img = egui::ColorImage::from_rgba_unmultiplied([w, h], &p.rgba);
+        let tex = ui.ctx().load_texture(format!("open-preview-{}", tab.job.0), img, egui::TextureOptions::LINEAR);
+        tab.texture = Some(PreviewTexture(tex, vec2(p.doc_width as f32, p.doc_height as f32)));
+    }
+    let Some(PreviewTexture(tex, size)) = &tab.texture else { return false };
+    let r = fit_rect(area, *size, ui.ctx().pixels_per_point());
+    ui.painter().image(tex.id(), r, Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+    true
+}
+
 /// Open tabs for the tab strips: (job, title, progress).
 pub fn open_tabs(app: &PhotocraftApp) -> Vec<(JobId, String, f32)> {
     app.jobs.opens.iter().map(|o| (o.job, o.name.clone(), app.session.job(o.job).map_or(0.0, |j| j.progress))).collect()
@@ -1222,7 +1300,7 @@ pub fn tab_underline(ui: &egui::Ui, r: Rect, frac: f32, t: &Tokens) {
 pub fn inspect(app: &PhotocraftApp) -> Value {
     json!({
         "running": app.session.jobs(),
-        "opening": app.jobs.opens.iter().map(|o| json!({"job": o.job.0, "name": o.name, "path": o.path})).collect::<Vec<_>>(),
+        "opening": app.jobs.opens.iter().map(|o| json!({"job": o.job.0, "name": o.name, "path": o.path, "preview": o.preview.as_ref().is_some_and(|p| p.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some())})).collect::<Vec<_>>(),
         "saving": app.jobs.saves.iter().map(|s| json!({"job": s.job.0, "path": s.path})).collect::<Vec<_>>(),
         "focus": app.jobs.focus.map(|j| j.0),
         "background": app.background_jobs,

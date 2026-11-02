@@ -84,7 +84,10 @@ impl PhotocraftApp {
         let name = &self.open_name(name);
         // Decoded on a worker: a tab with progress appears now, the document when it's ready
         // (warnings are shown then).
-        if self.background_jobs {
+        // A PSD handed over (the single-threaded browser build): opened a step at a time between
+        // frames, its merged image shown meanwhile, as a background open shows it.
+        let stepped = self.stepped_opens && matches!(data, OpenData::Shared(_)) && photocraft_io::is_psd(bytes);
+        if self.background_jobs || stepped {
             jobs_ui::start_open(self, name, path.map(str::to_string), photocraft_engine::jobs::OpenSource::Bytes(data.shared()))?;
             return Ok(Vec::new());
         }

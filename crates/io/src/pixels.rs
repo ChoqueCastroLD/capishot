@@ -297,6 +297,20 @@ pub fn par_map<T: Send, R: Send>(items: Vec<T>, f: impl Fn(T) -> R + Sync) -> Ve
     })
 }
 
+/// `items.map(f)` on the rayon pool, in order, for many items of uneven size (a file's layers):
+/// the pool's workers share them out. In order here on the single-threaded browser build.
+pub fn pool_map<T: Send, R: Send>(items: Vec<T>, f: impl Fn(T) -> R + Sync + Send) -> Vec<R> {
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
+    {
+        use rayon::prelude::*;
+        items.into_par_iter().map(f).collect()
+    }
+    #[cfg(not(any(not(target_arch = "wasm32"), target_feature = "atomics")))]
+    {
+        items.into_iter().map(f).collect()
+    }
+}
+
 /// [`par_map`] for `parallel` work, else `items.map(f)` here: a few small items finish before
 /// threads would have started.
 pub fn par_map_if<T: Send, R: Send>(parallel: bool, items: Vec<T>, f: impl Fn(T) -> R + Sync + Send) -> Vec<R> {

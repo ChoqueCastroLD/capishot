@@ -434,37 +434,172 @@ pub fn import_shared_for_open_with(
 
 /// The PSD/PSB part of an import, from a parse that takes [`PsdFile::from_bytes_and_merged_recovering`]'s
 /// `want` and `recover`: of the file's bytes, or of the file itself ([`import_file_for_open_with`]).
+/// The layers' pixels are decoded side by side ([`PsdOpen::decode_all`]).
 fn import_psd(
     name: &str,
     ctl: &photocraft_raster::Interrupt,
     damaged: &mut bool,
     parse: impl FnOnce(&dyn Fn(&PsdFile) -> bool, &dyn Fn(&PsdFile) -> bool) -> photocraft_psd::Result<(PsdFile, Option<photocraft_psd::Result<Vec<u8>>>)>,
 ) -> Result<ImportResult, IoError> {
-    // A merged image the import reads is decoded with the parse: a ZIP one is inflated once.
-    // A failed read of the file (one parsed from its source) is a read error, as reading the
-    // whole file first would report it.
-    let (file, merged) =
-        parse(&|f| psd_import::check_group_depth(f).is_ok() && psd_import::merged_needed(f), &psd_import::can_recover_layers).map_err(|e| match e {
-            photocraft_psd::PsdError::Read(msg) => IoError::Read(msg),
-            e => e.into(),
-        })?;
-    // Nesting past the document model's cap could never be saved; reject the file with the
-    // actionable limit.
-    psd_import::check_group_depth(&file)?;
+    let mut open = PsdOpen::parse(name, parse)?;
     ctl.check().map_err(|_| IoError::Cancelled)?;
     ctl.progress(0.05);
-    // Read before the conversion, which moves the global blocks into the document.
-    let txt2 = file.global_blocks.iter().find(|b| &b.key == b"Txt2").and_then(|b| photocraft_text::psd::parse_txt2(&b.data));
-    let (mut document, warnings, psd_damaged, read_error) = psd_import::psd_to_document_owned(file, ctl, merged).ok_or(IoError::Cancelled)?;
-    // The file became unreadable while its layers were read from it (`import_file_for_open_with`):
-    // the open fails, rather than opening with those layers empty.
-    if let Some(e) = read_error {
-        return Err(IoError::Read(e.to_string()));
-    }
+    open.decode_all(ctl)?;
+    let (r, psd_damaged) = open.finish(ctl)?;
     *damaged = psd_damaged;
-    document.name = name.to_string();
-    text_import::prepare(&mut document, txt2.as_ref());
-    Ok(ImportResult { document, warnings, source_read_only: false, preview_only: false })
+    Ok(r)
+}
+
+/// A PSD/PSB being opened in steps: parsed ([`Self::shared`]), its layers' pixels decoded
+/// ([`Self::decode_all`] side by side, or [`Self::step`] a little at a time between frames in the
+/// single-threaded browser build), then turned into the document ([`Self::finish`]). The
+/// document is the one [`import_shared_for_open_with`] returns, however the pixels were decoded.
+pub struct PsdOpen {
+    name: String,
+    file: PsdFile,
+    merged: Option<photocraft_psd::Result<Vec<u8>>>,
+    /// The records with pixels and those decoded so far; `None` for a file opened flattened.
+    stepper: Option<psd_import::decode::Stepper>,
+}
+
+impl std::fmt::Debug for PsdOpen {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PsdOpen").field("name", &self.name).field("progress", &self.progress()).finish()
+    }
+}
+
+impl PsdOpen {
+    /// Parses the PSD/PSB in the shared `bytes` (decoded in place, as by
+    /// [`import_shared_for_open_with`]); `None` when they aren't one (or are a .pcraft).
+    pub fn shared(name: &str, bytes: &std::sync::Arc<Vec<u8>>) -> Option<Result<Self, IoError>> {
+        if has_extension(name, photocraft_format::EXTENSION) || photocraft_format::is_pcraft(bytes) || !is_psd(bytes) {
+            return None;
+        }
+        let source = photocraft_psd::Source::new(bytes.clone());
+        Some(Self::parse(name, |want, recover| PsdFile::from_source_and_merged_recovering(source, want, recover)))
+    }
+
+    fn parse(
+        name: &str,
+        parse: impl FnOnce(&dyn Fn(&PsdFile) -> bool, &dyn Fn(&PsdFile) -> bool) -> photocraft_psd::Result<(PsdFile, Option<photocraft_psd::Result<Vec<u8>>>)>,
+    ) -> Result<Self, IoError> {
+        // A merged image the import reads is decoded with the parse: a ZIP one is inflated once.
+        // A failed read of the file (one parsed from its source) is a read error, as reading the
+        // whole file first would report it.
+        let (file, merged) =
+            parse(&|f| psd_import::check_group_depth(f).is_ok() && psd_import::merged_needed(f), &psd_import::can_recover_layers).map_err(|e| match e {
+                photocraft_psd::PsdError::Read(msg) => IoError::Read(msg),
+                e => e.into(),
+            })?;
+        // Nesting past the document model's cap could never be saved; reject the file with the
+        // actionable limit.
+        psd_import::check_group_depth(&file)?;
+        let stepper = psd_import::layered_pixel_format(&file).map(|fmt| {
+            let tree = file.layer_tree_max_depth(photocraft_doc::MAX_GROUP_DEPTH);
+            let indices = psd_import::decode::records_with_pixels(&file, &tree);
+            psd_import::decode::Stepper::new(&file, psd_import::decode::Layout::of(&file, fmt), indices)
+        });
+        Ok(PsdOpen { name: name.to_string(), file, merged, stepper })
+    }
+
+    /// How far the layers' pixels are decoded (`0.0..=1.0`).
+    pub fn progress(&self) -> f32 {
+        match &self.stepper {
+            Some(s) => {
+                let (done, of) = s.progress();
+                if of == 0 { 1.0 } else { done as f32 / of as f32 }
+            }
+            None => 1.0,
+        }
+    }
+
+    /// Whether every layer's pixels are decoded.
+    pub fn decoded(&self) -> bool {
+        self.stepper.as_ref().is_none_or(psd_import::decode::Stepper::done)
+    }
+
+    /// Decodes bands of the layers' pixels until `more` says to stop (asked after each band of
+    /// about a megabyte, so a step decodes at least one) or all are; true once all are.
+    pub fn step(&mut self, more: &dyn Fn() -> bool) -> bool {
+        match &mut self.stepper {
+            Some(s) => s.step(&self.file, more),
+            None => true,
+        }
+    }
+
+    /// Decodes the pixels of every layer not decoded yet, side by side (on the rayon pool; in
+    /// order in the single-threaded browser build), reporting progress (5–85 %) to `ctl`.
+    pub fn decode_all(&mut self, ctl: &photocraft_raster::Interrupt) -> Result<(), IoError> {
+        let Some(s) = &mut self.stepper else { return Ok(()) };
+        let (from, of) = s.progress();
+        let rest: Vec<usize> = s.pending().to_vec();
+        let done = std::sync::atomic::AtomicUsize::new(from);
+        let report = || {
+            let n = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            ctl.progress(0.05 + 0.8 * n as f32 / of.max(1) as f32);
+        };
+        let lay = s.layout();
+        let decoded = psd_import::decode::decode_records(&self.file, lay, &rest, &|| ctl.cancelled(), &report);
+        s.put(&rest, decoded);
+        ctl.check().map_err(|_| IoError::Cancelled)
+    }
+
+    /// The document, from the layers' pixels decoded so far (any still missing are decoded now,
+    /// in order), its import warnings and whether damaged data was read (see [`import_for_open`]):
+    /// [`Self::build`], then [`PsdBuilt::finish`].
+    pub fn finish(self, ctl: &photocraft_raster::Interrupt) -> Result<(ImportResult, bool), IoError> {
+        self.build(ctl).map(PsdBuilt::finish)
+    }
+
+    /// The layers built from their pixels (any still missing are decoded now, in order): all of
+    /// the document but its type's last preparation ([`PsdBuilt::finish`]), which a step-at-a-time
+    /// open does in a step of its own.
+    pub fn build(self, ctl: &photocraft_raster::Interrupt) -> Result<PsdBuilt, IoError> {
+        let PsdOpen { name, file, merged, stepper } = self;
+        // Read before the conversion, which moves the global blocks into the document.
+        let txt2 = file.global_blocks.iter().find(|b| &b.key == b"Txt2").and_then(|b| photocraft_text::psd::parse_txt2(&b.data));
+        let pre = stepper.map(psd_import::decode::Stepper::into_decoded).unwrap_or_default();
+        let (mut document, warnings, damaged, read_error) = psd_import::psd_to_document_predecoded(file, ctl, merged, pre).ok_or(IoError::Cancelled)?;
+        // The file became unreadable while its layers were read from it (`import_file_for_open_with`):
+        // the open fails, rather than opening with those layers empty.
+        if let Some(e) = read_error {
+            return Err(IoError::Read(e.to_string()));
+        }
+        document.name = name;
+        let pending = text_import::type_layers(&document);
+        Ok(PsdBuilt { result: ImportResult { document, warnings, source_read_only: false, preview_only: false }, damaged, txt2, pending })
+    }
+}
+
+/// A PSD/PSB's document with its layers built ([`PsdOpen::build`]), its type not yet prepared.
+pub struct PsdBuilt {
+    result: ImportResult,
+    damaged: bool,
+    txt2: Option<photocraft_text::engine_data::Value>,
+    /// Type layers still to prepare, last first.
+    pending: Vec<photocraft_doc::LayerId>,
+}
+
+impl std::fmt::Debug for PsdBuilt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PsdBuilt").field("name", &self.result.document.name).finish()
+    }
+}
+
+impl PsdBuilt {
+    /// The document ready to open: its type prepared (`text_import::prepare`); its warnings and
+    /// whether damaged data was read.
+    pub fn finish(mut self) -> (ImportResult, bool) {
+        self.prepare(&|| true);
+        (self.result, self.damaged)
+    }
+
+    /// Prepares type layers until `more` says to stop (asked after each, so a call prepares at
+    /// least one) or all are; true once all are.
+    pub fn prepare(&mut self, more: &dyn Fn() -> bool) -> bool {
+        text_import::prepare_some(&mut self.result.document, self.txt2.as_ref(), &mut self.pending, more);
+        self.pending.is_empty()
+    }
 }
 
 /// [`import_for_open_with`] for the file at `path`. A PSD/PSB is parsed from the open file
