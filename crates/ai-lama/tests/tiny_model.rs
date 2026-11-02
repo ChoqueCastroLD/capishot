@@ -156,17 +156,29 @@ fn runs_on_a_gpu_with_little_workgroup_memory() {
     }
 }
 
-/// The ONNX graph on DirectML gives the PyTorch reference too, at two tile sizes in one session.
+/// The ONNX graph on DirectML (and on ONNX Runtime's CPU provider) gives the PyTorch reference
+/// too, at two tile sizes in one session.
 /// Skipped without ONNX Runtime (`PHOTOCRAFT_AI_ONNXRUNTIME` or next to the test binary).
 #[cfg(all(feature = "directml", windows))]
 #[test]
 fn directml_matches_pytorch() {
+    ort_matches_pytorch(false);
+}
+
+#[cfg(all(feature = "directml", windows))]
+#[test]
+fn onnx_runtime_cpu_matches_pytorch() {
+    ort_matches_pytorch(true);
+}
+
+#[cfg(all(feature = "directml", windows))]
+fn ort_matches_pytorch(cpu: bool) {
     use photocraft_ai_lama::directml::{DmlLama, available};
     if let Err(why) = available() {
-        return eprintln!("DirectML skipped: {why}");
+        return eprintln!("ONNX Runtime skipped: {why}");
     }
     let bytes = tiny_safetensors("lama-ffc");
-    let dml = DmlLama::from_safetensors(&bytes).unwrap();
+    let dml = if cpu { DmlLama::cpu_from_safetensors(&bytes, 0) } else { DmlLama::from_safetensors(&bytes) }.unwrap();
     let (rgb, mask) = tiny_input();
     let out = dml.generate(&rgb, &mask, W, H).unwrap();
     assert_eq!(out.len(), W * H * 3);

@@ -2,6 +2,8 @@
 //! calling thread (the engine's job worker) on the GPU when there is a real one, else on the CPU.
 //! On Windows with feature `directml`, Manga LaMa runs on DirectML through ONNX Runtime when its
 //! library loads ([`crate::directml`], much faster); else, and for MI-GAN, burn on wgpu.
+//! CPU runs of Manga LaMa there go to ONNX Runtime's CPU provider (2–3× faster than burn's
+//! CPU backend), with burn's CPU backend as the fallback.
 //!
 //! The weights come from local files: the AI Model Manager's downloads (the app's models
 //! folder, `photocraft-ai`'s cache) first, else `CAPISHOT_LAMA_WEIGHTS`; MI-GAN from `CAPISHOT_MIGAN_WEIGHTS`, else
@@ -46,6 +48,12 @@ pub struct NativeInpainter {
     /// Why DirectML couldn't load Manga LaMa: automatic runs use burn after that.
     #[cfg_attr(not(all(feature = "directml", windows)), allow(dead_code))]
     dml_failed: Mutex<Option<String>>,
+    /// Manga LaMa on ONNX Runtime's CPU provider, once loaded (CPU runs; burn's CPU backend
+    /// after it fails).
+    #[cfg_attr(not(all(feature = "directml", windows)), allow(dead_code))]
+    ort_cpu: Mutex<Option<(usize, Arc<Dml>)>>,
+    #[cfg_attr(not(all(feature = "directml", windows)), allow(dead_code))]
+    ort_cpu_failed: Mutex<bool>,
     device_name: Mutex<String>,
 }
 
@@ -59,6 +67,8 @@ impl NativeInpainter {
             model: Mutex::new(None),
             dml: Mutex::new(None),
             dml_failed: Mutex::new(None),
+            ort_cpu: Mutex::new(None),
+            ort_cpu_failed: Mutex::new(false),
             device_name: Mutex::new(String::new()),
         }
     }
@@ -222,6 +232,55 @@ impl NativeInpainter {
         }
     }
 
+    /// Runs a CPU request for Manga LaMa on ONNX Runtime's CPU provider; `None` runs it on
+    /// burn's CPU backend instead (no ONNX Runtime library, a failed session or run: the CPU
+    /// path never gets worse than burn's).
+    #[cfg(all(feature = "directml", windows))]
+    fn run_ort_cpu(&self, req: &Request) -> Option<Result<Vec<f32>>> {
+        let cpu = req.cpu || std::env::var("CAPISHOT_AI_DEVICE").is_ok_and(|v| v.eq_ignore_ascii_case("cpu"));
+        if req.model != LAMA || !cpu || *self.ort_cpu_failed.lock().unwrap_or_else(PoisonError::into_inner) {
+            return None;
+        }
+        let fail = || {
+            *self.ort_cpu_failed.lock().unwrap_or_else(PoisonError::into_inner) = true;
+            None
+        };
+        let mut slot = self.ort_cpu.lock().unwrap_or_else(PoisonError::into_inner);
+        let ort = match slot.as_ref() {
+            Some((threads, d)) if *threads == req.threads => d.clone(),
+            _ => {
+                *slot = None;
+                let Ok(bytes) = self.weights(LAMA) else { return None };
+                let Ok(d) = crate::directml::DmlLama::cpu_from_safetensors(&bytes, req.threads) else { return fail() };
+                // burn's CPU copy isn't needed while ONNX Runtime runs the model.
+                let mut m = self.model.lock().unwrap_or_else(PoisonError::into_inner);
+                if m.as_ref().is_some_and(|(id, cpu, _)| *id == LAMA && *cpu) {
+                    *m = None;
+                }
+                let d = Arc::new(d);
+                *slot = Some((req.threads, d.clone()));
+                d
+            }
+        };
+        let t = &req.tile;
+        let out = ort.generate(&t.rgb, &t.mask, t.w, t.h);
+        if out.is_err() || req.unload {
+            *slot = None;
+        }
+        match out {
+            Ok(o) => {
+                *self.device_name.lock().unwrap_or_else(PoisonError::into_inner) = "CPU".into();
+                Some(Ok(o))
+            }
+            Err(_) => fail(),
+        }
+    }
+
+    #[cfg(not(all(feature = "directml", windows)))]
+    fn run_ort_cpu(&self, _req: &Request) -> Option<Result<Vec<f32>>> {
+        None
+    }
+
     #[cfg(not(all(feature = "directml", windows)))]
     fn run_directml(&self, req: &Request) -> Option<Result<Vec<f32>>> {
         (req.backend == GpuBackend::DirectMl && self.wants_directml(req))
@@ -276,7 +335,7 @@ impl Inpainter for NativeInpainter {
         // burn panics on device failures (out of memory, a lost GPU): report it as an error and
         // drop the model so the next request loads it again.
         let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            if let Some(r) = self.run_directml(&req) {
+            if let Some(r) = self.run_directml(&req).or_else(|| self.run_ort_cpu(&req)) {
                 return r;
             }
             self.model(req.model, req.cpu).and_then(|m| {

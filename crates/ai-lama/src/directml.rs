@@ -92,25 +92,44 @@ impl DmlLama {
     /// session (about a second). Fails (and the burn path runs) when ONNX Runtime or DirectML
     /// can't take it.
     pub fn from_safetensors(bytes: &[u8]) -> Result<Self> {
+        Self::build(bytes, None)
+    }
+
+    /// As [`Self::from_safetensors`] on ONNX Runtime's CPU execution provider (same graph, same
+    /// fp32 arithmetic): its convolutions are 2–3× faster than burn's CPU backend on the
+    /// same cores (a 2-crop page in about 11 s instead of 29 s). `threads`: 0, one per core.
+    pub fn cpu_from_safetensors(bytes: &[u8], threads: usize) -> Result<Self> {
+        Self::build(bytes, Some(threads))
+    }
+
+    /// `cpu`: on the CPU provider with that many threads (0: one per core), else on DirectML.
+    fn build(bytes: &[u8], cpu: Option<usize>) -> Result<Self> {
         let env = environment().map_err(LamaError::Unavailable)?;
         let model = crate::onnx::lama(&crate::weights::parse(bytes)?);
+        let what = if cpu.is_some() { "ONNX Runtime CPU" } else { "DirectML" };
         let session = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> std::result::Result<Session, String> {
-            // DirectML wants sequential execution and no memory pattern (its own allocator).
-            Session::builder(env)
-                .map_err(|e| e.to_string())?
-                .with_optimization_level(GraphOptimizationLevel::Level3)
-                .map_err(|e| e.to_string())?
-                .with_memory_pattern(false)
-                .map_err(|e| e.to_string())?
-                .with_parallel_execution(false)
-                .map_err(|e| e.to_string())?
-                .with_execution_providers([ep::DirectML::default().build().error_on_failure()])
-                .map_err(|e| e.to_string())?
-                .commit_from_memory(&model)
-                .map_err(|e| e.to_string())
+            let b = Session::builder(env).map_err(|e| e.to_string())?.with_optimization_level(GraphOptimizationLevel::Level3).map_err(|e| e.to_string())?;
+            let mut b = if let Some(threads) = cpu {
+                // The CPU provider plans its buffers per shape (memory pattern) and uses one
+                // thread per physical core by default.
+                let b = if threads > 0 { b.with_intra_threads(threads).map_err(|e| e.to_string())? } else { b };
+                b.with_memory_pattern(true)
+                    .map_err(|e| e.to_string())?
+                    .with_execution_providers([ep::CPU::default().build().error_on_failure()])
+                    .map_err(|e| e.to_string())?
+            } else {
+                // DirectML wants sequential execution and no memory pattern (its own allocator).
+                b.with_memory_pattern(false)
+                    .map_err(|e| e.to_string())?
+                    .with_parallel_execution(false)
+                    .map_err(|e| e.to_string())?
+                    .with_execution_providers([ep::DirectML::default().build().error_on_failure()])
+                    .map_err(|e| e.to_string())?
+            };
+            b.commit_from_memory(&model).map_err(|e| e.to_string())
         }))
         .unwrap_or_else(|_| Err("session creation failed".into()))
-        .map_err(|e| LamaError::Device(format!("DirectML: {e}")))?;
+        .map_err(|e| LamaError::Device(format!("{what}: {e}")))?;
         Ok(Self { session: Mutex::new(session) })
     }
 
