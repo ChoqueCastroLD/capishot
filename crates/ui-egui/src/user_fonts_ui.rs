@@ -406,12 +406,20 @@ fn uses(t: &TextLayer, names: &[String]) -> bool {
 
 /// Fonts arrived: in every open document, the missing families an installed one now matches by
 /// name or PostScript name are mapped to it (Resolve Missing Fonts' automatic choices), one undo
-/// step per document. The pixels are left to [`install`]'s redraw.
+/// step per document. The pixels are left to [`install`]'s redraw. The user edited nothing, so
+/// a document that was unmodified (just opened, fonts still loading) stays unmodified.
 fn auto_resolve(app: &mut PhotocraftApp) {
     let docs: Vec<DocId> =
         app.session.documents().iter().filter(|d| !photocraft_engine::type_extra_cmds::auto_matches(&d.doc).is_empty()).map(|d| d.doc.id).collect();
     for doc in docs {
-        let r = app.with_document(doc, |app| app.run("type.resolveMissingFonts", json!({"auto": true, "keepPixels": true})));
+        let r = app.with_document(doc, |app| {
+            let clean = app.session.active().is_some_and(|st| !st.is_dirty());
+            let r = app.run("type.resolveMissingFonts", json!({"auto": true, "keepPixels": true}));
+            if clean && let Some(st) = app.session.active_mut() {
+                st.saved_revision = st.revision;
+            }
+            r
+        });
         if let Err(e) = r {
             log::warn!("matching missing fonts: {e}");
         }

@@ -5245,6 +5245,8 @@ fontTab	Find More	Buscar más
 	This update publishes no checksum: download it from the website	Esta actualización no publica su suma de verificación: descárgala desde la web
 	No update has been downloaded	No se ha descargado ninguna actualización
 	Capishot {version} is ready to install	Capishot {version} está listo para instalarse
+	Capishot {version} ready to install	Capishot {version} listo para instalar
+	Update download cancelled	Descarga de la actualización cancelada
 	It will be installed when you close Capishot.	Se instalará cuando cierres Capishot.
 	Capishot restarts to install it; open documents ask to be saved first.	Capishot se reinicia para instalarla; antes te pedirá guardar los documentos abiertos.
 	Restart and Update	Reiniciar y actualizar

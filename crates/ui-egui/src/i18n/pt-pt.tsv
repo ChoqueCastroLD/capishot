@@ -3466,6 +3466,8 @@ fontWeight	Italic	Itálico
 	This update publishes no checksum: download it from the website	Esta atualização não publica a soma de verificação: baixe-a pelo site
 	No update has been downloaded	Nenhuma atualização foi baixada
 	Capishot {version} is ready to install	O Capishot {version} está pronto para instalar
+	Capishot {version} ready to install	Capishot {version} pronto para instalar
+	Update download cancelled	Transferência da atualização cancelada
 	It will be installed when you close Capishot.	Será instalado quando você fechar o Capishot.
 	Capishot restarts to install it; open documents ask to be saved first.	O Capishot reinicia para instalá-la; antes pede para salvar os documentos abertos.
 	Restart and Update	Reiniciar e atualizar

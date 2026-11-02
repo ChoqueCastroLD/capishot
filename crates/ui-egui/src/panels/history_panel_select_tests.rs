@@ -288,3 +288,89 @@ fn a_new_state_at_the_history_limit_deselects_the_snapshot() {
     h.run_steps(4);
     assert_eq!(selected_snapshot(&h.ctx, h.state().session.active().unwrap()), None, "a new state deselects the snapshot");
 }
+
+/// A large page's snapshot thumbnail is composited off the frame: no History panel frame takes
+/// more than 50 ms while it opens, and the thumbnail still arrives.
+#[test]
+fn a_large_documents_snapshot_thumbnail_never_holds_a_frame() {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+    app.run("file.new", json!({"width": 3000, "height": 4500})).unwrap();
+    app.run("filter.render.clouds", json!({"seed": 4})).unwrap();
+    app.run("type.create", json!({"text": "Hola", "size": 200, "x": 100, "y": 400})).unwrap();
+    // The document as opened.
+    let doc = app.session.active().unwrap().doc.clone();
+    app.session.close(0);
+    app.session.add_document((*doc).clone(), None);
+    let id = app.session.active().unwrap().doc.id;
+    let mut ready = false;
+    let mut h = Harness::builder().with_size(vec2(300.0, 400.0)).with_max_steps(1).build_ui_state(
+        move |ui, app: &mut PhotocraftApp| {
+            if !ready {
+                PhotocraftApp::setup_context(ui.ctx(), theme::ThemeKind::ProMedium);
+                ready = true;
+                return;
+            }
+            history(app, ui);
+        },
+        app,
+    );
+    h.step();
+    let (mut worst, t) = (0.0f64, std::time::Instant::now());
+    while !h.state().snapshot_thumbs.contains_key(&(id, 0)) {
+        assert!(t.elapsed().as_secs() < 30, "the thumbnail never arrived");
+        let f = std::time::Instant::now();
+        h.step();
+        worst = worst.max(f.elapsed().as_secs_f64() * 1e3);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert!(worst < 50.0, "a History panel frame took {worst:.0} ms");
+    assert!(h.state().snapshot_bands.is_empty());
+}
+
+/// The History panel's frame spans (ms, slowest per name) over the first frames after each PSD
+/// in `PHOTOCRAFT_HISTORY_PSDS` (`;`-separated) opens.
+#[test]
+#[ignore = "needs PHOTOCRAFT_HISTORY_PSDS"]
+fn history_panel_frames_on_open() {
+    let list = std::env::var("PHOTOCRAFT_HISTORY_PSDS").unwrap_or_default();
+    for path in list.split(';').filter(|p| !p.is_empty()) {
+        let bytes = std::fs::read(path).unwrap();
+        let services = crate::Services {
+            import: Some(Box::new(|name, bytes, opts| {
+                photocraft_io::import_with_options(name, bytes, opts).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string())
+            })),
+            ..Default::default()
+        };
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);
+        let t = std::time::Instant::now();
+        app.open_bytes_from(path, &bytes, Some(path)).unwrap();
+        let open_ms = t.elapsed().as_secs_f64() * 1e3;
+        let mut ready = false;
+        let mut h = Harness::builder().with_size(vec2(300.0, 400.0)).with_max_steps(1).build_ui_state(
+            move |ui, app: &mut PhotocraftApp| {
+                if !ready {
+                    PhotocraftApp::setup_context(ui.ctx(), theme::ThemeKind::ProMedium);
+                    ready = true;
+                    return;
+                }
+                let _s = crate::perf_span::span("dock.history");
+                history(app, ui);
+            },
+            app,
+        );
+        h.step();
+        let mut worst: Vec<(&str, f64)> = Vec::new();
+        for _ in 0..20 {
+            crate::perf_span::begin_frame();
+            h.step();
+            for (name, ms) in crate::perf_span::frame() {
+                match worst.iter_mut().find(|w| w.0 == name) {
+                    Some(w) => w.1 = w.1.max(ms),
+                    None => worst.push((name, ms)),
+                }
+            }
+        }
+        worst.sort_by(|a, b| b.1.total_cmp(&a.1));
+        eprintln!("{path} (open {open_ms:.0} ms): {worst:?}");
+    }
+}

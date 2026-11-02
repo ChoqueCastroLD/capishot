@@ -80,34 +80,47 @@ impl PhotocraftApp {
         if let Some(tex) = self.snapshot_thumbs.get(&(doc, snap.id)) {
             return tex.id();
         }
-        // Composited a band of rows per frame within a few milliseconds (a whole-document
-        // composite in one frame held a new document's first frame for a quarter of a second on
-        // a large page); the row shows a blank square until the image is done.
+        // Composited off the frame: on a worker thread where there is one, else a band of whole
+        // thumbnail rows per frame within a few milliseconds. A whole-document composite in one
+        // frame held a new document's first frame for a quarter of a second on a large page; the
+        // row shows a blank square until the image is done.
+        let _s = perf_span::span("history.thumb");
         let (w, h) = photocraft_compose::thumbnail_size(&snap.doc, SNAPSHOT_SIDE);
         let side = w.max(h) as usize;
-        let (ox, oy) = ((side - w as usize) / 2, (side - h as usize) / 2);
-        let height = snap.doc.size.height as i32;
         let bands = self.snapshot_bands.entry((doc, snap.id)).or_insert_with(|| SnapshotBands {
             image: egui::ColorImage::new([side, side], vec![egui::Color32::TRANSPARENT; side * side]),
             next: 0,
-            rows: (height / 64).max(8),
+            rows: 1,
+            worker: spawn_snapshot_thumb(ctx, snap.doc.clone(), w, h),
         });
+        if let Some(rx) = &bands.worker {
+            match rx.try_recv() {
+                Ok(buf) => {
+                    place(&mut bands.image, side, (w, h), &buf);
+                    bands.next = h as i32;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    // The native worker wakes the window; a browser one can't.
+                    ctx.request_repaint_after(std::time::Duration::from_millis(30));
+                    return self.blank_thumb(ctx);
+                }
+                // The worker died: composite here, in bands.
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => bands.worker = None,
+            }
+        }
+        let (height, doc_h) = (h as i32, snap.doc.size.height);
         let t0 = crate::gpu_canvas::now_ms();
         while bands.next < height && crate::gpu_canvas::now_ms() - t0 < SNAPSHOT_BAND_MS {
             let b0 = crate::gpu_canvas::now_ms();
-            let band = photocraft_geom::Rect::new(0, bands.next, snap.doc.size.width as i32, (bands.next + bands.rows).min(height));
-            let buf = photocraft_compose::render_reduced_damage(&snap.doc, w, h, band);
-            let part = crate::canvas::display_image(None, &buf);
-            let (bx, by) = (buf.rect.x0.max(0) as usize, buf.rect.y0.max(0) as usize);
-            for (i, px) in part.pixels.iter().enumerate() {
-                let (x, y) = (ox + bx + i % part.size[0], oy + by + i / part.size[0]);
-                if let Some(out) = bands.image.pixels.get_mut(y * side + x).filter(|_| x < side) {
-                    *out = *px;
-                }
-            }
-            bands.next = band.y1;
+            // Whole thumbnail rows: a band inside one row would composite all of its document
+            // rows again for each band.
+            let start = bands.next;
+            let end = (start + bands.rows).min(height);
+            let buf = photocraft_compose::render_reduced_damage(&snap.doc, w, h, thumb_rows(snap.doc.size.width, doc_h, height, start, end));
+            place(&mut bands.image, side, (w, h), &buf);
+            bands.next = end;
             let took = (crate::gpu_canvas::now_ms() - b0).max(0.1);
-            bands.rows = ((f64::from(bands.rows) * (SNAPSHOT_BAND_MS / 2.0) / took) as i32).clamp(8, height.max(8));
+            bands.rows = ((f64::from(end - start) * (SNAPSHOT_BAND_MS / 2.0) / took) as i32).clamp(1, height.max(1));
         }
         if bands.next < height {
             ctx.request_repaint();
@@ -202,13 +215,68 @@ impl PhotocraftApp {
 const SNAPSHOT_SIDE: u32 = 56;
 const SNAPSHOT_BAND_MS: f64 = 4.0;
 
-/// A History snapshot thumbnail being composited a band of rows per frame.
+/// A History snapshot thumbnail being composited on a worker, or a band of rows per frame.
 pub(crate) struct SnapshotBands {
     image: egui::ColorImage,
-    /// The next document row to draw.
+    /// The next thumbnail row to draw.
     next: i32,
-    /// Document rows per band, sized by the last band's time.
+    /// Thumbnail rows per band, sized by the last band's time.
     rows: i32,
+    /// The worker compositing the whole thumbnail, if one could start.
+    worker: Option<std::sync::mpsc::Receiver<photocraft_compose::Buffer>>,
+}
+
+/// Composites `doc`'s `w`×`h` thumbnail on a worker thread; `None` where none can start (the
+/// single-threaded web build), and the caller composites it in bands.
+fn spawn_snapshot_thumb(ctx: &egui::Context, doc: std::sync::Arc<Document>, w: u32, h: u32) -> Option<std::sync::mpsc::Receiver<photocraft_compose::Buffer>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    #[cfg(not(target_arch = "wasm32"))]
+    let spawned = {
+        let ctx = ctx.clone();
+        std::thread::Builder::new()
+            .name("snapshot-thumb".into())
+            .spawn(move || {
+                let _ = tx.send(photocraft_compose::render_reduced(&doc, w, h));
+                ctx.request_repaint();
+            })
+            .is_ok()
+    };
+    // The browser threads build: on the rayon pool (a worker can't wake egui; the panel repaints
+    // while it waits).
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+    let spawned = {
+        let _ = ctx;
+        rayon::spawn(move || {
+            let _ = tx.send(photocraft_compose::render_reduced(&doc, w, h));
+        });
+        true
+    };
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
+    let spawned = {
+        let _ = (ctx, doc, w, h, tx);
+        false
+    };
+    spawned.then_some(rx)
+}
+
+/// The document rows of thumbnail rows `start..end` of a `thumb_h`-row thumbnail.
+fn thumb_rows(doc_w: u32, doc_h: u32, thumb_h: i32, start: i32, end: i32) -> photocraft_geom::Rect {
+    let row = |t: i32| (i64::from(t) * i64::from(doc_h) / i64::from(thumb_h.max(1))) as i32;
+    photocraft_geom::Rect::new(0, row(start), doc_w as i32, row(end))
+}
+
+/// Copies `buf` (thumbnail pixels at its rect) into the centre of the `side`-square `image`.
+fn place(image: &mut egui::ColorImage, side: usize, (w, h): (u32, u32), buf: &photocraft_compose::Buffer) {
+    let (ox, oy) = ((side.saturating_sub(w as usize)) / 2, (side.saturating_sub(h as usize)) / 2);
+    let part = crate::canvas::display_image(None, buf);
+    let (bx, by) = (buf.rect.x0.max(0) as usize, buf.rect.y0.max(0) as usize);
+    let pw = part.size[0].max(1);
+    for (i, px) in part.pixels.iter().enumerate() {
+        let (x, y) = (ox + bx + i % pw, oy + by + i / pw);
+        if let Some(out) = image.pixels.get_mut(y * side + x).filter(|_| x < side) {
+            *out = *px;
+        }
+    }
 }
 
 /// Layer and mask thumbnails rebuilt per frame at most (see `PhotocraftApp::thumb_budget`).
@@ -445,5 +513,33 @@ mod channel_tint_tests {
         assert_eq!(channel_tint(Cmyk, 3, 0, true), Color32::BLACK);
         assert_eq!(channel_tint(Grayscale, 0, 77, true), Color32::from_gray(77));
         assert_eq!(channel_tint(Rgb, 0, 77, false), Color32::from_gray(77));
+    }
+}
+
+#[cfg(test)]
+mod snapshot_band_tests {
+    use super::*;
+
+    /// Bands of whole thumbnail rows (the single-threaded web build's) make the worker's image.
+    #[test]
+    fn row_bands_make_the_whole_thumbnail() {
+        let mut s = photocraft_engine::Session::new();
+        s.execute("file.new", serde_json::json!({"width": 300, "height": 700})).unwrap();
+        s.execute("filter.render.clouds", serde_json::json!({"seed": 4})).unwrap();
+        let doc = s.active().unwrap().doc.clone();
+        let (w, h) = photocraft_compose::thumbnail_size(&doc, SNAPSHOT_SIDE);
+        let side = w.max(h) as usize;
+        let blank = || egui::ColorImage::new([side, side], vec![egui::Color32::TRANSPARENT; side * side]);
+        let mut whole = blank();
+        place(&mut whole, side, (w, h), &photocraft_compose::render_reduced(&doc, w, h));
+        let mut banded = blank();
+        let mut start = 0;
+        for n in [1, 2, 5, 3, 100] {
+            let end = (start + n).min(h as i32);
+            place(&mut banded, side, (w, h), &photocraft_compose::render_reduced_damage(&doc, w, h, thumb_rows(300, 700, h as i32, start, end)));
+            start = end;
+        }
+        assert_eq!(start, h as i32);
+        assert!(whole.pixels.iter().zip(&banded.pixels).all(|(a, b)| a.to_array().iter().zip(b.to_array()).all(|(x, y)| x.abs_diff(y) <= 1)));
     }
 }

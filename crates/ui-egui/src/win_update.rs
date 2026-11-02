@@ -376,12 +376,31 @@ pub fn download(app: &mut PhotocraftApp) -> Result<Value, String> {
             Ok(Plan { kind, source, exe, version, updates_dir: dir })
         },
         |_, plan: Plan| {
+            let version = plan.version.clone();
             *READY.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Ready { plan });
-            Ok(json!({"ready": true}))
+            Ok(json!({"ready": true, "version": version}))
         },
     );
     started.map_err(|e| e.to_string())?;
     Ok(json!({"downloading": update.version}))
+}
+
+/// The end of a [`DOWNLOAD`] job: the status line says the update is ready, that the download
+/// was cancelled, or why it failed; never "Downloading" any more.
+pub fn on_download_end(app: &mut PhotocraftApp, label: &str, outcome: photocraft_engine::jobs::JobOutcome) {
+    use photocraft_engine::jobs::JobOutcome;
+    app.ui.status_error = false;
+    match outcome {
+        JobOutcome::Done(v) => {
+            app.ui.status = match v.get("version").and_then(Value::as_str) {
+                Some(version) => crate::i18n::fmt(tl!("Capishot {version} ready to install"), &[("version", version)]),
+                None => String::new(),
+            };
+        }
+        JobOutcome::Cancelled => app.ui.status = tl!("Update download cancelled").into(),
+        // The status line and a notice say why.
+        JobOutcome::Failed(err) => crate::notices::error(app, format!("{label}: {err}")),
+    }
 }
 
 /// Each frame: a finished download offers to restart (or, with automatic installs, installs when
@@ -521,6 +540,25 @@ mod tests {
         assert!(r.is_err(), "{r:?}");
         assert!(!root.join("c.msi").exists(), "nothing kept");
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// The status line stops saying "Downloading" when the download ends, however it ends.
+    #[test]
+    fn the_status_line_says_how_the_download_ended() {
+        use photocraft_engine::jobs::JobOutcome;
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let label = "Downloading Capishot 9.9.9";
+        app.ui.status = label.into();
+        on_download_end(&mut app, label, JobOutcome::Done(json!({"ready": true, "version": "9.9.9"})));
+        assert_eq!(app.ui.status, "Capishot 9.9.9 ready to install");
+        app.ui.status = label.into();
+        on_download_end(&mut app, label, JobOutcome::Cancelled);
+        assert_eq!(app.ui.status, "Update download cancelled");
+        app.ui.status = label.into();
+        on_download_end(&mut app, label, JobOutcome::Failed("checksum mismatch".into()));
+        assert_eq!(app.ui.status, "Downloading Capishot 9.9.9: checksum mismatch");
+        assert!(app.ui.status_error);
+        assert!(app.ui.notices.iter().any(|n| n.title.contains("checksum mismatch")));
     }
 
     #[test]

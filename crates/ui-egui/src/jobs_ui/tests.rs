@@ -1079,3 +1079,91 @@ fn open_identity_keeps_same_poll_results_in_the_profile_queue() {
     assert!(app.held_opens.is_empty());
     control.assert_untouched(&app);
 }
+
+/// Opening a PSD (text, mask, group, hidden layer) and drawing frames leaves it unmodified, so
+/// quitting (and Restart and Update) asks nothing.
+#[test]
+fn an_opened_psd_is_not_modified_and_quits_without_asking() {
+    let mut s = photocraft_engine::Session::new();
+    s.execute("file.new", json!({"width": 200, "height": 150})).unwrap();
+    s.execute("layer.new.layer", json!({})).unwrap();
+    s.execute("edit.fill", json!({"color": "#3366cc"})).unwrap();
+    s.execute("layer.mask.revealAll", json!({})).ok();
+    s.execute("type.create", json!({"text": "Hola", "size": 24, "x": 10, "y": 40})).unwrap();
+    s.execute("layer.new.layer", json!({})).unwrap();
+    s.execute("layer.group", json!({})).ok();
+    let doc = (*s.active().unwrap().doc).clone();
+    let bytes = photocraft_io::export(&doc, "x.psd", &Default::default()).unwrap().bytes;
+
+    let mut h = Harness::builder().with_size(vec2(1280.0, 800.0)).with_max_steps(8).build_eframe(|cc| {
+        PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.background_jobs = true;
+        app
+    });
+    h.run_steps(2);
+    h.state_mut().open_file("/tmp/photocraft-test/clean.psd", &bytes).unwrap();
+    let t = Instant::now();
+    while !h.state().jobs.opens.is_empty() && t.elapsed() < Duration::from_secs(30) {
+        h.step();
+    }
+    h.run_steps(8);
+    assert_eq!(h.state().session.documents().len(), 1, "opened");
+    for st in h.state().session.documents() {
+        assert!(!st.is_dirty(), "{} is modified after opening: revision {} saved {}", st.doc.name, st.revision, st.saved_revision);
+    }
+    assert!(!h.state().has_unsaved_work());
+    // View, selection and layer targeting are not edits either.
+    let ctx = h.ctx.clone();
+    let mut dirtied = Vec::new();
+    for id in [
+        "view.zoomIn", "view.zoomOut", "view.fitOnScreen", "view.actualPixels", "view.rulers", "view.extras", "view.grid",
+        "select.all", "select.inverse", "select.deselect", "select.reselect", "select.deselect", "select.allLayers",
+        "layer.selectBackward", "layer.selectForward", "window.history", "window.layers", "window.channels",
+    ] {
+        let _ = crate::menus::invoke(h.state_mut(), &ctx, id, json!({}));
+        h.run_steps(2);
+        if h.state().session.active().is_some_and(|st| st.is_dirty()) {
+            dirtied.push(id);
+            let st = h.state_mut().session.active_mut().unwrap();
+            st.saved_revision = st.revision;
+        }
+    }
+    assert!(dirtied.is_empty(), "{dirtied:?} marked the opened file modified");
+    // File › Exit (what Restart and Update runs) quits without the unsaved-changes prompt.
+    crate::menus::invoke(h.state_mut(), &ctx, "file.exit", json!({})).unwrap();
+    assert!(h.state().discard.is_none(), "no unsaved-changes prompt");
+    assert!(h.state().allow_close);
+}
+
+/// [`an_opened_psd_is_not_modified_and_quits_without_asking`] over real files: the paths in
+/// `PHOTOCRAFT_CLEAN_OPEN_PSDS` (separated by `;`).
+#[test]
+#[ignore = "needs PHOTOCRAFT_CLEAN_OPEN_PSDS"]
+fn real_psds_open_unmodified() {
+    let list = std::env::var("PHOTOCRAFT_CLEAN_OPEN_PSDS").unwrap_or_default();
+    let mut bad = Vec::new();
+    for path in list.split(';').filter(|p| !p.is_empty()) {
+        let bytes = std::fs::read(path).unwrap();
+        let mut h = Harness::builder().with_size(vec2(1280.0, 800.0)).with_max_steps(8).build_eframe(|cc| {
+            PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+            app.background_jobs = true;
+            app
+        });
+        h.run_steps(2);
+        h.state_mut().open_file(path, &bytes).unwrap();
+        let t = Instant::now();
+        while !h.state().jobs.opens.is_empty() && t.elapsed() < Duration::from_secs(120) {
+            h.step();
+        }
+        h.run_steps(8);
+        assert_eq!(h.state().session.documents().len(), 1, "{path} opened");
+        for st in h.state().session.documents() {
+            if st.is_dirty() {
+                bad.push(format!("{path}: revision {} saved {} history {}", st.revision, st.saved_revision, st.history.past_len()));
+            }
+        }
+    }
+    assert!(bad.is_empty(), "{bad:#?}");
+}

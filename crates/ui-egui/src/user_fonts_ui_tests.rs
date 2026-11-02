@@ -231,6 +231,30 @@ fn stored_fonts_are_read_when_an_opened_document_needs_them() {
     remove(&mut app, &p.entry.id);
 }
 
+/// A stored font that arrives after a document opened maps the document's loosely named family
+/// to it (Resolve Missing Fonts' automatic choice) without marking the file modified: quitting
+/// or Restart and Update must not ask to save a file that was only opened.
+#[test]
+fn fonts_arriving_after_an_open_leave_the_document_unmodified() {
+    let data = mono("Late Mono DD12");
+    let p = photocraft_text::user_fonts::prepare("LateMono.ttf", data.clone()).unwrap();
+    photocraft_text::user_fonts::store().restore([serde_json::to_string(&p.entry).unwrap()]);
+    let mut app = PhotocraftApp::new(Session::new(), Services::default());
+    let layer = doc_with_text(&mut app, "LateMono-DD12");
+    // As opened: unmodified.
+    let st = app.session.active_mut().unwrap();
+    st.saved_revision = st.revision;
+    after_open(&mut app);
+    app.font_sink(None).send(Delivery::Stored(p.entry.id.clone(), Ok(data)));
+    tick(&mut app, None);
+    let st = app.session.active().unwrap();
+    let Some(photocraft_doc::LayerContent::Text(t)) = st.doc.layer(layer).map(|l| &l.content) else { panic!("type layer") };
+    assert_eq!(t.char_runs()[0].style.font_family, "Late Mono DD12", "mapped to the arrived font");
+    assert!(!st.is_dirty(), "matching fonts is not an edit");
+    assert!(!app.has_unsaved_work());
+    remove(&mut app, &p.entry.id);
+}
+
 #[test]
 fn a_full_browser_storage_is_reported_once_and_the_fonts_stay() {
     let (mut app, _) = web_app(vec![("Qtqta.ttf".into(), sans("Qtqta")), ("Qtqtb.ttf".into(), sans("Qtqtb"))]);

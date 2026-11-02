@@ -804,6 +804,9 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
             app.ui.status = tl!("Quick Selection found nothing there").into();
             app.ui.status_error = false;
         }
+        // The update download: its label says "Downloading", so the end says what happened instead.
+        #[cfg(not(target_arch = "wasm32"))]
+        outcome if e.command == crate::win_update::DOWNLOAD => crate::win_update::on_download_end(app, &e.label, outcome),
         JobOutcome::Done(ref result) if matches!(e.command.as_str(), "file.print" | "file.printOneCopy") => {
             app.sync_views();
             crate::file_ui::print_status(app, result);
