@@ -64,7 +64,8 @@ mod typer_place_cmds;
 mod typer_query_cmds;
 pub mod typer_state;
 pub mod zip_export_cmds;
-pub use typer_place_cmds::{PageBuild as TyperPageBuild, page_ready as typer_page_ready};
+pub use typer_place_cmds::{PageBuild as TyperPageBuild, page_cached as typer_page_cached, page_ready as typer_page_ready};
+pub use typer_query_cmds::shape_text_work as typer_shape_text_work;
 pub use variables_cmds::{export_data_sets_with, import_data_sets_text};
 pub use video_cmds::render_video_with;
 

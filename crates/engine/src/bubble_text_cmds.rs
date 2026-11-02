@@ -399,6 +399,90 @@ fn plan(interior: &Mask, src: &Source, tolerance: Option<f32>) -> Result<Plan> {
     Ok(Plan { region: Rect::new(x0, y0, x0 + w as i32, y0 + h as i32), weight, fill, pixels, gradient: fit.model.terms > 1 })
 }
 
+/// Premultiplied, clamped RGBA.
+fn premul(c: [f32; 4]) -> [f32; 4] {
+    let a = if c[3].is_finite() { c[3].clamp(0.0, 1.0) } else { 0.0 };
+    let v = |x: f32| if x.is_finite() { x.clamp(0.0, 1.0) * a } else { 0.0 };
+    [v(c[0]), v(c[1]), v(c[2]), a]
+}
+
+/// What the command reads, captured on the calling thread for [`find_and_plan`].
+struct Input {
+    doc: std::sync::Arc<photocraft_doc::Document>,
+    active: Option<photocraft_doc::LayerId>,
+    editable: bool,
+    sample_all: bool,
+    tolerance: Option<f32>,
+    x: i32,
+    y: i32,
+}
+
+/// The bubble at the click and what to paint in it: the heavy part, run as a background job
+/// (it froze phones for seconds on the page's main thread).
+fn find_and_plan(page: &crate::typer_place_cmds::support::PageImage, inp: &Input) -> Result<(Plan, &'static str)> {
+    let (x, y) = (inp.x, inp.y);
+    let plan_in = |interior: &Mask| -> Result<Plan> {
+        let region = Rect::new(interior.x0, interior.y0, interior.x0 + interior.width as i32, interior.y0 + interior.height as i32);
+        let (w, h) = (interior.width, interior.height);
+        let surf = inp.active.and_then(|id| inp.doc.layer(id)).and_then(|l| l.surface()).filter(|_| inp.editable && !inp.sample_all);
+        let src = match surf {
+            Some(surf) => {
+                let fmt = surf.format();
+                let n = fmt.channels().max(1);
+                let raw = surf.read_region(region);
+                if raw.len() != w * h * n {
+                    return Err(EngineError::Other("could not read the layer's pixels".into()));
+                }
+                Source { px: raw.chunks_exact(n).map(|c| premul(to_rgba(&fmt, c))).collect() }
+            }
+            None => {
+                // The page image (without type layers), the box clipped to it.
+                let pa = page.area;
+                let pw = pa.width() as usize;
+                let mut px = vec![[0f32; 4]; w * h];
+                for yy in 0..h {
+                    for xx in 0..w {
+                        let (dx, dy) = (region.x0 + xx as i32, region.y0 + yy as i32);
+                        if pa.contains(dx, dy)
+                            && let Some(q) = page.img.get((dy - pa.y0) as usize * pw + (dx - pa.x0) as usize)
+                        {
+                            px[yy * w + xx] = premul(q.map(|v| f32::from(v) / 255.0));
+                        }
+                    }
+                }
+                Source { px }
+            }
+        };
+        plan(interior, &src, inp.tolerance)
+    };
+    // The bubble: closed, else cut by the image's edge, else (it opens onto a panel border or the
+    // gutter) the block of lettering under the click with a margin, its panel lines kept as walls.
+    match bubble_find::find(&page.img, page.area, (x, y)) {
+        Ok(found) => Ok((plan_in(&found.interior)?, "bubble")),
+        Err(miss) => {
+            let mut first: Option<EngineError> = None;
+            if let Ok(found) = bubble_find::find_walled(&page.img, page.area, (x, y)) {
+                match plan_in(&found.interior) {
+                    Ok(p) => return Ok((p, "edge")),
+                    Err(e) => first = Some(e),
+                }
+            }
+            if let Some(c) = photocraft_typer::text_cluster::find(&page.img, page.area, (x, y)) {
+                let m = crate::type_bubble_cmds::open_bubble(page, x, y).map(|f| f.interior).unwrap_or_else(|| {
+                    let mut m = c.walls.clone();
+                    m.px.iter_mut().for_each(|v| *v = !*v);
+                    m
+                });
+                match plan_in(&m) {
+                    Ok(p) => return Ok((p, "textCluster")),
+                    Err(e) => first = first.or(Some(e)),
+                }
+            }
+            Err(first.unwrap_or_else(|| crate::type_bubble_cmds::no_bubble(miss)))
+        }
+    }
+}
+
 fn remove_bubble_text(s: &mut Session, p: &Value) -> Result<Value> {
     if !p.is_object() && !p.is_null() {
         return Err(bad("params must be a JSON object"));
@@ -418,7 +502,7 @@ fn remove_bubble_text(s: &mut Session, p: &Value) -> Result<Value> {
     let mut new_layer = flag(p, "newLayer", false)?;
     // The layer painted: the active pixel layer; a type, shape or other layer (or none) gets the
     // result on a new layer, modelled from what is seen.
-    let (active, editable) = {
+    let (doc, active, editable) = {
         let d = s.active().ok_or(EngineError::NoDocument)?;
         let active = d.active_layer;
         let editable = active.and_then(|id| d.doc.layer(id)).is_some_and(|l| matches!(l.content, LayerContent::Raster(_)));
@@ -428,93 +512,42 @@ fn remove_bubble_text(s: &mut Session, p: &Value) -> Result<Value> {
                 return Err(EngineError::Other(format!("the layer \"{}\" is locked", d.doc.layer(id).map(|l| l.name.as_str()).unwrap_or(""))));
             }
         }
-        (active, editable)
+        (d.doc.clone(), active, editable)
     };
     if !editable {
         sample_all = true;
         new_layer = true;
     }
-    let page = crate::typer_place_cmds::page_image(s)?;
-    let layer_fmt =
-        s.active().ok_or(EngineError::NoDocument)?.doc.layer(active.unwrap_or(photocraft_doc::LayerId(u64::MAX))).and_then(|l| l.surface()).map(|s| s.format());
-    let premul = |c: [f32; 4]| {
-        let a = if c[3].is_finite() { c[3].clamp(0.0, 1.0) } else { 0.0 };
-        let v = |x: f32| if x.is_finite() { x.clamp(0.0, 1.0) * a } else { 0.0 };
-        [v(c[0]), v(c[1]), v(c[2]), a]
-    };
-    // The bubble: closed, else cut by the image's edge, else (it opens onto a panel border or the
-    // gutter) the block of lettering under the click with a margin, its panel lines kept as walls.
-    let plan_in = |interior: &Mask| -> Result<Plan> {
-        let s = &*s;
-        let region = Rect::new(interior.x0, interior.y0, interior.x0 + interior.width as i32, interior.y0 + interior.height as i32);
-        let (w, h) = (interior.width, interior.height);
-        let d = s.active().ok_or(EngineError::NoDocument)?;
-        let layer_fmt = active.and_then(|id| d.doc.layer(id)).and_then(|l| l.surface()).map(|s| s.format());
-        let layer_px = match (active, layer_fmt) {
-            (Some(id), Some(_)) if editable => d.doc.layer(id).and_then(|l| l.surface()).map(|s| s.read_region(region)),
-            _ => None,
-        };
-        let premul = |c: [f32; 4]| {
-            let a = if c[3].is_finite() { c[3].clamp(0.0, 1.0) } else { 0.0 };
-            let v = |x: f32| if x.is_finite() { x.clamp(0.0, 1.0) * a } else { 0.0 };
-            [v(c[0]), v(c[1]), v(c[2]), a]
-        };
-        let src = if sample_all || layer_px.is_none() {
-            // The page image (without type layers), the box clipped to it.
-            let pa = page.area;
-            let pw = pa.width() as usize;
-            let mut px = vec![[0f32; 4]; w * h];
-            for yy in 0..h {
-                for xx in 0..w {
-                    let (dx, dy) = (region.x0 + xx as i32, region.y0 + yy as i32);
-                    if pa.contains(dx, dy) {
-                        let q = page.img[(dy - pa.y0) as usize * pw + (dx - pa.x0) as usize];
-                        px[yy * w + xx] = premul(q.map(|v| f32::from(v) / 255.0));
-                    }
-                }
-            }
-            Source { px }
-        } else {
-            let fmt = layer_fmt.ok_or_else(|| EngineError::Other("not a pixel layer".into()))?;
-            let n = fmt.channels().max(1);
-            let raw = layer_px.as_deref().unwrap_or(&[]);
-            if raw.len() != w * h * n {
-                return Err(EngineError::Other("could not read the layer's pixels".into()));
-            }
-            Source { px: raw.chunks_exact(n).map(|c| premul(to_rgba(&fmt, c))).collect() }
-        };
-        plan(interior, &src, tolerance)
-    };
-    let (plan, region_kind) = match bubble_find::find(&page.img, page.area, (x, y)) {
-        Ok(found) => (plan_in(&found.interior)?, "bubble"),
-        Err(miss) => {
-            let mut first: Option<EngineError> = None;
-            let mut out = None;
-            if let Ok(found) = bubble_find::find_walled(&page.img, page.area, (x, y)) {
-                match plan_in(&found.interior) {
-                    Ok(p) => out = Some((p, "edge")),
-                    Err(e) => first = Some(e),
-                }
-            }
-            if out.is_none()
-                && let Some(c) = photocraft_typer::text_cluster::find(&page.img, page.area, (x, y))
-            {
-                let m = crate::type_bubble_cmds::open_bubble(&page, x, y).map(|f| f.interior).unwrap_or_else(|| {
-                    let mut m = c.walls.clone();
-                    m.px.iter_mut().for_each(|v| *v = !*v);
-                    m
-                });
-                match plan_in(&m) {
-                    Ok(p) => out = Some((p, "textCluster")),
-                    Err(e) => first = first.or(Some(e)),
-                }
-            }
-            match out {
-                Some(o) => o,
-                None => return Err(first.unwrap_or_else(|| crate::type_bubble_cmds::no_bubble(miss))),
-            }
-        }
-    };
+    let layer_fmt = active.and_then(|id| doc.layer(id)).and_then(|l| l.surface()).map(|s| s.format());
+    // The page is composited (where it changed) in the job too.
+    let page = crate::typer_place_cmds::page_work(s)?;
+    let inp = Input { doc, active, editable, sample_all, tolerance, x, y };
+    crate::jobs::run(
+        s,
+        LABEL,
+        true,
+        move |_ctx| {
+            let page = page.finish();
+            let r = find_and_plan(&page, &inp);
+            Ok((page, r))
+        },
+        move |s, (page, r)| {
+            crate::typer_place_cmds::install_page(s, page);
+            let (plan, region_kind) = r?;
+            apply(s, plan, region_kind, active, layer_fmt, new_layer)
+        },
+    )
+}
+
+/// Paints the plan (one undo step) and reports it.
+fn apply(
+    s: &mut Session,
+    plan: Plan,
+    region_kind: &str,
+    active: Option<photocraft_doc::LayerId>,
+    layer_fmt: Option<PixelFormat>,
+    new_layer: bool,
+) -> Result<Value> {
     let Plan { region, weight, fill, pixels, gradient } = plan;
     let layer = s.edit(LABEL, |doc, act| {
         if new_layer {

@@ -440,3 +440,42 @@ fn vertical_text_with_furigana_is_one_block() {
     let (mean, off) = residue(&got, &clean, [830, 310, 958, 545], &|_, _| true);
     assert!(mean < 0.003 && off < 0.004, "every column and its furigana gone: mean {mean} off {off}");
 }
+
+/// A background job (the page's main thread stays free on phones): the same result as inline,
+/// and a refusal is the job's error with the document unchanged.
+#[test]
+fn runs_as_a_background_job_like_inline() {
+    let make = || {
+        let mut s = oval_page(white);
+        letter(&mut s, "HELLO THERE!", 330.0, 590.0, 48.0, "#000000");
+        s
+    };
+    let wait = |s: &mut Session, started: crate::jobs::Started| match started {
+        crate::jobs::Started::Job(id) => {
+            let t = std::time::Instant::now();
+            loop {
+                if let Some(e) = s.poll_jobs().into_iter().find(|e| e.id == id) {
+                    break e.outcome;
+                }
+                assert!(t.elapsed().as_secs() < 60, "job did not finish");
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        }
+        crate::jobs::Started::Done(v) => panic!("ran inline: {v}"),
+    };
+    let mut inline = make();
+    inline.execute(ID, json!({"x": 500, "y": 520})).unwrap();
+    let mut bg = make();
+    let started = bg.start(ID, json!({"x": 500, "y": 520})).unwrap();
+    let out = wait(&mut bg, started);
+    assert!(matches!(out, crate::jobs::JobOutcome::Done(_)), "{out:?}");
+    assert!(pixels(&inline) == pixels(&bg), "same pixels as inline");
+    // A second click: the page cached by the job is patched where the first click painted.
+    let past = bg.active().unwrap().history.past_len();
+    let started = bg.start(ID, json!({"x": 500, "y": 520})).unwrap();
+    let out = wait(&mut bg, started);
+    let crate::jobs::JobOutcome::Failed(err) = out else { panic!("{out:?}") };
+    assert!(err.contains("noText"), "{err}");
+    assert_eq!(bg.active().unwrap().history.past_len(), past, "a refusal changes nothing");
+    assert!(crate::typer_place_cmds::page_ready(&bg), "the job left the page cached");
+}

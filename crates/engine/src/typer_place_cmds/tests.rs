@@ -497,6 +497,22 @@ fn page_image_is_cached_across_placements() {
     .unwrap();
     let c = page_image(&mut s).unwrap();
     assert!(!std::sync::Arc::ptr_eq(&a.img, &c.img));
+    // Only the painted area was composited again (the Bubble Text Remover froze phones): the page
+    // matches a fresh composite, and the painted pixels are in it.
+    s.typer.place.forget_page();
+    let fresh = page_image(&mut s).unwrap();
+    assert!(c.img == fresh.img, "a patched page equals a fresh composite");
+    assert_eq!(c.img[0], [0, 0, 0, 255]);
+    drop((a, b, c, fresh));
+    s.edit("Paint", |doc, _| {
+        let surf = doc.layers[0].surface_mut().unwrap();
+        surf.fill_rect(photocraft_geom::Rect::new(40, 30, 90, 70), &[1.0, 0.0, 0.0, 1.0]);
+        Ok(())
+    })
+    .unwrap();
+    let d = page_image(&mut s).unwrap();
+    s.typer.place.forget_page();
+    assert!(d.img == page_image(&mut s).unwrap().img, "patched in place when nothing else holds the page");
 }
 
 #[test]

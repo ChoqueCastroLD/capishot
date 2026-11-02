@@ -175,33 +175,45 @@ const MAX_SHAPE_LIMIT: u64 = 64;
 /// A bubble for TextShapeR: its body box, outline rows and where it came from; or why there is none.
 type ShapeBubble = std::result::Result<(Rect, Vec<bubble::Row>, &'static str), &'static str>;
 
+/// Where TextShapeR's bubble comes from: the user's selection, else the page (the wand).
+enum BubbleSource {
+    Selection(bubble::Mask),
+    Page(crate::typer_place_cmds::support::PageImage),
+}
+
 /// The bubble TextShapeR fits into: the user's selection, else the wand around the layer's text
 /// (as Align finds it). `Err(reason)` when there is none.
-fn shape_bubble(s: &mut Session, id: LayerId, rows: usize) -> Result<ShapeBubble> {
-    let doc = std::sync::Arc::clone(&s.active().ok_or(EngineError::NoDocument)?.doc);
-    if let Some(mask) = selection_mask(&doc) {
-        return Ok(match bubble::body_rows(&mask, rows) {
-            Some((o, r)) if o.opened.area() >= bubble::MIN_AREA => Ok((o.opened, r, "selection")),
-            _ => Err("smallSelection"),
-        });
-    }
-    let Some(ink) = crate::typer_place_cmds::layer_ink(&doc, id) else { return Ok(Err("noText")) };
-    let size = crate::typer_place_cmds::layer_size_px(&doc, id);
-    let page = page_image(s)?;
-    let seed = bubble::seed_left_of(&ink);
-    let (mask, outline) = match bubble::wand_bubble_limited(&page.img, page.area, seed, bubble::WAND_TOLERANCE, Some(ink.center()), bubble::text_area(&ink, size)) {
-        Ok(found) => found,
-        Err(why) => return Ok(Err(why)),
+fn shape_bubble(doc: &photocraft_doc::Document, source: &BubbleSource, id: LayerId, rows: usize) -> ShapeBubble {
+    let page = match source {
+        BubbleSource::Selection(mask) => {
+            return match bubble::body_rows(mask, rows) {
+                Some((o, r)) if o.opened.area() >= bubble::MIN_AREA => Ok((o.opened, r, "selection")),
+                _ => Err("smallSelection"),
+            };
+        }
+        BubbleSource::Page(page) => page,
     };
-    let Some((o, r)) = bubble::body_rows(&mask, rows) else { return Ok(Err("noSelection")) };
+    let Some(ink) = crate::typer_place_cmds::layer_ink(doc, id) else { return Err("noText") };
+    let size = crate::typer_place_cmds::layer_size_px(doc, id);
+    let seed = bubble::seed_left_of(&ink);
+    let (mask, outline) = bubble::wand_bubble_limited(&page.img, page.area, seed, bubble::WAND_TOLERANCE, Some(ink.center()), bubble::text_area(&ink, size))?;
+    let Some((o, r)) = bubble::body_rows(&mask, rows) else { return Err("noSelection") };
     let judge = bubble::Judge { text: Some((&ink, size)), seed: bubble::pixel(&page.img, page.area, seed), page: Some(page.rect()), outline: Some(outline) };
-    Ok(match judge.verdict(&o) {
+    match judge.verdict(&o) {
         None => Ok((o.opened, r, "wand")),
         Some(why) => Err(why),
-    })
+    }
 }
 
 fn shape_text(s: &mut Session, p: &Value) -> Result<Value> {
+    shape_text_work(s, p)?()
+}
+
+/// `typer.shapeText` without blocking the caller: the params are checked and what it reads is
+/// captured here (the page composited if it isn't cached), and the returned work (the bubble
+/// wand and the shaping, seconds on a phone) runs on any thread. The TextShapeR strip runs it off
+/// the frame.
+pub fn shape_text_work(s: &mut Session, p: &Value) -> Result<Box<dyn FnOnce() -> Result<Value> + Send>> {
     use photocraft_typer::shaper::{self, Calibration, CharClass, Hyphenation, Options, Profile, TextMeasure};
     const CMD: &str = "typer.shapeText";
     let profile = match p.get("profile") {
@@ -268,8 +280,7 @@ fn shape_text(s: &mut Session, p: &Value) -> Result<Value> {
         None => None,
     };
     let mut opts = Options { profile, limit, max_lines, hyphenation: None, dehyphenate, ..Default::default() };
-    let mut bubble_json = Value::Null;
-    let (text, variants) = if let Some(id) = layer {
+    if let Some(id) = layer {
         let doc = std::sync::Arc::clone(&s.active().ok_or(EngineError::NoDocument)?.doc);
         let l = doc.layer(id).ok_or(EngineError::NoLayer(id))?;
         let LayerContent::Text(t) = &l.content else { return Err(typer_error(CMD, "noTextLayer")) };
@@ -284,29 +295,42 @@ fn shape_text(s: &mut Session, p: &Value) -> Result<Value> {
         let size_px = f64::from(style.size_pt) * k;
         let line_px = style.leading_pt.map_or(f64::from(para.auto_leading) * size_px, |l| f64::from(l) * k);
         opts.hyphenation = if hyphenate { language.or_else(|| Hyphenation::for_text(style.language.as_deref(), &text)) } else { None };
-        match (width, height) {
+        if line_px.is_finite() && line_px > 0.0 {
+            opts.calibration = Some(Calibration { unit_px: None, line_px });
+        }
+        let source = match (width, height) {
             (Some(w), Some(h)) => {
                 opts.width = Some(w);
                 opts.height = Some(h);
                 opts.rows = rows_list(p, CMD)?;
+                None
             }
-            _ => match shape_bubble(s, id, rows_wanted)? {
-                Ok((rect, rows, source)) => {
-                    opts.width = Some(rect.width);
-                    opts.height = Some(rect.height);
-                    opts.rows = rows;
-                    bubble_json = json!({"found": true, "source": source, "box": rect_json(&rect)});
+            _ => Some(match selection_mask(&doc) {
+                Some(mask) => BubbleSource::Selection(mask),
+                None => BubbleSource::Page(page_image(s)?),
+            }),
+        };
+        return Ok(Box::new(move || {
+            let mut opts = opts;
+            let mut bubble_json = Value::Null;
+            if let Some(source) = &source {
+                match shape_bubble(&doc, source, id, rows_wanted) {
+                    Ok((rect, rows, source)) => {
+                        opts.width = Some(rect.width);
+                        opts.height = Some(rect.height);
+                        opts.rows = rows;
+                        bubble_json = json!({"found": true, "source": source, "box": rect_json(&rect)});
+                    }
+                    Err(why) => bubble_json = json!({"found": false, "reason": why}),
                 }
-                Err(why) => bubble_json = json!({"found": false, "reason": why}),
-            },
-        }
-        if line_px.is_finite() && line_px > 0.0 {
-            opts.calibration = Some(Calibration { unit_px: None, line_px });
-        }
-        let mut eng = photocraft_text::shared().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let v = shaper::shape(&text, &opts, &mut TextMeasure { engine: &mut eng, style, dpi });
-        (text, v)
-    } else {
+            }
+            let mut eng = photocraft_text::shared().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let v = shaper::shape(&text, &opts, &mut TextMeasure { engine: &mut eng, style, dpi });
+            drop(eng);
+            Ok(shape_json(text, Some(id), &v, bubble_json, &opts, profile))
+        }));
+    }
+    let (text, variants) = {
         let text = text_in.ok_or_else(|| bad(CMD, "pass \"text\", or a type \"layer\" (default: the active one)"))?;
         opts.hyphenation = if hyphenate { language.or_else(|| Hyphenation::for_text(None, &text)) } else { None };
         opts.width = width;
@@ -320,12 +344,25 @@ fn shape_text(s: &mut Session, p: &Value) -> Result<Value> {
         let v = shaper::shape(&text, &opts, &mut CharClass);
         (text, v)
     };
+    Ok(Box::new(move || Ok(shape_json(text, None, &variants, Value::Null, &opts, profile))))
+}
+
+/// `typer.shapeText`'s result.
+fn shape_json(
+    text: String,
+    layer: Option<LayerId>,
+    variants: &[photocraft_typer::shaper::Variant],
+    bubble_json: Value,
+    opts: &photocraft_typer::shaper::Options,
+    profile: photocraft_typer::shaper::Profile,
+) -> Value {
+    use photocraft_typer::shaper::Hyphenation;
     let language = match opts.hyphenation {
         Some(Hyphenation::French) => Some("fr"),
         Some(Hyphenation::Patterns(l)) => Some(l.code()),
         None => None,
     };
-    Ok(json!({
+    json!({
         "text": text,
         "layer": layer.map(|l| l.0),
         "variants": variants.iter().map(|v| json!({
@@ -340,7 +377,7 @@ fn shape_text(s: &mut Session, p: &Value) -> Result<Value> {
         "bubble": bubble_json,
         "language": language,
         "profile": profile,
-    }))
+    })
 }
 
 /// `"rows"` as a list of outline rows (`{y, left, right, width?}`, 0..1), at most 64.

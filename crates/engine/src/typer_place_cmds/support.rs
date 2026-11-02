@@ -86,34 +86,108 @@ fn without_text(doc: &Document) -> Document {
     d
 }
 
-/// The cached page image of the active document (recomposited only when its non-type pixels
-/// changed).
-/// Rows of the page composited at a time for [`page_image`].
+/// Rows of the page composited at a time.
 const PAGE_BAND: i32 = 256;
 
+/// The cached page image of the active document (composited again only where its non-type
+/// pixels changed).
 pub fn page_image(s: &mut Session) -> Result<PageImage> {
-    let d = s.active().ok_or(EngineError::NoDocument)?;
-    let stripped = without_text(&d.doc);
-    if let Some(p) = &s.typer.place.page
-        && p.doc_id == d.doc.id
-        && crate::layer_multi_cmds::same_pixels(&p.stripped, &stripped)
-    {
-        return Ok(p.clone());
-    }
-    let area = stripped.bounds();
-    let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
-    // In bands: a whole page composited at once is four floats a pixel (a 2000 x 3000 page,
-    // 96 MB) for the 8-bit copy kept here, and on the web that peak stays in the page's memory.
-    let mut img: Vec<[u8; 4]> = Vec::with_capacity(area.width() as usize * area.height() as usize);
-    let mut y = area.y0;
-    while y < area.y1 {
-        let y1 = (y + PAGE_BAND).min(area.y1);
-        img.extend(photocraft_compose::render(&stripped, photocraft_geom::Rect::new(area.x0, y, area.x1, y1)).px.iter().map(|p| p.map(q)));
-        y = y1;
-    }
-    let page = PageImage { doc_id: d.doc.id, stripped: Arc::new(stripped), area, img: Arc::new(img) };
+    let page = page_work(s)?.finish();
     s.typer.place.page = Some(page.clone());
     Ok(page)
+}
+
+/// The page image of the active document, still to composite where it isn't current
+/// ([`page_work`]): [`PageWork::finish`] does it, on any thread.
+pub(crate) enum PageWork {
+    Ready(PageImage),
+    Composite {
+        doc_id: DocId,
+        stripped: Box<Document>,
+        area: photocraft_geom::Rect,
+        /// The previous page and the part of it to composite again (else all of it).
+        base: Option<(Arc<Vec<[u8; 4]>>, photocraft_geom::Rect)>,
+    },
+}
+
+/// What [`page_image`] has to do, decided without compositing anything. A page whose pixels
+/// changed in a bounded area (the last click's clean, a stroke) is composited again there only
+/// (it leaves the cache, so a page nothing else holds is patched in place): a phone spent
+/// seconds per Bubble Text Remover click compositing the whole page after the previous click's
+/// change.
+pub(crate) fn page_work(s: &mut Session) -> Result<PageWork> {
+    let d = s.active().ok_or(EngineError::NoDocument)?;
+    let doc_id = d.doc.id;
+    let stripped = without_text(&d.doc);
+    let area = stripped.bounds();
+    let mut patch = None;
+    if let Some(p) = &s.typer.place.page
+        && p.doc_id == doc_id
+    {
+        if crate::layer_multi_cmds::same_pixels(&p.stripped, &stripped) {
+            return Ok(PageWork::Ready(p.clone()));
+        }
+        if p.area == area
+            && let Some(r) = crate::layer_multi_cmds::step_damage(&p.stripped, &stripped)
+        {
+            let r = r.intersect(&p.area);
+            if u64::from(r.width()) * u64::from(r.height()) * 2 <= u64::from(area.width()) * u64::from(area.height()) {
+                patch = Some(r);
+            }
+        }
+    }
+    let base = match patch {
+        Some(r) => s.typer.place.page.take().map(|old| (old.img, r)),
+        None => None,
+    };
+    Ok(PageWork::Composite { doc_id, stripped: Box::new(stripped), area, base })
+}
+
+impl PageWork {
+    /// The page image, composited where needed (in bands: a whole page at once is four floats a
+    /// pixel, 96 MB for a 2000 x 3000 page, and on the web that peak stays in the page's memory).
+    pub(crate) fn finish(self) -> PageImage {
+        let (doc_id, stripped, area, base) = match self {
+            PageWork::Ready(p) => return p,
+            PageWork::Composite { doc_id, stripped, area, base } => (doc_id, stripped, area, base),
+        };
+        let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+        let w = area.width() as usize;
+        let (mut img, r) = match base {
+            Some((img, r)) => (Arc::try_unwrap(img).unwrap_or_else(|shared| (*shared).clone()), r),
+            None => (vec![[0u8; 4]; w * area.height() as usize], area),
+        };
+        let rw = r.width() as usize;
+        let mut y = r.y0;
+        while y < r.y1 {
+            let y1 = (y + PAGE_BAND).min(r.y1);
+            let band = photocraft_compose::render(&stripped, photocraft_geom::Rect::new(r.x0, y, r.x1, y1));
+            for (row, src) in band.px.chunks_exact(rw.max(1)).enumerate() {
+                let start = ((y - area.y0) as usize + row) * w + (r.x0 - area.x0) as usize;
+                if let Some(dst) = img.get_mut(start..start + rw) {
+                    for (d, p) in dst.iter_mut().zip(src) {
+                        *d = p.map(q);
+                    }
+                }
+            }
+            y = y1;
+        }
+        PageImage { doc_id, stripped: Arc::new(*stripped), area, img: Arc::new(img) }
+    }
+}
+
+/// Keep `page` as the cached page when it is still the active document's (a background job's
+/// page, composited while the document stayed as it was).
+pub(crate) fn install_page(s: &mut Session, page: PageImage) {
+    if s.active().is_some_and(|d| d.doc.id == page.doc_id && crate::layer_multi_cmds::same_pixels(&page.stripped, &without_text(&d.doc))) {
+        s.typer.place.page = Some(page);
+    }
+}
+
+/// Is a page image of the active document cached, current or not (a stale one is patched where
+/// it changed, see [`page_work`])?
+pub fn page_cached(s: &Session) -> bool {
+    s.active().is_some_and(|d| s.typer.place.page.as_ref().is_some_and(|p| p.doc_id == d.doc.id))
 }
 
 /// Is the page image of the active document cached and current (TypeR's bubble detection can

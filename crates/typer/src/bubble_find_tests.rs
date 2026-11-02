@@ -222,3 +222,35 @@ fn rectangularity_tells_boxes_from_bubbles() {
     let spiky = r(&page(&star, 3));
     assert!(spiky < 0.75, "a spiky bubble: {spiky}");
 }
+
+/// The search starts in a window around the click; on a page larger than the window every
+/// answer (found, refused, a bubble larger than the window, one cut by the page edge) is the
+/// page's.
+#[test]
+fn the_window_answers_as_the_whole_page() {
+    let (pw, ph) = (1800usize, 2600usize);
+    let big = oval(900.0, 1500.0, 820.0, 700.0);
+    let small = oval(400.0, 300.0, 150.0, 100.0);
+    let cut = oval(1790.0, 300.0, 120.0, 90.0);
+    let inside = |x: f64, y: f64| small(x, y) || big(x, y) || cut(x, y);
+    let fill: Vec<bool> = (0..pw * ph).map(|i| inside((i % pw) as f64 + 0.5, (i / pw) as f64 + 0.5)).collect();
+    let get = |x: i32, y: i32| x >= 0 && y >= 0 && (x as usize) < pw && (y as usize) < ph && fill[y as usize * pw + x as usize];
+    let img: Vec<[u8; 4]> = (0..pw * ph)
+        .map(|i| {
+            let (x, y) = ((i % pw) as i32, (i / pw) as i32);
+            let edge = fill[i] && (-3..=3).any(|dy| (-3..=3).any(|dx| dx * dx + dy * dy <= 9 && !get(x + dx, y + dy)));
+            // Grey page outside the bubbles, so the page background isn't white paper.
+            if edge { [0, 0, 0, 255] } else if fill[i] { [255, 255, 255, 255] } else { [150, 150, 150, 255] }
+        })
+        .collect();
+    let page = photocraft_geom::Rect::new(0, 0, pw as i32, ph as i32);
+    let whole = |at: (i32, i32), walls: bool| search(&img, page, page, at, walls, MAX_PAGE_SHARE).unwrap();
+    let key = |r: &Result<Found, Miss>| r.as_ref().map(|f| (f.interior.bounds(), f.interior.count(), f.body.bounds())).map_err(|m| *m);
+    for (at, walls) in [((400, 300), false), ((900, 1500), false), ((900, 1500), true), ((1750, 300), false), ((1750, 300), true), ((100, 1000), false), ((60, 2550), true)] {
+        let got = find_with(&img, page, at, walls, MAX_PAGE_SHARE);
+        assert_eq!(key(&got), key(&whole(at, walls)), "at {at:?} walls {walls}");
+    }
+    let f = find(&img, page, (900, 1500)).unwrap();
+    assert!(f.interior.bounds().unwrap().width() > 2 * WINDOWS[0], "the bubble larger than the first window is found whole");
+    assert!(find(&img, page, (400, 300)).is_ok());
+}

@@ -29,7 +29,7 @@ mod preview;
 pub mod script_editor;
 mod settings;
 mod shaper_ui;
-pub(crate) use shaper_ui::PageJob;
+pub(crate) use shaper_ui::{PageJob, warm_page};
 pub(crate) mod style_editor;
 mod styles;
 pub(crate) mod tabs;

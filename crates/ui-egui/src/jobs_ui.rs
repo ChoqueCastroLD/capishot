@@ -385,7 +385,8 @@ fn run_inner(app: &mut PhotocraftApp, id: &str, params: Value) -> Result<Value, 
 /// The browser threads build runs these as background jobs on its Web Worker pool even without
 /// [`PhotocraftApp::background_jobs`] (the browser's default): the seconds-long fills and graph
 /// cuts at pen-up would otherwise hold the page's main thread. Their results are the same.
-const POOL_COMMANDS: [&str; 4] = ["paint.spotHealing", "select.quick", "paint.remove", photocraft_engine::ai_inpaint_cmds::ID];
+const POOL_COMMANDS: [&str; 5] =
+    ["paint.spotHealing", "select.quick", "paint.remove", photocraft_engine::ai_inpaint_cmds::ID, photocraft_engine::bubble_text_cmds::ID];
 /// Runs `f` on the browser threads build's worker pool (callers check [`POOL_THREADS`]); here
 /// in the other builds.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
@@ -729,6 +730,9 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
     // An AI run's end: "Done" or its error on the progress card.
     let ai_error = crate::ai_progress::on_event(app, ctx, &e);
     if on_files_event(app, &e) {
+        return;
+    }
+    if crate::tools::bubble_text_ui::on_job_event(app, &e) {
         return;
     }
     if placed(app, ctx, &e) {

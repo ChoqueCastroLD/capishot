@@ -97,11 +97,44 @@ pub fn find_in_box(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32
     find_with(img, area, seed, true, 1.0)
 }
 
+/// Half the sides of the windows around the click searched first, smallest first.
+const WINDOWS: [i32; 2] = [384, 1024];
+/// A flood this close (px) to a side of the window that isn't the page's leaves the window: every
+/// pixel the search reads (the gap radius around the core, the interior grown back by it, the
+/// outline three pixels past that) stays inside it until then.
+const WINDOW_MARGIN: i32 = GAP_RADIUS + 6;
+
 fn find_with(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32), walls: bool, share: f64) -> Result<Found, Miss> {
     let (w, h) = (area.width() as usize, area.height() as usize);
     if w == 0 || h == 0 || img.len() != w * h || !area.contains(seed.0, seed.1) {
         return Err(Miss::Dark);
     }
+    // A bubble is a few hundred pixels: look in a window around the click first (a phone spent
+    // seconds per Bubble Text Remover click on a whole page's luma and flood buffers). A search
+    // whose flood reaches the window's inner side runs again over the page, so the result is the
+    // same as the page's.
+    for half in WINDOWS {
+        let win = photocraft_geom::Rect::new(seed.0 - half, seed.1 - half, seed.0 + half + 1, seed.1 + half + 1).intersect(&area);
+        if win == area {
+            break;
+        }
+        let (ww, wh) = (win.width() as usize, win.height() as usize);
+        let mut crop = Vec::with_capacity(ww * wh);
+        for y in win.y0..win.y1 {
+            let start = (y - area.y0) as usize * w + (win.x0 - area.x0) as usize;
+            crop.extend_from_slice(img.get(start..start + ww).ok_or(Miss::Dark)?);
+        }
+        if let Some(r) = search(&crop, win, area, seed, walls, share) {
+            return r;
+        }
+    }
+    search(img, area, area, seed, walls, share).unwrap_or(Err(Miss::TooBig))
+}
+
+/// [`find_with`] over `img` covering `area`, a window of `page` (or the page itself); `None` when
+/// a flood reached a side of the window that isn't the page's.
+fn search(img: &[[u8; 4]], area: photocraft_geom::Rect, page: photocraft_geom::Rect, seed: (i32, i32), walls: bool, share: f64) -> Option<Result<Found, Miss>> {
+    let w = area.width() as usize;
     // One byte a pixel (a page is millions of them).
     let lum: Vec<u8> = img.iter().map(|p| luma(*p).round().clamp(0.0, 255.0) as u8).collect();
     let at = |x: i32, y: i32| (y - area.y0) as usize * w + (x - area.x0) as usize;
@@ -133,8 +166,8 @@ fn find_with(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32), wal
             }
         }
         let light_min = (f64::from(paper) - LIGHT_TOLERANCE.min(0.4 * f64::from(paper))).ceil().clamp(0.0, 255.0) as u8;
-        match flood_from(img, area, &lum, start, light_min, walls, share) {
-            Ok(found) => return Ok(found),
+        match flood_from(img, area, page, &lum, start, light_min, walls, share)? {
+            Ok(found) => return Some(Ok(found)),
             // Too dark to start here (a letter's edge): not a try.
             Err(Miss::Dark) => continue,
             Err(m) => {
@@ -143,30 +176,58 @@ fn find_with(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32), wal
             }
         }
     }
-    Err(first_miss.unwrap_or(Miss::Dark))
+    Some(Err(first_miss.unwrap_or(Miss::Dark)))
 }
 
-/// The flood from `start` over pixels with no pixel darker than `light_min` within the radius.
-fn flood_from(img: &[[u8; 4]], area: photocraft_geom::Rect, lum: &[u8], start: (i32, i32), light_min: u8, walls: bool, share: f64) -> Result<Found, Miss> {
+/// The flood from `start` over pixels with no pixel darker than `light_min` within the radius
+/// (`None`: it reached a side of the window `area` that isn't the `page`'s).
+#[allow(clippy::too_many_arguments)]
+fn flood_from(
+    img: &[[u8; 4]],
+    area: photocraft_geom::Rect,
+    page: photocraft_geom::Rect,
+    lum: &[u8],
+    start: (i32, i32),
+    light_min: u8,
+    walls: bool,
+    share: f64,
+) -> Option<Result<Found, Miss>> {
     let (w, h) = (area.width() as usize, area.height() as usize);
     let at = |x: i32, y: i32| (y - area.y0) as usize * w + (x - area.x0) as usize;
     let r = GAP_RADIUS;
     let disc: Vec<(i32, i32)> = (-r..=r).flat_map(|dy| (-r..=r).map(move |dx| (dx, dy))).filter(|(dx, dy)| dx * dx + dy * dy <= r * r).collect();
     // Passable: no dark pixel within the radius (pixels off the page count as light, so a
     // bubble cut by the page edge still reaches it and is refused as touching it).
+    let offsets: Vec<isize> = disc.iter().map(|(dx, dy)| *dy as isize * w as isize + *dx as isize).collect();
     let passable = |x: i32, y: i32| {
+        if x - r >= area.x0 && y - r >= area.y0 && x + r < area.x1 && y + r < area.y1 {
+            // The whole disc is inside: no bounds to check.
+            let c = at(x, y) as isize;
+            return offsets.iter().all(|o| lum.get((c + o) as usize).is_some_and(|v| *v >= light_min));
+        }
         disc.iter().all(|(dx, dy)| {
             let (px, py) = (x + dx, y + dy);
             if area.contains(px, py) { lum[at(px, py)] >= light_min } else { !walls }
         })
     };
+    let m = WINDOW_MARGIN;
+    let leaves = |x: i32, y: i32| {
+        (area.x0 > page.x0 && x - m <= area.x0)
+            || (area.y0 > page.y0 && y - m <= area.y0)
+            || (area.x1 < page.x1 && x + m >= area.x1 - 1)
+            || (area.y1 < page.y1 && y + m >= area.y1 - 1)
+    };
+    if leaves(start.0, start.1) {
+        return None;
+    }
     if !passable(start.0, start.1) {
-        return Err(Miss::Dark);
+        return Some(Err(Miss::Dark));
     }
     let seed = start;
     // The flood over passable pixels; the core stays `r` inside the page, so one that gets
     // there touches the edge.
-    let cap = MAX_PIXELS.min(((w * h) as f64 * share) as usize).max(1);
+    let page_px = page.width() as usize * page.height() as usize;
+    let cap = MAX_PIXELS.min((page_px as f64 * share) as usize).max(1);
     let mut seen = vec![false; w * h];
     let mut core: Vec<(i32, i32)> = vec![seed];
     seen[at(seed.0, seed.1)] = true;
@@ -174,11 +235,14 @@ fn flood_from(img: &[[u8; 4]], area: photocraft_geom::Rect, lum: &[u8], start: (
     let (mut x0, mut y0, mut x1, mut y1) = (seed.0, seed.1, seed.0, seed.1);
     while let Some(&(x, y)) = core.get(i) {
         i += 1;
-        if !walls && (x - r <= area.x0 || y - r <= area.y0 || x + r >= area.x1 - 1 || y + r >= area.y1 - 1) {
-            return Err(Miss::Edge);
+        if !walls && (x - r <= page.x0 || y - r <= page.y0 || x + r >= page.x1 - 1 || y + r >= page.y1 - 1) {
+            return Some(Err(Miss::Edge));
+        }
+        if leaves(x, y) {
+            return None;
         }
         if core.len() > cap {
-            return Err(Miss::TooBig);
+            return Some(Err(Miss::TooBig));
         }
         (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
         for n in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
@@ -193,7 +257,7 @@ fn flood_from(img: &[[u8; 4]], area: photocraft_geom::Rect, lum: &[u8], start: (
     let pad = r + 1;
     let (mx, my) = (x0 - pad, y0 - pad);
     let (mw, mh) = ((x1 - x0 + 1 + 2 * pad) as usize, (y1 - y0 + 1 + 2 * pad) as usize);
-    let mut interior = Mask::new(mx, my, mw, mh).ok_or(Miss::TooBig)?;
+    let Some(mut interior) = Mask::new(mx, my, mw, mh) else { return Some(Err(Miss::TooBig)) };
     for &(x, y) in &core {
         interior.set(x, y, true);
     }
@@ -205,16 +269,16 @@ fn flood_from(img: &[[u8; 4]], area: photocraft_geom::Rect, lum: &[u8], start: (
         }
     }
     interior.fill_holes();
-    judge(img, area, interior, walls, share)
+    Some(judge(img, area, page, interior, walls, share))
 }
 
-fn judge(img: &[[u8; 4]], area: photocraft_geom::Rect, interior: Mask, walls: bool, share: f64) -> Result<Found, Miss> {
+fn judge(img: &[[u8; 4]], area: photocraft_geom::Rect, page: photocraft_geom::Rect, interior: Mask, walls: bool, share: f64) -> Result<Found, Miss> {
     let b = interior.bounds().ok_or(Miss::TooSmall)?;
     let count = interior.count();
     if (count as f64) < bubble::MIN_AREA || f64::from(b.width().min(b.height())) < bubble::MIN_SIDE {
         return Err(Miss::TooSmall);
     }
-    if (count as f64) > share * f64::from(area.width()) * f64::from(area.height()) {
+    if (count as f64) > share * f64::from(page.width()) * f64::from(page.height()) {
         return Err(Miss::TooBig);
     }
     let fill = count as f64 / (f64::from(b.width()) * f64::from(b.height())).max(1.0);
