@@ -38,7 +38,7 @@ pub const DIALOG_DELAY_MS: f64 = 250.0;
 /// times what the rest of the last frame took, within these bounds. A frame that is quick to draw
 /// keeps the page at display rate; one slow to draw (a software-rendered page) doesn't make the
 /// job take many times longer than it would in one go.
-const STEP_BUDGET_MS: (f64, f64) = (8.0, 48.0);
+const STEP_BUDGET_MS: (f64, f64) = (8.0, 64.0);
 
 /// [`STEP_BUDGET_MS`] for a frame starting at `now`, from the last one (`JobsUi::stepped`).
 fn step_budget(jobs: &mut JobsUi, now: f64) -> f64 {

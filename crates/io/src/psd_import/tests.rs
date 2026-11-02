@@ -412,18 +412,24 @@ fn assert_decodes_agree(name: &str, bytes: &[u8]) -> bool {
     let none = &photocraft_raster::Interrupt::NONE;
     let open = || crate::PsdOpen::shared(name, &bytes).expect("a PSD");
     let Ok(first) = open() else { return false };
-    let Ok(walk) = first.finish(none) else { return false };
-    let walk = open_fingerprint(&walk);
+    let Ok(walk_doc) = first.finish(none) else { return false };
+    let walk = open_fingerprint(&walk_doc);
+    let saved = |r: &(crate::ImportResult, bool)| crate::export(&r.0.document, "x.psd", &Default::default()).map(|o| o.bytes).ok();
+    let walk_saved = saved(&walk_doc);
     let mut o = open().unwrap();
     o.decode_all(none).unwrap();
-    assert_eq!(open_fingerprint(&o.finish(none).unwrap()), walk, "{name}: side by side");
+    let side = o.finish(none).unwrap();
+    assert_eq!(open_fingerprint(&side), walk, "{name}: side by side");
+    assert!(saved(&side) == walk_saved, "{name}: saved side by side");
     let mut o = open().unwrap();
     let mut steps = 0;
     while !o.step(&|| false) {
         steps += 1;
         assert!(o.progress() < 1.0 || o.decoded());
     }
-    assert_eq!(open_fingerprint(&o.finish(none).unwrap()), walk, "{name}: in {} steps", steps + 1);
+    let stepped = o.finish(none).unwrap();
+    assert_eq!(open_fingerprint(&stepped), walk, "{name}: in {} steps", steps + 1);
+    assert!(saved(&stepped) == walk_saved, "{name}: saved after {} steps", steps + 1);
     // Half stepped, the rest side by side.
     let mut o = open().unwrap();
     for _ in 0..steps / 2 {
