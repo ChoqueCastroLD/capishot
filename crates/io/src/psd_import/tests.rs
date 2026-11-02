@@ -372,19 +372,114 @@ fn a_complete_alpha_identifiers_resource_keeps_photoshop_polarity() {
 fn layer_bands_end_on_tile_rows_and_cover_the_layer() {
     let t = TILE_SIZE as usize;
     for (top, h, row_bytes) in [(0, 2000, 8000), (-37, 15000, 80_000), (100, 5, 4), (255, 1, 4), (-256, 40_000, 1 << 20), (7, 0, 4)] {
-        let bands = band_rows(top, h, row_bytes);
+        let bands = decode::band_rows(top, h, row_bytes, decode::BAND_BYTES);
         let mut next = 0;
         for &(a, b) in &bands {
             assert_eq!(a, next);
             assert!(b > a);
             if b < h {
                 assert_eq!((top + b as i32).rem_euclid(TILE_SIZE), 0, "{top} {h}: band ends inside a tile row");
-                assert!((b - a) * row_bytes <= BAND_BYTES + t * row_bytes || b - a <= t);
+                assert!((b - a) * row_bytes <= decode::BAND_BYTES + t * row_bytes || b - a <= t);
             }
             next = b;
         }
         assert_eq!(next, h);
     }
     // A small layer is one band.
-    assert_eq!(band_rows(0, 2000, 8000), vec![(0, 2000)]);
+    assert_eq!(decode::band_rows(0, 2000, 8000, decode::BAND_BYTES), vec![(0, 2000)]);
+}
+
+/// Everything an open's result shows: per layer its name, visibility, pixels and mask, then the
+/// warnings and the damage flag.
+type LayerPrint = (String, bool, Option<Vec<u8>>, Option<Vec<u8>>);
+
+fn open_fingerprint(r: &(crate::ImportResult, bool)) -> (Vec<LayerPrint>, Vec<String>, bool) {
+    let doc = &r.0.document;
+    let b = doc.bounds();
+    let layers = doc
+        .walk()
+        .iter()
+        .map(|(_, _, l)| (l.name.clone(), l.visible, l.surface().map(|s| s.to_interleaved(b)), l.mask.as_ref().map(|m| m.surface.to_interleaved(b))))
+        .collect();
+    (layers, r.0.warnings.clone(), r.1)
+}
+
+/// The layer walk decoding each layer itself, the layers decoded side by side, and a band at a
+/// time (with one band per step) give the same document, warnings and damage. Returns whether
+/// the file opened damaged.
+fn assert_decodes_agree(name: &str, bytes: &[u8]) -> bool {
+    let bytes = Arc::new(bytes.to_vec());
+    let none = &photocraft_raster::Interrupt::NONE;
+    let open = || crate::PsdOpen::shared(name, &bytes).expect("a PSD");
+    let Ok(first) = open() else { return false };
+    let Ok(walk_doc) = first.finish(none) else { return false };
+    let walk = open_fingerprint(&walk_doc);
+    let saved = |r: &(crate::ImportResult, bool)| crate::export(&r.0.document, "x.psd", &Default::default()).map(|o| o.bytes).ok();
+    let walk_saved = saved(&walk_doc);
+    let mut o = open().unwrap();
+    o.decode_all(none).unwrap();
+    let side = o.finish(none).unwrap();
+    assert_eq!(open_fingerprint(&side), walk, "{name}: side by side");
+    assert!(saved(&side) == walk_saved, "{name}: saved side by side");
+    let mut o = open().unwrap();
+    let mut steps = 0;
+    while !o.step(&|| false) {
+        steps += 1;
+        assert!(o.progress() < 1.0 || o.decoded());
+    }
+    let stepped = o.finish(none).unwrap();
+    assert_eq!(open_fingerprint(&stepped), walk, "{name}: in {} steps", steps + 1);
+    assert!(saved(&stepped) == walk_saved, "{name}: saved after {} steps", steps + 1);
+    // Half stepped, the rest side by side.
+    let mut o = open().unwrap();
+    for _ in 0..steps / 2 {
+        o.step(&|| false);
+    }
+    o.decode_all(none).unwrap();
+    assert_eq!(open_fingerprint(&o.finish(none).unwrap()), walk, "{name}: stepped, then side by side");
+    walk.2
+}
+
+/// A document whose layers span several bands of a step, with a mask and a hidden layer.
+fn banded_document(depth: SampleType) -> Document {
+    let (w, h) = (700u32, 900u32);
+    let mut doc = Document::new("banded", Size::new(w, h), ColorMode::Rgb, depth);
+    let fmt = doc.pixel_format();
+    for (i, (r, visible)) in [(Rect::new(0, 0, 700, 900), true), (Rect::new(-37, 300, 650, 1100), false), (Rect::new(10, 20, 400, 610), true)].into_iter().enumerate() {
+        let n = (r.width() * r.height()) as usize;
+        let bps = fmt.sample.bytes();
+        let bytes: Vec<u8> = (0..n * 4 * bps).map(|k| ((k / 3 + i * 31 + (k / 2048) * 7) % 251) as u8).collect();
+        let mut l = Layer::new(format!("layer {i}"), LayerContent::Raster(Surface::from_interleaved(fmt, r, &bytes)));
+        l.visible = visible;
+        if i == 2 {
+            let mfmt = PixelFormat::new(ColorMode::Grayscale, depth, false);
+            let mbytes: Vec<u8> = (0..(300 * 200 * bps)).map(|k| (k % 199) as u8).collect();
+            l.mask = Some(LayerMask { surface: Surface::from_interleaved(mfmt, Rect::new(50, 50, 350, 250), &mbytes), enabled: true, linked: true, density: 1.0, feather: 0.0 });
+        }
+        doc.layers.push(l);
+    }
+    doc
+}
+
+#[test]
+fn every_way_of_decoding_the_layers_gives_the_same_document() {
+    for depth in [SampleType::U8, SampleType::U16] {
+        let doc = banded_document(depth);
+        let bytes = crate::export(&doc, "banded.psd", &Default::default()).unwrap().bytes;
+        assert_decodes_agree(&format!("banded {depth:?}"), &bytes);
+        // Damaged channel data: warnings and empty layers alike, whatever the decode.
+        let mut damaged = 0;
+        for at in (1..12).map(|k| bytes.len() * k / 12) {
+            let mut bad = bytes.clone();
+            for (i, b) in bad.iter_mut().skip(at).take(64).enumerate() {
+                *b = [0x7F, 0x81, 0xFF][i % 3];
+            }
+            damaged += usize::from(assert_decodes_agree(&format!("banded {depth:?} damaged at {at}"), &bad));
+        }
+        assert!(damaged > 0, "{depth:?}: some damage was read");
+    }
+    for case in testgen::all_cases() {
+        let Ok(bytes) = case.file.to_bytes() else { continue };
+        assert_decodes_agree(&case.name, &bytes);
+    }
 }

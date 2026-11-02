@@ -524,8 +524,9 @@ pub struct PhotocraftApp {
     pub fps: f32,
     pub(crate) last_frame_time: f64,
     thumbs: HashMap<(photocraft_doc::LayerId, u8), (u64, egui::TextureHandle)>,
-    /// Thumbnails rebuilt this frame: (frame, count), for [`THUMBS_PER_FRAME`].
-    thumb_frame: (u64, u32),
+    /// Thumbnails rebuilt this frame: (frame, count, when the first started), for
+    /// [`THUMBS_PER_FRAME`].
+    thumb_frame: (u64, u32, f64),
     /// A transparent stand-in for a thumbnail not built yet.
     blank_thumb: Option<egui::TextureHandle>,
     /// The document area each layer thumbnail in `thumbs` frames (the canvas, or the layer's
@@ -782,6 +783,10 @@ pub struct PhotocraftApp {
     /// `jobs_ui`). The desktop app turns it on; off (the default), everything runs inline as
     /// before, which tests and scripts rely on.
     pub background_jobs: bool,
+    /// Open picked and dropped PSD/PSB files a step at a time between frames, their merged image
+    /// shown meanwhile, instead of inline (the single-threaded browser build, where
+    /// [`Self::background_jobs`] is off: an open would otherwise hold the page until done).
+    pub stepped_opens: bool,
     /// Shortest time between frames (ms), or `None` for no cap. A present mode that doesn't wait
     /// for the display (Low-Latency Drawing) would otherwise redraw as fast as it can while
     /// anything keeps requesting repaints (a drag hovering, autoscroll, Liquify held still).

@@ -782,3 +782,98 @@ fn every_job_terminal_path_drops_a_live_commit_stroke() {
         assert!(s.live_commit.is_none(), "terminal path {outcome} retained the preview");
     }
 }
+
+/// The single-threaded browser build's open, a step at a time: its preview first (before any
+/// layer is decoded), then the same document as a background open, after several steps; a
+/// cancelled one adds nothing; `wait_job` runs one to the end.
+#[test]
+fn a_stepped_open_shows_its_preview_first_and_opens_the_same_document() {
+    let mut src = session(600, 700);
+    let doc = (*src.active().unwrap().doc).clone();
+    let bytes = Arc::new(photocraft_io::export(&doc, "x.psd", &Default::default()).unwrap().bytes);
+    src.close(0);
+    let mut s = Session::new();
+    let preview: PreviewSlot = Arc::default();
+    let id = job(s.start_stepped_open("x.psd", OpenSource::Bytes(Arc::clone(&bytes)), Arc::clone(&preview)).unwrap());
+    assert!(s.has_stepped_jobs());
+    // Natively the job's work hands the steps over from a thread: step until it has.
+    let start = Instant::now();
+    while preview.lock().unwrap().is_none() {
+        s.step_jobs(&|| false);
+        assert!(start.elapsed() < Duration::from_secs(10), "no preview");
+    }
+    let p = preview.lock().unwrap().clone().unwrap();
+    assert_eq!((p.doc_width, p.doc_height), (600, 700));
+    assert!(s.job(id).unwrap().progress < 0.05, "the preview comes before the layers");
+    let mut steps = 1;
+    while s.has_stepped_jobs() {
+        s.step_jobs(&|| false);
+        steps += 1;
+        assert!(steps < 10_000);
+    }
+    assert!(steps > 3, "{steps} steps");
+    let e = wait_event(&mut s, id);
+    let JobOutcome::Done(v) = &e.outcome else { panic!("{e:?}") };
+    assert_eq!(v["document"], 0);
+    // The same pixels as a background open.
+    let id = job(s.start_open("y.psd", OpenSource::Bytes(Arc::clone(&bytes))).unwrap());
+    wait_event(&mut s, id);
+    let px = |d: &photocraft_doc::Document| d.walk().iter().map(|(_, _, l)| l.surface().map(|s| s.to_interleaved(d.bounds()))).collect::<Vec<_>>();
+    assert_eq!(px(&s.documents()[0].doc), px(&s.documents()[1].doc));
+
+    // Cancelled part way: nothing added, nothing left to step.
+    let id = job(s.start_stepped_open("z.psd", OpenSource::Bytes(Arc::clone(&bytes)), Arc::default()).unwrap());
+    for _ in 0..3 {
+        s.step_jobs(&|| false);
+    }
+    assert!(s.cancel_job(id));
+    s.step_jobs(&|| false);
+    assert!(!s.has_stepped_jobs());
+    assert_eq!(wait_event(&mut s, id).outcome, JobOutcome::Cancelled);
+    assert_eq!(s.documents().len(), 2);
+
+    // Waited for (the control channel's default): run to the end there.
+    let id = job(s.start_stepped_open("w.psd", OpenSource::Bytes(Arc::clone(&bytes)), Arc::default()).unwrap());
+    assert_eq!(s.wait_job(id).unwrap()["document"], 2);
+    assert!(!s.has_stepped_jobs());
+}
+
+/// Not a PSD, or a broken one: the stepped open fails like any open, without a panic.
+#[test]
+fn a_stepped_open_of_a_bad_file_fails() {
+    let mut s = Session::new();
+    for bytes in [b"8BPS\0\x01garbage".to_vec(), b"not a psd at all".to_vec(), Vec::new()] {
+        let id = job(s.start_stepped_open("bad.psd", OpenSource::Bytes(Arc::new(bytes)), Arc::default()).unwrap());
+        assert!(s.wait_job(id).is_err());
+    }
+    assert!(s.documents().is_empty());
+}
+
+/// A background open reads the PSD's merged image beside its layers: the slot gets it, sized as
+/// the document. A file without one (not a PSD) leaves the slot empty.
+#[test]
+fn a_background_open_puts_the_merged_preview_in_its_slot() {
+    let mut src = session(300, 200);
+    let doc = (*src.active().unwrap().doc).clone();
+    let bytes = Arc::new(photocraft_io::export(&doc, "p.psd", &Default::default()).unwrap().bytes);
+    src.close(0);
+    let mut s = Session::new();
+    let slot: PreviewSlot = Arc::default();
+    let id = job(s.start_open_with_preview("p.psd", OpenSource::Bytes(Arc::clone(&bytes)), Arc::clone(&slot)).unwrap());
+    wait_event(&mut s, id);
+    let t = Instant::now();
+    while slot.lock().unwrap().is_none() {
+        assert!(t.elapsed() < Duration::from_secs(10), "no preview");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let p = slot.lock().unwrap().clone().unwrap();
+    assert_eq!((p.doc_width, p.doc_height), (300, 200));
+    assert_eq!(p.rgba.len(), (p.width * p.height * 4) as usize);
+    // A PNG has no merged image to show.
+    let png = Arc::new(photocraft_io::export(&doc, "p.png", &Default::default()).unwrap().bytes);
+    let slot: PreviewSlot = Arc::default();
+    let id = job(s.start_open_with_preview("p.png", OpenSource::Bytes(png), Arc::clone(&slot)).unwrap());
+    wait_event(&mut s, id);
+    std::thread::sleep(Duration::from_millis(50));
+    assert!(slot.lock().unwrap().is_none());
+}

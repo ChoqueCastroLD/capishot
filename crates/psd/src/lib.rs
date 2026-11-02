@@ -66,6 +66,7 @@ pub mod metadata;
 pub mod path;
 pub mod patterns;
 pub mod pixels;
+pub mod preview;
 pub mod resources;
 pub mod rows;
 pub mod shc;
