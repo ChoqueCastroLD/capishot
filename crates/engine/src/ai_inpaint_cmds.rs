@@ -226,21 +226,22 @@ pub(crate) fn ai_fill_rgb_async(
         Err(e) => return finish(Err(bad(e.to_string()))),
     };
     let binary: Vec<f32> = cover.iter().map(|c| if *c > 0.0 { 1.0 } else { 0.0 }).collect();
-    let generated = rgb.clone();
-    let input = hidden.filter(|m| m.len() == cover.len()).unwrap_or_else(|| cover.clone());
-    let state = FillState { svc, ctx, rgb, cover, input, binary, generated, w, h, opts, plan, next: 0, finish };
+    let hidden = hidden.filter(|m| m.len() == cover.len());
+    let state = FillState { svc, ctx, rgb, cover, hidden, binary, w, h, opts, plan, next: 0, finish };
     fill_step(state);
 }
 
 struct FillState {
     svc: Arc<dyn Inpainter>,
     ctx: JobCtx,
+    /// The region, filled in place tile by tile: a pasted pixel is inside the hole, which every
+    /// later tile's model input masks out, so no tile sees another's output (and no second
+    /// region-sized copy is kept: phones ran out of memory on large selections).
     rgb: Vec<f32>,
     cover: Vec<f32>,
-    /// The model's input mask: `cover`, or more (hidden from the model, not filled).
-    input: Vec<f32>,
+    /// More than `cover` hidden from the model (not filled); `None`: the model's mask is `cover`.
+    hidden: Option<Vec<f32>>,
     binary: Vec<f32>,
-    generated: Vec<f32>,
     w: usize,
     h: usize,
     opts: AiOptions,
@@ -251,13 +252,13 @@ struct FillState {
 
 fn fill_step(mut st: FillState) {
     let Some(t) = st.plan.get(st.next).cloned() else {
-        let FillState { generated, finish, opts, .. } = st;
-        return finish(Ok((generated, opts.model)));
+        let FillState { rgb, finish, opts, .. } = st;
+        return finish(Ok((rgb, opts.model)));
     };
     if let Err(e) = st.ctx.check() {
         return (st.finish)(Err(e));
     }
-    let input = match tiles::extract(&st.rgb, &st.input, st.w, st.h, &t) {
+    let input = match tiles::extract(&st.rgb, st.hidden.as_deref().unwrap_or(&st.cover), st.w, st.h, &t) {
         Ok(i) => i,
         Err(e) => return (st.finish)(Err(bad(e.to_string()))),
     };
@@ -278,7 +279,7 @@ fn fill_step(mut st: FillState) {
                 Err(LamaError::Gpu(why)) if !st.opts.run.choice.cpu => return gpu_fallback(st, &why),
                 Err(e) => return (st.finish)(Err(lama_err(e))),
             };
-            if let Err(e) = tiles::paste(&mut st.generated, &st.binary, st.w, st.h, &t, &out) {
+            if let Err(e) = tiles::paste(&mut st.rgb, &st.binary, st.w, st.h, &t, &out) {
                 return (st.finish)(Err(lama_err(e)));
             }
             st.ctx.progress(b, "");
@@ -290,7 +291,8 @@ fn fill_step(mut st: FillState) {
 
 /// The GPU couldn't run the model: the rest of the job runs on the CPU, with the model the
 /// user's Quality picks there (Auto: MI-GAN, when it is here or may be downloaded; else the same
-/// model). A model change starts the tiles over, so one result never mixes two models.
+/// model). A model change starts the tiles over, so one result never mixes two models (the
+/// pixels filled so far are in the hole: the new model doesn't see them, and overwrites them).
 fn gpu_fallback(mut st: FillState, why: &str) {
     let run = crate::ai_cmds::on_cpu(&st.opts.run);
     let mut model = st.opts.model;
@@ -316,7 +318,6 @@ fn gpu_fallback(mut st: FillState, why: &str) {
             Err(e) => return (st.finish)(Err(bad(e.to_string()))),
         };
         st.next = 0;
-        st.generated.clone_from(&st.rgb);
     }
     fill_step(st);
 }
@@ -427,9 +428,10 @@ pub(crate) fn inpaint_ai_labelled(s: &mut Session, p: &Value, label: &'static st
         label,
         true,
         move |ctx, done| {
+            let mut plan = plan;
             ctx.progress(0.0, label);
             let (w, h) = (plan.region.width() as usize, plan.region.height() as usize);
-            let (rgb, cover, opts) = (plan.rgb.clone(), plan.cover.clone(), plan.opts.clone());
+            let (rgb, cover, opts) = (std::mem::take(&mut plan.rgb), plan.cover.clone(), plan.opts.clone());
             let svc2 = svc.clone();
             ai_fill_rgb_async(
                 svc,
@@ -474,11 +476,12 @@ fn apply(s: &mut Session, label: &str, plan: Plan, generated: &[f32], device: St
             return Ok(nid);
         }
         let surf = crate::edit_menu_cmds::writable_surface(doc, id)?;
-        let mut out = layer_px.clone();
+        // In place: each pixel is read before it is written.
+        let mut out = layer_px;
         let mut enc = [0.0f32; 8];
         for (i, &c) in cover.iter().enumerate() {
             if c > 0.0 {
-                let o = to_rgba(&fmt, &layer_px[i * n..(i + 1) * n]);
+                let o = to_rgba(&fmt, &out[i * n..(i + 1) * n]);
                 let g = &generated[i * 3..i * 3 + 3];
                 let mix = |k: usize| o[k] + (g[k] - o[k]) * c;
                 from_rgba_into(&fmt, [mix(0), mix(1), mix(2), o[3]], &mut enc);

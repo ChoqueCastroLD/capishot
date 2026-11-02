@@ -3,8 +3,11 @@
 //! time. Click applies one (`typer.applyShape`, one undo step); Shift+click also moves the
 //! script to the next line. Hidden when the active layer isn't type or while it is being edited.
 
+use std::sync::Arc;
+
 use egui::{Rect, RichText, Sense, Stroke, StrokeKind, vec2};
 use serde_json::{Value, json};
+use wasm_sync::Mutex;
 
 use super::act;
 use crate::PhotocraftApp;
@@ -27,7 +30,16 @@ struct Strip {
     /// No bubble was found around the text.
     no_bubble: bool,
     page: usize,
+    /// The key the shapes are being computed for, on another thread, and where they land.
+    pending: Option<Key>,
+    slot: Arc<Mutex<Option<(Key, Value)>>>,
+    /// The key last seen and since when (s): a change is reshaped once it has settled.
+    seen: Option<(Key, f64)>,
 }
+
+/// A change (moving the text, editing it) is reshaped once nothing changed for this long (s):
+/// TextShapeR took seconds on a phone after every move.
+const SETTLE_S: f64 = 0.4;
 
 #[derive(Clone, Debug, PartialEq)]
 struct Variant {
@@ -81,14 +93,52 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     // is ready: compositing it took a frame of a third of a second (more in the browser) after
     // every edit to the page's pixels. It is composited off the frame (`page_tick`); the strip
     // keeps its last shapes until then.
-    if strip.key != Some(key) && open && {
+    // Shapes come from another thread where there is one (the browser threads build, natively),
+    // so the frame never waits for them; a change is shaped once it settled and the pointer is up.
+    let now = ctx.input(|i| i.time);
+    if strip.seen.is_none_or(|(k, _)| k != key) {
+        strip.seen = Some((key, now));
+    }
+    let settled = strip.key.is_none() || strip.seen.is_some_and(|(_, t)| now - t >= SETTLE_S) && !ctx.input(|i| i.pointer.any_down());
+    let done = strip.slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+    if let Some((k, v)) = done {
+        strip.pending = None;
+        if k == key {
+            let (variants, no_bubble) = parse(&v);
+            strip = Strip { key: Some(key), variants, no_bubble, page: 0, ..strip };
+        }
+    }
+    if strip.key != Some(key) && open && strip.pending.is_none() && !settled {
+        ctx.request_repaint_after(std::time::Duration::from_millis(100));
+    }
+    if strip.key != Some(key) && open && strip.pending.is_none() && settled && {
         let _s = crate::perf_span::span("typer.page");
         page_tick(app, &ctx)
     } {
         let _s = crate::perf_span::span("typer.shape_text");
-        let r = app.session.execute("typer.shapeText", json!({"layer": key.1, "limit": 12}));
-        let (variants, no_bubble) = r.as_ref().map(parse).unwrap_or_default();
-        strip = Strip { key: Some(key), variants, no_bubble, page: 0 };
+        match photocraft_engine::typer_shape_text_work(&mut app.session, &json!({"layer": key.1, "limit": 12})) {
+            Ok(work) if crate::jobs_ui::OFF_THREAD => {
+                let slot = Arc::clone(&strip.slot);
+                #[cfg(not(target_arch = "wasm32"))]
+                let waker = ctx.clone();
+                crate::jobs_ui::off_thread(move || {
+                    let v = work().unwrap_or_default();
+                    *slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((key, v));
+                    #[cfg(not(target_arch = "wasm32"))]
+                    waker.request_repaint();
+                });
+                strip.pending = Some(key);
+            }
+            Ok(work) => {
+                let (variants, no_bubble) = work().as_ref().map(parse).unwrap_or_default();
+                strip = Strip { key: Some(key), variants, no_bubble, page: 0, ..strip };
+            }
+            Err(_) => strip = Strip { key: Some(key), variants: Vec::new(), no_bubble: false, page: 0, ..strip },
+        }
+    }
+    if strip.pending.is_some() {
+        // A browser worker can't wake the page: poll.
+        ctx.request_repaint_after(std::time::Duration::from_millis(50));
     }
     let t = Tokens::get(ui.ctx());
     let pages = strip.variants.len().div_ceil(PER_PAGE).max(1);
@@ -180,6 +230,17 @@ pub(crate) enum PageJob {
     Bands(Box<photocraft_engine::TyperPageBuild>, i32),
     /// On another thread; the slot holds the page when it's done.
     Thread(std::sync::Arc<wasm_sync::Mutex<Option<photocraft_engine::TyperPageBuild>>>),
+}
+
+/// The page the Bubble Text Remover and the Bubble Type tool read, composited off the frame once
+/// the tool is picked (else its first click composited the whole page: seconds on a phone).
+/// Later clicks patch it where the page changed.
+pub(crate) fn warm_page(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    if app.typer_page.is_none() && (photocraft_engine::typer_page_cached(&app.session) || app.session.active().is_none() || app.session.active_job().is_some()) {
+        return;
+    }
+    let _s = crate::perf_span::span("typer.page");
+    page_tick(app, ctx);
 }
 
 /// The time a frame may spend on TypeR's page in bands (ms).

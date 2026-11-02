@@ -39,20 +39,38 @@ pub fn click(app: &mut PhotocraftApp, tool: Tool, x: f64, y: f64) -> bool {
         return false;
     }
     let p = params(app, x, y);
-    if let Err(e) = app.run(photocraft_engine::bubble_text_cmds::ID, p) {
-        let why = refusal(&e);
-        app.ui.status = crate::i18n::t(why).to_string();
-        app.ui.status_error = true;
-        // A notice too: on a phone the status line is hidden.
-        app.ui.notices.retain(|n| n.tag.as_deref() != Some(NOTICE_TAG));
-        let id = crate::notices::post(app, why, Vec::new(), true, None);
-        if let Some(n) = app.ui.notices.iter_mut().find(|n| n.id == id) {
-            n.tag = Some(NOTICE_TAG.into());
-        }
-    } else {
-        app.ui.notices.retain(|n| n.tag.as_deref() != Some(NOTICE_TAG));
+    match app.run(photocraft_engine::bubble_text_cmds::ID, p) {
+        Err(e) => refuse(app, &e),
+        Ok(_) => app.ui.notices.retain(|n| n.tag.as_deref() != Some(NOTICE_TAG)),
     }
     true
+}
+
+fn refuse(app: &mut PhotocraftApp, e: &str) {
+    let why = refusal(e);
+    app.ui.status = crate::i18n::t(why).to_string();
+    app.ui.status_error = true;
+    // A notice too: on a phone the status line is hidden.
+    app.ui.notices.retain(|n| n.tag.as_deref() != Some(NOTICE_TAG));
+    let id = crate::notices::post(app, why, Vec::new(), true, None);
+    if let Some(n) = app.ui.notices.iter_mut().find(|n| n.id == id) {
+        n.tag = Some(NOTICE_TAG.into());
+    }
+}
+
+/// A click that ran as a background job (the browser threads build's worker pool) and was
+/// refused: the same notice as at once. True when the event was the tool's refusal.
+pub fn on_job_event(app: &mut PhotocraftApp, e: &photocraft_engine::jobs::JobEvent) -> bool {
+    if e.command != photocraft_engine::bubble_text_cmds::ID {
+        return false;
+    }
+    match &e.outcome {
+        photocraft_engine::jobs::JobOutcome::Failed(err) => {
+            refuse(app, err);
+            true
+        }
+        _ => false,
+    }
 }
 
 /// Tags the tool's refusal notice (one at a time).

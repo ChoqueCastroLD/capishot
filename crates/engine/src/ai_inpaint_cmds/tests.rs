@@ -305,3 +305,54 @@ fn a_gpu_failure_runs_again_on_the_cpu() {
     let (_, _, last) = run(json!({"model": "manga-lama"}));
     assert_eq!(last, ("manga-lama", true), "a named model stays");
 }
+
+/// Tiles are filled in place: a later tile whose context reaches an earlier tile's hole must get
+/// exactly what it got from a separate copy (the hole is masked out of its input), so the
+/// result equals filling every tile from the untouched region.
+#[test]
+fn in_place_tiles_match_tiles_filled_from_the_original() {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 160, "height": 64, "depth": 8, "background": "white"})).unwrap();
+    s.edit("noise", |doc, active| {
+        let surf = doc.layer_mut(active.unwrap()).unwrap().surface_mut().unwrap();
+        for x in 0..160 {
+            let v = ((x * 37) % 23) as f32 / 23.0;
+            surf.fill_rect(Rect::new(x, 0, x + 1, 64), &[v, 1.0 - v, (x % 7) as f32 / 7.0, 1.0]);
+        }
+        Ok(())
+    })
+    .unwrap();
+    // Two blobs 20 px apart: with a 24 px margin each tile's context covers the other's hole.
+    s.execute("select.rect", json!({"x": 40, "y": 20, "width": 30, "height": 20})).unwrap();
+    s.execute("select.rect", json!({"x": 90, "y": 22, "width": 30, "height": 20, "mode": "add"})).unwrap();
+    let id = active_id(&s);
+    let opts = json!({"output": "current", "maxSide": 64, "margin": 24});
+    let p = plan(&s, &opts).unwrap();
+    let (w, h) = (p.region.width() as usize, p.region.height() as usize);
+    let t = tiles::plan(&p.cover, w, h, &p.opts.tiles).unwrap();
+    assert!(t.len() >= 2, "{} tiles", t.len());
+    assert!(t.iter().any(|a| t.iter().any(|b| a != b && a.rect.x < b.core.x + b.core.w && b.core.x < a.rect.x + a.rect.w)), "contexts overlap other holes");
+    let binary: Vec<f32> = p.cover.iter().map(|c| if *c > 0.0 { 1.0 } else { 0.0 }).collect();
+    let mut want = p.rgb.clone();
+    for tile in &t {
+        let input = tiles::extract(&p.rgb, &p.cover, w, h, tile).unwrap();
+        let out = Arc::new(std::sync::Mutex::new(None));
+        let sink = out.clone();
+        struct NoHooks;
+        impl photocraft_ai_lama::service::Hooks for NoHooks {
+            fn progress(&self, _: f32, _: &str) {}
+            fn cancelled(&self) -> bool {
+                false
+            }
+        }
+        FakeInpainter::default().run(photocraft_ai_lama::service::Request::lama(input, false), Arc::new(NoHooks), Box::new(move |r| *sink.lock().unwrap() = Some(r.unwrap())));
+        let out = out.lock().unwrap().take().unwrap();
+        tiles::paste(&mut want, &binary, w, h, tile, &out).unwrap();
+    }
+    let mut s = with_fake(s, FakeInpainter::default());
+    s.execute(ID, opts).unwrap();
+    let surf = s.active().unwrap().doc.layer(id).unwrap().surface().unwrap();
+    let got = to_rgb(&surf.format(), &surf.read_region(p.region));
+    let worst = got.iter().zip(&want).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+    assert!(worst <= 1.0 / 255.0 + 1e-4, "largest difference {worst}");
+}

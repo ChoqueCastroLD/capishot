@@ -31,8 +31,8 @@ use crate::commands::CommandSpec;
 use crate::typer_cmds::summary;
 use crate::{EngineError, Result, Session};
 use support::{DocInfo, Fit, Styled};
-pub use support::{PageBuild, page_ready};
-pub(crate) use support::{PlaceState, bad, layer_ink, layer_size_px, page_image, rect_json, selection_mask, set_stroke, typer_error};
+pub use support::{PageBuild, page_cached, page_ready};
+pub(crate) use support::{PlaceState, bad, install_page, layer_ink, layer_size_px, page_image, page_work, rect_json, selection_mask, set_stroke, typer_error};
 
 /// Longest text a placement takes (bytes).
 pub(crate) const MAX_TEXT_BYTES: usize = 64 << 10;
