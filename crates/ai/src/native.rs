@@ -1,6 +1,8 @@
 //! The desktop and CLI [`Upscaler`]: models run in-process on a hardware GPU (wgpu) when there
 //! is one, else on the CPU; weights come from the [`DiskCache`] or are downloaded (feature
 //! `download`) from a base URL the shell configures.
+//! On Windows with feature `directml`, GPU runs go to DirectML and CPU runs to ONNX Runtime's
+//! CPU provider when its library loads ([`crate::directml`]); burn runs them otherwise.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -51,6 +53,9 @@ struct Inner {
     /// Why DirectML couldn't load a model (then `Auto` requests stay on wgpu).
     #[cfg_attr(not(all(feature = "directml", windows)), allow(dead_code))]
     directml_failed: Option<String>,
+    /// Why ONNX Runtime's CPU provider couldn't run a model (then CPU requests stay on burn).
+    #[cfg_attr(not(all(feature = "directml", windows)), allow(dead_code))]
+    onnx_cpu_failed: Option<String>,
 }
 
 impl NativeUpscaler {
@@ -106,10 +111,13 @@ impl NativeUpscaler {
                 r => return r,
             }
         }
+        if cpu && let Some(r) = self.run_onnx_cpu(&req, &bytes, &mut inner, hooks) {
+            return r;
+        }
         let rt = if req.opts.cpu { cpu_runtime()? } else { self.runtime(&mut inner)? };
         let device = if req.opts.cpu { "CPU".to_string() } else { inner.device.clone() };
-        let reuse =
-            inner.loaded.as_ref().is_some_and(|l| l.id == req.model.id && l.grayscale == req.grayscale && !l.is_directml()) && inner.loaded_cpu == req.opts.cpu;
+        let gray = Loaded::runs_gray(req.model, req.grayscale);
+        let reuse = inner.loaded.as_ref().is_some_and(|l| l.id == req.model.id && l.grayscale == gray && l.is_burn()) && inner.loaded_cpu == req.opts.cpu;
         if !reuse {
             inner.loaded = None;
             inner.loaded = Some(Loaded::new(&rt, req.model, &bytes, req.grayscale)?);
@@ -136,7 +144,8 @@ impl NativeUpscaler {
     /// caller retries on the CPU); one while loading is [`AiError::Device`].
     #[cfg(all(feature = "directml", windows))]
     fn run_directml(&self, req: &Request, bytes: &[u8], inner: &mut Inner, hooks: &dyn Hooks) -> Result<crate::Planar> {
-        let reuse = inner.loaded.as_ref().is_some_and(|l| l.id == req.model.id && l.grayscale == req.grayscale && l.is_directml());
+        let gray = Loaded::runs_gray(req.model, req.grayscale);
+        let reuse = inner.loaded.as_ref().is_some_and(|l| l.id == req.model.id && l.grayscale == gray && l.is_directml());
         if !reuse {
             inner.loaded = None;
             inner.loaded = Some(Loaded::new_directml(req.model, bytes, req.grayscale)?);
@@ -153,6 +162,51 @@ impl NativeUpscaler {
             Err(AiError::Inference(e)) => Err(AiError::Gpu(e)),
             r => r,
         }
+    }
+
+    /// A CPU request on ONNX Runtime's CPU provider (2–6× faster than burn's CPU backend), with
+    /// the CPU tiling; `None` runs it on burn instead (a model it doesn't take, no ONNX Runtime
+    /// library, or a failure loading or running there, remembered: the CPU path never gets
+    /// worse than burn's).
+    #[cfg(all(feature = "directml", windows))]
+    fn run_onnx_cpu(&self, req: &Request, bytes: &[u8], inner: &mut Inner, hooks: &dyn Hooks) -> Option<Result<crate::Planar>> {
+        if !Loaded::directml_supports(req.model) || inner.onnx_cpu_failed.is_some() || crate::directml::available().is_err() {
+            return None;
+        }
+        let threads = req.opts.threads;
+        let gray = Loaded::runs_gray(req.model, req.grayscale);
+        let reuse = inner.loaded.as_ref().is_some_and(|l| l.id == req.model.id && l.grayscale == gray && l.onnx_cpu_threads() == Some(threads));
+        if !reuse {
+            inner.loaded = None;
+            match Loaded::new_onnx_cpu(req.model, bytes, req.grayscale, threads) {
+                Ok(l) => inner.loaded = Some(l),
+                Err(e) => {
+                    inner.onnx_cpu_failed = Some(e.to_string());
+                    return None;
+                }
+            }
+            inner.loaded_cpu = true;
+        }
+        let loaded = inner.loaded.as_ref()?;
+        let progress = TileHooks { hooks, lo: 0.1, status: format!("Upscaling with {} (CPU)", req.model.title) };
+        let tiles = req.opts.tiles.unwrap_or_else(|| default_tiles(req.model));
+        let out = crate::upscale::upscale_directml(loaded, &req.input, tiles, &progress);
+        if req.opts.unload || out.is_err() {
+            inner.loaded = None;
+        }
+        match out {
+            Err(AiError::Cancelled) => Some(Err(AiError::Cancelled)),
+            Err(e) => {
+                inner.onnx_cpu_failed = Some(e.to_string());
+                None
+            }
+            r => Some(r),
+        }
+    }
+
+    #[cfg(not(all(feature = "directml", windows)))]
+    fn run_onnx_cpu(&self, _: &Request, _: &[u8], _: &mut Inner, _: &dyn Hooks) -> Option<Result<crate::Planar>> {
+        None
     }
 
     #[cfg(not(all(feature = "directml", windows)))]
@@ -172,7 +226,7 @@ mod backend {
             GpuBackend::Wgpu => Ok(false),
             GpuBackend::Auto => Ok(supported && inner.directml_failed.is_none() && crate::directml::available().is_ok()),
             GpuBackend::DirectMl if !supported => {
-                Err(AiError::Device(format!("{} doesn't run on DirectML (only the ESRGAN and FDAT models do)", req.model.title)))
+                Err(AiError::Device(format!("{} doesn't run on DirectML (only the ESRGAN, FDAT and Compact models do)", req.model.title)))
             }
             GpuBackend::DirectMl => crate::directml::available().map(|()| true).map_err(AiError::Device),
         }

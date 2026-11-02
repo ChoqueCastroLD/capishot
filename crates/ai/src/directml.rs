@@ -1,12 +1,16 @@
-//! Windows: the upscalers (ESRGAN and FDAT) on the GPU through ONNX Runtime's DirectML
-//! execution provider, in fp32.
+//! Windows: the upscalers (ESRGAN, FDAT and the lite Compact) on the GPU through ONNX Runtime's
+//! DirectML execution provider, in fp32, and the same graphs on its CPU provider for CPU runs.
 //!
 //! burn's convolutions in fp32 run as direct convolutions (no tensor cores, no implicit GEMM),
 //! which is what makes MangaJaNai slow on wgpu; DirectML's run several times faster on the same
 //! card with the same fp32 arithmetic (the output matches the burn path to about 60 dB PSNR).
 //! FDAT (IllustrationJaNai V3) gains about as much: a colour page at ×4 in about 6.5 s against
 //! 27 s on burn's wgpu path. The network is exported to ONNX in memory from the same weights
-//! ([`crate::onnx`]).
+//! ([`crate::onnx`]). Compact runs a grey 1000 × 1500 page at ×2 in about 0.55 s against 5.5 s.
+//!
+//! On the CPU ([`DmlUpscaler::cpu_threads`]), ONNX Runtime's convolutions are 2–6× faster than
+//! burn's CPU backend on the same cores (Compact ×2 on that page: about 22 s against 54 s), with
+//! the same tiles as burn's CPU path.
 //!
 //! ONNX Runtime is not linked: `onnxruntime.dll` (a DirectML build, 1.24 or later) is loaded at
 //! run time from `PHOTOCRAFT_AI_ONNXRUNTIME` (the file, or the folder holding it) or from the
@@ -23,6 +27,7 @@ use ort::session::Session;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::value::Tensor;
 
+use crate::compact::HostCompact;
 use crate::esrgan::HostEsrgan;
 use crate::fdat::Fdat;
 use crate::runtime::reflect_pad;
@@ -94,6 +99,9 @@ const ESRGAN_BYTES_PER_PIXEL: usize = 2250;
 /// The same for FDAT: 1.1 GiB for a 222 × 204 tile at ×4 (1.6 KB per output pixel), 0.28 GiB
 /// at 128 × 128, measured on IllustrationJaNai V3 detail.
 const FDAT_BYTES_PER_PIXEL: usize = 1700;
+/// The same for Compact (64 channels at the input resolution): an estimate well above its
+/// activations (about 0.2 GiB at the peak for a page at ×2).
+const COMPACT_BYTES_PER_PIXEL: usize = 300;
 
 /// What a session holds on the device for `w × h` input pixels at `scale`, at `per_pixel` bytes
 /// per output pixel.
@@ -120,6 +128,9 @@ fn sessions_bytes(sizes: impl IntoIterator<Item = (usize, usize)>, scale: usize,
     sizes.into_iter().map(|s| session_bytes(s, scale, per_pixel)).fold(0, usize::saturating_add)
 }
 
+/// The [`Slot`] size of a session with free dimensions (on the CPU, one runs every size).
+const ANY_SIZE: (usize, usize) = (0, 0);
+
 /// A session and the one input size it was built for.
 struct Slot {
     size: (usize, usize),
@@ -128,8 +139,9 @@ struct Slot {
 
 /// What a session is built from.
 enum Graph {
-    /// ESRGAN's model bytes, with free input dimensions (`h`, `w`) fixed per session.
-    Esrgan(Vec<u8>),
+    /// ESRGAN's or Compact's model bytes, with free input dimensions (`h`, `w`): fixed per
+    /// session on DirectML, left free on the CPU (one session runs every size).
+    Free(Vec<u8>),
     /// FDAT's weights: its graph is written per input size ([`crate::onnx::fdat`]), every shape
     /// a constant (window padding, reshapes).
     Fdat(Box<Weights>),
@@ -147,6 +159,8 @@ enum Graph {
 pub struct DmlUpscaler {
     env: &'static Environment,
     graph: Graph,
+    /// On ONNX Runtime's CPU provider with this many threads (0: one per core), else DirectML.
+    cpu: Option<usize>,
     /// Video memory a session holds per output pixel (see [`session_bytes`]).
     per_pixel: usize,
     /// Tiles all run at one size ([`uniform`]).
@@ -170,8 +184,9 @@ impl std::fmt::Debug for DmlUpscaler {
 }
 
 /// A DirectML session for the model bytes (graph optimisation and DirectML compilation), for
-/// inputs of `size` (`w`, `h`) only, or of any size.
-fn session(env: &Environment, model: &[u8], size: Option<(usize, usize)>) -> Result<Session> {
+/// inputs of `size` (`w`, `h`) only, or of any size; with `cpu`, a session on the CPU provider
+/// with that many threads (0: one per core).
+fn session(env: &Environment, model: &[u8], size: Option<(usize, usize)>, cpu: Option<usize>) -> Result<Session> {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> std::result::Result<Session, String> {
         let mut b = Session::builder(env).map_err(|e| e.to_string())?;
         if let Some((w, h)) = size {
@@ -179,41 +194,62 @@ fn session(env: &Environment, model: &[u8], size: Option<(usize, usize)>) -> Res
             b = b.with_dimension_override("h", dim(h)?).map_err(|e| e.to_string())?;
             b = b.with_dimension_override("w", dim(w)?).map_err(|e| e.to_string())?;
         }
-        // DirectML wants sequential execution and no memory pattern (its own allocator).
-        b.with_optimization_level(GraphOptimizationLevel::Level3)
-            .map_err(|e| e.to_string())?
-            .with_memory_pattern(false)
-            .map_err(|e| e.to_string())?
-            .with_parallel_execution(false)
-            .map_err(|e| e.to_string())?
-            .with_execution_providers([ep::DirectML::default().build().error_on_failure()])
-            .map_err(|e| e.to_string())?
-            .commit_from_memory(model)
-            .map_err(|e| e.to_string())
+        b = b.with_optimization_level(GraphOptimizationLevel::Level3).map_err(|e| e.to_string())?;
+        b = match cpu {
+            Some(threads) => {
+                if threads > 0 {
+                    b = b.with_intra_threads(threads).map_err(|e| e.to_string())?;
+                }
+                b.with_execution_providers([ep::CPU::default().build().error_on_failure()]).map_err(|e| e.to_string())?
+            }
+            // DirectML wants sequential execution and no memory pattern (its own allocator).
+            None => b
+                .with_memory_pattern(false)
+                .map_err(|e| e.to_string())?
+                .with_parallel_execution(false)
+                .map_err(|e| e.to_string())?
+                .with_execution_providers([ep::DirectML::default().build().error_on_failure()])
+                .map_err(|e| e.to_string())?,
+        };
+        b.commit_from_memory(model).map_err(|e| e.to_string())
     }))
     .unwrap_or_else(|_| Err("session creation failed".into()))
-    .map_err(|e| AiError::Device(format!("DirectML: {e}")))
+    .map_err(|e| AiError::Device(format!("{}: {e}", if cpu.is_some() { "ONNX Runtime CPU" } else { "DirectML" })))
 }
 
 impl DmlUpscaler {
     /// ESRGAN. Builds a session once (so a DirectML that can't take the model fails here, and
     /// the wgpu path runs instead); the sessions that run are built per size as tiles need them.
-    pub(crate) fn esrgan(h: &HostEsrgan) -> Result<Self> {
+    /// `cpu`: on ONNX Runtime's CPU provider with that many threads, one session for every size.
+    pub(crate) fn esrgan(h: &HostEsrgan, cpu: Option<usize>) -> Result<Self> {
+        let c = h.config;
+        Self::free(crate::onnx::esrgan(h), cpu, ESRGAN_BYTES_PER_PIXEL, (c.scale(), h.image_in, c.out_nc, c.shuffle))
+    }
+
+    /// Real-ESRGAN Compact, as [`Self::esrgan`].
+    pub(crate) fn compact(h: &HostCompact, cpu: Option<usize>) -> Result<Self> {
+        Self::free(crate::onnx::compact(h), cpu, COMPACT_BYTES_PER_PIXEL, (h.scale, h.channels, h.channels, 1))
+    }
+
+    /// A graph with free input dimensions: `(scale, in, out, multiple)`.
+    fn free(model: Vec<u8>, cpu: Option<usize>, per_pixel: usize, (scale, in_channels, out_channels, multiple): (usize, usize, usize, usize)) -> Result<Self> {
         let env = environment().map_err(AiError::Device)?;
-        let model = crate::onnx::esrgan(h);
-        drop(session(env, &model, None)?);
+        let first = session(env, &model, None, cpu)?;
+        // On the CPU that session runs every size; DirectML's are built per size.
+        let sessions = if cpu.is_some() { vec![Slot { size: ANY_SIZE, session: first }] } else { Vec::new() };
         Ok(Self {
             env,
-            graph: Graph::Esrgan(model),
-            per_pixel: ESRGAN_BYTES_PER_PIXEL,
+            graph: Graph::Free(model),
+            cpu,
+            per_pixel,
             uniform: false,
             built: AtomicBool::new(true),
-            sessions: Mutex::new(Vec::new()),
+            sessions: Mutex::new(sessions),
             last: Mutex::new(Vec::new()),
-            scale: h.config.scale(),
-            in_channels: h.image_in,
-            out_channels: h.config.out_nc,
-            multiple: h.config.shuffle,
+            scale,
+            in_channels,
+            out_channels,
+            multiple,
         })
     }
 
@@ -221,7 +257,7 @@ impl DmlUpscaler {
     /// built per tile size as tiles need them (a session for a sample size would cost a second
     /// or two here), and when the first one fails to build (DirectML can't take the model) the
     /// run fails with [`AiError::Device`], so the wgpu path runs it instead.
-    pub(crate) fn fdat(w: Weights) -> Result<Self> {
+    pub(crate) fn fdat(w: Weights, cpu: Option<usize>) -> Result<Self> {
         let env = environment().map_err(AiError::Device)?;
         let c = Fdat::config(&w)?;
         crate::onnx::fdat(&w, (8 * c.shuffle, 8 * c.shuffle))?;
@@ -229,6 +265,7 @@ impl DmlUpscaler {
         Ok(Self {
             env,
             graph: Graph::Fdat(Box::new(w)),
+            cpu,
             per_pixel: FDAT_BYTES_PER_PIXEL,
             uniform: true,
             built: AtomicBool::new(false),
@@ -241,14 +278,26 @@ impl DmlUpscaler {
         })
     }
 
-    /// A session for inputs of `size` (`w`, `h`).
+    /// A session for inputs of `size` (`w`, `h`; [`ANY_SIZE`]: free).
     fn build(&self, size: (usize, usize)) -> Result<Session> {
+        let fixed = (size != ANY_SIZE).then_some(size);
         let s = match &self.graph {
-            Graph::Esrgan(model) => session(self.env, model, Some(size))?,
-            Graph::Fdat(w) => session(self.env, &crate::onnx::fdat(w, size)?, None)?,
+            Graph::Free(model) => session(self.env, model, fixed, self.cpu)?,
+            Graph::Fdat(w) => session(self.env, &crate::onnx::fdat(w, size)?, None, self.cpu)?,
         };
         self.built.store(true, Ordering::Relaxed);
         Ok(s)
+    }
+
+    /// The session an input of `size` runs on: its own, or on the CPU the one for every size
+    /// (a free-dimension graph).
+    fn key(&self, size: (usize, usize)) -> (usize, usize) {
+        if self.cpu.is_some() && matches!(self.graph, Graph::Free(_)) { ANY_SIZE } else { size }
+    }
+
+    /// On ONNX Runtime's CPU provider: the thread count it was built with (0: one per core).
+    pub fn cpu_threads(&self) -> Option<usize> {
+        self.cpu
     }
 
     /// The tiling of a `w × h` input.
@@ -277,7 +326,7 @@ impl DmlUpscaler {
         let padded = reflect_pad(crop, pw, ph);
         let shape = [1i64, padded.channels as i64, ph as i64, pw as i64];
         let input = Tensor::from_array((shape, padded.data)).map_err(err)?;
-        let size = (pw, ph);
+        let size = self.key((pw, ph));
         let mut sessions = self.sessions.lock().unwrap_or_else(PoisonError::into_inner);
         let slot = match sessions.iter().position(|x| x.size == size) {
             Some(i) => sessions.get_mut(i),
@@ -311,7 +360,8 @@ impl DmlUpscaler {
     /// new size takes the room, a single page of another size (a colour cover among grey pages)
     /// runs on spares and leaves the others' sessions.
     fn make_room(&self, p: &Plan) {
-        let need = plan_sizes(p, self.multiple);
+        let mut need: Vec<(usize, usize)> = plan_sizes(p, self.multiple).into_iter().map(|s| self.key(s)).collect();
+        need.dedup();
         let repeated = {
             let mut last = self.last.lock().unwrap_or_else(PoisonError::into_inner);
             std::mem::replace(&mut *last, need.clone()) == need
@@ -497,9 +547,9 @@ pub(crate) mod tests {
         if let Err(e) = available() {
             return eprintln!("ONNX Runtime with DirectML not available ({e}): skipped");
         }
-        for shuffle in [1, 2] {
+        for (shuffle, cpu) in [(1, None), (2, None), (1, Some(0)), (2, Some(2))] {
             let w = tiny_fdat(shuffle);
-            let dml = DmlUpscaler::fdat(w.clone()).unwrap();
+            let dml = DmlUpscaler::fdat(w.clone(), cpu).unwrap();
             assert_eq!((dml.scale(), dml.in_channels(), dml.out_channels()), (4 / shuffle, 3, 3));
             for (iw, ih) in [(22, 14), (16, 30)] {
                 let img = pattern(iw, ih);
@@ -527,6 +577,68 @@ pub(crate) mod tests {
         }
     }
 
+    /// ESRGAN (grey with unshuffle, RGB) and Compact (×4, ×2) on DirectML and on ONNX Runtime's
+    /// CPU provider against burn's tiled CPU run with the same tiles. Skipped without ONNX
+    /// Runtime.
+    #[test]
+    fn tiny_esrgan_and_compact_match_burn() {
+        use crate::compact::Compact;
+        use crate::esrgan::Esrgan;
+        use crate::runtime::{Network, Runtime, block_on, run_tiled};
+        if let Err(e) = available() {
+            return eprintln!("ONNX Runtime with DirectML not available ({e}): skipped");
+        }
+        let rt = Runtime::cpu();
+        let gray = |w: usize, h: usize| Planar::new(w, h, 1, (0..w * h).map(|i| (i * 53 % 97) as f32 / 97.0).collect()).unwrap();
+        let esrgan = crate::esrgan::tests::tiny(12, "2");
+        let rgb = crate::esrgan::tests::tiny(3, "1");
+        let compact = crate::compact::tests::tiny();
+        let opts = TileOptions { tile: 24, overlap: 4 };
+        for cpu in [None, Some(0), Some(3)] {
+            let nets: Vec<(&str, Box<dyn Network>, DmlUpscaler, Planar)> = vec![
+                (
+                    "esrgan gray",
+                    Box::new(Esrgan::load(&rt, &esrgan, true).unwrap()),
+                    DmlUpscaler::esrgan(&Esrgan::host(&esrgan, true).unwrap(), cpu).unwrap(),
+                    gray(46, 30),
+                ),
+                (
+                    "esrgan rgb",
+                    Box::new(Esrgan::load(&rt, &rgb, false).unwrap()),
+                    DmlUpscaler::esrgan(&Esrgan::host(&rgb, false).unwrap(), cpu).unwrap(),
+                    pattern(41, 29),
+                ),
+                (
+                    "compact x4",
+                    Box::new(Compact::load(&rt, &compact, 4, false).unwrap()),
+                    DmlUpscaler::compact(&Compact::host(&compact, 4, false).unwrap(), cpu).unwrap(),
+                    pattern(37, 26),
+                ),
+                (
+                    "compact x2 gray",
+                    Box::new(Compact::load(&rt, &compact, 2, true).unwrap()),
+                    DmlUpscaler::compact(&Compact::host(&compact, 2, true).unwrap(), cpu).unwrap(),
+                    gray(50, 33),
+                ),
+            ];
+            for (name, burn, ort, img) in nets {
+                assert_eq!((ort.scale(), ort.in_channels(), ort.out_channels()), (burn.scale(), burn.in_channels(), burn.out_channels()), "{name}");
+                assert_eq!(ort.cpu_threads(), cpu);
+                let want = block_on(run_tiled(&rt, burn.as_ref(), &img, opts, &crate::NoProgress)).unwrap();
+                // Twice: the second page reuses the sessions (one for every size on the CPU).
+                for _ in 0..2 {
+                    let got = ort.run_tiled(&img, opts, &crate::NoProgress).unwrap();
+                    assert_eq!((got.width, got.height, got.channels), (want.width, want.height, want.channels), "{name}");
+                    let max = got.data.iter().zip(&want.data).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+                    assert!(max < 1e-4, "{name} {cpu:?}: off by {max}");
+                }
+                if cpu.is_some() {
+                    assert_eq!(ort.sessions.lock().unwrap().len(), 1, "{name}: one CPU session for every size");
+                }
+            }
+        }
+    }
+
     /// The real IllustrationJaNai V3 detail weights on a crop against burn's fp32 CPU output,
     /// with the warm DirectML time per tile: `CAPISHOT_FDAT_DML=<model.safetensors>[:<crop.png>]`
     /// (a 192 × 192 pattern without a crop). Ignored: run with `-- --ignored --nocapture`.
@@ -547,7 +659,7 @@ pub(crate) mod tests {
             }
             None => pattern(192, 192),
         };
-        let dml = DmlUpscaler::fdat(w.clone()).unwrap();
+        let dml = DmlUpscaler::fdat(w.clone(), None).unwrap();
         let mut spare = None;
         let t = std::time::Instant::now();
         let got = dml.run(&img, &mut spare).unwrap();

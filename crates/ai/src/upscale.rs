@@ -58,7 +58,7 @@ impl Network for Net {
 enum Backend {
     /// burn, on the runtime it was loaded on (wgpu or the CPU).
     Burn(Box<Net>),
-    /// ONNX Runtime on DirectML (Windows; ESRGAN and FDAT).
+    /// ONNX Runtime on DirectML or its CPU provider (Windows; ESRGAN, FDAT and Compact).
     #[cfg(all(feature = "directml", windows))]
     DirectMl(crate::directml::DmlUpscaler),
 }
@@ -75,7 +75,7 @@ impl Loaded {
     pub fn new(rt: &Runtime, model: &'static ModelInfo, bytes: &[u8], grayscale: bool) -> Result<Self> {
         let w = Weights::from_safetensors(bytes)?;
         // FDAT always takes RGB: a grayscale page goes in as gray RGB and comes out as RGB.
-        let grayscale = grayscale && model.arch != Arch::Fdat;
+        let grayscale = Self::runs_gray(model, grayscale);
         let net = match model.arch {
             Arch::Esrgan => Net::Esrgan(Esrgan::load(rt, &w, grayscale)?),
             Arch::Compact => Net::Compact(Compact::load(rt, &w, model.scale as usize, grayscale)?),
@@ -85,34 +85,66 @@ impl Loaded {
         Ok(Self { id: model.id, grayscale, backend: Backend::Burn(Box::new(net)) })
     }
 
-    /// Whether `model` can run on DirectML ([`Self::new_directml`]): ESRGAN (MangaJaNai and
-    /// IllustrationJaNai V1) and FDAT (IllustrationJaNai V3).
+    /// Whether `model` can run on ONNX Runtime ([`Self::new_directml`], [`Self::new_onnx_cpu`]):
+    /// ESRGAN (MangaJaNai and IllustrationJaNai V1), FDAT (IllustrationJaNai V3) and the lite
+    /// Real-ESRGAN Compact.
     pub fn directml_supports(model: &ModelInfo) -> bool {
-        matches!(model.arch, Arch::Esrgan | Arch::Fdat)
+        matches!(model.arch, Arch::Esrgan | Arch::Fdat | Arch::Compact)
+    }
+
+    /// Whether a model loaded for `grayscale` content runs one channel (FDAT always takes RGB).
+    pub fn runs_gray(model: &ModelInfo, grayscale: bool) -> bool {
+        grayscale && model.arch != Arch::Fdat
     }
 
     /// Parses `bytes` for `model` and builds its ONNX Runtime session on DirectML (Windows).
     #[cfg(all(feature = "directml", windows))]
     pub fn new_directml(model: &'static ModelInfo, bytes: &[u8], grayscale: bool) -> Result<Self> {
+        Self::new_onnx(model, bytes, grayscale, None)
+    }
+
+    /// As [`Self::new_directml`] on ONNX Runtime's CPU provider, with `threads` (0: one per core).
+    #[cfg(all(feature = "directml", windows))]
+    pub fn new_onnx_cpu(model: &'static ModelInfo, bytes: &[u8], grayscale: bool, threads: usize) -> Result<Self> {
+        Self::new_onnx(model, bytes, grayscale, Some(threads))
+    }
+
+    #[cfg(all(feature = "directml", windows))]
+    fn new_onnx(model: &'static ModelInfo, bytes: &[u8], grayscale: bool, cpu: Option<usize>) -> Result<Self> {
         if !Self::directml_supports(model) {
-            return Err(crate::AiError::Device(format!("{} doesn't run on DirectML", model.id)));
+            return Err(crate::AiError::Device(format!("{} doesn't run on ONNX Runtime", model.id)));
         }
         let w = Weights::from_safetensors(bytes)?;
         // FDAT always takes RGB, as in [`Self::new`].
-        let grayscale = grayscale && model.arch != Arch::Fdat;
+        let grayscale = Self::runs_gray(model, grayscale);
         let net = match model.arch {
-            Arch::Fdat => crate::directml::DmlUpscaler::fdat(w)?,
-            _ => crate::directml::DmlUpscaler::esrgan(&Esrgan::host(&w, grayscale)?)?,
+            Arch::Fdat => crate::directml::DmlUpscaler::fdat(w, cpu)?,
+            Arch::Compact => crate::directml::DmlUpscaler::compact(&Compact::host(&w, model.scale as usize, grayscale)?, cpu)?,
+            _ => crate::directml::DmlUpscaler::esrgan(&Esrgan::host(&w, grayscale)?, cpu)?,
         };
         Ok(Self { id: model.id, grayscale, backend: Backend::DirectMl(net) })
     }
 
-    /// Whether this runs on DirectML (else on burn).
+    /// Whether this runs on DirectML (else on burn or ONNX Runtime's CPU provider).
     pub fn is_directml(&self) -> bool {
-        match self.backend {
+        match &self.backend {
             Backend::Burn(_) => false,
             #[cfg(all(feature = "directml", windows))]
-            Backend::DirectMl(_) => true,
+            Backend::DirectMl(n) => n.cpu_threads().is_none(),
+        }
+    }
+
+    /// Whether this runs on burn (else on ONNX Runtime).
+    pub fn is_burn(&self) -> bool {
+        matches!(self.backend, Backend::Burn(_))
+    }
+
+    /// On ONNX Runtime's CPU provider: the thread count it was built with (0: one per core).
+    pub fn onnx_cpu_threads(&self) -> Option<usize> {
+        match &self.backend {
+            Backend::Burn(_) => None,
+            #[cfg(all(feature = "directml", windows))]
+            Backend::DirectMl(n) => n.cpu_threads(),
         }
     }
 
@@ -139,7 +171,8 @@ pub async fn upscale(rt: &Runtime, model: &Loaded, input: &Planar, tiles: TileOp
     Ok(clamped(out, model))
 }
 
-/// [`upscale`] for a model loaded with [`Loaded::new_directml`] (no burn runtime involved).
+/// [`upscale`] for a model loaded with [`Loaded::new_directml`] or [`Loaded::new_onnx_cpu`] (no
+/// burn runtime involved).
 #[cfg(all(feature = "directml", windows))]
 pub fn upscale_directml(model: &Loaded, input: &Planar, tiles: TileOptions, progress: &dyn Progress) -> Result<Planar> {
     let Backend::DirectMl(net) = &model.backend else {

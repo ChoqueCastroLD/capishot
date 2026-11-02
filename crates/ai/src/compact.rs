@@ -12,6 +12,7 @@ use burn::tensor::activation::prelu;
 use burn::tensor::module::{conv2d, interpolate};
 use burn::tensor::ops::{ConvOptions, InterpolateMode, InterpolateOptions};
 
+use crate::esrgan::HostConv;
 use crate::runtime::{Network, Runtime};
 use crate::weights::Weights;
 use crate::{AiError, Result};
@@ -32,6 +33,18 @@ struct Layer {
     bias: Tensor<1>,
     /// PReLU slopes (absent after the last conv).
     alpha: Option<Tensor<1>>,
+}
+
+/// The network's weights on the host, specialised for its input and scale ([`Compact::host`]):
+/// what [`Compact::load`] uploads and what the ONNX export (`crate::onnx`) writes.
+pub(crate) struct HostCompact {
+    pub config: Config,
+    /// Image channels in and out (1 when folded for grayscale).
+    pub channels: usize,
+    /// Output scale: [`Config::upscale`], or half of it for the ×2 variant.
+    pub scale: usize,
+    /// Each 3×3 conv and the PReLU slopes after it (none after the last).
+    pub layers: Vec<(HostConv, Option<Vec<f32>>)>,
 }
 
 /// A loaded Compact network.
@@ -71,6 +84,24 @@ impl Compact {
     /// `grayscale` it takes and returns one channel (the first conv's input weights summed, the
     /// last conv's first channel group kept): the same arithmetic as a gray RGB image, minus work.
     pub fn load(rt: &Runtime, w: &Weights, scale: usize, grayscale: bool) -> Result<Self> {
+        let h = Self::host(w, scale, grayscale)?;
+        let mut layers = Vec::with_capacity(h.layers.len());
+        for (c, a) in h.layers {
+            let alpha = match a {
+                Some(a) => {
+                    let n = a.len();
+                    Some(rt.tensor(a, [n])?)
+                }
+                None => None,
+            };
+            let n = c.shape[0];
+            layers.push(Layer { weight: rt.tensor(c.w, c.shape)?, bias: rt.tensor(c.b, [n])?, alpha });
+        }
+        Ok(Self { config: h.config, channels: h.channels, scale: h.scale, layers })
+    }
+
+    /// The weights for an output `scale` on the host, folded for `grayscale` as [`Self::load`] says.
+    pub(crate) fn host(w: &Weights, scale: usize, grayscale: bool) -> Result<HostCompact> {
         let c = Self::config(w)?;
         if scale != c.upscale && scale * 2 != c.upscale {
             return Err(AiError::Weights(format!("a ×{} network can't upscale ×{scale}", c.upscale)));
@@ -107,11 +138,10 @@ impl Compact {
             } else {
                 (wt.clone(), bt.clone(), [o, inp, 3, 3])
             };
-            let alpha = if i < convs - 1 { Some(rt.tensor(w.get(&format!("body.{}.weight", 2 * i + 1), &[c.nf])?.data.clone(), [c.nf])?) } else { None };
-            let n = shape[0];
-            layers.push(Layer { weight: rt.tensor(wv, shape)?, bias: rt.tensor(bv, [n])?, alpha });
+            let alpha = if i < convs - 1 { Some(w.get(&format!("body.{}.weight", 2 * i + 1), &[c.nf])?.data.clone()) } else { None };
+            layers.push((HostConv { w: wv, shape, b: bv }, alpha));
         }
-        Ok(Self { config: c, channels, scale, layers })
+        Ok(HostCompact { config: c, channels, scale, layers })
     }
 
     pub fn configuration(&self) -> Config {
@@ -157,7 +187,7 @@ impl Network for Compact {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::weights::to_safetensors;
 

@@ -467,8 +467,8 @@ requests and other methods emit no events. The session is unlocked between looks
 connections are served meanwhile; when a progress line can't be written (the client went away) the
 job is cancelled. `image.upscaleAi` reports per tile (`… (tile N of M)`).
 
-**DirectML (Windows).** `image.upscaleAi` with an ESRGAN model (MangaJaNai, the 2x/4x defaults) or
-an FDAT one (IllustrationJaNai V3 detail, colour pages) runs on ONNX Runtime's DirectML execution provider when `onnxruntime.dll` (a DirectML build, 1.24 or
+**DirectML (Windows).** `image.upscaleAi` with an ESRGAN model (MangaJaNai, the 2x/4x defaults),
+an FDAT one (IllustrationJaNai V3 detail, colour pages) or the lite Real-ESRGAN Compact runs on ONNX Runtime's DirectML execution provider when `onnxruntime.dll` (a DirectML build, 1.24 or
 later, from the `Microsoft.ML.OnnxRuntime.DirectML` NuGet package) and its `DirectML.dll` sit next
 to the executable, or in the folder (or at the file) `PHOTOCRAFT_AI_ONNXRUNTIME` names. Nothing is
 linked: without the DLLs the wgpu path runs as before. The network is the same, in fp32, written to
@@ -483,6 +483,15 @@ the new size in a row take the room. A tile that fails on the device (out of mem
 four and run again. FDAT's graph is written per tile size with every shape fixed, and its tiles
 are all grown to one size (as on wgpu), so a page takes one session (about 2.4 s to build at 4x,
 1.1 GiB of video memory); a 760 × 1200 colour page at 4x runs in about 6.5 s instead of 27 s.
+Compact runs a grey 1000 × 1500 page at 2x in under a second instead of 5.5 s.
+
+**CPU (Windows).** With the same DLLs, CPU runs (`device: "cpu"`, the CPU retry after a GPU
+failure, machines without a GPU) of these models and of Manga LaMa use ONNX Runtime's CPU
+execution provider on the same graphs: 2–6× faster than the built-in CPU backend on the same
+cores (Compact 2x on that page: about 22 s instead of 54 s; Manga LaMa removing text lines:
+about 11 s instead of 29 s), with the CPU path's tiles and crops (its output to 1/255 at most) and
+`threads` as the thread count. Without the DLLs, or if it fails, the built-in CPU backend runs as
+before.
 
 Manga LaMa (`edit.inpaintAi`, `edit.removeAi`, `paint.remove` with `ai`) runs on DirectML the same
 way: the generator, in fp32 from the same weights, is written to ONNX in memory with its Fourier

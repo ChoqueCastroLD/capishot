@@ -9,6 +9,7 @@
 //! `GraphProto`, `NodeProto`, `AttributeProto`, `TensorProto`, `ValueInfoProto`), by field
 //! number as `onnx.proto` defines them.
 
+use crate::compact::HostCompact;
 use crate::esrgan::{HostConv, HostEsrgan};
 
 mod fdat;
@@ -280,6 +281,37 @@ pub(crate) fn esrgan(h: &HostEsrgan) -> Vec<u8> {
     let hr = g.lrelu(&hr);
     g.conv_to(&hr, &h.conv_last, Some(OUTPUT));
     g.model("esrgan", &image_value(INPUT, h.image_in, ["h", "w"]), &image_value(OUTPUT, c.out_nc, ["oh", "ow"]))
+}
+
+/// Real-ESRGAN Compact as ONNX model bytes: `input` `[1, channels, H, W]` → `output`
+/// `[1, channels, H·scale, W·scale]`, fp32, the graph of [`crate::compact::Compact`]'s forward:
+/// the convs and PReLUs, pixel shuffle (`DepthToSpace`, PyTorch's order), plus the
+/// nearest-upsampled input; the ×2 variant averages each 2 × 2 block of the ×4 result.
+pub(crate) fn compact(h: &HostCompact) -> Vec<u8> {
+    let r = h.config.upscale;
+    let mut g = Graph::default();
+    let mut t = INPUT.to_string();
+    for (conv, alpha) in &h.layers {
+        t = g.conv(&t, conv);
+        if let Some(a) = alpha {
+            let slope = g.init("a", &[a.len(), 1, 1], a);
+            t = g.node("PRelu", &[&t, &slope], &[]);
+        }
+    }
+    let y = g.node("DepthToSpace", &[&t], &[Attr::Int("blocksize", r as i64), Attr::Str("mode", "CRD")]);
+    let scales = g.init("scales", &[4], &[1.0, 1.0, r as f32, r as f32]);
+    let base = g.node(
+        "Resize",
+        &[INPUT, "", &scales],
+        &[Attr::Str("mode", "nearest"), Attr::Str("nearest_mode", "floor"), Attr::Str("coordinate_transformation_mode", "asymmetric")],
+    );
+    if h.scale == r {
+        g.node_to("Add", &[&y, &base], &[], OUTPUT.into());
+    } else {
+        let sum = g.node("Add", &[&y, &base], &[]);
+        g.node_to("AveragePool", &[&sum], &[Attr::Ints("kernel_shape", &[2, 2]), Attr::Ints("strides", &[2, 2])], OUTPUT.into());
+    }
+    g.model("compact", &image_value(INPUT, h.channels, ["h", "w"]), &image_value(OUTPUT, h.channels, ["oh", "ow"]))
 }
 
 #[cfg(test)]
