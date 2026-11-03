@@ -328,8 +328,14 @@ impl Headless {
     }
 
     pub fn inspect(&self, index: Option<usize>) -> Result<Value, AutomationError> {
+        self.inspect_with(index, photocraft_engine::inspect::Options::default())
+    }
+
+    /// [`Self::inspect`] with `document.inspect`'s options (`textStyle`).
+    pub fn inspect_with(&self, index: Option<usize>, opts: photocraft_engine::inspect::Options) -> Result<Value, AutomationError> {
         let i = self.doc_index(index)?;
-        Ok(photocraft_engine::inspect::document(&self.session.documents()[i]))
+        let st = self.session.documents().get(i).ok_or_else(|| AutomationError::BadRequest(format!("no document at index {i}")))?;
+        Ok(photocraft_engine::inspect::document_with(st, opts))
     }
 
     pub fn render_png(&self, index: Option<usize>, max_side: u32) -> Result<Vec<u8>, AutomationError> {

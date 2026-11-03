@@ -15,7 +15,7 @@
 //!   `doc.exportLayers {dir, format?, prefix?, visibleOnly?, quality?, index?}`,
 //!   `doc.exportDataSets {dir, format?, dataSets?, naming?, index?}`,
 //!   `doc.importDataSets {path, delimiter?, index?}` (#3216: the same treatment for the export
-//!   and CSV half of #2810), `doc.save {path?, format?, quality?, index?}`, `doc.inspect {index?}`,
+//!   and CSV half of #2810), `doc.save {path?, format?, quality?, index?}`, `doc.inspect {index?, textStyle?}`,
 //!   `doc.render {index?, maxSide?, path?}` (writes a PNG to `path`, else
 //!   returns it base64-encoded), `doc.select {index}`, `doc.close {index?}`
 //! - `batch {steps: [{command, params?, wait?} | {method, params?}], stopOnError?}`
@@ -159,7 +159,10 @@ impl Headless {
                 opts.remove("index");
                 self.import_data_sets(index_of(&p)?, path, &Value::Object(opts))
             }
-            "doc.inspect" => self.inspect(index_of(&p)?),
+            "doc.inspect" => {
+                let opts = photocraft_engine::inspect::Options::parse(&p).map_err(bad)?;
+                self.inspect_with(index_of(&p)?, opts)
+            }
             "doc.render" => {
                 let max = match p.get("maxSide") {
                     None => 1024,

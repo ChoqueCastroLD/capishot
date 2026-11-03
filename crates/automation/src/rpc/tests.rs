@@ -1041,3 +1041,20 @@ fn progress_events_precede_the_reply() {
     assert_eq!(of(5).len(), 1);
     assert!(of(5)[0]["ok"].as_bool().unwrap());
 }
+
+/// Live sync (docs/control-protocol.md › Live sync): `doc.inspect` reports `pixelRev` and takes
+/// `textStyle`.
+#[test]
+fn doc_inspect_reports_pixel_revisions_and_text_style_on_request() {
+    let h = session();
+    let mut g = h.lock().unwrap();
+    g.handle("doc.new", json!({"width": 64, "height": 32})).unwrap();
+    let layer = g.handle("engine.execute", json!({"command": "type.create", "params": {"text": "A", "x": 4, "y": 20, "size": 12}})).unwrap()["layer"].clone();
+    let plain = g.handle("doc.inspect", json!({})).unwrap();
+    assert!(plain["layers"][0]["pixelRev"].is_u64(), "{plain}");
+    assert!(plain["layers"][0]["text"].get("style").is_none());
+    let full = g.handle("doc.inspect", json!({"textStyle": true})).unwrap();
+    assert_eq!(full["layers"][0]["id"], layer);
+    assert!(full["layers"][0]["text"]["style"]["runs"].is_array(), "{full}");
+    assert!(g.handle("doc.inspect", json!({"textStyle": "yes"})).is_err());
+}

@@ -56,6 +56,8 @@ pub struct DocState {
     /// The snapshot set as the History Brush's source (`history.setSource {snapshot}`); `None`:
     /// the source is a state, kept by the history ([`photocraft_ops::History::brush_source`]).
     pub(crate) source_snapshot: Option<u64>,
+    /// Per-layer pixel revisions (`pixelRev`, the embed API's `layerPixelsChanged`).
+    pub pixel_revs: crate::pixel_revs::PixelRevs,
 }
 
 impl DocState {
@@ -106,6 +108,7 @@ impl DocState {
             snapshots: vec![first],
             next_snapshot: 1,
             source_snapshot: None,
+            pixel_revs: Default::default(),
         }
     }
     /// The selected layers in bottom-to-top document order, always including the active layer.

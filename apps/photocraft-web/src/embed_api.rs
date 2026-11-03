@@ -247,6 +247,12 @@ pub fn process(app: &mut PhotocraftApp, ctx: &egui::Context) {
 /// The events of this frame, at most one of each kind: called once per frame, after the frame's
 /// UI (where pans, zooms and rotations happen) and the calls [`process`] ran before it.
 pub fn report(app: &PhotocraftApp) {
+    // Layers whose pixels or mask changed (compared tile by tile with the document seen last).
+    for st in app.session.documents() {
+        for c in st.pixel_revs.take_changes(&st.doc) {
+            emit(&core::pixels_changed_event(st.doc.id.0, &c));
+        }
+    }
     let snap = snapshot(app);
     let events = HOST.with(|h| {
         let mut h = h.borrow_mut();

@@ -39,6 +39,9 @@ pub const FEATURES: &[&str] = &[
     "events.fontsMissing",
     "boot.hiddenTab",
     "layerStyle.dropShadow.source",
+    "events.layerPixelsChanged",
+    "inspect.pixelRev",
+    "inspect.textStyle",
 ];
 
 /// The build stamp: the Capishot commit and the build id, set by `scripts/build-embed.sh`
@@ -325,6 +328,18 @@ pub fn events(prev: Option<&Snapshot>, next: &Snapshot) -> Vec<Value> {
     out
 }
 
+/// `layerPixelsChanged {document, layer, rect: [x, y, width, height], pixelRev}`: a layer's pixels
+/// or layer mask changed (`rect` in document pixels, tile-aligned, may reach past the canvas).
+pub fn pixels_changed_event(document: u64, c: &photocraft_engine::pixel_revs::PixelChange) -> Value {
+    json!({
+        "type": "layerPixelsChanged",
+        "document": document,
+        "layer": c.layer.0,
+        "rect": [c.rect.x0, c.rect.y0, c.rect.width(), c.rect.height()],
+        "pixelRev": c.rev,
+    })
+}
+
 /// The view events from the view last reported (`prev`) to `next`: `viewChanged` when anything
 /// moved, after `zoom` when the factor changed (or another document's view shows). The host
 /// glue calls it at most once per animation frame with the latest view, so a gesture's frames
@@ -463,6 +478,15 @@ mod tests {
         c.active = Some(2);
         let e = events(Some(&b), &c);
         assert_eq!(e, [json!({"type": "documents", "documents": [1, 2], "active": 2})], "the same error isn't repeated");
+    }
+
+    #[test]
+    fn pixel_changes_become_events() {
+        let c = photocraft_engine::pixel_revs::PixelChange { layer: photocraft_engine::doc::LayerId(7), rect: photocraft_engine::doc::Rect::new(64, 0, 128, 64), rev: 3 };
+        assert_eq!(
+            pixels_changed_event(2, &c),
+            json!({"type": "layerPixelsChanged", "document": 2, "layer": 7, "rect": [64, 0, 64, 64], "pixelRev": 3})
+        );
     }
 
     #[test]

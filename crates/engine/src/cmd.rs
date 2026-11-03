@@ -997,9 +997,10 @@ fn build() -> Vec<CommandSpec> {
             label: "Inspect Document",
             menu: &[],
             shortcut: None,
-            params: r##"{"document":index?}"##,
+            params: r##"{"document":index?,"textStyle":bool=false (type layers' full run and paragraph styles in `text.style`, every effect's settings in `effects.items[].fx`)} (every layer has `pixelRev`, moving when its pixels or mask change)"##,
             enabled: has_doc,
             run: |s, p| {
+                let opts = inspect::Options::parse(p).map_err(|e| bad("document.inspect", e))?;
                 let d = match p.get("document") {
                     Some(v) => {
                         let i = v.as_u64().and_then(|v| usize::try_from(v).ok()).ok_or_else(|| bad("document.inspect", "`document` must be an index"))?;
@@ -1007,7 +1008,7 @@ fn build() -> Vec<CommandSpec> {
                     }
                     None => s.active().ok_or(EngineError::NoDocument)?,
                 };
-                Ok(inspect::document(d))
+                Ok(inspect::document_with(d, opts))
             },
             journal: false,
         },
@@ -1288,6 +1289,7 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::layer_multi_cmds::specs());
     v.extend(crate::layer_copy_cmds::specs());
     v.extend(crate::layer_key_cmds::specs());
+    v.extend(crate::live_cmds::specs());
     v.extend(crate::prefs::specs());
     v.extend(crate::updates_cmds::specs());
     v.extend(crate::edit_menu_cmds::specs());
