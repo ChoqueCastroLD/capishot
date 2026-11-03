@@ -70,6 +70,7 @@ pub fn manga(w: u32, h: u32, layers: usize) -> Document {
                     anti_alias: false,
                     noise: 0.0,
                     knocks_out: true,
+                    source: Default::default(),
                 })];
             }
         }

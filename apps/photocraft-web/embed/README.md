@@ -39,6 +39,11 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
   `viewChanged` per frame however many app frames it ran. `zoom` `{id, zoom}` comes before it when
   the factor changed since the last report (feature `events.viewChanged`).
 
+- `execute('layer.layerStyle.dropShadow', {source: 'fill+stroke', …})` casts the drop shadow from
+  the layer and the outside of its strokes (an outlined lettering's 3D shadow); `'fill'` (default)
+  from the layer's pixels as Photoshop does. Saved to PSD and `.pcraft` (feature
+  `layerStyle.dropShadow.source`; `docs/control-protocol.md`).
+
 - Type layers through `execute` (`docs/control-protocol.md`): `type.frame {layer}` gives a layer's
   frame without its layout (`shape` point/box/path/inPath with its geometry, `transform`, `bounds`),
   and `type.edit {layer, path | inPath, vertical?, inset?}` gives type in a path a new path (document

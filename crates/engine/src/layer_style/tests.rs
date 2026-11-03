@@ -574,3 +574,22 @@ fn double_stroke_bands_render_and_survive_an_edit() {
     s.execute("layer.layerStyle.replace", json!({"layer": id.0, "effects": entries})).unwrap();
     assert_eq!(px(&mut s, 24, 14), before, "both strokes render identically after the round trip");
 }
+
+/// `layer.layerStyle.dropShadow` `source`: "fill" (default, Photoshop's) or "fill+stroke" (the
+/// shadow cast from the layer and its strokes); anything else is refused and changes nothing.
+#[test]
+fn drop_shadow_source_param() {
+    let mut s = session();
+    s.execute("layer.layerStyle.dropShadow", json!({"distance": 4})).unwrap();
+    assert!(matches!(&effects(&s)[0], Effect::DropShadow(d) if d.source == ShadowSource::Fill));
+    for (name, want) in [("fill+stroke", ShadowSource::FillAndStroke), ("fill", ShadowSource::Fill), ("fillAndStroke", ShadowSource::FillAndStroke)] {
+        s.execute("layer.layerStyle.dropShadow", json!({"source": name})).unwrap();
+        assert!(matches!(&effects(&s)[..], [Effect::DropShadow(d)] if d.source == want), "{name}");
+    }
+    for bad in [json!("stroke"), json!(3), json!(null)] {
+        assert!(s.execute("layer.layerStyle.dropShadow", json!({"source": bad})).is_err(), "{bad}");
+    }
+    assert!(matches!(&effects(&s)[..], [Effect::DropShadow(d)] if d.source == ShadowSource::FillAndStroke));
+    assert_eq!(shadow_source_param(ShadowSource::FillAndStroke), "fill+stroke");
+    assert_eq!(effect_defaults("dropShadow")["source"], "fill");
+}

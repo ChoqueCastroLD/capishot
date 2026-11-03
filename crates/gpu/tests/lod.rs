@@ -91,6 +91,7 @@ fn mixed_doc() -> Document {
         anti_alias: false,
         noise: 0.0,
         knocks_out: true,
+        source: Default::default(),
     })];
     let mut group = Layer::group("g", vec![screen, small]);
     group.blend = BlendMode::Normal;

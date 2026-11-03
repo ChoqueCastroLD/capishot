@@ -25,7 +25,7 @@ use photocraft_color::blend::BlendMode;
 use photocraft_doc::Pattern;
 use photocraft_doc::{
     Bevel, BevelStyle, BevelTechnique, Contour, Effect, FxPaint, GlobalLight, Glow, GlowSource, GlowTechnique, Gradient, GradientStyle, Layer, Shadow,
-    StrokePosition,
+    ShadowSource, StrokePosition,
 };
 use photocraft_geom::Rect;
 
@@ -88,6 +88,8 @@ pub fn margin(layer: &Layer) -> i32 {
     let mut m = 0.0f32;
     for e in layer.effects.items.iter().filter(|e| e.enabled()) {
         let r = match e {
+            // Cast from the fill and strokes, the shadow starts past the widest stroke.
+            Effect::DropShadow(s) if s.source == ShadowSource::FillAndStroke => s.distance + s.size + composite::caster_reach(&layer.effects.items),
             Effect::DropShadow(s) | Effect::InnerShadow(s) => s.distance + s.size,
             Effect::OuterGlow(g) | Effect::InnerGlow(g) => g.size,
             Effect::Stroke(s) => s.size,
@@ -121,6 +123,10 @@ pub(crate) fn maps_are_local(layer: &Layer) -> bool {
         !dissolves(e)
             && match e {
                 Effect::Stroke(s) => !matches!(s.paint, FxPaint::Gradient(_)),
+                // Cast from the strokes, a wide one's exact distances depend on the region.
+                Effect::DropShadow(s) if s.source == ShadowSource::FillAndStroke => {
+                    s.noise <= 0.0 && !stroke_outside_exact(composite::caster_reach(&layer.effects.items))
+                }
                 Effect::DropShadow(s) | Effect::InnerShadow(s) => s.noise <= 0.0,
                 Effect::OuterGlow(g) | Effect::InnerGlow(g) => g.technique != GlowTechnique::Precise && g.noise <= 0.0,
                 Effect::BevelEmboss(b) => b.technique == BevelTechnique::Smooth,

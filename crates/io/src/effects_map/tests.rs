@@ -11,6 +11,7 @@ fn sample_effects() -> Vec<Effect> {
         Effect::DropShadow(Shadow {
             distance: 9.0,
             spread: 0.25,
+            source: ShadowSource::FillAndStroke,
             contour: Contour::Custom {
                 name: "Cone".into(),
                 points: vec![CurvePoint { input: 0.0, output: 0.0 }, CurvePoint { input: 0.5, output: 1.0 }, CurvePoint { input: 1.0, output: 0.0 }],
@@ -23,6 +24,7 @@ fn sample_effects() -> Vec<Effect> {
         }),
         Effect::InnerShadow(Shadow {
             knocks_out: false,
+            source: Default::default(),
             ..match Effect::default_drop_shadow() {
                 Effect::DropShadow(s) => s,
                 _ => unreachable!(),
@@ -367,4 +369,21 @@ fn lrfx_drop_shadow() {
         }
         other => panic!("{other:?}"),
     }
+}
+
+/// A drop shadow cast from the fill and strokes saves a Capishot key Photoshop ignores and reads
+/// back; a shadow cast from the fill writes the descriptor as before, without it.
+#[test]
+fn shadow_source_round_trips_through_a_private_key() {
+    let Effect::DropShadow(plain) = Effect::default_drop_shadow() else { unreachable!() };
+    let stroked = Shadow { source: ShadowSource::FillAndStroke, ..plain.clone() };
+    let (_, d) = write_one(&Effect::DropShadow(plain.clone()));
+    assert!(d.get(SHADOW_FROM_STROKE).is_none(), "nothing new for a Photoshop shadow");
+    assert_eq!(parse_shadow(&d, false).source, ShadowSource::Fill);
+    let (_, d) = write_one(&Effect::DropShadow(stroked));
+    assert!(matches!(d.get(SHADOW_FROM_STROKE), Some(Value::Boolean(true))));
+    assert_eq!(parse_shadow(&d, false).source, ShadowSource::FillAndStroke);
+    let (master, back) = parse_lfx2(&write_lfx2(true, &[Effect::DropShadow(Shadow { source: ShadowSource::FillAndStroke, ..plain })])).unwrap();
+    assert!(master);
+    assert!(matches!(&back[..], [Effect::DropShadow(s)] if s.source == ShadowSource::FillAndStroke), "{back:?}");
 }

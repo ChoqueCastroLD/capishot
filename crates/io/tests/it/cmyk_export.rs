@@ -195,6 +195,7 @@ fn layer_effects_export_their_inks() {
         anti_alias: false,
         noise: 0.0,
         knocks_out: true,
+        source: Default::default(),
     }));
     d.layers.push(t);
     let r = export(&d, "a.tif", &ExportOptions::default()).unwrap_or_else(|e| panic!("{e}"));

@@ -1055,6 +1055,7 @@ fn flatten_all_layer_effects_uses_the_documents_global_light() {
             anti_alias: false,
             noise: 0.0,
             knocks_out: true,
+            source: Default::default(),
         });
         assert_flatten_effects_is_a_no_op(depth, |d| d.global_light.angle = 0.0, shadow);
     }

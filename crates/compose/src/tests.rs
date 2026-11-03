@@ -1280,7 +1280,7 @@ fn buffer_over_background() {
 
 // ---------- layer effects ----------
 
-use photocraft_doc::{Effect, FxCommon, FxPaint, Glow, GlowSource, GlowTechnique, Gradient, GradientStyle, Satin, Shadow, StrokeFx, StrokePosition};
+use photocraft_doc::{Effect, FxCommon, FxPaint, Glow, GlowSource, GlowTechnique, Gradient, GradientStyle, Satin, Shadow, ShadowSource, StrokeFx, StrokePosition};
 
 fn fx_doc(effects: Vec<Effect>) -> Document {
     let mut d = doc_white(40, 40);
@@ -1379,6 +1379,7 @@ fn shadow(distance: f32, angle: f32) -> Shadow {
         anti_alias: false,
         noise: 0.0,
         knocks_out: true,
+        source: Default::default(),
     }
 }
 
@@ -1392,6 +1393,37 @@ fn drop_shadow_falls_away_from_light() {
     let d = fx_doc(vec![Effect::DropShadow(shadow(5.0, 0.0))]);
     assert!(close4(px(&d, 8, 20), [0.0, 0.0, 0.0, 1.0]));
     assert!(close4(px(&d, 32, 20), [1.0; 4]));
+}
+
+/// A drop shadow cast from the fill and strokes (`ShadowSource::FillAndStroke`) falls from the
+/// outlined shape: comic lettering's outline casts its extrusion. From the fill (the default, as in
+/// Photoshop) it falls from the square only.
+#[test]
+fn drop_shadow_can_be_cast_from_the_stroke() {
+    let outlined = |source: ShadowSource, stroke_on: bool| {
+        let mut st = stroke(3.0, StrokePosition::Outside);
+        st.set_enabled(stroke_on);
+        // The square spans 10..30, its stroke 7..33; the shadow falls 6 px down.
+        fx_doc(vec![Effect::DropShadow(Shadow { source, ..shadow(6.0, 90.0) }), st])
+    };
+    let black = [0.0, 0.0, 0.0, 1.0];
+    let fill = outlined(ShadowSource::Fill, true);
+    assert!(close4(px(&fill, 20, 35), black), "{:?}", px(&fill, 20, 35));
+    assert!(close4(px(&fill, 20, 37), [1.0; 4]), "{:?}", px(&fill, 20, 37));
+    assert!(close4(px(&fill, 8, 36), [1.0; 4]), "{:?}", px(&fill, 8, 36));
+    let both = outlined(ShadowSource::FillAndStroke, true);
+    for (x, y) in [(20, 35), (20, 38), (8, 36), (31, 37)] {
+        assert!(close4(px(&both, x, y), black), "({x}, {y}): {:?}", px(&both, x, y));
+    }
+    // The stroke and the layer still paint over the shadow.
+    assert!(close4(px(&both, 20, 32), [0.0, 0.0, 1.0, 1.0]), "{:?}", px(&both, 20, 32));
+    assert!(close4(px(&both, 20, 20), [1.0, 0.0, 0.0, 1.0]));
+    // Without an enabled stroke the shadow is the fill's.
+    let off = outlined(ShadowSource::FillAndStroke, false);
+    let fill_off = outlined(ShadowSource::Fill, false);
+    for (x, y) in [(20, 35), (20, 37), (8, 36)] {
+        assert!(close4(px(&off, x, y), px(&fill_off, x, y)), "({x}, {y})");
+    }
 }
 
 #[test]

@@ -130,6 +130,19 @@ pub struct Shadow {
     pub noise: f32,
     /// Drop shadow only: the layer knocks out the shadow beneath it.
     pub knocks_out: bool,
+    /// Drop shadow only: the shape that casts it (Capishot; Photoshop casts from the fill).
+    #[serde(default)]
+    pub source: ShadowSource,
+}
+
+/// What casts a drop shadow. Photoshop casts it from the layer's own pixels (`Fill`); comic
+/// lettering with a thick outline wants it from the outlined shape (`FillAndStroke`): the layer
+/// joined with the outside part of its enabled strokes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ShadowSource {
+    #[default]
+    Fill,
+    FillAndStroke,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -395,6 +408,7 @@ impl Effect {
             anti_alias: false,
             noise: 0.0,
             knocks_out: true,
+            source: ShadowSource::Fill,
         })
     }
 }

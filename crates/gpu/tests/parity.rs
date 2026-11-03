@@ -1117,6 +1117,7 @@ fn shadow(blend: BlendMode, opacity: f32, angle: f32, distance: f32, size: f32, 
         anti_alias: false,
         noise: 0.0,
         knocks_out: true,
+        source: Default::default(),
     }
 }
 

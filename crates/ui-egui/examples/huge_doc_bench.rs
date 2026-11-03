@@ -91,6 +91,7 @@ fn text(name: &str, r: Rect) -> Layer {
             anti_alias: false,
             noise: 0.0,
             knocks_out: true,
+            source: Default::default(),
         }),
         Effect::Stroke(StrokeFx {
             common: FxCommon::new(BlendMode::Normal, 1.0),
@@ -139,6 +140,7 @@ fn build(w: u32, h: u32) -> Document {
             anti_alias: false,
             noise: 0.0,
             knocks_out: true,
+            source: Default::default(),
         }),
         Effect::Stroke(StrokeFx {
             common: FxCommon::new(BlendMode::Normal, 1.0),

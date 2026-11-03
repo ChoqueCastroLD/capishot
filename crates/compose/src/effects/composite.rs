@@ -3,7 +3,7 @@ use super::distance::{INSIDE_EPS, Metric, dist_inside_by, dist_outside_by, local
 use super::paint::{dissolves_in, glow_map, paint_color, paint_fx, paint_glow, paint_pattern, rgb, shadow_map};
 use super::{
     BlendMode, Buffer, Effect, FxMaps, FxPaint, GlobalLight, Layer, MAX_REACH, Map, PREPARED_PATTERN_BYTES, Pattern, Placement, PreparedPatterns, Rect,
-    StrokePosition, psblend,
+    ShadowSource, StrokePosition, psblend,
 };
 
 /// Build every effect map for `layer` from its alpha `shape` over `rect`.
@@ -47,11 +47,18 @@ pub(crate) fn build_maps_prepared(
     let shape = Map { w, h, v: shape };
     let items: Vec<&Effect> = layer.effects.items.iter().filter(|e| e.enabled()).collect();
     let mut bevel_paint = vec![BevelPaint::Inner; items.len()];
+    let caster = stroked_caster(&shape, &items);
     let per: Vec<Vec<Map>> = items
         .iter()
         .enumerate()
         .map(|(i, e)| match e {
-            Effect::DropShadow(s) => vec![shadow_map(&shape, s, light, false, (rect.x0, rect.y0))],
+            Effect::DropShadow(s) => {
+                let from = match (&caster, s.source) {
+                    (Some(c), ShadowSource::FillAndStroke) => c,
+                    _ => &shape,
+                };
+                vec![shadow_map(from, s, light, false, (rect.x0, rect.y0))]
+            }
             Effect::InnerShadow(s) => vec![shadow_map(&shape, s, light, true, (rect.x0, rect.y0))],
             Effect::OuterGlow(g) => vec![glow_map(&shape, g, false, (rect.x0, rect.y0))],
             Effect::InnerGlow(g) => vec![glow_map(&shape, g, true, (rect.x0, rect.y0))],
@@ -106,6 +113,45 @@ pub(crate) fn build_maps_prepared(
         }
     }
     FxMaps { rect, shape, per, bevel_paint, din, dout, dout_exact, vdout, vdout_exact, outline, frames }
+}
+
+/// The outside width of every enabled stroke in `items` that paints (positive width and opacity),
+/// with its opacity.
+fn outside_strokes<'a>(items: impl IntoIterator<Item = &'a Effect>) -> impl Iterator<Item = (f32, f32)> {
+    items.into_iter().filter_map(|e| match e {
+        Effect::Stroke(st) if st.common.enabled => {
+            let w = stroke_widths(st).1;
+            (w.is_finite() && w > 0.0 && st.common.opacity > 0.0).then_some((w.min(MAX_REACH), st.common.opacity.clamp(0.0, 1.0)))
+        }
+        _ => None,
+    })
+}
+
+/// How far past the shape a drop shadow cast from the fill and strokes
+/// ([`ShadowSource::FillAndStroke`]) starts: the widest outside stroke.
+pub(crate) fn caster_reach(items: &[Effect]) -> f32 {
+    outside_strokes(items).map(|(w, _)| w).fold(0.0, f32::max)
+}
+
+/// The shape a [`ShadowSource::FillAndStroke`] drop shadow is cast from: the layer's alpha joined
+/// with the outside band of each enabled stroke at its opacity, the band the compositor paints
+/// (`outside_share`). `None` when no such shadow or no outside stroke is enabled.
+fn stroked_caster(shape: &Map, items: &[&Effect]) -> Option<Map> {
+    let wanted = items.iter().any(|e| matches!(e, Effect::DropShadow(s) if s.source == ShadowSource::FillAndStroke));
+    let strokes: Vec<(f32, f32)> = outside_strokes(items.iter().copied()).collect();
+    if !wanted || strokes.is_empty() {
+        return None;
+    }
+    let chamfer = strokes.iter().any(|&(w, _)| !stroke_outside_exact(w)).then(|| dist_outside_by(shape, Metric::Chamfer));
+    let exact = strokes.iter().any(|&(w, _)| stroke_outside_exact(w)).then(|| dist_outside_by(shape, Metric::Euclidean));
+    let mut out = shape.clone();
+    for (w, opacity) in strokes {
+        let Some(d) = (if stroke_outside_exact(w) { exact.as_ref() } else { chamfer.as_ref() }) else { continue };
+        for (v, &di) in out.v.iter_mut().zip(d) {
+            *v = v.max((w + 0.5 - di).clamp(0.0, 1.0) * opacity);
+        }
+    }
+    Some(out)
 }
 
 /// Far outside any shape (distance fill for cropped distance fields).

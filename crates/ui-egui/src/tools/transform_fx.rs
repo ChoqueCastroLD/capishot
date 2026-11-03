@@ -458,6 +458,7 @@ mod tests {
             anti_alias: false,
             noise: 0.0,
             knocks_out: true,
+            source: Default::default(),
         })
     }
 
