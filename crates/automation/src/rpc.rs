@@ -15,7 +15,7 @@
 //!   `doc.exportLayers {dir, format?, prefix?, visibleOnly?, quality?, index?}`,
 //!   `doc.exportDataSets {dir, format?, dataSets?, naming?, index?}`,
 //!   `doc.importDataSets {path, delimiter?, index?}` (#3216: the same treatment for the export
-//!   and CSV half of #2810), `doc.save {path?, format?, quality?, index?}`, `doc.inspect {index?}`,
+//!   and CSV half of #2810), `doc.save {path?, format?, quality?, index?}`, `doc.inspect {index?, textStyle?}`,
 //!   `doc.render {index?, maxSide?, path?}` (writes a PNG to `path`, else
 //!   returns it base64-encoded), `doc.select {index}`, `doc.close {index?}`
 //! - `batch {steps: [{command, params?, wait?} | {method, params?}], stopOnError?}`
@@ -87,7 +87,18 @@ impl Headless {
             "engine.execute" => {
                 let id = str_of(&p, "command").ok_or_else(|| bad("engine.execute needs `command`"))?;
                 let wait = p.get("wait").and_then(Value::as_bool).unwrap_or(true);
-                self.command_start(id, p.get("params").cloned().unwrap_or(Value::Null), wait)
+                let params = p.get("params").cloned().unwrap_or(Value::Null);
+                // Live sync: `index` or `document` (an id) targets another open document without
+                // making it active, `history: "none"` keeps the change out of the undo history.
+                let history = photocraft_engine::HistoryMode::parse(p.get("history")).map_err(bad)?;
+                let target = self.target_of(&p)?;
+                if target.is_none() && history == photocraft_engine::HistoryMode::Step {
+                    return self.command_start(id, params, wait);
+                }
+                if !wait {
+                    return Err(bad("`index`, `document` and `history` need a command that waits (no `wait: false`)"));
+                }
+                self.command_scoped(id, params, target, history)
             }
             // Background jobs (#210): list (applying any that finished) and cancel.
             "jobs.list" => self.command_start("jobs.list", json!({}), true),
@@ -159,7 +170,10 @@ impl Headless {
                 opts.remove("index");
                 self.import_data_sets(index_of(&p)?, path, &Value::Object(opts))
             }
-            "doc.inspect" => self.inspect(index_of(&p)?),
+            "doc.inspect" => {
+                let opts = photocraft_engine::inspect::Options::parse(&p).map_err(bad)?;
+                self.inspect_with(index_of(&p)?, opts)
+            }
             "doc.render" => {
                 let max = match p.get("maxSide") {
                     None => 1024,

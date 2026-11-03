@@ -905,6 +905,40 @@ fn info(s: &Session, p: &Value) -> Result<Value> {
         return Err(EngineError::Other(format!("layer {} is not a type layer", id.0)));
     };
     let text = &t.text;
+    let style = style_json(t);
+    let layout = photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner()).layout(t, d.doc.resolution_dpi);
+    let lines: Vec<Value> = layout
+        .lines
+        .iter()
+        .map(|ln| json!({ "start": char_at(text, ln.range.start), "end": char_at(text, ln.range.end), "baseline": ln.baseline, "x0": ln.x0, "x1": ln.x1, "ascent": ln.ascent, "descent": ln.descent }))
+        .collect();
+    let bounds = t.cache.as_ref().map(|c| c.content_bounds()).map(|r| json!([r.x0, r.y0, r.x1, r.y1]));
+    let warnings = crate::type_extra_cmds::missing_font_warnings_for_layer(t);
+    let mut out = json!({
+        "layer": id.0,
+        "text": text,
+        "shape": t.shape,
+        "transform": t.transform.m,
+        "antialias": t.antialias,
+        "orientation": t.orientation,
+        "warp": t.warp,
+        "runs": style["runs"],
+        "paragraphs": style["paragraphs"],
+        "lines": lines,
+        "bounds": bounds,
+        "pxPerPt": layout.px_per_pt,
+    });
+    if !warnings.is_empty() {
+        out["warnings"] = json!(warnings);
+    }
+    Ok(out)
+}
+
+/// A type layer's style without laying it out: the character runs and paragraphs (char offsets +
+/// styles, as `type.info` gives them), antialias, orientation, shape, transform and warp
+/// (`document.inspect {textStyle: true}`).
+pub(crate) fn style_json(t: &photocraft_doc::TextLayer) -> Value {
+    let text = &t.text;
     let mut at = 0;
     let runs: Vec<Value> = t
         .char_runs()
@@ -925,32 +959,15 @@ fn info(s: &Session, p: &Value) -> Result<Value> {
             v
         })
         .collect();
-    let layout = photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner()).layout(t, d.doc.resolution_dpi);
-    let lines: Vec<Value> = layout
-        .lines
-        .iter()
-        .map(|ln| json!({ "start": char_at(text, ln.range.start), "end": char_at(text, ln.range.end), "baseline": ln.baseline, "x0": ln.x0, "x1": ln.x1, "ascent": ln.ascent, "descent": ln.descent }))
-        .collect();
-    let bounds = t.cache.as_ref().map(|c| c.content_bounds()).map(|r| json!([r.x0, r.y0, r.x1, r.y1]));
-    let warnings = crate::type_extra_cmds::missing_font_warnings_for_layer(t);
-    let mut out = json!({
-        "layer": id.0,
-        "text": text,
-        "shape": t.shape,
-        "transform": t.transform.m,
-        "antialias": t.antialias,
-        "orientation": t.orientation,
-        "warp": t.warp,
+    json!({
         "runs": runs,
         "paragraphs": paragraphs,
-        "lines": lines,
-        "bounds": bounds,
-        "pxPerPt": layout.px_per_pt,
-    });
-    if !warnings.is_empty() {
-        out["warnings"] = json!(warnings);
-    }
-    Ok(out)
+        "antialias": t.antialias,
+        "orientation": t.orientation,
+        "shape": t.shape,
+        "transform": t.transform.m,
+        "warp": t.warp,
+    })
 }
 
 /// `type.frame`: a type layer's frame without laying it out (no runs, paragraphs or lines):

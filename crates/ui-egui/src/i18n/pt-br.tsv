@@ -5245,3 +5245,7 @@ fontTab	Find More	Encontrar mais
 # Preview channel badge (title bar of a test deploy)
 	PREVIEW	PRÉVIA
 	Preview build, for testing before a release. It sends no usage statistics.	Versão prévia, para testar antes de publicar. Não envia estatísticas de uso.
+	Put Pixels	Colocar pixels
+	Add Image Layer	Adicionar camada de imagem
+	Set Layer Mask	Definir máscara de camada
+	Set Selection	Definir seleção

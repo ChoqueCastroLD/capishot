@@ -162,6 +162,18 @@ export type EmbedEvent =
    * (feature `events.fontsMissing`).
    */
   | { type: 'fontsMissing'; families: string[] }
+  /**
+   * A layer's pixels or layer mask changed (strokes, fills, Remove, clears, undo, redo…): `rect`
+   * in document pixels, tile-aligned, the union of the changes since the last event. `pixelRev`
+   * is the layer's new `pixelRev` (as in `document.inspect`). Feature `events.layerPixelsChanged`.
+   */
+  /**
+   * Layers inside one group (`group` null: the top level) changed order; `layers` is that group's
+   * children now, top to bottom. Adding, deleting or moving a layer to another group alone isn't
+   * a reorder. Feature `events.layersReordered`.
+   */
+  | { type: 'layersReordered'; document: DocumentId; group: number | null; layers: number[] }
+  | { type: 'layerPixelsChanged'; document: DocumentId; layer: number; rect: [x: number, y: number, width: number, height: number]; pixelRev: number }
   | { type: 'error'; message: string; source: 'init' | 'status'; fatal: boolean };
 
 /** The embedding API version (sync). */
@@ -185,8 +197,19 @@ export function activateDocument(id: DocumentId): Promise<DocumentInfo>;
 export function listDocuments(): Promise<DocumentInfo[]>;
 export function getState(): Promise<EmbedState>;
 
+/** `execute`'s third argument (features `execute.document`, `execute.history`). */
+export interface ExecuteOptions {
+  /** Run an engine command on this open document without making it active (no focus change). */
+  document?: DocumentId;
+  /**
+   * `none` / `silent`: no undo step; the change is carried into every history state, so the
+   * user's undo and redo keep it (per layer; document-wide changes aren't carried). Default `step`.
+   */
+  history?: 'step' | 'none' | 'silent';
+}
+
 /** Runs a command by id (`engine.execute` of the control protocol); params: object or JSON string. */
-export function execute(command: string, params?: { [key: string]: Json } | string | null): Promise<Json>;
+export function execute(command: string, params?: { [key: string]: Json } | string | null, options?: ExecuteOptions | null): Promise<Json>;
 /** Any control-protocol method (`ui.inspect`, `ui.pointer`, …). */
 export function request(method: 'fonts.preload', params: FontsPreloadParams): Promise<FontsPreloadResult>;
 export function request(method: string, params?: { [key: string]: Json } | null): Promise<Json>;

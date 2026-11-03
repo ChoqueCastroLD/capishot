@@ -60,6 +60,8 @@ struct Host {
     last: Option<Snapshot>,
     /// Selection bounds by document, with the revision they were measured at.
     selections: Vec<(u64, u64, Option<[i32; 4]>)>,
+    /// Layer stacking order by document, with the revision it was read at (`layersReordered`).
+    orders: Vec<(u64, u64, std::sync::Arc<core::LayerOrder>)>,
     ready: Vec<Settle>,
     runner: Option<eframe::WebRunner>,
     /// A canvas `init` made inside the host's container (removed by `destroy`).
@@ -78,6 +80,7 @@ impl Default for Host {
             saved_chrome: None,
             last: None,
             selections: Vec::new(),
+            orders: Vec::new(),
             ready: Vec::new(),
             runner: None,
             own_canvas: None,
@@ -247,6 +250,12 @@ pub fn process(app: &mut PhotocraftApp, ctx: &egui::Context) {
 /// The events of this frame, at most one of each kind: called once per frame, after the frame's
 /// UI (where pans, zooms and rotations happen) and the calls [`process`] ran before it.
 pub fn report(app: &PhotocraftApp) {
+    // Layers whose pixels or mask changed (compared tile by tile with the document seen last).
+    for st in app.session.documents() {
+        for c in st.pixel_revs.take_changes(&st.doc) {
+            emit(&core::pixels_changed_event(st.doc.id.0, &c));
+        }
+    }
     let snap = snapshot(app);
     let events = HOST.with(|h| {
         let mut h = h.borrow_mut();
@@ -355,10 +364,21 @@ fn snapshot(app: &PhotocraftApp) -> Snapshot {
                         b
                     }
                 };
-                DocSnap { id, revision: st.revision, dirty: st.revision != st.saved_revision, selection }
+                // The stacking order, likewise once per revision.
+                let order = match h.orders.iter().find(|(d, rev, _)| *d == id && *rev == st.revision) {
+                    Some((_, _, o)) => o.clone(),
+                    None => {
+                        let o = std::sync::Arc::new(core::layer_order(&st.doc));
+                        h.orders.retain(|(d, ..)| *d != id);
+                        h.orders.push((id, st.revision, o.clone()));
+                        o
+                    }
+                };
+                DocSnap { id, revision: st.revision, dirty: st.revision != st.saved_revision, selection, order }
             })
             .collect::<Vec<_>>();
         cache.retain(|(d, ..)| snaps.iter().any(|s| s.id == *d));
+        h.orders.retain(|(d, ..)| snaps.iter().any(|s| s.id == *d));
         h.selections = cache;
         snaps
     });
@@ -524,7 +544,7 @@ pub fn destroy() {
 
 /// Sets the one event listener (`null` removes it). Events: `ready`, `documents`,
 /// `documentChanged`, `dirty`, `selectionChanged`, `toolChanged`, `modeChanged`, `zoom`,
-/// `viewChanged`, `error`.
+/// `viewChanged`, `layerPixelsChanged`, `layersReordered`, `fontsMissing`, `error`.
 #[wasm_bindgen(js_name = onEvent)]
 pub fn on_event(listener: JsValue) {
     let f = listener.dyn_into::<js_sys::Function>().ok();
@@ -661,14 +681,20 @@ pub fn get_state() -> js_sys::Promise {
 
 /// Runs a command by id (engine commands and the shell's View/Window commands) with `params`
 /// (an object or a JSON string) → its JSON result. Same as the control protocol's `engine.execute`.
+/// `options` (optional): `{document, history}`: `document` runs an engine command on that open
+/// document without making it active; `history: "none"` (or `"silent"`) applies it without an
+/// undo step, kept through the user's undo and redo (`docs/control-protocol.md` › Live sync).
 #[wasm_bindgen(js_name = execute)]
-pub fn execute(command: String, params: JsValue) -> js_sys::Promise {
+pub fn execute(command: String, params: JsValue, options: JsValue) -> js_sys::Promise {
     let params = from_js(&params);
     let params = if params.is_null() { json!({}) } else { params };
     if !params.is_object() {
         return js_sys::Promise::reject(&error(&format!("{command}: params must be an object")));
     }
-    control("engine.execute", json!({ "command": command, "params": params }))
+    match core::execute_request(&command, params, &from_js(&options)) {
+        Ok(req) => control("engine.execute", req),
+        Err(e) => js_sys::Promise::reject(&error(&e)),
+    }
 }
 
 /// Any control-protocol method (`ui.inspect`, `ui.set`, `ui.pointer`…): the escape hatch for what

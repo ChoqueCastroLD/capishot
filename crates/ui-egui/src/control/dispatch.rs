@@ -103,9 +103,45 @@ fn execute_command(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRe
     // params and never open a dialog (an agent would otherwise get a modal instead of a
     // result). `ui.menu.invoke` behaves like a menu click, so it may open the dialog.
     if req.method == "engine.execute" && photocraft_engine::commands::find(id).is_some() {
-        return run_waiting(app, wait, |app| app.run(id, params));
+        // Live sync: `document` (an open document's id) runs it there without switching, and
+        // `history: "none"` keeps it out of the undo history (engine `session/scoped.rs`).
+        let (target, history) = match scope_params(app, p) {
+            Ok(t) => t,
+            Err(e) => return err(e),
+        };
+        if target.is_none() && history == photocraft_engine::HistoryMode::Step {
+            return run_waiting(app, wait, |app| app.run(id, params));
+        }
+        if !wait {
+            return err("`document` and `history` need a command that waits (no `wait: false`)");
+        }
+        let active = app.session.active().map(|st| st.doc.id);
+        let scope = match app.session.begin_scope(target, history) {
+            Ok(scope) => scope,
+            Err(e) => return err(e.to_string()),
+        };
+        // The active document goes through the app (its tool and mask targets); another one
+        // straight to the engine, which the app's per-document state doesn't concern.
+        let on_active = active == Some(scope.target());
+        let outcome = run_waiting(app, true, |app| if on_active { app.run(id, params) } else { app.session.execute(id, params).map_err(|e| e.to_string()) });
+        app.session.end_scope(scope);
+        return outcome;
     }
     run_waiting(app, wait, |app| crate::menus::invoke(app, ctx, id, params))
+}
+
+/// `engine.execute`'s `document` (an open document's id, `null`: the active one) and `history`.
+fn scope_params(app: &PhotocraftApp, p: &Value) -> Result<(Option<photocraft_doc::DocId>, photocraft_engine::HistoryMode), String> {
+    let history = photocraft_engine::HistoryMode::parse(p.get("history"))?;
+    let target = match p.get("document") {
+        None | Some(Value::Null) => None,
+        Some(v) => {
+            let id = v.as_u64().map(photocraft_doc::DocId).ok_or("`document` must be an open document's id")?;
+            app.session.index_of_document(id).ok_or_else(|| format!("no open document {}", id.0))?;
+            Some(id)
+        }
+    };
+    Ok((target, history))
 }
 
 fn jobs_cancel(app: &mut PhotocraftApp, p: &Value) -> Outcome {

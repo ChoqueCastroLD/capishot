@@ -328,8 +328,14 @@ impl Headless {
     }
 
     pub fn inspect(&self, index: Option<usize>) -> Result<Value, AutomationError> {
+        self.inspect_with(index, photocraft_engine::inspect::Options::default())
+    }
+
+    /// [`Self::inspect`] with `document.inspect`'s options (`textStyle`).
+    pub fn inspect_with(&self, index: Option<usize>, opts: photocraft_engine::inspect::Options) -> Result<Value, AutomationError> {
         let i = self.doc_index(index)?;
-        Ok(photocraft_engine::inspect::document(&self.session.documents()[i]))
+        let st = self.session.documents().get(i).ok_or_else(|| AutomationError::BadRequest(format!("no document at index {i}")))?;
+        Ok(photocraft_engine::inspect::document_with(st, opts))
     }
 
     pub fn render_png(&self, index: Option<usize>, max_side: u32) -> Result<Vec<u8>, AutomationError> {
@@ -393,6 +399,42 @@ impl Headless {
 }
 
 impl Headless {
+    /// `engine.execute`'s target: `index` (a position in `session.list`) or `document` (an open
+    /// document's `id`, from `session.list` or `doc.inspect`); `None`: the active one.
+    pub fn target_of(&self, p: &Value) -> Result<Option<photocraft_engine::doc::DocId>, AutomationError> {
+        let given = |k: &str| p.get(k).filter(|v| !v.is_null());
+        match (given("index"), given("document")) {
+            (Some(_), Some(_)) => Err(AutomationError::BadRequest("give `index` or `document`, not both".into())),
+            (Some(v), None) => {
+                let i = v.as_u64().and_then(|i| usize::try_from(i).ok()).ok_or_else(|| AutomationError::BadRequest("`index` must be a non-negative integer".into()))?;
+                let st = self.session.documents().get(i).ok_or_else(|| AutomationError::BadRequest(format!("no document at index {i}")))?;
+                Ok(Some(st.doc.id))
+            }
+            (None, Some(v)) => {
+                let id = v.as_u64().map(photocraft_engine::doc::DocId).ok_or_else(|| AutomationError::BadRequest("`document` must be a document id".into()))?;
+                self.session.index_of_document(id).ok_or_else(|| AutomationError::BadRequest(format!("no open document {}", id.0)))?;
+                Ok(Some(id))
+            }
+            (None, None) => Ok(None),
+        }
+    }
+
+    /// [`Self::command_run`] on document `target` (the active one staying active) with `history`.
+    pub fn command_scoped(
+        &mut self,
+        id: &str,
+        params: Value,
+        target: Option<photocraft_engine::doc::DocId>,
+        history: photocraft_engine::HistoryMode,
+    ) -> Result<Value, AutomationError> {
+        let params = if params.is_null() { json!({}) } else { params };
+        if !matches!(&self.filesystem, Filesystem::TrustedLocal) {
+            authorize_engine_command(id, &params)?;
+        }
+        self.sync_jobs();
+        Ok(self.session.execute_scoped(id, params, target, history)?)
+    }
+
     /// Job `job`'s progress (0–1) and message while it runs; `None` once it has ended (or if
     /// there is no such job). Applies the jobs that finished first, as every request does.
     pub fn job_progress(&mut self, job: u64) -> Option<(f32, String)> {

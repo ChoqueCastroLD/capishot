@@ -2086,3 +2086,31 @@ fn ui_set_mask_target_ends_a_filter_mask_view() {
     let photocraft_doc::LayerContent::Smart(sm) = &l.content else { panic!("smart object") };
     assert_eq!(sm.filter_mask.as_ref().unwrap().value(20, 20), 1.0, "not into the filter mask");
 }
+
+/// Live sync: `engine.execute {document, history}` runs on another open document without
+/// activating it, and `history: "none"` adds no undo step.
+#[test]
+fn engine_execute_targets_another_document_and_skips_history() {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    let ctx = egui::Context::default();
+    app.run("file.new", json!({"width": 8, "height": 8})).unwrap();
+    let first = app.session.active().unwrap().doc.id.0;
+    app.run("file.new", json!({"width": 8, "height": 8})).unwrap();
+    let second = app.session.active().unwrap().doc.id.0;
+    let generation = app.session.active_generation();
+    let layers = |app: &PhotocraftApp, id: u64| app.session.documents().iter().find(|st| st.doc.id.0 == id).unwrap().doc.layer_count();
+    let before = layers(&app, first);
+    let steps = |app: &PhotocraftApp| app.session.documents().iter().find(|st| st.doc.id.0 == first).unwrap().history.entries().len();
+    let steps_before = steps(&app);
+    let r = call(&mut app, &ctx, "engine.execute", json!({"command": "layer.new.layer", "params": {}, "document": first, "history": "none"}));
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(layers(&app, first), before + 1);
+    assert_eq!(app.session.active().unwrap().doc.id.0, second);
+    assert_eq!(app.session.active_generation(), generation);
+    assert_eq!(steps(&app), steps_before, "no undo step");
+    for bad in [json!({"document": 123_456_789}), json!({"history": "later"}), json!({"history": "none", "wait": false})] {
+        let mut req = json!({"command": "layer.new.layer", "params": {}});
+        req.as_object_mut().unwrap().extend(bad.as_object().unwrap().clone());
+        assert_eq!(call(&mut app, &ctx, "engine.execute", req.clone())["ok"], false, "{req}");
+    }
+}

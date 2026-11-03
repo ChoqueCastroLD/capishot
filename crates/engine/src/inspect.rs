@@ -20,6 +20,7 @@ pub fn session(s: &Session) -> Value {
         },
         "documents": s.documents().iter().enumerate().map(|(i, d)| json!({
             "index": i,
+            "id": d.doc.id.0,
             "name": d.doc.name,
             "path": d.path,
             "width": d.doc.size.width,
@@ -35,10 +36,38 @@ pub fn session(s: &Session) -> Value {
 }
 
 pub fn document(d: &DocState) -> Value {
+    document_with(d, Options::default())
+}
+
+/// What `document.inspect` adds on request.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Options {
+    /// `textStyle: true`: type layers' full character and paragraph styles (`text.style`, the
+    /// runs and paragraphs `type.info` gives, without laying the text out) and every layer
+    /// effect's full settings (`effects.items[].fx`, as `layer.layerStyle.replace` takes them).
+    pub text_style: bool,
+}
+
+impl Options {
+    /// The options in `document.inspect`'s (and `doc.inspect`'s) params.
+    pub fn parse(p: &Value) -> std::result::Result<Options, String> {
+        let text_style = match p.get("textStyle") {
+            None | Some(Value::Null) => false,
+            Some(Value::Bool(b)) => *b,
+            Some(_) => return Err("`textStyle` must be true or false".into()),
+        };
+        Ok(Options { text_style })
+    }
+}
+
+pub fn document_with(d: &DocState, opts: Options) -> Value {
     let doc = &d.doc;
     let selected = d.selected_layers();
     let instances = smart_instances(&doc.layers);
+    let revs = d.pixel_revs.revisions(doc);
+    let ctx = LayerCtx { selected: &selected, instances: &instances, meta: Some(&doc.metadata), revs: Some(&revs), style: opts.text_style };
     json!({
+        "id": doc.id.0,
         "name": doc.name,
         "path": &d.path,
         "width": doc.size.width,
@@ -51,7 +80,7 @@ pub fn document(d: &DocState) -> Value {
         "isolatedLayers": d.isolated_layers.iter().map(|l| l.0).collect::<Vec<_>>(),
         "hasSelection": doc.selection.is_some(),
         "selectionBounds": doc.selection.as_ref().map(|s| { let r = s.content_bounds(); [r.x0, r.y0, r.width() as i32, r.height() as i32] }),
-        "layers": doc.layers.iter().rev().map(|l| layer_sel(l, &selected, &instances, Some(&doc.metadata))).collect::<Vec<_>>(),
+        "layers": doc.layers.iter().rev().map(|l| layer_sel(l, &ctx)).collect::<Vec<_>>(),
         "history": d.history.entries(),
         "historySource": crate::history_source_cmds::source_json(d),
         "snapshots": d.snapshots.iter().map(|snap| json!({"id": snap.id, "name": snap.name})).collect::<Vec<_>>(),
@@ -77,7 +106,19 @@ pub fn document(d: &DocState) -> Value {
 
 /// Layer tree top-to-bottom (display order). Smart object instances are counted within `l`.
 pub fn layer(l: &Layer) -> Value {
-    layer_sel(l, &[], &smart_instances(std::slice::from_ref(l)), None)
+    let instances = smart_instances(std::slice::from_ref(l));
+    layer_sel(l, &LayerCtx { selected: &[], instances: &instances, meta: None, revs: None, style: false })
+}
+
+/// What every node of [`layer_sel`]'s tree is reported with.
+struct LayerCtx<'a> {
+    selected: &'a [photocraft_doc::LayerId],
+    instances: &'a HashMap<SmartContentsId, usize>,
+    meta: Option<&'a photocraft_doc::Metadata>,
+    /// Pixel revisions (`pixelRev`); `None` leaves the field out.
+    revs: Option<&'a HashMap<photocraft_doc::LayerId, u64>>,
+    /// [`Options::text_style`].
+    style: bool,
 }
 
 /// How many smart objects in `layers`, groups included, share each contents identity.
@@ -95,7 +136,8 @@ fn smart_instances(layers: &[Layer]) -> HashMap<SmartContentsId, usize> {
 }
 
 /// [`layer`] with a `selected` flag on every node (Layers panel multi-selection).
-fn layer_sel(l: &Layer, selected: &[photocraft_doc::LayerId], instances: &HashMap<SmartContentsId, usize>, meta: Option<&photocraft_doc::Metadata>) -> Value {
+fn layer_sel(l: &Layer, ctx: &LayerCtx) -> Value {
+    let (selected, instances, meta) = (ctx.selected, ctx.instances, ctx.meta);
     let bounds = l.surface().map(|s| {
         let r = s.content_bounds();
         [r.x0, r.y0, r.width() as i32, r.height() as i32]
@@ -118,9 +160,13 @@ fn layer_sel(l: &Layer, selected: &[photocraft_doc::LayerId], instances: &HashMa
         "linkGroup": l.link_group,
         "hasXmp": l.xmp.is_some(),
     });
+    // Moves whenever the layer's pixels or layer mask change (pixel_revs.rs).
+    if let Some(revs) = ctx.revs {
+        v["pixelRev"] = json!(revs.get(&l.id).copied().unwrap_or(0));
+    }
     match &l.content {
         LayerContent::Group(g) => {
-            v["children"] = Value::Array(g.children.iter().rev().map(|c| layer_sel(c, selected, instances, meta)).collect());
+            v["children"] = Value::Array(g.children.iter().rev().map(|c| layer_sel(c, ctx)).collect());
             v["expanded"] = json!(g.expanded);
             if let Some(a) = &g.artboard {
                 v["artboard"] = json!({"rect": [a.rect.x0, a.rect.y0, a.rect.width(), a.rect.height()], "background": a.background.name(), "preset": a.preset});
@@ -161,6 +207,9 @@ fn layer_sel(l: &Layer, selected: &[photocraft_doc::LayerId], instances: &HashMa
         }
         LayerContent::Text(t) => {
             v["text"] = json!({"text": t.text, "font": t.font_family, "sizePt": t.size_pt});
+            if ctx.style {
+                v["text"]["style"] = crate::type_cmds::style_json(t);
+            }
         }
         _ => {}
     }
@@ -188,7 +237,14 @@ fn layer_sel(l: &Layer, selected: &[photocraft_doc::LayerId], instances: &HashMa
     if !l.effects.items.is_empty() {
         v["effects"] = json!({
             "enabled": l.effects.enabled,
-            "items": l.effects.items.iter().map(|e| json!({"kind": e.label(), "enabled": e.enabled()})).collect::<Vec<_>>(),
+            "items": l.effects.items.iter().map(|e| {
+                let mut item = json!({"kind": e.label(), "enabled": e.enabled()});
+                if ctx.style {
+                    item["id"] = json!(crate::layer_style::kind_of(e));
+                    item["fx"] = serde_json::to_value(e).unwrap_or(Value::Null);
+                }
+                item
+            }).collect::<Vec<_>>(),
         });
     }
     // Video layer (Layer › Video Layers): the frame stack behind the displayed content.

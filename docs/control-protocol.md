@@ -245,6 +245,79 @@ Long commands (every `filter.*`, `edit.contentAwareFill`, `edit.inpaintAi`, `edi
 
 Served fonts (the web build, `fonts/manifest.txt` next to the page): `fonts.preload {families, timeoutMs?}` fetches the served fonts of `families` and replies once each has arrived or failed, as `{ready, missing, failed}` (`missing`: not installed and not in the manifest; `failed`: the download failed or didn't end within `timeoutMs`, default 10000, at most 120000). Names match as documents' do: without case, spaces, punctuation or parentheses, and by PostScript name. A family the manifest lists is never reported missing: until the manifest is read, and while a document's served fonts download, the "Missing fonts" notice waits, and it lists only absent families and those whose download failed. `ui.set {fontsNotice: false}` hides the notice (an embedding page reports missing fonts itself; the web build also sends a `photocraft-fontsMissing` event).
 
+### Live sync (several people and agents on one document)
+
+For hosts that keep one document in step between collaborators (the embed API and
+`photocraft-cli serve` sessions alike):
+
+- **Pixel revisions.** Every layer in `document.inspect` (and `doc.inspect`) has `pixelRev`, a
+  number that moves whenever the layer's pixels or its layer mask change, whatever changed them
+  (strokes, fills, Remove, clears, filters, undo, redo, background jobs); renames, moves in the
+  stack and style changes leave it alone. `layer.pixelRevision {layer?}` → `{layer, pixelRev}` reads
+  one layer cheaply (`{layers: [{layer, pixelRev}]}` without `layer`). Numbers are per document and
+  session (not saved); a layer that comes back (undo of a delete) counts as changed. The
+  comparison is per tile (copy-on-write tiles: a pointer check, never a pixel scan). The embed API
+  sends `layerPixelsChanged {document, layer, rect: [x, y, width, height], pixelRev}` once per frame
+  per changed layer (`rect` in document pixels, tile-aligned, the union of what changed since the
+  last event; it may reach past the canvas).
+- **Text style.** `document.inspect {textStyle: true}` (CLI: `doc.inspect {index?, textStyle: true}`)
+  adds `text.style` to every type layer: `runs` and `paragraphs` exactly as `type.info` gives them
+  (char offsets and the full character/paragraph style: font, size, colour, tracking, leading,
+  faux bold/italic, horizontal/vertical scale, justification, indents…), plus `antialias`,
+  `orientation`, `shape`, `transform` and `warp`, without laying the text out. Every layer's
+  `effects.items[]` gets `id` (`stroke`, `dropShadow`…) and `fx`, the effect's full settings, which
+  `layer.layerStyle.replace {layer, effects: [{kind: id, params: {}, fx}]}` takes back.
+
+- **Another document, no focus change.** `engine.execute {command, params, document}` runs an
+  engine command on the open document whose id is `document` (`session.list`'s and
+  `document.inspect`'s `id`; the embed API's document ids) without making it active: nothing
+  switches, no `documents` event, and the next call without `document` runs on the active one
+  again. `photocraft-cli serve` also takes `index` (a `session.list` position) instead. Shell
+  (View/Window) commands don't take it. Embed API: `execute(command, params, {document})`.
+- **Outside the user's undo history.** `engine.execute {…, history: "none"}` (`"silent"` is the
+  same; `"step"`, the default, is today's behaviour) applies the change with no undo step and
+  carries it into every state of the document's history, so the user's Undo and Redo step through
+  their own changes and the collaborator's change stays. The carrying is per layer: a layer the
+  command changed (pixels, mask, text, style, properties, position in the stack), added or deleted
+  is changed, added or deleted in each state (a group keeps each state's own children).
+  Document-wide changes (canvas size, mode, guides, channels, the selection) stay in the current
+  document only; combine with `selection.get`/`selection.set` to keep the person's selection.
+  The command must finish inline: `wait: false` is refused, and a command that turns into a
+  background job in the desktop app records its step when the job ends. Embed API:
+  `execute(command, params, {history: 'none'})`; both options together are fine.
+- **Pixels and masks from an image, one step.** `layer.putPixels {layer, png, x?, y?, mode?}` puts
+  an image (base64 PNG, JPEG, WebP…, or a `data:` URL) into an existing pixel layer with its
+  top-left at `(x, y)`: `mode: "replace"` (default) makes that rect the image, transparency
+  included, `"over"` composites it on top; the layer keeps its id, name and everything else.
+  `layer.addImage {png, x?, y?, name?, above?}` makes a new pixel layer from an image above layer
+  `above` (default the active layer) without changing the active layer. `layer.layerMask.set
+  {layer, png, x?, y?, mode?, fill?}` creates or replaces part of a layer mask: the image's
+  luminance (white reveals) times its alpha, in that rect (`over`: transparent pixels keep the
+  mask); a new mask's rest is `fill: "reveal"` (default) or `"hide"`. Images convert to the
+  document's colour profile and depth as copied layers do. Each is one history step (none with
+  `history: "none"`). Fetching a URL is the host's job: pass the bytes as base64.
+- **The person's selection and selected layers.** `selection.get {png?}` keeps the current
+  selection (or its absence) in memory and returns `{id, bounds}` (with `png: true` also the mask
+  as a grey PNG cropped to `bounds`, at `x, y`); no channel is created and nothing is saved.
+  `selection.set {id}` puts it back (`{png, x?, y?}` sets one from a grey mask, `{none: true}`
+  deselects); it is not a history step and leaves a clean document clean, unless `step: true`.
+  `layer.selectMany {layers, active?}` selects exactly those layers (`active`, default the last,
+  the key layer), not a history step. The 32 most recent saved selections are kept per document.
+- **Events** (embed API, once per frame): `toolChanged {tool}` when the tool changes (any way: the
+  toolbar, shortcuts, `setTool`); `layersReordered {document, group, layers}` when layers inside one
+  group (`group` null: the top level) change order, `layers` being that group's children top to
+  bottom now (adding, deleting or moving a layer to another group alone isn't a reorder; those show
+  as `documentChanged`).
+
+Example (CLI session, one JSON per line):
+
+```json
+{"id":1,"method":"session.list"}
+{"id":2,"method":"engine.execute","params":{"command":"layer.putPixels","document":7,"history":"none","params":{"layer":28,"png":"iVBORw0…","x":120,"y":340,"mode":"over"}}}
+{"id":3,"method":"engine.execute","params":{"command":"layer.layerMask.set","index":0,"params":{"layer":28,"png":"iVBORw0…","x":0,"y":0}}}
+{"id":4,"method":"doc.inspect","params":{"index":0,"textStyle":true}}
+```
+
 ### LUT library
 
 Color Lookup (Properties › 3D LUT File) lists the LUT packs the user installed once, from a folder or a `.zip`, in `<config dir>/Presets/LUTs/<pack>/`. Commands:
@@ -434,7 +507,7 @@ stdio, and a value that is not a port is a usage error naming the variable. Impl
 
 | Method | Params |
 |---|---|
-| `engine.execute` | `{command, params?, wait?}`: any engine command (`wait: false` starts a long one as a background job: `{job, pending}`) |
+| `engine.execute` | `{command, params?, wait?, index?, document?, history?}`: any engine command (`wait: false` starts a long one as a background job: `{job, pending}`; `index`/`document` and `history` as in [Live sync](#live-sync-several-people-and-agents-on-one-document)) |
 | `jobs.list` / `jobs.cancel` | `{}` / `{job?}`: background jobs; cancel one or all. Every request (and MCP tool call) first applies the jobs that finished, so `doc.save`, `doc.inspect`, `doc.render` and `session.list` include a finished job's result without polling `jobs.list` first |
 | `engine.commands` | `{filter?}`: registry with params docs and enablement (`enabled`, `disabledReason`, `needsDocument`); `result` is a bare array of command objects ([Command list replies](#command-list-replies)) |
 | `session.list` | open documents and the active index |
@@ -445,7 +518,7 @@ stdio, and a value that is not a port is a usage error naming the variable. Impl
 | `doc.exportDataSets` | `{dir, format? (png), dataSets? (all), naming? ("{name}\|{index}\|{document}"), index?}` → `{files, count}`: the capability-scoped `file.export.dataSetsAsFiles`. The batch is planned first and colliding names are refused before any file is written, as in the command |
 | `doc.importDataSets` | `{path, delimiter? (,), index?}` → `{imported}`: the capability-scoped `file.import.variableDataSets`; the CSV is read beneath the read root |
 | `doc.save` | `{path?, format?, quality?, index?, tiffLayers?, tgaBits?, ddsCompression?, ddsMipmaps?}` (`.pcraft` native, else export by extension; set `tiffLayers: true` to preserve TIFF layers rather than exporting a flattened TIFF; `tgaBits` 24 or 32 sets a TGA's bits per pixel, and `ddsCompression`/`ddsMipmaps` a DDS texture's compression and mip chain, as `app.save` does). Without `path` only a PSD, PSB or `.pcraft` document is written back to its own file, in its own format; anything else is an error and the file is left unchanged. A successful layered save (PSD, PSB or `.pcraft`) records the current revision as saved and makes the file the document's path, so `session.list` reports `dirty: false`; a flat export is a copy and leaves the document dirty |
-| `doc.inspect` | `{index?}`: same JSON as `document.inspect` |
+| `doc.inspect` | `{index?, textStyle?}`: same JSON as `document.inspect` ([Live sync](#live-sync-several-people-and-agents-on-one-document)) |
 | `doc.render` | `{index?, maxSide? (1024; 0 = full), path?}`: PNG to `path`, else `{mime, base64}` |
 | `doc.select` / `doc.close` | `{index}` / `{index?}` |
 | `batch` | `{steps: [{command, params?, wait?} \| {method, params?}], stopOnError? (true)}` → `{completed, failed, results}` (a step with `wait: false` starts a long command as a background job, like `engine.execute`) |
