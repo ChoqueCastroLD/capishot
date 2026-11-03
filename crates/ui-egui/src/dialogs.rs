@@ -1242,6 +1242,7 @@ pub mod filter_dialog;
 pub(super) mod filter_preview_ui;
 #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
 pub(super) mod filter_preview_worker;
+pub mod flat_copy_ui;
 pub mod gallery_ui;
 pub mod guide_layout_ui;
 pub mod history_options_ui;

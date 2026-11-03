@@ -96,7 +96,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         let settings = ExportSettings { dds: p.options, ..app.save_settings() };
         let mut step = if p.record == "file.save" { serde_json::json!({}) } else { serde_json::json!({"path": p.path}) };
         record(p.options, &mut step);
-        let written = app.with_document(p.doc, |app| app.write_document(p.path, &settings, p.copy));
+        let written = app.with_document(p.doc, |app| app.write_answered(p.path, &settings, p.copy, p.record));
         if written.is_ok() {
             // An action being recorded keeps the Save As or Save a Copy with this answer.
             app.session.journal.push((p.record.into(), step));

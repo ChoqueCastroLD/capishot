@@ -355,6 +355,90 @@ fn fallible_tile_edits_move_weakly_cached_pixels_and_copy_shared_pixels() {
     }
 }
 
+/// Check encoded defaults across formats and keep cloned tiles isolated during edits.
+#[test]
+fn fallible_default_tiles_preserve_every_encoded_pixel() {
+    for mode in [
+        ColorMode::Bitmap,
+        ColorMode::Grayscale,
+        ColorMode::Indexed,
+        ColorMode::Rgb,
+        ColorMode::Cmyk,
+        ColorMode::Lab,
+        ColorMode::Multichannel,
+        ColorMode::Duotone,
+    ] {
+        for sample in SampleType::ALL {
+            for alpha in [false, true] {
+                let fmt = PixelFormat::new(mode, sample, alpha);
+                let channels = fmt.channels();
+                let defaults = [
+                    ("zero", vec![0.0; channels]),
+                    ("mixed channels", (1..=channels).map(|i| i as f32 / 8.0).collect()),
+                    ("negative zero", vec![-0.0; channels]),
+                ];
+                for (name, values) in defaults {
+                    let mut surface = Surface::with_default(fmt, &values);
+                    let expected = surface.default_pixel.repeat((TILE_SIZE * TILE_SIZE) as usize);
+                    assert_eq!(surface.try_default_tile().unwrap().bytes(), expected, "{fmt:?}, {name}");
+                    let coord = TileCoord::new(-1, 2);
+                    assert_eq!(surface.try_tile_mut(coord).unwrap().bytes(), expected);
+                    let snapshot = surface.clone();
+                    surface.try_tile_mut(coord).unwrap().bytes_mut()[0] ^= 0xff;
+                    assert_eq!(snapshot.tile(coord).unwrap().bytes(), expected, "copy-on-write: {fmt:?}");
+                    assert_ne!(surface.tile(coord).unwrap().bytes(), expected);
+                }
+            }
+        }
+    }
+}
+
+/// Tile initialization only: 384 tiles cover a 6000 x 4000 image. Each tile is dropped before
+/// allocating the next, so this is not an end-to-end image-open or peak-memory measurement.
+#[test]
+#[ignore = "manual 24 MP release benchmark"]
+fn benchmark_fallible_default_tiles() {
+    use std::{hint::black_box, time::Instant};
+    // Isolate the unchanged float-zero control from the other cases' different CPU loads.
+    let zero_only = std::env::var_os("PHOTOCRAFT_TILE_FILL_ZERO_ONLY").is_some();
+    let count = Rect::new(0, 0, 6000, 4000).tile_count();
+    for fmt in [PixelFormat::GRAY8, PixelFormat::RGBA8, PixelFormat::CMYKA8, PixelFormat::RGBA16, PixelFormat::RGBA32F] {
+        if zero_only && fmt != PixelFormat::RGBA32F {
+            continue;
+        }
+        for value in [0.0, 0.25] {
+            if zero_only && value != 0.0 {
+                continue;
+            }
+            let values: Vec<f32> = (0..fmt.channels()).map(|i| value * (i + 1) as f32).collect();
+            let surface = Surface::with_default(fmt, &values);
+            for trial in 0..7 {
+                let start = Instant::now();
+                for _ in 0..count {
+                    black_box(black_box(&surface).try_default_tile().unwrap());
+                }
+                println!("tile_fill,{fmt:?},{value},{trial},{:.6}", start.elapsed().as_secs_f64() * 1000.0);
+            }
+        }
+    }
+    if zero_only {
+        return;
+    }
+    // A fallible region write also converts and stores the incoming samples. Measure that
+    // caller separately so tile-initialization gains are not presented as editing speedups.
+    let rect = Rect::new(0, 0, 6000, 4000);
+    let samples = vec![0.75; 6000 * 4000];
+    for trial in 0..7 {
+        let mut mask = Surface::with_default(PixelFormat::GRAY8, &[1.0]);
+        let start = Instant::now();
+        mask.try_write_region(rect, black_box(&samples)).unwrap();
+        let elapsed = start.elapsed().as_secs_f64() * 1000.0;
+        assert!(mask.to_interleaved(rect).iter().all(|&b| b == 191));
+        black_box(&mask);
+        println!("tile_write,Gray8 mask,1,{trial},{elapsed:.6}");
+    }
+}
+
 #[test]
 fn fill_rect_shares_covered_tiles_and_edits_stay_local() {
     // A 300000² background used to materialize ~360 GB of tiles (#705).
@@ -454,6 +538,88 @@ fn convert_depths_and_models() {
     assert!(p[3] < 0.01 && (p[4] - 1.0).abs() < 1e-6);
     let back = c.convert(PixelFormat::RGBA8);
     assert_eq!(back.pixel(1, 1), vec![1.0, 1.0, 1.0, 1.0]);
+}
+
+/// Reusing the pixel buffer preserves the allocating converter's exact floating-point results.
+#[test]
+fn reusable_conversion_matches_allocating_pixels() {
+    let modes = [
+        ColorMode::Bitmap,
+        ColorMode::Grayscale,
+        ColorMode::Indexed,
+        ColorMode::Rgb,
+        ColorMode::Cmyk,
+        ColorMode::Lab,
+        ColorMode::Multichannel,
+        ColorMode::Duotone,
+    ];
+    for from_mode in modes {
+        for to_mode in modes {
+            for from_alpha in [false, true] {
+                for to_alpha in [false, true] {
+                    let from = PixelFormat::new(from_mode, SampleType::F32, from_alpha);
+                    let to = PixelFormat::new(to_mode, SampleType::F32, to_alpha);
+                    let mut out = vec![0.0; to.channels()];
+                    for values in [[0.2, 0.4, 0.6, 0.3, 0.7], [-0.0, 1.5, -0.25, 0.5, 0.0], [f32::NAN, 0.1, f32::INFINITY, 0.0, 1.0]] {
+                        let expected = convert_pixel(&from, &to, &values);
+                        convert_pixel_into(&from, &to, &values, &mut out);
+                        assert_eq!(
+                            out.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                            expected.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                            "{from:?} -> {to:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Both surface paths preserve encoded pixels, sparse defaults and shared tile ownership.
+#[test]
+fn reusable_surface_conversion_preserves_defaults_pixels_and_sharing() {
+    for mode in [
+        ColorMode::Bitmap,
+        ColorMode::Grayscale,
+        ColorMode::Indexed,
+        ColorMode::Rgb,
+        ColorMode::Cmyk,
+        ColorMode::Lab,
+        ColorMode::Multichannel,
+        ColorMode::Duotone,
+    ] {
+        for (depth, next) in [(SampleType::U8, SampleType::U16), (SampleType::U16, SampleType::F32), (SampleType::F32, SampleType::U8)] {
+            for alpha in [false, true] {
+                let from = PixelFormat::new(mode, depth, alpha);
+                let mut source = Surface::with_default(from, &[0.2, 0.4, 0.6, 0.3, 0.7]);
+                source.write_pixel(-1, 0, &[0.7, 0.5, 0.3, 0.1, 0.9]);
+                if depth == SampleType::F32 {
+                    source.write_pixel(-2, 0, &[f32::from_bits(0x7fc1_2345), -0.0, f32::INFINITY, f32::NEG_INFINITY, 1.5]);
+                }
+                let tile = source.tile(TileCoord::new(-1, 0)).unwrap().clone();
+                source.put_tiles([(TileCoord::new(1, 1), tile.clone())]);
+                let before = tile.bytes().to_vec();
+                for to in [from, PixelFormat::new(mode, next, !alpha), PixelFormat::RGBA8.with_sample(next)] {
+                    let default = convert_pixel(&from, &to, &source.default_pixel());
+                    let mut encoded = vec![0; to.bytes_per_pixel()];
+                    encode_pixel(&to, &default, &mut encoded);
+                    let mut expected = encoded.repeat((TILE_SIZE * TILE_SIZE) as usize);
+                    for x in [-2, -1] {
+                        let at = (TILE_SIZE + x) as usize * to.bytes_per_pixel();
+                        encode_pixel(&to, &convert_pixel(&from, &to, &source.pixel(x, 0)), &mut expected[at..at + to.bytes_per_pixel()]);
+                    }
+                    for out in [source.convert(to), source.try_convert(to).unwrap()] {
+                        assert_eq!(out.tile_count(), 2);
+                        assert_eq!(out.to_interleaved(Rect::new(0, 0, 1, 1)), encoded);
+                        let first = out.tile(TileCoord::new(-1, 0)).unwrap();
+                        assert_eq!(first.bytes(), expected, "{from:?} -> {to:?}");
+                        assert!(Arc::ptr_eq(first, out.tile(TileCoord::new(1, 1)).unwrap()));
+                    }
+                }
+                assert_eq!(tile.bytes(), before, "conversion must not modify the source");
+            }
+        }
+    }
 }
 
 #[test]
@@ -965,5 +1131,196 @@ fn copy_alpha_matches_decode_and_encode() {
         copy_alpha_reference(&old, &mut want);
         new.copy_alpha_from(&old);
         assert!(new == want, "{fmt:?}");
+    }
+}
+
+#[test]
+fn content_bounds_handles_extreme_tile_coordinates_without_overflow() {
+    for format in [PixelFormat::RGBA8, PixelFormat::RGBA16, PixelFormat::RGBA32F] {
+        for coords in [
+            [TileCoord::new(i32::MIN, 0), TileCoord::new(0, 0), TileCoord::new(i32::MAX, 0)],
+            [TileCoord::new(0, i32::MIN), TileCoord::new(0, 0), TileCoord::new(0, i32::MAX)],
+            [TileCoord::new(i32::MIN, i32::MIN), TileCoord::new(0, 0), TileCoord::new(i32::MAX, i32::MAX)],
+        ] {
+            let mut surface = Surface::new(format);
+            let white = surface.solid_tile(&[1.0, 1.0, 1.0, 1.0]);
+            surface.put_tiles(coords.into_iter().map(|coord| (coord, Arc::clone(&white))));
+            assert_eq!(surface.content_bounds(), surface.tile_bounds());
+        }
+    }
+}
+
+/// The byte a row-callback test writes at pixel (x, y).
+fn row_byte(x: i32, y: i32) -> u8 {
+    (x.wrapping_mul(7).wrapping_add(y.wrapping_mul(13)) & 0xff) as u8
+}
+
+fn fill_row_bytes(y: i32, x0: i32, dst: &mut [u8]) {
+    for (i, b) in dst.iter_mut().enumerate() {
+        *b = row_byte(x0 + i as i32, y);
+    }
+}
+
+#[test]
+fn write_rows_empty_rect_writes_nothing() {
+    let mut s = Surface::new(PixelFormat::GRAY8);
+    let called = std::sync::atomic::AtomicBool::new(false);
+    for r in [Rect::new(5, 5, 5, 9), Rect::new(0, 0, 10, 0), Rect::new(10, 10, 2, 2), Rect::EMPTY] {
+        s.try_write_rows_with(r, |_, _, _| called.store(true, std::sync::atomic::Ordering::Relaxed)).expect("empty is fine");
+    }
+    assert!(!called.load(std::sync::atomic::Ordering::Relaxed), "no rows in an empty rect");
+    assert_eq!(s.tile_count(), 0);
+}
+
+#[test]
+fn write_rows_overflowing_rect_is_an_error_not_a_panic() {
+    let mut s = Surface::new(PixelFormat::GRAY8);
+    let huge = Rect::new(i32::MIN, i32::MIN, i32::MAX, i32::MAX);
+    assert!(s.try_write_rows_with(huge, |_, _, _| {}).is_err());
+    assert_eq!(s.tile_count(), 0);
+}
+
+#[test]
+fn write_rows_negative_origin_and_unaligned_rect() {
+    let mut s = Surface::with_default(PixelFormat::GRAY8, &[0.5]);
+    let r = Rect::new(-300, -5, 270, 260);
+    s.try_write_rows_with(r, fill_row_bytes).expect("memory");
+    let got = s.to_interleaved(Rect::new(-320, -10, 300, 270));
+    let w = 620;
+    for (i, &b) in got.iter().enumerate() {
+        let (x, y) = (-320 + (i % w) as i32, -10 + (i / w) as i32);
+        let want = if x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1 { row_byte(x, y) } else { 128 };
+        assert_eq!(b, want, "({x}, {y})");
+    }
+}
+
+#[test]
+fn write_rows_matches_write_interleaved_at_every_depth() {
+    for fmt in [PixelFormat::RGBA8, PixelFormat::RGBA16, PixelFormat::RGBA32F, PixelFormat::GRAY8] {
+        let bpp = fmt.bytes_per_pixel();
+        let r = Rect::new(3, 2, 520, 300);
+        let w = r.width() as usize;
+        let bytes: Vec<u8> = (0..w * r.height() as usize * bpp).map(|i| (i % 251) as u8).collect();
+        let mut a = Surface::new(fmt);
+        a.write_interleaved(r, &bytes);
+        let mut b = Surface::new(fmt);
+        b.try_write_rows_with(r, |y, x0, dst| {
+            let o = (((y - r.y0) as usize) * w + (x0 - r.x0) as usize) * bpp;
+            dst.copy_from_slice(&bytes[o..o + dst.len()]);
+        })
+        .expect("memory");
+        assert_eq!(a.tile_count(), b.tile_count());
+        for (c, t) in a.tiles() {
+            assert!(b.tiles().any(|(c2, t2)| c2 == c && t2 == t), "{fmt:?}: tile {c:?} differs");
+        }
+    }
+}
+
+#[test]
+fn write_rows_copies_tiles_a_clone_still_shares() {
+    let mut s = Surface::new(PixelFormat::GRAY8);
+    s.try_write_rows_with(Rect::new(0, 0, 300, 300), |_, _, dst| dst.fill(9)).expect("memory");
+    let before = s.clone();
+    let snapshot = before.to_interleaved(Rect::new(0, 0, 300, 300));
+    s.try_write_rows_with(Rect::new(100, 100, 280, 290), fill_row_bytes).expect("memory");
+    assert_eq!(before.to_interleaved(Rect::new(0, 0, 300, 300)), snapshot, "the clone is unchanged");
+    assert_eq!(s.to_interleaved(Rect::new(150, 150, 151, 151)), vec![row_byte(150, 150)]);
+    assert_eq!(s.to_interleaved(Rect::new(10, 10, 11, 11)), vec![9], "pixels outside the rect keep their value");
+}
+
+#[test]
+fn edit_tiles_from_keeps_the_destination_stride_with_fewer_source_channels() {
+    // Documented contract: with different channel counts the shorter one wins. A source with fewer
+    // channels must not shift the destination's pixel layout, and a channel it has no value for
+    // keeps what it had.
+    let dst_fmt = PixelFormat::RGBA8;
+    let src_fmt = PixelFormat::new(ColorMode::Rgb, SampleType::U8, false);
+    let r = Rect::new(0, 0, 6, 3);
+    let mut dst = Surface::new(dst_fmt);
+    dst.fill_rect(r, &[0.1, 0.2, 0.3, 0.9]);
+    let mut src = Surface::new(src_fmt);
+    src.fill_rect(r, &[0.4, 0.5, 0.6]);
+    dst.edit_tiles_from(&src, &[r], |_, _, _, _, row| row.fill(0.75));
+    for y in 0..3 {
+        for x in 0..6 {
+            let px = dst.pixel(x, y);
+            // 8-bit quantisation, so compare within a step.
+            assert!(px[..3].iter().all(|&v| (v - 0.75).abs() <= 1.0 / 255.0), "({x},{y}): RGB written, got {:?}", &px[..3]);
+            assert!((px[3] - 0.9).abs() < 1.0 / 255.0, "({x},{y}): alpha untouched, got {}", px[3]);
+        }
+    }
+}
+
+#[test]
+fn write_samples_matches_writing_one_at_a_time() {
+    // Including out-of-range values and NaN, which the saturating cast clamps exactly as the
+    // explicit `clamp` did.
+    let values = [-1.0f32, 0.0, 0.25, 0.5, 0.7501, 1.0, 1.5, f32::NAN, f32::INFINITY, f32::NEG_INFINITY];
+    for sample in [SampleType::U8, SampleType::U16, SampleType::F32] {
+        let bytes = sample.bytes();
+        let mut bulk = vec![0u8; values.len() * bytes];
+        let mut one = vec![0u8; values.len() * bytes];
+        write_samples(&mut bulk, sample, 0, &values);
+        for (i, v) in values.iter().enumerate() {
+            write_sample(&mut one, sample, i, *v);
+        }
+        assert_eq!(bulk, one, "{sample:?}");
+    }
+}
+
+#[test]
+fn edit_tiles_from_leaves_pixels_outside_its_rects_alone() {
+    let fmt = PixelFormat::RGBA8;
+    let mut s = Surface::new(fmt);
+    s.fill_rect(Rect::new(0, 0, 300, 300), &[0.2, 0.4, 0.6, 1.0]);
+    let before = s.read_region(Rect::new(0, 0, 300, 300));
+    let mut source = Surface::new(fmt);
+    source.fill_rect(Rect::new(0, 0, 300, 300), &[0.9, 0.9, 0.9, 0.9]);
+    // One rect well inside a single tile: the rest of that tile must keep its own pixels, which
+    // is what lets a large stroke's dab write only what it covers.
+    let rect = Rect::new(10, 10, 50, 50);
+    s.edit_tiles_from(&source, &[rect], |_, _, _, _, samples| samples.fill(1.0));
+    let after = s.read_region(Rect::new(0, 0, 300, 300));
+    let n = fmt.channels();
+    for y in 0..300usize {
+        for x in 0..300usize {
+            let i = (y * 300 + x) * n;
+            let inside = (10..50).contains(&x) && (10..50).contains(&y);
+            if inside {
+                assert_eq!(&after[i..i + n], &[1.0; 4][..n], "({x},{y})");
+            } else {
+                assert_eq!(&after[i..i + n], &before[i..i + n], "({x},{y})");
+            }
+        }
+    }
+}
+
+#[test]
+fn edit_tiles_from_matches_a_read_modify_write() {
+    let fun = |v: f32| (v + 0.1).min(1.0);
+    for mode in [ColorMode::Rgb, ColorMode::Grayscale, ColorMode::Cmyk] {
+        for sample in [SampleType::U8, SampleType::U16, SampleType::F32] {
+            let fmt = PixelFormat::new(mode, sample, true);
+            let mut a = Surface::new(fmt);
+            a.fill_rect(Rect::new(-100, -100, 400, 300), &from_rgba(&fmt, [0.4, 0.6, 0.2, 0.75]));
+            let mut b = a.clone();
+            let mut source = Surface::new(fmt);
+            source.fill_rect(Rect::new(-120, -120, 420, 320), &from_rgba(&fmt, [0.9, 0.1, 0.5, 0.6]));
+            // Rects at negative coordinates, across tile boundaries, and across the content edge.
+            let rects = [Rect::new(-70, -70, 30, 30), Rect::new(100, 40, 260, 130), Rect::new(-100, 200, 400, 460)];
+            a.edit_tiles_from(&source, &rects, |_, _, _, _, samples| {
+                for v in samples.iter_mut() {
+                    *v = fun(*v);
+                }
+            });
+            for r in rects {
+                let mut v = source.read_region(r);
+                for v in v.iter_mut() {
+                    *v = fun(*v);
+                }
+                b.write_region(r, &v);
+            }
+            assert_eq!(a, b, "{fmt:?}");
+        }
     }
 }
