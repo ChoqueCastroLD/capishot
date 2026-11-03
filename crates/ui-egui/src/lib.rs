@@ -59,6 +59,7 @@ pub mod chrome_freeze;
 pub(crate) mod clone_overlay;
 pub mod code_gate;
 pub mod cpu_canvas;
+pub mod eyedrop;
 pub mod floaters;
 pub mod font_folders_ui;
 pub mod font_projects_ui;

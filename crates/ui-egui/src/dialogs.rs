@@ -365,7 +365,15 @@ fn command_body_more(app: &mut PhotocraftApp, ui: &mut egui::Ui, d: &Dialog, fie
     match d.kind {
         _ if crate::file_ui::owns(fields) => crate::file_ui::body(app, ui, fields, d.id),
         _ if crate::color_picker_ui::owns(fields) => {
+            // Its eyedropper button (a click on the image picks on a desktop anyway; a phone's
+            // picker covers the image, so it steps aside until the tap).
+            let target = crate::eyedrop::Target::ColorPicker { id: d.id };
+            fields.insert(crate::color_picker_ui::EYEDROP_ON.into(), json!(crate::eyedrop::armed(ui.ctx()).as_ref() == Some(&target)));
             outcome = crate::color_picker_ui::body(ui, fields);
+            fields.remove(crate::color_picker_ui::EYEDROP_ON);
+            if fields.remove(crate::color_picker_ui::EYEDROP_TOGGLE).is_some() {
+                crate::eyedrop::toggle(ui.ctx(), target);
+            }
             crate::color_picker_ui::take_add_swatch(app, fields);
             if let Some(web) = fields.get("__webOnly").and_then(Value::as_bool) {
                 app.ui.color_panel.web_only = web;
@@ -612,6 +620,10 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let top = dialogs.last().map(|d| d.id);
     let mut shown = Vec::new();
     for d in dialogs {
+        // Its eyedropper is armed on a phone: out of the way of the image until the pick.
+        if crate::eyedrop::hides_dialog(ctx, d.id) {
+            continue;
+        }
         let lang = if crate::prefs_ui::is_preferences(&d.fields) {
             crate::i18n::Lang::from_pref(d.fields.get("values").and_then(|v| v.pointer("/interface/language")).and_then(Value::as_str).unwrap_or("auto"))
         } else {

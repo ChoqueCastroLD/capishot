@@ -718,7 +718,7 @@ fn handle_dialog_canvas_input(app: &mut PhotocraftApp, input: DialogCanvasInput<
     // sampler as the Color Picker, never the reduced adjustment preview.
     let curves_picking = crate::adjust_dialog::picker_armed(app);
     let replace_picking = crate::filter_dialog::color_eyedropper_armed(app);
-    let picking = input.primary && (crate::color_picker_ui::top(app).is_some() || curves_picking || replace_picking);
+    let picking = input.primary && !crate::eyedrop::owns_pointer(input.ctx) && (crate::color_picker_ui::top(app).is_some() || curves_picking || replace_picking);
     let range_picking =
         input.primary && app.ui.dialogs.last().is_some_and(|d| crate::color_range_ui::owns(&d.fields) && crate::color_range_ui::controls(&d.fields).sampling);
     // Select and Mask's Refine Edge Brush paints on the image.
@@ -728,7 +728,7 @@ fn handle_dialog_canvas_input(app: &mut PhotocraftApp, input: DialogCanvasInput<
     let pinning = input.primary && app.ui.dialogs.last().is_some_and(|d| crate::blur_pins::owns(&d.fields));
     // Layer Style on a Drop or Inner Shadow page: a drag on the image moves the shadow (#5701).
     let shadow_drag =
-        !picking && app.ui.dialogs.last().is_some_and(|d| d.kind == crate::state::DialogKind::LayerStyle && crate::layer_style::drags_shadow(&d.fields));
+        !picking && !crate::eyedrop::owns_pointer(input.ctx) && app.ui.dialogs.last().is_some_and(|d| d.kind == crate::state::DialogKind::LayerStyle && crate::layer_style::drags_shadow(&d.fields));
     // ⌘/Ctrl-click with Curves open: a point at the pixel's tone (#7325), whatever the tool. The
     // press's own modifiers decide, and only the press adds: a drag would add one per frame.
     let curve_point_press = (input.primary && !input.middle && crate::adjust_dialog::curves_on_top(app))
@@ -1946,6 +1946,8 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     let response = ui.allocate_rect(rect, Sense::click_and_drag());
     // A press that closes a popover, sheet, menu or the like is only that (`overlay_guard`).
     let stroke_dismissal = primary && (crate::shape_stroke_ui::dismiss_from_canvas(app, &response) | crate::overlay_guard::swallowed(&response));
+    // A colour control's eyedropper: the press picks, and no tool sees it.
+    let stroke_dismissal = stroke_dismissal | (primary && crate::eyedrop::canvas_frame(app, &ctx, rect, |p| xf.to_doc(p)));
     let painter = ui.painter_at(rect);
 
     match crate::prefs_ui::pasteboard_color(app) {

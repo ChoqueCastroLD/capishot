@@ -1087,11 +1087,16 @@ fn page(
                 }
             }
             P::Color => {
+                let dialog = app.ui.dialogs.iter().rev().find(|d| d.kind == crate::state::DialogKind::LayerStyle).map(|d| d.id);
                 field_row(ui, stacked, tl!(&label), |ui| {
                     let color = disp.get(key).and_then(Value::as_str).unwrap_or("#000000");
                     let response = swatch(ui, stacked, parse_hex(color)).on_hover_text(tl!("Color Picker (Layer Style Color)"));
                     if response.clicked() {
                         f.insert(color_picker::REQUEST.into(), json!({"effect": selected, "field": key}));
+                    }
+                    if let Some(id) = dialog {
+                        let target = crate::eyedrop::Target::LayerStyle { id, effect: selected.to_string(), field: key.to_string() };
+                        crate::eyedrop::button(ui, target, if stacked { 36.0 } else { 22.0 });
                     }
                 });
             }

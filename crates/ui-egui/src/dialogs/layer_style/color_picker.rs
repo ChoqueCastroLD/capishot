@@ -107,6 +107,15 @@ pub(crate) fn take_request(app: &mut PhotocraftApp, parent: u64) -> Result<(), S
     Ok(())
 }
 
+/// Colour `field` of `effect` in the Layer Style dialog `parent` becomes `rgb` (its eyedropper's
+/// pick), as a swatch edit: live in the dialog, applied by its OK.
+pub(crate) fn set_color(app: &mut PhotocraftApp, parent: u64, effect: &str, field: &str, rgb: [f32; 3]) -> Result<(), String> {
+    let d = app.ui.dialog_mut(parent).filter(|d| d.kind == DialogKind::LayerStyle).ok_or("the Layer Style dialog closed")?;
+    color_value(&d.fields, effect, field)?;
+    set_param(&mut d.fields, effect, field, json!(color_picker_ui::hex(rgb)));
+    Ok(())
+}
+
 /// Overlay only for rendering. Cancel therefore needs no rollback of parent fields.
 pub(crate) fn preview_fields<'a>(app: &PhotocraftApp, parent: u64, fields: &'a Map<String, Value>) -> Cow<'a, Map<String, Value>> {
     let Some(d) = app.ui.dialogs.last().filter(|d| child_of(&d.fields, parent)) else { return Cow::Borrowed(fields) };

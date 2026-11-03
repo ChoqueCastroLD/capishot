@@ -21,7 +21,7 @@ use crate::state::{BoxResize, TextEdit};
 
 mod defaults;
 mod editing;
-mod effects;
+pub(crate) mod effects;
 mod fonts;
 mod ime;
 mod ime_edit;
@@ -32,7 +32,7 @@ mod options_bar;
 mod overlay;
 mod panel;
 mod pointer;
-mod stroke;
+pub(crate) mod stroke;
 
 use defaults::apply;
 #[cfg(test)]

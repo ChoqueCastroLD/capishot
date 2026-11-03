@@ -3483,3 +3483,6 @@ fontWeight	Italic	Itálico
 	This file type can't hold the document's alpha channels, saved paths, layer comps or Quick Mask. The document stays open, with its changes unsaved.	Este tipo de ficheiro não comporta os canais alfa, os traçados guardados, as composições de camadas nem a máscara rápida do documento. O documento continua aberto, com as alterações por guardar.
 	PSD (with layers)	PSD (com camadas)
 	Each document saved with its layers, as Save does. Size and sRGB apply to all its layers.	Cada documento é guardado com as suas camadas, como ao Guardar. O tamanho e o sRGB aplicam-se a todas as camadas.
+	Pick a color from the image	Recolher uma cor da imagem
+	Tap the image to pick a color	Toque na imagem para recolher uma cor
+	Click the image to pick a color	Clique na imagem para recolher uma cor

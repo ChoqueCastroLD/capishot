@@ -209,6 +209,7 @@ impl PhotocraftApp {
         // A real UI pass consumes the one in-flight synthetic batch (see `inject_synthetic`).
         self.begin_synthetic_pass(&ctx);
         self.hover_layer = None;
+        crate::eyedrop::begin_frame(self, &ctx);
         i18n::set_current(i18n::Lang::from_pref(&self.session.prefs().interface.language));
         // Fonts registered via set_fonts only take effect next frame; named families would panic now.
         if !self.fonts_ready {
