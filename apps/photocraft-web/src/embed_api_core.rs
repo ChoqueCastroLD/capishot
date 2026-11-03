@@ -37,6 +37,7 @@ pub const FEATURES: &[&str] = &[
     "fonts.preload",
     "fonts.notice",
     "events.fontsMissing",
+    "boot.hiddenTab",
     "layerStyle.dropShadow.source",
 ];
 

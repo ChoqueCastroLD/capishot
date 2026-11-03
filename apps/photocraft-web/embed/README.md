@@ -19,6 +19,11 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
   `index.html` has one and starts as before). `init` starts the app on the host's canvas.
 - Hosted, the app doesn't install `window.photocraft`, the Photopea hash mode or the
   `beforeunload` prompt: the host owns its page.
+- A page that starts in a hidden (background) tab boots there too (feature `boot.hiddenTab`):
+  `init` resolves and the `ready` event, `window.photocraft` and its `{photocraft: "ready"}`
+  message come without the tab ever being shown. The browser throttles a hidden tab's timers
+  (about one frame a second, less after minutes hidden), so it boots and answers slower than a
+  visible one; no fake `visibilitychange` is needed.
 - Calls that need the app run at the start of the next frame, so they return promises.
   `execute`, `request`, `setTool`, `fit`, `zoom`, `undo` and `redo` use the same control channel as
   the desktop control server (`docs/control-protocol.md`): same results, same errors.

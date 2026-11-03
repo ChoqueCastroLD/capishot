@@ -167,5 +167,8 @@ Chromium in `CHROME`):
   (the reload message after one retry), chunks arriving late (a command waits for its chunk, no
   synchronous load on the page) or never (the command fails cleanly with a Retry notice), and a
   failed last-resort synchronous load (`?split=sync`: the toast). Works on either build.
+- `e2e/hidden-tab-boot.mjs`: the app opened in a background tab (never shown) boots, `window.photocraft`
+  appears and answers commands. Raw DevTools protocol (Playwright keeps its pages visible), so it needs
+  only Node and a Chromium: `CHROME=<chromium> node e2e/hidden-tab-boot.mjs <url>`.
 - `e2e/save-to-device.mjs`: where the browser can save to a picked file, Save As asks once and
   File › Save writes that file again in place (no download); elsewhere saves download.

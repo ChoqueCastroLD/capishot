@@ -230,7 +230,23 @@ pub async fn run(canvas: web_sys::HtmlCanvasElement, hosted: Option<crate::embed
         )
         .await
         .map_err(|e| format!("{e:?}"))?;
+    kick_hidden_first_frame();
     Ok(runner)
+}
+
+/// eframe schedules its first frame from the canvas's ResizeObserver, which a hidden tab never
+/// runs: a page opened or reloaded in the background would never build the app (nor its
+/// `window.photocraft`). eframe's `visibilitychange` handler schedules the next frame with a timer
+/// while the tab is hidden, so a page that starts hidden fires one for it.
+fn kick_hidden_first_frame() {
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else { return };
+    if !document.hidden() {
+        return;
+    }
+    crate::startup::mark("hidden tab: first frame on a timer");
+    if let Ok(event) = web_sys::Event::new("visibilitychange") {
+        let _ = document.dispatch_event(&event);
+    }
 }
 
 /// Is rayon's worker pool up? The single-threaded build has none to wait for; the threads page
