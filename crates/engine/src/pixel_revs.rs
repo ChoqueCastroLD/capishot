@@ -86,8 +86,8 @@ fn sync(t: &mut Track, doc: &Arc<Document>) {
     for (_, _, l) in doc.walk() {
         let rect = match before.get(&l.id) {
             Some(old) => changed_rect(old, l),
-            // A new layer: whatever it holds is new.
-            None => Some(content_rect(l)),
+            // A new layer: whatever it holds is new (an empty one changes nothing yet).
+            None => Some(content_rect(l)).filter(|r| !r.is_empty()),
         };
         let Some(rect) = rect else { continue };
         t.counter = t.counter.saturating_add(1);
@@ -198,6 +198,10 @@ mod tests {
         assert_eq!(revs.take_changes(&d0).len(), 1);
         assert_eq!(revs.revision(&d0, id), Some(2));
         assert!(revs.take_changes(&d0).is_empty());
+        // A new empty layer is no pixel change.
+        let mut d2 = (*d0).clone();
+        d2.layers.push(Layer::new("empty", LayerContent::Raster(Surface::new(PixelFormat::RGBA8))));
+        assert!(revs.take_changes(&Arc::new(d2)).is_empty());
     }
 
     #[test]
