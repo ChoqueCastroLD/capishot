@@ -24,6 +24,8 @@ use resvg::usvg;
 
 use crate::{ImportResult, IoError};
 
+mod limits;
+
 /// Largest canvas side an SVG opens at; a larger drawing is scaled down to fit.
 pub const MAX_SIDE: u32 = 16_384;
 /// A rasterised fallback layer or a smart-object render never exceeds this many pixels.
@@ -114,6 +116,9 @@ const MAX_RECURSION: usize = 200;
 pub const MAX_XML_DEPTH: usize = 256;
 /// Largest `.svgz` accepted once inflated (a 1.5 MB gzip can hold 1.5 GB of whitespace).
 pub const MAX_INFLATED_BYTES: u64 = 128 << 20;
+/// Deepest chain of SVG images embedded in SVG images that the memory preflight follows (our
+/// resolver gives sub-SVGs no `<image>` of their own, so real chains stop at one).
+const MAX_EMBEDDED_SVG_DEPTH: usize = 32;
 
 /// Does this look like an SVG document (plain XML; `.svgz` is recognised by its extension)?
 pub fn is_svg(bytes: &[u8]) -> bool {
@@ -493,6 +498,7 @@ fn import_parsed_with_budget(name: &str, parsed: Parsed, max_group_depth: usize,
         conv.warnings.push(format!("SVG: more than {MAX_NODES} elements; opened as one pixel layer instead of shapes"));
         let (w, h) = (cv.size.width, cv.size.height);
         if let Some(mut pixmap) = pixmap(w, h) {
+            check_render_memory(&tree, global, w, h)?;
             resvg::render(&tree, global, &mut pixmap.as_mut());
             doc.layers.push(Layer::new("Background", LayerContent::Raster(surface(&pixmap, doc.bounds(), fmt))));
         }
@@ -549,8 +555,15 @@ fn render(tree: &usvg::Tree, k: f32) -> Result<tiny_skia::Pixmap, IoError> {
     let side = |v: f32| ((v * k).ceil() as u32).max(1);
     let (w, h) = (side(tree.size().width()), side(tree.size().height()));
     let mut pixmap = pixmap(w, h).ok_or_else(|| IoError::Svg(format!("{w} × {h} px is too large to rasterise")))?;
-    resvg::render(tree, tiny_skia::Transform::from_scale(k, k), &mut pixmap.as_mut());
+    let ts = tiny_skia::Transform::from_scale(k, k);
+    check_render_memory(tree, ts, w, h)?;
+    resvg::render(tree, ts, &mut pixmap.as_mut());
     Ok(pixmap)
+}
+
+/// An error when drawing the whole `tree` at `ts` onto a `w × h` pixmap would break a [`limits`] cap.
+fn check_render_memory(tree: &usvg::Tree, ts: tiny_skia::Transform, w: u32, h: u32) -> Result<(), IoError> {
+    limits::check(tree.root().children(), ts, w, h, 0).map_err(|r| IoError::Svg(format!("can't rasterise this drawing: {}", r.message)))
 }
 
 /// A transparent pixmap, or `None` past [`MAX_RASTER_PIXELS`].
@@ -919,11 +932,18 @@ impl Conv {
             self.note("raster-alloc", "SVG: a rasterised element could not be allocated".to_string());
             return None;
         };
+        let canvas = tiny_skia::Transform::from_row(k, 0.0, 0.0, k, -(x0 as f32), -(y0 as f32));
+        let ts = canvas.pre_concat(parent).pre_translate(shift.x(), shift.y());
+        // resvg's own buffers for this element (nested layers, filters, clips, pattern tiles) come on
+        // top of the layers already kept.
+        if let Err(refusal) = limits::check(std::slice::from_ref(node), ts, w, h, self.retained_pixel_bytes) {
+            let why = if refusal.complex { "is too complex to check" } else { "needs too much memory to rasterise" };
+            self.note("raster-scratch", format!("SVG: an element was dropped because it {why}: {}", refusal.message));
+            return None;
+        }
         // resvg renders the node in its parent's space after shifting its absolute bounding box
         // to the origin: undo that shift, apply the parent's transform, then scale to the canvas
         // and shift so the pixmap starts at (x0, y0).
-        let canvas = tiny_skia::Transform::from_row(k, 0.0, 0.0, k, -(x0 as f32), -(y0 as f32));
-        let ts = canvas.pre_concat(parent).pre_translate(shift.x(), shift.y());
         resvg::render_node(node, ts, &mut pixmap.as_mut())?;
         let layer = Layer::new(name, LayerContent::Raster(surface(&pixmap, Rect::new(x0, y0, x1, y1), self.fmt)));
         let bytes = pixels * self.fmt.bytes_per_pixel() as u64;
