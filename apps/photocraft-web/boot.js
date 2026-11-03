@@ -19,6 +19,8 @@
   const build = (script && script.dataset.build) || 'st';
   const RETRY = 'capishot.loadRetry';
   const FROM_THREADS = 'capishot.threadsFailure';
+  // Set once a load ran out of memory: the next one loads the module's parts on demand.
+  const LOW_MEMORY = 'capishot.boot.lowMemory';
   const t0 = performance.now();
   const lang = (navigator.language || 'en').slice(0, 2);
   const TEXT = {
@@ -248,6 +250,13 @@
       u.searchParams.set('r', Date.now().toString(36));
       location.replace(u.href + location.hash);
       return;
+    }
+    // Out of memory: one automatic retry that loads only the parts of the module a command needs
+    // (packaging/web-split's loader reads the flag), so less code is compiled at once.
+    if (r.err === 'oom') {
+      let tried = true;
+      try { tried = sessionStorage.getItem(LOW_MEMORY) === '1'; sessionStorage.setItem(LOW_MEMORY, '1'); } catch (x) {}
+      if (!tried) { r.outcome = 'retried_low_memory'; beacon(r); reload(false); return; }
     }
     // One automatic retry past the caches (not for memory: the same device fails the same way).
     let retried = true;

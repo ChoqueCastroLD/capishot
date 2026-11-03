@@ -94,6 +94,19 @@ pub struct Buffer {
     pub px: Vec<[f32; 4]>,
 }
 
+/// Straight-alpha float pixels to 8 bits (`out[i] = round(src[i] × 255)`, clamped), as far as
+/// the shorter of the two goes. Here rather than at each caller: pixel crates keep their speed in
+/// the browser build, where a 16 MP page took over a second at the engine's size-first level
+/// (never inlined, so it isn't compiled at its caller's level).
+#[inline(never)]
+pub fn quantize_rgba8(out: &mut [[u8; 4]], src: &[[f32; 4]]) {
+    for (o, p) in out.iter_mut().zip(src) {
+        for (dst, v) in o.iter_mut().zip(p) {
+            *dst = (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+        }
+    }
+}
+
 impl Buffer {
     pub fn transparent(rect: Rect) -> Self {
         Self { rect, px: vec![[0.0; 4]; rect.width() as usize * rect.height() as usize] }
@@ -107,13 +120,7 @@ impl Buffer {
     }
     pub fn to_rgba8(&self) -> Rgba8Image {
         let mut img = Rgba8Image::new(self.rect.width(), self.rect.height());
-        let quantize = |out: &mut [[u8; 4]], src: &[[f32; 4]]| {
-            for (o, p) in out.iter_mut().zip(src) {
-                for (dst, v) in o.iter_mut().zip(p) {
-                    *dst = (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
-                }
-            }
-        };
+        let quantize = quantize_rgba8;
         let out = img.pixels.as_chunks_mut::<4>().0;
         // In parallel off wasm: a 24 MP composite took 120 ms on one core (the CPU canvas,
         // previews, thumbnails and 8-bit exports all come through here).

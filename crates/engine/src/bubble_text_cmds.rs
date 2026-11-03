@@ -417,44 +417,48 @@ struct Input {
     y: i32,
 }
 
+/// What to paint in `interior`: from the active layer's pixels, or the page's (`page`, which may
+/// be a window of it holding the interior).
+fn plan_in(page: &crate::typer_place_cmds::support::PageImage, inp: &Input, interior: &Mask) -> Result<Plan> {
+    let region = Rect::new(interior.x0, interior.y0, interior.x0 + interior.width as i32, interior.y0 + interior.height as i32);
+    let (w, h) = (interior.width, interior.height);
+    let surf = inp.active.and_then(|id| inp.doc.layer(id)).and_then(|l| l.surface()).filter(|_| inp.editable && !inp.sample_all);
+    let src = match surf {
+        Some(surf) => {
+            let fmt = surf.format();
+            let n = fmt.channels().max(1);
+            let raw = surf.read_region(region);
+            if raw.len() != w * h * n {
+                return Err(EngineError::Other("could not read the layer's pixels".into()));
+            }
+            Source { px: raw.chunks_exact(n).map(|c| premul(to_rgba(&fmt, c))).collect() }
+        }
+        None => {
+            // The page image (without type layers), the box clipped to it.
+            let pa = page.area;
+            let pw = pa.width() as usize;
+            let mut px = vec![[0f32; 4]; w * h];
+            for yy in 0..h {
+                for xx in 0..w {
+                    let (dx, dy) = (region.x0 + xx as i32, region.y0 + yy as i32);
+                    if pa.contains(dx, dy)
+                        && let Some(q) = page.img.get((dy - pa.y0) as usize * pw + (dx - pa.x0) as usize)
+                    {
+                        px[yy * w + xx] = premul(q.map(|v| f32::from(v) / 255.0));
+                    }
+                }
+            }
+            Source { px }
+        }
+    };
+    plan(interior, &src, inp.tolerance)
+}
+
 /// The bubble at the click and what to paint in it: the heavy part, run as a background job
 /// (it froze phones for seconds on the page's main thread).
 fn find_and_plan(page: &crate::typer_place_cmds::support::PageImage, inp: &Input) -> Result<(Plan, &'static str)> {
     let (x, y) = (inp.x, inp.y);
-    let plan_in = |interior: &Mask| -> Result<Plan> {
-        let region = Rect::new(interior.x0, interior.y0, interior.x0 + interior.width as i32, interior.y0 + interior.height as i32);
-        let (w, h) = (interior.width, interior.height);
-        let surf = inp.active.and_then(|id| inp.doc.layer(id)).and_then(|l| l.surface()).filter(|_| inp.editable && !inp.sample_all);
-        let src = match surf {
-            Some(surf) => {
-                let fmt = surf.format();
-                let n = fmt.channels().max(1);
-                let raw = surf.read_region(region);
-                if raw.len() != w * h * n {
-                    return Err(EngineError::Other("could not read the layer's pixels".into()));
-                }
-                Source { px: raw.chunks_exact(n).map(|c| premul(to_rgba(&fmt, c))).collect() }
-            }
-            None => {
-                // The page image (without type layers), the box clipped to it.
-                let pa = page.area;
-                let pw = pa.width() as usize;
-                let mut px = vec![[0f32; 4]; w * h];
-                for yy in 0..h {
-                    for xx in 0..w {
-                        let (dx, dy) = (region.x0 + xx as i32, region.y0 + yy as i32);
-                        if pa.contains(dx, dy)
-                            && let Some(q) = page.img.get((dy - pa.y0) as usize * pw + (dx - pa.x0) as usize)
-                        {
-                            px[yy * w + xx] = premul(q.map(|v| f32::from(v) / 255.0));
-                        }
-                    }
-                }
-                Source { px }
-            }
-        };
-        plan(interior, &src, inp.tolerance)
-    };
+    let plan_in = |interior: &Mask| plan_in(page, inp, interior);
     // The bubble: closed, else cut by the image's edge, else (it opens onto a panel border or the
     // gutter) the block of lettering under the click with a margin, its panel lines kept as walls.
     match bubble_find::find(&page.img, page.area, (x, y)) {
@@ -481,6 +485,34 @@ fn find_and_plan(page: &crate::typer_place_cmds::support::PageImage, inp: &Input
             Err(first.unwrap_or_else(|| crate::type_bubble_cmds::no_bubble(miss)))
         }
     }
+}
+
+/// Half the sides of the windows around the click composited first when the cached page is stale
+/// (a phone spent seconds compositing a 16 MP page for one bubble), smallest first.
+const CLICK_WINDOWS: [i32; 2] = [448, 1088];
+
+/// The click on a stale page, its bubble found and planned in a window of the page composited
+/// around the click (the same as on the page, see [`bubble_find::find_in_window`]): `None`
+/// (composite the page) when the page is current, a window would be most of what is stale
+/// anyway, or the bubble needs the page (larger than the windows, open, or a miss).
+fn in_window(page: &crate::typer_place_cmds::support::PageWork, inp: &Input) -> Option<Result<(Plan, &'static str)>> {
+    let (area, stale) = page.stale_area()?;
+    let size = |r: &Rect| u64::from(r.width()) * u64::from(r.height());
+    for half in CLICK_WINDOWS {
+        let win = Rect::new(inp.x - half, inp.y - half, inp.x + half + 1, inp.y + half + 1).intersect(&area);
+        if size(&win) * 2 > size(&stale) {
+            return None;
+        }
+        let wp = page.window(win)?;
+        match bubble_find::find_in_window(&wp.img, win, area, (inp.x, inp.y)) {
+            Some(Ok(found)) => return Some(plan_in(&wp, inp, &found.interior).map(|p| (p, "bubble"))),
+            // Not closed: the fallbacks read the page around it.
+            Some(Err(_)) => return None,
+            // It reached the window's side: the next window.
+            None => {}
+        }
+    }
+    None
 }
 
 fn remove_bubble_text(s: &mut Session, p: &Value) -> Result<Value> {
@@ -527,12 +559,17 @@ fn remove_bubble_text(s: &mut Session, p: &Value) -> Result<Value> {
         LABEL,
         true,
         move |_ctx| {
+            if let Some(r) = in_window(&page, &inp) {
+                return Ok((None, r));
+            }
             let page = page.finish();
             let r = find_and_plan(&page, &inp);
-            Ok((page, r))
+            Ok((Some(page), r))
         },
         move |s, (page, r)| {
-            crate::typer_place_cmds::install_page(s, page);
+            if let Some(page) = page {
+                crate::typer_place_cmds::install_page(s, page);
+            }
             let (plan, region_kind) = r?;
             apply(s, plan, region_kind, active, layer_fmt, new_layer)
         },

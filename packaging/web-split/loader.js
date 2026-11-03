@@ -128,6 +128,17 @@ function __splitFetch(c) {
     return p;
 }
 
+// Devices with 4 GB or less compile the chunks one at a time: four compiles at once (some 22 MB
+// of code) failed 4 GB Android phones' loads with a RangeError (out of memory).
+let __splitChain = Promise.resolve();
+function __splitQueue(c) {
+    const serial = typeof navigator !== 'undefined' && typeof navigator.deviceMemory === 'number' && navigator.deviceMemory <= 4;
+    if (!serial || __split.loaded[c] || __split.pending[c]) return __splitFetch(c);
+    const p = __splitChain.then(() => __splitFetch(c));
+    __splitChain = p.catch(() => {});
+    return p;
+}
+
 function __splitDownload(c) {
     return fetch(__splitUrl(c), { priority: 'high' }).then((res) => {
         if (!res.ok) throw new Error(`${__split.chunks[c]}: HTTP ${res.status}`);
@@ -148,14 +159,14 @@ const __splitApi = {
         if (__split.lazy || __split.started) return;
         __split.started = true;
         for (const c of Object.keys(__split.chunks)) {
-            __splitFetch(c).catch((e) => console.warn(`Capishot: chunk ${c} not loaded yet:`, e));
+            __splitQueue(c).catch((e) => console.warn(`Capishot: chunk ${c} not loaded yet:`, e));
         }
     },
     whenLoaded(onProgress) {
         const all = Object.keys(__split.chunks);
         const report = () => { if (onProgress) onProgress(all.filter((c) => __split.loaded[c]).length / all.length); };
         report();
-        return Promise.all(all.map((c) => __splitFetch(c).then(report))).then(() => undefined, (e) => {
+        return Promise.all(all.map((c) => __splitQueue(c).then(report))).then(() => undefined, (e) => {
             if (self.capishotBoot && self.capishotBoot.chunkFailed) self.capishotBoot.chunkFailed(e, false);
             throw e;
         });
@@ -169,8 +180,12 @@ function __splitInstanceReady() {
     // Diagnostics: ?split=lazy loads chunks only when a command waits for them; ?split=sync never
     // waits, so every call into a chunk loads it on the spot.
     const mode = new URLSearchParams(location.search).get('split');
+    // A load that ran out of memory is tried again with only the chunks a command needs
+    // (boot.js sets this before reloading).
+    let lowMemory = false;
+    try { lowMemory = sessionStorage.getItem('capishot.boot.lowMemory') === '1'; } catch (e) {}
     __split.sync = mode === 'sync';
-    __split.lazy = mode === 'lazy' || mode === 'sync';
+    __split.lazy = mode === 'lazy' || mode === 'sync' || lowMemory;
     if (__split.lazy) return;
     for (const c of Object.keys(__split.chunks)) {
         const d = __splitDownload(c);

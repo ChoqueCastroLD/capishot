@@ -97,6 +97,17 @@ pub fn find_in_box(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32
     find_with(img, area, seed, true, 1.0)
 }
 
+/// [`find`] given only `img` covering `win`, a window of the page `page`: the same result as on
+/// the page, or `None` when the search reached a side of the window that isn't the page's (it
+/// needs more of the page). A caller with a stale page composites only a window around a click.
+pub fn find_in_window(img: &[[u8; 4]], win: photocraft_geom::Rect, page: photocraft_geom::Rect, seed: (i32, i32)) -> Option<Result<Found, Miss>> {
+    let win = win.intersect(&page);
+    if win.is_empty() || img.len() != win.width() as usize * win.height() as usize || !win.contains(seed.0, seed.1) {
+        return None;
+    }
+    search(img, win, page, seed, false, MAX_PAGE_SHARE)
+}
+
 /// Half the sides of the windows around the click searched first, smallest first.
 const WINDOWS: [i32; 2] = [384, 1024];
 /// A flood this close (px) to a side of the window that isn't the page's leaves the window: every

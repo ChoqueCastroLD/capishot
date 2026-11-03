@@ -71,6 +71,38 @@ pub(crate) fn shown(app: &PhotocraftApp, kind: &str) -> Option<(u64, Value, bool
     })
 }
 
+/// While a popover's control is dragged, its change applies at most this often (s): each one
+/// re-renders the layer's style, seconds on a phone with a large page.
+const DRAG_APPLY_S: f64 = 0.12;
+
+/// A drag's value not applied yet (see [`throttle`]), to show instead of the document's.
+pub(crate) fn pending<T: Clone + Send + Sync + 'static>(ui: &egui::Ui, id: egui::Id) -> Option<T> {
+    ui.data(|d| d.get_temp::<Option<T>>(id)).flatten()
+}
+
+/// Whether to apply `edited` (it differs from the document's `before`) now: at once when no
+/// pointer is down, else at most every [`DRAG_APPLY_S`], the rest kept as [`pending`] (applied
+/// when the pointer is released).
+pub(crate) fn throttle<T: Clone + PartialEq + Send + Sync + 'static>(ui: &egui::Ui, id: egui::Id, before: &T, edited: &T) -> bool {
+    if edited == before {
+        ui.data_mut(|d| d.insert_temp::<Option<T>>(id, None));
+        return false;
+    }
+    let now = ui.input(|i| i.time);
+    let last_id = id.with("last");
+    let last: f64 = ui.data(|d| d.get_temp(last_id)).unwrap_or(f64::NEG_INFINITY);
+    if !ui.input(|i| i.pointer.any_down()) || now - last >= DRAG_APPLY_S {
+        ui.data_mut(|d| {
+            d.insert_temp::<Option<T>>(id, None);
+            d.insert_temp(last_id, now);
+        });
+        return true;
+    }
+    ui.data_mut(|d| d.insert_temp(id, Some(edited.clone())));
+    ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(DRAG_APPLY_S));
+    false
+}
+
 /// Applies `params` as the target's effect of `kind` (made when missing, replaced when there,
 /// hidden when `on` is false), in history step `key`.
 pub(crate) fn set_effect(app: &mut PhotocraftApp, kind: &str, params: &Value, on: bool, key: &str) -> Result<(), String> {
@@ -192,8 +224,8 @@ fn popover(app: &mut PhotocraftApp, ui: &mut egui::Ui, button: &egui::Response, 
         ui.data_mut(|d| d.insert_temp(open_id, false));
         return;
     };
-    let mut p = before.clone();
-    let mut on = was_on;
+    let pending_id = egui::Id::unique("type-fx-pending").with(kind);
+    let (mut p, mut on) = pending::<(Value, bool)>(ui, pending_id).unwrap_or_else(|| (before.clone(), was_on));
     let mut ask: Option<Ask> = None;
     let t = crate::theme::Tokens::get(ui.ctx());
     let screen = crate::safe_area::rect(ui.ctx());
@@ -332,7 +364,7 @@ fn popover(app: &mut PhotocraftApp, ui: &mut egui::Ui, button: &egui::Response, 
     ui.data_mut(|d| d.insert_temp(tab_id, tab));
     // A tab switch shows the other effect: its values were read before the click.
     if KINDS[tab].0 == kind
-        && (p != before || on != was_on)
+        && throttle(ui, pending_id, &(before.clone(), was_on), &(p.clone(), on))
         && let Err(e) = set_effect(app, kind, &p, on, &key)
     {
         app.ui.status = e;
