@@ -129,10 +129,8 @@ impl PhotocraftApp {
             Vec::new()
         };
         let _open_span = (!arrived.is_empty()).then(|| perf_span::span("open.bytes"));
-        for (name, bytes) in arrived {
-            if let Err(e) = self.open_owned(&name, bytes) {
-                self.open_failed(&name, &e);
-            }
+        if !arrived.is_empty() {
+            self.open_contents_in_order(arrived);
         }
         // Web drops onto the canvas, read since the last frame: placed below, one at a time.
         let to_place: Vec<(String, Vec<u8>)> =

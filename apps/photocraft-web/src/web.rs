@@ -1465,18 +1465,22 @@ impl eframe::App for WebShell {
         let dropped = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
         // Dropped on the canvas of an open document: placed as layers; elsewhere opened.
         let on_canvas = !dropped.is_empty() && self.app.drop_places_on_canvas(ctx, drop_position(&self.canvas, ctx));
-        for f in dropped {
+        if !dropped.is_empty() {
+            // Files dropped together arrive together, so they open as one set: in name order,
+            // their tabs in that order whichever decode finishes first (`open_contents_in_order`).
             let inbox = if on_canvas { self.places.clone() } else { self.inbox.clone() };
             let ctx = ctx.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                let name = f.path().file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "dropped".into());
-                match f.bytes_async().await {
-                    Ok(bytes) => {
-                        inbox.lock().unwrap_or_else(|e| e.into_inner()).push((name, bytes));
-                        ctx.request_repaint();
+                let mut read = Vec::with_capacity(dropped.len());
+                for f in dropped {
+                    let name = f.path().file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "dropped".into());
+                    match f.bytes_async().await {
+                        Ok(bytes) => read.push((name, bytes)),
+                        Err(e) => log::error!("couldn't read dropped file {name}: {e}"),
                     }
-                    Err(e) => log::error!("couldn't read dropped file {name}: {e}"),
                 }
+                inbox.lock().unwrap_or_else(|e| e.into_inner()).extend(read);
+                ctx.request_repaint();
             });
         }
         let placed = std::mem::take(&mut *self.places.lock().unwrap_or_else(|e| e.into_inner()));

@@ -199,6 +199,34 @@ impl PhotocraftApp {
         opened
     }
 
+    /// Open files handed over as contents (the browser's picker and drops), in name order
+    /// ([`natural_cmp`]), their tabs kept in that order however the background decodes finish,
+    /// like [`Self::open_paths`]. Returns how many opened.
+    pub fn open_contents_in_order(&mut self, mut files: Vec<(String, Vec<u8>)>) -> usize {
+        files.sort_by(|a, b| natural_cmp(&a.0, &b.0));
+        let batch = crate::jobs_ui::begin_batch(self);
+        let mut opened = 0;
+        for (seq, (name, bytes)) in files.into_iter().enumerate() {
+            let order = crate::jobs_ui::OpenOrder { batch, seq };
+            let pending = self.jobs.opens.len();
+            let documents = self.session.documents().len();
+            match self.open_owned(&name, bytes) {
+                Ok(_) => {
+                    opened += 1;
+                    match self.jobs.opens.get_mut(pending) {
+                        Some(tab) => tab.order = Some(order),
+                        // Only a document opened at once takes a place (a font or preset file doesn't).
+                        None if self.session.documents().len() > documents => crate::jobs_ui::opened_in_order(&mut self.jobs, order),
+                        None => {}
+                    }
+                }
+                Err(e) => self.open_failed(&name, &e),
+            }
+        }
+        crate::jobs_ui::end_batch(&mut self.jobs);
+        opened
+    }
+
     /// Show the document already open from the file at `path`, or its tab while it is still
     /// opening in the background, as Photoshop does, rather than open a second copy bound to the
     /// same file (#6598). True when there was one.
