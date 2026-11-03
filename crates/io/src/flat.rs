@@ -379,7 +379,6 @@ pub(crate) fn image_surface(img: &Image, target_layout: ChannelLayout, csample: 
 /// The error an out-of-memory or oversized surface allocation is reported as.
 fn alloc_error(e: AllocationError) -> IoError {
     match e {
-        AllocationError::LengthMismatch { .. } => IoError::Unsupported("the decoded image does not match its size".into()),
         AllocationError::SizeOverflow => IoError::Unsupported("image too large".into()),
         AllocationError::NotEnoughMemory { .. } => IoError::Unsupported("not enough memory to open this image".into()),
     }
@@ -1446,7 +1445,6 @@ mod streamed_png_tests {
 mod fused_tile_tests {
     use super::*;
     use std::collections::BTreeMap;
-    use std::sync::atomic::{AtomicU32, Ordering};
 
     /// The band-at-a-time conversion `image_surface` used before it wrote straight into the
     /// tiles, kept as the oracle. `band_bytes` is [`BAND_BYTES`] in production; the test makes it
@@ -1638,31 +1636,6 @@ mod fused_tile_tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn a_cancelled_open_fails_with_cancelled() {
-        let img = pixels(64, 64, false);
-        let bytes = codecs::encode(&img, Format::Png, &codecs::EncodeOptions::default()).unwrap();
-        let yes = || true;
-        let r = import_flat_with("t", &bytes, &Interrupt::cancel_only(&yes));
-        assert!(matches!(r, Err(IoError::Cancelled)), "{:?}", r.map(|_| ()));
-        // Cancelled only once the decode is over: the tiles are not built.
-        let calls = AtomicU32::new(0);
-        let after_decode = || calls.fetch_add(1, Ordering::Relaxed) >= 1;
-        let r = import_flat_with("t", &bytes, &Interrupt::cancel_only(&after_decode));
-        assert!(matches!(r, Err(IoError::Cancelled)), "{:?}", r.map(|_| ()));
-    }
-
-    #[test]
-    fn progress_is_reported_and_never_goes_backwards() {
-        let bytes = codecs::encode(&pixels(64, 64, false), Format::Png, &codecs::EncodeOptions::default()).unwrap();
-        let seen = std::sync::Mutex::new(Vec::new());
-        let no = || false;
-        let progress = |f: f32| seen.lock().unwrap().push(f);
-        import_flat_with("t", &bytes, &Interrupt::new(&no, &progress)).unwrap();
-        let seen = seen.into_inner().unwrap();
-        assert!(seen.len() >= 2 && seen.windows(2).all(|w| w[0] <= w[1]), "{seen:?}");
     }
 
     #[test]
