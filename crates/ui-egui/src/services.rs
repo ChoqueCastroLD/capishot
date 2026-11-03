@@ -421,6 +421,10 @@ pub struct Services {
     /// Taps the phone's vibration for this many milliseconds (the browser's `navigator.vibrate`),
     /// when an AI run finishes.
     pub vibrate: Option<fn(u32)>,
+    /// A build channel other than the published one (the web page's `capishot-channel` meta, as
+    /// "preview"): the title bar shows it as a badge, so a test deploy is never taken for the
+    /// release. `None` for a release.
+    pub channel: Option<String>,
     /// Starts a background check for published releases (desktop, outside Flatpak).
     pub check_updates: Option<photocraft_engine::updates_cmds::CheckFn>,
     /// Files delivered asynchronously (web drag-and-drop): drained every frame and opened as

@@ -164,6 +164,8 @@
     try {
       if (!/(^|\.)capichan\.com$/.test(location.hostname)) return;
       if (navigator.doNotTrack === '1' || navigator.globalPrivacyControl === true) return;
+      const off = document.querySelector('meta[name="capishot-telemetry"]');
+      if (off && off.content.trim().toLowerCase() === 'off') return;
       let iid = '';
       try { iid = localStorage.getItem('capishot.telemetry.iid') || ''; } catch (e) {}
       if (!/^[0-9a-f]{16,64}$/.test(iid)) iid = hex(16);

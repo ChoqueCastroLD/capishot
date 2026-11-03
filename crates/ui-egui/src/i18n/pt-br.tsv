@@ -5239,3 +5239,7 @@ fontTab	Find More	Encontrar mais
 	Move to folder	Mover para a pasta
 	Move folder up	Mover pasta para cima
 	Move folder down	Mover pasta para baixo
+
+# Preview channel badge (title bar of a test deploy)
+	PREVIEW	PRÉVIA
+	Preview build, for testing before a release. It sends no usage statistics.	Versão prévia, para testar antes de publicar. Não envia estatísticas de uso.
