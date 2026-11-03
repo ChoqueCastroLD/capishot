@@ -199,9 +199,7 @@ impl Hooks for JobHooks {
 /// Receives the generated RGB and the model that made it.
 pub(crate) type FillDone = Box<dyn FnOnce(Result<(Vec<f32>, &'static ModelInfo)>) + Send>;
 
-/// The AI fill of a `w×h` region (`rgb` interleaved RGB 0..=1, `cover` the hole's coverage,
-/// `hidden` what the model doesn't see when more than the hole: [`super::retouch_cmds`]'s letters
-/// around it),
+/// The AI fill of a `w×h` region (`rgb` interleaved RGB 0..=1, `cover` the hole's coverage),
 /// without blocking: each tile's request starts from the previous one's `done`, and `finish`
 /// gets the generated RGB for every pixel (equal to `rgb` outside the hole) and the model that
 /// made it (another than `opts.model` after a GPU failure, see [`gpu_fallback`]). Works with an
@@ -214,7 +212,6 @@ pub(crate) fn ai_fill_rgb_async(
     ctx: JobCtx,
     rgb: Vec<f32>,
     cover: Vec<f32>,
-    hidden: Option<Vec<f32>>,
     w: usize,
     h: usize,
     opts: AiOptions,
@@ -226,8 +223,7 @@ pub(crate) fn ai_fill_rgb_async(
         Err(e) => return finish(Err(bad(e.to_string()))),
     };
     let binary: Vec<f32> = cover.iter().map(|c| if *c > 0.0 { 1.0 } else { 0.0 }).collect();
-    let hidden = hidden.filter(|m| m.len() == cover.len());
-    let state = FillState { svc, ctx, rgb, cover, hidden, binary, w, h, opts, plan, next: 0, finish };
+    let state = FillState { svc, ctx, rgb, cover, binary, w, h, opts, plan, next: 0, finish };
     fill_step(state);
 }
 
@@ -239,8 +235,6 @@ struct FillState {
     /// region-sized copy is kept: phones ran out of memory on large selections).
     rgb: Vec<f32>,
     cover: Vec<f32>,
-    /// More than `cover` hidden from the model (not filled); `None`: the model's mask is `cover`.
-    hidden: Option<Vec<f32>>,
     binary: Vec<f32>,
     w: usize,
     h: usize,
@@ -258,7 +252,7 @@ fn fill_step(mut st: FillState) {
     if let Err(e) = st.ctx.check() {
         return (st.finish)(Err(e));
     }
-    let input = match tiles::extract(&st.rgb, st.hidden.as_deref().unwrap_or(&st.cover), st.w, st.h, &t) {
+    let input = match tiles::extract(&st.rgb, &st.cover, st.w, st.h, &t) {
         Ok(i) => i,
         Err(e) => return (st.finish)(Err(bad(e.to_string()))),
     };
@@ -389,10 +383,7 @@ fn plan(s: &Session, p: &Value) -> Result<Plan> {
     if sb.is_empty() {
         return Err(bad("the selection is outside the canvas"));
     }
-    // Context around the selection: what every blob's tile can reach (`tiles::plan` grows each
-    // blob by max(margin, its long side / 4)).
-    let reach = (opts.tiles.margin as u64).max(u64::from(sb.width().max(sb.height())) / 4).min(1 << 20) as i32;
-    let region = sb.inflate(reach).intersect(&canvas);
+    let region = context_region(sb, canvas, opts.tiles.margin);
     let pixels = u64::from(region.width()) * u64::from(region.height());
     if pixels > MAX_PIXELS {
         return Err(bad(format!("the area is too large to clean at once ({pixels} pixels, at most {MAX_PIXELS}); select less")));
@@ -412,6 +403,14 @@ fn plan(s: &Session, p: &Value) -> Result<Plan> {
     }
     let rgb = to_rgb(&fmt, &layer_px);
     Ok(Plan { layer: id, fmt, region, layer_px, rgb, cover, new_layer, opts })
+}
+
+/// What a fill of a hole within `sb` reads on `canvas`: every blob's tile can reach that far
+/// (`tiles::plan` grows each blob by max(`margin`, its long side / 4)). The Remove tools' AI fill
+/// reads the same, so a stroke's hole is filled exactly as a selection of that shape.
+pub(crate) fn context_region(sb: Rect, canvas: Rect, margin: usize) -> Rect {
+    let reach = (margin as u64).max(u64::from(sb.width().max(sb.height())) / 4).min(1 << 20) as i32;
+    sb.inflate(reach).intersect(&canvas)
 }
 
 fn inpaint_ai(s: &mut Session, p: &Value) -> Result<Value> {
@@ -438,7 +437,6 @@ pub(crate) fn inpaint_ai_labelled(s: &mut Session, p: &Value, label: &'static st
                 ctx.clone(),
                 rgb,
                 cover,
-                None,
                 w,
                 h,
                 opts,

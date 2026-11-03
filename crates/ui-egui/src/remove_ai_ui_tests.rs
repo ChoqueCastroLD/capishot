@@ -117,3 +117,19 @@ fn the_tool_group_and_the_remove_tool_untouched() {
     assert_eq!((d.remove_new_layer, d.remove_after_each_stroke, d.remove_ai, d.sample_all.remove), (false, true, false, false));
     assert_eq!(crate::tool_reset::sample_all_key(Tool::RemoveAi).as_deref(), Some("remove_ai"));
 }
+
+/// AI Cleaning Options never reach the tool: whatever the dialog says, it runs Manga LaMa.
+#[test]
+fn the_ai_cleaning_options_do_not_change_the_tool() {
+    let (mut app, _) = app(true);
+    let fake = Arc::new(FakeInpainter::default());
+    app.session.set_inpainter(Some(fake.clone()));
+    let mut f = serde_json::Map::new();
+    f.insert("model".into(), json!(photocraft_ai::catalog::MIGAN_ID));
+    f.insert("quality".into(), json!("fast"));
+    f.insert("maxSide".into(), json!(64));
+    crate::ai_options_ui::save(&mut app, crate::ai_options_ui::Kind::Inpaint, &f);
+    crate::remove_ai_ui::finish_stroke(&mut app, &[[29.0, 22.0, 1.0], [35.0, 22.0, 1.0]]);
+    assert!(!red(&app), "removed");
+    assert_eq!(fake.last.lock().unwrap().map(|l| l.0), Some(LAMA_ID), "Manga LaMa, not the dialog's model");
+}

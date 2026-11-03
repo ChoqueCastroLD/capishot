@@ -33,7 +33,7 @@ const MAX_PIXELS: u64 = 16 << 20;
 /// Cap on the sampling margin around the stroke (the window grows with the stroke).
 const MAX_MARGIN: i32 = 512;
 
-/// The least margin around Remove with AI's strokes: the model's context (128 px) past the
+/// The least margin around Remove with AI's strokes: room for the model's context past the
 /// farthest the hole grows.
 const AI_CONTEXT: i32 = 256;
 
@@ -63,7 +63,7 @@ struct Plan {
     new_layer: bool,
     /// `ai`: fill with Manga LaMa through the injected service instead of patch completion.
     ai: Option<(std::sync::Arc<dyn photocraft_ai_lama::service::Inpainter>, crate::ai_inpaint_cmds::AiOptions)>,
-    /// Remove with AI: the hole grows over the ink the strokes touch, and the fill feathers in
+    /// Remove with AI: the hole grows over the ink the strokes touch
     /// ([`super::ink_mask`]) instead of the plain [`GROW`].
     ink: bool,
 }
@@ -174,35 +174,29 @@ fn painted(plan: &Plan) -> Result<Vec<bool>> {
     Ok(m)
 }
 
-/// The hole and its paste-back weights (`None`: all 1) over the plan's window: the painted area
-/// grown by [`GROW`] (or by the ink it touches, see [`Plan::ink`]), limited to the selection.
-/// Empty when nothing would change.
-#[allow(clippy::type_complexity)]
-fn hole(plan: &Plan, doc: &Document, img: &Region, fmt: &photocraft_color::PixelFormat) -> Result<(Vec<bool>, Option<Vec<f32>>, Option<Vec<bool>>)> {
+/// The hole over the plan's window: the painted area grown by [`GROW`] (or by the ink it
+/// touches, see [`Plan::ink`]), limited to the selection. Empty when nothing would change.
+fn hole(plan: &Plan, doc: &Document, img: &Region, fmt: &photocraft_color::PixelFormat) -> Result<Vec<bool>> {
     let win = plan.window;
     let (w, h) = (win.width() as usize, win.height() as usize);
     let painted = painted(plan)?;
-    let (mut m, mut weight, hide) = if plan.ink {
+    let mut m = if plan.ink {
         let page = doc.bounds();
         let brush = plan.strokes.iter().map(|s| s.brush.size).fold(0.0, f32::max);
         let g = super::ink_mask::Grow::for_page(page.width().min(page.height()), brush);
         let lum = super::ink_mask::luminance(&crate::ai_inpaint_cmds::to_rgb(fmt, &img.data));
-        let hole = super::ink_mask::expand(w, h, &lum, &painted, g);
-        (hole.mask, Some(hole.weight), Some(hole.hide))
+        super::ink_mask::expand(w, h, &lum, &painted, g)
     } else {
-        (photocraft_algo::remove::dilate(w, h, &painted, GROW), None, None)
+        photocraft_algo::remove::dilate(w, h, &painted, GROW)
     };
     if let Some(sel) = doc.selection.as_ref() {
         for (i, c) in coverage(sel, win).into_iter().enumerate() {
             if c <= 0.0 {
                 m[i] = false;
-                if let Some(wt) = weight.as_mut() {
-                    wt[i] = 0.0;
-                }
             }
         }
     }
-    Ok((m, weight, hide))
+    Ok(m)
 }
 
 /// The window's pixels and the hole, read on `doc` (a snapshot) before the fill.
@@ -210,10 +204,6 @@ struct Prepared {
     img: Region,
     fmt: photocraft_color::PixelFormat,
     hole: Vec<bool>,
-    /// The paste-back weights over the hole (`None`: a hard edge).
-    weight: Option<Vec<f32>>,
-    /// What the model doesn't see besides the hole (Remove with AI: the letters around it).
-    hide: Option<Vec<bool>>,
 }
 
 /// Reads what the fill needs. `None` when the layer's own window is fully transparent: nothing to
@@ -226,7 +216,7 @@ fn prepare(doc: &mut Document, plan: &Plan, p: &Value) -> Result<Option<Prepared
         let img = if plan.all_layers { composite_region(doc, None, SampleLayers::All, win, fmt) } else { Region::read(surf, win) };
         (img, fmt)
     };
-    let (hole, weight, hide) = hole(plan, doc, &img, &fmt)?;
+    let hole = hole(plan, doc, &img, &fmt)?;
     if !hole.iter().any(|m| *m) {
         return Err(bad(CMD, "the stroke doesn't cover anything that can change (check the selection)"));
     }
@@ -237,7 +227,40 @@ fn prepare(doc: &mut Document, plan: &Plan, p: &Value) -> Result<Option<Prepared
     if !plan.all_layers && alpha_index(&fmt).is_some_and(|a| img.data.chunks_exact(img.ch).all(|px| px.get(a).is_none_or(|v| *v <= 0.0))) {
         return Ok(None);
     }
-    Ok(Some(Prepared { img, fmt, hole, weight, hide }))
+    Ok(Some(Prepared { img, fmt, hole }))
+}
+
+/// The bounds of the set pixels of `hole` over `win`.
+fn hole_bounds(hole: &[bool], win: Rect) -> Rect {
+    let w = (win.width() as usize).max(1);
+    let (mut x0, mut y0, mut x1, mut y1) = (usize::MAX, usize::MAX, 0, 0);
+    for (i, _) in hole.iter().enumerate().filter(|(_, m)| **m) {
+        (x0, y0, x1, y1) = (x0.min(i % w), y0.min(i / w), x1.max(i % w + 1), y1.max(i / w + 1));
+    }
+    if x0 > x1 {
+        return win;
+    }
+    Rect::new(win.x0 + x0 as i32, win.y0 + y0 as i32, win.x0 + x1 as i32, win.y0 + y1 as i32)
+}
+
+/// `prep` (over `win`) cut to `rect`, which lies within `win`.
+fn crop(prep: Prepared, win: Rect, rect: Rect) -> Prepared {
+    let rect = rect.intersect(&win);
+    if rect == win || rect.is_empty() {
+        return prep;
+    }
+    let Prepared { img, fmt, hole } = prep;
+    let (ww, ch) = (win.width() as usize, img.ch);
+    let (dx, dy) = ((rect.x0 - win.x0) as usize, (rect.y0 - win.y0) as usize);
+    let (w, h) = (rect.width() as usize, rect.height() as usize);
+    let mut data = Vec::with_capacity(w * h * ch);
+    let mut cut = Vec::with_capacity(w * h);
+    for y in dy..dy + h {
+        let row = y * ww + dx;
+        data.extend_from_slice(img.data.get(row * ch..(row + w) * ch).unwrap_or_default());
+        cut.extend_from_slice(hole.get(row..row + w).unwrap_or_default());
+    }
+    Prepared { img: Region { rect, ch, data }, fmt, hole: cut }
 }
 
 /// The filled window and the hole it fills, by patch-based completion on `doc` (a snapshot).
@@ -283,33 +306,20 @@ fn fill_to_new_layer(doc: &mut Document, id: Option<LayerId>, out: &Region, hole
     Ok((out.rect, nid))
 }
 
-/// The window with the AI's RGB `generated` in the hole (alpha kept), in the layer's format,
-/// blended by the hole's paste-back weights.
+/// The window with the AI's RGB `generated` in the hole (alpha kept), in the layer's format.
 fn encode_ai(prep: Prepared, rect: Rect, generated: &[f32]) -> Result<(Region, Vec<bool>)> {
-    let Prepared { img, fmt, hole, weight, .. } = prep;
+    let Prepared { img, fmt, hole } = prep;
     let n = fmt.channels().max(1);
     if generated.len() != hole.len() * 3 || img.data.len() != hole.len() * n {
         return Err(EngineError::Other("AI fill: window size mismatch".into()));
     }
-    // Remove with AI: a bubble's fill takes the bubble's white exactly.
-    let settled;
-    let generated = if weight.is_some() {
-        let mut g = generated.to_vec();
-        super::ink_mask::settle_paper(rect.width() as usize, rect.height() as usize, &crate::ai_inpaint_cmds::to_rgb(&fmt, &img.data), &hole, &mut g);
-        settled = g;
-        &settled[..]
-    } else {
-        generated
-    };
     let mut data = img.data.clone();
     let mut enc = [0.0f32; 8];
     for (i, m) in hole.iter().enumerate() {
         if *m {
             let orig = to_rgba(&fmt, &img.data[i * n..(i + 1) * n]);
             let g = &generated[i * 3..i * 3 + 3];
-            let k = weight.as_ref().and_then(|wt| wt.get(i)).copied().unwrap_or(1.0);
-            let mix = |c: usize| orig[c] + (g[c] - orig[c]) * k;
-            from_rgba_into(&fmt, [mix(0), mix(1), mix(2), orig[3]], &mut enc);
+            from_rgba_into(&fmt, [g[0], g[1], g[2], orig[3]], &mut enc);
             data[i * n..(i + 1) * n].copy_from_slice(&enc[..n]);
         }
     }
@@ -340,7 +350,8 @@ pub(super) fn remove(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Remove with AI's strokes: [`remove`] (in its AI mode) as one undo step named `label`, the hole
-/// grown over the ink the strokes touch and feathered in ([`super::ink_mask`]).
+/// grown over the ink the strokes touch ([`super::ink_mask`]) and filled as `edit.inpaintAi` fills
+/// a selection of its shape.
 pub(crate) fn remove_ink_labelled(s: &mut Session, p: &Value, label: &'static str) -> Result<Value> {
     run_labelled(s, p, label, true)
 }
@@ -358,11 +369,14 @@ fn run_labelled(s: &mut Session, p: &Value, label: &'static str, ink: bool) -> R
     if let Some((svc, opts)) = plan.ai.take() {
         let mut work = (*doc).clone();
         let Some(prep) = prepare(&mut work, &plan, &p)? else { return Ok(json!({"changed": false})) };
-        let win = plan.window;
+        // What edit.inpaintAi would read for a selection of the hole's shape: the same context
+        // around it gives the same fill.
+        let canvas = work.bounds();
+        let win = crate::ai_inpaint_cmds::context_region(hole_bounds(&prep.hole, plan.window), canvas, opts.tiles.margin).intersect(&plan.window);
+        let prep = crop(prep, plan.window, win);
         let (w, h) = (win.width() as usize, win.height() as usize);
         let rgb = crate::ai_inpaint_cmds::to_rgb(&prep.fmt, &prep.img.data);
         let cover: Vec<f32> = prep.hole.iter().map(|m| if *m { 1.0 } else { 0.0 }).collect();
-        let hidden = prep.hide.as_ref().map(|hide| prep.hole.iter().zip(hide).map(|(m, x)| if *m || *x { 1.0 } else { 0.0 }).collect());
         return crate::jobs::run_async(
             s,
             label,
@@ -374,7 +388,6 @@ fn run_labelled(s: &mut Session, p: &Value, label: &'static str, ink: bool) -> R
                     ctx.clone(),
                     rgb,
                     cover,
-                    hidden,
                     w,
                     h,
                     opts,

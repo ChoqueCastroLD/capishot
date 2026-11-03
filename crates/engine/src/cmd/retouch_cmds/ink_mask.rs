@@ -1,29 +1,23 @@
 //! Remove with AI's hole: the painted strokes, grown so nothing of what they touched is left for
 //! the fill to rebuild from.
 //!
-//! A rough stroke over lettering leaves the glyphs' anti-aliased edges and the parts of letters
-//! it only half covered, and an inpainting model reconstructs from those leftovers (grey smudges
-//! in the bubble). So, before the fill:
+//! A rough stroke over lettering leaves the glyphs' anti-aliased edges, the parts of letters it
+//! only half covered and the white outline around an SFX, and an inpainting model reconstructs
+//! from those leftovers (grey smudges in a bubble, a white smear over dark art). So, before the
+//! fill:
 //!
 //! 1. the stroke dilates by a few pixels (scaled with the page's resolution);
 //! 2. it grows over every connected run of dark ink the stroke touches, when the whole run fits
 //!    within a bounded reach of the stroke: a letter is taken whole, while a bubble outline, a
-//!    panel border or a field of screentone (runs that leave the reach) is not, and the dilation
-//!    keeps off them and off nearby ink the stroke never touched;
-//! 3. the paste-back feathers over a thin ring around that ([`Hole::weight`]), so the fill
-//!    blends into the page instead of meeting it at a hard edge.
+//!    panel border or a field of screentone (runs that leave the reach) is not.
+//!
+//! Nothing else: the hole is filled exactly as Clean Selected Area with AI fills a selection of its
+//! shape (the model sees the page around it, the fill is pasted back whole). Growing it further
+//! over the light around it (an SFX's white outline) took hair highlights and art with it, and the
+//! model smeared grey over what it had to rebuild.
 //!
 //! Dark is relative to the local background (the brightest value around), so ink on screentone
 //! or on a grey sky counts as it does on a white bubble.
-//!
-//! Manga LaMa also continues the text it sees around a hole: a word removed from a bubble comes
-//! back as letter-like scribbles. So the letters around the hole (runs of ink of a letter's size
-//! on clear paper, not screentone or hatching) are hidden from the model too ([`Hole::hide`]);
-//! only the hole is pasted back, so they stay on the page. And its fill of a bubble comes out a
-//! shade off the paper: where the hole meets flat paper, the fill that is near the paper's tone
-//! takes it ([`settle_paper`]).
-
-use std::collections::{HashMap, VecDeque};
 
 use photocraft_algo::remove::dilate;
 
@@ -34,8 +28,6 @@ pub(crate) struct Grow {
     pub dilate: usize,
     /// How far from the stroke a run of ink may reach and still be taken whole.
     pub reach: usize,
-    /// The soft ring at the paste-back.
-    pub feather: usize,
 }
 
 impl Grow {
@@ -45,7 +37,7 @@ impl Grow {
     pub(crate) fn for_page(short: u32, brush: f32) -> Self {
         let dilate = ((f64::from(short) / 300.0).round() as usize).clamp(4, 10);
         let brush = if brush.is_finite() { brush.max(0.0).round() as usize } else { 0 };
-        Grow { dilate, reach: brush.max(dilate * 4).min(128), feather: 2 }
+        Grow { dilate, reach: brush.max(dilate * 4).min(128) }
     }
 }
 
@@ -153,69 +145,21 @@ fn neighbours(i: usize, w: usize, h: usize) -> impl Iterator<Item = usize> {
     n.into_iter().take(len)
 }
 
-/// The hole and its paste-back weights.
-pub(crate) struct Hole {
-    pub mask: Vec<bool>,
-    /// 1 over the hole's core, then falling over the soft ring around it (`k/(f+1)` at `f+1−k`
-    /// pixels out), 0 outside: the fill blends into what is around it instead of meeting it at a
-    /// hard edge, and never lets what the stroke covered show through.
-    pub weight: Vec<f32>,
-    /// Letters around the hole the model shouldn't see (masked in its input, not changed).
-    pub hide: Vec<bool>,
-}
-
-/// The share of a run's surroundings (3 px around it, outside the hole) that may be other ink for
-/// the run to count as a letter on clear paper (screentone and hatching have more).
-const CLEAR_PAPER: f32 = 0.2;
-
-/// Whether `run` (pixel indices, outside the hole) is a letter on clear paper: between `min` and
-/// `max` pixels a side, off the window's edge, and mostly paper around it.
-fn letter_on_paper(w: usize, h: usize, run: &[usize], ink: &[bool], hole: &[bool], min: usize, max: usize) -> bool {
-    let (mut x0, mut y0, mut x1, mut y1) = (usize::MAX, usize::MAX, 0, 0);
-    for &i in run {
-        (x0, y0, x1, y1) = (x0.min(i % w), y0.min(i / w), x1.max(i % w), y1.max(i / w));
-    }
-    let side = (x1 - x0 + 1).max(y1 - y0 + 1);
-    if side < min || side > max || x0 == 0 || y0 == 0 || x1 + 1 == w || y1 + 1 == h {
-        return false;
-    }
-    const R: usize = 3;
-    let (bx0, by0) = (x0.saturating_sub(R), y0.saturating_sub(R));
-    let (bw, bh) = ((x1 + R + 1).min(w) - bx0, (y1 + R + 1).min(h) - by0);
-    let mut own = vec![false; bw * bh];
-    for &i in run {
-        own[(i / w - by0) * bw + (i % w - bx0)] = true;
-    }
-    let near = dilate(bw, bh, &own, R);
-    let (mut around, mut inked) = (0usize, 0usize);
-    for (k, n) in near.iter().enumerate() {
-        let i = (by0 + k / bw) * w + bx0 + k % bw;
-        if *n && !own[k] && !hole[i] {
-            around += 1;
-            inked += usize::from(ink[i]);
-        }
-    }
-    around > 0 && (inked as f32) <= CLEAR_PAPER * around as f32
-}
-
 /// The hole for `painted` (the strokes' footprint over a `w×h` window) on an image of luminance
 /// `lum` (0..=1): see the module docs.
-pub(crate) fn expand(w: usize, h: usize, lum: &[f32], painted: &[bool], g: Grow) -> Hole {
+pub(crate) fn expand(w: usize, h: usize, lum: &[f32], painted: &[bool], g: Grow) -> Vec<bool> {
     let n = w.saturating_mul(h);
     if lum.len() != n || painted.len() != n || !painted.iter().any(|p| *p) {
-        let weight = painted.iter().map(|m| if *m { 1.0 } else { 0.0 }).collect();
-        return Hole { mask: painted.to_vec(), weight, hide: vec![false; painted.len()] };
+        return painted.to_vec();
     }
     let ink = ink(w, h, lum, (g.dilate * 3).max(8));
     let zone = dilate(w, h, painted, g.reach.max(g.dilate));
-    // Runs of ink outside the stroke: taken whole (`take`) when the stroke touches them and they
-    // stay within the reach; else kept out of the hole (`keep`).
+    // Runs of ink outside the stroke, taken whole when the stroke touches them and they stay
+    // within the reach.
     let mut seen = vec![false; n];
     let mut take = vec![false; n];
-    let mut keep = vec![false; n];
     let mut run = Vec::new();
     let mut stack = Vec::new();
-    let mut kept: Vec<Vec<usize>> = Vec::new();
     for start in 0..n {
         if seen[start] || painted[start] || !ink[start] {
             continue;
@@ -239,123 +183,16 @@ pub(crate) fn expand(w: usize, h: usize, lum: &[f32], painted: &[bool], g: Grow)
                 }
             }
         }
-        let out = if touched && bounded { &mut take } else { &mut keep };
-        for &i in &run {
-            out[i] = true;
-        }
-        if !(touched && bounded) {
-            kept.push(run.clone());
+        if touched && bounded {
+            for &i in &run {
+                take[i] = true;
+            }
         }
     }
     // The stroke dilated, and the runs taken with their soft edge (a pixel past the threshold).
     let grown = dilate(w, h, painted, g.dilate);
     let taken = dilate(w, h, &take, 1);
-    let mut mask: Vec<bool> = (0..n).map(|i| painted[i] || ((grown[i] || taken[i]) && !keep[i])).collect();
-    let mut weight: Vec<f32> = mask.iter().map(|m| if *m { 1.0 } else { 0.0 }).collect();
-    let step = 1.0 / (g.feather as f32 + 1.0);
-    for k in 0..g.feather {
-        let ring = dilate(w, h, &mask, 1);
-        for i in 0..n {
-            if ring[i] && !mask[i] && !keep[i] {
-                mask[i] = true;
-                weight[i] = 1.0 - step * (k as f32 + 1.0);
-            }
-        }
-    }
-    // The letters around: from a dilation's size (smaller is screentone dots and specks) to twice
-    // the reach (bigger is art), with their soft edge.
-    let mut letters = vec![false; n];
-    let (min, max) = (g.dilate.max(5), (g.reach * 2).max(96));
-    for run in &kept {
-        if letter_on_paper(w, h, run, &ink, &mask, min, max) {
-            for &i in run {
-                letters[i] = true;
-            }
-        }
-    }
-    let hide = dilate(w, h, &letters, 2).iter().zip(&mask).map(|(l, m)| *l && !m).collect();
-    Hole { mask, weight, hide }
-}
-
-/// Flat paper: its neighbourhood (2 px) varies by at most this, and it is at least this light
-/// (a fine, light screentone is flat at 2 px too, but darker).
-const FLAT: f32 = 0.06;
-const PAPER: f32 = 0.9;
-/// How far the fill may be from the paper's tone and still be paper.
-const NEAR_PAPER: f32 = 0.12;
-
-/// Where `hole` meets flat paper on the original (`orig` interleaved RGB 0..=1), the fill
-/// (`generated`, the same layout) that stays near the paper's tone, reached from that paper
-/// without crossing anything darker, takes the nearest paper's tone: a bubble's fill
-/// comes out exactly the bubble's white, while screentone, art and lines keep the model's fill.
-pub(crate) fn settle_paper(w: usize, h: usize, orig: &[f32], hole: &[bool], generated: &mut [f32]) {
-    let n = w.saturating_mul(h);
-    if orig.len() != n * 3 || generated.len() != n * 3 || hole.len() != n {
-        return;
-    }
-    let lum = luminance(orig);
-    // The pixels within 2 of `i` (clipped to the grid) outside the hole: what the flatness and the
-    // paper's tone look at. Only read at the hole's edge, so taken there rather than everywhere.
-    let around = |i: usize, f: &mut dyn FnMut(usize)| {
-        let (x, y) = (i % w, i / w);
-        for yy in y.saturating_sub(2)..(y + 3).min(h) {
-            let row = yy * w;
-            for (j, _) in hole.iter().enumerate().take(row + (x + 3).min(w)).skip(row + x.saturating_sub(2)).filter(|(_, h)| !**h) {
-                f(j);
-            }
-        }
-    };
-    // From each flat paper pixel at the hole's edge, outward into the hole (breadth first, so each
-    // pixel takes its nearest paper's colour).
-    let mut from = vec![usize::MAX; n];
-    let mut queue = VecDeque::new();
-    for i in 0..n {
-        if hole[i] || lum[i] < PAPER || !neighbours(i, w, h).any(|j| hole[j]) {
-            continue;
-        }
-        // The brightest and the darkest around, without the hole (it counts as black for the
-        // brightest and as white for the darkest; it is always within reach of the edge).
-        let (mut hi, mut lo) = (0.0f32, 0.0f32);
-        around(i, &mut |j| {
-            hi = max(hi, lum[j]);
-            lo = max(lo, 1.0 - lum[j]);
-        });
-        if hi - (1.0 - lo) <= FLAT {
-            from[i] = i;
-            queue.push_back(i);
-        }
-    }
-    let glum = |j: usize| generated.get(j * 3..j * 3 + 3).map_or(f32::NAN, |c| 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]);
-    while let Some(i) = queue.pop_front() {
-        let src = from[i];
-        for j in neighbours(i, w, h) {
-            if hole[j] && from[j] == usize::MAX && (glum(j) - lum[src]).abs() <= NEAR_PAPER {
-                from[j] = src;
-                queue.push_back(j);
-            }
-        }
-    }
-    // The paper's tone at each source: the brightest around it (ink and compression ringing only
-    // darken paper), so one noisy pixel doesn't spread.
-    let mut tone: HashMap<usize, [f32; 3]> = HashMap::new();
-    for i in 0..n {
-        let src = from[i];
-        if !hole[i] || src == usize::MAX {
-            continue;
-        }
-        let t = *tone.entry(src).or_insert_with(|| {
-            let mut t = [0.0f32; 3];
-            around(src, &mut |j| {
-                for (c, t) in t.iter_mut().enumerate() {
-                    *t = max(*t, orig[j * 3 + c]);
-                }
-            });
-            t
-        });
-        if let Some(g) = generated.get_mut(i * 3..i * 3 + 3) {
-            g.copy_from_slice(&t);
-        }
-    }
+    (0..n).map(|i| painted[i] || grown[i] || taken[i]).collect()
 }
 
 /// Rec. 601 luminance of interleaved RGB (0..=1).
