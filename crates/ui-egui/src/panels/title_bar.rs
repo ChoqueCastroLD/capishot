@@ -67,6 +67,10 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     crate::brand::paint_mark(ui, mark);
                     ui.add_space(6.0);
                 }
+                if app.services.channel.is_some() {
+                    channel_badge(ui, &t);
+                    ui.add_space(6.0);
+                }
                 // With the macOS menu bar the menus are at the top of the screen instead. Either way
                 // this is the menus' inner edge, facing the title.
                 let menus_end = if app.services.native_menu.is_some() {
@@ -150,6 +154,17 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     if custom {
         crate::titlebar::caption_buttons(app, ui, bar.response.rect);
     }
+}
+
+/// The badge of a build that is not the release ([`crate::Services::channel`]): a test deploy
+/// must never be taken for the published app, nor its bugs reported against it.
+fn channel_badge(ui: &mut egui::Ui, t: &Tokens) {
+    let galley = ui.painter().layout_no_wrap(tl!("PREVIEW").to_owned(), theme::medium(11.0), t.warning);
+    let size = vec2(galley.size().x + 12.0, 18.0);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
+    ui.painter().rect_stroke(rect, egui::CornerRadius::same(4), egui::Stroke::new(1.5, t.warning), egui::StrokeKind::Inside);
+    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, t.warning);
+    response.on_hover_text(tl!("Preview build, for testing before a release. It sends no usage statistics."));
 }
 
 /// Whether the window shows the system's title bar instead of the app drawing its own: Windows

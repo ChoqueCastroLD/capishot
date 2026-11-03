@@ -5271,3 +5271,7 @@ fontTab	Find More	Buscar más
 	Move to folder	Mover a carpeta
 	Move folder up	Subir carpeta
 	Move folder down	Bajar carpeta
+
+# Preview channel badge (title bar of a test deploy)
+	PREVIEW	PRUEBA
+	Preview build, for testing before a release. It sends no usage statistics.	Versión de prueba, para probar antes de publicar. No envía estadísticas de uso.
