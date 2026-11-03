@@ -5223,3 +5223,8 @@ fontTab	Find More	Encontrar mais
 	The update was cancelled (the administrator prompt was declined).	A atualização foi cancelada (o pedido de administrador foi recusado).
 	No release notes	Sem notas da versão
 	Install Updates Automatically	Instalar atualizações automaticamente
+	Saving a copy	Salvando uma cópia
+	Save a flat copy?	Salvar uma cópia achatada?
+	Only a flat copy of this document has been saved. Its layers and other content aren't in any file.	Só foi salva uma cópia achatada deste documento. Suas camadas e o restante do conteúdo não estão em nenhum arquivo.
+	“{name}” can't keep this document's layers, alpha channels, saved paths, layer comps or Quick Mask. The document stays open, with its changes unsaved.	“{name}” não pode manter as camadas, os canais alfa, os demarcadores salvos, as composições de camadas nem a máscara rápida deste documento. O documento continua aberto, com as alterações não salvas.
+	This file type can't hold the document's alpha channels, saved paths, layer comps or Quick Mask. The document stays open, with its changes unsaved.	Este tipo de arquivo não comporta os canais alfa, os demarcadores salvos, as composições de camadas nem a máscara rápida do documento. O documento continua aberto, com as alterações não salvas.

@@ -550,6 +550,8 @@ pub struct FileHandling {
     /// that would otherwise open as linear sRGB opens as ACEScg (AP1, linear) instead.
     pub exr_aces_cg: bool,
     pub ask_before_saving_layered_tiff: bool,
+    /// Save As asks before writing a file that can't keep the document.
+    pub ask_before_saving_flat_copy: bool,
     pub maximize_psd_compatibility: Ask,
     /// SVG groups deeper than this are rasterised on import; parser and document safety caps remain fixed.
     pub rasterize_svg_groups_deeper_than: u32,
@@ -582,6 +584,7 @@ impl Default for FileHandling {
             ignore_exif_profile_tag: false,
             exr_aces_cg: false,
             ask_before_saving_layered_tiff: true,
+            ask_before_saving_flat_copy: true,
             maximize_psd_compatibility: Ask::Always,
             rasterize_svg_groups_deeper_than: photocraft_doc::MAX_GROUP_DEPTH as u32,
             recent_file_count: 20,
