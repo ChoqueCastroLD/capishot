@@ -1,13 +1,11 @@
 //! `edit.removeAi`: the Remove with AI tool. What the user painted (`strokes`, as the Remove
-//! tool's) or, without strokes, the selection, is erased and filled by Manga LaMa, always, at its
-//! best: no lite model, the crops at full resolution up to what the device can hold (1024 px a
-//! side on a GPU, 768 on a CPU, 512, LaMa's own working size, on phones and machines of 4 GB or
-//! less, one crop at a time, so a run stays within a phone's memory cap), with a wide context
-//! margin. The GPU runs it when there is one, the CPU otherwise or
-//! when the GPU fails mid-run (still Manga LaMa). A stroke's hole grows first so nothing of what
-//! it touched is left for the model to rebuild from, and the model doesn't see the letters around
-//! it (`retouch_cmds::ink_mask`). One undo step, "Remove with AI", on the target
-//! layer. A background job, cancellable.
+//! tool's) or, without strokes, the selection, is erased and filled as Clean Selected Area with AI
+//! (`edit.inpaintAi`) fills a selection, with fixed options: Manga LaMa (never the lite model) at
+//! best quality, f32, the default working side and context margin. The AI Cleaning Options dialog
+//! doesn't apply. The GPU runs it when there is one, the CPU otherwise or when the GPU fails
+//! mid-run (still Manga LaMa). A stroke's hole grows first so nothing of what it touched is left for the
+//! model to rebuild from (`retouch_cmds::ink_mask`). One undo step, "Remove with AI", on the
+//! target layer. A background job, cancellable.
 
 use serde_json::{Value, json};
 
@@ -17,46 +15,35 @@ use crate::{EngineError, Result, Session};
 pub const ID: &str = "edit.removeAi";
 /// The undo step and the job.
 pub const LABEL: &str = "Remove with AI";
-/// Context around each masked blob (px): the largest that keeps the crops at full resolution.
-const MARGIN: u64 = 128;
+/// What the AI Cleaning Options dialog would set, overridden on every run: Remove with AI is
+/// fixed (Manga LaMa at its best, the GPU when there is one, the working side and context
+/// margin `edit.inpaintAi` uses by default) and never follows that dialog.
+const FIXED: [&str; 7] = ["model", "quality", "device", "maxSide", "margin", "threads", "keepLoaded"];
 
-/// The inpainting params every run uses: Manga LaMa pinned, best quality, the largest crops the
-/// device can hold, the widest margin.
-pub fn lama_params(s: &Session, p: &Value) -> Result<serde_json::Map<String, Value>> {
+/// The inpainting params of a run: Clean Selected Area with AI's (`edit.inpaintAi`) with Manga LaMa
+/// pinned at best quality and every other option at its default, whatever the caller sent.
+pub fn lama_params(p: &Value) -> Result<serde_json::Map<String, Value>> {
     let mut q = match p {
         Value::Object(m) => m.clone(),
         Value::Null => serde_json::Map::new(),
         _ => return Err(EngineError::BadParams { cmd: ID.into(), msg: "params must be a JSON object".into() }),
     };
-    for k in ["model", "quality", "maxSide", "margin", "ai", "output", "newLayer"] {
-        q.remove(k);
+    for k in FIXED.iter().chain(&["ai", "output", "newLayer"]) {
+        q.remove(*k);
     }
     q.insert("model".into(), json!(photocraft_ai::catalog::LAMA_ID));
     q.insert("quality".into(), json!("best"));
-    let run = crate::ai_cmds::run_choice(s, &Value::Object(q.clone()), ID)?;
-    // Phones and machines with little memory: LaMa's own working size, so a run stays bounded
-    // within the page's memory cap (one crop of at most 512 x 512 at a time).
-    let bounded = run.choice.small_tiles || run.profile.mobile || run.profile.memory_gb.is_some_and(|m| m <= 4.0);
-    let side = if bounded {
-        512
-    } else if run.choice.cpu {
-        768
-    } else {
-        1024
-    };
-    q.insert("maxSide".into(), json!(side));
-    q.insert("margin".into(), json!(MARGIN));
     Ok(q)
 }
 
 /// The model state the run needs (the UI's first-use download).
 pub fn lama_state(s: &Session) -> Option<photocraft_ai_lama::service::ModelState> {
-    let p = Value::Object(lama_params(s, &json!({})).ok()?);
+    let p = Value::Object(lama_params(&json!({})).ok()?);
     crate::ai_inpaint_cmds::model_state(s, &p).map(|(_, st)| st)
 }
 
 fn remove_ai(s: &mut Session, p: &Value) -> Result<Value> {
-    let mut q = lama_params(s, p)?;
+    let mut q = lama_params(p)?;
     if q.contains_key("strokes") || q.contains_key("points") {
         q.insert("ai".into(), json!(true));
         q.insert("newLayer".into(), json!(false));
@@ -80,7 +67,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: LABEL,
         menu: &[],
         shortcut: None,
-        params: r#"{"strokes"?: [[[x,y,pressure?],…],…] or "points"?: [[x,y],…] (what was painted, with "size": px, as paint.remove; a stroke around an object removes what it encloses), else the selection, "sampleAllLayers"?: bool, "layer"?: id, "allowDownload"?: bool (fetch Manga LaMa, about 100 MB, when it isn't on this device), "device"?: "auto"|"gpu"|"cpu"|"directml"|"wgpu"} -> {"damage"|"region", …}. Erases it and fills it with Manga LaMa at its best (a stroke's hole grows over the ink it touches, nearby letters are hidden from the model, a fill meeting flat paper takes its tone, the edge feathers in; never the lite model; crops at full resolution up to 1024 px on a GPU, 768 on a CPU, 512 on phones; 128 px of context), on the target layer, as one undo step ("Remove with AI"). A background job; the GPU's failure retries on the CPU."#,
+        params: r#"{"strokes"?: [[[x,y,pressure?],…],…] or "points"?: [[x,y],…] (what was painted, with "size": px, as paint.remove; a stroke around an object removes what it encloses), else the selection, "sampleAllLayers"?: bool, "layer"?: id, "allowDownload"?: bool (fetch Manga LaMa, about 100 MB, when it isn't on this device)} -> {"damage"|"region", …}. Erases it and fills it as edit.inpaintAi fills a selection, with fixed options (Manga LaMa at best quality, its default working side and margin; model, quality, device, maxSide, margin, threads and keepLoaded params are ignored), on the target layer, as one undo step ("Remove with AI"). A background job; the GPU's failure retries on the CPU."#,
         enabled,
         run: remove_ai,
         journal: true,
@@ -92,15 +79,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_run_is_manga_lama_at_its_best() {
-        let s = Session::new();
-        let q = lama_params(&s, &json!({"model": "migan-512", "quality": "fast", "maxSide": 64, "strokes": [[[1, 2]]]})).unwrap();
-        assert_eq!(q["model"], "manga-lama");
-        assert_eq!(q["quality"], "best");
-        assert!([512, 768, 1024].contains(&q["maxSide"].as_u64().unwrap()), "{}", q["maxSide"]);
-        assert_eq!(q["margin"], 128);
+    fn every_run_is_manga_lama_at_best_whatever_the_options_say() {
+        let dialog = json!({"model": "migan-512", "quality": "fast", "device": "cpu", "maxSide": 64, "margin": 8, "threads": 2, "keepLoaded": false, "strokes": [[[1, 2]]], "ai": false});
+        let q = lama_params(&dialog).unwrap();
+        assert_eq!((q["model"].as_str(), q["quality"].as_str()), (Some("manga-lama"), Some("best")));
+        for k in ["device", "maxSide", "margin", "threads", "keepLoaded", "ai"] {
+            assert!(!q.contains_key(k), "{k} is fixed");
+        }
         assert!(q.contains_key("strokes"), "the painted strokes go through");
-        assert!(lama_params(&s, &json!([1])).is_err());
+        assert_eq!(lama_params(&json!({})).unwrap(), q.into_iter().filter(|(k, _)| k != "strokes").collect());
+        assert!(lama_params(&json!([1])).is_err());
     }
 
     use std::sync::Arc;
@@ -165,7 +153,7 @@ mod tests {
         let mut s = lettered(Arc::new(FakeInpainter::default()));
         s.execute(ID, stroke.clone()).unwrap();
         for (x, y) in [(61, 41), (66, 69), (87, 41), (87, 55), (80, 69)] {
-            assert_eq!(grey_at(&s, x, y), 1.0, "the word is gone, its paper white, at {x},{y}");
+            assert!(grey_at(&s, x, y) > 0.9, "the word is gone, at {x},{y}");
         }
         assert_eq!(grey_at(&s, 126, 55), 0.0, "the next word stays");
         assert_eq!(grey_at(&s, 30, 74), 0.0, "the line stays");
@@ -205,15 +193,57 @@ mod tests {
         assert_eq!(s.active().unwrap().doc.walk().len(), layers, "no new layer");
     }
 
+    /// The layer's pixels.
+    fn pixels(s: &Session) -> Vec<f32> {
+        let st = s.active().unwrap();
+        let surf = st.doc.layer(st.active_layer.unwrap()).unwrap().surface().unwrap();
+        surf.read_region(st.doc.bounds())
+    }
+
+    /// A stroke's hole is filled exactly as Clean Selected Area with AI fills a selection of that
+    /// shape: the same context reaches the model (the fake fills with the mean of what it sees),
+    /// and nothing around the hole (an SFX's outline, hair) is taken or blended. Before, the stroke
+    /// read another window, grew over the light around it and feathered and flattened the fill.
     #[test]
-    fn a_phone_runs_one_512_crop_at_a_time() {
-        let mut s = Session::new();
-        let phone = DeviceProfile { gpu: GpuClass::Integrated, memory_gb: Some(4.0), cores: Some(8), mobile: true, ..Default::default() };
-        s.set_ai_upscaler(Some(Arc::new(FakeUpscaler { profile: std::sync::Mutex::new(phone), ..Default::default() })));
-        assert_eq!(lama_params(&s, &json!({})).unwrap()["maxSide"], 512);
-        let desk = DeviceProfile { gpu: GpuClass::Discrete, memory_gb: Some(16.0), cores: Some(8), ..Default::default() };
-        s.set_ai_upscaler(Some(Arc::new(FakeUpscaler { profile: std::sync::Mutex::new(desk), ..Default::default() })));
-        assert_eq!(lama_params(&s, &json!({})).unwrap()["maxSide"], 1024);
+    fn a_stroke_fills_as_clean_selected_area_with_ai_fills_its_hole() {
+        // Dark hair strands (every 4th column dark, 2 px wide) with a white-outlined black word.
+        let draw = |s: &mut Session| {
+            s.execute("file.new", json!({"width": 400, "height": 300, "background": "white"})).unwrap();
+            s.edit("art", |doc, active| {
+                let surf = doc.layer_mut(active.unwrap()).unwrap().surface_mut().unwrap();
+                for x in (0..400).step_by(4) {
+                    surf.fill_rect(Rect::new(x, 0, x + 2, 300), &[0.1, 0.1, 0.1, 1.0]);
+                }
+                surf.fill_rect(Rect::new(161, 141, 241, 181), &[1.0, 1.0, 1.0, 1.0]);
+                surf.fill_rect(Rect::new(167, 147, 235, 175), &[0.0, 0.0, 0.0, 1.0]);
+                Ok(())
+            })
+            .unwrap();
+        };
+        let mut a = page(Arc::new(FakeInpainter::default()), true);
+        draw(&mut a);
+        let before = pixels(&a);
+        a.execute(ID, json!({"strokes": [[[171, 161], [228, 163]]], "size": 23})).unwrap();
+        let after = pixels(&a);
+        // The hole: what changed (the fake's mean is grey, unlike any pixel of the page).
+        let hole: Vec<bool> = before.as_chunks::<4>().0.iter().zip(after.as_chunks::<4>().0).map(|(b, a)| b != a).collect();
+        let n = hole.iter().filter(|m| **m).count();
+        assert!(n > 60 * 24 && n < 120 * 50, "the stroke's hole, grown a little: {n} px");
+        assert!(!hole[131 * 400 + 201] && !hole[191 * 400 + 201], "the hair beyond the outline stays");
+        let mut b = page(Arc::new(FakeInpainter::default()), true);
+        draw(&mut b);
+        b.edit("sel", |doc, _| {
+            let mut sel = photocraft_raster::Surface::new(photocraft_color::PixelFormat::GRAY8);
+            for (i, _) in hole.iter().enumerate().filter(|(_, m)| **m) {
+                let (x, y) = ((i % 400) as i32, (i / 400) as i32);
+                sel.fill_rect(Rect::new(x, y, x + 1, y + 1), &[1.0]);
+            }
+            doc.selection = Some(sel);
+            Ok(())
+        })
+        .unwrap();
+        b.execute(crate::ai_inpaint_cmds::ID, json!({"output": "current", "model": "manga-lama", "quality": "best"})).unwrap();
+        assert!(pixels(&b) == after, "the same fill, pixel for pixel");
     }
 
     #[test]
