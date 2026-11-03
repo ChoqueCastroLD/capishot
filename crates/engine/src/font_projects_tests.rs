@@ -81,7 +81,8 @@ fn a_capiproj_round_trips_without_pages_and_without_restricted_fonts() {
         file("ComicPro.otf", "Comic Pro", with_fs_type(INTER, 0x0002)),
     ];
     let typer = json!({"styles": []});
-    let out = export(&p, &files, &[], false, Some(&typer), None).unwrap();
+    let aliases: BTreeMap<String, String> = [("Inter".to_string(), "Globos".to_string()), ("Unused".to_string(), "X".to_string())].into();
+    let out = export(&p, &files, &[], false, Some(&typer), None, &aliases).unwrap();
     assert_eq!(out.restricted, ["Comic Pro"], "the restricted font is left out");
     assert_eq!(out.referenced, ["Arial"], "a system font is only named");
     assert!(!out.large);
@@ -101,11 +102,12 @@ fn a_capiproj_round_trips_without_pages_and_without_restricted_fonts() {
     assert!(back.fonts.iter().any(|(n, b)| n == "Inter-Regular.ttf" && b == INTER));
     assert_eq!(back.referenced, ["Comic Pro", "Arial"]);
     assert_eq!(back.typer, Some(typer));
+    assert_eq!(back.aliases, [("Inter".to_string(), "Globos".to_string())].into(), "the project's fonts' aliases go with them");
     assert!(back.project.fonts.iter().find(|f| f.family == "Inter").unwrap().sha256.is_some());
     // Asked for, the restricted font goes in too.
-    assert!(export(&p, &files, &[], true, None, None).unwrap().restricted.is_empty());
+    assert!(export(&p, &files, &[], true, None, None, &Default::default()).unwrap().restricted.is_empty());
     // Unticked fonts stay out.
-    assert_eq!(export(&p, &files, &["JetBrains Mono".into()], false, None, None).unwrap().referenced, ["JetBrains Mono", "Arial"]);
+    assert_eq!(export(&p, &files, &["JetBrains Mono".into()], false, None, None, &Default::default()).unwrap().referenced, ["JetBrains Mono", "Arial"]);
 }
 
 #[test]
@@ -122,6 +124,7 @@ fn a_damaged_or_foreign_archive_is_refused() {
         false,
         None,
         None,
+        &Default::default(),
     )
     .unwrap()
     .bytes;

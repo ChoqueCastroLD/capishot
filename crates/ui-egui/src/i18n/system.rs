@@ -2,10 +2,26 @@
 
 use super::{Lang, lang_from_tag};
 
-#[cfg(not(target_arch = "wasm32"))]
 const MAX_SYSTEM_TAGS: usize = 64;
-#[cfg(not(target_arch = "wasm32"))]
 const MAX_SYSTEM_TAG_BYTES: usize = 128;
+
+/// The browser's preferred languages (`navigator.languages`, in order), handed over by the web
+/// shell before the first frame: wasm has no OS locale to ask.
+#[cfg(not(test))]
+static PROVIDED: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+
+/// Set the system language tags from outside (the web shell passes `navigator.languages`). Only
+/// the first call counts, and only before anything resolved the system language.
+pub fn provide_system_tags(tags: impl IntoIterator<Item = String>) {
+    #[cfg(not(test))]
+    {
+        let _ = PROVIDED.set(bounded_tags(tags));
+    }
+    #[cfg(test)]
+    {
+        drop(tags);
+    }
+}
 
 /// Resolve Auto against the current registry. Cache the OS's tags, rather than a language,
 /// so matching remains separate from platform detection.
@@ -18,7 +34,7 @@ pub fn system_lang() -> Lang {
     #[cfg(not(test))]
     {
         static SYSTEM: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
-        resolve(SYSTEM.get_or_init(detect_system_tags))
+        resolve(SYSTEM.get_or_init(|| PROVIDED.get().cloned().unwrap_or_else(detect_system_tags)))
     }
 }
 
@@ -26,7 +42,6 @@ fn resolve(tags: &[String]) -> Lang {
     tags.iter().find_map(|tag| lang_from_tag(tag)).unwrap_or(Lang::EN)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn bounded_tags(tags: impl IntoIterator<Item = String>) -> Vec<String> {
     tags.into_iter()
         .take(MAX_SYSTEM_TAGS)
@@ -94,7 +109,13 @@ mod tests {
             (vec!["sv-SE", "ar-SA"], "en"),
             (vec!["sv-SE", "sw-KE"], "en"),
             (vec!["de-AT", "en-US"], "de"),
-            (vec!["pt-PT"], "pt-br"),
+            (vec!["pt-PT"], "pt-pt"),
+            (vec!["pt-BR", "en-US"], "pt-br"),
+            (vec!["pt"], "pt-br"),
+            (vec!["es-AR", "en-US"], "es"),
+            (vec!["es-419", "en"], "es"),
+            (vec!["en-GB", "es-ES"], "en"),
+            (vec!["xx-YY", "tlh"], "en"),
             (vec!["it-IT", "en-US"], "it"),
             (vec!["nl-BE", "fr-BE"], "nl"),
             (vec![], "en"),

@@ -299,9 +299,14 @@ pub fn top(app: &PhotocraftApp) -> Option<u64> {
 pub fn sample_at(app: &mut PhotocraftApp, x: f64, y: f64) {
     let Some(id) = top(app) else { return };
     let Some(rgb) = crate::canvas::composite_color(app, x, y) else { return };
-    if let Some(d) = app.ui.dialog_mut(id) {
-        set_rgb(&mut d.fields, rgb, Keep::Nothing);
-    }
+    let _ = set_color(app, id, rgb);
+}
+
+/// The Color Picker `id`'s new colour becomes `rgb` (its eyedropper button's pick).
+pub fn set_color(app: &mut PhotocraftApp, id: u64, rgb: [f32; 3]) -> Result<(), String> {
+    let d = app.ui.dialog_mut(id).filter(|d| owns(&d.fields)).ok_or("the Color Picker closed")?;
+    set_rgb(&mut d.fields, rgb, Keep::Nothing);
+    Ok(())
 }
 
 /// The colour in every model the dialog shows.
@@ -451,9 +456,12 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) -> Option<bool> {
             // Under the colour field, not in the action column: the dialog must still fit a
             // 760 x 480 window.
             ui.add_space(4.0);
-            if let Some(rgb) = crate::screen_picker::button(ui, ui.scope_id().with("screen-color")) {
-                set_rgb(f, rgb, Keep::Nothing);
-            }
+            ui.horizontal(|ui| {
+                if let Some(rgb) = crate::screen_picker::button(ui, ui.scope_id().with("screen-color")) {
+                    set_rgb(f, rgb, Keep::Nothing);
+                }
+                eyedrop_button(ui, f, 24.0);
+            });
         });
         ui.vertical(|ui| {
             ui.horizontal_top(|ui| {
@@ -508,6 +516,7 @@ fn body_narrow(ui: &mut egui::Ui, f: &mut Map<String, Value>) -> Option<bool> {
             if widgets::secondary_button(ui, tl!("Add to Swatches"), 0.0).clicked() {
                 f.insert("__addSwatch".into(), json!(true));
             }
+            eyedrop_button(ui, f, 36.0);
             let mut web = f.get("__webOnly").and_then(Value::as_bool).unwrap_or(false);
             if widgets::checkbox(ui, &mut web, tl!("Only Web Colors")).changed() {
                 f.insert("__webOnly".into(), json!(web));
@@ -518,6 +527,21 @@ fn body_narrow(ui: &mut egui::Ui, f: &mut Map<String, Value>) -> Option<bool> {
     let mode = f.get("__mode").and_then(Value::as_str).unwrap_or("h").to_string();
     egui::ScrollArea::horizontal().id_salt("cp-values").show(ui, |ui| fields(ui, f, &mode, &current(f)));
     outcome
+}
+
+/// Set by the dialog host before [`body`]: is this picker's eyedropper armed?
+pub const EYEDROP_ON: &str = "__eyedropOn";
+/// Set by [`body`] when its eyedropper button was clicked (the host arms or disarms it).
+pub const EYEDROP_TOGGLE: &str = "__eyedropToggle";
+
+/// The eyedropper button: the next press on the image picks the new colour.
+fn eyedrop_button(ui: &mut egui::Ui, f: &mut Map<String, Value>, side: f32) {
+    let on = f.get(EYEDROP_ON).and_then(Value::as_bool).unwrap_or(false);
+    let r = crate::icons::button(ui, "pipette", side, on, tl!("Pick a color from the image"));
+    crate::touch_ui::note_rect(ui.ctx(), "colorPickerDrop", r.rect);
+    if r.clicked() {
+        f.insert(EYEDROP_TOGGLE.into(), json!(true));
+    }
 }
 
 /// The Color Picker's colour field and component slider, editing the colour in f.

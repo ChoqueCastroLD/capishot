@@ -417,7 +417,8 @@ pub struct Exported {
 /// Packs `project` as a `.capiproj`: its manifest, the font `files` it uses (each once, by
 /// SHA-256; restricted ones only with `include_restricted`), and `typer` (TypeR's style library)
 /// and `bubble` (Bubble Type's styles) when given. `skip` lists families not to pack (the
-/// export dialog's unticked ones).
+/// export dialog's unticked ones). `aliases` (family → the name the user gave it) go with the
+/// fonts they name.
 pub fn export(
     project: &Project,
     files: &[FontFile],
@@ -425,6 +426,7 @@ pub fn export(
     include_restricted: bool,
     typer: Option<&Value>,
     bubble: Option<&Value>,
+    aliases: &BTreeMap<String, String>,
 ) -> Result<Exported> {
     let mut zip = photocraft_format::zip::ZipWriter::new();
     let mut fonts_json = Vec::new();
@@ -434,6 +436,9 @@ pub fn export(
     for f in &project.fonts {
         let file = files.iter().find(|x| x.families.iter().any(|fam| fam == &f.family));
         let mut entry = json!({"family": f.family, "role": f.role});
+        if let Some(alias) = aliases.get(&f.family).filter(|a| !a.trim().is_empty()) {
+            entry["alias"] = json!(alias);
+        }
         match file {
             Some(file) if skip.contains(&f.family) => {
                 let _ = file;
@@ -513,6 +518,8 @@ pub struct Imported {
     pub bubble: Option<Value>,
     /// Families the project uses but doesn't carry (to install separately).
     pub referenced: Vec<String>,
+    /// The display names its fonts were given (family → alias).
+    pub aliases: BTreeMap<String, String>,
 }
 
 /// Reads a `.capiproj`. Only the manifest, font files under `fonts/` and the two style files are
@@ -538,8 +545,14 @@ pub fn import(bytes: &[u8]) -> Result<Imported> {
     let mut fonts = Vec::new();
     let mut referenced = Vec::new();
     let mut seen = std::collections::HashSet::new();
+    let mut aliases = BTreeMap::new();
     for f in manifest["fonts"].as_array().into_iter().flatten() {
         let family = f["family"].as_str().unwrap_or_default().to_string();
+        if let Some(alias) = f["alias"].as_str().map(str::trim).filter(|a| !a.is_empty() && a.chars().count() <= 120 && !a.chars().any(char::is_control))
+            && !family.is_empty()
+        {
+            aliases.insert(family.clone(), alias.to_string());
+        }
         let Some(path) = f["file"].as_str().filter(|p| p.starts_with("fonts/") && !p.contains("..")) else {
             referenced.push(family);
             continue;
@@ -557,7 +570,7 @@ pub fn import(bytes: &[u8]) -> Result<Imported> {
         fonts.push((name, data));
     }
     let read_json = |name: &str| zip.read_by_name(name, 16 << 20).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
-    Ok(Imported { project, fonts, typer: read_json("typer.json"), bubble: read_json("bubbleStyles.json"), referenced })
+    Ok(Imported { project, fonts, typer: read_json("typer.json"), bubble: read_json("bubbleStyles.json"), referenced, aliases })
 }
 
 /// Adds (or replaces, by id) an imported project.

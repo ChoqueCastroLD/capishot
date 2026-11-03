@@ -107,12 +107,28 @@ fn spanish_resolves_and_pluralises() {
 #[test]
 fn brazilian_portuguese_resolves_and_pluralises() {
     let pt = Lang::from_code("pt-br").expect("pt-br registered");
-    for tag in ["pt", "pt-BR", "pt_BR.UTF-8", "pt-PT", "pt_PT.UTF-8"] {
+    for tag in ["pt", "pt-BR", "pt_BR.UTF-8", "pt-Latn-BR"] {
         assert_eq!(lang_from_tag(tag), Some(pt), "{tag}");
     }
+    let pt_pt = Lang::from_code("pt-pt").expect("pt-pt registered");
+    for tag in ["pt-PT", "pt_PT.UTF-8", "pt-AO", "pt-MZ"] {
+        assert_eq!(lang_from_tag(tag), Some(pt_pt), "{tag}");
+    }
     assert_eq!(candidates("pt_PT"), ["pt-pt", "pt-br", "pt"]);
+    assert_eq!(candidates("pt-AO"), ["pt-ao", "pt-pt", "pt-br", "pt"]);
     let forms: Vec<usize> = [0, 1, 2].into_iter().map(pt.0.plural).collect();
     assert_eq!(forms, [0, 0, 1]);
+}
+#[test]
+fn european_portuguese_falls_back_to_brazilian_strings() {
+    let pt_pt = Lang::from_code("pt-pt").expect("pt-pt registered");
+    let pt_br = Lang::from_code("pt-br").expect("pt-br registered");
+    let br = parse_entries(&pt_br.0.text()).0;
+    let own: std::collections::HashSet<(String, String)> = parse_entries(&pt_pt.0.text()).0.into_iter().map(|(c, s, _)| (c, s)).collect();
+    let (_, src, tr_br) = br.iter().find(|(c, s, _)| c.is_empty() && !own.contains(&(c.clone(), s.clone()))).expect("a string only pt-br has");
+    assert_eq!(tr(pt_pt, src), tr_br.as_str(), "missing pt-pt string shows pt-br");
+    let (_, src, tr_pt) = parse_entries(&pt_pt.0.text()).0.into_iter().find(|(c, _, _)| c.is_empty()).expect("a pt-pt string");
+    assert_eq!(tr(pt_pt, &src), tr_pt, "own string wins");
 }
 #[test]
 fn catalog_kinds_are_parsed_and_looked_up() {

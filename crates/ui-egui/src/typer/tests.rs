@@ -548,3 +548,108 @@ fn a_short_group_compacts_the_preview() {
     let h = harness(app(), vec2(320.0, super::COMPACT_BELOW + 100.0));
     assert!(h.query_by_label("Regular: Hello there.").is_none(), "tall enough: the line in its font");
 }
+
+/// A pointer drag from `from` to `to` in steps; a finger (`hold`) rests first, as a press and hold.
+fn drag(h: &mut Harness<'static, PhotocraftApp>, from: Pos2, to: Pos2, hold: bool) {
+    h.input_mut().events.push(Event::PointerMoved(from));
+    h.step();
+    h.input_mut().events.push(Event::PointerButton { pos: from, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    h.step();
+    if hold {
+        for _ in 0..45 {
+            h.step();
+        }
+    }
+    for i in 1..=10 {
+        let p = from + (to - from) * (i as f32 / 10.0);
+        h.input_mut().events.push(Event::PointerMoved(p));
+        h.step();
+    }
+    h.input_mut().events.push(Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    h.run_steps(3);
+}
+
+fn noted(h: &Harness<'static, PhotocraftApp>, label: &str) -> Pos2 {
+    crate::touch_ui::noted_rect(&h.ctx, label)
+        .unwrap_or_else(|| {
+            let all: Vec<(String, [f32; 4])> = h.ctx.data(|d| d.get_temp(egui::Id::unique("touch-ui-rects"))).unwrap_or_default();
+            panic!("{label} not drawn: {:?}", all.iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>())
+        })
+        .center()
+}
+
+/// The style named `name`'s id (an import gives styles and folders ids of its own).
+fn style_key(app: &PhotocraftApp, name: &str) -> String {
+    app.session.typer.state.library.styles.iter().find(|s| s.name == name).unwrap().id.to_string()
+}
+
+fn folder_key(app: &PhotocraftApp, name: &str) -> String {
+    app.session.typer.state.library.folders.iter().find(|f| f.name == name).unwrap().id.to_string()
+}
+
+/// The name of the folder the style `name` is in.
+fn folder_of(app: &PhotocraftApp, name: &str) -> Option<String> {
+    let lib = &app.session.typer.state.library;
+    let style = lib.styles.iter().find(|s| s.name == name)?;
+    style.folder.as_ref().and_then(|f| lib.folder(f)).map(|f| f.name.clone())
+}
+
+fn folder_names(app: &PhotocraftApp) -> Vec<String> {
+    app.session.typer.state.library.flatten_tree().into_iter().map(|f| f.name).collect()
+}
+
+#[test]
+fn a_style_dragged_onto_a_folder_moves_there_and_folders_reorder_by_drag() {
+    let mut app = app();
+    app.run("typer.folder.save", json!({"folder": {"id": "f2", "name": "Series B"}})).unwrap();
+    let mut h = harness(app, vec2(320.0, 560.0));
+    let key = |h: &Harness<'static, PhotocraftApp>, kind: &str, name: &str| {
+        if kind == "s" { format!("typerStyle:{}", style_key(h.state(), name)) } else { format!("typerFolder:{}", folder_key(h.state(), name)) }
+    };
+    let (from, to) = (noted(&h, &key(&h, "s", "Shout")), noted(&h, &key(&h, "f", "Series B")));
+    drag(&mut h, from, to, false);
+    assert_eq!(folder_of(h.state(), "Shout").as_deref(), Some("Series B"), "moved by a mouse drag");
+    // Kept in the library's export (and so in the workspace).
+    let export = h.state_mut().run("typer.library.export", json!({})).unwrap();
+    let mut back = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    back.run("typer.library.import", json!({"json": export})).unwrap();
+    assert_eq!(folder_of(&back, "Shout").as_deref(), Some("Series B"), "kept in the library's export");
+    // Series B dragged onto Series A goes before it.
+    assert_eq!(folder_names(h.state()), ["Series A", "Series B"]);
+    let (from, to) = (noted(&h, &key(&h, "f", "Series B")), noted(&h, &key(&h, "f", "Series A")));
+    drag(&mut h, from, to, false);
+    assert_eq!(folder_names(h.state()), ["Series B", "Series A"]);
+}
+
+#[test]
+fn a_finger_presses_and_holds_a_style_then_drags_it_onto_a_folder() {
+    let mut app = app();
+    app.run("typer.folder.save", json!({"folder": {"id": "f2", "name": "Series B"}})).unwrap();
+    let mut h = harness(app, vec2(320.0, 560.0));
+    // The touch interface is on (`touch_ui::begin_frame` runs in the app's frame).
+    h.ctx.data_mut(|d| d.insert_temp(egui::Id::unique("touch-ui-flag"), true));
+    h.run_steps(2);
+    // A quick drag (no hold) scrolls rather than moves.
+    let style = format!("typerStyle:{}", style_key(h.state(), "Regular"));
+    let folder = format!("typerFolder:{}", folder_key(h.state(), "Series B"));
+    let (from, to) = (noted(&h, &style), noted(&h, &folder));
+    drag(&mut h, from, to, false);
+    assert_eq!(folder_of(h.state(), "Regular").as_deref(), Some("Series A"));
+    let (from, to) = (noted(&h, &style), noted(&h, &folder));
+    drag(&mut h, from, to, true);
+    assert_eq!(folder_of(h.state(), "Regular").as_deref(), Some("Series B"), "press, hold, drag");
+}
+
+#[test]
+fn the_style_menu_moves_it_to_a_folder() {
+    let mut app = app();
+    app.run("typer.folder.save", json!({"folder": {"id": "f2", "name": "Series B"}})).unwrap();
+    let mut h = harness(app, vec2(320.0, 560.0));
+    h.get_by_label("Regular").click_secondary();
+    h.run_steps(2);
+    h.get_by_label("Move to folder").click();
+    h.run_steps(2);
+    h.get_by_label("Series B").click();
+    h.run_steps(3);
+    assert_eq!(folder_of(h.state(), "Regular").as_deref(), Some("Series B"));
+}

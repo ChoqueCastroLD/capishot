@@ -21,7 +21,7 @@ use crate::state::{BoxResize, TextEdit};
 
 mod defaults;
 mod editing;
-mod effects;
+pub(crate) mod effects;
 mod fonts;
 mod ime;
 mod ime_edit;
@@ -32,7 +32,7 @@ mod options_bar;
 mod overlay;
 mod panel;
 mod pointer;
-mod stroke;
+pub(crate) mod stroke;
 
 use defaults::apply;
 #[cfg(test)]
@@ -56,7 +56,7 @@ pub(crate) use fonts::{Axis, axis_value, slider_axes};
 use fonts::{FONT_LIST_HEIGHT, font_picker_in, preview_text, style_names, wheel_family_index};
 use fonts::{FontFieldEdit, accept_row, font_labels_id, font_menu_rows};
 pub(crate) use fonts::{FontLibrary, family_picker_in, phone_menu_width, user_family_set, font_picker, font_picker_salted, fonts_ready, selected_style};
-pub use fonts::{families, invalidate_families, style_label, styles, sync_font_names, warm_fonts};
+pub use fonts::{families, invalidate_families, style_label, styles, sync_font_labels, sync_font_names, warm_fonts};
 pub(crate) use ime::{ImeState, controls_only, finish_reset_logic, finish_reset_pass, in_ui_pass, install_reset_hooks};
 #[cfg(test)]
 use ime::{IncomingComposition, ResetPhase};

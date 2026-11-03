@@ -102,6 +102,14 @@ pub(crate) fn set_type_stroke(app: &mut PhotocraftApp, s: TypeStroke, key: &str)
     Ok(())
 }
 
+/// The eyedropper's pick for the stroke colour, in undo step `key`: the stroke is made (or
+/// edited) and shown in it.
+pub(crate) fn set_color(app: &mut PhotocraftApp, ctx: &egui::Context, key: &str, rgb: [f32; 3]) -> Result<(), String> {
+    let (_, s) = shown_stroke(app).ok_or("no type layer")?;
+    ctx.data_mut(|d| d.remove_temp::<Option<TypeStroke>>(egui::Id::unique("type-stroke-pending")));
+    set_type_stroke(app, TypeStroke { on: true, color: rgb, ..s }, key)
+}
+
 /// The quick colours: white, black, red, yellow, blue, then the text colour's opposite.
 fn stroke_chips(app: &PhotocraftApp) -> [[f32; 3]; 6] {
     [[1.0, 1.0, 1.0], [0.0, 0.0, 0.0], [0.9, 0.16, 0.16], [1.0, 0.85, 0.1], [0.12, 0.45, 0.9], text_inverse(app)]
@@ -195,6 +203,8 @@ fn stroke_popover(app: &mut PhotocraftApp, ui: &mut egui::Ui, button: &egui::Res
                 if r.clicked() {
                     pick = true;
                 }
+                let r = crate::eyedrop::button(ui, crate::eyedrop::Target::TypeStroke { key: key.clone() }, h);
+                crate::touch_ui::note_rect(ui.ctx(), "typeStrokeColorDrop", r.rect);
                 for (i, c) in stroke_chips(app).into_iter().enumerate() {
                     let (rect, resp) = ui.allocate_exact_size(egui::vec2(h * 0.8, h * 0.8), egui::Sense::click());
                     let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
@@ -270,10 +280,15 @@ fn stroke_popover(app: &mut PhotocraftApp, ui: &mut egui::Ui, button: &egui::Res
         ui.data_mut(|d| d.insert_temp(open_id, false));
         return;
     }
-    let outside = ui.input(|i| i.pointer.any_pressed())
+    // Armed, the eyedropper's press on the image is a pick, not a dismissal.
+    let outside = !crate::eyedrop::owns_pointer(ui.ctx())
+        && ui.input(|i| i.pointer.any_pressed())
         && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| !area.response.rect.contains(p) && !button.rect.contains(p));
     if outside || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
         ui.data_mut(|d| d.insert_temp(open_id, false));
+        if matches!(crate::eyedrop::armed(ui.ctx()), Some(crate::eyedrop::Target::TypeStroke { .. })) {
+            crate::eyedrop::cancel(ui.ctx());
+        }
     }
 }
 

@@ -1,8 +1,10 @@
 //! The styles block (TypeR `stylesBlock.jsx`): the style library as a folder tree. Each style row
 //! shows its text colour, its tag chip in the tag colour, its name drawn in its font and its size
 //! or size presets, with a quick −/+ on hover. A click selects a style, a double-click edits it,
-//! a right-click copies, pastes, duplicates, applies or deletes it. Folder headers collapse and
-//! have their own menu (edit, add a style or subfolder, duplicate, export, delete).
+//! a right-click copies, pastes, duplicates, applies, moves to a folder or deletes it. Folder
+//! headers collapse and have their own menu (edit, add a style or subfolder, move up or down,
+//! duplicate, export, delete). A style dragged onto a folder (a mouse drag, or a finger's press
+//! and hold, then drag) moves there; a folder dragged onto a sibling goes before it.
 
 use egui::{Color32, Rect, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
 use photocraft_typer::{Id, presets};
@@ -46,6 +48,38 @@ enum Action {
     NewFolder(Option<Value>),
     ExportFolder(Value, String),
     Toggle(String),
+    /// A style into a folder (`None`: Unsorted).
+    MoveStyle(Value, Option<Value>),
+    /// A parent's folders in a new order.
+    OrderFolders(Option<Value>, Vec<Value>),
+}
+
+/// A style dragged with the mouse.
+#[derive(Clone)]
+struct StyleDrag(Value);
+
+/// A folder dragged with the mouse: its id and its parent's.
+#[derive(Clone)]
+struct FolderDrag(Value, Option<Value>);
+
+/// The list, for a finger's press-and-hold drag ([`crate::touch_drag`]).
+fn drag_list() -> egui::Id {
+    egui::Id::unique("typer-styles-touch-drag")
+}
+
+/// Where a drag can be dropped: a folder header (`None`: Unsorted), its parent.
+struct Drop {
+    rect: Rect,
+    folder: Option<Value>,
+    parent: Option<Value>,
+}
+
+/// `order` (sibling folder ids) with `moved` put just before `before`.
+fn reordered(order: &[Value], moved: &Value, before: &Value) -> Vec<Value> {
+    let mut v: Vec<Value> = order.iter().filter(|o| *o != moved).cloned().collect();
+    let at = v.iter().position(|o| o == before).unwrap_or(v.len());
+    v.insert(at, moved.clone());
+    v
 }
 
 fn unit_label(unit: Option<&str>) -> &'static str {
@@ -102,76 +136,155 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, height: f32) {
     let last_id = egui::Id::unique("typer-styles-last-current");
     let scroll_to_current = auto_scroll && ctx.data(|d| d.get_temp::<Option<String>>(last_id)).flatten() != current;
     ctx.data_mut(|d| d.insert_temp(last_id, current.clone()));
-    egui::ScrollArea::vertical().id_salt("typer-styles").min_scrolled_height(height).max_height(height).auto_shrink([false, false]).show(ui, |ui| {
-        ui.spacing_mut().item_spacing.y = 1.0;
-        if rows.is_empty() && tree.is_empty() {
-            ui.add_space(8.0);
-            ui.add(
-                egui::Label::new(
-                    RichText::new(tl!("Add styles to apply to the pasted text: + below, or import a TypeR library.")).color(t.text_faint).size(11.5),
-                )
-                .wrap(),
-            );
-            return;
-        }
-        // Unsorted first, as TypeR matches its tags first.
-        let unsorted: Vec<&Row> = rows.iter().filter(|r| r.folder.is_none()).collect();
-        if !unsorted.is_empty() || tree.is_empty() {
-            let open = !collapsed.iter().any(|c| c.is_empty());
-            let has_current = unsorted.iter().any(|r| Some(&r.key) == current.as_ref());
-            header(ui, &t, None, tl!("Unsorted"), 0, unsorted.len(), has_current, open, has_clip, &mut actions);
-            if open {
-                for r in &unsorted {
+    // Each parent's folders in order (for reordering by drag or Move Up / Down).
+    let siblings = |parent: Option<&Id>| -> Vec<Value> { tree.iter().filter(|f| f.parent_id.as_ref() == parent).map(|f| f.id.to_value()).collect() };
+    let folder_list: Vec<(Value, String)> = tree.iter().map(|f| (f.id.to_value(), f.label.clone())).collect();
+    let mut drops: Vec<Drop> = Vec::new();
+    let finger = crate::touch_drag::moving(&ctx, drag_list()).map(|(_, at)| at);
+    let scroll = !crate::touch_drag::dragging(&ctx, drag_list());
+    egui::ScrollArea::vertical()
+        .id_salt("typer-styles")
+        .min_scrolled_height(height)
+        .max_height(height)
+        .auto_shrink([false, false])
+        .scroll_source(if scroll { egui::scroll_area::ScrollSource::default() } else { egui::scroll_area::ScrollSource::NONE })
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 1.0;
+            if rows.is_empty() && tree.is_empty() {
+                ui.add_space(8.0);
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(tl!("Add styles to apply to the pasted text: + below, or import a TypeR library.")).color(t.text_faint).size(11.5),
+                    )
+                    .wrap(),
+                );
+                return;
+            }
+            // Unsorted first, as TypeR matches its tags first.
+            let unsorted: Vec<&Row> = rows.iter().filter(|r| r.folder.is_none()).collect();
+            if !unsorted.is_empty() || tree.is_empty() {
+                let open = !collapsed.iter().any(|c| c.is_empty());
+                let has_current = unsorted.iter().any(|r| Some(&r.key) == current.as_ref());
+                let h = header(ui, &t, None, tl!("Unsorted"), 0, unsorted.len(), has_current, open, has_clip, &[], None, &mut actions);
+                drop_on(&h, None, None, finger, &mut actions);
+                drops.push(Drop { rect: h.rect, folder: None, parent: None });
+                if open {
+                    for r in &unsorted {
+                        style_row(
+                            ui,
+                            &t,
+                            r,
+                            1,
+                            current.as_ref() == Some(&r.key),
+                            default.as_ref() == Some(&r.key),
+                            quick,
+                            step,
+                            has_clip,
+                            scroll_to_current,
+                            &folder_list,
+                            &mut actions,
+                        );
+                    }
+                }
+            }
+            let mut hidden_below: Option<usize> = None;
+            for f in &tree {
+                if hidden_below.is_some_and(|d| f.depth > d) {
+                    continue;
+                }
+                hidden_below = None;
+                let key = f.id.to_string();
+                let open = !collapsed.contains(&key);
+                let members: Vec<&Row> = rows.iter().filter(|r| r.folder.as_ref() == Some(&f.id)).collect();
+                let has_current = members.iter().any(|r| Some(&r.key) == current.as_ref());
+                let order = siblings(f.parent_id.as_ref());
+                let parent = f.parent_id.as_ref().map(Id::to_value);
+                let h = header(
+                    ui,
+                    &t,
+                    Some((&f.id.to_value(), &key)),
+                    &f.name,
+                    f.depth,
+                    members.len(),
+                    has_current,
+                    open,
+                    has_clip,
+                    &order,
+                    parent.clone(),
+                    &mut actions,
+                );
+                if h.drag_started() && !crate::touch_ui::flagged(&ctx) {
+                    h.dnd_set_drag_payload(FolderDrag(f.id.to_value(), parent.clone()));
+                }
+                if crate::touch_ui::flagged(&ctx) && crate::touch_drag::held_still(&h) {
+                    crate::touch_drag::start(&ctx, drag_list(), &format!("f:{key}"), &f.name);
+                }
+                drop_on(&h, Some(&f.id.to_value()), Some((&parent, order.as_slice())), finger, &mut actions);
+                drops.push(Drop { rect: h.rect, folder: Some(f.id.to_value()), parent });
+                if !open {
+                    hidden_below = Some(f.depth);
+                    continue;
+                }
+                for r in members {
                     style_row(
                         ui,
                         &t,
                         r,
-                        1,
+                        f.depth + 1,
                         current.as_ref() == Some(&r.key),
                         default.as_ref() == Some(&r.key),
                         quick,
                         step,
                         has_clip,
                         scroll_to_current,
+                        &folder_list,
                         &mut actions,
                     );
                 }
             }
+        });
+    // A finger's drag let go over a header.
+    if let Some((payload, at)) = crate::touch_drag::frame(&ctx, drag_list())
+        && let Some(d) = drops.iter().find(|d| d.rect.contains(at))
+    {
+        if let Some(key) = payload.strip_prefix("s:")
+            && let Some(r) = rows.iter().find(|r| r.key == key)
+        {
+            actions.push(Action::MoveStyle(r.id.clone(), d.folder.clone()));
+        } else if let Some(key) = payload.strip_prefix("f:")
+            && let Some(f) = tree.iter().find(|f| f.id.to_string() == key)
+            && let Some(before) = &d.folder
+            && d.parent == f.parent_id.as_ref().map(Id::to_value)
+        {
+            let order = siblings(f.parent_id.as_ref());
+            actions.push(Action::OrderFolders(d.parent.clone(), reordered(&order, &f.id.to_value(), before)));
         }
-        let mut hidden_below: Option<usize> = None;
-        for f in &tree {
-            if hidden_below.is_some_and(|d| f.depth > d) {
-                continue;
-            }
-            hidden_below = None;
-            let key = f.id.to_string();
-            let open = !collapsed.contains(&key);
-            let members: Vec<&Row> = rows.iter().filter(|r| r.folder.as_ref() == Some(&f.id)).collect();
-            let has_current = members.iter().any(|r| Some(&r.key) == current.as_ref());
-            header(ui, &t, Some((&f.id.to_value(), &key)), &f.name, f.depth, members.len(), has_current, open, has_clip, &mut actions);
-            if !open {
-                hidden_below = Some(f.depth);
-                continue;
-            }
-            for r in members {
-                style_row(
-                    ui,
-                    &t,
-                    r,
-                    f.depth + 1,
-                    current.as_ref() == Some(&r.key),
-                    default.as_ref() == Some(&r.key),
-                    quick,
-                    step,
-                    has_clip,
-                    scroll_to_current,
-                    &mut actions,
-                );
-            }
-        }
-    });
+    }
     for a in actions {
         apply(app, a);
+    }
+}
+
+/// A header as a drop target: a style dropped on it moves into its folder (`folder`; `None`:
+/// Unsorted), a sibling folder (`siblings`: its parent and their order) goes before it. Lit while
+/// something that can drop there is over it.
+fn drop_on(h: &egui::Response, folder: Option<&Value>, siblings: Option<(&Option<Value>, &[Value])>, finger: Option<egui::Pos2>, actions: &mut Vec<Action>) {
+    // `dnd_release_payload` takes whatever is carried: ask for the type that is.
+    let carried_style = egui::DragAndDrop::has_payload_of_type::<StyleDrag>(&h.ctx);
+    if carried_style && let Some(s) = h.dnd_release_payload::<StyleDrag>() {
+        actions.push(Action::MoveStyle(s.0.clone(), folder.cloned()));
+    }
+    let folder_drop = if carried_style { None } else { h.dnd_release_payload::<FolderDrag>() };
+    if let (Some(f), Some(this), Some((parent, order))) = (folder_drop, folder, siblings)
+        && f.1 == *parent
+        && f.0 != *this
+    {
+        actions.push(Action::OrderFolders(parent.clone(), reordered(order, &f.0, this)));
+    }
+    let over = h.dnd_hover_payload::<StyleDrag>().is_some() || h.dnd_hover_payload::<FolderDrag>().is_some() || finger.is_some_and(|p| h.rect.contains(p));
+    if over {
+        let t = Tokens::get(&h.ctx);
+        h.ctx.layer_painter(h.layer_id).rect_stroke(h.rect.shrink(1.0), 3.0, Stroke::new(2.0, t.accent), StrokeKind::Inside);
     }
 }
 
@@ -186,9 +299,13 @@ fn header(
     has_current: bool,
     open: bool,
     has_clip: bool,
+    siblings: &[Value],
+    parent: Option<Value>,
     actions: &mut Vec<Action>,
-) {
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), HEADER_H), Sense::click());
+) -> egui::Response {
+    let sense = if folder.is_some() && !crate::touch_ui::flagged(ui.ctx()) { Sense::click_and_drag() } else { Sense::click() };
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), HEADER_H), sense);
+    crate::touch_ui::note_rect(ui.ctx(), &format!("typerFolder:{}", folder.map_or("", |(_, k)| k)), rect);
     if resp.hovered() {
         ui.painter().rect_filled(rect, 2.0, t.hover);
     }
@@ -243,6 +360,20 @@ fn header(
             actions.push(Action::NewFolder(Some(id.clone())));
             ui.close();
         }
+        if let Some(i) = siblings.iter().position(|s| s == id) {
+            if ui.add_enabled(i > 0, egui::Button::new(tl!("Move folder up"))).clicked() {
+                let mut order = siblings.to_vec();
+                order.swap(i, i - 1);
+                actions.push(Action::OrderFolders(parent.clone(), order));
+                ui.close();
+            }
+            if ui.add_enabled(i + 1 < siblings.len(), egui::Button::new(tl!("Move folder down"))).clicked() {
+                let mut order = siblings.to_vec();
+                order.swap(i, i + 1);
+                actions.push(Action::OrderFolders(parent.clone(), order));
+                ui.close();
+            }
+        }
         if ui.button(tl!("Duplicate folder")).clicked() {
             actions.push(Action::Run("typer.folder.duplicate", json!({"id": id})));
             ui.close();
@@ -261,6 +392,7 @@ fn header(
             ui.close();
         }
     });
+    resp
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -275,9 +407,19 @@ fn style_row(
     step: f64,
     has_clip: bool,
     scroll: bool,
+    folders: &[(Value, String)],
     actions: &mut Vec<Action>,
 ) {
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
+    let touch = crate::touch_ui::flagged(ui.ctx());
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), if touch { Sense::click() } else { Sense::click_and_drag() });
+    crate::touch_ui::note_rect(ui.ctx(), &format!("typerStyle:{}", r.key), rect);
+    // Dragged onto a folder header: moved there (a finger presses and holds first).
+    if !touch && resp.drag_started() {
+        resp.dnd_set_drag_payload(StyleDrag(r.id.clone()));
+    }
+    if touch && crate::touch_drag::held_still(&resp) {
+        crate::touch_drag::start(ui.ctx(), drag_list(), &format!("s:{}", r.key), &r.name);
+    }
     resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, selected, &r.name));
     if selected {
         ui.painter().rect_filled(rect, 2.0, t.row_selected);
@@ -396,6 +538,20 @@ fn style_row(
             actions.push(Action::Run("typer.style.duplicate", json!({"id": r.id})));
             ui.close();
         }
+        ui.menu_button(tl!("Move to folder"), |ui| {
+            crate::widgets::style_spectrum_popup_menu(ui);
+            if ui.add_enabled(r.folder.is_some(), egui::Button::new(tl!("Unsorted"))).clicked() {
+                actions.push(Action::MoveStyle(r.id.clone(), None));
+                ui.close();
+            }
+            for (id, label) in folders {
+                let here = r.folder.as_ref().map(Id::to_value).as_ref() == Some(id);
+                if ui.add_enabled(!here, egui::Button::new(label)).clicked() {
+                    actions.push(Action::MoveStyle(r.id.clone(), Some(id.clone())));
+                    ui.close();
+                }
+            }
+        });
         ui.separator();
         if r.tag.is_some() && ui.button(if r.tags_off { tl!("Turn tags on") } else { tl!("Turn tags off") }).clicked() {
             actions.push(Action::Run("typer.style.togglePrefixes", json!({"id": r.id})));
@@ -448,6 +604,8 @@ fn apply(app: &mut PhotocraftApp, a: Action) {
         Action::EditFolder(id) => super::folder_editor::open(app, &id),
         Action::NewFolder(parent) => super::folder_editor::open_new(app, parent),
         Action::ExportFolder(id, name) => export_folder(app, id, &name),
+        Action::MoveStyle(id, folder) => act(app, "typer.style.reorder", json!({"id": id, "folder": folder})),
+        Action::OrderFolders(parent, order) => act(app, "typer.folder.reorder", json!({"parentId": parent, "order": order})),
         Action::Toggle(key) => {
             let c = &mut app.ui.typer.collapsed;
             if let Some(i) = c.iter().position(|k| *k == key) {

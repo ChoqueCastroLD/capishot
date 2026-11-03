@@ -259,3 +259,22 @@ fn eyedropper_edits_only_the_picker_and_invalid_samples_leave_it_unchanged() {
     assert_eq!(app.session.tools.foreground, tools.foreground);
     dialogs::cancel(&mut app, picker).unwrap();
 }
+
+/// The Layer Style swatches' eyedropper: the effect's colour becomes the image's where it was
+/// pressed, live in the dialog (its OK applies it); cancelled, it stays.
+#[test]
+fn the_layer_style_eyedropper_takes_the_image_colour() {
+    let mut app = app(8);
+    let ctx = egui::Context::default();
+    let parent = layer_style::open(&mut app, Some("dropShadow")).unwrap();
+    let effect = selected(&app, parent);
+    let target = crate::eyedrop::Target::LayerStyle { id: parent, effect: effect.clone(), field: "color".into() };
+    crate::eyedrop::toggle(&ctx, target.clone());
+    crate::eyedrop::cancel(&ctx);
+    assert!(!crate::eyedrop::pick_at(&mut app, &ctx, 3.0, 3.0));
+    assert_eq!(color_value(&fields(&app, parent), &effect, "color").unwrap().color, "#000000");
+    crate::eyedrop::toggle(&ctx, target);
+    assert!(crate::eyedrop::pick_at(&mut app, &ctx, 3.0, 3.0));
+    assert_eq!(color_value(&fields(&app, parent), &effect, "color").unwrap().color, "#406080");
+    assert!(super::set_color(&mut app, 9999, &effect, "color", [0.0; 3]).is_err(), "no such dialog");
+}

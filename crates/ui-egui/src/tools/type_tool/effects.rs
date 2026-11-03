@@ -128,6 +128,16 @@ pub(crate) fn set_effect(app: &mut PhotocraftApp, kind: &str, params: &Value, on
     Ok(())
 }
 
+/// The eyedropper's pick for colour `field` of the target's `kind` effect, in undo step `key`:
+/// the effect is made (or edited) and shown with it, as a swatch edit would.
+pub(crate) fn set_color(app: &mut PhotocraftApp, ctx: &egui::Context, kind: &str, field: &str, key: &str, rgb: [f32; 3]) -> Result<(), String> {
+    let (_, mut p, _) = shown(app, kind).ok_or("no type layer")?;
+    p[field] = json!(crate::color_picker_ui::hex(rgb));
+    // An edit still waiting for the throttle would put the old colour back.
+    ctx.data_mut(|d| d.remove_temp::<Option<(Value, bool)>>(egui::Id::unique("type-fx-pending").with(kind)));
+    set_effect(app, kind, &p, true, key)
+}
+
 fn rgb(hex: &str) -> [f32; 3] {
     let v = u32::from_str_radix(hex.trim_start_matches('#'), 16).unwrap_or(0);
     [((v >> 16) & 255) as f32 / 255.0, ((v >> 8) & 255) as f32 / 255.0, (v & 255) as f32 / 255.0]
@@ -283,11 +293,13 @@ fn popover(app: &mut PhotocraftApp, ui: &mut egui::Ui, button: &egui::Response, 
                         if r.clicked() {
                             ask = Some(Ask::Pick { kind: "gradientOverlay", key: "from", title: "Color Picker (Gradient)", color: from });
                         }
+                        drop_button(ui, "gradientOverlay", "from", &key, h, "typeFxFromDrop");
                         let r = swatch(ui, &to, h, tl!("Gradient end color"));
                         crate::touch_ui::note_rect(ui.ctx(), "typeFxTo", r.rect);
                         if r.clicked() {
                             ask = Some(Ask::Pick { kind: "gradientOverlay", key: "to", title: "Color Picker (Gradient)", color: to });
                         }
+                        drop_button(ui, "gradientOverlay", "to", &key, h, "typeFxToDrop");
                         ui.add_space(8.0);
                         for (style, label, note) in [("linear", tl!("Linear"), "typeFxLinear"), ("radial", tl!("Radial"), "typeFxRadial")] {
                             let r = ui.add_sized([58.0, h], egui::Button::new(label).selected(p["style"].as_str() == Some(style)));
@@ -328,6 +340,7 @@ fn popover(app: &mut PhotocraftApp, ui: &mut egui::Ui, button: &egui::Response, 
                         if r.clicked() {
                             ask = Some(Ask::Pick { kind: "dropShadow", key: "color", title: "Color Picker (Drop Shadow)", color: c });
                         }
+                        drop_button(ui, "dropShadow", "color", &key, h, "typeFxColorDrop");
                     });
                     slider(ui, &mut p, &mut on, "distance", "Distance", 0.0..=50.0, " px", "typeFxDistance");
                     slider(ui, &mut p, &mut on, "size", "Size", 0.0..=50.0, " px", "typeFxSize");
@@ -348,6 +361,7 @@ fn popover(app: &mut PhotocraftApp, ui: &mut egui::Ui, button: &egui::Response, 
                         if r.clicked() {
                             ask = Some(Ask::Pick { kind: "outerGlow", key: "color", title: "Color Picker (Outer Glow)", color: c });
                         }
+                        drop_button(ui, "outerGlow", "color", &key, h, "typeFxColorDrop");
                     });
                     slider(ui, &mut p, &mut on, "size", "Size", 0.0..=50.0, " px", "typeFxSize");
                     slider(ui, &mut p, &mut on, "opacity", "Opacity", 0.0..=100.0, " %", "typeFxOpacity");
@@ -396,11 +410,23 @@ fn popover(app: &mut PhotocraftApp, ui: &mut egui::Ui, button: &egui::Response, 
         }
         None => {}
     }
-    let outside = ui.input(|i| i.pointer.any_pressed())
+    // Armed, the eyedropper's press on the image is a pick, not a dismissal.
+    let outside = !crate::eyedrop::owns_pointer(ui.ctx())
+        && ui.input(|i| i.pointer.any_pressed())
         && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| !area.response.rect.contains(p) && !button.rect.contains(p));
     if outside || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
         ui.data_mut(|d| d.insert_temp(open_id, false));
+        if matches!(crate::eyedrop::armed(ui.ctx()), Some(crate::eyedrop::Target::TypeEffect { .. })) {
+            crate::eyedrop::cancel(ui.ctx());
+        }
     }
+}
+
+/// The eyedropper button after a colour swatch: picks colour `field` of `kind` from the image.
+fn drop_button(ui: &mut egui::Ui, kind: &str, field: &str, key: &str, side: f32, note: &str) {
+    let target = crate::eyedrop::Target::TypeEffect { kind: kind.into(), field: field.into(), key: key.into() };
+    let r = crate::eyedrop::button(ui, target, side);
+    crate::touch_ui::note_rect(ui.ctx(), note, r.rect);
 }
 
 #[cfg(test)]

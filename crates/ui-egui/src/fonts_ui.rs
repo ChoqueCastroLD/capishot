@@ -413,7 +413,9 @@ pub fn tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     ui.horizontal_wrapped(|ui| {
         for (tab, label) in [(PickerTab::Fonts, "System"), (PickerTab::Custom, "Custom"), (PickerTab::Favorites, "Favorites"), (PickerTab::FindMore, "Find More")] {
             let shown = crate::i18n::tr_ctx(lang, "fontTab", label);
-            if named(crate::widgets::pill_tab(ui, shown, app.ui.fonts.tab == tab), label).clicked() {
+            let r = named(crate::widgets::pill_tab(ui, shown, app.ui.fonts.tab == tab), label);
+            crate::touch_ui::note_rect(ui.ctx(), &format!("fontTab:{label}"), r.rect);
+            if r.clicked() {
                 app.ui.fonts.tab = tab;
             }
         }

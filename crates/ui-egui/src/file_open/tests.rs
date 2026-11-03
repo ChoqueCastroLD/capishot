@@ -1071,3 +1071,33 @@ fn opening_an_open_file_again_shows_its_tab() {
         let _ = std::fs::remove_dir_all(&d);
     }
 }
+
+/// Files opened together as contents (the browser's picker and drops) open in natural name order
+/// (case-insensitive, numbers by value), and their tabs keep that order whichever background
+/// decode finishes first.
+#[test]
+fn twelve_dropped_contents_open_as_tabs_in_natural_order_whatever_order_they_finish() {
+    use crate::jobs_ui;
+    let names = |n: &[usize]| -> Vec<String> { n.iter().map(|i| if i % 2 == 0 { format!("Page_{i:02}.png") } else { format!("page_{i}.png") }).collect() };
+    let want = names(&(1..=12).collect::<Vec<_>>());
+    let shuffled = [7usize, 12, 1, 10, 3, 9, 2, 11, 5, 8, 4, 6];
+    // At once (no background jobs): in order straight away.
+    let (mut app, _) = app_with(Vec::new());
+    let files: Vec<(String, Vec<u8>)> = names(&shuffled).into_iter().map(|n| (n, b"x".to_vec())).collect();
+    assert_eq!(app.open_contents_in_order(files), 12);
+    assert_eq!(doc_names(&app), want);
+    // In the background: real decodes, completed in a shuffled order.
+    let (mut app, _) = app_with(Vec::new());
+    app.background_jobs = true;
+    let files: Vec<(String, Vec<u8>)> = names(&shuffled).into_iter().map(|n| (n, png_bytes(4, 4))).collect();
+    assert_eq!(app.open_contents_in_order(files), 12);
+    assert_eq!(app.jobs.opens.len(), 12);
+    for seq in [11usize, 0, 6, 3, 9, 1, 10, 4, 2, 8, 5, 7] {
+        let i = app.jobs.opens.iter().position(|o| o.order.is_some_and(|x| x.seq == seq)).unwrap();
+        let tab = app.jobs.opens.remove(i);
+        let v = app.session.wait_job(tab.job).unwrap();
+        jobs_ui::finish_open_tab(&mut app, &tab, &v).unwrap();
+    }
+    assert_eq!(doc_names(&app), want);
+    assert!(app.jobs.batches.is_empty());
+}

@@ -264,3 +264,125 @@ fn every_tab_of_the_font_menu_fits_a_phone() {
         }
     }
 }
+
+/// A phone: a finger's press held still on a row shows "Move … to…" (its release picks
+/// nothing); held and then dragged onto a folder's header, it files the font there.
+#[test]
+fn a_phone_press_and_hold_moves_and_drags_a_font_into_a_folder() {
+    let mut h = tab_harness(filed(), 390.0);
+    let press = |h: &mut Harness<'static, Picked>, at: egui::Pos2, pressed: bool| {
+        h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+    };
+    let row = h.get_by_label("Bangers").rect().center();
+    h.event(egui::Event::PointerMoved(row));
+    press(&mut h, row, true);
+    for _ in 0..45 {
+        h.step();
+    }
+    press(&mut h, row, false);
+    h.run_steps(3);
+    assert!(h.query_by_label_contains("Move Bangers to").is_some(), "press and hold: Move to…");
+    assert_eq!(h.state().1, None, "the hold's release picks nothing");
+    h.query_all_by_label("Cancel").next().unwrap().click();
+    h.run_steps(2);
+    // Held, then dragged onto Unfiled.
+    let from = h.get_by_label("Bangers").rect().center();
+    h.event(egui::Event::PointerMoved(from));
+    press(&mut h, from, true);
+    for _ in 0..45 {
+        h.step();
+    }
+    let to = crate::touch_ui::noted_rect(&h.ctx, "fontFolder:\u{1}unfiled").expect("Unfiled's header").center();
+    for k in 1..=10 {
+        h.event(egui::Event::PointerMoved(from + (to - from) * (k as f32 / 10.0)));
+        h.step();
+    }
+    press(&mut h, to, false);
+    h.run_steps(3);
+    assert!(folders(&h.state().0)[0].2.is_empty(), "dragged out of Manga: {:?}", folders(&h.state().0));
+    assert_eq!(h.state().1, None);
+}
+
+/// "Rename…" in a row's menu gives the font a name the menu shows; documents keep the family.
+#[test]
+fn rename_gives_a_font_an_alias() {
+    let mut h = tab_harness(filed(), 1000.0);
+    let row = h.get_by_label("Bangers").rect();
+    h.event(egui::Event::PointerMoved(row.center()));
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton { pos: row.center(), button: egui::PointerButton::Secondary, pressed, modifiers: egui::Modifiers::NONE });
+    }
+    h.run_steps(2);
+    h.get_by_label("Rename…").click();
+    h.run_steps(2);
+    let field = crate::touch_ui::noted_rect(&h.ctx, "fontAliasField").expect("the name field").center();
+    h.event(egui::Event::PointerButton { pos: field, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+    h.event(egui::Event::PointerButton { pos: field, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+    h.run_steps(2);
+    h.event(egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND });
+    h.event(egui::Event::Text("Golpes".into()));
+    h.run_steps(2);
+    h.get_by_label("Save").click();
+    h.run_steps(2);
+    let s = &h.state().0.session;
+    assert_eq!(photocraft_engine::font_library_cmds::alias_of(s, "Bangers"), Some("Golpes"));
+    assert_eq!(folders(&h.state().0)[0].2, ["Bangers"], "still filed by its family");
+    assert!(h.query_by_label_contains("Name shown for").is_none(), "the panel closes");
+}
+
+/// A phone whose frames are slow (or a press handed over late): no frame is drawn while the
+/// finger rests, and the release ends a 0.7 s press. It is still a press and hold ("Move … to…"),
+/// not a pick that closes the menu.
+#[test]
+fn a_hold_released_before_any_frame_saw_it_still_moves() {
+    let mut h = Harness::builder().with_size(egui::vec2(390.0, 700.0)).with_step_dt(0.7).build_ui_state(
+        |ui, (app, picked): &mut Picked| {
+            if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                super::move_panel(app, ui);
+                if let Some(p) = super::custom_tab(app, ui, "Inter") {
+                    *picked = Some(p);
+                }
+            }
+        },
+        (filed(), None),
+    );
+    crate::PhotocraftApp::setup_context(&h.ctx, Default::default());
+    h.run_steps(3);
+    let row = h.get_by_label("Bangers").rect().center();
+    h.event(egui::Event::PointerMoved(row));
+    h.event(egui::Event::PointerButton { pos: row, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+    h.step();
+    h.event(egui::Event::PointerButton { pos: row, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+    h.step();
+    h.step();
+    assert_eq!(h.state().1, None, "no pick");
+    assert!(h.query_by_label_contains("Move Bangers to").is_some(), "Move to… shows");
+}
+
+/// The same with the finger's lift reported as the pointer gone (a touch end): still a hold.
+#[test]
+fn a_hold_whose_lift_leaves_no_position_still_moves() {
+    let mut h = Harness::builder().with_size(egui::vec2(390.0, 700.0)).with_step_dt(0.7).build_ui_state(
+        |ui, (app, picked): &mut Picked| {
+            if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                super::move_panel(app, ui);
+                if let Some(p) = super::custom_tab(app, ui, "Inter") {
+                    *picked = Some(p);
+                }
+            }
+        },
+        (filed(), None),
+    );
+    crate::PhotocraftApp::setup_context(&h.ctx, Default::default());
+    h.run_steps(3);
+    let row = h.get_by_label("Bangers").rect().center();
+    h.event(egui::Event::PointerMoved(row));
+    h.event(egui::Event::PointerButton { pos: row, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+    h.step();
+    h.event(egui::Event::PointerButton { pos: row, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+    h.event(egui::Event::PointerGone);
+    h.step();
+    h.step();
+    assert_eq!(h.state().1, None, "no pick");
+    assert!(h.query_by_label_contains("Move Bangers to").is_some(), "Move to… shows");
+}

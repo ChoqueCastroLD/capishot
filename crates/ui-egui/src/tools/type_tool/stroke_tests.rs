@@ -208,3 +208,17 @@ fn every_type_bar_control_shows_on_narrow_phones() {
         }
     }
 }
+
+/// Contorno's eyedropper: the stroke takes the image's colour where it was pressed, shown.
+#[test]
+fn the_outline_eyedropper_takes_the_image_colour() {
+    let mut app = new_app();
+    app.run("edit.fill", json!({"color": "#3366cc"})).unwrap();
+    let id = type_new(&mut app, "Hola");
+    let ctx = egui::Context::default();
+    crate::eyedrop::toggle(&ctx, crate::eyedrop::Target::TypeStroke { key: "type-stroke-9".into() });
+    assert!(crate::eyedrop::pick_at(&mut app, &ctx, 300.0, 20.0));
+    let (_, s) = shown_stroke(&app).unwrap();
+    assert!(s.on && visible(&app, id));
+    assert_eq!(crate::color_picker_ui::hex(s.color), "#3366cc");
+}

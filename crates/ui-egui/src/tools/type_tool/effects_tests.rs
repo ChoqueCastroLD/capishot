@@ -111,3 +111,26 @@ fn a_drag_applies_at_most_every_120_ms_and_its_last_value_on_release() {
         assert_eq!(pending::<usize>(ui, id), None);
     });
 }
+
+/// Efectos' eyedroppers: a gradient stop, the shadow and the glow take the image's colour where it
+/// was pressed, the effect made and shown; a cancelled one leaves the effect alone.
+#[test]
+fn the_effect_eyedroppers_take_the_image_colour() {
+    let mut app = new_app();
+    app.run("edit.fill", json!({"color": "#22aa44"})).unwrap();
+    let id = type_new(&mut app, "Hola");
+    let ctx = egui::Context::default();
+    for (kind, field) in [("gradientOverlay", "to"), ("dropShadow", "color"), ("outerGlow", "color")] {
+        crate::eyedrop::toggle(&ctx, crate::eyedrop::Target::TypeEffect { kind: kind.into(), field: field.into(), key: "fx-drop".into() });
+        assert!(crate::eyedrop::pick_at(&mut app, &ctx, 300.0, 20.0), "{kind}");
+        let (_, p, on) = shown(&app, kind).unwrap();
+        assert!(on, "{kind}: shown");
+        assert_eq!(p[field].as_str(), Some("#22aa44"), "{kind}: {p}");
+        assert_eq!(count(&app, id, kind), 1);
+    }
+    let before = effects(&app, id);
+    crate::eyedrop::toggle(&ctx, crate::eyedrop::Target::TypeEffect { kind: "dropShadow".into(), field: "color".into(), key: "fx-drop".into() });
+    crate::eyedrop::cancel(&ctx);
+    assert!(!crate::eyedrop::pick_at(&mut app, &ctx, 300.0, 20.0));
+    assert_eq!(effects(&app, id), before, "cancel restores (nothing changed)");
+}

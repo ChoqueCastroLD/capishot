@@ -89,7 +89,7 @@ impl PhotocraftApp {
         monitor_status::poll_frame(self, ctx, frame);
         // Control requests and persisted preferences can change the language in this frame.
         i18n::sync_context(ctx, &self.session.prefs().interface.language);
-        type_tool::sync_font_names(ctx, self.session.prefs().type_.show_font_names_in_english);
+        type_tool::sync_font_labels(ctx, self.session.prefs().type_.show_font_names_in_english, &self.session.prefs().type_.font_aliases);
         // A window bigger than its display (1440 × 900 on 1366 × 768) runs under the taskbar:
         // maximize it into the work area once (#315).
         work_area::fit_window(ctx);
@@ -129,10 +129,8 @@ impl PhotocraftApp {
             Vec::new()
         };
         let _open_span = (!arrived.is_empty()).then(|| perf_span::span("open.bytes"));
-        for (name, bytes) in arrived {
-            if let Err(e) = self.open_owned(&name, bytes) {
-                self.open_failed(&name, &e);
-            }
+        if !arrived.is_empty() {
+            self.open_contents_in_order(arrived);
         }
         // Web drops onto the canvas, read since the last frame: placed below, one at a time.
         let to_place: Vec<(String, Vec<u8>)> =
@@ -211,6 +209,7 @@ impl PhotocraftApp {
         // A real UI pass consumes the one in-flight synthetic batch (see `inject_synthetic`).
         self.begin_synthetic_pass(&ctx);
         self.hover_layer = None;
+        crate::eyedrop::begin_frame(self, &ctx);
         i18n::set_current(i18n::Lang::from_pref(&self.session.prefs().interface.language));
         // Fonts registered via set_fonts only take effect next frame; named families would panic now.
         if !self.fonts_ready {

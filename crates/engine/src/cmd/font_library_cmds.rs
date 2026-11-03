@@ -181,8 +181,46 @@ fn folder_move(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(folders_json(s))
 }
 
+/// At most this many aliases, and this long an alias.
+const MAX_ALIASES: usize = 5000;
+const MAX_ALIAS_CHARS: usize = 120;
+
+/// The display name the user gave `family`, if any ([`font_alias`]).
+pub fn alias_of<'a>(s: &'a Session, family: &str) -> Option<&'a str> {
+    s.prefs().type_.font_aliases.get(family).map(String::as_str).filter(|a| !a.trim().is_empty())
+}
+
+/// `type.font.alias`: gives `family` a display name (`alias`; empty or null removes it). The
+/// family itself, and every document using it, is unchanged.
+fn font_alias(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "type.font.alias";
+    let fam = family(p, CMD)?;
+    let alias = match p.get("alias") {
+        None | Some(Value::Null) => String::new(),
+        Some(v) => v.as_str().ok_or_else(|| bad(CMD, "`alias` must be a name, or null to remove it"))?.trim().to_string(),
+    };
+    if alias.chars().count() > MAX_ALIAS_CHARS || alias.chars().any(char::is_control) {
+        return Err(bad(CMD, format!("`alias` must be at most {MAX_ALIAS_CHARS} printable characters")));
+    }
+    let aliases = &s.prefs().type_.font_aliases;
+    if !alias.is_empty() && alias != fam && !aliases.contains_key(&fam) && aliases.len() >= MAX_ALIASES {
+        return Err(bad(CMD, format!("at most {MAX_ALIASES} font aliases")));
+    }
+    // An alias equal to the family's own name is no alias.
+    let keep = (!alias.is_empty() && alias != fam).then(|| alias.clone());
+    s.prefs.edit(|pr| match &keep {
+        Some(a) => {
+            pr.type_.font_aliases.insert(fam.clone(), a.clone());
+        }
+        None => {
+            pr.type_.font_aliases.remove(&fam);
+        }
+    });
+    Ok(json!({"family": fam, "alias": keep}))
+}
+
 fn library(s: &mut Session, _: &Value) -> Result<Value> {
-    Ok(json!({"favorites": favorite_fonts(s), "folders": s.prefs().type_.font_folders}))
+    Ok(json!({"favorites": favorite_fonts(s), "folders": s.prefs().type_.font_folders, "aliases": s.prefs().type_.font_aliases}))
 }
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -202,9 +240,19 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Font Library",
             menu: &[],
             shortcut: None,
-            params: "{} → favorites, folders",
+            params: "{} → favorites, folders, aliases ({family: alias})",
             enabled: always,
             run: library,
+            journal: false,
+        },
+        CommandSpec {
+            id: "type.font.alias",
+            label: "Rename Font",
+            menu: &[],
+            shortcut: None,
+            params: r#"{"family":str,"alias":str|null (the name shown for it in the font menu; empty or null: its own name again)} → family, alias. Documents keep the real family name"#,
+            enabled: always,
+            run: font_alias,
             journal: false,
         },
         CommandSpec {

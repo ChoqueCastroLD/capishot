@@ -140,3 +140,33 @@ fn entry_names_and_the_default_zip_name() {
     s.active_mut().unwrap().path = Some("/data/obra/capitulo-12/p001.psd".into());
     assert_eq!(default_zip_name(&s), "capitulo-12.zip");
 }
+
+/// PSD pages keep their layers (and the merged image): three documents give three .psd entries
+/// that reopen with every layer, resized as a whole when asked.
+#[test]
+fn psd_pages_reopen_with_their_layers() {
+    let mut s = session(3);
+    for i in 0..3 {
+        s.set_active(i);
+        for _ in 0..=i {
+            s.execute("layer.new.layer", json!({})).unwrap();
+        }
+    }
+    let layers: Vec<usize> = s.documents().iter().map(|d| d.doc.layers.len()).collect();
+    assert_eq!(layers, [2, 3, 4]);
+    let (zip, v) = run(&s, json!({"format": "psd"}));
+    assert_eq!(v["failed"], json!([]));
+    let e = entries(&zip);
+    assert_eq!(e.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["page-a.psd", "page-b.psd", "page-c.psd"]);
+    for ((name, bytes), want) in e.iter().zip(&layers) {
+        assert!(bytes.starts_with(b"8BPS"), "{name}");
+        let doc = photocraft_io::import(name, bytes).unwrap().document;
+        assert_eq!(doc.layers.len(), *want, "{name}");
+        assert_eq!((doc.size.width, doc.size.height), (200, 100));
+    }
+    let (zip, _) = run(&s, json!({"format": "psd", "resize": {"percent": 50}, "srgb": true}));
+    let e = entries(&zip);
+    let doc = photocraft_io::import(&e[2].0, &e[2].1).unwrap().document;
+    assert_eq!((doc.size.width, doc.size.height, doc.layers.len()), (100, 50, 4), "resized with its layers");
+    assert!(prepare(&s, &json!({"format": "psb"})).is_err());
+}

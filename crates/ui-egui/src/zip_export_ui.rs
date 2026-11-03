@@ -74,7 +74,7 @@ pub fn params(st: &State) -> Value {
         "prefix": st.prefix,
         "srgb": st.srgb,
     });
-    if st.format != "png" {
+    if st.format == "jpg" || st.format == "webp" {
         p["quality"] = json!(st.quality.round().clamp(1.0, 100.0));
     }
     if st.format == "webp" {
@@ -348,7 +348,7 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
             crate::widgets::hairline(ui);
             ui.label(RichText::new(tl!("Format")).font(crate::theme::semibold(13.0)));
             ui.horizontal_wrapped(|ui| {
-                for (k, l) in [("png", "PNG"), ("jpg", "JPG"), ("webp", "WebP")] {
+                for (k, l) in [("png", "PNG"), ("jpg", "JPG"), ("webp", "WebP"), ("psd", tl!("PSD (with layers)"))] {
                     if ui.selectable_label(st.format == k, l).clicked() {
                         st.format = k.into();
                     }
@@ -356,6 +356,9 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
             });
             if st.format == "webp" {
                 crate::widgets::checkbox(ui, &mut st.lossless, tl!("Lossless"));
+            }
+            if st.format == "psd" {
+                ui.label(RichText::new(tl!("Each document saved with its layers, as Save does. Size and sRGB apply to all its layers.")).small().color(t.text_faint));
             }
             if st.format == "jpg" || (st.format == "webp" && !st.lossless) {
                 ui.horizontal(|ui| {

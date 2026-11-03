@@ -1,7 +1,8 @@
 //! File › Export › Export Open Documents as ZIP… (`file.export.openDocsZip`): the open documents
 //! (or the ones picked, in the order given) flattened as Export As does, encoded as PNG, JPEG or
-//! WebP, optionally resized and converted to sRGB, and written into one ZIP of pages named after
-//! their documents or numbered (`001.png`, `002.png`…).
+//! WebP, or saved with their layers as PSD (as File › Save writes one, merged image included),
+//! optionally resized and converted to sRGB, and written into one ZIP of pages named after their
+//! documents or numbered (`001.png`, `002.png`…).
 //!
 //! The archive is made a page at a time ([`ZipExport::run`]): each page's entry goes to the sink
 //! as soon as it is encoded (a file being written on the desktop, a download growing in the
@@ -29,6 +30,8 @@ pub enum Format {
     Png,
     Jpg { quality: u8 },
     Webp { quality: u8, lossless: bool },
+    /// Layered PSD (PSB when too big for PSD), with its merged image.
+    Psd,
 }
 
 impl Format {
@@ -37,6 +40,7 @@ impl Format {
             Format::Png => "png",
             Format::Jpg { .. } => "jpg",
             Format::Webp { .. } => "webp",
+            Format::Psd => "psd",
         }
     }
 }
@@ -56,6 +60,8 @@ pub struct Page {
     pub entry: String,
     pub name: String,
     pub doc: Arc<Document>,
+    /// The document's file: linked smart objects a PSD embeds are resolved against it.
+    pub path: Option<String>,
 }
 
 /// An export ready to run anywhere (a worker): checked and captured from the session.
@@ -120,7 +126,8 @@ pub fn prepare(s: &Session, p: &Value) -> Result<ZipExport> {
         "png" => Format::Png,
         "jpg" | "jpeg" => Format::Jpg { quality: quality(p, 90)? },
         "webp" => Format::Webp { quality: quality(p, 90)?, lossless: p.get("lossless").and_then(Value::as_bool).unwrap_or(false) },
-        f => return Err(bad(format!("unknown format \"{f}\" (png, jpg or webp)"))),
+        "psd" => Format::Psd,
+        f => return Err(bad(format!("unknown format \"{f}\" (png, jpg, webp or psd)"))),
     };
     let resize = match p.get("resize") {
         None | Some(Value::Null) => None,
@@ -165,12 +172,13 @@ pub fn prepare(s: &Session, p: &Value) -> Result<ZipExport> {
     let prefix = p.get("prefix").and_then(Value::as_str).unwrap_or("");
     let names: Vec<String> = docs.iter().map(|d| d.doc.name.clone()).collect();
     let entries = entry_names(&names, format.ext(), sequence, prefix);
-    let pages = docs.iter().zip(entries).map(|(d, entry)| Page { entry, name: d.doc.name.clone(), doc: d.doc.clone() }).collect();
+    let pages = docs.iter().zip(entries).map(|(d, entry)| Page { entry, name: d.doc.name.clone(), doc: d.doc.clone(), path: d.path.clone() }).collect();
     Ok(ZipExport { pages, format, resize, srgb })
 }
 
 impl ZipExport {
-    /// One page flattened and encoded.
+    /// One page flattened and encoded, or (PSD) saved with its layers; resizing and the sRGB
+    /// conversion apply to the whole layered document, as Image Size and Convert to Profile do.
     pub fn render(&self, page: &Page) -> std::result::Result<Vec<u8>, String> {
         let mut doc = (*page.doc).clone();
         let scale = match self.resize {
@@ -197,6 +205,7 @@ impl ZipExport {
                 opts.encode.webp_quality = quality;
                 opts.encode.webp_lossless = lossless;
             }
+            Format::Psd => opts.document_path = page.path.as_ref().map(std::path::PathBuf::from),
         }
         let out = photocraft_io::export(&doc, &format!("page.{}", self.format.ext()), &opts).map_err(|e| e.to_string())?;
         Ok(out.bytes)
@@ -285,7 +294,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: "Export Open Documents as ZIP…",
         menu: &["File", "Export"],
         shortcut: None,
-        params: r##"{"docs"?:[document id] (default every open document, in tab order; the pages follow this order),"format":"png|jpg|webp"="png","quality"?:1..100 (JPEG, lossy WebP; default 90),"lossless"?:bool (WebP),"resize"?:{"maxWidth":px}|{"percent":1..100} (never enlarges),"srgb"?:bool (convert to sRGB),"naming":"keep|sequence"="keep" (the document names, or 001, 002… in order),"prefix"?:str (before the numbers),"path":file.zip} → {path,files,failed:[{document,error}]}. Each document flattened as Export As does, one page per document; the ZIP is written as the pages are made. A page that fails is reported in "failed" and the others are kept"##,
+        params: r##"{"docs"?:[document id] (default every open document, in tab order; the pages follow this order),"format":"png|jpg|webp|psd"="png" (psd: each document with its layers and merged image, as Save writes it),"quality"?:1..100 (JPEG, lossy WebP; default 90),"lossless"?:bool (WebP),"resize"?:{"maxWidth":px}|{"percent":1..100} (never enlarges),"srgb"?:bool (convert to sRGB),"naming":"keep|sequence"="keep" (the document names, or 001, 002… in order),"prefix"?:str (before the numbers),"path":file.zip} → {path,files,failed:[{document,error}]}. Each document flattened as Export As does (psd: layered), one page per document; the ZIP is written as the pages are made. A page that fails is reported in "failed" and the others are kept"##,
         enabled,
         journal: true,
         run: export_zip,

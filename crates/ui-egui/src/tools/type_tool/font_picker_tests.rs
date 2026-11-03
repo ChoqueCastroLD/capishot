@@ -1747,3 +1747,21 @@ fn capture_font_field_gpu_visual_fixtures() {
         }
     }
 }
+
+/// The names the user gave fonts label the menu, a search finds either name, and a pick is
+/// still the family.
+#[test]
+fn font_aliases_label_and_search_the_menu() {
+    let ctx = egui::Context::default();
+    let aliases: std::collections::BTreeMap<String, String> = [("Komika Axis".to_string(), "Gritos".to_string())].into();
+    crate::type_tool::sync_font_labels(&ctx, true, &aliases);
+    let labels: Option<std::sync::Arc<HashMap<String, String>>> = ctx.data(|d| d.get_temp(super::font_labels_id()));
+    let labels = labels.expect("aliases make labels");
+    let families: Vec<String> = ["Anime Ace", "Komika Axis"].iter().map(|s| s.to_string()).collect();
+    for q in ["grit", "komika"] {
+        let (rows, _) = super::font_menu_rows(&families, Some(&labels), q, &[]);
+        assert_eq!(rows.iter().map(|(f, l)| (f.as_str(), *l)).collect::<Vec<_>>(), [("Komika Axis", "Gritos")], "{q}");
+    }
+    crate::type_tool::sync_font_labels(&ctx, true, &Default::default());
+    assert!(ctx.data(|d| d.get_temp::<std::sync::Arc<HashMap<String, String>>>(super::font_labels_id())).is_none(), "none without aliases");
+}

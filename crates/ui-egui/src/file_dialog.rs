@@ -316,13 +316,8 @@ impl PhotocraftApp {
 
     /// Opens each picked file's contents as its own document, in name order (like
     /// [`Self::open_paths`]), reporting each failure.
-    fn open_contents(&mut self, mut files: Vec<(String, Vec<u8>)>) {
-        files.sort_by(|a, b| crate::file_open::natural_cmp(&a.0, &b.0));
-        for (name, bytes) in files {
-            if let Err(e) = self.open_owned(&name, bytes) {
-                self.open_failed(&name, &e);
-            }
-        }
+    fn open_contents(&mut self, files: Vec<(String, Vec<u8>)>) {
+        self.open_contents_in_order(files);
     }
 
     /// Run `next` on the result of the open dialog's action once it is answered; its result
