@@ -20,8 +20,9 @@
 #                                       ~6.5, but the wasm is ~10% bigger (measured: 32.9 -> 36.2
 #                                       MB optimized, gzip +9%; the first-load part after the
 #                                       split 14.6 -> 18.2 MB) and wasm-opt takes twice as long.
-#                                       For quick test deploys only, never a release. Switching
-#                                       between the two recompiles every crate once.
+#                                       For quick test deploys only, never a release: it is also
+#                                       5-19% slower at run time (packaging/web-threads/README.md).
+#                                       Switching between the two recompiles every crate once.
 #
 # Fails (non-zero, the other builds stopped) as soon as any stage fails: never deploy after a
 # failure. Environment:
