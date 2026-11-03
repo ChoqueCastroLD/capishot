@@ -3486,3 +3486,9 @@ fontWeight	Italic	Itálico
 	Pick a color from the image	Recolher uma cor da imagem
 	Tap the image to pick a color	Toque na imagem para recolher uma cor
 	Click the image to pick a color	Clique na imagem para recolher uma cor
+	Name shown for {font}	Nome apresentado para {font}
+	Use its own name	Usar o nome original
+	The name the font menu shows for it; documents keep the font's own name	O nome que o menu de tipos de letra mostra; os documentos mantêm o nome real
+	Move to folder	Mover para a pasta
+	Move folder up	Mover pasta para cima
+	Move folder down	Mover pasta para baixo

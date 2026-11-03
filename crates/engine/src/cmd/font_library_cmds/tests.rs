@@ -47,7 +47,7 @@ fn the_library_survives_a_preferences_round_trip_and_hostile_lists_are_tidied() 
     let prefs = serde_json::from_value(saved).unwrap();
     t.prefs.edit(|p| *p = prefs);
     let lib = t.execute("type.font.library", json!({})).unwrap();
-    assert_eq!(lib, json!({"favorites": ["Arial"], "folders": []}));
+    assert_eq!(lib, json!({"favorites": ["Arial"], "folders": [], "aliases": {}}));
     // Duplicates, blanks and an oversized list from a hand-edited file are tidied on read.
     t.prefs.edit(|p| p.type_.favorite_fonts = (0..5000).map(|i| format!("F{}", i % 1200)).chain([String::new()]).collect());
     assert_eq!(favorite_fonts(&t).len(), MAX_FAVORITE_FONTS);
@@ -127,4 +127,28 @@ fn font_folders_survive_a_type_reset_and_bad_params_change_nothing() {
         assert!(s.execute(id, p.clone()).is_err(), "{id} {p}");
     }
     assert_eq!(folders(&s), [("Manga".into(), None, vec![])]);
+}
+
+#[test]
+fn a_font_alias_is_kept_in_the_prefs_and_removed_by_an_empty_one() {
+    let mut s = Session::new();
+    let v = s.execute("type.font.alias", json!({"family": "Anime Ace 2.0 BB", "alias": "  Diálogo  "})).unwrap();
+    assert_eq!(v["alias"], "Diálogo");
+    assert_eq!(super::alias_of(&s, "Anime Ace 2.0 BB"), Some("Diálogo"));
+    assert_eq!(s.execute("type.font.library", json!({})).unwrap()["aliases"]["Anime Ace 2.0 BB"], "Diálogo");
+    // Survives a restart (the preferences' JSON) and a Type section reset.
+    let mut back = Session::new();
+    back.prefs.edit(|p| *p = serde_json::from_value(s.prefs().to_json()).unwrap());
+    assert_eq!(super::alias_of(&back, "Anime Ace 2.0 BB"), Some("Diálogo"));
+    s.execute("prefs.reset", json!({"path": "type"})).unwrap();
+    assert_eq!(super::alias_of(&s, "Anime Ace 2.0 BB"), Some("Diálogo"));
+    // Its own name, empty or null: no alias.
+    for alias in [json!("Anime Ace 2.0 BB"), json!(""), json!(null)] {
+        s.execute("type.font.alias", json!({"family": "Anime Ace 2.0 BB", "alias": "X"})).unwrap();
+        s.execute("type.font.alias", json!({"family": "Anime Ace 2.0 BB", "alias": alias})).unwrap();
+        assert_eq!(super::alias_of(&s, "Anime Ace 2.0 BB"), None);
+    }
+    for bad in [json!({}), json!({"family": "A", "alias": 3}), json!({"family": "A", "alias": "x".repeat(121)}), json!({"family": "A", "alias": "a\nb"})] {
+        assert!(s.execute("type.font.alias", bad.clone()).is_err(), "{bad}");
+    }
 }

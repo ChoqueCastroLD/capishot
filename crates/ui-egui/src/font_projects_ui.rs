@@ -289,6 +289,12 @@ pub fn import_bytes(app: &mut PhotocraftApp, name: &str, bytes: &[u8]) -> Result
     if let Some(t) = imp.typer.clone() {
         let _ = app.run("typer.library.import", json!({"json": t, "kind": "library"}));
     }
+    // The names its fonts were given, unless the user named them already.
+    for (family, alias) in &imp.aliases {
+        if photocraft_engine::font_library_cmds::alias_of(&app.session, family).is_none() {
+            let _ = app.run("type.font.alias", json!({"family": family, "alias": alias}));
+        }
+    }
     let project_name = imp.project.name.clone();
     let id = fp::add_imported(&mut app.session, imp.project, true);
     app.font_projects.selected = Some(id);
@@ -347,7 +353,7 @@ fn export_now(app: &mut PhotocraftApp, form: &ExportForm) -> bool {
     }
     let bubble = form.with_styles.then(|| serde_json::to_value(&app.ui.tool_options.bubble_styles).ok()).flatten();
     let typer = if form.with_styles { app.run("typer.library.export", json!({})).ok() } else { None };
-    let out = match fp::export(&project, &files, &form.skip, form.include_restricted, typer.as_ref(), bubble.as_ref()) {
+    let out = match fp::export(&project, &files, &form.skip, form.include_restricted, typer.as_ref(), bubble.as_ref(), &app.session.prefs().type_.font_aliases) {
         Ok(o) => o,
         Err(e) => {
             crate::notices::error(app, e.to_string());

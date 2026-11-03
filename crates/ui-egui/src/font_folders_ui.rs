@@ -65,10 +65,32 @@ pub fn row_menu(response: &egui::Response, family: &str) {
     // that ends the hold is no pick.
     if response.is_pointer_button_down_on() && response.ctx.input(|i| i.pointer.any_pressed()) {
         // A new press: an earlier hold whose release picked nothing is over.
-        response.ctx.data_mut(|d| d.remove::<String>(held_id()));
+        let (now, at) = response.ctx.input(|i| (i.time, i.pointer.interact_pos()));
+        response.ctx.data_mut(|d| {
+            d.remove::<String>(held_id());
+            d.insert_temp(press_id(), (family.to_string(), now, at));
+        });
+    }
+    // The release of a press that rested long enough is a hold too, though no frame was drawn
+    // while it rested (a slow phone, or a press the touch router handed over late): judged by
+    // how long and how still it was.
+    // (Not `clicked`: a release after egui's longest click is none.)
+    let released_hold = phone(&response.ctx)
+        && response.ctx.input(|i| i.pointer.any_released())
+        && response.ctx.data(|d| d.get_temp::<(String, f64, Option<egui::Pos2>)>(press_id())).is_some_and(|(f, t, at)| {
+            // A lifted finger leaves no position: where it pressed.
+            let (now, pos) = response.ctx.input(|i| (i.time, i.pointer.interact_pos().or(i.pointer.latest_pos()).or(at)));
+            f == family
+                && now - t >= HOLD_S
+                && pos.is_some_and(|p| response.rect.contains(p))
+                && at.zip(pos).is_none_or(|(a, b)| a.distance(b) < HOLD_SLOP)
+        });
+    if released_hold {
+        response.ctx.data_mut(|d| d.remove::<(String, f64, Option<egui::Pos2>)>(press_id()));
     }
     // Phones only: with a mouse, a press that rests before it moves is the start of a drag.
     let held = response.long_touched()
+        || released_hold
         || (phone(&response.ctx)
             && response.is_pointer_button_down_on()
             && response.ctx.input(|i| {
@@ -97,6 +119,16 @@ fn held_id() -> Id {
     Id::unique("font-folder-held")
 }
 
+/// Where and when the last press on a font row began (family, time, position).
+fn press_id() -> Id {
+    Id::unique("font-folder-press")
+}
+
+/// The Custom tab's list, for a finger's press-and-hold drag onto a folder ([`crate::touch_drag`]).
+fn drag_list() -> Id {
+    Id::unique("font-folders-touch-drag")
+}
+
 /// Is this pick of `family` the release of a press and hold on its row (which asked for "Move
 /// to…", not for the font)? Answers once.
 pub fn swallow_pick(ctx: &egui::Context, family: &str) -> bool {
@@ -114,6 +146,7 @@ enum Action {
     Delete(String),
     Move(String, Option<String>),
     Star(String),
+    Alias(String, String),
 }
 
 fn run(app: &mut PhotocraftApp, action: Action) {
@@ -123,6 +156,7 @@ fn run(app: &mut PhotocraftApp, action: Action) {
         Action::Delete(name) => ("type.fontFolder.delete", json!({"name": name})),
         Action::Move(family, folder) => ("type.fontFolder.move", json!({"family": family, "folder": folder})),
         Action::Star(family) => ("type.font.favorite", json!({"family": family})),
+        Action::Alias(family, alias) => ("type.font.alias", json!({"family": family, "alias": alias})),
     };
     if let Err(e) = app.run(id, p) {
         app.ui.status = e;
@@ -152,16 +186,48 @@ pub fn move_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let h = if phone(ui.ctx()) { 40.0 } else { 22.0 };
     let mut action = None;
     let mut done = false;
+    let alias_id = Id::unique("font-alias-edit");
+    let mut renaming: Option<(String, String)> = ui.data(|d| d.get_temp(alias_id)).filter(|(f, _): &(String, String)| *f == family);
     egui::Frame::group(ui.style()).fill(t.accent_soft).show(ui, |ui| {
+        // "Rename…": the name the menu shows for it (the documents keep the family).
+        if let Some((_, text)) = renaming.as_mut() {
+            ui.label(RichText::new(crate::i18n::fmt(tl!("Name shown for {font}"), &[("font", &family)])).strong());
+            ui.horizontal_wrapped(|ui| {
+                let field = Id::unique(("font-alias-field", family.as_str()));
+                let r = ui.add_sized([(ui.available_width() - 8.0).clamp(120.0, 220.0), h], egui::TextEdit::singleline(text).id(field).hint_text(family.as_str()));
+                crate::touch_ui::note_rect(ui.ctx(), "fontAliasField", r.rect);
+                if !r.has_focus() && ui.data(|d| d.get_temp::<bool>(field.with("focused")).is_none()) {
+                    r.request_focus();
+                    ui.data_mut(|d| d.insert_temp(field.with("focused"), true));
+                }
+                let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let save = ui.add(egui::Button::new(tl!("Save")).min_size(vec2(0.0, h)));
+                crate::touch_ui::note_rect(ui.ctx(), "fontAliasSave", save.rect);
+                if save.clicked() || enter {
+                    action = Some(Action::Alias(family.clone(), text.trim().to_string()));
+                }
+                if ui.add(egui::Button::new(tl!("Use its own name")).min_size(vec2(0.0, h))).clicked() {
+                    action = Some(Action::Alias(family.clone(), String::new()));
+                }
+                if ui.add(egui::Button::new(tl!("Cancel")).min_size(vec2(0.0, h))).clicked() {
+                    done = true;
+                }
+            });
+            return;
+        }
         ui.label(RichText::new(crate::i18n::fmt(tl!("Move {font} to…"), &[("font", &family)])).strong());
         ui.horizontal_wrapped(|ui| {
             for (f, depth) in ordered(&folders) {
                 let label = if depth > 0 { format!("↳ {}", f.name) } else { f.name.clone() };
-                if ui.add(egui::Button::selectable(current.as_deref() == Some(f.name.as_str()), label).min_size(vec2(0.0, h))).clicked() {
+                let r = ui.add(egui::Button::selectable(current.as_deref() == Some(f.name.as_str()), label).min_size(vec2(0.0, h)));
+                crate::touch_ui::note_rect(ui.ctx(), &format!("fontMoveTo:{}", f.name), r.rect);
+                if r.clicked() {
                     action = Some(Action::Move(family.clone(), Some(f.name.clone())));
                 }
             }
-            if ui.add(egui::Button::selectable(current.is_none(), tl!("Unfiled")).min_size(vec2(0.0, h))).clicked() {
+            let r = ui.add(egui::Button::selectable(current.is_none(), tl!("Unfiled")).min_size(vec2(0.0, h)));
+            crate::touch_ui::note_rect(ui.ctx(), "fontMoveTo:", r.rect);
+            if r.clicked() {
                 action = Some(Action::Move(family.clone(), None));
             }
             if ui.add(egui::Button::new(tl!("New Folder…")).min_size(vec2(0.0, h))).clicked() {
@@ -171,6 +237,12 @@ pub fn move_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     st.focus = true;
                 });
                 app.ui.fonts.tab = crate::fonts_ui::PickerTab::Custom;
+            }
+            let r = ui.add(egui::Button::new(tl!("Rename…")).min_size(vec2(0.0, h))).on_hover_text(tl!("The name the font menu shows for it; documents keep the font's own name"));
+            crate::touch_ui::note_rect(ui.ctx(), "fontRename", r.rect);
+            if r.clicked() {
+                let shown = photocraft_engine::font_library_cmds::alias_of(&app.session, &family).unwrap_or(&family).to_string();
+                renaming = Some((family.clone(), shown));
             }
             if ui.add(egui::Button::new(tl!("Cancel")).min_size(vec2(0.0, h))).clicked() {
                 done = true;
@@ -185,14 +257,26 @@ pub fn move_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         done = true;
     }
     if done {
-        ui.data_mut(|d| d.remove::<String>(moving_id()));
+        renaming = None;
+        ui.data_mut(|d| {
+            d.remove::<String>(moving_id());
+            d.remove::<bool>(Id::unique(("font-alias-field", family.as_str())).with("focused"));
+        });
     }
+    ui.data_mut(|d| match renaming {
+        Some(r) => {
+            d.insert_temp(alias_id, r);
+        }
+        None => d.remove::<(String, String)>(alias_id),
+    });
 }
 
 /// One font row: star, name, a role's label at the right. `drag`: a mouse drag carries the
 /// family to a folder.
 struct Row<'a> {
     family: &'a str,
+    /// What the row shows: the family, or the name the user gave it.
+    label: &'a str,
     role: Option<String>,
     on: bool,
     favorite: bool,
@@ -225,11 +309,18 @@ fn font_row(ui: &mut egui::Ui, row: &Row<'_>, width: f32, h: f32, drag: bool) ->
         right -= 8.0;
     }
     let clip = Rect::from_min_max(pos2(x, rect.top()), pos2(right.max(x), rect.bottom()));
-    ui.painter().with_clip_rect(clip).text(pos2(x, rect.center().y), Align2::LEFT_CENTER, row.family, egui::FontId::proportional(13.5), text);
+    ui.painter().with_clip_rect(clip).text(pos2(x, rect.center().y), Align2::LEFT_CENTER, row.label, egui::FontId::proportional(13.5), text);
     if drag && resp.drag_started() {
         resp.dnd_set_drag_payload(row.family.to_string());
     }
     row_menu(&resp, row.family);
+    // A finger's press held on the row: moving it now drags the font to a folder.
+    if !drag && resp.is_pointer_button_down_on() && ui.data(|d| d.get_temp::<String>(held_id())).as_deref() == Some(row.family) {
+        crate::touch_drag::start(ui.ctx(), drag_list(), row.family, row.label);
+    }
+    if ui.is_rect_visible(rect) {
+        crate::touch_ui::note_rect(ui.ctx(), &format!("fontRow:{}", row.family), rect);
+    }
     let picked = resp.clicked() && !star_resp.hovered() && !swallow_pick(ui.ctx(), row.family);
     (picked, star_resp.clicked())
 }
@@ -251,6 +342,7 @@ fn folder_header(
 ) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let (rect, resp) = ui.allocate_exact_size(vec2(width, h), Sense::click());
+    crate::touch_ui::note_rect(ui.ctx(), &format!("fontFolder:{name}"), rect);
     let open = !st.collapsed.iter().any(|c| c == name);
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     let hovering_drop = resp.dnd_hover_payload::<String>().is_some();
@@ -392,11 +484,17 @@ pub fn custom_tab(app: &mut PhotocraftApp, ui: &mut egui::Ui, current: &str) -> 
     }
     let room = ui.ctx().content_rect().bottom() - ui.cursor().top() - 16.0;
     let height = LIST_HEIGHT.min(room).max(h * 3.0);
-    egui::ScrollArea::vertical().id_salt("font-folders-list").max_height(height).auto_shrink([false, true]).show(ui, |ui| {
+    let aliases = app.session.prefs().type_.font_aliases.clone();
+    // Where a finger's drag can drop the font: each folder's header (and Unfiled's).
+    let mut drops: Vec<(Rect, Option<String>)> = Vec::new();
+    let finger = crate::touch_drag::moving(ui.ctx(), drag_list()).map(|(_, at)| at);
+    let scroll = !crate::touch_drag::dragging(ui.ctx(), drag_list());
+    egui::ScrollArea::vertical().id_salt("font-folders-list").max_height(height).auto_shrink([false, true]).scroll_source(if scroll { egui::scroll_area::ScrollSource::default() } else { egui::scroll_area::ScrollSource::NONE }).show(ui, |ui| {
         ui.set_width(width);
         ui.spacing_mut().item_spacing.y = 1.0;
         let mut row = |ui: &mut egui::Ui, family: &str, role: Option<String>, indent: f32, role_id: Option<String>, actions: &mut Vec<Action>| {
-            let r = Row { family, role, on: family == current, favorite: favorites.iter().any(|f| f == family), indent };
+            let label = aliases.get(family).map_or(family, String::as_str);
+            let r = Row { family, label, role, on: family == current, favorite: favorites.iter().any(|f| f == family), indent };
             let (clicked, star) = font_row(ui, &r, width, h, !phone);
             if star {
                 actions.push(Action::Star(family.to_string()));
@@ -414,6 +512,8 @@ pub fn custom_tab(app: &mut PhotocraftApp, ui: &mut egui::Ui, current: &str) -> 
             if let Some(family) = header.dnd_release_payload::<String>() {
                 actions.push(Action::Move((*family).clone(), Some(f.name.clone())));
             }
+            drop_target(ui, &header, finger);
+            drops.push((header.rect, Some(f.name.clone())));
             if st.actions.as_deref() == Some(f.name.as_str()) {
                 ui.horizontal_wrapped(|ui| {
                     ui.add_space(indent + 34.0);
@@ -474,6 +574,8 @@ pub fn custom_tab(app: &mut PhotocraftApp, ui: &mut egui::Ui, current: &str) -> 
         if let Some(family) = header.dnd_release_payload::<String>() {
             actions.push(Action::Move((*family).clone(), None));
         }
+        drop_target(ui, &header, finger);
+        drops.push((header.rect, None));
         if !st.collapsed.iter().any(|c| c == key) {
             for fam in &unfiled {
                 row(ui, fam, None, INDENT, None, &mut actions);
@@ -483,11 +585,29 @@ pub fn custom_tab(app: &mut PhotocraftApp, ui: &mut egui::Ui, current: &str) -> 
             }
         }
     });
+    if let Some((family, at)) = crate::touch_drag::frame(ui.ctx(), drag_list())
+        && let Some((_, folder)) = drops.iter().find(|(r, _)| r.contains(at))
+    {
+        actions.push(Action::Move(family, folder.clone()));
+        // Dropped: the hold's "Move to…" panel and its pick are done with.
+        ui.data_mut(|d| {
+            d.remove::<String>(moving_id());
+            d.remove::<String>(held_id());
+        });
+    }
     ui.data_mut(|d| d.insert_temp(state_id(), st));
     for a in actions {
         run(app, a);
     }
     picked
+}
+
+/// A folder header under a finger's drag lights up as the drop target.
+fn drop_target(ui: &egui::Ui, header: &egui::Response, finger: Option<egui::Pos2>) {
+    if finger.is_some_and(|p| header.rect.contains(p)) {
+        let t = Tokens::get(ui.ctx());
+        ui.painter().rect_stroke(header.rect.shrink(1.0), 4.0, Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
+    }
 }
 
 #[cfg(test)]

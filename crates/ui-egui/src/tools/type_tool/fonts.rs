@@ -45,7 +45,13 @@ pub(super) fn font_labels_id() -> egui::Id {
 /// localized (native-language) name by that name, as Photoshop does ("MS Gothic" reads
 /// "ＭＳ ゴシック"). Called once a frame; the menus read the labels from the context.
 pub fn sync_font_names(ctx: &egui::Context, show_in_english: bool) {
-    let labels = (!show_in_english).then(localized_families);
+    sync_font_labels(ctx, show_in_english, &std::collections::BTreeMap::new());
+}
+
+/// [`sync_font_names`] with the names the user gave fonts (`type.font.alias`, family → alias),
+/// which win over the localized names: the menus show and search them, documents keep the family.
+pub fn sync_font_labels(ctx: &egui::Context, show_in_english: bool, aliases: &std::collections::BTreeMap<String, String>) {
+    let labels = if aliases.is_empty() { (!show_in_english).then(localized_families) } else { Some(labels_with_aliases(show_in_english, aliases)) };
     ctx.data_mut(|d| {
         if let Some(labels) = labels {
             d.insert_temp(font_labels_id(), labels);
@@ -53,6 +59,28 @@ pub fn sync_font_names(ctx: &egui::Context, show_in_english: bool) {
             d.remove::<Arc<HashMap<String, String>>>(font_labels_id());
         }
     });
+}
+
+/// The localized names (unless `show_in_english`) with `aliases` over them, cached until either
+/// changes or the shared engine registers fonts.
+fn labels_with_aliases(show_in_english: bool, aliases: &std::collections::BTreeMap<String, String>) -> Arc<HashMap<String, String>> {
+    type Key = (u64, bool, std::collections::BTreeMap<String, String>);
+    type Cached = Option<(Key, Arc<HashMap<String, String>>)>;
+    static MERGED: wasm_sync::Mutex<Cached> = wasm_sync::Mutex::new(None);
+    let generation = photocraft_text::fonts::shared_generation();
+    let mut cached = MERGED.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(((g, e, a), v)) = cached.as_ref()
+        && *g == generation
+        && *e == show_in_english
+        && a == aliases
+    {
+        return v.clone();
+    }
+    let mut map = if show_in_english { HashMap::new() } else { (*localized_families()).clone() };
+    map.extend(aliases.iter().filter(|(_, a)| !a.trim().is_empty()).map(|(f, a)| (f.clone(), a.clone())));
+    let v = Arc::new(map);
+    *cached = Some(((generation, show_in_english, aliases.clone()), v.clone()));
+    v
 }
 
 /// The fonts' localized family names, keyed by family. Cached until the shared engine registers fonts.
@@ -858,6 +886,9 @@ fn family_picker_with(
                         crate::font_projects_ui::row_menu(&response, f);
                         // And its "Move to…" a folder.
                         crate::font_folders_ui::row_menu(&response, f);
+                        if phone.is_some() && ui.is_rect_visible(response.rect) {
+                            crate::touch_ui::note_rect(ui.ctx(), &format!("fontRow:{f}"), response.rect);
+                        }
                         if stepped == Some(i) {
                             response.scroll_to_me(Some(egui::Align::Center));
                         } else if reveal.is_some() {

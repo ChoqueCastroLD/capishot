@@ -5265,3 +5265,9 @@ fontTab	Find More	Buscar más
 	Pick a color from the image	Tomar un color de la imagen
 	Tap the image to pick a color	Toca la imagen para tomar un color
 	Click the image to pick a color	Haz clic en la imagen para tomar un color
+	Name shown for {font}	Nombre que se muestra para {font}
+	Use its own name	Usar su propio nombre
+	The name the font menu shows for it; documents keep the font's own name	El nombre que muestra el menú de fuentes; los documentos conservan el nombre real de la fuente
+	Move to folder	Mover a carpeta
+	Move folder up	Subir carpeta
+	Move folder down	Bajar carpeta

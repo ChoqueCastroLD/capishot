@@ -89,7 +89,7 @@ impl PhotocraftApp {
         monitor_status::poll_frame(self, ctx, frame);
         // Control requests and persisted preferences can change the language in this frame.
         i18n::sync_context(ctx, &self.session.prefs().interface.language);
-        type_tool::sync_font_names(ctx, self.session.prefs().type_.show_font_names_in_english);
+        type_tool::sync_font_labels(ctx, self.session.prefs().type_.show_font_names_in_english, &self.session.prefs().type_.font_aliases);
         // A window bigger than its display (1440 × 900 on 1366 × 768) runs under the taskbar:
         // maximize it into the work area once (#315).
         work_area::fit_window(ctx);

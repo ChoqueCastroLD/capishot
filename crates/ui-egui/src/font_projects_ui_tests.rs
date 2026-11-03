@@ -189,6 +189,7 @@ fn opening_a_capiproj_installs_its_fonts_once() {
         false,
         None,
         None,
+        &[("Prjqz".to_string(), "Diálogos".to_string())].into(),
     )
     .unwrap();
     let mut app = new_app();

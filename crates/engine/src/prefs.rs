@@ -1002,6 +1002,10 @@ pub struct TypePrefs {
     /// "Unfiled".
     #[serde(default)]
     pub font_folders: Vec<FontFolder>,
+    /// Display names the user gave font families (`type.font.alias`): family → alias. Shown in
+    /// the font menu and matched by its search; documents keep the real family name.
+    #[serde(default)]
+    pub font_aliases: std::collections::BTreeMap<String, String>,
 }
 
 /// A folder of the font menu's Custom tab: its name (unique), the folder it is in (one level of
@@ -1028,6 +1032,7 @@ impl Default for TypePrefs {
             allow_online_fonts: false,
             favorite_fonts: Vec::new(),
             font_folders: Vec::new(),
+            font_aliases: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -1406,13 +1411,14 @@ impl Preferences {
         }
         // The favourite fonts are the user's library, not a Type setting: resetting the Type
         // section keeps them (only `type.favoriteFonts` itself, or Reset All, clears them).
-        let favorites = (path == "type").then(|| (self.type_.favorite_fonts.clone(), self.type_.font_folders.clone()));
+        let favorites = (path == "type").then(|| (self.type_.favorite_fonts.clone(), self.type_.font_folders.clone(), self.type_.font_aliases.clone()));
         let mut root = self.to_json();
         set_path(&mut root, path, def)?;
         *self = serde_json::from_value(root).map_err(|e| e.to_string())?;
-        if let Some((favorites, folders)) = favorites {
+        if let Some((favorites, folders, aliases)) = favorites {
             self.type_.favorite_fonts = favorites;
             self.type_.font_folders = folders;
+            self.type_.font_aliases = aliases;
         }
         Ok(())
     }
