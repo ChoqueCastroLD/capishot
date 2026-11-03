@@ -1298,6 +1298,7 @@ fn make_effect(f: &FxSpec) -> Effect {
                 anti_alias: false,
                 noise: 0.0,
                 knocks_out: *knocks_out,
+                source: Default::default(),
             };
             if *inner { Effect::InnerShadow(s) } else { Effect::DropShadow(s) }
         }
@@ -1464,6 +1465,7 @@ fn k_only_shadows_stay_k_only() {
         anti_alias: false,
         noise: 0.0,
         knocks_out: true,
+        source: Default::default(),
     }));
     d.layers.push(t);
     assert!(!supports(&d) && split::supports(&d));

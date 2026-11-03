@@ -909,6 +909,7 @@ fn shadow(noise: f32, origin: (i32, i32)) -> Map {
         anti_alias: false,
         noise,
         knocks_out: true,
+        source: Default::default(),
     };
     shadow_map(&square_shape(40), &s, &GlobalLight::default(), false, origin)
 }
@@ -1024,6 +1025,7 @@ fn effect_noise_stays_inside_the_visible_falloff() {
         anti_alias: false,
         noise,
         knocks_out: true,
+        source: Default::default(),
     };
     let light = GlobalLight::default();
     let pairs = [

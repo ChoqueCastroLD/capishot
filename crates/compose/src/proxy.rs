@@ -307,6 +307,7 @@ mod tests {
             anti_alias: false,
             noise: 0.0,
             knocks_out: true,
+            source: Default::default(),
         };
         doc.layers[0].effects.items.push(Effect::DropShadow(shadow));
         doc.layers[0].effects.reference = Some((40.0, 80.0));

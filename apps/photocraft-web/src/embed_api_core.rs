@@ -37,6 +37,8 @@ pub const FEATURES: &[&str] = &[
     "fonts.preload",
     "fonts.notice",
     "events.fontsMissing",
+    "boot.hiddenTab",
+    "layerStyle.dropShadow.source",
 ];
 
 /// The build stamp: the Capishot commit and the build id, set by `scripts/build-embed.sh`

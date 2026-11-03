@@ -312,6 +312,7 @@ fn a_see_through_normal_layer_without_interior_effects_counts_the_backdrop_once(
             anti_alias: false,
             noise: 0.0,
             knocks_out: true,
+            source: Default::default(),
         })];
         d.layers.push(l);
         check(&d, 2, 2, [1.0 / 3.0, 0.0, 2.0 / 3.0, 0.75], "inside the layer");

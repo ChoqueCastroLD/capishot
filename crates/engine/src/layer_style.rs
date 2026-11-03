@@ -4,7 +4,7 @@ use photocraft_color::{BlendMode, Color};
 use photocraft_doc::adjust::CurvePoint;
 use photocraft_doc::{
     Bevel, BevelStyle, BevelTechnique, Contour, Effect, FxCommon, FxPaint, Glow, GlowSource, GlowTechnique, Gradient, GradientStyle, Satin, Shadow, StrokeFx,
-    StrokePosition,
+    ShadowSource, StrokePosition,
 };
 use serde_json::{Value, json};
 
@@ -82,7 +82,7 @@ fn gradient(p: &Value) -> Gradient {
 pub fn effect_defaults(kind: &str) -> Value {
     match kind {
         "dropShadow" => {
-            json!({"blend": "Multiply", "color": "#000000", "opacity": 75, "angle": 120, "useGlobalLight": true, "distance": 5, "spread": 0, "size": 5, "contour": "Linear", "antiAlias": false, "noise": 0, "knocksOut": true})
+            json!({"blend": "Multiply", "color": "#000000", "opacity": 75, "angle": 120, "useGlobalLight": true, "distance": 5, "spread": 0, "size": 5, "contour": "Linear", "antiAlias": false, "noise": 0, "knocksOut": true, "source": "fill"})
         }
         "innerShadow" => {
             json!({"blend": "Multiply", "color": "#000000", "opacity": 75, "angle": 120, "useGlobalLight": true, "distance": 5, "choke": 0, "size": 5, "contour": "Linear", "antiAlias": false, "noise": 0})
@@ -499,6 +499,7 @@ fn fresh_effect(kind: &str) -> Option<Effect> {
         anti_alias: false,
         noise: 0.0,
         knocks_out: !inner,
+        source: Default::default(),
     };
     let glow = || Glow {
         common: FxCommon::new(BlendMode::Screen, 0.75),
@@ -665,6 +666,26 @@ fn overlay_shadow(s: &mut Shadow, p: &Value, inner: bool) {
     }
     if !inner && let Some(x) = b_of(p, "knocksOut") {
         s.knocks_out = x;
+    }
+    if !inner && let Some(x) = p.get("source").and_then(Value::as_str).and_then(shadow_source) {
+        s.source = x;
+    }
+}
+
+/// A drop shadow's `source` param: what casts it.
+fn shadow_source(name: &str) -> Option<ShadowSource> {
+    match name {
+        "fill" => Some(ShadowSource::Fill),
+        "fill+stroke" | "fillAndStroke" => Some(ShadowSource::FillAndStroke),
+        _ => None,
+    }
+}
+
+/// The `source` param naming `s`'s caster (what [`shadow_source`] reads).
+pub fn shadow_source_param(s: ShadowSource) -> &'static str {
+    match s {
+        ShadowSource::Fill => "fill",
+        ShadowSource::FillAndStroke => "fill+stroke",
     }
 }
 
@@ -960,6 +981,12 @@ fn replace_effects(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn set_effect(s: &mut Session, p: &Value, kind: &str) -> Result<Value> {
     crate::commands::check_f32_values(&format!("layer.layerStyle.{kind}"), p)?;
+    if kind == "dropShadow"
+        && let Some(v) = p.get("source")
+        && v.as_str().and_then(shadow_source).is_none()
+    {
+        return Err(bad("layer.layerStyle.dropShadow", "`source` must be \"fill\" or \"fill+stroke\""));
+    }
     let fx = effect_from_params(kind, p).ok_or_else(|| EngineError::Other(format!("unknown effect {kind}")))?;
     let (fx, pattern) = crate::pattern_cmds::resolve_effect(s, fx)?;
     let label = format!("Layer Style: {}", fx.label());
@@ -1042,7 +1069,7 @@ pub fn specs() -> Vec<CommandSpec> {
         style_cmd!(
             "dropShadow",
             "Drop Shadow…",
-            r##"{"color":"#rrggbb","opacity":0..100=75,"blend":str="multiply","angle":deg=120,"useGlobalLight":bool,"distance":px=5,"spread":0..100,"size":px=5,"contour":"Linear|Cone|Cone - Inverted|Cove - Deep|Cove - Shallow|Gaussian|Half Round|Ring|Ring - Double|Rolling Slope - Descending|Rounded Steps|Sawtooth 1"|{"name":str,"points":[[in 0..1,out 0..1],…],"corners":[bool,…]}="Linear","antiAlias":bool,"noise":0..100,"knocksOut":bool,"add":bool,"layer":id}"##
+            r##"{"color":"#rrggbb","opacity":0..100=75,"blend":str="multiply","angle":deg=120,"useGlobalLight":bool,"distance":px=5,"spread":0..100,"size":px=5,"contour":"Linear|Cone|Cone - Inverted|Cove - Deep|Cove - Shallow|Gaussian|Half Round|Ring|Ring - Double|Rolling Slope - Descending|Rounded Steps|Sawtooth 1"|{"name":str,"points":[[in 0..1,out 0..1],…],"corners":[bool,…]}="Linear","antiAlias":bool,"noise":0..100,"knocksOut":bool,"source":"fill|fill+stroke"="fill" (what casts the shadow: the layer's pixels as in Photoshop, or the layer with the outside of its strokes, for outlined lettering; saved to PSD as a Capishot key Photoshop ignores),"add":bool,"layer":id}"##
         ),
         style_cmd!(
             "innerShadow",

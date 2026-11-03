@@ -95,6 +95,7 @@ fn spec(kind: &str) -> &'static [(&'static str, &'static str, P)] {
     const DIR: &[(&str, &str)] = &[("up", "Up"), ("down", "Down")];
     const SRC: &[(&str, &str)] = &[("edge", "Edge"), ("center", "Center")];
     const GLOW_TECHNIQUE: &[(&str, &str)] = &[("softer", "Softer"), ("precise", "Precise")];
+    const SHADOW_SOURCE: &[(&str, &str)] = &[("fill", "Fill"), ("fill+stroke", "Fill + Stroke")];
     const CONTOUR: P = P::Contour(Some("antiAlias"));
     match kind {
         "dropShadow" => &[
@@ -109,6 +110,7 @@ fn spec(kind: &str) -> &'static [(&'static str, &'static str, P)] {
             ("contour", "Contour", CONTOUR),
             ("noise", "Noise", P::Slider(0.0, 100.0, "%")),
             ("knocksOut", "Layer Knocks Out Drop Shadow", P::Check),
+            ("source", "Shadow Source", P::Choice(SHADOW_SOURCE)),
         ],
         "innerShadow" => &[
             ("blend", "Blend Mode", P::Blend),
@@ -251,6 +253,7 @@ pub(crate) fn values_of(e: &Effect, light: f32) -> Value {
             set(&mut v, "noise", json!((s.noise * 100.0).round()));
             if matches!(e, Effect::DropShadow(_)) {
                 set(&mut v, "knocksOut", json!(s.knocks_out));
+                set(&mut v, "source", json!(photocraft_engine::layer_style::shadow_source_param(s.source)));
             }
         }
         Effect::OuterGlow(g) | Effect::InnerGlow(g) => {

@@ -130,8 +130,9 @@ fn collect_kern_slots(line: &Line<'_>, para: &Para<'_>) -> Vec<KernSlot> {
             continue;
         }
         line_runs.push(run.index());
-        let hs = env.styles.get(gr.style().brush.0 as usize).map_or(1.0, scale_of);
         for c in run.visual_clusters() {
+            // A shaping run can span styles (its glyph runs split at each): the cluster's own.
+            let hs = env.styles.get(c.first_style().brush.0 as usize).map_or(1.0, scale_of);
             let mut gl = c.glyphs();
             let first = gl.next().map(|g| g.id);
             let last = gl.last().map(|g| g.id).or(first);
@@ -322,12 +323,13 @@ impl Para<'_> {
     }
 
     /// Where the line starts along its extent: box and area lines at their box or span edge,
-    /// point lines around the anchor.
-    fn line_start(&self, f: &LineFrame, offset: f32, adv: f32, line_kern: f32) -> f32 {
+    /// point lines around the anchor. `adv` is the shaped width, `width` the drawn one (each
+    /// run's horizontal scale applied), both without trailing whitespace.
+    fn line_start(&self, f: &LineFrame, offset: f32, (adv, width): (f32, f32), line_kern: f32) -> f32 {
         if !self.env.wraps {
             let target = match self.ps.align {
-                TextAlign::Center | TextAlign::JustifyCenter => -(adv + line_kern) / 2.0,
-                TextAlign::Right | TextAlign::JustifyRight => -(adv + line_kern),
+                TextAlign::Center | TextAlign::JustifyCenter => -(width + line_kern) / 2.0,
+                TextAlign::Right | TextAlign::JustifyRight => -(width + line_kern),
                 _ => self.indent_start,
             };
             return target - offset;
@@ -341,18 +343,27 @@ impl Para<'_> {
         let origin = f.slot.map_or(self.line_origin, |s| s.x);
         let base = origin + self.indent_start - kern_align;
         // The line's own width takes the justify-last-line slack.
-        let slack = self.line_avail(f).unwrap_or(0.0) - adv * self.break_scale - line_kern;
+        let slack = self.line_avail(f).unwrap_or(0.0) - width - line_kern;
         // Parley aligned the unscaled line in `avail / break_scale`: scale its
         // indent and alignment offset back to the box.
         let scaled_offset = offset * (self.break_scale - 1.0);
+        // That offset centres (or right-aligns) a line `adv * break_scale` wide; a line whose runs
+        // are scaled less than the paragraph's largest scale is narrower, so it moves by the
+        // difference to stay centred (flush right).
+        let narrower = adv * self.break_scale - width;
+        let mixed_scale = match self.ps.align {
+            TextAlign::Center => narrower * 0.5,
+            TextAlign::Right => narrower,
+            _ => 0.0,
+        };
         base + if f.last {
             match self.ps.align {
                 TextAlign::JustifyCenter => slack * 0.5 - offset,
                 TextAlign::JustifyRight => slack - offset,
-                _ => scaled_offset,
+                _ => scaled_offset + mixed_scale,
             }
         } else {
-            scaled_offset
+            scaled_offset + mixed_scale
         }
     }
 
@@ -402,7 +413,8 @@ impl Para<'_> {
         let mut kern_px = self.kerning(optical, &slots);
         let (trailing_tabs, trailing_growth) = self.apply_tab_stops(&slots, &mut kern_px, f.index);
         let line_kern: f32 = kern_px.iter().sum::<f32>() - trailing_tabs;
-        let dx = self.line_start(f, m.offset, adv, line_kern);
+        let growth: f32 = slots.iter().map(|s| s.growth).sum::<f32>() - trailing_growth;
+        let dx = self.line_start(f, m.offset, (adv, adv + growth), line_kern);
         let lc = LineCtx { dx, baseline: f.baseline, slots: &slots, kern_px: &kern_px, line_index: out.lines.len() };
         let (g0, c0) = (out.glyphs.len(), out.clusters.len());
         let mut state = LineState { cursors: kern_cursors(line, &slots), seen_runs: Vec::new(), vinfo: Vec::new(), extra: 0.0 };
@@ -466,7 +478,7 @@ impl Para<'_> {
         let run_x0 = lc.dx + gr.offset() + state.extra;
         if !state.seen_runs.contains(&run.index()) {
             state.seen_runs.push(run.index());
-            self.push_clusters(out, lc, run, hs, run_x0);
+            self.push_clusters(out, lc, run, run_x0);
         }
         self.push_glyphs(out, lc, state, gr, face, hs);
         let span = RunSpan { x0: run_x0, x1: lc.dx + gr.offset() + gr.advance() + state.extra, style: si };
@@ -474,10 +486,12 @@ impl Para<'_> {
     }
 
     /// The caret clusters of a shaping run, with kerning and horizontal scale in their advances.
-    fn push_clusters(&self, out: &mut TextLayout, lc: &LineCtx<'_>, run: &Run<'_, RunBrush>, hs: f32, run_x0: f32) {
+    fn push_clusters(&self, out: &mut TextLayout, lc: &LineCtx<'_>, run: &Run<'_, RunBrush>, run_x0: f32) {
         let mut cx = run_x0;
         let base = lc.slots.iter().position(|s| s.run == run.index()).unwrap_or(0);
         for (ci, c) in run.visual_clusters().enumerate() {
+            // Each cluster's own style: a shaping run can span several.
+            let hs = self.env.styles.get(c.first_style().brush.0 as usize).map_or(1.0, scale_of);
             let a = c.advance() * hs + lc.kern_px.get(base + ci).copied().unwrap_or(0.0);
             let r = c.text_range();
             if r.end > self.prefix.len() || self.prefix.is_empty() {

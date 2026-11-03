@@ -7,7 +7,7 @@ use photocraft_color::{BlendMode, Color};
 use photocraft_doc::adjust::CurvePoint;
 use photocraft_doc::{
     Bevel, BevelContour, BevelStyle, BevelTechnique, BevelTexture, Contour, Effect, FxCommon, FxPaint, Glow, GlowSource, GlowTechnique, Gradient, Satin,
-    Shadow, StrokeFx, StrokePosition,
+    Shadow, ShadowSource, StrokeFx, StrokePosition,
 };
 use photocraft_psd::descriptor::{Descriptor, Id, UnicodeString, Value, VersionedDescriptor};
 
@@ -164,6 +164,11 @@ fn gradient_from(d: &Descriptor) -> Gradient {
     }
 }
 
+/// Capishot's drop shadow key: the shadow is cast from the fill and the outside of the layer's
+/// strokes ([`ShadowSource::FillAndStroke`]). Photoshop has no such setting and ignores the key
+/// (it casts from the fill); Capishot reads it back.
+const SHADOW_FROM_STROKE: &str = "capishotShadowIncludesStroke";
+
 fn parse_shadow(d: &Descriptor, inner: bool) -> Shadow {
     Shadow {
         common: common(d, BlendMode::Multiply, 0.75),
@@ -177,6 +182,7 @@ fn parse_shadow(d: &Descriptor, inner: bool) -> Shadow {
         anti_alias: bool_of(d, "AntA"),
         noise: pct(d, "Nose", 0.0),
         knocks_out: !inner && !matches!(d.get("layerConceals"), Some(Value::Boolean(false))),
+        source: if !inner && matches!(d.get(SHADOW_FROM_STROKE), Some(Value::Boolean(true))) { ShadowSource::FillAndStroke } else { ShadowSource::Fill },
     }
 }
 
@@ -389,6 +395,10 @@ fn write_one(e: &Effect) -> (&'static str, Descriptor) {
                 .with("TrnS", contour_value(&s.contour));
             if !inner {
                 d = d.with("layerConceals", Value::Boolean(s.knocks_out));
+                // Only when set, so a Photoshop-style shadow writes the same descriptor as before.
+                if s.source == ShadowSource::FillAndStroke {
+                    d = d.with(SHADOW_FROM_STROKE, Value::Boolean(true));
+                }
             }
             (if inner { "IrSh" } else { "DrSh" }, d)
         }
@@ -607,6 +617,7 @@ pub fn parse_lrfx(data: &[u8]) -> Option<(bool, Vec<Effect>)> {
                     anti_alias: false,
                     noise: 0.0,
                     knocks_out: &key == b"dsdw",
+                    source: Default::default(),
                 };
                 out.push(if &key == b"dsdw" { Effect::DropShadow(s) } else { Effect::InnerShadow(s) });
             }

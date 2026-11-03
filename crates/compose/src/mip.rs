@@ -533,6 +533,7 @@ mod tests {
             anti_alias: false,
             noise: 0.0,
             knocks_out: false,
+            source: Default::default(),
         }));
         ink.effects.items.push(Effect::Stroke(StrokeFx {
             common: FxCommon::new(photocraft_color::blend::BlendMode::Normal, 1.0),

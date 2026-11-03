@@ -3682,3 +3682,56 @@ fn restyling_the_photoshop_era_objects_keeps_the_raw_strings_of_the_file() {
     let runs = era_runs(&crate::psd::parse_txt2(&out).unwrap());
     assert_eq!(runs.first().and_then(|(_, f)| f.get("FontSize")).and_then(E::as_f64), Some(24.0), "and the legacy copy was restyled");
 }
+
+/// Centred and right-aligned lines sit by their drawn (horizontally scaled) width at any scale,
+/// also when a paragraph mixes scales: its lines break at the largest, and a line scaled less
+/// used to keep the offset of that width and drift left by (1 − scale) / 2 of its own width.
+/// Point text too, around its anchor.
+#[test]
+fn horizontally_scaled_lines_stay_centred_and_flush_right() {
+    let mut e = TextEngine::new();
+    let text = "¡GUAU,\rOKARIN\rESTÁ\rEMPAPADO!";
+    let layer = |scale: f32, first: f32, align: TextAlign, shape: TextShape| {
+        let style = CharStyle { font_family: "Inter".into(), size_pt: 30.0, horizontal_scale: scale, ..Default::default() };
+        // Each paragraph's first character at `first`, the rest at `scale`.
+        let mut runs = Vec::new();
+        for (i, part) in text.split('\r').enumerate() {
+            let head = part.chars().next().map_or(0, char::len_utf8);
+            let lead = if i > 0 { 1 } else { 0 };
+            runs.push(TextRun { len: lead + head, style: CharStyle { horizontal_scale: first, ..style.clone() } });
+            runs.push(TextRun { len: part.len() - head, style: style.clone() });
+        }
+        with_para(TextLayer { text: text.into(), runs, shape, ..Default::default() }, ParagraphStyle { align, ..Default::default() })
+    };
+    let boxed = TextShape::Box { x: 20.0, y: 0.0, width: 300.0, height: 1000.0 };
+    for scale in [0.5f32, 0.85, 1.0, 1.2] {
+        for first in [scale, 1.0, 1.3] {
+            let c = e.layout(&layer(scale, first, TextAlign::Center, boxed.clone()), 72.0);
+            assert_eq!(c.lines.len(), 4, "{scale}/{first}");
+            for ln in &c.lines {
+                assert!(((ln.x0 + ln.x1) * 0.5 - 170.0).abs() <= 0.5, "{scale}/{first}: centred {ln:?}");
+            }
+            let r = e.layout(&layer(scale, first, TextAlign::Right, boxed.clone()), 72.0);
+            for ln in &r.lines {
+                assert!((ln.x1 - 320.0).abs() <= 0.5, "{scale}/{first}: flush right {ln:?}");
+            }
+            // The caret clusters end where the line's drawn width does.
+            for (li, ln) in c.lines.iter().enumerate() {
+                let end = c.clusters.iter().filter(|k| k.line == li).map(|k| k.x + k.advance).fold(f32::MIN, f32::max);
+                assert!((end - ln.x1).abs() <= 0.5, "{scale}/{first}: clusters end {end} {ln:?}");
+            }
+            let l = e.layout(&layer(scale, first, TextAlign::Left, boxed.clone()), 72.0);
+            for ln in &l.lines {
+                assert!((ln.x0 - 20.0).abs() <= 0.5, "{scale}/{first}: flush left {ln:?}");
+            }
+            let pc = e.layout(&layer(scale, first, TextAlign::Center, TextShape::Point), 72.0);
+            for ln in &pc.lines {
+                assert!(((ln.x0 + ln.x1) * 0.5).abs() <= 0.5, "{scale}/{first}: point centred {ln:?}");
+            }
+            let pr = e.layout(&layer(scale, first, TextAlign::Right, TextShape::Point), 72.0);
+            for ln in &pr.lines {
+                assert!(ln.x1.abs() <= 0.5, "{scale}/{first}: point flush right {ln:?}");
+            }
+        }
+    }
+}

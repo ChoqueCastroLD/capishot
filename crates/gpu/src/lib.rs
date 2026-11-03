@@ -1008,6 +1008,10 @@ impl Compositor {
                 if noisy {
                     return Err(Unsupported(format!("effect noise on `{}` uses the CPU path", f.layer.name)));
                 }
+                // The GPU map program casts shadows from the shape alone.
+                if matches!(e, photocraft_doc::Effect::DropShadow(s) if s.source == photocraft_doc::ShadowSource::FillAndStroke) {
+                    return Err(Unsupported(format!("a drop shadow cast from the strokes of `{}` uses the CPU path", f.layer.name)));
+                }
                 for s in fx::program_with(e, &doc.global_light, false, &doc.patterns, (0.0, 0.0)).stages {
                     if s.lut.as_ref().is_some_and(|l| l.len() > 4096) {
                         return Err(Unsupported(format!("effect blur on `{}` too wide for the GPU path", f.layer.name)));

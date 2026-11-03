@@ -19,6 +19,11 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
   `index.html` has one and starts as before). `init` starts the app on the host's canvas.
 - Hosted, the app doesn't install `window.photocraft`, the Photopea hash mode or the
   `beforeunload` prompt: the host owns its page.
+- A page that starts in a hidden (background) tab boots there too (feature `boot.hiddenTab`):
+  `init` resolves and the `ready` event, `window.photocraft` and its `{photocraft: "ready"}`
+  message come without the tab ever being shown. The browser throttles a hidden tab's timers
+  (about one frame a second, less after minutes hidden), so it boots and answers slower than a
+  visible one; no fake `visibilitychange` is needed.
 - Calls that need the app run at the start of the next frame, so they return promises.
   `execute`, `request`, `setTool`, `fit`, `zoom`, `undo` and `redo` use the same control channel as
   the desktop control server (`docs/control-protocol.md`): same results, same errors.
@@ -38,6 +43,11 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
   browser's next animation frame, with the latest values, so a gesture sends at most one
   `viewChanged` per frame however many app frames it ran. `zoom` `{id, zoom}` comes before it when
   the factor changed since the last report (feature `events.viewChanged`).
+
+- `execute('layer.layerStyle.dropShadow', {source: 'fill+stroke', …})` casts the drop shadow from
+  the layer and the outside of its strokes (an outlined lettering's 3D shadow); `'fill'` (default)
+  from the layer's pixels as Photoshop does. Saved to PSD and `.pcraft` (feature
+  `layerStyle.dropShadow.source`; `docs/control-protocol.md`).
 
 - Type layers through `execute` (`docs/control-protocol.md`): `type.frame {layer}` gives a layer's
   frame without its layout (`shape` point/box/path/inPath with its geometry, `transform`, `bounds`),
