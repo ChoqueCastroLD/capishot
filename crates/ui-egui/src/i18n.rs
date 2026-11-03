@@ -23,7 +23,7 @@
 mod catalog;
 mod system;
 
-pub use system::system_lang;
+pub use system::{provide_system_tags, system_lang};
 
 use std::cell::Cell;
 use std::sync::OnceLock;
@@ -187,7 +187,7 @@ fn expand(packed: &str, keys: &[&str]) -> Result<String, String> {
 }
 
 /// The registry. English first: it is the fallback and the source language.
-pub static LANGUAGES: [LangInfo; 17] = [
+pub static LANGUAGES: [LangInfo; 18] = [
     LangInfo { code: "en", name: "English", source: b"", plural: plural_one_other, complete_menus: false, catalog: OnceLock::new() },
     LangInfo { code: "ja", name: "日本語", source: catalog!("ja"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
     LangInfo { code: "zh-hans", name: "简体中文", source: catalog!("zh-hans"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
@@ -204,8 +204,11 @@ pub static LANGUAGES: [LangInfo; 17] = [
     LangInfo { code: "ko", name: "한국어", source: catalog!("ko"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
     LangInfo { code: "pl", name: "Polski", source: catalog!("pl"), plural: plural_polish, complete_menus: true, catalog: OnceLock::new() },
     LangInfo { code: "de", name: "Deutsch", source: catalog!("de"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
-    // Brazilian Portuguese; `pt`, `pt-BR` and `pt-PT` locales all resolve here (see `candidates`).
+    // Brazilian Portuguese; `pt` and `pt-BR` locales resolve here (see `candidates`).
     LangInfo { code: "pt-br", name: "Português (Brasil)", source: catalog!("pt-br"), plural: plural_pt, complete_menus: true, catalog: OnceLock::new() },
+    // European Portuguese (`pt-PT` and the other non-Brazilian regions); strings it lacks are
+    // shown in Brazilian Portuguese ([`fallback_of`]) rather than English.
+    LangInfo { code: "pt-pt", name: "Português (Portugal)", source: catalog!("pt-pt"), plural: plural_pt, complete_menus: false, catalog: OnceLock::new() },
     LangInfo { code: "el", name: "Ελληνικά", source: catalog!("el"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
     // Dutch; `nl-NL` and `nl-BE` locales both resolve here.
     LangInfo { code: "nl", name: "Nederlands", source: catalog!("nl"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
@@ -234,7 +237,7 @@ impl LangInfo {
             }
             return &NO_CATALOG;
         }
-        self.catalog.get_or_init(|| Catalog::parse(&self.text()))
+        self.catalog.get_or_init(|| Catalog::parse(&with_fallback(self.code, self.text())))
     }
 
     /// Is this catalog installed at run time ([`provide_catalog`]) rather than compiled in?
@@ -271,8 +274,25 @@ pub fn provide_catalog(code: &str, text: &str) -> Result<(), String> {
     if text.len() as u64 > MAX_CATALOG_BYTES {
         return Err(format!("catalog {code}: over {MAX_CATALOG_BYTES} bytes"));
     }
-    let _ = info.catalog.set(Catalog::parse(text));
+    let _ = info.catalog.set(Catalog::parse(&with_fallback(info.code, text.to_owned())));
     Ok(())
+}
+
+/// The language whose strings a partial catalog borrows (later entries win in [`Catalog::parse`]).
+fn fallback_of(code: &str) -> Option<&'static LangInfo> {
+    let base = match code {
+        "pt-pt" => "pt-br",
+        _ => return None,
+    };
+    LANGUAGES.iter().find(|l| l.code == base && !l.is_fetched())
+}
+
+/// `text` preceded by its fallback language's catalog, if it has one.
+fn with_fallback(code: &str, text: String) -> String {
+    match fallback_of(code) {
+        Some(base) => base.text() + "\n" + &text,
+        None => text,
+    }
 }
 
 /// A language the UI can be shown in (a handle into [`LANGUAGES`]).
@@ -384,9 +404,16 @@ fn candidates(tag: &str) -> Vec<String> {
         let script = if parts.iter().any(|p| matches!(*p, "tw" | "hk" | "mo")) { "zh-hant" } else { "zh-hans" };
         out.insert(out.len() - 1, script.to_string());
     }
-    if primary == "pt" && !out.iter().any(|c| c == "pt-br") {
-        // The only Portuguese catalog is Brazilian; other regions use it rather than English.
-        out.insert(out.len() - 1, "pt-br".to_string());
+    if primary == "pt" {
+        // Brazil (and a bare `pt`: most of our Portuguese readers are Brazilian) reads pt-br;
+        // every other region reads European Portuguese, then Brazilian.
+        let region = parts.iter().skip(1).find(|r| r.len() == 2 || (r.len() == 3 && r.bytes().all(|b| b.is_ascii_digit())));
+        if region.is_some_and(|r| *r != "br") && !out.iter().any(|c| c == "pt-pt") {
+            out.insert(out.len() - 1, "pt-pt".to_string());
+        }
+        if !out.iter().any(|c| c == "pt-br") {
+            out.insert(out.len() - 1, "pt-br".to_string());
+        }
     }
     out
 }

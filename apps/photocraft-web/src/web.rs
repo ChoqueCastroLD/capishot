@@ -155,6 +155,9 @@ pub fn own_page() -> bool {
 /// its options replace the URL flags, the page keeps its own unload prompt and globals, and the
 /// embedding API drives the app every frame. Returns the runner (kept alive by its listeners).
 pub async fn run(canvas: web_sys::HtmlCanvasElement, hosted: Option<crate::embed_api::Hosted>) -> Result<eframe::WebRunner, String> {
+    // Before anything resolves the `auto` interface language: the browser's languages are the
+    // system locale here (wasm has no OS to ask).
+    photocraft_ui_egui::i18n::provide_system_tags(browser_languages());
     let q = if hosted.is_some() { String::new() } else { query() };
     // The Photopea-compatible config in the URL hash (crate::embed).
     let photopea = if hosted.is_some() { None } else { crate::embed::photopea_config() };
