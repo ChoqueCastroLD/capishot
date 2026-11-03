@@ -479,3 +479,75 @@ fn runs_as_a_background_job_like_inline() {
     assert_eq!(bg.active().unwrap().history.past_len(), past, "a refusal changes nothing");
     assert!(crate::typer_place_cmds::page_ready(&bg), "the job left the page cached");
 }
+
+/// A `w` x `h` white page with an oval bubble (outline about 4 px) centred at `(cx, cy)`, radii
+/// `rx`, `ry`, and two lines of black type merged into it.
+fn big_page(w: u32, h: u32, (cx, cy, rx, ry): (f32, f32, f32, f32)) -> Session {
+    let e = ell(cx, cy, rx, ry);
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": w, "height": h, "background": "white"})).unwrap();
+    let id = s.active().unwrap().doc.layers[0].id;
+    let fmt = s.active().unwrap().doc.layer(id).unwrap().surface().unwrap().format();
+    let n = fmt.channels();
+    let (mut px, mut enc) = (vec![0f32; (w * h) as usize * n], [0f32; 8]);
+    for y in 0..h as i32 {
+        for x in 0..w as i32 {
+            let v = e(x, y);
+            let c = if (0.97..1.03).contains(&v) { 0.0 } else { 1.0 };
+            from_rgba_into(&fmt, [c, c, c, 1.0], &mut enc);
+            let k = (y as usize * w as usize + x as usize) * n;
+            px[k..k + n].copy_from_slice(&enc[..n]);
+        }
+    }
+    s.edit("Page", |doc, _| {
+        doc.layer_mut(id).unwrap().surface_mut().unwrap().write_region(Rect::new(0, 0, w as i32, h as i32), &px);
+        Ok(())
+    })
+    .unwrap();
+    letter(&mut s, "HELLO THERE!", f64::from(cx) - 170.0, f64::from(cy) - 10.0, 48.0, "#000000");
+    letter(&mut s, "HOW ARE YOU?", f64::from(cx) - 160.0, f64::from(cy) + 60.0, 48.0, "#000000");
+    s
+}
+
+fn layer_pixels(s: &Session) -> Vec<f32> {
+    let d = s.active().unwrap();
+    let b = d.doc.bounds();
+    d.doc.layers[0].surface().unwrap().read_region(b)
+}
+
+/// A click on a stale page composites a window around it, not the page; the result is the
+/// page's: for a bubble inside a window, one too large for one, one cut by the page's edge (found
+/// from the page), and a miss.
+#[test]
+fn a_stale_page_is_composited_around_the_click_only_with_the_same_result() {
+    for (size, bubble, click, windowed) in [
+        ((1800, 2400), (1200.0, 1500.0, 260.0, 170.0), (1200, 1420), true),
+        ((1800, 2400), (900.0, 1200.0, 700.0, 500.0), (900, 1120), false),
+        ((1800, 2400), (1200.0, 1500.0, 260.0, 170.0), (100, 100), false),
+        ((1800, 2400), (300.0, 300.0, 400.0, 220.0), (250, 250), false),
+        ((1800, 2400), (1450.0, 2100.0, 260.0, 170.0), (1450, 2020), true),
+        ((1800, 2400), (900.0, 1200.0, 1150.0, 1400.0), (900, 1120), false),
+        // Only the larger window holds it (a page large enough for that window to be worth it).
+        ((3000, 3600), (1500.0, 1800.0, 560.0, 300.0), (1500, 1720), true),
+    ] {
+        for sample_all in [false, true] {
+            let p = json!({"x": click.0, "y": click.1, "sampleAll": sample_all});
+            let mut stale = big_page(size.0, size.1, bubble);
+            let a = stale.execute(ID, p.clone());
+            assert_eq!(!crate::typer_place_cmds::page_cached(&stale), windowed, "{bubble:?}: windowed {windowed}");
+            let mut ready = big_page(size.0, size.1, bubble);
+            crate::typer_place_cmds::page_image(&mut ready).unwrap();
+            let b = ready.execute(ID, p);
+            match (a, b) {
+                // Layer ids differ between the sessions.
+                (Ok(mut a), Ok(mut b)) => {
+                    a["layer"] = json!(0);
+                    b["layer"] = json!(0);
+                    assert_eq!(a, b, "{bubble:?}");
+                }
+                (a, b) => assert_eq!(a.map_err(|e| e.to_string()), b.map_err(|e| e.to_string()), "{bubble:?}"),
+            }
+            assert!(layer_pixels(&stale) == layer_pixels(&ready), "{bubble:?} sampleAll {sample_all}: same pixels");
+        }
+    }
+}

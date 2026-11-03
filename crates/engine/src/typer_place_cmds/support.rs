@@ -103,7 +103,7 @@ pub(crate) enum PageWork {
     Ready(PageImage),
     Composite {
         doc_id: DocId,
-        stripped: Box<Document>,
+        stripped: Arc<Document>,
         area: photocraft_geom::Rect,
         /// The previous page and the part of it to composite again (else all of it).
         base: Option<(Arc<Vec<[u8; 4]>>, photocraft_geom::Rect)>,
@@ -140,7 +140,7 @@ pub(crate) fn page_work(s: &mut Session) -> Result<PageWork> {
         Some(r) => s.typer.place.page.take().map(|old| (old.img, r)),
         None => None,
     };
-    Ok(PageWork::Composite { doc_id, stripped: Box::new(stripped), area, base })
+    Ok(PageWork::Composite { doc_id, stripped: Arc::new(stripped), area, base })
 }
 
 impl PageWork {
@@ -151,34 +151,66 @@ impl PageWork {
             PageWork::Ready(p) => return p,
             PageWork::Composite { doc_id, stripped, area, base } => (doc_id, stripped, area, base),
         };
-        let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
         let w = area.width() as usize;
         let (mut img, r) = match base {
             Some((img, r)) => (Arc::try_unwrap(img).unwrap_or_else(|shared| (*shared).clone()), r),
             None => (vec![[0u8; 4]; w * area.height() as usize], area),
         };
-        let rw = r.width() as usize;
-        let mut y = r.y0;
-        while y < r.y1 {
-            let y1 = (y + PAGE_BAND).min(r.y1);
-            let band = photocraft_compose::render(&stripped, photocraft_geom::Rect::new(r.x0, y, r.x1, y1));
-            for (row, src) in band.px.chunks_exact(rw.max(1)).enumerate() {
-                let start = ((y - area.y0) as usize + row) * w + (r.x0 - area.x0) as usize;
-                if let Some(dst) = img.get_mut(start..start + rw) {
-                    for (d, p) in dst.iter_mut().zip(src) {
-                        *d = p.map(q);
-                    }
-                }
-            }
-            y = y1;
+        composite_into(&stripped, area, &mut img, r);
+        PageImage { doc_id, stripped, area, img: Arc::new(img) }
+    }
+
+    /// The part of the page where it must be composited again (its whole box when nothing of it
+    /// is kept); `None` when the cached page is current.
+    pub(crate) fn stale_area(&self) -> Option<(photocraft_geom::Rect, photocraft_geom::Rect)> {
+        match self {
+            PageWork::Ready(_) => None,
+            PageWork::Composite { area, base, .. } => Some((*area, base.as_ref().map_or(*area, |b| b.1))),
         }
-        PageImage { doc_id, stripped: Arc::new(*stripped), area, img: Arc::new(img) }
+    }
+
+    /// The page within `win` only, composited now: a click that needs a few hundred pixels of a
+    /// stale page needn't wait for all of it. Never cached (see [`install_page`]).
+    pub(crate) fn window(&self, win: photocraft_geom::Rect) -> Option<PageImage> {
+        let PageWork::Composite { doc_id, stripped, area, .. } = self else { return None };
+        let win = win.intersect(area);
+        if win.is_empty() {
+            return None;
+        }
+        let mut img = vec![[0u8; 4]; win.width() as usize * win.height() as usize];
+        composite_into(stripped, win, &mut img, win);
+        Some(PageImage { doc_id: *doc_id, stripped: stripped.clone(), area: win, img: Arc::new(img) })
+    }
+}
+
+/// Composites `r` of `stripped` into `img` (8-bit, covering `area`), [`PAGE_BAND`] rows at a time
+/// (a whole page at once is four floats a pixel, 96 MB for a 2000 x 3000 page, and on the web that
+/// peak stays in the page's memory).
+fn composite_into(stripped: &Document, area: photocraft_geom::Rect, img: &mut [[u8; 4]], r: photocraft_geom::Rect) {
+    let w = area.width() as usize;
+    let r = r.intersect(&area);
+    let rw = r.width() as usize;
+    let mut y = r.y0;
+    while y < r.y1 {
+        let y1 = (y + PAGE_BAND).min(r.y1);
+        let band = photocraft_compose::render(stripped, photocraft_geom::Rect::new(r.x0, y, r.x1, y1));
+        for (row, src) in band.px.chunks_exact(rw.max(1)).enumerate() {
+            let start = ((y - area.y0) as usize + row) * w + (r.x0 - area.x0) as usize;
+            if let Some(dst) = img.get_mut(start..start + rw) {
+                photocraft_compose::quantize_rgba8(dst, src);
+            }
+        }
+        y = y1;
     }
 }
 
 /// Keep `page` as the cached page when it is still the active document's (a background job's
 /// page, composited while the document stayed as it was).
 pub(crate) fn install_page(s: &mut Session, page: PageImage) {
+    // A window of the page (see [`PageWork::window`]) is no page.
+    if page.area != page.stripped.bounds() {
+        return;
+    }
     if s.active().is_some_and(|d| d.doc.id == page.doc_id && crate::layer_multi_cmds::same_pixels(&page.stripped, &without_text(&d.doc))) {
         s.typer.place.page = Some(page);
     }
@@ -220,10 +252,13 @@ impl PageBuild {
     /// Composite the next `rows` rows of the page. True once it is all there.
     pub fn step(&mut self, rows: i32) -> bool {
         if self.next < self.area.y1 {
-            let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
             let y1 = (self.next + rows.max(1)).min(self.area.y1);
             let band = photocraft_compose::render(&self.stripped, photocraft_geom::Rect::new(self.area.x0, self.next, self.area.x1, y1));
-            self.img.extend(band.px.iter().map(|p| p.map(q)));
+            let at = self.img.len();
+            self.img.resize(at + band.px.len(), [0; 4]);
+            if let Some(dst) = self.img.get_mut(at..) {
+                photocraft_compose::quantize_rgba8(dst, &band.px);
+            }
             self.next = y1;
         }
         self.done()
