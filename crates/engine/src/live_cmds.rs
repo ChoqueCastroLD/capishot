@@ -1,7 +1,9 @@
 //! Commands for hosts that sync a document live between several people and agents (Visoria's
 //! multiplayer editing over the embed API and `capishot-cli serve`): cheap change detection
 //! (`layer.pixelRevision`), and pixels or a layer mask put into an existing layer in one step from
-//! an image (`layer.putPixels`, `layer.addImage`, `layer.layerMask.set`).
+//! an image (`layer.putPixels`, `layer.addImage`, `layer.layerMask.set`), and the person's selection
+//! and selected layers saved and put back around a collaborator's change (`selection.get`,
+//! `selection.set`, `layer.selectMany`).
 
 use photocraft_doc::{LayerContent, LayerId, LayerMask};
 use photocraft_geom::Rect;
@@ -9,6 +11,11 @@ use serde_json::{Value, json};
 
 use crate::commands::CommandSpec;
 use crate::{EngineError, Result, Session};
+
+/// Selections `selection.get` keeps per document (the oldest go first).
+const MAX_SAVED_SELECTIONS: usize = 32;
+
+static NEXT_SELECTION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// The largest image a call takes (base64 text, about 192 MiB of file).
 const MAX_BASE64: usize = 256 << 20;
@@ -264,6 +271,123 @@ fn set_mask(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"layer": id.0, "rect": [x, y, w, h], "created": created}))
 }
 
+fn bounds_json(sel: Option<&photocraft_raster::Surface>) -> (Value, Rect) {
+    let r = sel.map(photocraft_raster::Surface::content_bounds).filter(|r| !r.is_empty()).unwrap_or(Rect::EMPTY);
+    let v = if r.is_empty() { Value::Null } else { json!([r.x0, r.y0, r.width(), r.height()]) };
+    (v, r)
+}
+
+/// `selection.get {png?}` → `{id, bounds, png?, x?, y?}`: keeps the selection in memory under `id`.
+fn selection_get(s: &mut Session, p: &Value) -> Result<Value> {
+    const ID: &str = "selection.get";
+    let png = match object(p, ID)?.and_then(|o| o.get("png")) {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return Err(bad(ID, "`png` must be true or false")),
+    };
+    let st = s.active_mut().ok_or(EngineError::NoDocument)?;
+    let sel = st.doc.selection.clone();
+    let (bounds, r) = bounds_json(sel.as_ref());
+    let id = NEXT_SELECTION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    st.saved_selections.push((id, sel.clone()));
+    if st.saved_selections.len() > MAX_SAVED_SELECTIONS {
+        st.saved_selections.remove(0);
+    }
+    let mut out = json!({"id": id, "bounds": bounds});
+    if png && let Some(sel) = sel.as_ref().filter(|_| !r.is_empty()) {
+        let data: Vec<u8> = sel.read_region(r).iter().step_by(sel.format().channels().max(1)).map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8).collect();
+        let img = photocraft_codecs::Image::from_raw(r.width(), r.height(), photocraft_codecs::ChannelLayout::Gray, photocraft_codecs::SampleType::U8, data)
+            .map_err(|e| EngineError::Other(format!("{ID}: {e}")))?;
+        let bytes = photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &Default::default()).map_err(|e| EngineError::Other(format!("{ID}: {e}")))?;
+        out["png"] = json!(photocraft_paint::tile::b64_encode(&bytes));
+        out["x"] = json!(r.x0);
+        out["y"] = json!(r.y0);
+    }
+    Ok(out)
+}
+
+/// `selection.set {id} | {png, x?, y?} | {none: true}`, `step?`: puts a selection back. Not a
+/// history step (nor an edit: a clean document stays clean) unless `step: true`.
+fn selection_set(s: &mut Session, p: &Value) -> Result<Value> {
+    const ID: &str = "selection.set";
+    let o = object(p, ID)?.ok_or_else(|| bad(ID, "needs {id}, {png, x, y} or {none: true}"))?;
+    let step = match o.get("step") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return Err(bad(ID, "`step` must be true or false")),
+    };
+    let given = |k: &str| o.get(k).filter(|v| !v.is_null());
+    let sel: Option<photocraft_raster::Surface> = match (given("id"), given("png"), given("none")) {
+        (Some(v), None, None) => {
+            let id = v.as_u64().ok_or_else(|| bad(ID, "`id` must be a selection id from selection.get"))?;
+            let st = s.active().ok_or(EngineError::NoDocument)?;
+            st.saved_selections.iter().find(|(i, _)| *i == id).map(|(_, m)| m.clone()).ok_or_else(|| bad(ID, format!("no saved selection {id} in this document")))?
+        }
+        (None, Some(_), None) => {
+            let (x, y) = origin(ID, p)?;
+            let bytes = image_bytes(ID, p)?;
+            let img = photocraft_codecs::decode(&bytes).map_err(|e| bad(ID, format!("`png`: {e}")))?;
+            let img = img.convert(photocraft_codecs::ChannelLayout::GrayA, photocraft_codecs::SampleType::U8);
+            let (w, h) = (img.width(), img.height());
+            let px = img.as_u8().ok_or_else(|| bad(ID, "the image has no pixels"))?;
+            let data: Vec<f32> = px.as_chunks::<2>().0.iter().map(|&[v, a]| f32::from(v) / 255.0 * (f32::from(a) / 255.0)).collect();
+            let mut m = photocraft_raster::Surface::new(photocraft_color::PixelFormat::GRAY8);
+            m.write_region(Rect::from_xywh(x, y, w, h), &data);
+            Some(m)
+        }
+        (None, None, Some(Value::Bool(true))) => None,
+        _ => return Err(bad(ID, "give exactly one of `id`, `png` or `none: true`")),
+    };
+    let sel = sel.filter(|m| !m.content_bounds().is_empty());
+    let (bounds, _) = bounds_json(sel.as_ref());
+    if step {
+        s.edit(if sel.is_some() { "Set Selection" } else { "Deselect" }, |doc, _| {
+            doc.selection = sel;
+            Ok(())
+        })?;
+    } else {
+        let st = s.active_mut().ok_or(EngineError::NoDocument)?;
+        if st.doc.selection != sel {
+            let mut doc = (*st.doc).clone();
+            doc.selection = sel;
+            st.doc = std::sync::Arc::new(doc);
+            st.bump_revision(st.revision == st.saved_revision);
+            st.last_damage = Some(Rect::EMPTY);
+        }
+    }
+    Ok(json!({"bounds": bounds}))
+}
+
+/// `layer.selectMany {layers, active?}`: selects exactly these layers (the Layers panel's
+/// multi-selection), `active` (default the last listed) as the key layer. Not a history step.
+fn select_many(s: &mut Session, p: &Value) -> Result<Value> {
+    const ID: &str = "layer.selectMany";
+    let o = object(p, ID)?.ok_or_else(|| bad(ID, "needs {layers}"))?;
+    let list = o.get("layers").and_then(Value::as_array).ok_or_else(|| bad(ID, "`layers` must be a list of layer ids"))?;
+    let st = s.active().ok_or(EngineError::NoDocument)?;
+    let mut layers = Vec::new();
+    for v in list {
+        let id = LayerId(v.as_u64().ok_or_else(|| bad(ID, format!("`layers` holds layer ids, got {v}")))?);
+        st.doc.layer(id).ok_or(EngineError::NoLayer(id))?;
+        if !layers.contains(&id) {
+            layers.push(id);
+        }
+    }
+    let active = match o.get("active").filter(|v| !v.is_null()) {
+        Some(v) => {
+            let id = LayerId(v.as_u64().ok_or_else(|| bad(ID, "`active` must be a layer id"))?);
+            if !layers.contains(&id) {
+                return Err(bad(ID, "`active` must be one of `layers`"));
+            }
+            Some(id)
+        }
+        None => layers.last().copied(),
+    };
+    s.restore_layer_selection(active, &layers, active)?;
+    let st = s.active().ok_or(EngineError::NoDocument)?;
+    Ok(json!({"active": st.active_layer.map(|l| l.0), "selected": st.selected_layers().iter().map(|l| l.0).collect::<Vec<_>>()}))
+}
+
 pub fn specs() -> Vec<CommandSpec> {
     vec![CommandSpec {
         id: "layer.pixelRevision",
@@ -304,6 +428,36 @@ pub fn specs() -> Vec<CommandSpec> {
         enabled: has_doc,
         journal: true,
         run: set_mask,
+    },
+    CommandSpec {
+        id: "selection.get",
+        label: "Save Selection in Memory",
+        menu: &[],
+        shortcut: None,
+        params: r##"{"png":bool=false} → {id, bounds:[x,y,w,h]|null, png?, x?, y?}: keeps the selection (or its absence) in memory under `id` for selection.set (no channel is made, nothing is saved; the 32 most recent per document); `png`: the selection mask as a grey PNG (base64) cropped to `bounds`, its top-left at (x, y)"##,
+        enabled: has_doc,
+        journal: false,
+        run: selection_get,
+    },
+    CommandSpec {
+        id: "selection.set",
+        label: "Restore Selection",
+        menu: &[],
+        shortcut: None,
+        params: r##"{"id":selection.get's id} | {"png":base64 grey mask (white selected, alpha multiplies),"x":px=0,"y":px=0} | {"none":true}, "step":bool=false → {bounds}: puts that selection back; without `step` it's no history step and leaves a clean document clean"##,
+        enabled: has_doc,
+        journal: false,
+        run: selection_set,
+    },
+    CommandSpec {
+        id: "layer.selectMany",
+        label: "Select Layers",
+        menu: &[],
+        shortcut: None,
+        params: r##"{"layers":[id] (empty: no layer selected),"active":id? (one of them; default the last)} → {active, selected}: exactly these layers selected in the Layers panel (not a history step)"##,
+        enabled: has_doc,
+        journal: false,
+        run: select_many,
     }]
 }
 
@@ -464,6 +618,50 @@ mod tests {
         assert!(s.active().unwrap().doc.layer(LayerId(hidden)).unwrap().mask.is_none(), "one step");
         for p in [json!({"layer": layer}), json!({"layer": layer, "png": png(1, 1, [0; 4]), "fill": "grey"}), json!({"layer": layer, "png": "zz"})] {
             assert!(s.execute("layer.layerMask.set", p.clone()).is_err(), "{p}");
+        }
+    }
+
+    #[test]
+    fn a_selection_is_kept_and_put_back_without_a_step() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 64, "height": 64})).unwrap();
+        s.execute("select.rect", json!({"x": 4, "y": 5, "width": 10, "height": 8})).unwrap();
+        let got = s.execute("selection.get", json!({"png": true})).unwrap();
+        assert_eq!(got["bounds"], json!([4, 5, 10, 8]));
+        assert_eq!((got["x"].clone(), got["y"].clone()), (json!(4), json!(5)));
+        let steps = s.active().unwrap().history.entries().len();
+        s.execute("select.deselect", json!({})).unwrap();
+        let clean_steps = s.active().unwrap().history.entries().len();
+        assert_eq!(s.execute("selection.set", json!({"id": got["id"]})).unwrap()["bounds"], json!([4, 5, 10, 8]));
+        assert_eq!(s.active().unwrap().history.entries().len(), clean_steps, "no step");
+        assert!(steps <= clean_steps);
+        s.execute("selection.set", json!({"none": true})).unwrap();
+        assert!(s.active().unwrap().doc.selection.is_none());
+        let r = s.execute("selection.set", json!({"png": got["png"], "x": 4, "y": 5})).unwrap();
+        assert_eq!(r["bounds"], json!([4, 5, 10, 8]), "the PNG round-trips");
+        s.execute("selection.set", json!({"none": true, "step": true})).unwrap();
+        assert_eq!(s.active().unwrap().history.entries().len(), clean_steps + 1);
+        for p in [json!({}), json!({"id": 0}), json!({"id": got["id"], "none": true}), json!({"none": false}), json!({"png": "zz"}), json!({"id": 1, "step": "no"})] {
+            assert!(s.execute("selection.set", p.clone()).is_err(), "{p}");
+        }
+        assert!(s.execute("selection.get", json!({"png": 1})).is_err());
+    }
+
+    #[test]
+    fn select_many_selects_exactly_those_layers() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 8, "height": 8})).unwrap();
+        let a = s.execute("layer.new.layer", json!({})).unwrap()["layer"].as_u64().unwrap();
+        let b = s.execute("layer.new.layer", json!({})).unwrap()["layer"].as_u64().unwrap();
+        let _c = s.execute("layer.new.layer", json!({})).unwrap()["layer"].as_u64().unwrap();
+        let r = s.execute("layer.selectMany", json!({"layers": [a, b], "active": a})).unwrap();
+        assert_eq!(r, json!({"active": a, "selected": [a, b]}));
+        let r = s.execute("layer.selectMany", json!({"layers": [b]})).unwrap();
+        assert_eq!(r, json!({"active": b, "selected": [b]}));
+        let r = s.execute("layer.selectMany", json!({"layers": []})).unwrap();
+        assert_eq!(r["active"], Value::Null);
+        for p in [json!({}), json!({"layers": [999_999]}), json!({"layers": ["a"]}), json!({"layers": [a], "active": b})] {
+            assert!(s.execute("layer.selectMany", p.clone()).is_err(), "{p}");
         }
     }
 

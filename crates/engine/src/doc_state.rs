@@ -58,6 +58,9 @@ pub struct DocState {
     pub(crate) source_snapshot: Option<u64>,
     /// Per-layer pixel revisions (`pixelRev`, the embed API's `layerPixelsChanged`).
     pub pixel_revs: crate::pixel_revs::PixelRevs,
+    /// Selections kept by `selection.get` for `selection.set` (id, mask), newest last; in
+    /// memory only, never a channel or saved (`live_cmds`).
+    pub(crate) saved_selections: Vec<(u64, Option<photocraft_raster::Surface>)>,
 }
 
 impl DocState {
@@ -109,6 +112,7 @@ impl DocState {
             next_snapshot: 1,
             source_snapshot: None,
             pixel_revs: Default::default(),
+            saved_selections: Vec::new(),
         }
     }
     /// The selected layers in bottom-to-top document order, always including the active layer.
