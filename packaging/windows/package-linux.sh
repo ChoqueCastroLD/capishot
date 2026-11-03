@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Cross-build and package Capishot for Windows x64 on Linux (no Windows machine needed):
 #
-#   $DIST/capishot-<version>-windows-x64-portable.zip  capishot.exe, capishot-cli.exe, portable.txt
+#   $DIST/capishot-<version>-windows-x64-portable.zip  capishot.exe, capishot-cli.exe, portable.txt,
+#                                                      onnxruntime.dll, DirectML.dll
 #                                                      and licenses/
 #   $DIST/capishot-<version>-windows-x64.msi           per-machine installer (wixl)
 #   $DIST/capishot-<version>-windows-x64.sha256        sha256sum of both
@@ -144,6 +145,8 @@ PORTABLE="$WORK/$NAME-portable"
 rm -rf "$PORTABLE"
 mkdir -p "$PORTABLE/licenses"
 cp "$STAGE"/*.exe "$PORTABLE/"
+# The DirectML runtime too: the app loads onnxruntime.dll and DirectML.dll from its own folder.
+[ "$DIRECTML" = 1 ] && cp "$STAGE"/onnxruntime.dll "$STAGE"/DirectML.dll "$PORTABLE/"
 # portable.txt beside capishot.exe switches on portable mode: settings, presets, recovery files
 # and AI models go to CapishotData\ next to the exe (see apps/photocraft/src/app_dirs.rs).
 cp "$HERE/portable.txt" "$PORTABLE/"
