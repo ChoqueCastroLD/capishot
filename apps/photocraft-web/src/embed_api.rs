@@ -667,14 +667,20 @@ pub fn get_state() -> js_sys::Promise {
 
 /// Runs a command by id (engine commands and the shell's View/Window commands) with `params`
 /// (an object or a JSON string) → its JSON result. Same as the control protocol's `engine.execute`.
+/// `options` (optional): `{document, history}`: `document` runs an engine command on that open
+/// document without making it active; `history: "none"` (or `"silent"`) applies it without an
+/// undo step, kept through the user's undo and redo (`docs/control-protocol.md` › Live sync).
 #[wasm_bindgen(js_name = execute)]
-pub fn execute(command: String, params: JsValue) -> js_sys::Promise {
+pub fn execute(command: String, params: JsValue, options: JsValue) -> js_sys::Promise {
     let params = from_js(&params);
     let params = if params.is_null() { json!({}) } else { params };
     if !params.is_object() {
         return js_sys::Promise::reject(&error(&format!("{command}: params must be an object")));
     }
-    control("engine.execute", json!({ "command": command, "params": params }))
+    match core::execute_request(&command, params, &from_js(&options)) {
+        Ok(req) => control("engine.execute", req),
+        Err(e) => js_sys::Promise::reject(&error(&e)),
+    }
 }
 
 /// Any control-protocol method (`ui.inspect`, `ui.set`, `ui.pointer`…): the escape hatch for what

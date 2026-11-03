@@ -844,6 +844,34 @@ impl History {
         self.last_record.as_ref().map(|held| held.before.clone())
     }
 
+    /// Rewrite every stored state (undo, redo and what Clear History keeps for its undo) with
+    /// `f`, so a change made outside the history (a collaborator's edit applied with no undo step)
+    /// is in every state and stepping back or forward keeps it. `f` returns `None` to leave a state
+    /// as it is. A state whose archive can't be read is left as it is too; their count is returned.
+    /// Rewritten states are resident; [`History::rollback`] is no longer possible.
+    pub fn map_states(&mut self, mut f: impl FnMut(&Document) -> Option<Document>) -> usize {
+        let mut unreadable = 0;
+        let mut map = |state: &mut HistoryState| match state.document.load() {
+            Ok(doc) => {
+                if let Some(new) = f(&doc) {
+                    state.has_selection = new.selection.is_some();
+                    state.document = StoredDocument::Resident(Arc::new(new));
+                }
+            }
+            Err(_) => unreadable += 1,
+        };
+        for state in self.undo.iter_mut().chain(self.redo.iter_mut()) {
+            map(state);
+        }
+        if let Some(c) = self.cleared.as_mut() {
+            for state in c.undo.iter_mut().chain(c.redo.iter_mut()) {
+                map(state);
+            }
+        }
+        self.last_record = None;
+        unreadable
+    }
+
     /// Forget the redo states, e.g. after undoing half of a compound step that failed.
     pub fn clear_redo(&mut self) {
         if !self.redo.is_empty() {

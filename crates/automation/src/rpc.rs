@@ -87,7 +87,18 @@ impl Headless {
             "engine.execute" => {
                 let id = str_of(&p, "command").ok_or_else(|| bad("engine.execute needs `command`"))?;
                 let wait = p.get("wait").and_then(Value::as_bool).unwrap_or(true);
-                self.command_start(id, p.get("params").cloned().unwrap_or(Value::Null), wait)
+                let params = p.get("params").cloned().unwrap_or(Value::Null);
+                // Live sync: `index` or `document` (an id) targets another open document without
+                // making it active, `history: "none"` keeps the change out of the undo history.
+                let history = photocraft_engine::HistoryMode::parse(p.get("history")).map_err(bad)?;
+                let target = self.target_of(&p)?;
+                if target.is_none() && history == photocraft_engine::HistoryMode::Step {
+                    return self.command_start(id, params, wait);
+                }
+                if !wait {
+                    return Err(bad("`index`, `document` and `history` need a command that waits (no `wait: false`)"));
+                }
+                self.command_scoped(id, params, target, history)
             }
             // Background jobs (#210): list (applying any that finished) and cancel.
             "jobs.list" => self.command_start("jobs.list", json!({}), true),

@@ -42,6 +42,8 @@ pub const FEATURES: &[&str] = &[
     "events.layerPixelsChanged",
     "inspect.pixelRev",
     "inspect.textStyle",
+    "execute.document",
+    "execute.history",
 ];
 
 /// The build stamp: the Capishot commit and the build id, set by `scripts/build-embed.sh`
@@ -328,6 +330,25 @@ pub fn events(prev: Option<&Snapshot>, next: &Snapshot) -> Vec<Value> {
     out
 }
 
+/// `engine.execute`'s request for `execute(command, params, options)`: `options` is `null` or
+/// `{document?, history?}` (checked again by the app; unknown keys are refused here).
+pub fn execute_request(command: &str, params: Value, options: &Value) -> Result<Value, String> {
+    let mut req = json!({ "command": command, "params": params });
+    match options {
+        Value::Null => {}
+        Value::Object(o) => {
+            for (k, v) in o {
+                match k.as_str() {
+                    "document" | "history" => req[k.as_str()] = v.clone(),
+                    other => return Err(format!("{command}: unknown option `{other}` (document, history)")),
+                }
+            }
+        }
+        _ => return Err(format!("{command}: options must be an object")),
+    }
+    Ok(req)
+}
+
 /// `layerPixelsChanged {document, layer, rect: [x, y, width, height], pixelRev}`: a layer's pixels
 /// or layer mask changed (`rect` in document pixels, tile-aligned, may reach past the canvas).
 pub fn pixels_changed_event(document: u64, c: &photocraft_engine::pixel_revs::PixelChange) -> Value {
@@ -478,6 +499,17 @@ mod tests {
         c.active = Some(2);
         let e = events(Some(&b), &c);
         assert_eq!(e, [json!({"type": "documents", "documents": [1, 2], "active": 2})], "the same error isn't repeated");
+    }
+
+    #[test]
+    fn execute_options_go_into_the_request() {
+        assert_eq!(execute_request("a.b", json!({}), &Value::Null), Ok(json!({"command": "a.b", "params": {}})));
+        assert_eq!(
+            execute_request("a.b", json!({"x": 1}), &json!({"document": 3, "history": "none"})),
+            Ok(json!({"command": "a.b", "params": {"x": 1}, "document": 3, "history": "none"}))
+        );
+        assert!(execute_request("a.b", json!({}), &json!({"wait": false})).is_err());
+        assert!(execute_request("a.b", json!({}), &json!(5)).is_err());
     }
 
     #[test]

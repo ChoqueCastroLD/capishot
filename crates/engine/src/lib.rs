@@ -86,6 +86,7 @@ pub mod cmd;
 mod doc_state;
 mod error;
 mod session;
+pub use session::{ExecScope, HistoryMode};
 
 pub use cmd as commands;
 pub use cmd::actions_cmds;
