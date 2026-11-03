@@ -72,3 +72,42 @@ fn a_gradient_preset_sets_both_colours_and_the_shadow_keeps_its_own_angle() {
     let shadow = effects(&app, id).into_iter().find_map(|e| if let Effect::DropShadow(s) = e { Some(s) } else { None }).unwrap();
     assert!(!shadow.use_global_light && (shadow.angle - 45.0).abs() < 0.01, "{shadow:?}");
 }
+
+/// Runs `f` in one frame at `time` (s), the pointer held down or not.
+fn frame(ctx: &egui::Context, time: f64, down: bool, f: impl FnOnce(&egui::Ui)) {
+    let mut input = egui::RawInput { time: Some(time), ..Default::default() };
+    input.events.push(egui::Event::PointerMoved(egui::pos2(10.0, 10.0)));
+    input.events.push(egui::Event::PointerButton { pos: egui::pos2(10.0, 10.0), button: egui::PointerButton::Primary, pressed: down, modifiers: Default::default() });
+    let mut f = Some(f);
+    ctx.run_ui(input, |ui| {
+        if let Some(f) = f.take() {
+            f(ui);
+        }
+    })
+    .textures_delta
+    .clear();
+}
+
+#[test]
+fn a_drag_applies_at_most_every_120_ms_and_its_last_value_on_release() {
+    use super::{pending, throttle};
+    let ctx = egui::Context::default();
+    let id = egui::Id::unique("fx-throttle-test");
+    let mut applied = Vec::new();
+    // Pointer held: the first change applies, the next ones within 120 ms wait.
+    for (i, t) in [0.0, 0.03, 0.06, 0.09, 0.13, 0.16].into_iter().enumerate() {
+        frame(&ctx, t, true, |ui| {
+            if throttle(ui, id, &0, &(i + 1)) {
+                applied.push(i + 1);
+            }
+        });
+    }
+    assert_eq!(applied, vec![1, 5], "one apply per 120 ms while dragging");
+    frame(&ctx, 0.17, true, |ui| assert_eq!(pending::<usize>(ui, id), Some(6), "the last value waits"));
+    // Released: the waiting value applies at once.
+    frame(&ctx, 0.18, false, |ui| {
+        let p = pending::<usize>(ui, id).unwrap();
+        assert!(throttle(ui, id, &5, &p));
+        assert_eq!(pending::<usize>(ui, id), None);
+    });
+}

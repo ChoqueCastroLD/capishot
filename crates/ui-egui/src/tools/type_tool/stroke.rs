@@ -163,6 +163,10 @@ fn stroke_popover(app: &mut PhotocraftApp, ui: &mut egui::Ui, button: &egui::Res
     };
     let key: String = ui.data(|d| d.get_temp(key_id)).unwrap_or_else(|| "type-stroke".into());
     let before = s;
+    let pending_id = egui::Id::unique("type-stroke-pending");
+    if let Some(p) = super::effects::pending::<TypeStroke>(ui, pending_id) {
+        s = p;
+    }
     let t = crate::theme::Tokens::get(ui.ctx());
     let screen = crate::safe_area::rect(ui.ctx());
     let w = if phone { 300.0 } else { 260.0 };
@@ -251,7 +255,7 @@ fn stroke_popover(app: &mut PhotocraftApp, ui: &mut egui::Ui, button: &egui::Res
             });
         });
     });
-    if s != before
+    if super::effects::throttle(ui, pending_id, &before, &s)
         && let Err(e) = set_type_stroke(app, s, &key)
     {
         app.ui.status = e;
