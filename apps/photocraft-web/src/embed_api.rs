@@ -60,6 +60,8 @@ struct Host {
     last: Option<Snapshot>,
     /// Selection bounds by document, with the revision they were measured at.
     selections: Vec<(u64, u64, Option<[i32; 4]>)>,
+    /// Layer stacking order by document, with the revision it was read at (`layersReordered`).
+    orders: Vec<(u64, u64, std::sync::Arc<core::LayerOrder>)>,
     ready: Vec<Settle>,
     runner: Option<eframe::WebRunner>,
     /// A canvas `init` made inside the host's container (removed by `destroy`).
@@ -78,6 +80,7 @@ impl Default for Host {
             saved_chrome: None,
             last: None,
             selections: Vec::new(),
+            orders: Vec::new(),
             ready: Vec::new(),
             runner: None,
             own_canvas: None,
@@ -361,10 +364,21 @@ fn snapshot(app: &PhotocraftApp) -> Snapshot {
                         b
                     }
                 };
-                DocSnap { id, revision: st.revision, dirty: st.revision != st.saved_revision, selection }
+                // The stacking order, likewise once per revision.
+                let order = match h.orders.iter().find(|(d, rev, _)| *d == id && *rev == st.revision) {
+                    Some((_, _, o)) => o.clone(),
+                    None => {
+                        let o = std::sync::Arc::new(core::layer_order(&st.doc));
+                        h.orders.retain(|(d, ..)| *d != id);
+                        h.orders.push((id, st.revision, o.clone()));
+                        o
+                    }
+                };
+                DocSnap { id, revision: st.revision, dirty: st.revision != st.saved_revision, selection, order }
             })
             .collect::<Vec<_>>();
         cache.retain(|(d, ..)| snaps.iter().any(|s| s.id == *d));
+        h.orders.retain(|(d, ..)| snaps.iter().any(|s| s.id == *d));
         h.selections = cache;
         snaps
     });
@@ -530,7 +544,7 @@ pub fn destroy() {
 
 /// Sets the one event listener (`null` removes it). Events: `ready`, `documents`,
 /// `documentChanged`, `dirty`, `selectionChanged`, `toolChanged`, `modeChanged`, `zoom`,
-/// `viewChanged`, `error`.
+/// `viewChanged`, `layerPixelsChanged`, `layersReordered`, `fontsMissing`, `error`.
 #[wasm_bindgen(js_name = onEvent)]
 pub fn on_event(listener: JsValue) {
     let f = listener.dyn_into::<js_sys::Function>().ok();

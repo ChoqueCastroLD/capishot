@@ -44,6 +44,7 @@ pub const FEATURES: &[&str] = &[
     "inspect.textStyle",
     "execute.document",
     "execute.history",
+    "events.layersReordered",
 ];
 
 /// The build stamp: the Capishot commit and the build id, set by `scripts/build-embed.sh`
@@ -299,6 +300,42 @@ pub struct DocSnap {
     pub dirty: bool,
     /// The selection's bounds `[x, y, width, height]`, `None` without a selection.
     pub selection: Option<[i32; 4]>,
+    /// Every group's children, top to bottom ([`layer_order`]).
+    pub order: std::sync::Arc<LayerOrder>,
+}
+
+/// Each group's (`None`: the document's top level) child layer ids, top to bottom.
+pub type LayerOrder = Vec<(Option<u64>, Vec<u64>)>;
+
+/// The stacking order of `doc`'s layers, group by group.
+pub fn layer_order(doc: &photocraft_engine::doc::Document) -> LayerOrder {
+    fn rec(layers: &[photocraft_engine::doc::Layer], parent: Option<u64>, out: &mut LayerOrder) {
+        out.push((parent, layers.iter().rev().map(|l| l.id.0).collect()));
+        for l in layers {
+            if let Some(ch) = l.children() {
+                rec(ch, Some(l.id.0), out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    rec(&doc.layers, None, &mut out);
+    out
+}
+
+/// `layersReordered {document, group, layers}` for every group whose layers kept in it changed
+/// order (`group` null: the top level; `layers` its children now, top to bottom). Layers added,
+/// deleted or moved to another group alone don't count.
+fn reorder_events(document: u64, prev: &LayerOrder, next: &LayerOrder) -> Vec<Value> {
+    let mut out = Vec::new();
+    for (group, now) in next {
+        let Some((_, was)) = prev.iter().find(|(g, _)| g == group) else { continue };
+        let kept_now: Vec<u64> = now.iter().copied().filter(|id| was.contains(id)).collect();
+        let kept_was: Vec<u64> = was.iter().copied().filter(|id| now.contains(id)).collect();
+        if kept_now != kept_was {
+            out.push(json!({ "type": "layersReordered", "document": document, "group": group, "layers": now }));
+        }
+    }
+    out
 }
 
 /// The events between two frames (none for the first one: hosts read the state then).
@@ -313,6 +350,9 @@ pub fn events(prev: Option<&Snapshot>, next: &Snapshot) -> Vec<Value> {
         let Some(before) = prev.docs.iter().find(|p| p.id == d.id) else { continue };
         if before.revision != d.revision {
             out.push(json!({ "type": "documentChanged", "id": d.id, "revision": d.revision, "dirty": d.dirty }));
+        }
+        if !std::sync::Arc::ptr_eq(&before.order, &d.order) && before.order != d.order {
+            out.extend(reorder_events(d.id, &before.order, &d.order));
         }
         if before.dirty != d.dirty {
             out.push(json!({ "type": "dirty", "id": d.id, "dirty": d.dirty }));
@@ -481,7 +521,7 @@ mod tests {
     fn events_follow_what_changed() {
         let a = Snapshot {
             active: Some(1),
-            docs: vec![DocSnap { id: 1, revision: 3, dirty: false, selection: None }],
+            docs: vec![DocSnap { id: 1, revision: 3, dirty: false, selection: None, ..Default::default() }],
             tool: "brush".into(),
             error: None,
             view: None,
@@ -489,7 +529,7 @@ mod tests {
         assert!(events(None, &a).is_empty(), "the first frame is the baseline");
         assert!(events(Some(&a), &a).is_empty());
         let mut b = a.clone();
-        b.docs[0] = DocSnap { id: 1, revision: 4, dirty: true, selection: Some([0, 0, 5, 5]) };
+        b.docs[0] = DocSnap { id: 1, revision: 4, dirty: true, selection: Some([0, 0, 5, 5]), ..Default::default() };
         b.tool = "eraser".into();
         b.error = Some("boom".into());
         let types: Vec<_> = events(Some(&a), &b).iter().map(|e| e["type"].as_str().unwrap_or("").to_string()).collect();
@@ -499,6 +539,36 @@ mod tests {
         c.active = Some(2);
         let e = events(Some(&b), &c);
         assert_eq!(e, [json!({"type": "documents", "documents": [1, 2], "active": 2})], "the same error isn't repeated");
+    }
+
+    #[test]
+    fn layer_order_lists_each_group_top_to_bottom() {
+        use photocraft_engine::doc::{Layer, LayerContent};
+        let mut doc = photocraft_engine::doc::Document::new("t", photocraft_engine::doc::Size::new(4, 4), photocraft_engine::doc::ColorMode::Rgb, photocraft_engine::doc::SampleType::U8);
+        let raster = |n: &str| Layer::new(n, LayerContent::Raster(photocraft_raster_surface()));
+        let (a, b) = (raster("a"), raster("b"));
+        let (ia, ib) = (a.id.0, b.id.0);
+        let group = Layer::group("g", vec![a, b]);
+        let ig = group.id.0;
+        doc.layers = vec![group];
+        assert_eq!(layer_order(&doc), vec![(None, vec![ig]), (Some(ig), vec![ib, ia])]);
+    }
+
+    fn photocraft_raster_surface() -> photocraft_engine::doc::Surface {
+        photocraft_engine::doc::Surface::new(photocraft_engine::doc::PixelFormat::RGBA8)
+    }
+
+    #[test]
+    fn reordering_inside_a_group_is_an_event_and_adding_is_not() {
+        let order = |v: LayerOrder| std::sync::Arc::new(v);
+        let snap = |o: std::sync::Arc<LayerOrder>| Snapshot { docs: vec![DocSnap { id: 1, order: o, ..Default::default() }], ..Default::default() };
+        let a = snap(order(vec![(None, vec![10, 9]), (Some(10), vec![3, 2, 1])]));
+        let swapped = snap(order(vec![(None, vec![10, 9]), (Some(10), vec![2, 3, 1])]));
+        assert_eq!(events(Some(&a), &swapped), [json!({"type": "layersReordered", "document": 1, "group": 10, "layers": [2, 3, 1]})]);
+        let added = snap(order(vec![(None, vec![11, 10, 9]), (Some(10), vec![3, 4, 2, 1])]));
+        assert!(events(Some(&a), &added).is_empty(), "added layers keep the others' order");
+        let top = snap(order(vec![(None, vec![9, 10]), (Some(10), vec![3, 2, 1])]));
+        assert_eq!(events(Some(&a), &top)[0]["group"], Value::Null);
     }
 
     #[test]
