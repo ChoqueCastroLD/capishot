@@ -32,7 +32,8 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
   zoom, pan, the tool cursor and floating windows the user opens still work. `setMode('full')`
   restores the chrome as it was. Both are live on the same session.
 - Events (`onEvent`): `ready`, `documents`, `documentChanged`, `dirty`, `selectionChanged`,
-  `toolChanged`, `modeChanged`, `zoom`, `viewChanged`, `error`. Derived once per frame, after the
+  `toolChanged`, `modeChanged`, `zoom`, `viewChanged`, `layerPixelsChanged`, `layersReordered`,
+  `fontsMissing`, `error`. Derived once per frame, after the
   frame's UI, from the session; each kind at most once per frame and only on change. Selection
   bounds are measured once per document revision.
 - `viewChanged` `{id, zoom, center, rotation}`: the active document's view after any pan, zoom or
@@ -48,6 +49,32 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
   the layer and the outside of its strokes (an outlined lettering's 3D shadow); `'fill'` (default)
   from the layer's pixels as Photoshop does. Saved to PSD and `.pcraft` (feature
   `layerStyle.dropShadow.source`; `docs/control-protocol.md`).
+
+- Live sync (`docs/control-protocol.md` › Live sync): every layer in
+  `execute('document.inspect', {})` has `pixelRev`, moving whenever its pixels or layer mask change
+  (`execute('layer.pixelRevision', {layer})` reads one), and the `layerPixelsChanged` event
+  `{document, layer, rect, pixelRev}` says which layer changed where, once per frame (features
+  `inspect.pixelRev`, `events.layerPixelsChanged`). `execute('document.inspect', {textStyle: true})`
+  adds type layers' full run and paragraph styles (`text.style`) and every effect's settings
+  (`effects.items[].fx`) (feature `inspect.textStyle`).
+  - `execute(command, params, {document, history})`: `document` runs an engine command on that
+    open document without activating it (feature `execute.document`); `history: 'none'` (or
+    `'silent'`) applies it with no undo step, kept through the user's undo and redo (feature
+    `execute.history`).
+  - `execute('layer.putPixels', {layer, png, x, y, mode: 'replace' | 'over'})`,
+    `execute('layer.addImage', {png, x, y, name, above})`, `execute('layer.layerMask.set', {layer,
+    png, x, y})` (`png`: base64 or a `data:` URL), `execute('selection.get')` /
+    `execute('selection.set', {id})`, `execute('layer.selectMany', {layers, active})`.
+  - Events `toolChanged {tool}` and `layersReordered {document, group, layers}` (feature
+    `events.layersReordered`).
+
+  ```js
+  const toB64 = async (blob) => btoa(String.fromCharCode(...new Uint8Array(await blob.arrayBuffer())));
+  const sel = await capishot.execute('selection.get', {}, {document: doc});
+  await capishot.execute('layer.putPixels', {layer: 28, png: await toB64(png), x: 120, y: 340, mode: 'over'},
+                         {document: doc, history: 'none'});
+  await capishot.execute('selection.set', {id: sel.id}, {document: doc});
+  ```
 
 - Type layers through `execute` (`docs/control-protocol.md`): `type.frame {layer}` gives a layer's
   frame without its layout (`shape` point/box/path/inPath with its geometry, `transform`, `bounds`),
