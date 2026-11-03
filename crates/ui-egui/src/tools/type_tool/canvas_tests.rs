@@ -1945,8 +1945,8 @@ mod multi_layer_formatting {
     fn controls(app: PhotocraftApp, properties: bool) -> Harness<'static, PhotocraftApp> {
         // The lazily populated font popup introduces widgets in successive passes. egui 0.37
         // styles each new widget on its following pass; keep a bounded settle assertion while
-        // allowing those additional passes (the loaded menu requires six under parallel tests).
-        let mut h = Harness::builder().with_size(vec2(1100.0, 800.0)).with_max_steps(8).build_ui_state(
+        // allowing those additional passes (the loaded menu takes up to 14 under parallel tests).
+        let mut h = Harness::builder().with_size(vec2(1100.0, 800.0)).with_max_steps(32).build_ui_state(
             move |ui, app| {
                 if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
                     if properties {
