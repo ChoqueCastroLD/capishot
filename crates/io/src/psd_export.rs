@@ -78,6 +78,9 @@ pub struct PsdExportOptions {
     /// off, since a stored path is document data rather than a granted file: such a layer is
     /// then written as pixels, with a warning.
     pub read_linked_files: bool,
+    /// Reuse the encoded channels of layers unchanged since the last save through this cache
+    /// (an incremental save; the bytes are a full save's). Top-level document only.
+    pub cache: Option<crate::PsdExportCache>,
 }
 
 impl Default for PsdExportOptions {
@@ -91,6 +94,7 @@ impl Default for PsdExportOptions {
             document_path: None,
             merged_image: true,
             read_linked_files: true,
+            cache: None,
         }
     }
 }
@@ -131,6 +135,8 @@ struct Ex {
     patterns: Vec<photocraft_doc::Pattern>,
     /// The layer written as Photoshop's Background (see [`psd_background`]).
     background: Option<photocraft_doc::LayerId>,
+    /// This save's use of the incremental cache ([`PsdExportOptions::cache`]).
+    cache: Option<crate::psd_cache::Session>,
 }
 
 /// The layer Photoshop should open as its Background: the bottom top-level layer when it is a
@@ -238,7 +244,18 @@ impl Ex {
     /// A layer's pixels as PSD channels: the rect its content spans, one encoded plane per
     /// channel, and the warnings to show the user (a rect past what a PSD layer may span, or a
     /// plane that would not encode, writes an empty layer and says why — #8612).
-    fn pixel_channels(&self, s: &Surface, name: &str) -> (PsdRect, Vec<ChannelData>, Vec<String>) {
+    fn pixel_channels(&self, id: photocraft_doc::LayerId, s: &Surface, name: &str) -> (PsdRect, Vec<ChannelData>, Vec<String>) {
+        use crate::psd_cache::{Encoded, Part};
+        let Some(cache) = &self.cache else { return self.encode_pixels(s, name) };
+        if let Some(e) = cache.get(id, Part::Pixels, s, self.fmt, self.version) {
+            return (e.rect, e.channels, e.warnings);
+        }
+        let (rect, channels, warnings) = self.encode_pixels(s, name);
+        cache.put(id, Part::Pixels, Encoded::new(s, self.fmt, self.version, rect, channels.clone(), warnings.clone()));
+        (rect, channels, warnings)
+    }
+
+    fn encode_pixels(&self, s: &Surface, name: &str) -> (PsdRect, Vec<ChannelData>, Vec<String>) {
         let mut warnings = Vec::new();
         let s = if s.format() != self.fmt {
             warnings.push(format!("layer \"{name}\": pixels converted from {:?} to {:?}", s.format(), self.fmt));
@@ -296,21 +313,20 @@ impl Ex {
     /// A layer mask as PSD writes it: its rect and the encoded plane, or the vector mask's
     /// density and feather where it has one. An error when the plane will not encode, so the
     /// caller can say so instead of writing a mask that reopens empty (#8612).
-    fn mask(&self, m: &LayerMask, vector: Option<(f32, f32)>) -> Result<(MaskData, Option<ChannelData>), String> {
-        let s = if m.surface.format() != self.mask_fmt { m.surface.convert(self.mask_fmt) } else { m.surface.clone() };
-        let default = s.default_pixel().first().copied().unwrap_or(0.0);
-        let r = s.content_bounds();
-        if !within_psd_limit(r) {
-            return Err(format!("it spans {}×{} px, past the PSD limit of {} px", r.width(), r.height(), photocraft_psd::header::MAX_DIMENSION));
-        }
-        // The mask is gathered as one dense rectangle too: a few pixels far apart within the
-        // limit can still make a box too large to gather, as a layer's can.
-        let dense = u64::from(r.width()).saturating_mul(u64::from(r.height())).saturating_mul(s.format().bytes_per_pixel() as u64);
-        if dense > MAX_LAYER_GATHER_BYTES {
-            return Err(format!("it spans {}×{} px, too large to write", r.width(), r.height()));
-        }
-        let (w, h) = (r.width() as usize, r.height() as usize);
-        let plane = if r.is_empty() { Vec::new() } else { deinterleave(&s.to_interleaved(r), 1, self.mask_fmt.sample, &[false]).remove(0) };
+    fn mask(&self, id: photocraft_doc::LayerId, m: &LayerMask, vector: Option<(f32, f32)>) -> Result<(MaskData, Option<ChannelData>), String> {
+        use crate::psd_cache::{Encoded, Part};
+        let hit = self.cache.as_ref().and_then(|c| c.get(id, Part::Mask, &m.surface, self.mask_fmt, self.version));
+        let (r, default, channel) = match hit.and_then(|e| Some((e.mask?, e.channels.into_iter().next()?))) {
+            Some(((r, default), channel)) => (r, default, channel),
+            None => {
+                let (r, default, channel) = self.encode_mask(m)?;
+                if let Some(c) = &self.cache {
+                    let e = Encoded::new(&m.surface, self.mask_fmt, self.version, PsdRect::default(), vec![channel.clone()], Vec::new());
+                    c.put(id, Part::Mask, e.with_mask(r, default));
+                }
+                (r, default, channel)
+            }
+        };
         let mut flags = 0u8;
         if !m.linked {
             flags |= PsdMask::FLAG_RELATIVE;
@@ -331,7 +347,26 @@ impl Ex {
             real: None,
             real_first: true,
         };
-        Ok((MaskData::Mask(pm), Some(self.encode(-2, &plane, w, h)?)))
+        Ok((MaskData::Mask(pm), Some(channel)))
+    }
+
+    /// A layer mask's content bounds, default value and encoded plane.
+    fn encode_mask(&self, m: &LayerMask) -> Result<(photocraft_geom::Rect, f32, ChannelData), String> {
+        let s = if m.surface.format() != self.mask_fmt { m.surface.convert(self.mask_fmt) } else { m.surface.clone() };
+        let default = s.default_pixel().first().copied().unwrap_or(0.0);
+        let r = s.content_bounds();
+        if !within_psd_limit(r) {
+            return Err(format!("it spans {}×{} px, past the PSD limit of {} px", r.width(), r.height(), photocraft_psd::header::MAX_DIMENSION));
+        }
+        // The mask is gathered as one dense rectangle too: a few pixels far apart within the
+        // limit can still make a box too large to gather, as a layer's can.
+        let dense = u64::from(r.width()).saturating_mul(u64::from(r.height())).saturating_mul(s.format().bytes_per_pixel() as u64);
+        if dense > MAX_LAYER_GATHER_BYTES {
+            return Err(format!("it spans {}×{} px, too large to write", r.width(), r.height()));
+        }
+        let (w, h) = (r.width() as usize, r.height() as usize);
+        let plane = if r.is_empty() { Vec::new() } else { deinterleave(&s.to_interleaved(r), 1, self.mask_fmt.sample, &[false]).remove(0) };
+        Ok((r, default, self.encode(-2, &plane, w, h)?))
     }
 
     /// Prefer numbers above imported layer IDs, wrapping safely at u32::MAX.
@@ -354,7 +389,7 @@ impl Ex {
     fn record(&mut self, l: &Layer, extra: Vec<TaggedBlock>, pixels: Option<&Surface>) -> LayerRecord {
         let id = self.layer_id(l);
         let (rect, mut channels, warnings) = match pixels {
-            Some(s) => self.pixel_channels(s, &l.name),
+            Some(s) => self.pixel_channels(l.id, s, &l.name),
             None => (PsdRect::default(), self.empty_channels(), Vec::new()),
         };
         self.warnings.extend(warnings);
@@ -367,7 +402,7 @@ impl Ex {
         };
         let mut user_mask = false;
         if let Some(m) = &l.mask {
-            match self.mask(m, vector) {
+            match self.mask(l.id, m, vector) {
                 Ok((md, ch)) => {
                     mask = md;
                     channels.extend(ch);

@@ -60,10 +60,12 @@ mod palette_map;
 pub use ora::losses as ora_losses;
 pub mod pattern_map;
 mod pcraft_cache;
+mod psd_cache;
 pub mod pdf;
 mod pdn;
 mod perspective_type;
 pub use pcraft_cache::PcraftExportCache;
+pub use psd_cache::{PsdCacheStats, PsdExportCache};
 pub mod pixels;
 mod psd_export;
 mod psd_import;
@@ -249,6 +251,10 @@ pub struct ExportOptions {
     pub document_path: Option<std::path::PathBuf>,
     /// Reuse one cache per open document for native saves; other formats ignore it.
     pub pcraft_cache: Option<PcraftExportCache>,
+    /// PSD/PSB: one cache per open document for incremental saves (only layers changed since the
+    /// last save through it are encoded again; the bytes are a full save's). Other formats
+    /// ignore it.
+    pub psd_cache: Option<PsdExportCache>,
     /// PSD/PSB and layered TIFF: read and embed the files linked smart objects name (see
     /// [`PsdExportOptions::read_linked_files`]). On by default; automation turns it off.
     pub read_linked_files: bool,
@@ -268,6 +274,7 @@ impl Default for ExportOptions {
             psd_maximize_compatibility: true,
             document_path: None,
             pcraft_cache: None,
+            psd_cache: None,
             read_linked_files: true,
         }
     }
@@ -812,6 +819,7 @@ fn export_stages(doc: &Document, name_or_ext: &str, opts: &ExportOptions, ctl: &
                 document_path: opts.document_path.clone(),
                 merged_image,
                 read_linked_files: opts.read_linked_files,
+                cache: opts.psd_cache.clone(),
                 ..Default::default()
             };
             let (mut file, mut warnings) = with_span(ctl, 0.0, PSD_MODEL_DONE, |ctl| psd_export::document_to_psd_interruptible(doc, &o, ctl));
@@ -840,7 +848,7 @@ fn export_stages(doc: &Document, name_or_ext: &str, opts: &ExportOptions, ctl: &
         if !psdc {
             return Ok(ExportResult { bytes, warnings });
         }
-        let failed = match psdc::recomposite(&mut file, &bytes, doc, opts.psdc_plain_compose) {
+        let failed = match psdc::recomposite(&mut file, &bytes, doc, opts.psdc_plain_compose, opts.psd_cache.as_ref()) {
             Ok(Some(bytes)) => return Ok(ExportResult { bytes, warnings }),
             Ok(None) => None,
             Err(e) => Some(format!("the merged image was not compiled with psd-compiler: {e}")),

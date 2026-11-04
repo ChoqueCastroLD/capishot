@@ -89,6 +89,47 @@ pub const GPU_FALLBACK_CLASS: &str = "ai.gpuFallback";
 /// The progress message while a run that the GPU couldn't do moves to the CPU (the progress UI
 /// says the CPU may take longer).
 pub const SWITCHING_TO_CPU: &str = "Switching to the CPU";
+/// The notice when an automatic run couldn't use DirectML and ran on wgpu (another GPU runtime).
+pub const DIRECTML_FALLBACK_NOTICE: &str = "DirectML couldn't run this model; used wgpu instead";
+/// Its class.
+pub const DIRECTML_FALLBACK_CLASS: &str = "ai.directmlFallback";
+/// The notice when an automatic run found no usable GPU (wgpu didn't start, or only a software
+/// adapter) and ran on the CPU.
+pub const CPU_FALLBACK_NOTICE: &str = "No usable GPU for this model; ran on the CPU instead";
+/// Its class.
+pub const CPU_FALLBACK_CLASS: &str = "ai.cpuFallback";
+
+/// Where a job's automatic runs actually ended, from the runtime's `fell_back` reports: for the
+/// reply's `device`, `cpu` and `fellBack`, each fallback said once per job.
+#[derive(Debug, Default)]
+pub(crate) struct Trail {
+    /// The last report's device.
+    pub device: Option<String>,
+    /// A run ended on the CPU (or a software adapter).
+    pub cpu: bool,
+    /// A run left where it was headed.
+    pub fell_back: bool,
+    said: Vec<(String, String)>,
+}
+
+/// Records a fallback from `from` to `to` (`cpu`: that is the CPU) in `trail`, and the first
+/// time in this job says so: a notice ([`DIRECTML_FALLBACK_CLASS`], [`CPU_FALLBACK_CLASS`]; the
+/// cause is `why`) and the progress line.
+pub(crate) fn fell_back(ctx: &JobCtx, trail: &std::sync::Mutex<Trail>, from: &str, to: &str, cpu: bool, why: &str) {
+    let mut t = trail.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    t.device = Some(to.to_string());
+    t.cpu |= cpu;
+    t.fell_back = true;
+    let key = (from.to_string(), to.to_string());
+    if t.said.contains(&key) {
+        return;
+    }
+    t.said.push(key);
+    drop(t);
+    let (class, text) = if cpu { (CPU_FALLBACK_CLASS, CPU_FALLBACK_NOTICE) } else { (DIRECTML_FALLBACK_CLASS, DIRECTML_FALLBACK_NOTICE) };
+    ctx.notice(class, text, why);
+    ctx.progress(ctx.fraction(), &format!("{from} unavailable, running on {to}"));
+}
 
 /// After the GPU failed: the same Quality on the CPU (Auto then means the lite model, as for any
 /// CPU run; Best keeps the full one).
@@ -309,8 +350,8 @@ fn upscale_plane(p: &[f32], w: usize, h: usize, s: usize) -> Vec<f32> {
     out
 }
 
-/// Progress and cancellation of the job, for the upscaler.
-struct JobHooks(JobCtx);
+/// Progress, cancellation and fallbacks of the job, for the upscaler.
+struct JobHooks(JobCtx, Arc<std::sync::Mutex<Trail>>);
 
 impl Hooks for JobHooks {
     fn progress(&self, fraction: f32, status: &str) {
@@ -318,6 +359,9 @@ impl Hooks for JobHooks {
     }
     fn cancelled(&self) -> bool {
         self.0.cancelled()
+    }
+    fn fell_back(&self, f: &photocraft_ai::service::Fallback) {
+        fell_back(&self.0, &self.1, &f.from, &f.to, f.cpu, &f.why);
     }
 }
 
@@ -330,10 +374,19 @@ struct Upscaled {
     surface: Surface,
     /// The model that ran (the lite one after a GPU failure, see [`run_upscale`]).
     model: &'static ModelInfo,
+    run: UpscaleRun,
 }
 
-/// Receives the upscaled image and the model that made it.
-type UpscaleDone = Box<dyn FnOnce(photocraft_ai::Result<(Planar, &'static ModelInfo)>) + Send>;
+/// Where an upscale ran, for the reply.
+#[derive(Clone, Debug, Default)]
+struct UpscaleRun {
+    device: String,
+    cpu: bool,
+    fell_back: bool,
+}
+
+/// Receives the upscaled image, the model that made it and where it ran.
+type UpscaleDone = Box<dyn FnOnce(photocraft_ai::Result<(Planar, &'static ModelInfo, UpscaleRun)>) + Send>;
 
 /// What a GPU run needs to run again on the CPU.
 struct CpuRetry {
@@ -346,11 +399,11 @@ struct CpuRetry {
 /// Runs `req`; when the GPU couldn't run it and `retry` is given, runs it again on the CPU with
 /// the model the user's Quality picks there (Auto: the lite one, when it is here or may be
 /// downloaded; else the same model), and says so ([`GPU_FALLBACK_NOTICE`]).
-fn run_upscale(svc: Arc<dyn Upscaler>, ctx: JobCtx, req: Request, retry: Option<CpuRetry>, finish: UpscaleDone) {
+fn run_upscale(svc: Arc<dyn Upscaler>, ctx: JobCtx, req: Request, retry: Option<CpuRetry>, trail: Arc<std::sync::Mutex<Trail>>, finish: UpscaleDone) {
     let model = req.model;
     let (grayscale, allow_download, opts) = (req.grayscale, req.allow_download, req.opts);
     let again = svc.clone();
-    let hooks = Arc::new(JobHooks(ctx.clone()));
+    let hooks = Arc::new(JobHooks(ctx.clone(), trail.clone()));
     svc.run(
         req,
         hooks,
@@ -367,10 +420,25 @@ fn run_upscale(svc: Arc<dyn Upscaler>, ctx: JobCtx, req: Request, retry: Option<
                 }
                 ctx.notice(GPU_FALLBACK_CLASS, GPU_FALLBACK_NOTICE, &why);
                 ctx.progress(ctx.fraction(), SWITCHING_TO_CPU);
+                {
+                    let mut t = trail.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    t.fell_back = true;
+                    t.cpu = true;
+                }
                 let req = Request { model: m, input: retry.input, grayscale, allow_download, opts: RunOptions { cpu: true, ..opts } };
-                run_upscale(again, ctx, req, None, finish);
+                run_upscale(again, ctx, req, None, trail, finish);
             }
-            (r, _) => finish(r.map(|image| (image, model))),
+            (r, _) => {
+                let t = trail.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let device = again.device();
+                let run = UpscaleRun {
+                    device: if device.is_empty() { t.device.clone().unwrap_or_default() } else { device },
+                    cpu: opts.cpu || t.cpu,
+                    fell_back: t.fell_back,
+                };
+                drop(t);
+                finish(r.map(|image| (image, model, run)))
+            }
         }),
     );
 }
@@ -433,9 +501,9 @@ fn upscale_ai(s: &mut Session, p: &Value) -> Result<Value> {
                 // pixels are made on a worker, so a big upscale doesn't hold the page.
                 off_thread(move || {
                     done.finish(
-                        r.map(|(image, model)| {
+                        r.map(|(image, model, run)| {
                             let alpha = alpha.map(|a| upscale_plane(&a, w, h, scale));
-                            Upscaled { width: image.width, height: image.height, surface: to_surface(&image, alpha.as_deref(), fmt), model }
+                            Upscaled { width: image.width, height: image.height, surface: to_surface(&image, alpha.as_deref(), fmt), model, run }
                         })
                         .map_err(|e| match e {
                             AiError::Cancelled => EngineError::Cancelled,
@@ -444,7 +512,7 @@ fn upscale_ai(s: &mut Session, p: &Value) -> Result<Value> {
                     );
                 });
             });
-            run_upscale(svc, ctx.clone(), req, retry, finish);
+            run_upscale(svc, ctx.clone(), req, retry, Arc::default(), finish);
         },
         move |s, up: Upscaled| apply(s, up, output, content),
     )
@@ -466,7 +534,11 @@ fn apply(s: &mut Session, up: Upscaled, output: Output, content: &str) -> Result
     let (nw, nh) = (w as u32, h as u32);
     let k = f64::from(m.scale);
     let affine = photocraft_geom::Affine { m: [k, 0.0, 0.0, k, 0.0, 0.0] };
-    let result = json!({"width": nw, "height": nh, "model": m.id, "scale": m.scale, "content": content, "lite": m.lite});
+    let run = up.run;
+    let result = json!({
+        "width": nw, "height": nh, "model": m.id, "scale": m.scale, "content": content, "lite": m.lite,
+        "device": run.device, "cpu": run.cpu, "fellBack": run.fell_back,
+    });
     match output {
         Output::Replace => {
             s.set_sampler_map(affine);
@@ -541,7 +613,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: "Upscale with AI…",
         menu: &["Image"],
         shortcut: None,
-        params: r##"{"scale":2|4=2,"model":"auto|<id from photocraft_ai::catalog>"="auto","quality":"auto|fast|best"="auto" (fast: the lite Real-ESRGAN Compact; auto: full models on a capable GPU, lite on the CPU, phones and weak machines),"device":"auto|gpu|cpu|directml|wgpu"="auto" (directml, wgpu: natively, that GPU runtime; auto picks DirectML on Windows for the ESRGAN, FDAT and Compact models when ONNX Runtime is installed; cpu runs them on its CPU provider there),"tile":32..1024 (input pixels per tile; default the model's),"overlap":0..128=16,"threads":0..64=0 (CPU threads, 0 = one per core),"keepLoaded":bool=true,"content":"auto|grayscale|color"="auto","autoLevels":bool=true (grayscale only, as MangaJaNai),"output":"auto|replace|newDocument"="auto" (auto: replace a single-layer document, else open a new one),"download":bool=false (agents: fetch the model's weights when they aren't downloaded; the UI downloads with ai.models.download)} → {width,height,model,scale,content,document?} (a background job: MangaJaNai for grayscale pages by page height, IllustrationJaNai for colour)"##,
+        params: r##"{"scale":2|4=2,"model":"auto|<id from photocraft_ai::catalog>"="auto","quality":"auto|fast|best"="auto" (fast: the lite Real-ESRGAN Compact; auto: full models on a capable GPU, lite on the CPU, phones and weak machines),"device":"auto|gpu|cpu|directml|wgpu"="auto" (directml, wgpu: natively, that GPU runtime; auto picks DirectML on Windows for the ESRGAN, FDAT and Compact models when ONNX Runtime is installed; cpu runs them on its CPU provider there),"tile":32..1024 (input pixels per tile; default the model's),"overlap":0..128=16,"threads":0..64=0 (CPU threads, 0 = one per core),"keepLoaded":bool=true,"content":"auto|grayscale|color"="auto","autoLevels":bool=true (grayscale only, as MangaJaNai),"output":"auto|replace|newDocument"="auto" (auto: replace a single-layer document, else open a new one),"download":bool=false (agents: fetch the model's weights when they aren't downloaded; the UI downloads with ai.models.download)} → {width,height,model,scale,content,lite,device,cpu,fellBack,document?} (device: where it ran; cpu: on the CPU; fellBack: it left where it was headed (the GPU failed and the CPU ran it again, DirectML couldn't load it, or no usable GPU), with "notices" saying which: ai.gpuFallback, ai.directmlFallback, ai.cpuFallback; a background job: MangaJaNai for grayscale pages by page height, IllustrationJaNai for colour)"##,
         enabled,
         run: upscale_ai,
         journal: true,

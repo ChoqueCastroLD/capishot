@@ -179,6 +179,8 @@ struct JobHooks {
     /// This tile and the count, when more than one: said after the model's own status ("Cleaning
     /// with Manga LaMa (WebGPU) (2 of 5)"), so the progress UI can count them.
     tile: Option<(usize, usize)>,
+    /// Where the job's runs ended ([`Hooks::fell_back`]).
+    trail: Arc<std::sync::Mutex<crate::ai_cmds::Trail>>,
 }
 
 impl Hooks for JobHooks {
@@ -194,13 +196,17 @@ impl Hooks for JobHooks {
     fn cancelled(&self) -> bool {
         self.ctx.cancelled()
     }
+    fn fell_back(&self, f: &photocraft_ai_lama::service::Fallback) {
+        crate::ai_cmds::fell_back(&self.ctx, &self.trail, &f.from, &f.to, f.cpu, &f.why);
+    }
 }
 
 /// Receives the generated RGB and what made it.
 pub(crate) type FillDone = Box<dyn FnOnce(Result<(Vec<f32>, FillRun)>) + Send>;
 
-/// What an AI fill ran: the model, and whether it ended on the CPU (`fell_back`: after the GPU
-/// failed mid-run).
+/// What an AI fill ran: the model, whether it ended on the CPU (an automatic run with no usable
+/// GPU too), and `fell_back`: it left where it was headed (the GPU failed mid-run, DirectML
+/// couldn't run it, or there was no usable GPU).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct FillRun {
     pub model: &'static ModelInfo,
@@ -232,7 +238,7 @@ pub(crate) fn ai_fill_rgb_async(
         Err(e) => return finish(Err(bad(e.to_string()))),
     };
     let binary: Vec<f32> = cover.iter().map(|c| if *c > 0.0 { 1.0 } else { 0.0 }).collect();
-    let state = FillState { svc, ctx, rgb, cover, binary, w, h, opts, plan, next: 0, fell_back: false, finish };
+    let state = FillState { svc, ctx, rgb, cover, binary, w, h, opts, plan, next: 0, fell_back: false, trail: Arc::default(), finish };
     fill_step(state);
 }
 
@@ -252,13 +258,18 @@ struct FillState {
     next: usize,
     /// The GPU failed and the rest runs on the CPU ([`gpu_fallback`]).
     fell_back: bool,
+    /// The runtime's own fallbacks ([`Hooks::fell_back`]).
+    trail: Arc<std::sync::Mutex<crate::ai_cmds::Trail>>,
     finish: FillDone,
 }
 
 fn fill_step(mut st: FillState) {
     let Some(t) = st.plan.get(st.next).cloned() else {
-        let FillState { rgb, finish, opts, fell_back, .. } = st;
-        return finish(Ok((rgb, FillRun { model: opts.model, cpu: opts.run.choice.cpu, fell_back })));
+        let FillState { rgb, finish, opts, fell_back, trail, .. } = st;
+        let t = trail.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let run = FillRun { model: opts.model, cpu: opts.run.choice.cpu || t.cpu, fell_back: fell_back || t.fell_back };
+        drop(t);
+        return finish(Ok((rgb, run)));
     };
     if let Err(e) = st.ctx.check() {
         return (st.finish)(Err(e));
@@ -272,7 +283,7 @@ fn fill_step(mut st: FillState) {
     let (a, b) = (i as f32 / n, (i + 1) as f32 / n);
     let status = if st.plan.len() > 1 { format!("{LABEL} ({} of {})", i + 1, st.plan.len()) } else { LABEL.to_string() };
     let tile = (st.plan.len() > 1).then_some((i + 1, st.plan.len()));
-    let hooks = Arc::new(JobHooks { ctx: st.ctx.clone(), lo: a, hi: b, status, tile });
+    let hooks = Arc::new(JobHooks { ctx: st.ctx.clone(), lo: a, hi: b, status, tile, trail: st.trail.clone() });
     let svc = st.svc.clone();
     let req = st.opts.request(input);
     svc.run(
@@ -528,7 +539,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: "Clean Selected Area with AI",
         menu: &["Edit"],
         shortcut: None,
-        params: r#"{"output"?: "new" (default: the result on a new layer above, alpha = selection coverage) | "current" (paint it into the layer), "layer"?: layer id (default: the active pixel layer), "maxSide"?: 64..2048, multiple of 8 (default 512: larger crops are downscaled to this working size), "margin"?: 0..1024 px of context around each masked blob (default 64), "allowDownload"?: bool (fetch the model's weights when not cached: Manga LaMa about 100 MB, MI-GAN 13 MB; default false), "quality"?: "auto"|"fast"|"best" (fast: the lite MI-GAN, at most 512 px tiles; auto: Manga LaMa on a capable GPU, MI-GAN on the CPU, phones and weak machines), "device"?: "auto"|"gpu"|"cpu"|"directml"|"wgpu" (directml, wgpu: natively, that GPU runtime; auto picks DirectML on Windows for Manga LaMa when ONNX Runtime is installed), "model"?: "auto"|"manga-lama"|"migan-512", "threads"?: 0..64 (CPU threads, 0 = one per core), "keepLoaded"?: bool (default true)} -> {"layer", "pixels", "region": [x,y,w,h], "device", "model", "lite", "cpu" (it ran on the CPU), "fellBack" (the GPU failed mid-run and the CPU finished it), "ms" (the run's wall time)}. Erases what the selection covers (text, SFX) and fills it with Manga LaMa (or MI-GAN). Background job, one undo step."#,
+        params: r#"{"output"?: "new" (default: the result on a new layer above, alpha = selection coverage) | "current" (paint it into the layer), "layer"?: layer id (default: the active pixel layer), "maxSide"?: 64..2048, multiple of 8 (default 512: larger crops are downscaled to this working size), "margin"?: 0..1024 px of context around each masked blob (default 64), "allowDownload"?: bool (fetch the model's weights when not cached: Manga LaMa about 100 MB, MI-GAN 13 MB; default false), "quality"?: "auto"|"fast"|"best" (fast: the lite MI-GAN, at most 512 px tiles; auto: Manga LaMa on a capable GPU, MI-GAN on the CPU, phones and weak machines), "device"?: "auto"|"gpu"|"cpu"|"directml"|"wgpu" (directml, wgpu: natively, that GPU runtime; auto picks DirectML on Windows for Manga LaMa when ONNX Runtime is installed), "model"?: "auto"|"manga-lama"|"migan-512", "threads"?: 0..64 (CPU threads, 0 = one per core), "keepLoaded"?: bool (default true)} -> {"layer", "pixels", "region": [x,y,w,h], "device", "model", "lite", "cpu" (it ran on the CPU, also when an automatic run found no usable GPU), "fellBack" (it left where it was headed: the GPU failed mid-run and the CPU finished it, DirectML couldn't run it, or there was no usable GPU; then "notices" say which: ai.gpuFallback, ai.directmlFallback, ai.cpuFallback), "ms" (the run's wall time)}. Erases what the selection covers (text, SFX) and fills it with Manga LaMa (or MI-GAN). Background job, one undo step."#,
         enabled,
         run: inpaint_ai,
         journal: true,

@@ -83,6 +83,23 @@ pub trait Hooks: Send + Sync {
     /// Overall progress `0..=1` and a short status ("Downloading MangaJaNai 4x…").
     fn progress(&self, fraction: f32, status: &str);
     fn cancelled(&self) -> bool;
+    /// An automatic request left the backend it was headed for and runs on another (DirectML
+    /// to wgpu, or no usable GPU: the CPU). Called before the model runs there, once per request.
+    fn fell_back(&self, _fallback: &Fallback) {}
+}
+
+/// Where an automatic request ended instead of where it was headed ([`Hooks::fell_back`]; as
+/// `photocraft_ai_lama::service::Fallback`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Fallback {
+    /// What it left: `"DirectML"` or `"GPU"`.
+    pub from: String,
+    /// The device it runs on instead (as [`Upscaler::device`]: `"GPU, DiscreteGpu(0)"`, `"CPU"`).
+    pub to: String,
+    /// `to` is the CPU (burn's CPU backend, or a software GPU adapter).
+    pub cpu: bool,
+    /// Why (the error, or "software adapter …").
+    pub why: String,
 }
 
 /// Receives the result: the upscaled image (1 channel for grayscale requests, else 3).
@@ -126,6 +143,8 @@ pub struct FakeUpscaler {
     pub profile: std::sync::Mutex<DeviceProfile>,
     /// The last request's options.
     pub last_opts: std::sync::Mutex<Option<RunOptions>>,
+    /// Report this [`Hooks::fell_back`] for every request that may use the GPU (not `opts.cpu`).
+    pub fallback: Option<Fallback>,
 }
 
 impl Upscaler for FakeUpscaler {
@@ -161,6 +180,9 @@ impl Upscaler for FakeUpscaler {
         }
         if let Some(e) = self.gpu_fail.as_ref().filter(|_| !req.opts.cpu) {
             return done(Err(AiError::Gpu(e.clone())));
+        }
+        if let Some(f) = self.fallback.as_ref().filter(|_| !req.opts.cpu) {
+            hooks.fell_back(f);
         }
         if self.model_state(req.model) == ModelState::NeedsDownload {
             if !req.allow_download {

@@ -168,7 +168,9 @@ fn save_active(app: &mut PhotocraftApp, format: &str) -> Result<Vec<u8>, String>
     let state = app.session.active().ok_or("no document is open")?;
     let name = protocol::export_name(&state.doc.name, format)?;
     let export = app.services.export.as_ref().ok_or("no exporter")?;
-    let (bytes, _warnings) = export(&state.doc, &name, &ExportSettings::default())?;
+    // PSD saves are incremental: layers unchanged since the last save aren't encoded again.
+    let settings = ExportSettings { psd_cache: Some(state.psd_cache.clone()), ..ExportSettings::default() };
+    let (bytes, _warnings) = export(&state.doc, &name, &settings)?;
     if photocraft_engine::file_cmds::saves_in_place(&name)
         && let Some(state) = app.session.active_mut()
     {

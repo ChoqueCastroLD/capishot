@@ -221,7 +221,8 @@ export function onEvent(listener: ((event: EmbedEvent) => void) | null): void;
 /** PSD/PSB/.pcraft/PNG/JPEG/WebP/… bytes → a new active document (a flat image becomes one layer). */
 export function openDocument(data: ArrayBuffer | ArrayBufferView | Blob, filename: string): Promise<OpenedDocument>;
 export function newDocument(options: NewDocumentOptions): Promise<DocumentInfo>;
-/** `id` null = the active document. PSD keeps layers; a layered save marks the document clean. */
+/** `id` null = the active document. PSD keeps layers; a layered save marks the document clean.
+ * PSD saves are incremental (unchanged layers aren't encoded again); the bytes are a full save's. */
 export function saveDocument(id: DocumentId | null, format: SaveFormat): Promise<Uint8Array>;
 export function closeDocument(id: DocumentId | null, force?: boolean): Promise<void>;
 export function activateDocument(id: DocumentId): Promise<DocumentInfo>;
@@ -258,3 +259,23 @@ export function zoom(level: number | 'in' | 'out' | 'fit' | 'actual'): Promise<J
 /** Resolves `true` when a step was undone/redone. */
 export function undo(): Promise<Json>;
 export function redo(): Promise<Json>;
+
+/** Where an AI command (`edit.inpaintAi`, `edit.removeAi`, `paint.remove` with `ai`,
+ * `image.upscaleAi`) really ran, in its `execute` reply. */
+export interface AiRunInfo {
+  /** The runtime's name (`"DirectML"`, `"Vulkan: …"`, `"GPU, DiscreteGpu(0)"`, `"CPU"`). */
+  device: string;
+  /** It ran on the CPU (asked for, or no usable GPU). */
+  cpu: boolean;
+  /** It left where it was headed (DirectML, the GPU); `notices` say why. */
+  fellBack: boolean;
+  notices?: AiNotice[];
+}
+
+export interface AiNotice {
+  class: 'ai.gpuFallback' | 'ai.directmlFallback' | 'ai.cpuFallback' | string;
+  /** The message shown to the user. */
+  text: string;
+  /** The underlying error. */
+  cause: string;
+}

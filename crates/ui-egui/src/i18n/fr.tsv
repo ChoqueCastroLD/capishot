@@ -3465,6 +3465,8 @@ curves	Smooth	Lisser
 	Describe what to add (optional)	Décrivez ce qu’il faut ajouter (facultatif)
 	English, Spanish or Portuguese; empty fills with background. It runs on this device, and generating means you accept the Terms of Use.	Anglais, espagnol ou portugais ; vide remplit avec l’arrière-plan. Fonctionne sur cet appareil ; générer vaut acceptation des Conditions d’utilisation.
 	GPU couldn't run this model; used the CPU instead	Le GPU n'a pas pu exécuter ce modèle ; le CPU a été utilisé à la place
+	DirectML couldn't run this model; used wgpu instead	DirectML n'a pas pu exécuter ce modèle ; wgpu a été utilisé à la place
+	No usable GPU for this model; ran on the CPU instead	Aucun GPU utilisable pour ce modèle ; le CPU a été utilisé à la place
 	Menu	Menu
 	Max pixel density	Densité de pixels maximale
 	Display's own	Celle de l’écran

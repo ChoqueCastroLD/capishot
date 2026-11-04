@@ -79,6 +79,22 @@ pub trait Hooks: Send + Sync {
     fn progress(&self, fraction: f32, status: &str);
     /// The caller gave up; finish with [`LamaError::Cancelled`] as soon as possible.
     fn cancelled(&self) -> bool;
+    /// An automatic request left the backend it was headed for and runs on another (DirectML
+    /// to wgpu, or no usable GPU: the CPU). Called before the tile runs there, once per request.
+    fn fell_back(&self, _fallback: &Fallback) {}
+}
+
+/// Where an automatic request ended instead of where it was headed ([`Hooks::fell_back`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Fallback {
+    /// What it left: `"DirectML"` or `"GPU"`.
+    pub from: String,
+    /// The device it runs on instead (as [`Inpainter::device`]: `"Vulkan: …"`, `"CPU"`).
+    pub to: String,
+    /// `to` is the CPU (burn's CPU backend, or a software GPU adapter).
+    pub cpu: bool,
+    /// Why (the error, or "software adapter …").
+    pub why: String,
 }
 
 /// Receives the raw generator output: interleaved RGB, `tile.w·tile.h·3`, 0..=1.
@@ -113,6 +129,8 @@ pub struct FakeInpainter {
     pub state: Option<ModelState>,
     /// The last request's model id and CPU flag.
     pub last: std::sync::Mutex<Option<(&'static str, bool)>>,
+    /// Report this [`Hooks::fell_back`] for every request that may use the GPU (not `cpu`).
+    pub fallback: Option<Fallback>,
 }
 
 impl Inpainter for FakeInpainter {
@@ -143,6 +161,9 @@ impl Inpainter for FakeInpainter {
             && !req.allow_download
         {
             return done(Err(LamaError::Unavailable("the model needs a download".into())));
+        }
+        if let Some(f) = self.fallback.as_ref().filter(|_| !req.cpu) {
+            hooks.fell_back(f);
         }
         let t = &req.tile;
         let (mut sum, mut n) = ([0f64; 3], 0usize);

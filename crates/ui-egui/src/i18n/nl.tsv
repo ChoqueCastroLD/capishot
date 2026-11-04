@@ -4199,6 +4199,8 @@ curves	Smooth	Vloeiend maken
 	Describe what to add (optional)	Beschrijf wat er bij moet (optioneel)
 	English, Spanish or Portuguese; empty fills with background. It runs on this device, and generating means you accept the Terms of Use.	Engels, Spaans of Portugees; leeg vult met achtergrond. Draait op dit apparaat; door te genereren aanvaardt u de Gebruiksvoorwaarden.
 	GPU couldn't run this model; used the CPU instead	De GPU kon dit model niet uitvoeren; in plaats daarvan is de CPU gebruikt
+	DirectML couldn't run this model; used wgpu instead	DirectML kon dit model niet uitvoeren; in plaats daarvan is wgpu gebruikt
+	No usable GPU for this model; ran on the CPU instead	Geen bruikbare GPU voor dit model; in plaats daarvan is de CPU gebruikt
 	Menu	Menu
 	Max pixel density	Maximale pixeldichtheid
 	Display's own	Die van het scherm

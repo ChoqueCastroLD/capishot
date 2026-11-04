@@ -356,3 +356,33 @@ fn in_place_tiles_match_tiles_filled_from_the_original() {
     let worst = got.iter().zip(&want).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
     assert!(worst <= 1.0 / 255.0 + 1e-4, "largest difference {worst}");
 }
+
+/// #22: an automatic run that left DirectML or found no usable GPU (the runtime's `fell_back`)
+/// says so once per job, however many tiles, and the reply's `cpu` and `fellBack` say where it
+/// really ran.
+#[test]
+fn a_silent_device_fallback_is_reported_once_per_job() {
+    use photocraft_ai_lama::service::Fallback;
+    let run = |from: &str, to: &str, cpu: bool| {
+        let fallback = Some(Fallback { from: from.into(), to: to.into(), cpu, why: "injected".into() });
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 512, "height": 64, "background": "white"})).unwrap();
+        // Two blobs far apart: two tiles, two requests.
+        s.execute("select.rect", json!({"x": 4, "y": 4, "width": 8, "height": 8})).unwrap();
+        s.execute("select.rect", json!({"x": 490, "y": 40, "width": 8, "height": 8, "mode": "add"})).unwrap();
+        let mut s = with_fake(s, FakeInpainter { fallback, ..Default::default() });
+        s.execute(ID, json!({"margin": 0})).unwrap()
+    };
+    let r = run("GPU", "CPU", true);
+    assert_eq!((r["cpu"].clone(), r["fellBack"].clone()), (json!(true), json!(true)), "{r}");
+    let n = r["notices"].as_array().unwrap();
+    assert_eq!(n.len(), 1, "said once: {r}");
+    assert_eq!((n[0]["class"].as_str(), n[0]["cause"].as_str()), (Some(crate::ai_cmds::CPU_FALLBACK_CLASS), Some("injected")));
+    let r = run("DirectML", "Vulkan: test", false);
+    assert_eq!((r["cpu"].clone(), r["fellBack"].clone()), (json!(false), json!(true)), "{r}");
+    assert_eq!(r["notices"][0]["class"].as_str(), Some(crate::ai_cmds::DIRECTML_FALLBACK_CLASS));
+    // Nothing left: as before.
+    let mut s = with_fake(page(8), FakeInpainter::default());
+    let r = s.execute(ID, json!({})).unwrap();
+    assert_eq!((r["cpu"].clone(), r["fellBack"].clone(), r.get("notices")), (json!(false), json!(false), None), "{r}");
+}

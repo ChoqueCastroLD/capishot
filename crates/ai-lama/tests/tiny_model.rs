@@ -260,3 +260,76 @@ fn native_inpainter_reports_missing_weights_and_runs_a_file() {
     assert!(!i.device().is_empty());
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// Records [`Hooks::fell_back`] reports.
+#[derive(Default)]
+struct Trail(std::sync::Mutex<Vec<photocraft_ai_lama::service::Fallback>>);
+impl photocraft_ai_lama::service::Hooks for Trail {
+    fn progress(&self, _: f32, _: &str) {}
+    fn cancelled(&self) -> bool {
+        false
+    }
+    fn fell_back(&self, f: &photocraft_ai_lama::service::Fallback) {
+        self.0.lock().unwrap().push(f.clone());
+    }
+}
+
+/// #22: an automatic run that leaves DirectML (it can't load or run the model) or ends on the
+/// CPU says so through `Hooks::fell_back`, with the device it really ran on; an explicit
+/// DirectML request fails instead; a CPU request says nothing.
+#[test]
+fn native_inpainter_reports_its_fallbacks() {
+    use photocraft_ai_lama::native::{Faults, NativeInpainter};
+    use photocraft_ai_lama::service::{GpuBackend, Inpainter, Request};
+    let dir = std::env::temp_dir().join(format!("lama-fallback-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("tiny.safetensors");
+    std::fs::write(&path, tiny_safetensors("lama-ffc")).unwrap();
+    let run = |i: &NativeInpainter, backend: GpuBackend, cpu: bool| {
+        let (rgb, mask) = tiny_input();
+        let tile = photocraft_ai_lama::tiles::TileInput { rgb, mask, w: W, h: H };
+        let req = Request { backend, cpu, ..Request::lama(tile, false) };
+        let trail = std::sync::Arc::new(Trail::default());
+        let (tx, rx) = std::sync::mpsc::channel();
+        i.run(req, trail.clone(), Box::new(move |r| tx.send(r).unwrap()));
+        let r = rx.recv().unwrap();
+        let reports = trail.0.lock().unwrap().clone();
+        (r, reports)
+    };
+    let gpu_fault = Faults { wgpu: Some("no adapter (injected)".into()), ..Default::default() };
+    // wgpu can't start: the CPU, said so.
+    let i = NativeInpainter::new(path.clone()).with_faults(gpu_fault.clone());
+    let (r, f) = run(&i, GpuBackend::Wgpu, false);
+    assert_eq!(r.unwrap().len(), W * H * 3);
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!((f[0].from.as_str(), f[0].to.as_str(), f[0].cpu), ("GPU", "CPU", true));
+    assert!(f[0].why.contains("injected"), "{f:?}");
+    assert_eq!(i.device(), "CPU");
+    // Every later run on that model says so too (it is still on the CPU).
+    assert_eq!(run(&i, GpuBackend::Wgpu, false).1.len(), 1);
+    // A CPU request asked for the CPU: nothing to say.
+    let (r, f) = run(&i, GpuBackend::Auto, true);
+    assert!(r.is_ok() && f.is_empty(), "{f:?}");
+    // DirectML can't load the model: the automatic run leaves it (and the GPU) and says both.
+    let i = NativeInpainter::new(path.clone()).with_faults(Faults { directml_load: Some("no onnxruntime (injected)".into()), ..gpu_fault.clone() });
+    let (r, f) = run(&i, GpuBackend::Auto, false);
+    assert!(r.is_ok());
+    assert_eq!((f[0].from.as_str(), f[0].cpu), ("DirectML", true), "{f:?}");
+    assert!(f[0].why.contains("no onnxruntime") && f[0].why.contains("no adapter"), "{f:?}");
+    // The next automatic run doesn't try DirectML again, and still says it left it.
+    let (_, f) = run(&i, GpuBackend::Auto, false);
+    assert_eq!(f.first().map(|f| f.from.as_str()), Some("DirectML"), "{f:?}");
+    // Asked for DirectML: an error, not a fallback.
+    let i = NativeInpainter::new(path.clone()).with_faults(Faults { directml_load: Some("no onnxruntime (injected)".into()), ..Default::default() });
+    let (r, f) = run(&i, GpuBackend::DirectMl, false);
+    assert!(r.is_err() && f.is_empty());
+    // DirectML fails while running: the automatic run goes on on burn and says so.
+    let i = NativeInpainter::new(path.clone()).with_faults(Faults { directml_run: Some("device removed (injected)".into()), ..gpu_fault });
+    let (r, f) = run(&i, GpuBackend::Auto, false);
+    assert!(r.is_ok());
+    assert_eq!(f[0].from, "DirectML");
+    assert!(f[0].why.contains("device removed"), "{f:?}");
+    let (r, _) = run(&i, GpuBackend::DirectMl, false);
+    assert!(matches!(r, Err(photocraft_ai_lama::LamaError::Gpu(_))), "asked for DirectML: the GPU's failure, for the caller's CPU retry");
+    std::fs::remove_dir_all(&dir).ok();
+}
