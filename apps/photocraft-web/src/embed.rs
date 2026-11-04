@@ -11,6 +11,8 @@
 //! window.addEventListener("photocraft-dirty", e => e.detail)   // true / false as it changes
 //! window.addEventListener("photocraft-fontsMissing", e => e.detail.families)  // fonts nobody serves
 //! await photocraft.request("fonts.preload", {families: ["Patrick Hand"]})    // {ready, missing, failed}
+//! window.addEventListener("photocraft-fontsPreloadProgress", e => e.detail)  // {id?, family, status, done, total}
+//! await photocraft.request("fonts.status", {families: ["Patrick Hand"]})     // {loaded, loading, failed, available, missing, manifest}
 //! await photocraft.request("ui.set", {fontsNotice: false})                   // no missing-fonts notice
 //! ```
 //!
@@ -133,6 +135,19 @@ pub fn process(app: &mut PhotocraftApp) {
             }
         }
         post(&json!({ "photocraft": "fontsMissing", "families": families }), None);
+    }
+    // `fonts.preload` progress: `photocraft-fontsPreloadProgress`, one per family as it settles.
+    for progress in std::mem::take(&mut app.font_checks.progress) {
+        if let Some(window) = web_sys::window() {
+            let init = web_sys::CustomEventInit::new();
+            init.set_detail(&to_js(&progress));
+            if let Ok(event) = web_sys::CustomEvent::new_with_event_init_dict("photocraft-fontsPreloadProgress", &init) {
+                window.dispatch_event(&event).ok();
+            }
+        }
+        let mut message = progress;
+        message["photocraft"] = json!("fontsPreloadProgress");
+        post(&message, None);
     }
     let dirty = app.has_unsaved_work();
     if DIRTY.with(|d| d.replace(dirty)) != dirty {

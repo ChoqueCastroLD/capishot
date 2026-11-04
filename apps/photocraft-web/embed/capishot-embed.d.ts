@@ -65,6 +65,30 @@ export interface FontsPreloadParams {
   families: string[];
   /** Give up on downloads still running after this long (those count as `failed`). Default 10000, at most 120000. */
   timeoutMs?: number;
+  /** Tag echoed in this preload's `fontsPreloadProgress` events (at most 200 characters). */
+  id?: string;
+}
+
+/** `request('fonts.status', …)` params (feature `fonts.status`). */
+export interface FontsStatusParams {
+  /** Family names (matched as in `fonts.preload`). Default: every family the host serves. */
+  families?: string[];
+}
+
+/** `request('fonts.status', …)` result: each family in one of the lists. Asks for nothing. */
+export interface FontsStatusResult {
+  /** Usable now: installed, bundled, stored, or served and downloaded. */
+  loaded: string[];
+  /** Served and downloading (or the manifest is still being read). */
+  loading: string[];
+  /** Served, but the download failed. */
+  failed: string[];
+  /** Served and not asked for yet: `fonts.preload` fetches it. */
+  available: string[];
+  /** Not installed and not served. */
+  missing: string[];
+  /** The served fonts manifest: `loading`, `loaded` or `none` (no manifest). */
+  manifest: 'loading' | 'loaded' | 'none';
 }
 
 /** `request('fonts.preload', …)` result: each asked family in one of the lists. */
@@ -163,6 +187,13 @@ export type EmbedEvent =
    */
   | { type: 'fontsMissing'; families: string[] }
   /**
+   * One family of a `fonts.preload` settled: `status` `loaded`, `failed` (download failed or
+   * timed out) or `missing`; `done` of `total` families of that preload have settled, so the
+   * last event has `done === total`. `id`: the preload's `id` param (feature
+   * `events.fontsPreloadProgress`).
+   */
+  | { type: 'fontsPreloadProgress'; id?: string; family: string; status: 'loaded' | 'failed' | 'missing'; done: number; total: number }
+  /**
    * A layer's pixels or layer mask changed (strokes, fills, Remove, clears, undo, redo…): `rect`
    * in document pixels, tile-aligned, the union of the changes since the last event. `pixelRev`
    * is the layer's new `pixelRev` (as in `document.inspect`). Feature `events.layerPixelsChanged`.
@@ -212,6 +243,7 @@ export interface ExecuteOptions {
 export function execute(command: string, params?: { [key: string]: Json } | string | null, options?: ExecuteOptions | null): Promise<Json>;
 /** Any control-protocol method (`ui.inspect`, `ui.pointer`, …). */
 export function request(method: 'fonts.preload', params: FontsPreloadParams): Promise<FontsPreloadResult>;
+export function request(method: 'fonts.status', params?: FontsStatusParams | null): Promise<FontsStatusResult>;
 export function request(method: string, params?: { [key: string]: Json } | null): Promise<Json>;
 export function listCommands(): Promise<CommandInfo[]>;
 /** Tool ids, e.g. `brush`, `eraser`, `cloneStamp` (sync). */

@@ -245,6 +245,13 @@ Long commands (every `filter.*`, `edit.contentAwareFill`, `edit.inpaintAi`, `edi
 
 Served fonts (the web build, `fonts/manifest.txt` next to the page): `fonts.preload {families, timeoutMs?}` fetches the served fonts of `families` and replies once each has arrived or failed, as `{ready, missing, failed}` (`missing`: not installed and not in the manifest; `failed`: the download failed or didn't end within `timeoutMs`, default 10000, at most 120000). Names match as documents' do: without case, spaces, punctuation or parentheses, and by PostScript name. A family the manifest lists is never reported missing: until the manifest is read, and while a document's served fonts download, the "Missing fonts" notice waits, and it lists only absent families and those whose download failed. `ui.set {fontsNotice: false}` hides the notice (an embedding page reports missing fonts itself; the web build also sends a `photocraft-fontsMissing` event).
 
+`fonts.preload` also takes `id` (a string): as each family settles, the web build sends a `fontsPreloadProgress` event `{id?, family, status, done, total}` (`status`: `loaded`, `failed` or `missing`; `done` of the call's `total` families have settled, so the last has `done == total`), as the `photocraft-fontsPreloadProgress` window event, `{photocraft: "fontsPreloadProgress", …}` over `postMessage`, and the embed API's `fontsPreloadProgress` event. A family already loaded or on its way is not fetched twice. `fonts.status {families?}` says where families stand and fetches nothing: `{loaded, loading, failed, available, missing, manifest}`, each family in one list (`loaded`: usable now (installed, bundled, stored, or served and downloaded); `loading`: downloading, or the manifest is still being read; `failed`: the download failed; `available`: served, not asked for yet; `missing`: nobody has it); without `families`, every family the manifest lists; `manifest`: `loading`, `loaded` or `none`. A host preloading a whole work's fonts in the background asks `fonts.status` first and preloads only the `available` ones:
+
+```json
+{"id":1,"method":"fonts.status","params":{"families":["Patrick Hand","Bangers"]}}
+{"id":2,"method":"fonts.preload","params":{"families":["Bangers"],"id":"work-12","timeoutMs":60000}}
+```
+
 ### Live sync (several people and agents on one document)
 
 For hosts that keep one document in step between collaborators (the embed API and
@@ -325,6 +332,42 @@ Example (CLI session, one JSON per line):
 {"id":3,"method":"engine.execute","params":{"command":"layer.layerMask.set","index":0,"params":{"layer":28,"png":"iVBORw0…","x":0,"y":0}}}
 {"id":4,"method":"doc.inspect","params":{"index":0,"textStyle":true}}
 ```
+
+### Same type layout in the browser and the CLI
+
+Type lays out deterministically: given the same font files, the web build (wasm) and
+`photocraft-cli` (any OS) place every glyph at the same position, bit for bit. Shaping, line
+breaking and kerning are pure Rust, and the few transcendental functions in the layout and type
+rasteriser (`ln` for optical kerning, `tan` for faux italic, `hypot` for type in a path and warps,
+`pow` for the anti-aliasing curves) come from the `libm` crate rather than the platform maths
+library, whose last bit differs between glibc, MSVC and the wasm port.
+
+`type.layoutDigest {layer?, fontHashes?}` fingerprints the layout: with `layer`,
+`{layer, digest, lines, glyphs, fonts: [{names, bytes, index, sha256?}]}` (`digest`: SHA-256 of
+every line, glyph and decoration position as float bits and the font instances; `fonts`: the font
+files its glyphs use, `sha256` with `fontHashes: true`); without it, `{digest, layers: [{layer,
+digest, lines, glyphs}]}` for every type layer, `digest` covering them all. Equal digests mean
+identical layout; when they differ, compare `fonts` first. No history step, read-only.
+
+What still makes the two lay out differently, and how to line them up:
+
+- **Different font files.** The CLI also scans the system's fonts; the browser has the bundled
+  fonts, the fonts the page serves (`fonts/manifest.txt`) and the user's stored fonts. A family
+  installed in another version, or a missing family's fallback, gives other glyphs. Install on the
+  server exactly the files the page serves (and no other version of those families), and compare
+  `type.layoutDigest {layer, fontHashes: true}`'s `fonts` on both sides.
+- **A font still downloading** in the browser lays out with a fallback until it arrives
+  (`fonts.preload`, `fonts.status`).
+- **Japanese word boundaries and Thai, Lao, Khmer and Burmese line breaks.** Native builds carry
+  ICU's dictionaries for them; the web build leaves them out (wasm size) and uses the generic
+  Unicode rules, so lines in those scripts may break at other places. Latin, Cyrillic, Greek,
+  Korean, Chinese, Arabic and Hebrew text breaks alike.
+
+```json
+{"id":1,"method":"engine.execute","params":{"command":"type.layoutDigest","index":0,"params":{}}}
+```
+
+Embed API: `execute('type.layoutDigest', {})` (feature `type.layoutDigest`).
 
 ### LUT library
 

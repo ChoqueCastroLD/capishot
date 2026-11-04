@@ -54,7 +54,7 @@ pub(super) fn ink_extent(layout: &Layout<RunBrush>, styles: &[CharStyle], k: f32
             let vs = scale(st.map(|s| s.vertical_scale));
             let synth = run.synthesis();
             let skew_deg = if st.is_some_and(|s| s.faux_italic) { crate::render::FAUX_ITALIC_DEG } else { 0.0 } + synth.skew().unwrap_or(0.0);
-            let skew = skew_deg.to_radians().tan() * vs;
+            let skew = libm::tanf(skew_deg.to_radians()) * vs;
             let shift = st.map_or(0.0, |s| s.baseline_shift_pt * k);
             // Faux bold draws the outline again a pixel off in every direction.
             let bold = if st.is_some_and(|s| s.faux_bold) || synth.embolden() { 1.0 } else { 0.0 };

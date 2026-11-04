@@ -233,6 +233,11 @@ pub fn process(app: &mut PhotocraftApp, ctx: &egui::Context) {
     for families in std::mem::take(&mut app.font_checks.events) {
         emit(&json!({ "type": "fontsMissing", "families": families }));
     }
+    // `fonts.preload` progress, one event per family as it settles.
+    for mut progress in std::mem::take(&mut app.font_checks.progress) {
+        progress["type"] = json!("fontsPreloadProgress");
+        emit(&progress);
+    }
     if first {
         let ready = HOST.with(|h| {
             let mut h = h.borrow_mut();

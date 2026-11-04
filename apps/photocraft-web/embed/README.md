@@ -79,6 +79,12 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
   await capishot.execute('selection.set', {id: sel.id}, {document: doc});
   ```
 
+- `execute('type.layoutDigest', {layer?, fontHashes?})` fingerprints how type lays out: the same
+  digest from the browser and from a `photocraft-cli serve` session means every glyph sits at the
+  same place (layout is deterministic given the same font files; `docs/control-protocol.md` ›
+  Same type layout in the browser and the CLI lists what can still differ). Feature
+  `type.layoutDigest`.
+
 - Type layers through `execute` (`docs/control-protocol.md`): `type.frame {layer}` gives a layer's
   frame without its layout (`shape` point/box/path/inPath with its geometry, `transform`, `bounds`),
   and `type.edit {layer, path | inPath, vertical?, inset?}` gives type in a path a new path (document
@@ -99,8 +105,23 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
   (`PatrickHand-Regular`) and the names in the font file (name IDs 1, 4, 6, 16, 17) find it too.
   The "Missing fonts" notice lists only families nobody serves, and those whose download failed
   ("couldn't download it").
-  - `request('fonts.preload', {families, timeoutMs?})` fetches families ahead and resolves once
-    each has arrived or failed: `{ready, missing, failed}` (feature `fonts.preload`).
+  - `request('fonts.preload', {families, timeoutMs?, id?})` fetches families ahead and resolves once
+    each has arrived or failed: `{ready, missing, failed}` (feature `fonts.preload`). A family
+    already loaded or on its way is not fetched again. As each family settles, a
+    `fontsPreloadProgress` event `{id?, family, status: 'loaded' | 'failed' | 'missing', done,
+    total}` goes out (`id`: the call's `id`; `done === total` on the last one); with
+    `window.photocraft` it is the `photocraft-fontsPreloadProgress` window event (`detail`), over
+    `postMessage` `{photocraft: "fontsPreloadProgress", …}` (feature `events.fontsPreloadProgress`).
+  - `request('fonts.status', {families?})` says where families stand without fetching anything:
+    `{loaded, loading, failed, available, missing, manifest}` (`available`: served, not asked for
+    yet; without `families`, every family the host serves; `manifest`: `loading`, `loaded` or
+    `none`). Preload only what isn't `loaded` or `loading` (feature `fonts.status`).
+
+    ```js
+    const st = await capishot.request('fonts.status', {families: workFonts});
+    capishot.onEvent((e) => e.type === 'fontsPreloadProgress' && e.id === 'work-12' && bar(e.done / e.total));
+    await capishot.request('fonts.preload', {families: st.available, id: 'work-12', timeoutMs: 60000});
+    ```
   - `init({fontsNotice: false})` (or `request('ui.set', {fontsNotice: false})`) hides the notice;
     the `fontsMissing` event `{families}` goes out either way (features `fonts.notice`,
     `events.fontsMissing`). A page using `window.photocraft` gets it as the
