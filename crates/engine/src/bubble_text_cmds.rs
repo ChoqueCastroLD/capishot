@@ -413,8 +413,74 @@ struct Input {
     editable: bool,
     sample_all: bool,
     tolerance: Option<f32>,
+    search: Search,
     x: i32,
     y: i32,
+}
+
+/// The caller's search sizes (`gapRadius`, `reach`, `window`), each `None` for the automatic one.
+#[derive(Clone, Copy, Debug, Default)]
+struct Search {
+    gap_radius: Option<i32>,
+    reach: Option<i32>,
+    /// The largest window's half side; `Some(None)`: the whole page.
+    window: Option<Option<i32>>,
+}
+
+impl Search {
+    fn parse(p: &Value) -> Result<Search> {
+        let px = |key: &str, max: i32| -> Result<Option<i32>> {
+            match p.get(key) {
+                None | Some(Value::Null) => Ok(None),
+                Some(Value::String(a)) if a == "auto" => Ok(None),
+                Some(v) => match v.as_f64() {
+                    Some(n) if n.is_finite() && (1.0..=f64::from(max)).contains(&n) => Ok(Some(n.round() as i32)),
+                    _ => Err(bad(format!("\"{key}\" must be 1..{max} (px) or \"auto\""))),
+                },
+            }
+        };
+        let window = match p.get("window") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(a)) if a == "auto" => None,
+            Some(Value::String(a)) if a == "page" => Some(None),
+            Some(v) => match v.as_f64() {
+                Some(n) if n.is_finite() && (16.0..=f64::from(MAX_WINDOW)).contains(&n) => Some(Some(n.round() as i32)),
+                _ => return Err(bad(format!("\"window\" must be 16..{MAX_WINDOW} (px, half the side of the square searched around the click), \"page\" or \"auto\""))),
+            },
+        };
+        Ok(Search { gap_radius: px("gapRadius", bubble_find::MAX_GAP_RADIUS)?, reach: px("reach", bubble_find::MAX_REACH)?, window })
+    }
+
+    /// The search at `(x, y)` on `img` covering `area` (of the page `page`): sized for the ink
+    /// there, the caller's sizes over it, bounded to the windows unless the page is asked for.
+    fn opts(&self, img: &[[u8; 4]], area: Rect, page: Rect, (x, y): (i32, i32)) -> bubble_find::Opts {
+        let mut o = bubble_find::Opts::auto_in(img, area, page, (x, y)).bounded(page);
+        if let Some(r) = self.gap_radius {
+            o.gap_radius = r;
+        }
+        if let Some(r) = self.reach {
+            o.reach = r;
+        }
+        match self.window {
+            Some(Some(h)) => o = o.with_window(h),
+            Some(None) => o.page = true,
+            None => {}
+        }
+        o
+    }
+}
+
+/// The largest `window` a caller may ask for (px).
+const MAX_WINDOW: i32 = 1 << 16;
+
+/// The search's sizes, as reported.
+fn search_json(o: &bubble_find::Opts) -> Value {
+    json!({
+        "scale": (o.scale * 100.0).round() / 100.0,
+        "gapRadius": o.gap_radius,
+        "reach": o.reach,
+        "window": if o.page { json!("page") } else { json!(o.windows[1]) },
+    })
 }
 
 /// What to paint in `interior`: from the active layer's pixels, or the page's (`page`, which may
@@ -456,29 +522,34 @@ fn plan_in(page: &crate::typer_place_cmds::support::PageImage, inp: &Input, inte
 
 /// The bubble at the click and what to paint in it: the heavy part, run as a background job
 /// (it froze phones for seconds on the page's main thread).
-fn find_and_plan(page: &crate::typer_place_cmds::support::PageImage, inp: &Input) -> Result<(Plan, &'static str)> {
+fn find_and_plan(page: &crate::typer_place_cmds::support::PageImage, inp: &Input) -> Result<(Plan, &'static str, bubble_find::Opts)> {
     let (x, y) = (inp.x, inp.y);
     let plan_in = |interior: &Mask| plan_in(page, inp, interior);
+    let o = inp.search.opts(&page.img, page.area, page.area, (x, y));
     // The bubble: closed, else cut by the image's edge, else (it opens onto a panel border or the
     // gutter) the block of lettering under the click with a margin, its panel lines kept as walls.
-    match bubble_find::find(&page.img, page.area, (x, y)) {
-        Ok(found) => Ok((plan_in(&found.interior)?, "bubble")),
+    match bubble_find::find_opts(&page.img, page.area, (x, y), false, &o) {
+        Ok(found) => Ok((plan_in(&found.interior)?, "bubble", o)),
         Err(miss) => {
             let mut first: Option<EngineError> = None;
-            if let Ok(found) = bubble_find::find_walled(&page.img, page.area, (x, y)) {
+            // A region past the window without touching the page edge is no bubble cut by it
+            // (the walled flood would only cross the window again).
+            if miss != bubble_find::Miss::Beyond
+                && let Ok(found) = bubble_find::find_opts(&page.img, page.area, (x, y), true, &o)
+            {
                 match plan_in(&found.interior) {
-                    Ok(p) => return Ok((p, "edge")),
+                    Ok(p) => return Ok((p, "edge", o)),
                     Err(e) => first = Some(e),
                 }
             }
-            if let Some(c) = photocraft_typer::text_cluster::find(&page.img, page.area, (x, y)) {
+            if let Some(c) = photocraft_typer::text_cluster::find_scaled(&page.img, page.area, (x, y), o.scale) {
                 let m = crate::type_bubble_cmds::open_bubble(page, x, y).map(|f| f.interior).unwrap_or_else(|| {
                     let mut m = c.walls.clone();
                     m.px.iter_mut().for_each(|v| *v = !*v);
                     m
                 });
                 match plan_in(&m) {
-                    Ok(p) => return Ok((p, "textCluster")),
+                    Ok(p) => return Ok((p, "textCluster", o)),
                     Err(e) => first = first.or(Some(e)),
                 }
             }
@@ -495,7 +566,7 @@ const CLICK_WINDOWS: [i32; 2] = [448, 1088];
 /// around the click (the same as on the page, see [`bubble_find::find_in_window`]): `None`
 /// (composite the page) when the page is current, a window would be most of what is stale
 /// anyway, or the bubble needs the page (larger than the windows, open, or a miss).
-fn in_window(page: &crate::typer_place_cmds::support::PageWork, inp: &Input) -> Option<Result<(Plan, &'static str)>> {
+fn in_window(page: &crate::typer_place_cmds::support::PageWork, inp: &Input) -> Option<Result<(Plan, &'static str, bubble_find::Opts)>> {
     let (area, stale) = page.stale_area()?;
     let size = |r: &Rect| u64::from(r.width()) * u64::from(r.height());
     for half in CLICK_WINDOWS {
@@ -504,8 +575,13 @@ fn in_window(page: &crate::typer_place_cmds::support::PageWork, inp: &Input) -> 
             return None;
         }
         let wp = page.window(win)?;
-        match bubble_find::find_in_window(&wp.img, win, area, (inp.x, inp.y)) {
-            Some(Ok(found)) => return Some(plan_in(&wp, inp, &found.interior).map(|p| (p, "bubble"))),
+        let o = inp.search.opts(&wp.img, win, area, (inp.x, inp.y));
+        match bubble_find::find_in_window_opts(&wp.img, win, area, (inp.x, inp.y), &o) {
+            // A bounded search finds it too only when it stays inside the search's window.
+            Some(Ok(found)) if o.page || within(&found.interior, &o, area, (inp.x, inp.y)) => {
+                return Some(plan_in(&wp, inp, &found.interior).map(|p| (p, "bubble", o)));
+            }
+            Some(Ok(_)) => return None,
             // Not closed: the fallbacks read the page around it.
             Some(Err(_)) => return None,
             // It reached the window's side: the next window.
@@ -513,6 +589,19 @@ fn in_window(page: &crate::typer_place_cmds::support::PageWork, inp: &Input) -> 
         }
     }
     None
+}
+
+/// Whether `interior` stays clear of the sides (those inside the page `area`) of `o`'s largest
+/// window around `seed`, by the margin a bounded flood keeps from them.
+fn within(interior: &Mask, o: &bubble_find::Opts, area: Rect, seed: (i32, i32)) -> bool {
+    let half = o.windows[1];
+    let win = Rect::new(seed.0.saturating_sub(half), seed.1.saturating_sub(half), seed.0.saturating_add(half + 1), seed.1.saturating_add(half + 1)).intersect(&area);
+    let Some(b) = interior.bounds() else { return false };
+    let m = o.gap_radius + 7;
+    (win.x0 <= area.x0 || b.x0 - m > win.x0)
+        && (win.y0 <= area.y0 || b.y0 - m > win.y0)
+        && (win.x1 >= area.x1 || b.x1 + m < win.x1 - 1)
+        && (win.y1 >= area.y1 || b.y1 + m < win.y1 - 1)
 }
 
 fn remove_bubble_text(s: &mut Session, p: &Value) -> Result<Value> {
@@ -553,7 +642,8 @@ fn remove_bubble_text(s: &mut Session, p: &Value) -> Result<Value> {
     let layer_fmt = active.and_then(|id| doc.layer(id)).and_then(|l| l.surface()).map(|s| s.format());
     // The page is composited (where it changed) in the job too.
     let page = crate::typer_place_cmds::page_work(s)?;
-    let inp = Input { doc, active, editable, sample_all, tolerance, x, y };
+    let search = Search::parse(p)?;
+    let inp = Input { doc, active, editable, sample_all, tolerance, search, x, y };
     crate::jobs::run(
         s,
         LABEL,
@@ -570,8 +660,10 @@ fn remove_bubble_text(s: &mut Session, p: &Value) -> Result<Value> {
             if let Some(page) = page {
                 crate::typer_place_cmds::install_page(s, page);
             }
-            let (plan, region_kind) = r?;
-            apply(s, plan, region_kind, active, layer_fmt, new_layer)
+            let (plan, region_kind, opts) = r?;
+            let mut out = apply(s, plan, region_kind, active, layer_fmt, new_layer)?;
+            out["search"] = search_json(&opts);
+            Ok(out)
         },
     )
 }
@@ -655,7 +747,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: LABEL,
         menu: &[],
         shortcut: None,
-        params: r##"{"x":px,"y":px (the click),"tolerance"?:1..255|"auto" (how far from the background, as a colour difference, a pixel counts as text; default auto: from the bubble's noise),"sampleAll"?:bool (model the background from every visible layer, not the active one; default false),"newLayer"?:bool (the result on a new layer above; default false)} → {"ok":true,"layer","bubbleBounds":[x,y,w,h],"pixels" (painted),"background":"solid"|"gradient","newLayer"}. The Bubble Text Remover tool's click: the text in the speech bubble, narration box or SFX bubble at the point is removed without AI. The bubble is found as for type.createInBubble (a click on a letter still finds it; a bubble cut by the page edge, or one that opens onto a panel border or the gutter, is bounded by the edge or by its lettering's block, its panel lines kept as walls; "region" says which: "bubble", "edge" or "textCluster"); its background is a solid colour or a smooth gradient fitted around the lettering, and only the pixels that differ from it (with their anti-aliased edge, a 1 px feather) are painted with it plus matching noise; a 2 px band along the outline is never touched. Errors: "noBubble (…)" with no bubble there, "notPlain: …" when the background isn't plain (screentone, art: use Remove with AI), "noText: …" when nothing in it differs; none changes anything. A type, shape or other non-pixel active layer gets the result on a new layer. One undo step"##,
+        params: r##"{"x":px,"y":px (the click),"tolerance"?:1..255|"auto" (how far from the background, as a colour difference, a pixel counts as text; default auto: from the bubble's noise),"sampleAll"?:bool (model the background from every visible layer, not the active one; default false),"newLayer"?:bool (the result on a new layer above; default false),"gapRadius"?:1..32|"auto" (px: outline gaps up to about twice this wide stay shut),"reach"?:1..512|"auto" (px: how far from the click a light pixel to start from may be),"window"?:16..65536|"page"|"auto" (px: half the side of the largest square searched around the click, or the whole page)} → {"ok":true,"layer","bubbleBounds":[x,y,w,h],"pixels" (painted),"background":"solid"|"gradient","region","newLayer","search":{"scale","gapRadius","reach","window"}}. The Bubble Text Remover tool's click: the text in the speech bubble, narration box or SFX bubble at the point is removed without AI. The bubble is found as for type.createInBubble (a click on a letter still finds it; a bubble cut by the page edge, or one that opens onto a panel border or the gutter, is bounded by the edge or by its lettering's block, its panel lines kept as walls; "region" says which: "bubble", "edge" or "textCluster"); its background is a solid colour or a smooth gradient fitted around the lettering, and only the pixels that differ from it (with their anti-aliased edge, a 1 px feather) are painted with it plus matching noise; a 2 px band along the outline is never touched. The search is sized for the page's resolution: the ink's stroke width around the click gives its scale against a 1x page (about 1500 px wide), and the gap radius (2 px at 1x), the reach (24 px) and the windows (384 and 1024 px) scale with it ("search" in the result says what was used); it stays in its windows unless "window":"page", so a click with no bubble answers at once. Errors: "noBubble (…)" with no bubble there ("beyondWindow" when the light area reaches past the search window), "notPlain: …" when the background isn't plain (screentone, art: use Remove with AI), "noText: …" when nothing in it differs; none changes anything. A type, shape or other non-pixel active layer gets the result on a new layer. One undo step"##,
         enabled,
         journal: true,
         run: remove_bubble_text,

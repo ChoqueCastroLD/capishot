@@ -551,3 +551,126 @@ fn a_stale_page_is_composited_around_the_click_only_with_the_same_result() {
         }
     }
 }
+
+/// A `w` x `h` page whose grey level is `f(x, y)`.
+fn grey_page(w: u32, h: u32, f: &dyn Fn(i32, i32) -> f32) -> Session {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": w, "height": h, "background": "white"})).unwrap();
+    let id = s.active().unwrap().doc.layers[0].id;
+    let fmt = s.active().unwrap().doc.layer(id).unwrap().surface().unwrap().format();
+    let n = fmt.channels();
+    let (mut px, mut enc) = (vec![0f32; (w * h) as usize * n], [0f32; 8]);
+    for y in 0..h as i32 {
+        for x in 0..w as i32 {
+            let c = f(x, y);
+            from_rgba_into(&fmt, [c, c, c, 1.0], &mut enc);
+            let k = (y as usize * w as usize + x as usize) * n;
+            px[k..k + n].copy_from_slice(&enc[..n]);
+        }
+    }
+    s.edit("Page", |doc, _| {
+        doc.layer_mut(id).unwrap().surface_mut().unwrap().write_region(Rect::new(0, 0, w as i32, h as i32), &px);
+        Ok(())
+    })
+    .unwrap();
+    s
+}
+
+/// The oval page's bubble at `k` times its size (outline 3k px, a 4k px break at its right) with
+/// two lines of type `k` times as large, on a `k` times larger page.
+fn scaled_oval_page(k: f32) -> Session {
+    let (cx, cy, rx, ry) = (500.0 * k, 600.0 * k, 260.0 * k, 170.0 * k);
+    let e = ell(cx, cy, rx, ry);
+    let mut s = grey_page((W as f32 * k) as u32, (H as f32 * k) as u32, &|x, y| {
+        // Distance (about) from the outline's middle, in px.
+        let d = (e(x, y).sqrt() - 1.0) * ry;
+        let gap = x as f32 > cx && (y as f32 + 0.5 - cy).abs() < 2.0 * k;
+        if d.abs() < 1.5 * k && !gap { 0.0 } else { 1.0 }
+    });
+    let kk = f64::from(k);
+    letter(&mut s, "HELLO THERE!", 330.0 * kk, 590.0 * kk, 48.0 * kk, "#000000");
+    letter(&mut s, "HOW ARE YOU?", 340.0 * kk, 660.0 * kk, 48.0 * kk, "#000000");
+    s
+}
+
+/// At 1x, 2x and 3x the bubble is found on the first try (a closed bubble, not a fallback): the
+/// search is sized for the ink; with 1x sizes forced on the upscaled page the break leaks.
+#[test]
+fn a_high_resolution_bubble_is_found_first_try() {
+    for k in [1.0f32, 2.0, 3.0] {
+        let mut s = scaled_oval_page(k);
+        let at = |x: f32, y: f32| json!({"x": x * k, "y": y * k});
+        let t = std::time::Instant::now();
+        let r = s.execute(ID, at(500.0, 520.0)).unwrap();
+        eprintln!("{k}x: {r} in {:.1} ms", t.elapsed().as_secs_f64() * 1000.0);
+        assert_eq!(r["region"], "bubble", "{k}x: {r}");
+        let b = r["bubbleBounds"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect::<Vec<_>>();
+        assert!((b[2] - 514.0 * f64::from(k)).abs() < 12.0 * f64::from(k), "{k}x: the bubble's width {b:?}");
+        let scale = r["search"]["scale"].as_f64().unwrap();
+        if k == 1.0 {
+            assert_eq!(r["search"], json!({"scale": 1.0, "gapRadius": 2, "reach": 24, "window": 1024}));
+        } else {
+            assert!(scale > 0.6 * f64::from(k) && r["search"]["gapRadius"].as_i64().unwrap() > 2, "{k}x: {r}");
+            s.execute("edit.undo", json!({})).unwrap();
+            let one_x = s.execute(ID, json!({"x": 500.0 * k, "y": 520.0 * k, "gapRadius": 2, "reach": 24}));
+            assert!(one_x.as_ref().map_or(true, |r| r["region"] != "bubble"), "{k}x with 1x sizes: {one_x:?}");
+        }
+    }
+}
+
+#[test]
+fn search_params_are_checked() {
+    let mut s = oval_page(white);
+    letter(&mut s, "HELLO", 400.0, 620.0, 60.0, "#000000");
+    for bad in [json!({"gapRadius": 0}), json!({"gapRadius": 99}), json!({"reach": "far"}), json!({"window": 4}), json!({"window": "all"}), json!({"window": f64::MAX})] {
+        let mut p = bad.clone();
+        p["x"] = json!(500);
+        p["y"] = json!(520);
+        let e = s.execute(ID, p).unwrap_err().to_string();
+        assert!(e.contains("must be"), "{bad}: {e}");
+    }
+    let r = s.execute(ID, json!({"x": 500, "y": 520, "gapRadius": 3, "reach": "auto", "window": "page"})).unwrap();
+    // The 60 px lettering measures thicker than a 1x page's: the reach follows, the gap radius
+    // asked for stays.
+    let auto = bubble_find::Opts::scaled(r["search"]["scale"].as_f64().unwrap());
+    assert_eq!((&r["search"]["gapRadius"], &r["search"]["reach"], &r["search"]["window"]), (&json!(3), &json!(auto.reach), &json!("page")), "{r}");
+    s.execute("edit.undo", json!({})).unwrap();
+    let r = s.execute(ID, json!({"x": 500, "y": 520, "window": 300})).unwrap();
+    assert_eq!(r["search"]["window"], 300);
+    // A window smaller than the bubble refuses, saying why.
+    s.execute("edit.undo", json!({})).unwrap();
+    let e = s.execute(ID, json!({"x": 500, "y": 520, "window": 100})).unwrap_err().to_string();
+    assert!(e.contains("beyondWindow"), "{e}");
+}
+
+/// A 3000 x 4300 page (a 1500 px page at 2x): panels with thick borders and gutters, a dark blob
+/// and a bubble. A click that finds no bubble searches around it only and answers fast (a
+/// release build, the page cached), with the reason.
+#[test]
+fn a_miss_on_a_large_page_is_fast() {
+    let (w, h) = (3000u32, 4300u32);
+    let panels = [(80, 80, 1460, 2100), (1540, 80, 2920, 2100), (80, 2180, 2920, 4220)];
+    let e = ell(2200.0, 1000.0, 300.0, 200.0);
+    let mut s = grey_page(w, h, &|x, y| {
+        let border = panels.iter().any(|&(x0, y0, x1, y1)| (x0..x1).contains(&x) && (y0..y1).contains(&y) && (x < x0 + 8 || x >= x1 - 8 || y < y0 + 8 || y >= y1 - 8));
+        let blob = (600..1400).contains(&x) && (3000..3800).contains(&y);
+        let v = e(x, y);
+        if border || blob || (1.0..1.04).contains(&v) { 0.05 } else { 1.0 }
+    });
+    letter(&mut s, "HELLO THERE!", 2030.0, 990.0, 48.0, "#000000");
+    crate::typer_place_cmds::page_image(&mut s).unwrap();
+    let mut worst = 0f64;
+    for (x, y) in [(40, 1000), (1500, 2140), (1000, 3400), (2000, 3000), (700, 1000), (2990, 4290)] {
+        let t = std::time::Instant::now();
+        let e = s.execute(ID, json!({"x": x, "y": y})).unwrap_err().to_string();
+        let ms = t.elapsed().as_secs_f64() * 1000.0;
+        worst = worst.max(ms);
+        eprintln!("miss at ({x}, {y}) in {ms:.1} ms: {e}");
+        assert!(e.contains("noBubble ("), "{e}");
+    }
+    let r = s.execute(ID, json!({"x": 2200, "y": 980})).unwrap();
+    assert_eq!(r["region"], "bubble", "{r}");
+    if !cfg!(debug_assertions) {
+        assert!(worst < 150.0, "{worst} ms");
+    }
+}

@@ -13,25 +13,60 @@
 //! dark outline ([`crate::bubble::MIN_OUTLINE_DARK`]: a light patch of art), or one that fills
 //! too little of its box. The body the text goes in drops the tail with TypeR's adaptive opening
 //! ([`crate::bubble::opening_radius`]).
+//!
+//! The pixel sizes ([`GAP_RADIUS`], [`REACH`], [`WINDOWS`]) are a 1x page's (about 1500 px wide).
+//! A page scanned or upscaled larger has thicker ink and wider gaps: [`Opts::auto`] measures the
+//! ink's stroke width around the click ([`ink_scale`]) and scales them by it (resolution metadata
+//! is often wrong and isn't read). [`Opts`] also sets them outright, and bounds the search to the
+//! windows around the click (a miss then costs a window, not the page).
+
+use photocraft_geom::Rect;
 
 use crate::bubble::{self, Mask};
 
-/// Outline gaps up to about twice this wide (px) don't let the flood out.
+/// Outline gaps up to about twice this wide (px, at 1x) don't let the flood out.
 pub const GAP_RADIUS: i32 = 2;
 /// A light pixel is at most this much darker (luma, 0–255) than the clicked one.
 pub const LIGHT_TOLERANCE: f64 = 60.0;
-/// How far from the click (px) a light pixel to start from is looked for.
+/// How far from the click (px, at 1x) a light pixel to start from is looked for.
 pub const REACH: i32 = 24;
 /// The darkest paper (luma) a bubble may have: a light grey tone still counts.
 pub const MIN_PAPER: f64 = 96.0;
 /// Starts tried at most (each on another side of a letter or the outline)…
 const MAX_STARTS: usize = 6;
-/// …at least this far (px) from each other.
+/// …at least this far (px, at 1x) from each other.
 const SPREAD: i32 = 6;
 /// The largest share of the page a bubble may cover.
 pub const MAX_PAGE_SHARE: f64 = 0.4;
 /// The flood stops after this many pixels (a bubble this large is the page, not a balloon).
 pub const MAX_PIXELS: usize = 6_000_000;
+/// Half the sides (px, at 1x) of the windows around the click searched first, smallest first.
+pub const WINDOWS: [i32; 2] = [384, 1024];
+/// The ink's stroke width (px) on a 1x page, as [`ink_scale`] measures it (lettering and outlines
+/// about 3 px wide, crossed at an angle).
+pub const STROKE_1X: f64 = 3.5;
+/// A stroke width below this is a 1x page (bold lettering, a thick outline)…
+pub const STROKE_SCALED: f64 = 5.0;
+/// …or below this on a page whose short side is at least [`LARGE_PAGE`] px (a 1x manga page is
+/// 1000–1700 px wide: on a larger one, ink this thick is more likely upscaled thin ink).
+pub const STROKE_SCALED_LARGE: f64 = 4.0;
+/// See [`STROKE_SCALED_LARGE`].
+pub const LARGE_PAGE: i32 = 2200;
+/// A bounded search's largest window is no wider than this share of the page's short side (where
+/// that is more than a 1x window: a bubble is not wider than the page).
+pub const MAX_WINDOW_SHARE: f64 = 0.7;
+/// The largest scale against a 1x page.
+pub const MAX_SCALE: f64 = 8.0;
+/// The largest gap radius (px) a caller may ask for.
+pub const MAX_GAP_RADIUS: i32 = 32;
+/// The largest reach (px) a caller may ask for.
+pub const MAX_REACH: i32 = 512;
+/// A pixel darker than this (luma) is ink, for [`ink_scale`].
+const INK: f64 = 128.0;
+/// [`ink_scale`] needs at least this many ink runs to measure…
+const MIN_RUNS: usize = 24;
+/// …and ignores runs longer than this (px): a solid fill, a panel line along its length.
+const MAX_RUN: u32 = 32;
 
 /// Why there is no bubble at a point.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,6 +81,9 @@ pub enum Miss {
     TooSmall,
     /// Light, closed and sized like a bubble, but without a bubble's outline or shape.
     NotBubble,
+    /// The light region reaches past the largest search window (a bounded search,
+    /// [`Opts::page`] false): the page background, a gutter, or a bubble larger than the window.
+    Beyond,
 }
 
 impl Miss {
@@ -56,7 +94,89 @@ impl Miss {
             Miss::TooBig => "tooBig",
             Miss::TooSmall => "tooSmall",
             Miss::NotBubble => "notBubble",
+            Miss::Beyond => "beyondWindow",
         }
+    }
+}
+
+/// How a search is sized (document pixels).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Opts {
+    /// The page's scale against a 1x page (1 for one): spaces the starts.
+    pub scale: f64,
+    /// Outline gaps up to about twice this wide don't let the flood out.
+    pub gap_radius: i32,
+    /// How far from the click a light pixel to start from is looked for.
+    pub reach: i32,
+    /// Half the sides of the windows around the click searched, smallest first.
+    pub windows: [i32; 2],
+    /// After the windows, the whole page; when false, a region reaching past the last window is
+    /// a [`Miss::Beyond`].
+    pub page: bool,
+}
+
+impl Default for Opts {
+    /// A 1x page's, the whole page searched last.
+    fn default() -> Self {
+        Self::scaled(1.0)
+    }
+}
+
+impl Opts {
+    /// The 1x sizes times `scale` (clamped to 1..[`MAX_SCALE`]), the whole page searched last.
+    pub fn scaled(scale: f64) -> Self {
+        let s = if scale.is_finite() { scale.clamp(1.0, MAX_SCALE) } else { 1.0 };
+        let px = |v: i32| (f64::from(v) * s).round() as i32;
+        Opts { scale: s, gap_radius: px(GAP_RADIUS), reach: px(REACH), windows: WINDOWS.map(px), page: true }
+    }
+
+    /// Sized for the ink around `seed` ([`ink_scale`]).
+    pub fn auto(img: &[[u8; 4]], area: Rect, seed: (i32, i32)) -> Self {
+        Self::scaled(ink_scale(img, area, seed))
+    }
+
+    /// [`Opts::auto`] on `img` covering `area`, a window of the page `page` (the same as on the
+    /// page while the window holds [`INK_WINDOW`] px around `seed`).
+    pub fn auto_in(img: &[[u8; 4]], area: Rect, page: Rect, seed: (i32, i32)) -> Self {
+        Self::scaled(ink_scale_in(img, area, page, seed))
+    }
+
+    /// Bounded to the windows ([`Opts::page`] false), the largest no larger than a bubble on
+    /// `page` can be: [`MAX_WINDOW_SHARE`] of its short side, or the 1x window.
+    pub fn bounded(self, page: Rect) -> Self {
+        let short = f64::from(page.width().min(page.height()));
+        let half = ((short * MAX_WINDOW_SHARE / 2.0) as i32).max(WINDOWS[1]).min(self.windows[1]);
+        Opts { page: false, ..self.with_window(half) }
+    }
+
+    /// The largest window's half side set to `half` (the first no larger).
+    pub fn with_window(mut self, half: i32) -> Self {
+        let half = half.clamp(16, 1 << 20);
+        self.windows = [self.windows[0].min(half), half];
+        self
+    }
+
+    /// Sizes in range (a caller's may be anything).
+    fn checked(self) -> Self {
+        let w1 = self.windows[1].clamp(16, 1 << 20);
+        Opts {
+            scale: if self.scale.is_finite() { self.scale.clamp(1.0, MAX_SCALE) } else { 1.0 },
+            gap_radius: self.gap_radius.clamp(1, MAX_GAP_RADIUS),
+            reach: self.reach.clamp(1, MAX_REACH),
+            windows: [self.windows[0].clamp(16, w1), w1],
+            page: self.page,
+        }
+    }
+
+    fn spread(&self) -> i32 {
+        ((f64::from(SPREAD) * self.scale).round() as i32).max(1)
+    }
+
+    /// A flood this close (px) to a side of the window that isn't the page's leaves the window:
+    /// every pixel the search reads (the gap radius around the core, the interior grown back by
+    /// it, the outline three pixels past that) stays inside it until then.
+    fn margin(&self) -> i32 {
+        self.gap_radius + 6
     }
 }
 
@@ -73,13 +193,67 @@ fn luma(p: [u8; 4]) -> f64 {
     if p[3] < 128 { 0.0 } else { 0.299 * f64::from(p[0]) + 0.587 * f64::from(p[1]) + 0.114 * f64::from(p[2]) }
 }
 
+/// The page's scale against a 1x page, from the ink around `seed` on an 8-bit RGBA image covering
+/// `area`: the median length of the ink's runs along rows and columns (each run once, so a stroke
+/// counts by its width, not its length; solid fills ignored) over [`STROKE_1X`]. 1 when the ink is no thicker than a
+/// 1x page's ([`STROKE_SCALED`]) or there is too little of it to measure.
+pub fn ink_scale(img: &[[u8; 4]], area: Rect, seed: (i32, i32)) -> f64 {
+    ink_scale_in(img, area, area, seed)
+}
+
+/// Half the side of the largest square around the click [`ink_scale`] reads.
+pub const INK_WINDOW: i32 = 160;
+
+/// [`ink_scale`] on `img` covering `area`, a window of the page `page` (whose size tells a large
+/// page).
+pub fn ink_scale_in(img: &[[u8; 4]], area: Rect, page: Rect, seed: (i32, i32)) -> f64 {
+    let w = area.width() as usize;
+    if w == 0 || img.len() != w * area.height() as usize || !area.contains(seed.0, seed.1) {
+        return 1.0;
+    }
+    let ink = |x: i32, y: i32| img.get((y - area.y0) as usize * w + (x - area.x0) as usize).is_some_and(|p| luma(*p) < INK);
+    // A run cut by the window's side isn't measured.
+    let runs_of = |line: &mut dyn Iterator<Item = bool>, out: &mut Vec<u32>| {
+        let (mut n, mut cut) = (0u32, true);
+        for d in line {
+            if d {
+                n += 1;
+            } else {
+                if n > 0 && n <= MAX_RUN && !cut {
+                    out.push(n);
+                }
+                (n, cut) = (0, false);
+            }
+        }
+    };
+    for half in [64, INK_WINDOW] {
+        let win = Rect::new(seed.0 - half, seed.1 - half, seed.0 + half + 1, seed.1 + half + 1).intersect(&area);
+        let mut runs: Vec<u32> = Vec::new();
+        for y in win.y0..win.y1 {
+            runs_of(&mut (win.x0..win.x1).map(|x| ink(x, y)), &mut runs);
+        }
+        for x in win.x0..win.x1 {
+            runs_of(&mut (win.y0..win.y1).map(|y| ink(x, y)), &mut runs);
+        }
+        if runs.len() < MIN_RUNS {
+            continue;
+        }
+        let k = runs.len() / 2;
+        let stroke = f64::from(*runs.select_nth_unstable(k).1);
+        let large = page.width().min(page.height()) >= LARGE_PAGE as u32;
+        let threshold = if large { STROKE_SCALED_LARGE } else { STROKE_SCALED };
+        return if stroke < threshold { 1.0 } else { (stroke / STROKE_1X).clamp(1.0, MAX_SCALE) };
+    }
+    1.0
+}
+
 /// The bubble around `seed` on an 8-bit RGBA image covering `area`. A click on lettering or on
 /// the outline still finds it: the flood starts from the nearest light pixels around the click
 /// (up to [`REACH`] px away), trying the next one when a start leads nowhere (the other side of
 /// the outline). What counts as light is relative to the start, so a bubble lighter than a grey
-/// or toned page is found as well as a white one.
-pub fn find(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32)) -> Result<Found, Miss> {
-    find_with(img, area, seed, false, MAX_PAGE_SHARE)
+/// or toned page is found as well as a white one. Sized for the ink there ([`Opts::auto`]).
+pub fn find(img: &[[u8; 4]], area: Rect, seed: (i32, i32)) -> Result<Found, Miss> {
+    find_with(img, area, seed, false, MAX_PAGE_SHARE, &Opts::auto(img, area, seed))
 }
 
 /// [`find`] for a bubble cut by the image's edge (it opens onto the page edge or a panel drawn to
@@ -87,97 +261,110 @@ pub fn find(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32)) -> R
 /// touching it, and its stretch of edge counts as dark outline. Still refused when too large,
 /// too small or without an outline elsewhere (the page background is still no bubble: it leaks
 /// along the gutters to [`MAX_PAGE_SHARE`]).
-pub fn find_walled(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32)) -> Result<Found, Miss> {
-    find_with(img, area, seed, true, MAX_PAGE_SHARE)
+pub fn find_walled(img: &[[u8; 4]], area: Rect, seed: (i32, i32)) -> Result<Found, Miss> {
+    find_with(img, area, seed, true, MAX_PAGE_SHARE, &Opts::auto(img, area, seed))
+}
+
+/// [`find`] (or [`find_walled`] when `walled`) sized by `opts`.
+pub fn find_opts(img: &[[u8; 4]], area: Rect, seed: (i32, i32), walled: bool, opts: &Opts) -> Result<Found, Miss> {
+    find_with(img, area, seed, walled, MAX_PAGE_SHARE, opts)
 }
 
 /// [`find_walled`] inside a box known to hold one bubble (the lettering's box, when the bubble
 /// opens onto the gutter): the box's sides are walls too, and the region may fill the box.
-pub fn find_in_box(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32)) -> Result<Found, Miss> {
-    find_with(img, area, seed, true, 1.0)
+pub fn find_in_box(img: &[[u8; 4]], area: Rect, seed: (i32, i32)) -> Result<Found, Miss> {
+    find_with(img, area, seed, true, 1.0, &Opts::auto(img, area, seed))
 }
 
 /// [`find`] given only `img` covering `win`, a window of the page `page`: the same result as on
 /// the page, or `None` when the search reached a side of the window that isn't the page's (it
 /// needs more of the page). A caller with a stale page composites only a window around a click.
-pub fn find_in_window(img: &[[u8; 4]], win: photocraft_geom::Rect, page: photocraft_geom::Rect, seed: (i32, i32)) -> Option<Result<Found, Miss>> {
+pub fn find_in_window(img: &[[u8; 4]], win: Rect, page: Rect, seed: (i32, i32)) -> Option<Result<Found, Miss>> {
+    let opts = Opts::auto_in(img, win.intersect(&page), page, seed);
+    find_in_window_opts(img, win, page, seed, &opts)
+}
+
+/// [`find_in_window`] sized by `opts` (its windows unused: `win` is the one).
+pub fn find_in_window_opts(img: &[[u8; 4]], win: Rect, page: Rect, seed: (i32, i32), opts: &Opts) -> Option<Result<Found, Miss>> {
     let win = win.intersect(&page);
     if win.is_empty() || img.len() != win.width() as usize * win.height() as usize || !win.contains(seed.0, seed.1) {
         return None;
     }
-    search(img, win, page, seed, false, MAX_PAGE_SHARE)
+    search(img, win, win, page, seed, false, MAX_PAGE_SHARE, &opts.checked())
 }
 
-/// Half the sides of the windows around the click searched first, smallest first.
-const WINDOWS: [i32; 2] = [384, 1024];
-/// A flood this close (px) to a side of the window that isn't the page's leaves the window: every
-/// pixel the search reads (the gap radius around the core, the interior grown back by it, the
-/// outline three pixels past that) stays inside it until then.
-const WINDOW_MARGIN: i32 = GAP_RADIUS + 6;
-
-fn find_with(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32), walls: bool, share: f64) -> Result<Found, Miss> {
+fn find_with(img: &[[u8; 4]], area: Rect, seed: (i32, i32), walls: bool, share: f64, opts: &Opts) -> Result<Found, Miss> {
     let (w, h) = (area.width() as usize, area.height() as usize);
     if w == 0 || h == 0 || img.len() != w * h || !area.contains(seed.0, seed.1) {
         return Err(Miss::Dark);
     }
+    let o = opts.checked();
     // A bubble is a few hundred pixels: look in a window around the click first (a phone spent
     // seconds per Bubble Text Remover click on a whole page's luma and flood buffers). A search
-    // whose flood reaches the window's inner side runs again over the page, so the result is the
-    // same as the page's.
-    for half in WINDOWS {
-        let win = photocraft_geom::Rect::new(seed.0 - half, seed.1 - half, seed.0 + half + 1, seed.1 + half + 1).intersect(&area);
+    // whose flood reaches the window's inner side runs again in the next window, then over the
+    // page (unless bounded), so the result is the same as the page's.
+    let mut last = None;
+    for half in o.windows {
+        let win = Rect::new(seed.0.saturating_sub(half), seed.1.saturating_sub(half), seed.0.saturating_add(half + 1), seed.1.saturating_add(half + 1)).intersect(&area);
         if win == area {
-            break;
+            return search(img, area, area, area, seed, walls, share, &o).unwrap_or(Err(Miss::TooBig));
         }
-        let (ww, wh) = (win.width() as usize, win.height() as usize);
-        let mut crop = Vec::with_capacity(ww * wh);
-        for y in win.y0..win.y1 {
-            let start = (y - area.y0) as usize * w + (win.x0 - area.x0) as usize;
-            crop.extend_from_slice(img.get(start..start + ww).ok_or(Miss::Dark)?);
+        if last == Some(win) {
+            continue;
         }
-        if let Some(r) = search(&crop, win, area, seed, walls, share) {
+        last = Some(win);
+        if let Some(r) = search(img, area, win, area, seed, walls, share, &o) {
             return r;
         }
     }
-    search(img, area, area, seed, walls, share).unwrap_or(Err(Miss::TooBig))
+    if !o.page {
+        return Err(Miss::Beyond);
+    }
+    search(img, area, area, area, seed, walls, share, &o).unwrap_or(Err(Miss::TooBig))
 }
 
-/// [`find_with`] over `img` covering `area`, a window of `page` (or the page itself); `None` when
-/// a flood reached a side of the window that isn't the page's.
-fn search(img: &[[u8; 4]], area: photocraft_geom::Rect, page: photocraft_geom::Rect, seed: (i32, i32), walls: bool, share: f64) -> Option<Result<Found, Miss>> {
-    let w = area.width() as usize;
-    // One byte a pixel (a page is millions of them).
-    let lum: Vec<u8> = img.iter().map(|p| luma(*p).round().clamp(0.0, 255.0) as u8).collect();
-    let at = |x: i32, y: i32| (y - area.y0) as usize * w + (x - area.x0) as usize;
+/// [`find_with`] in the window `win` of `img` (covering `img_area`, itself `page` or a window of
+/// it); `None` when a flood reached a side of the window that isn't the page's.
+#[allow(clippy::too_many_arguments)]
+fn search(img: &[[u8; 4]], img_area: Rect, win: Rect, page: Rect, seed: (i32, i32), walls: bool, share: f64, o: &Opts) -> Option<Result<Found, Miss>> {
+    let Some(mut g) = Grid::new(img, img_area, win, walls) else { return Some(Err(Miss::Dark)) };
     // Light starts near the click, nearest first.
+    let reach = o.reach;
     let mut starts: Vec<(i32, (i32, i32))> = Vec::new();
-    for dy in -REACH..=REACH {
-        for dx in -REACH..=REACH {
+    for dy in -reach..=reach {
+        for dx in -reach..=reach {
             let p = (seed.0 + dx, seed.1 + dy);
-            if area.contains(p.0, p.1) && f64::from(lum[at(p.0, p.1)]) >= MIN_PAPER && dx * dx + dy * dy <= REACH * REACH {
+            if win.contains(p.0, p.1) && dx * dx + dy * dy <= reach * reach && f64::from(g.lum(p.0, p.1)) >= MIN_PAPER {
                 starts.push((dx * dx + dy * dy, p));
             }
         }
     }
     starts.sort_by_key(|(d, _)| *d);
+    let spread = o.spread();
     let mut tried: Vec<(i32, i32)> = Vec::new();
     let mut first_miss = None;
     for (_, start) in starts {
         if tried.len() >= MAX_STARTS {
             break;
         }
-        if tried.iter().any(|t| (t.0 - start.0).pow(2) + (t.1 - start.1).pow(2) < SPREAD * SPREAD) {
+        if tried.iter().any(|t| (t.0 - start.0).pow(2) + (t.1 - start.1).pow(2) < spread * spread) {
             continue;
         }
         // The paper here: the lightest pixel right around the start.
         let mut paper = 0u8;
         for (dx, dy) in [(0, 0), (-1, 0), (1, 0), (0, -1), (0, 1), (-2, 0), (2, 0), (0, -2), (0, 2)] {
-            if area.contains(start.0 + dx, start.1 + dy) {
-                paper = paper.max(lum[at(start.0 + dx, start.1 + dy)]);
+            if win.contains(start.0 + dx, start.1 + dy) {
+                paper = paper.max(g.lum(start.0 + dx, start.1 + dy));
             }
         }
         let light_min = (f64::from(paper) - LIGHT_TOLERANCE.min(0.4 * f64::from(paper))).ceil().clamp(0.0, 255.0) as u8;
-        match flood_from(img, area, page, &lum, start, light_min, walls, share)? {
+        // A start a missed flood already reached (the page background seen from another side of
+        // a letter) misses the same way: tried, not flooded again.
+        if g.set_light_min(light_min) && g.flooded(start) {
+            tried.push(start);
+            continue;
+        }
+        match flood_from(&mut g, page, start, walls, share, o)? {
             Ok(found) => return Some(Ok(found)),
             // Too dark to start here (a letter's edge): not a try.
             Err(Miss::Dark) => continue,
@@ -190,38 +377,156 @@ fn search(img: &[[u8; 4]], area: photocraft_geom::Rect, page: photocraft_geom::R
     Some(Err(first_miss.unwrap_or(Miss::Dark)))
 }
 
-/// The flood from `start` over pixels with no pixel darker than `light_min` within the radius
-/// (`None`: it reached a side of the window `area` that isn't the `page`'s).
-#[allow(clippy::too_many_arguments)]
-fn flood_from(
-    img: &[[u8; 4]],
-    area: photocraft_geom::Rect,
-    page: photocraft_geom::Rect,
-    lum: &[u8],
-    start: (i32, i32),
-    light_min: u8,
+/// What a search reads of the window `win` of `img` (covering `img_area`), each row computed the
+/// first time a flood comes near it (a flood is mostly far smaller than its window).
+struct Grid<'a> {
+    img: &'a [[u8; 4]],
+    img_area: Rect,
+    win: Rect,
+    w: usize,
+    /// The image's edge counts as dark (a walled search).
     walls: bool,
-    share: f64,
-) -> Option<Result<Found, Miss>> {
-    let (w, h) = (area.width() as usize, area.height() as usize);
-    let at = |x: i32, y: i32| (y - area.y0) as usize * w + (x - area.x0) as usize;
-    let r = GAP_RADIUS;
-    let disc: Vec<(i32, i32)> = (-r..=r).flat_map(|dy| (-r..=r).map(move |dx| (dx, dy))).filter(|(dx, dy)| dx * dx + dy * dy <= r * r).collect();
-    // Passable: no dark pixel within the radius (pixels off the page count as light, so a
-    // bubble cut by the page edge still reaches it and is refused as touching it).
-    let offsets: Vec<isize> = disc.iter().map(|(dx, dy)| *dy as isize * w as isize + *dx as isize).collect();
-    let passable = |x: i32, y: i32| {
-        if x - r >= area.x0 && y - r >= area.y0 && x + r < area.x1 && y + r < area.y1 {
-            // The whole disc is inside: no bounds to check.
-            let c = at(x, y) as isize;
-            return offsets.iter().all(|o| lum.get((c + o) as usize).is_some_and(|v| *v >= light_min));
+    /// Luma, one byte a pixel, where `lum_row` says it's computed.
+    lum: Vec<u8>,
+    lum_row: Vec<bool>,
+    /// The luma weights times each channel value.
+    tables: Box<[[f64; 256]; 3]>,
+    /// The light threshold `near` and `state` are for.
+    light_min: Option<u8>,
+    /// Per pixel, where `near_row` says it's computed: how far (px, up to 255) along its row the
+    /// nearest pixel darker than `light_min` is (0 for a dark one; the window's sides dark when
+    /// walled, none otherwise).
+    near: Vec<u8>,
+    near_row: Vec<bool>,
+    /// Per pixel: 0 not yet tested, 1 blocked, 2 in a flood's core (each pixel's disc is tested
+    /// once, not once per neighbour).
+    state: Vec<u8>,
+}
+
+impl<'a> Grid<'a> {
+    fn new(img: &'a [[u8; 4]], img_area: Rect, win: Rect, walls: bool) -> Option<Self> {
+        let (w, h) = (win.width() as usize, win.height() as usize);
+        let n = w.checked_mul(h)?;
+        if w == 0 || !img_area.contains_rect(&win) || img.len() != img_area.width() as usize * img_area.height() as usize {
+            return None;
         }
-        disc.iter().all(|(dx, dy)| {
-            let (px, py) = (x + dx, y + dy);
-            if area.contains(px, py) { lum[at(px, py)] >= light_min } else { !walls }
+        Some(Grid {
+            img,
+            img_area,
+            win,
+            w,
+            walls,
+            lum: vec![0; n],
+            lum_row: vec![false; h],
+            tables: Box::new(std::array::from_fn(|c| std::array::from_fn(|v| [0.299, 0.587, 0.114][c] * v as f64))),
+            light_min: None,
+            near: vec![0; n],
+            near_row: vec![false; h],
+            state: vec![0; n],
         })
-    };
-    let m = WINDOW_MARGIN;
+    }
+
+    fn at(&self, x: i32, y: i32) -> usize {
+        (y - self.win.y0) as usize * self.w + (x - self.win.x0) as usize
+    }
+
+    /// Computes row `y`'s luma (inside the window).
+    fn lum_row(&mut self, y: i32) {
+        let r = (y - self.win.y0) as usize;
+        if self.lum_row.get(r) != Some(&false) {
+            return;
+        }
+        self.lum_row[r] = true;
+        let iw = self.img_area.width() as usize;
+        let s = (y - self.img_area.y0) as usize * iw + (self.win.x0 - self.img_area.x0) as usize;
+        let (Some(src), Some(dst)) = (self.img.get(s..s + self.w), self.lum.get_mut(r * self.w..(r + 1) * self.w)) else { return };
+        // `luma` rounded (half up: it is never negative), its products from tables.
+        let t = &self.tables;
+        for (d, p) in dst.iter_mut().zip(src) {
+            let v = if p[3] < 128 { 0.0 } else { t[0][usize::from(p[0])] + t[1][usize::from(p[1])] + t[2][usize::from(p[2])] };
+            *d = (v + 0.5) as u8;
+        }
+    }
+
+    /// The luma at `(x, y)`, inside the window.
+    fn lum(&mut self, x: i32, y: i32) -> u8 {
+        self.lum_row(y);
+        let k = self.at(x, y);
+        self.lum.get(k).copied().unwrap_or(0)
+    }
+
+    /// Sets the light threshold; false (and the per-threshold rows forgotten) when it changed.
+    fn set_light_min(&mut self, light_min: u8) -> bool {
+        match self.light_min.replace(light_min) {
+            Some(m) if m == light_min => true,
+            None => false,
+            Some(_) => {
+                self.near_row.fill(false);
+                self.state.fill(0);
+                false
+            }
+        }
+    }
+
+    fn flooded(&self, p: (i32, i32)) -> bool {
+        self.state.get(self.at(p.0, p.1)) == Some(&2)
+    }
+
+    /// Computes row `y`'s distances to the nearest dark pixel along it.
+    fn near_row(&mut self, y: i32) {
+        let r = (y - self.win.y0) as usize;
+        if self.near_row.get(r) != Some(&false) {
+            return;
+        }
+        self.lum_row(y);
+        self.near_row[r] = true;
+        let (w, min, walls) = (self.w, self.light_min.unwrap_or(0), self.walls);
+        let (Some(lum), Some(near)) = (self.lum.get(r * w..(r + 1) * w), self.near.get_mut(r * w..(r + 1) * w)) else { return };
+        // Left to right, then right to left; the window's side is a dark pixel just past it when
+        // walled.
+        let side: u32 = if walls { 0 } else { 255 };
+        let mut d = side;
+        for (n, l) in near.iter_mut().zip(lum) {
+            d = if *l < min { 0 } else { (d + 1).min(255) };
+            *n = d as u8;
+        }
+        let mut d = side;
+        for (n, l) in near.iter_mut().zip(lum).rev() {
+            d = if *l < min { 0 } else { (d + 1).min(255) };
+            *n = (*n).min(d as u8);
+        }
+    }
+
+    /// No pixel darker than the threshold within `r` of `(x, y)` (`span[dy + r]`: the disc's half
+    /// width on row `dy`). Pixels off the window count as light, or dark when walled (a bubble cut
+    /// by the page edge still reaches it in an open search, and is refused as touching it).
+    fn passable(&mut self, x: i32, y: i32, r: i32, span: &[i32]) -> bool {
+        for (dy, hw) in (-r..=r).zip(span) {
+            let yy = y + dy;
+            if yy < self.win.y0 || yy >= self.win.y1 {
+                if self.walls {
+                    return false;
+                }
+                continue;
+            }
+            self.near_row(yy);
+            let k = self.at(x, yy);
+            if self.near.get(k).is_none_or(|d| i32::from(*d) <= *hw) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+/// The flood from `start` over pixels with no pixel darker than the grid's light threshold within
+/// the gap radius (`None`: it reached a side of the window that isn't the `page`'s).
+fn flood_from(g: &mut Grid, page: Rect, start: (i32, i32), walls: bool, share: f64, o: &Opts) -> Option<Result<Found, Miss>> {
+    let area = g.win;
+    let r = o.gap_radius;
+    // The disc's half width on each of its rows.
+    let span: Vec<i32> = (-r..=r).map(|dy| f64::from(r * r - dy * dy).sqrt().floor() as i32).collect();
+    let m = o.margin();
     let leaves = |x: i32, y: i32| {
         (area.x0 > page.x0 && x - m <= area.x0)
             || (area.y0 > page.y0 && y - m <= area.y0)
@@ -231,7 +536,7 @@ fn flood_from(
     if leaves(start.0, start.1) {
         return None;
     }
-    if !passable(start.0, start.1) {
+    if !g.passable(start.0, start.1, r, &span) {
         return Some(Err(Miss::Dark));
     }
     let seed = start;
@@ -239,9 +544,10 @@ fn flood_from(
     // there touches the edge.
     let page_px = page.width() as usize * page.height() as usize;
     let cap = MAX_PIXELS.min((page_px as f64 * share) as usize).max(1);
-    let mut seen = vec![false; w * h];
     let mut core: Vec<(i32, i32)> = vec![seed];
-    seen[at(seed.0, seed.1)] = true;
+    let k = g.at(seed.0, seed.1);
+    let Some(s) = g.state.get_mut(k) else { return Some(Err(Miss::Dark)) };
+    *s = 2;
     let mut i = 0;
     let (mut x0, mut y0, mut x1, mut y1) = (seed.0, seed.1, seed.0, seed.1);
     while let Some(&(x, y)) = core.get(i) {
@@ -257,10 +563,13 @@ fn flood_from(
         }
         (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
         for n in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
-            let j = at(n.0, n.1);
-            if !seen[j] && passable(n.0, n.1) {
-                seen[j] = true;
-                core.push(n);
+            let j = g.at(n.0, n.1);
+            if g.state.get(j) == Some(&0) {
+                let pass = g.passable(n.0, n.1, r, &span);
+                g.state[j] = if pass { 2 } else { 1 };
+                if pass {
+                    core.push(n);
+                }
             }
         }
     }
@@ -268,22 +577,28 @@ fn flood_from(
     let pad = r + 1;
     let (mx, my) = (x0 - pad, y0 - pad);
     let (mw, mh) = ((x1 - x0 + 1 + 2 * pad) as usize, (y1 - y0 + 1 + 2 * pad) as usize);
+    // A box this large holds too much for a bubble or fills too little of it (the gutters around
+    // a page's panels): refused before the box-sized work (the distance transform, the holes).
+    if (mw * mh) as f64 * bubble::MIN_FILL > share * page_px as f64 {
+        return Some(Err(Miss::TooBig));
+    }
     let Some(mut interior) = Mask::new(mx, my, mw, mh) else { return Some(Err(Miss::TooBig)) };
     for &(x, y) in &core {
         interior.set(x, y, true);
     }
     let to_core = photocraft_algo::selection::edt(&interior.px, mw, mh);
+    let light_min = g.light_min.unwrap_or(0);
     for (k, d) in to_core.iter().enumerate() {
         let (x, y) = (mx + (k % mw) as i32, my + (k / mw) as i32);
-        if *d <= r as f32 + 0.5 && area.contains(x, y) && lum[at(x, y)] >= light_min {
+        if *d <= r as f32 + 0.5 && area.contains(x, y) && g.lum(x, y) >= light_min {
             interior.px[k] = true;
         }
     }
     interior.fill_holes();
-    Some(judge(img, area, page, interior, walls, share))
+    Some(judge(g.img, g.img_area, page, interior, walls, share))
 }
 
-fn judge(img: &[[u8; 4]], area: photocraft_geom::Rect, page: photocraft_geom::Rect, interior: Mask, walls: bool, share: f64) -> Result<Found, Miss> {
+fn judge(img: &[[u8; 4]], area: Rect, page: Rect, interior: Mask, walls: bool, share: f64) -> Result<Found, Miss> {
     let b = interior.bounds().ok_or(Miss::TooSmall)?;
     let count = interior.count();
     if (count as f64) < bubble::MIN_AREA || f64::from(b.width().min(b.height())) < bubble::MIN_SIDE {

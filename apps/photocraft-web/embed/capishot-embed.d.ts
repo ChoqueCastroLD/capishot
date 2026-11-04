@@ -59,6 +59,47 @@ export interface InitOptions {
   fontsNotice?: boolean;
 }
 
+/** `execute('edit.removeBubbleText', …)` params. */
+export interface RemoveBubbleTextParams {
+  /** The click, document pixels. */
+  x: number;
+  y: number;
+  /** 1..255: how far from the background (a colour difference) a pixel counts as text. Default `auto`. */
+  tolerance?: number | 'auto';
+  /** Model the background from every visible layer. Default false. */
+  sampleAll?: boolean;
+  /** The result on a new layer above. Default false. */
+  newLayer?: boolean;
+  /** 1..32 px: outline gaps up to about twice this wide stay shut. Default `auto` (2 px on a 1x page, scaled with the ink's stroke width) (feature `removeBubbleText.search`). */
+  gapRadius?: number | 'auto';
+  /** 1..512 px: how far from the click a light pixel to start from may be. Default `auto` (24 px at 1x, scaled) (feature `removeBubbleText.search`). */
+  reach?: number | 'auto';
+  /** 16..65536 px: half the side of the largest square searched around the click, or the whole page. Default `auto` (1024 px at 1x, scaled, at most 35 % of the page's short side when that is more) (feature `removeBubbleText.search`). */
+  window?: number | 'page' | 'auto';
+}
+
+/** `execute('edit.removeBubbleText', …)` result. Errors start `noBubble (dark|edge|tooBig|tooSmall|notBubble|beyondWindow)`, `notPlain:` or `noText:`. */
+export interface RemoveBubbleTextResult {
+  ok: true;
+  layer: number;
+  /** `[x, y, w, h]`, document pixels. */
+  bubbleBounds: [number, number, number, number];
+  /** Pixels painted. */
+  pixels: number;
+  background: 'solid' | 'gradient';
+  /** How the bubble was bounded: its outline, the image edge, or its lettering's block. */
+  region: 'bubble' | 'edge' | 'textCluster';
+  newLayer: boolean;
+  /** The sizes the search used (feature `removeBubbleText.search`). */
+  search: {
+    /** The page's scale against a 1x page, from the ink's stroke width. */
+    scale: number;
+    gapRadius: number;
+    reach: number;
+    window: number | 'page';
+  };
+}
+
 /** `request('fonts.preload', …)` params (feature `fonts.preload`). */
 export interface FontsPreloadParams {
   /** Family names, matched as documents' are: case, spaces, punctuation and parentheses aside, PostScript names too. */
