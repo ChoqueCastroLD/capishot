@@ -31,6 +31,7 @@ pub fn no_bubble(miss: Miss) -> EngineError {
         Miss::TooBig => "the light area is too large to be a bubble",
         Miss::TooSmall => "the area is too small for a line of text",
         Miss::NotBubble => "the area has no bubble outline",
+        Miss::Beyond => "the light area reaches past the search window (pass a larger \"window\", or \"page\")",
     };
     EngineError::Other(format!("noBubble ({}): no bubble found here: {why}", miss.code()))
 }
@@ -267,7 +268,8 @@ fn box_path(mask: &photocraft_typer::bubble::Mask) -> Result<Subpath> {
 /// The bubble that opens onto a panel border or the gutter at `(x, y)`: the light area around the
 /// lettering there, inside the lettering's box ([`photocraft_typer::text_cluster`]).
 pub(crate) fn open_bubble(page: &crate::typer_place_cmds::support::PageImage, x: i32, y: i32) -> Option<bubble_find::Found> {
-    let c = photocraft_typer::text_cluster::find(&page.img, page.area, (x, y))?;
+    let scale = bubble_find::ink_scale(&page.img, page.area, (x, y));
+    let c = photocraft_typer::text_cluster::find_scaled(&page.img, page.area, (x, y), scale)?;
     let [bx0, by0, bx1, by1] = c.rect;
     let pw = page.area.width() as usize;
     let sub: Vec<[u8; 4]> = (by0..by1)

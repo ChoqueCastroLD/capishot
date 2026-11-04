@@ -7,9 +7,9 @@
 
 use crate::bubble::Mask;
 
-/// How far (px) around the click the components are looked at.
+/// How far (px, at 1x) around the click the components are looked at.
 const WINDOW: i32 = 320;
-/// How far (px) from the click the first glyph may be.
+/// How far (px, at 1x) from the click the first glyph may be.
 const REACH: i32 = 30;
 /// A pixel darker than this (luma) is ink.
 const INK: u8 = 140;
@@ -56,12 +56,21 @@ fn luma(p: [u8; 4]) -> u8 {
 
 /// The block of lettering nearest `seed` on an 8-bit RGBA image covering `area`, or `None`.
 pub fn find(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32)) -> Option<Cluster> {
+    find_scaled(img, area, seed, 1.0)
+}
+
+/// [`find`] on a page `scale` times a 1x page's resolution (see
+/// [`crate::bubble_find::ink_scale`]): its pixel sizes scaled by it.
+pub fn find_scaled(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32), scale: f64) -> Option<Cluster> {
     let (aw, ah) = (area.width() as usize, area.height() as usize);
     if img.len() != aw * ah || !area.contains(seed.0, seed.1) {
         return None;
     }
-    let (wx0, wy0) = ((seed.0 - WINDOW).max(area.x0), (seed.1 - WINDOW).max(area.y0));
-    let (wx1, wy1) = ((seed.0 + WINDOW).min(area.x1), (seed.1 + WINDOW).min(area.y1));
+    let scale = if scale.is_finite() { scale.clamp(1.0, crate::bubble_find::MAX_SCALE) } else { 1.0 };
+    let px = |v: i32| (f64::from(v) * scale).round() as i32;
+    let (window, reach) = (px(WINDOW), px(REACH));
+    let (wx0, wy0) = ((seed.0 - window).max(area.x0), (seed.1 - window).max(area.y0));
+    let (wx1, wy1) = ((seed.0 + window).min(area.x1), (seed.1 + window).min(area.y1));
     let (w, h) = ((wx1 - wx0) as usize, (wy1 - wy0) as usize);
     let ink: Vec<bool> = (0..w * h)
         .map(|k| {
@@ -113,7 +122,7 @@ pub fn find(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32)) -> O
     // The glyph nearest the click.
     let (sx, sy) = (seed.0 - wx0, seed.1 - wy0);
     let point = Comp { x0: sx, y0: sy, x1: sx + 1, y1: sy + 1, glyph: true };
-    let first = comps.iter().enumerate().filter(|(_, c)| c.glyph && c.gap(&point) <= REACH).min_by_key(|(_, c)| c.gap(&point)).map(|(i, _)| i)?;
+    let first = comps.iter().enumerate().filter(|(_, c)| c.glyph && c.gap(&point) <= reach).min_by_key(|(_, c)| c.gap(&point)).map(|(i, _)| i)?;
     // Grow by proximity: the gap a block's glyphs leave between them (lines of a column, columns
     // of a block, furigana beside them) scales with the glyph size.
     let mut member = vec![false; comps.len()];
@@ -130,7 +139,7 @@ pub fn find(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32)) -> O
             s.sort_unstable();
             s[s.len() * 3 / 4]
         };
-        let gap = (g * 9 / 10).max(8);
+        let gap = (g * 9 / 10).max(px(8));
         let c = comps[list[i]];
         for (j, o) in comps.iter().enumerate() {
             if !member[j] && o.glyph && c.gap(o) <= gap {
@@ -155,11 +164,11 @@ pub fn find(img: &[[u8; 4]], area: photocraft_geom::Rect, seed: (i32, i32)) -> O
     }
     // Wide enough that the ring the background is read from (a few pixels in from the box) is
     // clear of the lettering.
-    let margin = (glyph * 0.75).max(14.0) as i32;
+    let margin = (glyph * 0.75).max(14.0 * scale) as i32;
     let rect = [(wx0 + x0 - margin).max(area.x0), (wy0 + y0 - margin).max(area.y0), (wx0 + x1 + margin).min(area.x1), (wy0 + y1 + margin).min(area.y1)];
     let (rw, rh) = ((rect[2] - rect[0]) as usize, (rect[3] - rect[1]) as usize);
     let mut walls = Mask::new(rect[0], rect[1], rw, rh)?;
-    let grow = 2;
+    let grow = px(2);
     for y in rect[1]..rect[3] {
         for x in rect[0]..rect[2] {
             let (lx, ly) = (x - wx0, y - wy0);

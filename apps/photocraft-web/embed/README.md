@@ -107,6 +107,22 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
   await capishot.execute('edit.removeAi', {maxSide: 512}); // the selection, downscaled as before
   ```
 
+- `execute('edit.removeBubbleText', {x, y, gapRadius?, reach?, window?})` (feature
+  `removeBubbleText.search`): the search for the bubble is sized for the page's resolution (from
+  the ink's stroke width around the click, not resolution metadata), so a 2x or 3x page finds its
+  bubbles on the first try; a click with no bubble answers at once with `noBubble (<reason>)`
+  (`beyondWindow` when the light area reaches past the search window) instead of searching the
+  page. `gapRadius` (px, outline gaps up to about twice it stay shut), `reach` (px, how far from
+  the click a light pixel to start from may be) and `window` (px, half the side of the largest
+  square searched around the click, or `'page'`) override the automatic sizes; the result's
+  `search` says which were used (`RemoveBubbleTextParams`, `RemoveBubbleTextResult`).
+
+  ```js
+  const r = await capishot.execute('edit.removeBubbleText', {x: 1830, y: 2410});
+  // r.search: {scale: 2, gapRadius: 4, reach: 48, window: 1048}
+  await capishot.execute('edit.removeBubbleText', {x: 1830, y: 2410, gapRadius: 6, window: 'page'});
+  ```
+
 - Fonts the host serves (`fonts/manifest.txt` next to the page, craft-fonts' format
   `family | style | file | …`; file paths may have spaces and other characters, they are
   URL-encoded for the request). A family the manifest lists is never reported missing: a document

@@ -50,6 +50,7 @@ pub const FEATURES: &[&str] = &[
     "fonts.status",
     "events.fontsPreloadProgress",
     "removeAi.fullRes",
+    "removeBubbleText.search",
 ];
 
 /// The build stamp: the Capishot commit and the build id, set by `scripts/build-embed.sh`
