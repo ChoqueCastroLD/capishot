@@ -223,7 +223,7 @@ fn install_without_a_models_folder_or_the_feature_sets_nothing_and_says_why() {
     let mut s = Session::new();
     let a = install(&mut s, &AiConfig::default());
     assert!(!a.inpaint && !a.upscale && !a.models && a.reason.is_some(), "{a:?}");
-    assert_eq!(availability(&s).inpaint, false);
+    assert!(!availability(&s).inpaint);
     // Without services the AI commands fail cleanly; the Bubble Text Remover still works.
     s.execute("file.new", json!({"width": 32, "height": 32, "background": "white"})).unwrap();
     assert!(s.execute(REMOVE_AI, over_the_blob().params().unwrap()).is_err());

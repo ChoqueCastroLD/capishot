@@ -503,7 +503,7 @@ impl RemoveAi {
             p.insert("strokes".into(), json!(self.strokes));
             p.insert("size".into(), json!(self.size));
         }
-        if self.max_side != 0 && (!(64..=2048).contains(&self.max_side) || self.max_side % 8 != 0) {
+        if self.max_side != 0 && (!(64..=2048).contains(&self.max_side) || !self.max_side.is_multiple_of(8)) {
             return Err(bad(REMOVE_AI, "maxSide must be 0 or 64..2048, a multiple of 8"));
         }
         p.insert("maxSide".into(), json!(self.max_side));
