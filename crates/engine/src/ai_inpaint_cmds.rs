@@ -196,8 +196,17 @@ impl Hooks for JobHooks {
     }
 }
 
-/// Receives the generated RGB and the model that made it.
-pub(crate) type FillDone = Box<dyn FnOnce(Result<(Vec<f32>, &'static ModelInfo)>) + Send>;
+/// Receives the generated RGB and what made it.
+pub(crate) type FillDone = Box<dyn FnOnce(Result<(Vec<f32>, FillRun)>) + Send>;
+
+/// What an AI fill ran: the model, and whether it ended on the CPU (`fell_back`: after the GPU
+/// failed mid-run).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct FillRun {
+    pub model: &'static ModelInfo,
+    pub cpu: bool,
+    pub fell_back: bool,
+}
 
 /// The AI fill of a `w×h` region (`rgb` interleaved RGB 0..=1, `cover` the hole's coverage),
 /// without blocking: each tile's request starts from the previous one's `done`, and `finish`
@@ -223,7 +232,7 @@ pub(crate) fn ai_fill_rgb_async(
         Err(e) => return finish(Err(bad(e.to_string()))),
     };
     let binary: Vec<f32> = cover.iter().map(|c| if *c > 0.0 { 1.0 } else { 0.0 }).collect();
-    let state = FillState { svc, ctx, rgb, cover, binary, w, h, opts, plan, next: 0, finish };
+    let state = FillState { svc, ctx, rgb, cover, binary, w, h, opts, plan, next: 0, fell_back: false, finish };
     fill_step(state);
 }
 
@@ -241,13 +250,15 @@ struct FillState {
     opts: AiOptions,
     plan: Vec<tiles::Tile>,
     next: usize,
+    /// The GPU failed and the rest runs on the CPU ([`gpu_fallback`]).
+    fell_back: bool,
     finish: FillDone,
 }
 
 fn fill_step(mut st: FillState) {
     let Some(t) = st.plan.get(st.next).cloned() else {
-        let FillState { rgb, finish, opts, .. } = st;
-        return finish(Ok((rgb, opts.model)));
+        let FillState { rgb, finish, opts, fell_back, .. } = st;
+        return finish(Ok((rgb, FillRun { model: opts.model, cpu: opts.run.choice.cpu, fell_back })));
     };
     if let Err(e) = st.ctx.check() {
         return (st.finish)(Err(e));
@@ -299,6 +310,7 @@ fn gpu_fallback(mut st: FillState, why: &str) {
         }
     }
     st.opts.run = run;
+    st.fell_back = true;
     st.ctx.notice(crate::ai_cmds::GPU_FALLBACK_CLASS, crate::ai_cmds::GPU_FALLBACK_NOTICE, why);
     st.ctx.progress(st.ctx.fraction(), crate::ai_cmds::SWITCHING_TO_CPU);
     if model.id != st.opts.model.id {
@@ -432,6 +444,7 @@ pub(crate) fn inpaint_ai_labelled(s: &mut Session, p: &Value, label: &'static st
             let (w, h) = (plan.region.width() as usize, plan.region.height() as usize);
             let (rgb, cover, opts) = (std::mem::take(&mut plan.rgb), plan.cover.clone(), plan.opts.clone());
             let svc2 = svc.clone();
+            let started = web_time::Instant::now();
             ai_fill_rgb_async(
                 svc,
                 ctx.clone(),
@@ -440,14 +453,18 @@ pub(crate) fn inpaint_ai_labelled(s: &mut Session, p: &Value, label: &'static st
                 w,
                 h,
                 opts,
-                Box::new(move |r| done.finish(r.map(|(generated, model)| (plan, generated, svc2.device(), model)))),
+                Box::new(move |r| {
+                    let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+                    done.finish(r.map(|(generated, run)| (plan, generated, svc2.device(), run, ms)))
+                }),
             );
         },
-        move |s, (plan, generated, dev, model)| apply(s, label, plan, &generated, if dev.is_empty() { device } else { dev }, model),
+        move |s, (plan, generated, dev, run, ms)| apply(s, label, plan, &generated, if dev.is_empty() { device } else { dev }, run, ms),
     )
 }
 
-fn apply(s: &mut Session, label: &str, plan: Plan, generated: &[f32], device: String, model: &ModelInfo) -> Result<Value> {
+fn apply(s: &mut Session, label: &str, plan: Plan, generated: &[f32], device: String, run: FillRun, ms: u64) -> Result<Value> {
+    let model = run.model;
     let Plan { layer: id, fmt, region, layer_px, cover, new_layer, .. } = plan;
     let n = fmt.channels();
     let count = cover.iter().filter(|c| **c > 0.0).count();
@@ -499,6 +516,9 @@ fn apply(s: &mut Session, label: &str, plan: Plan, generated: &[f32], device: St
         "device": device,
         "model": model.id,
         "lite": model.lite,
+        "cpu": run.cpu,
+        "fellBack": run.fell_back,
+        "ms": ms,
     }))
 }
 
@@ -508,7 +528,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: "Clean Selected Area with AI",
         menu: &["Edit"],
         shortcut: None,
-        params: r#"{"output"?: "new" (default: the result on a new layer above, alpha = selection coverage) | "current" (paint it into the layer), "layer"?: layer id (default: the active pixel layer), "maxSide"?: 64..2048, multiple of 8 (default 512: larger crops are downscaled to this working size), "margin"?: 0..1024 px of context around each masked blob (default 64), "allowDownload"?: bool (fetch the model's weights when not cached: Manga LaMa about 100 MB, MI-GAN 13 MB; default false), "quality"?: "auto"|"fast"|"best" (fast: the lite MI-GAN, at most 512 px tiles; auto: Manga LaMa on a capable GPU, MI-GAN on the CPU, phones and weak machines), "device"?: "auto"|"gpu"|"cpu"|"directml"|"wgpu" (directml, wgpu: natively, that GPU runtime; auto picks DirectML on Windows for Manga LaMa when ONNX Runtime is installed), "model"?: "auto"|"manga-lama"|"migan-512", "threads"?: 0..64 (CPU threads, 0 = one per core), "keepLoaded"?: bool (default true)} -> {"layer", "pixels", "region": [x,y,w,h], "device", "model", "lite"}. Erases what the selection covers (text, SFX) and fills it with Manga LaMa (or MI-GAN). Background job, one undo step."#,
+        params: r#"{"output"?: "new" (default: the result on a new layer above, alpha = selection coverage) | "current" (paint it into the layer), "layer"?: layer id (default: the active pixel layer), "maxSide"?: 64..2048, multiple of 8 (default 512: larger crops are downscaled to this working size), "margin"?: 0..1024 px of context around each masked blob (default 64), "allowDownload"?: bool (fetch the model's weights when not cached: Manga LaMa about 100 MB, MI-GAN 13 MB; default false), "quality"?: "auto"|"fast"|"best" (fast: the lite MI-GAN, at most 512 px tiles; auto: Manga LaMa on a capable GPU, MI-GAN on the CPU, phones and weak machines), "device"?: "auto"|"gpu"|"cpu"|"directml"|"wgpu" (directml, wgpu: natively, that GPU runtime; auto picks DirectML on Windows for Manga LaMa when ONNX Runtime is installed), "model"?: "auto"|"manga-lama"|"migan-512", "threads"?: 0..64 (CPU threads, 0 = one per core), "keepLoaded"?: bool (default true)} -> {"layer", "pixels", "region": [x,y,w,h], "device", "model", "lite", "cpu" (it ran on the CPU), "fellBack" (the GPU failed mid-run and the CPU finished it), "ms" (the run's wall time)}. Erases what the selection covers (text, SFX) and fills it with Manga LaMa (or MI-GAN). Background job, one undo step."#,
         enabled,
         run: inpaint_ai,
         journal: true,

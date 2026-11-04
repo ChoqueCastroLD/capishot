@@ -327,6 +327,33 @@ fn encode_ai(prep: Prepared, rect: Rect, generated: &[f32]) -> Result<(Region, V
     Ok((Region { rect, ch: img.ch, data }, hole))
 }
 
+/// What an AI fill ran on, for the reply (`device`, `model`, `lite`, `cpu`, `fellBack`, `ms`), as
+/// `edit.inpaintAi` reports it.
+struct AiRun {
+    device: String,
+    run: crate::ai_inpaint_cmds::FillRun,
+    ms: u64,
+}
+
+impl AiRun {
+    /// `after` is the service's device once the run ended (a GPU that failed mid-run reports the
+    /// CPU it fell back to); `before`, the one it was going to use, when `after` is unknown.
+    fn new(after: &str, before: &str, run: crate::ai_inpaint_cmds::FillRun, started: web_time::Instant) -> Self {
+        let device = if after.is_empty() { before } else { after };
+        let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        Self { device: device.to_string(), run, ms }
+    }
+
+    fn report(self, o: &mut serde_json::Map<String, Value>) {
+        o.insert("device".into(), json!(self.device));
+        o.insert("model".into(), json!(self.run.model.id));
+        o.insert("lite".into(), json!(self.run.model.lite));
+        o.insert("cpu".into(), json!(self.run.cpu));
+        o.insert("fellBack".into(), json!(self.run.fell_back));
+        o.insert("ms".into(), json!(self.ms));
+    }
+}
+
 /// Applies a filled window to the live document as one undo step (into the target, or onto a new
 /// layer above it with `new_layer`).
 fn apply_fill(s: &mut Session, label: &'static str, id: Option<LayerId>, p: &Value, new_layer: bool, filled: Option<(Region, Vec<bool>)>) -> Result<Value> {
@@ -377,12 +404,17 @@ fn run_labelled(s: &mut Session, p: &Value, label: &'static str, ink: bool) -> R
         let (w, h) = (win.width() as usize, win.height() as usize);
         let rgb = crate::ai_inpaint_cmds::to_rgb(&prep.fmt, &prep.img.data);
         let cover: Vec<f32> = prep.hole.iter().map(|m| if *m { 1.0 } else { 0.0 }).collect();
+        let device = svc.device();
         return crate::jobs::run_async(
             s,
             label,
             true,
             move |ctx, done| {
                 ctx.progress(0.0, label);
+                // What ran, as edit.inpaintAi reports it: the device read after the run (a GPU
+                // failure mid-run falls back to the CPU), the model and the time it took.
+                let started = web_time::Instant::now();
+                let svc2 = svc.clone();
                 crate::ai_inpaint_cmds::ai_fill_rgb_async(
                     svc,
                     ctx.clone(),
@@ -391,10 +423,19 @@ fn run_labelled(s: &mut Session, p: &Value, label: &'static str, ink: bool) -> R
                     w,
                     h,
                     opts,
-                    Box::new(move |r| done.finish(r.and_then(|(generated, _)| encode_ai(prep, win, &generated)).map(Some))),
+                    Box::new(move |r| {
+                        let ran = r.as_ref().map(|(_, run)| AiRun::new(&svc2.device(), &device, *run, started)).ok();
+                        done.finish(r.and_then(|(generated, _)| encode_ai(prep, win, &generated)).map(|f| (Some(f), ran)))
+                    }),
                 );
             },
-            move |s, filled| apply_fill(s, label, id, &p, new_layer, filled),
+            move |s, (filled, ran): (Option<(Region, Vec<bool>)>, Option<AiRun>)| {
+                let mut v = apply_fill(s, label, id, &p, new_layer, filled)?;
+                if let (Some(o), Some(ran)) = (v.as_object_mut(), ran) {
+                    ran.report(o);
+                }
+                Ok(v)
+            },
         );
     }
     crate::jobs::run(

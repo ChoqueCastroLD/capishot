@@ -7891,6 +7891,7 @@ dependencies = [
  "thiserror 2.0.21",
  "wasm_sync",
  "wat",
+ "web-time",
  "winsafe",
 ]
 
