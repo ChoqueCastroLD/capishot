@@ -528,18 +528,30 @@ pub struct FontChecks {
     /// `fontsPreloadProgress` events since the shell last looked: one per family of a
     /// `fonts.preload` as it settles (`{id?, family, status, done, total}`).
     pub progress: Vec<Value>,
+    /// `fontsReady` events since the shell last looked: an opened document's fonts settled
+    /// (`{document, ready, missing, failed}`), its type drawn with them.
+    pub ready: Vec<Value>,
+    /// `document.fontsReady` requests waiting for their document's fonts.
+    waits: Vec<DocWait>,
 }
 
 impl Default for FontChecks {
     fn default() -> Self {
-        Self { checks: Vec::new(), preloads: Vec::new(), notice: true, events: Vec::new(), progress: Vec::new() }
+        Self { checks: Vec::new(), preloads: Vec::new(), notice: true, events: Vec::new(), progress: Vec::new(), ready: Vec::new(), waits: Vec::new() }
     }
 }
 
-impl FontChecks {
-    /// Whether document `doc`'s served fonts are still on their way.
-    pub fn waiting_for(&self, doc: DocId) -> bool {
-        self.checks.iter().any(|c| c.doc == doc)
+/// A `document.fontsReady` waiting until no font its document uses is on its way.
+pub struct DocWait {
+    pub doc: DocId,
+    pub timeout_s: f64,
+    pub reply: std::sync::mpsc::Sender<Value>,
+    since: Option<f64>,
+}
+
+impl DocWait {
+    pub fn new(doc: DocId, timeout_s: f64, reply: std::sync::mpsc::Sender<Value>) -> Self {
+        Self { doc, timeout_s, reply, since: None }
     }
 }
 
@@ -667,10 +679,27 @@ pub fn tick_checks(app: &mut PhotocraftApp, now: Option<f64>) {
                     }
                 }
             }
+            let ready = fonts_ready(&d.doc, missing.clone(), failed.clone());
             report_missing(app, c.doc, &missing, &failed);
+            // Taken by the web shell each frame; elsewhere nobody does, so only the latest stay.
+            if app.font_checks.ready.len() >= 64 {
+                app.font_checks.ready.remove(0);
+            }
+            app.font_checks.ready.push(ready);
         }
         keep.append(&mut app.font_checks.checks);
         app.font_checks.checks = keep;
+    }
+    if !app.font_checks.waits.is_empty() {
+        for mut w in std::mem::take(&mut app.font_checks.waits) {
+            if let Some(t) = now
+                && w.since.is_none()
+            {
+                w.since = Some(t);
+            }
+            let timed_out = matches!((now, w.since), (Some(t), Some(s)) if t - s > w.timeout_s);
+            settle_wait(app, w, timed_out);
+        }
     }
     if !app.font_checks.preloads.is_empty() {
         let preloads = std::mem::take(&mut app.font_checks.preloads);
@@ -722,9 +751,63 @@ fn settle_preload(app: &mut PhotocraftApp, mut p: Preload, timed_out: bool) {
     let _ = p.reply.send(json!({"ok": true, "result": {"ready": ready, "missing": missing, "failed": failed}}));
 }
 
-/// Something waits for fonts (a document's check or a `fonts.preload`).
+/// `{document, ready, missing, failed}`: the families `doc`'s type uses, those nobody has and
+/// those whose download failed (or didn't finish); `ready` is the rest.
+fn fonts_ready(doc: &photocraft_doc::Document, missing: Vec<String>, failed: Vec<String>) -> Value {
+    let mut ready: Vec<String> = Vec::new();
+    for (_, _, l) in doc.walk() {
+        if let LayerContent::Text(t) = &l.content {
+            for r in t.char_runs() {
+                let f = r.style.font_family;
+                if !f.is_empty() && !ready.contains(&f) && !missing.contains(&f) && !failed.contains(&f) {
+                    ready.push(f);
+                }
+            }
+        }
+    }
+    json!({"document": doc.id.0, "ready": ready, "missing": missing, "failed": failed})
+}
+
+/// Replies to `w` once none of its document's fonts is on its way (what still is after
+/// `timeout_s` counts as failed), else keeps it waiting. A closed document is an error.
+fn settle_wait(app: &mut PhotocraftApp, w: DocWait, timed_out: bool) {
+    let Some(d) = app.session.documents().iter().find(|d| d.doc.id == w.doc) else {
+        let _ = w.reply.send(json!({"ok": false, "error": format!("document {} was closed", w.doc.0)}));
+        return;
+    };
+    let (mut missing, mut failed, mut waiting) = (Vec::new(), Vec::new(), false);
+    for (family, ps) in photocraft_engine::type_extra_cmds::missing_font_names(&d.doc) {
+        match verdict(&family, &ps) {
+            Verdict::Here => {}
+            Verdict::Waiting if timed_out => failed.push(family),
+            Verdict::Waiting => waiting = true,
+            Verdict::Failed => failed.push(family),
+            Verdict::Missing => missing.push(family),
+        }
+    }
+    // Type kept waiting for a font is drawn by the shell in the frame it arrives
+    // (`served_fonts::install`, before this check runs).
+    if waiting && !timed_out {
+        app.font_checks.waits.push(w);
+        return;
+    }
+    let _ = w.reply.send(json!({"ok": true, "result": fonts_ready(&d.doc, missing, failed)}));
+}
+
+/// `document.fontsReady {document?, timeoutMs?}`: replies once the fonts the document's type
+/// uses have arrived or failed and its type is drawn with them (at once when nothing is on its way).
+pub fn wait_fonts(app: &mut PhotocraftApp, w: DocWait) {
+    settle_wait(app, w, false);
+}
+
+/// Something waits for fonts (a document's check, a `fonts.preload` or a `document.fontsReady`).
 pub fn checks_pending(app: &PhotocraftApp) -> bool {
-    !app.font_checks.checks.is_empty() || !app.font_checks.preloads.is_empty()
+    !app.font_checks.checks.is_empty() || !app.font_checks.preloads.is_empty() || !app.font_checks.waits.is_empty()
+}
+
+/// Are `doc`'s fonts settled: no check for it is waiting for served fonts?
+pub fn fonts_settled(app: &PhotocraftApp, doc: DocId) -> bool {
+    !app.font_checks.checks.iter().any(|c| c.doc == doc)
 }
 
 /// A `fonts.preload` waits here until each family has arrived or failed.

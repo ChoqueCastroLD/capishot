@@ -40,9 +40,10 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
   `image.upscaleAi`) reply with `device`, `cpu` and `fellBack`: where the run really ended. A run that
   left DirectML, found no usable GPU (the CPU, or a software adapter) or lost the GPU mid-run sets
   `fellBack` and lists why in `notices` (`ai.directmlFallback`, `ai.cpuFallback`, `ai.gpuFallback`).
-- Events (`onEvent`): `ready`, `documents`, `documentChanged`, `dirty`, `selectionChanged`,
-  `toolChanged`, `modeChanged`, `zoom`, `viewChanged`, `layerPixelsChanged`, `layersReordered`,
-  `fontsMissing`, `error`. Derived once per frame, after the
+- Events (`onEvent`): `ready`, `documents`, `documentShown`, `documentReady`, `documentChanged`,
+  `dirty`, `selectionChanged`, `toolChanged`, `modeChanged`, `zoom`, `viewChanged`,
+  `viewportChanged`, `layerPixelsChanged`, `layerChanged`, `layersReordered`, `fontsMissing`,
+  `fontsReady`, `fontsPreloadProgress`, `error`. Derived once per frame, after the
   frame's UI, from the session; each kind at most once per frame and only on change. Selection
   bounds are measured once per document revision.
 - `viewChanged` `{id, zoom, center, rotation}`: the active document's view after any pan, zoom or
@@ -144,6 +145,44 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
 
   `batch` sends its commands as JSON: a `src` inside it must be base64 or a `data:` URL; a `Blob`
   or URL goes through `execute('layer.putPixels', …)`.
+- Pixels without touching anything (features `layer.getPixels`, `layer.dirtySince`):
+  `getPixels({layer, rect?, format?: 'png' | 'rgba', mask?}, {document?})` reads a layer's pixels
+  (or its mask) from its tiles, on any open document, with no document switch, no history step and
+  nothing redrawn → `{document, layer, rect, width, height, format, channels, data: Uint8Array,
+  pixelRev}` (`window.photocraft.getPixels` is the same; `execute('layer.getPixels', …)` gives
+  `data` as base64, as the CLI does). `execute('layer.dirtySince', {layer, rev}, {document})` →
+  `{pixelRev, rect | null, full}`: where the layer changed after `rev` (`full`: too old, read it
+  all). Mirroring a stroke from page A into page B:
+
+  ```js
+  capishot.onEvent(async (e) => {
+    if (e.type !== 'layerPixelsChanged' || e.document !== a) return;
+    // `execute` gives the PNG as base64, which putPixels takes as it is.
+    const px = await capishot.execute('layer.getPixels', {layer: e.layer, rect: e.rect}, {document: a});
+    await capishot.execute('layer.putPixels', {layer: mirror[e.layer], png: px.data, x: px.rect[0], y: px.rect[1]},
+                           {document: b, history: 'none'});
+  });
+  ```
+- More push events, so a host needn't poll snapshots (features `events.documentShown`,
+  `events.documentReady`, `events.viewportChanged`, `events.layerChanged`, `events.fontsReady`):
+  `documentShown {id, previous}`, `documentReady {id, firstFrameMs, finalFrameMs}` (a new document
+  is complete: decoded, fonts settled; ms from the open call to its first frame and to the first
+  complete frame), `viewportChanged {document, zoom, center, rotation, canvas, rect}` (the canvas
+  size in device pixels and the document area it shows; also on resizes), `layerChanged {document,
+  layer, what}` (`what`: `added`, `removed`, `name`, `visible`, `opacity`, `fillOpacity`, `blend`,
+  `clipped`, `locks`, `label`, `effects`, `mask`, `vectorMask`, `parent`, `content`) and
+  `fontsReady {document, ready, missing, failed}`.
+- `window.photocraft` gets every event too (feature `window.events`): `photocraft-<type>` window
+  events (`detail`: the event) and, with `?embed=`, `{photocraft: '<type>', …}` messages, for all
+  of the above plus `documents`, `documentChanged`, `selectionChanged`, `toolChanged`, `zoom`,
+  `viewChanged`, `layerPixelsChanged`, `layersReordered` and `error` (`photocraft-dirty` stays the
+  app-wide boolean).
+- Fonts without a fallback flash (feature `fonts.noFallbackFlash`): type whose served font is
+  still downloading keeps the pixels it shows (a new layer none) until the font arrives, never
+  drawing a fallback first. `request('document.fontsReady', {document?, timeoutMs?})` resolves
+  once the document's fonts have arrived or failed and its type is drawn with them (`{document,
+  ready, missing, failed}`; feature `document.fontsReady`); the `fontsReady` event says the same
+  for every opened document, and `fontsPreloadProgress` gives a preload's progress.
 
 - `execute('type.layoutDigest', {layer?, fontHashes?})` fingerprints how type lays out: the same
   digest from the browser and from a `photocraft-cli serve` session means every glyph sits at the

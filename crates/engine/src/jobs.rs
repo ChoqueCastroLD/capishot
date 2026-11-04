@@ -578,6 +578,96 @@ pub fn run_async<T: Send + 'static>(
     Ok(json!({"job": id.0}))
 }
 
+/// Whether [`run_async_prepared`] reads its input on the pool and hands it back to the page's
+/// thread: the browser threads build, where `run_async`'s work runs on the page's thread.
+const HAND_OFF: bool = cfg!(all(target_arch = "wasm32", target_feature = "atomics"));
+
+#[cfg(test)]
+thread_local! {
+    /// Tests take the browser threads build's hand-off path natively.
+    pub(crate) static TEST_HAND_OFF: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// [`run_async`] whose input is read first by `prep` (the window's pixels, the hole: seconds
+/// for a big stroke on a phone): on the rayon pool in the browser threads build, which then
+/// hands `prep`'s output to `work` on the page's thread (`work` talks to the AI Web Worker,
+/// which only the page's thread may), between frames ([`Session::step_jobs`]). Elsewhere `prep`
+/// runs where `work` does (a worker thread natively, inline in the single-threaded browser
+/// build). An error from `prep` fails the job.
+pub fn run_async_prepared<P: Send + 'static, T: Send + 'static>(
+    s: &mut Session,
+    label: &str,
+    lock_document: bool,
+    prep: impl FnOnce(&JobCtx) -> Result<P> + Send + 'static,
+    work: impl FnOnce(&JobCtx, P, Completion<T>) + Send + 'static,
+    apply: impl FnOnce(&mut Session, T) -> Result<Value> + Send + 'static,
+) -> Result<Value> {
+    #[cfg(test)]
+    let hand_off = HAND_OFF || TEST_HAND_OFF.with(std::cell::Cell::get);
+    #[cfg(not(test))]
+    let hand_off = HAND_OFF;
+    if !(hand_off && s.jobs.spawn) {
+        return run_async(
+            s,
+            label,
+            lock_document,
+            move |ctx, done| match prep(ctx) {
+                Ok(p) => work(ctx, p, done),
+                Err(e) => done.finish(Err(e)),
+            },
+            apply,
+        );
+    }
+    type Slot<X> = Arc<wasm_sync::Mutex<Option<X>>>;
+    let held: Slot<(JobCtx, Completion<T>)> = Arc::default();
+    let ready: Slot<Result<P>> = Arc::default();
+    let (put_held, put_ready) = (Arc::clone(&held), Arc::clone(&ready));
+    let label_w = label.to_string();
+    let v = run_async(
+        s,
+        label,
+        lock_document,
+        move |ctx, done| {
+            *put_held.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((ctx.clone(), done));
+            let ctx = ctx.clone();
+            on_pool(move || {
+                let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| prep(&ctx)))
+                    .unwrap_or_else(|_| Err(EngineError::Other(format!("`{label_w}` failed with an internal error (logged); the document is unchanged"))));
+                *put_ready.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(r);
+            });
+        },
+        apply,
+    )?;
+    let Some(id) = s.jobs.pending.as_ref().map(|r| r.id) else { return Ok(v) };
+    let mut work = Some(work);
+    let stepper: Stepper = Box::new(move |_more| {
+        let mut h = held.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Not handed over yet (the work starts on a thread natively): try again next time.
+        let Some((ctx, _)) = h.as_ref() else { return false };
+        if ctx.cancelled() {
+            return true;
+        }
+        let Some(r) = ready.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() else { return false };
+        let (Some((ctx, done)), Some(work)) = (h.take(), work.take()) else { return true };
+        match r {
+            Ok(p) => work(&ctx, p, done),
+            Err(e) => done.finish(Err(e)),
+        }
+        true
+    });
+    s.jobs.steppers.push((id, stepper));
+    Ok(v)
+}
+
+/// Runs `f` on the rayon pool in the browser threads build, else here (tests: the hand-off still
+/// waits for the next step). `f` must not touch the browser's APIs.
+pub(crate) fn on_pool(f: impl FnOnce() + Send + 'static) {
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+    rayon::spawn(f);
+    #[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
+    f();
+}
+
 /// A document edit whose body is the job: like [`Session::edit`] (one undo step named `label`),
 /// but `f` runs on a worker against a copy of the active document when started in the
 /// background. `finish` turns `f`'s output into the command's result.

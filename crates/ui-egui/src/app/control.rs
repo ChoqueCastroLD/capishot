@@ -58,6 +58,9 @@ impl PhotocraftApp {
             crate::control::Outcome::AfterFonts { families, timeout_s, id } => {
                 crate::user_fonts_ui::preload(self, crate::user_fonts_ui::Preload::new(families, timeout_s, reply).with_id(id));
             }
+            crate::control::Outcome::AfterDocumentFonts { doc, timeout_s } => {
+                crate::user_fonts_ui::wait_fonts(self, crate::user_fonts_ui::DocWait::new(doc, timeout_s, reply));
+            }
             crate::control::Outcome::Screenshot { token, path } => {
                 // Admission is budgeted here, after this pass's completed captures were
                 // drained, so a just-finished request never causes a false rejection.

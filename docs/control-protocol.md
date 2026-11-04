@@ -406,6 +406,47 @@ For hosts that keep one document in step between collaborators (the embed API an
   group (`group` null: the top level) change order, `layers` being that group's children top to
   bottom now (adding, deleting or moving a layer to another group alone isn't a reorder; those show
   as `documentChanged`).
+- **Reading pixels without touching anything.** `layer.getPixels {layer, rect?, format?, mask?,
+  document?}` → `{document, layer, rect, width, height, format, channels, data, pixelRev}` reads a
+  layer's pixels straight from its tiles: no history step, no revision, nothing redrawn, no
+  document switch (`document`: any open document's id; `layer`: an id or a name). `rect`
+  `[x, y, width, height]` defaults to the layer's pixel bounds; `format` `png` (default; `data` a
+  base64 PNG) or `rgba` (`data` base64 raw 8-bit rows, straight alpha). Pixels come as the
+  document's RGB values (what `layer.putPixels` takes back); gray, CMYK, Lab and 32-bit documents
+  go through their profile to sRGB as File › Export does. `mask: true` reads the layer mask
+  instead (gray, `channels: 1`; default rect: the canvas). At most 100 MP per call. Type, shape and
+  smart object layers give their rendered pixels; groups and adjustments have none (an error).
+  `pixelRev` is the layer's revision the pixels are at. Embed API: `getPixels(params, {document})`
+  and `window.photocraft.getPixels(params, {document})` give `data` as a `Uint8Array`.
+- **What changed since.** `layer.dirtySince {layer, rev, document?}` → `{document, layer,
+  pixelRev, rect, full}`: `rect` the area (tile-aligned union) where the layer's pixels or mask
+  changed after `pixelRev` `rev` (`null`: unchanged). The last 2048 changes of a document are
+  remembered; a `rev` older than that, or not this document's, answers `full: true` (read the
+  whole layer). With `layerPixelsChanged` events or polling `layer.pixelRevision`, a host mirrors
+  a layer as `getPixels(rect)` of only what changed.
+- **Push events instead of polling** (embed API `onEvent`, and `window.photocraft` as
+  `photocraft-<type>` window events / `{photocraft: "<type>", …}` messages; once per frame, only
+  on change): `layerPixelsChanged`, `layersReordered`, `layerChanged {document, layer, what}`
+  (`what` lists what changed: `added`, `removed`, `name`, `visible`, `opacity`, `fillOpacity`,
+  `blend`, `clipped`, `locks`, `label`, `effects`, `mask`, `vectorMask`, `parent`, `content` (the
+  text and its style, a shape, an adjustment's or fill's settings); pixels are
+  `layerPixelsChanged`'s), `documentShown {id, previous}` (another document became the visible
+  one), `documentReady {id, firstFrameMs, finalFrameMs}` (a new document is complete: no job works
+  on it and its fonts have arrived or failed; times from the `open` call, or from the frame it
+  appeared in, to the end of the first frame that showed it and of the first frame it was
+  complete in), `viewportChanged {document, zoom, center, rotation, canvas, rect}` (`canvas` the
+  canvas size in device pixels, `rect` the document area shown, document pixels; also on a canvas
+  resize; at most one per animation frame like `viewChanged`) and `fontsReady {document, ready,
+  missing, failed}` (an opened document's fonts settled, its type drawn with them).
+- **Fonts without a fallback flash.** On the web build, type whose font the host serves and that
+  is still downloading (or whose manifest is still being read) is never drawn with a fallback
+  font first: a layer keeps the pixels it shows (a new one shows none) until the font arrives,
+  then it is drawn once with it; a font that fails to download draws with the fallback then.
+  The text itself (`type.info`, saved files) is up to date meanwhile. `document.fontsReady
+  {document?, timeoutMs?}` (a control method, `request` in the embed API) replies once every font
+  the document's type uses has arrived or failed and its type is drawn with them: `{document,
+  ready, missing, failed}` (what is still on its way after `timeoutMs`, default 10000, counts as
+  failed); the `fontsPreloadProgress` events of a `fonts.preload` show the downloads' progress.
 
 Example (CLI session, one JSON per line):
 
@@ -416,6 +457,8 @@ Example (CLI session, one JSON per line):
 {"id":4,"method":"doc.inspect","params":{"index":0,"textStyle":true}}
 {"id":5,"method":"engine.execute","params":{"command":"file.new","params":{"width":1200,"height":1800,"hidden":true}}}
 {"id":6,"method":"engine.execute","params":{"command":"document.batch","document":7,"history":"none","params":{"commands":[{"command":"layer.setProps","params":{"layer":28,"opacity":0.5}},{"command":"layer.putPixels","params":{"layer":29,"src":"/9j/4AAQ…"}}],"inspect":true}}}
+{"id":7,"method":"engine.execute","params":{"command":"layer.dirtySince","document":7,"params":{"layer":28,"rev":41}}}
+{"id":8,"method":"engine.execute","params":{"command":"layer.getPixels","document":7,"params":{"layer":28,"rect":[0,256,256,128],"format":"rgba"}}}
 ```
 
 ### Same type layout in the browser and the CLI

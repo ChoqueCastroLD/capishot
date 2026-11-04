@@ -98,7 +98,7 @@ fn cached_plan(app: &PhotocraftApp, f: &mut Map<String, Value>) -> photocraft_en
 /// Draws the dialog; true when it should close (the user opened the AI Model Manager).
 pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) -> bool {
     let mut dismiss = false;
-    let tokens = crate::theme::Tokens::for_kind(app.ui.theme);
+    let tokens = crate::theme::Tokens::get(ui.ctx());
     let mut scale = f.get("scale").and_then(Value::as_str).unwrap_or("2").to_string();
     let mut content = f.get("content").and_then(Value::as_str).unwrap_or("auto").to_string();
     let model = f.get("model").and_then(Value::as_str).unwrap_or("auto").to_string();

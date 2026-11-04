@@ -1,0 +1,108 @@
+:root {
+  /* Base */
+  --base: classic;
+  --dark: false;
+  /* Surfaces */
+  --chrome: #d4d0c8;
+  --dock: #d4d0c8;
+  --card: #d4d0c8;
+  --card-border: #808080;
+  --field: #ffffff;
+  --field-border: #808080;
+  --separator: #808080;
+  --tab-strip: #d4d0c8;
+  /* Text and icons */
+  --text: #000000;
+  --text-dim: #404040;
+  --text-faint: #808080;
+  --icon: #000000;
+  /* Accent */
+  --accent: #0a246a;
+  --accent-soft: #0a246a;
+  --accent-border: #0a246a;
+  --accent-text: #ffffff;
+  --primary-bg: #d4d0c8;
+  --primary-text: #000000;
+  /* Hover and selection */
+  --hover: #e2ded6;
+  --pressed: #bebab2;
+  --row-selected: #0a246a;
+  /* Status colours */
+  --danger: #a00000;
+  --warning: #806000;
+  --caption-close: #c42b1c;
+  --caption-close-text: #ffffff;
+  /* Canvas and scopes */
+  --canvas: #808080;
+  --canvas-dot: #808080;
+  --histogram-bg: #282828;
+  --histogram-level: 240;
+  --scrim: #0000006e;
+  /* Corners and layout */
+  --radius-sm: 0;
+  --radius: 0;
+  --radius-lg: 0;
+  --bevel: true;
+  --pro: false;
+  --round-chips: false;
+  /* Text sizes */
+  --font-small: 10.5;
+  --font-body: 12.5;
+  --font-button: 12.5;
+  --font-heading: 15;
+  --font-mono: 12;
+  /* Spacing */
+  --item-spacing: 8 6;
+  --button-padding: 10 4;
+  --interact-size: 24 24;
+  --slider-width: 150;
+  --combo-width: 120;
+  --menu-margin: 6;
+  --window-margin: 16;
+  --icon-width: 14;
+  --tooltip-width: 280;
+  --scroll-width: 4;
+  /* Shadows */
+  --shadow: #00000000;
+  --window-shadow: 0 10 32 0;
+  --popup-shadow: 0 6 20 0;
+}
+
+label {
+  /* Labels */
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button {
+  /* Controls */
+  --border: #404040;
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button:hover {
+  /* Controls: hover */
+  --border: #404040;
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button:active {
+  /* Controls: pressed */
+  --border: #404040;
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button:open {
+  /* Controls: open */
+  --border: #404040;
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}

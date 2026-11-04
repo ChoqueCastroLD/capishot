@@ -210,11 +210,6 @@ fn set_budget(app: &mut PhotocraftApp, p: &Value) -> Result<Option<Value>, Strin
     Ok(Some(json!({"mb": budget, "evicted": evicted.iter().map(|id| id.0).collect::<Vec<_>>()})))
 }
 
-/// Whether document `id`'s served fonts have arrived (or failed: then they never will).
-fn fonts_settled(app: &PhotocraftApp, id: DocId) -> bool {
-    !app.font_checks.waiting_for(id)
-}
-
 /// Every frame, after the control requests: note the active document as shown, work on the
 /// documents waiting to be shown or prewarmed (swapping a ready one in), keep within the budget.
 pub(crate) fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
@@ -231,7 +226,7 @@ pub(crate) fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
             };
             // The CPU canvas (no GPU canvas, or a view it can't draw) has nothing to draw ahead.
             let drawn = crate::canvas::prewarm_gpu(app, ctx, idx, w.full).unwrap_or(true);
-            let ready = drawn && fonts_settled(app, w.id);
+            let ready = drawn && crate::user_fonts_ui::fonts_settled(app, w.id);
             let elapsed = now - w.started_ms;
             if !ready && elapsed < w.timeout_ms {
                 w.frames += 1;

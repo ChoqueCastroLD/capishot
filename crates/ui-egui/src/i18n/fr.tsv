@@ -4961,7 +4961,7 @@ shape	Appearance	Apparence
 	Bend	Inflexion
 	Horizontal Distortion	Déformation horizontale
 	Vertical Distortion	Déformation verticale
-	A .capiproj carries the project's settings and its font files, never pages or images.	Un .capiproj contient les réglages du projet et ses fichiers de polices, jamais de pages ni d’images.
+	A .proj.capishot carries the project's settings and its font files, never pages or images.	Un .proj.capishot contient les réglages du projet et ses fichiers de polices, jamais de pages ni d’images.
 	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Un projet de polices garde les polices d’une série par rôle (dialogue, cri, narration…) et leurs réglages. Créez-en un pour commencer.
 	Add role	Ajouter un rôle
 	Add tag	Ajouter une balise

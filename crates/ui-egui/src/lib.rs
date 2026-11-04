@@ -65,6 +65,7 @@ pub mod touch_drag;
 pub mod floaters;
 pub mod font_folders_ui;
 pub mod font_projects_ui;
+pub mod profile_ui;
 pub mod fonts_ui;
 pub mod genfill_ui;
 pub mod help_text;

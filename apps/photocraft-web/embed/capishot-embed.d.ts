@@ -260,7 +260,85 @@ export type EmbedEvent =
    */
   | { type: 'layersReordered'; document: DocumentId; group: number | null; layers: number[] }
   | { type: 'layerPixelsChanged'; document: DocumentId; layer: number; rect: [x: number, y: number, width: number, height: number]; pixelRev: number }
+  /** Another document became the visible (active) one (feature `events.documentShown`). */
+  | { type: 'documentShown'; id: DocumentId; previous: DocumentId | null }
+  /**
+   * A new document is complete: no job works on it and its fonts have arrived or failed. Times
+   * in ms from the `openDocument` / `open` call (else from the frame it appeared in) to the end of
+   * its first frame and of its first complete frame (feature `events.documentReady`).
+   */
+  | { type: 'documentReady'; id: DocumentId; firstFrameMs: number; finalFrameMs: number }
+  /**
+   * The active document's view or the canvas size changed: `canvas` in device pixels, `rect` the
+   * document area shown (document pixels; bounding box when rotated). At most one per animation
+   * frame (feature `events.viewportChanged`).
+   */
+  | { type: 'viewportChanged'; document: DocumentId; zoom: number; center: [x: number, y: number]; rotation: number; canvas: [width: number, height: number]; rect: [x: number, y: number, width: number, height: number] }
+  /** A layer's settings, type, shape or adjustment changed, or it was added or removed (feature `events.layerChanged`). */
+  | { type: 'layerChanged'; document: DocumentId; layer: number; what: LayerChange[] }
+  /** An opened document's fonts settled, its type drawn with them (feature `events.fontsReady`). */
+  | { type: 'fontsReady'; document: DocumentId; ready: string[]; missing: string[]; failed: string[] }
   | { type: 'error'; message: string; source: 'init' | 'status'; fatal: boolean };
+
+/** What a `layerChanged` event says changed. */
+export type LayerChange =
+  | 'added' | 'removed' | 'name' | 'visible' | 'opacity' | 'fillOpacity' | 'blend' | 'clipped'
+  | 'locks' | 'label' | 'effects' | 'mask' | 'vectorMask' | 'parent' | 'content';
+
+/** `getPixels` / `execute('layer.getPixels', …)` params (feature `layer.getPixels`). */
+export interface GetPixelsParams {
+  /** A layer id (or name). */
+  layer: number | string;
+  /** `[x, y, width, height]` in document pixels; default the layer's pixel bounds (a mask's: the canvas). At most 100 MP. */
+  rect?: [x: number, y: number, width: number, height: number];
+  /** `png` (default): a PNG file; `rgba`: raw 8-bit rows (straight alpha; 1 gray byte per pixel for a mask). */
+  format?: 'png' | 'rgba';
+  /** Read the layer mask instead of the pixels. */
+  mask?: boolean;
+  /** Any open document (not activated); default the active one. */
+  document?: DocumentId;
+}
+
+/** `getPixels` result. `execute('layer.getPixels')` gives the same with `data` as base64. */
+export interface LayerPixels {
+  document: DocumentId;
+  layer: number;
+  rect: [x: number, y: number, width: number, height: number];
+  width: number;
+  height: number;
+  format: 'png' | 'rgba';
+  /** 4 (RGBA) or 1 (a mask). */
+  channels: 1 | 4;
+  data: Uint8Array;
+  /** The layer's `pixelRev` these pixels are at (for `layer.dirtySince`). */
+  pixelRev: number;
+}
+
+/** `execute('layer.dirtySince', {layer, rev, document?})` result (feature `layer.dirtySince`). */
+export interface DirtySince {
+  document: DocumentId;
+  layer: number;
+  pixelRev: number;
+  /** Where the layer changed after `rev` (tile-aligned), `null` when it didn't. */
+  rect: [x: number, y: number, width: number, height: number] | null;
+  /** `rev` is older than the changes remembered (or not this document's): read the whole layer. */
+  full: boolean;
+}
+
+/** `request('document.fontsReady', …)` (feature `document.fontsReady`). */
+export interface DocumentFontsReadyParams {
+  /** Default the active document. */
+  document?: DocumentId;
+  /** What is still downloading after this long counts as failed. Default 10000, at most 120000. */
+  timeoutMs?: number;
+}
+
+export interface DocumentFontsReady {
+  document: DocumentId;
+  ready: string[];
+  missing: string[];
+  failed: string[];
+}
 
 /** The embedding API version (sync). */
 export function embedApiVersion(): number;
@@ -392,6 +470,8 @@ export function execute(command: string, params?: { [key: string]: Json } | stri
 /** Any control-protocol method (`ui.inspect`, `ui.pointer`, …). */
 export function request(method: 'fonts.preload', params: FontsPreloadParams): Promise<FontsPreloadResult>;
 export function request(method: 'fonts.status', params?: FontsStatusParams | null): Promise<FontsStatusResult>;
+/** Resolves once the document's fonts have arrived or failed and its type is drawn with them. */
+export function request(method: 'document.fontsReady', params?: DocumentFontsReadyParams | null): Promise<DocumentFontsReady>;
 export function request(method: 'editor.showDocument', params: ShowDocumentOptions & { id: DocumentId }): Promise<SwitchResult>;
 export function request(method: 'document.prewarm', params: PrewarmOptions & { id: DocumentId }): Promise<SwitchResult>;
 /** One visible document: no tiles, tabs, floating windows or open cards (feature `editor.setLayout`). */
@@ -400,6 +480,8 @@ export function request(method: 'editor.setLayout', params: { single: boolean })
 export function request(method: 'editor.setMemoryBudget', params: { mb: number | null }): Promise<{ mb: number | null; evicted: DocumentId[] }>;
 export function request(method: 'document.memory', params?: {} | null): Promise<DocumentMemory>;
 export function request(method: string, params?: { [key: string]: Json } | null): Promise<Json>;
+/** A layer's pixels or mask, read from its tiles: no document switch, no history step, nothing redrawn. */
+export function getPixels(params: GetPixelsParams, options?: { document?: DocumentId } | null): Promise<LayerPixels>;
 export function listCommands(): Promise<CommandInfo[]>;
 /** Tool ids, e.g. `brush`, `eraser`, `cloneStamp` (sync). */
 export function listTools(): string[];

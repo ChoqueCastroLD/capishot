@@ -1190,13 +1190,20 @@ impl WebShell {
         self.was_typing = self.app.ui.text_edit.is_some();
     }
 
+    /// The window can't draw any more: its WebGL context or its WebGPU device was lost (a phone
+    /// short of memory drops WebGPU devices; `gpu_status::check_window` notices it).
+    fn graphics_lost(&self) -> bool {
+        crate::gpu_lost::lost() || self.app.window_lost()
+    }
+
     /// Every frame once the graphics context is lost: unsaved documents go to crash recovery,
     /// then the page reloads on the CPU canvas, where they reopen (gpu_lost.rs). An embedding
     /// host's page isn't reloaded: it decides.
     fn after_context_lost(&mut self, ctx: &egui::Context) {
         let now = js_sys::Date::now();
+        let cause = if crate::gpu_lost::lost() { "context_lost" } else { "device_lost" };
         let since = *self.lost_at.get_or_insert_with(|| {
-            crate::gpu_lost::note(&mut self.app);
+            crate::gpu_lost::note(&mut self.app, cause);
             photocraft_ui_egui::prefs_ui::flush_prefs(&mut self.app, ctx.input(|i| i.time));
             crate::usage_stats::flush_now();
             now
@@ -1440,7 +1447,7 @@ impl eframe::App for WebShell {
     }
 
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        if crate::gpu_lost::lost() {
+        if self.graphics_lost() {
             self.after_context_lost(ctx);
             return;
         }
@@ -1558,7 +1565,7 @@ impl eframe::App for WebShell {
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         // Nothing can be drawn on a lost context.
-        if crate::gpu_lost::lost() {
+        if self.graphics_lost() {
             return;
         }
         // Only while a preset change is unsaved. Storage the browser denies from the start (a
@@ -1568,7 +1575,7 @@ impl eframe::App for WebShell {
             && let Some(error) = self.presets.error()
         {
             egui::Panel::top("browser_preset_storage").show(ui, |ui| {
-                let tokens = photocraft_ui_egui::theme::Tokens::for_kind(self.app.ui.theme);
+                let tokens = photocraft_ui_egui::theme::Tokens::get(ui.ctx());
                 // Put retry first so floating brush windows cannot cover the control.
                 ui.horizontal_wrapped(|ui| {
                     if self.database.is_some() && ui.button(i18n::t("Retry saving presets")).clicked() {
@@ -1586,9 +1593,15 @@ impl eframe::App for WebShell {
         }
         self.app.ui_frame(ui, frame);
         self.app.finish_type_reset_pass(ui.ctx());
-        if self.hosted {
+        {
             // After the frame's UI: a pan, zoom or rotation made this frame is reported now.
-            crate::embed_api::report(&self.app);
+            let _s = photocraft_ui_egui::perf_span::span("embed.report");
+            let ppp = ui.ctx().pixels_per_point();
+            if self.hosted {
+                crate::embed_api::report(&mut self.app, ppp);
+            } else {
+                crate::embed::report(&mut self.app, ppp);
+            }
         }
         {
             let _s = photocraft_ui_egui::perf_span::span("presets.save");

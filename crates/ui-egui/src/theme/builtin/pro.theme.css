@@ -1,0 +1,104 @@
+:root {
+  /* Base */
+  --base: pro;
+  --dark: true;
+  /* Surfaces */
+  --chrome: #323232;
+  --dock: #1e1e1e;
+  --card: #323232;
+  --card-border: #1e1e1e;
+  --field: #242424;
+  --field-border: #4a4a4a;
+  --separator: #1e1e1e;
+  --tab-strip: #262626;
+  /* Text and icons */
+  --text: #dedede;
+  --text-dim: #b2b2b2;
+  --text-faint: #808080;
+  --icon: #c8c8c8;
+  /* Accent */
+  --accent: #378ef0;
+  --accent-soft: #4e4e4e;
+  --accent-border: #378ef0;
+  --accent-text: #ffffff;
+  --primary-bg: #378ef0;
+  --primary-text: #ffffff;
+  /* Hover and selection */
+  --hover: #424242;
+  --pressed: #4e4e4e;
+  --row-selected: #525252;
+  /* Status colours */
+  --danger: #ec5b62;
+  --warning: #e8b046;
+  --caption-close: #c42b1c;
+  --caption-close-text: #ffffff;
+  /* Canvas and scopes */
+  --canvas: #282828;
+  --canvas-dot: #282828;
+  --histogram-bg: #282828;
+  --histogram-level: 225;
+  --scrim: #0000006e;
+  /* Corners and layout */
+  --radius-sm: 3;
+  --radius: 4;
+  --radius-lg: 6;
+  --bevel: false;
+  --pro: true;
+  --round-chips: false;
+  /* Text sizes */
+  --font-small: 10.5;
+  --font-body: 12;
+  --font-button: 12;
+  --font-heading: 15;
+  --font-mono: 12;
+  /* Spacing */
+  --item-spacing: 8 6;
+  --button-padding: 10 4;
+  --interact-size: 24 24;
+  --slider-width: 150;
+  --combo-width: 120;
+  --menu-margin: 6;
+  --window-margin: 16;
+  --icon-width: 14;
+  --tooltip-width: 280;
+  --scroll-width: 4;
+  /* Shadows */
+  --shadow: #00000096;
+  --window-shadow: 0 10 32 0;
+  --popup-shadow: 0 6 20 0;
+}
+
+label {
+  /* Labels */
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button {
+  /* Controls */
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button:hover {
+  /* Controls: hover */
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button:active {
+  /* Controls: pressed */
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button:open {
+  /* Controls: open */
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}

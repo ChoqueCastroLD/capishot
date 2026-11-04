@@ -38,6 +38,9 @@
 //!   `id` is the request's optional `id` param)
 //! - `fonts.status {families?}`: where families stand, asking for nothing: `{loaded, loading,
 //!   failed, available, missing, manifest}` (without `families`, every family the host serves)
+//! - `document.fontsReady {document?, timeoutMs?}`: reply once every font the document's type uses
+//!   has arrived or failed (what is still on its way after `timeoutMs`, default 10000, counts as
+//!   failed), its type drawn with them: `{document, ready, missing, failed}`
 //! - `editor.showDocument {id, viewport?, hidePrevious?, timeoutMs?}`, `document.prewarm {id,
 //!   viewport?, full?, timeoutMs?}`, `editor.setLayout {single}`, `editor.setMemoryBudget {mb}`,
 //!   `document.memory`: page switching for hosts with one visible document (`doc_switch`)
@@ -158,6 +161,8 @@ pub enum Outcome {
         /// The caller's tag for its `fontsPreloadProgress` events.
         id: Option<String>,
     },
+    /// `document.fontsReady`: reply once the document's fonts have arrived or failed.
+    AfterDocumentFonts { doc: photocraft_doc::DocId, timeout_s: f64 },
 }
 
 fn wrap(r: Result<Value, String>) -> Outcome {

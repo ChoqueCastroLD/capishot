@@ -5054,7 +5054,7 @@ layerLabel	No Color	Sem cor
 	Bend	Curvatura
 	Horizontal Distortion	Distorção horizontal
 	Vertical Distortion	Distorção vertical
-	A .capiproj carries the project's settings and its font files, never pages or images.	Um .capiproj leva os ajustes do projeto e os arquivos de fontes, nunca páginas ou imagens.
+	A .proj.capishot carries the project's settings and its font files, never pages or images.	Um .proj.capishot leva os ajustes do projeto e os arquivos de fontes, nunca páginas ou imagens.
 	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Um projeto de fontes guarda as fontes de uma série por função (diálogo, grito, narração…) e seus ajustes. Crie um para começar.
 	Add role	Adicionar função
 	Add tag	Adicionar etiqueta
@@ -5253,3 +5253,127 @@ fontTab	Find More	Encontrar mais
 	Add Image Layer	Adicionar camada de imagem
 	Set Layer Mask	Definir máscara de camada
 	Set Selection	Definir seleção
+	This page is large for this device	Esta página é grande para este dispositivo
+	The page has {mp} MP and this device {gb} GB of memory: save often, and keep few documents open.	A página tem {mp} MP e este dispositivo {gb} GB de memória: salve com frequência e mantenha poucos documentos abertos.
+	Image › Image Size makes it lighter if the browser runs short of memory.	Imagem › Tamanho da imagem a deixa mais leve se faltar memória ao navegador.
+# Preferences › Profile & Themes, the Theme editor
+	3D bevels	Chanfros 3D
+	A .proj.capishot carries your settings to another computer or to your team. Never pages or images.	Um .proj.capishot leva seus ajustes para outro computador ou para sua equipe. Nunca páginas ou imagens.
+	Accent	Destaque
+	Accent border	Borda de destaque
+	Accent text	Texto de destaque
+	Also fonts whose licence doesn't allow sharing them	Também as fontes cuja licença não permite compartilhá-las
+	Base	Base
+	Between items	Entre itens
+	Body	Corpo
+	Border width	Espessura da borda
+	Built-in themes	Temas incluídos
+	Button padding	Preenchimento dos botões
+	Buttons	Botões
+	Canvas and scopes	Tela e gráficos
+	Canvas dots	Pontos da tela
+	Canvas surround	Ao redor da tela
+	Changes show at once across the app.	As mudanças aparecem na hora em todo o app.
+	Check box size	Tamanho das caixas de seleção
+	Choose a .proj.capishot file…	Escolher um arquivo .proj.capishot…
+	Choose icon…	Escolher ícone…
+	Close button	Botão Fechar
+	Close button glyph	Símbolo do botão Fechar
+	Control size	Tamanho dos controles
+	Controls	Controles
+	Controls: hover	Controles: ao passar
+	Controls: open	Controles: abertos
+	Controls: pressed	Controles: pressionados
+	Corners and layout	Cantos e layout
+	Danger	Perigo
+	Dark theme	Tema escuro
+	Description (for sharing)	Descrição (para compartilhar)
+	Dimming	Escurecimento
+	Edit as text	Editar como texto
+	Export profile	Exportar perfil
+	Export profile…	Exportar perfil…
+	Faint text	Texto suave
+	Favourite fonts, font folders and names	Fontes favoritas, pastas de fontes e nomes
+	Field borders	Bordas dos campos
+	Fields	Campos
+	Font files	Arquivos de fontes
+	Font files can make the file large.	Os arquivos de fontes podem deixar o arquivo grande.
+	Font project	Projeto de fontes
+	Font projects	Projetos de fontes
+	General preferences	Preferências gerais
+	Grow by	Crescer
+	Headings	Títulos
+	Hover	Ao passar
+	Hover and selection	Ao passar e seleção
+	Icon: 256 × 256	Ícone: 256 × 256
+	Icons	Ícones
+	Import profile	Importar perfil
+	Import theme…	Importar tema…
+	Keyboard shortcuts, menus and toolbar	Atalhos de teclado, menus e barra de ferramentas
+	Large corners	Cantos grandes
+	Line width	Espessura da linha
+	Menu button width	Largura dos botões de menu
+	Menu margin	Margem dos menus
+	Menus and pop-ups	Menus e pop-ups
+	Merge with mine	Mesclar com o meu
+	My Capishot profile	Meu perfil do Capishot
+	My {theme}	Meu {theme}
+	New theme from this…	Novo tema a partir deste…
+	No icon	Sem ícone
+	None yet: start one from a built-in theme below, or import a .theme.capishot file.	Nenhum ainda: crie um a partir de um tema incluído ou importe um arquivo .theme.capishot.
+	Numbers	Números
+	Panel area	Área dos painéis
+	Panel borders	Bordas dos painéis
+	Presets: swatches, gradients, styles, patterns, shapes, tool presets	Predefinições: amostras, degradês, estilos, padrões, formas, ferramentas
+	Pressed	Pressionado
+	Primary button	Botão principal
+	Primary button text	Texto do botão principal
+	Pro controls	Controles Pro
+	Profile & Themes	Perfil e temas
+	Profile & Themes…	Perfil e temas…
+	Profile exported	Perfil exportado
+	Profile imported	Perfil importado
+	Profile imported.	Perfil importado.
+	Reading your fonts…	Lendo suas fontes…
+	Replace mine	Substituir o meu
+	Round colour chips	Amostras de cor redondas
+	Save and export…	Salvar e exportar…
+	Save theme	Salvar tema
+	Scope background	Fundo dos gráficos
+	Scope brightness	Brilho dos gráficos
+	Scroll bar width	Largura das barras de rolagem
+	Secondary text	Texto secundário
+	Selected row	Linha selecionada
+	Separators	Separadores
+	Shadow colour	Cor da sombra
+	Slider width	Largura dos controles deslizantes
+	Small corners	Cantos pequenos
+	Soft accent	Destaque suave
+	Start a theme of your own from any of them.	Crie seu próprio tema a partir de qualquer um deles.
+	Starts from	Parte de
+	Status colours	Cores de estado
+	Surfaces	Superfícies
+	Tab strip	Barra de abas
+	Text and icons	Texto e ícones
+	Text sizes	Tamanhos de texto
+	Theme and custom themes	Tema e temas próprios
+	Theme saved.	Tema salvo.
+	Theme {name} imported	Tema {name} importado
+	Themes	Temas
+	Title	Título
+	Tooltip width	Largura das dicas
+	TypeR styles	Estilos do TypeR
+	Undo last profile import	Desfazer a última importação de perfil
+	Use the built-in theme	Usar o tema incluído
+	Web page	Página da web
+	Window and toolbars	Janela e barras de ferramentas
+	Window margin	Margem das janelas
+	Workspace and panel layout	Espaço de trabalho e disposição dos painéis
+	Your current profile is kept first, so you can undo the import.	Antes, seu perfil atual é guardado, para você poder desfazer a importação.
+	Your profile is back as it was before the import.	Seu perfil voltou a como estava antes da importação.
+	Your themes	Seus temas
+	dark, manga, high contrast	escuro, mangá, alto contraste
+	{file} carries:	{file} contém:
+	{n} font files	{n} arquivos de fontes
+	{n} lines ignored:	{n} linhas ignoradas:
+	Discard changes	Descartar alterações

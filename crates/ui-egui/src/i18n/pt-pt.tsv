@@ -3345,7 +3345,7 @@ fontWeight	Italic	Itálico
 	Bend	Curvatura
 	Horizontal Distortion	Distorção horizontal
 	Vertical Distortion	Distorção vertical
-	A .capiproj carries the project's settings and its font files, never pages or images.	Um .capiproj leva os ajustes do projeto e os arquivos de fontes, nunca páginas ou imagens.
+	A .proj.capishot carries the project's settings and its font files, never pages or images.	Um .proj.capishot leva os ajustes do projeto e os arquivos de fontes, nunca páginas ou imagens.
 	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Um projeto de fontes guarda as fontes de uma série por função (diálogo, grito, narração…) e seus ajustes. Crie um para começar.
 	Add role	Adicionar função
 	Add tag	Adicionar etiqueta
@@ -3502,3 +3502,6 @@ fontWeight	Italic	Itálico
 # Preview channel badge (title bar of a test deploy)
 	PREVIEW	PRÉVIA
 	Preview build, for testing before a release. It sends no usage statistics.	Versão prévia, para testar antes de publicar. Não envia estatísticas de utilização.
+	This page is large for this device	Esta página é grande para este dispositivo
+	The page has {mp} MP and this device {gb} GB of memory: save often, and keep few documents open.	A página tem {mp} MP e este dispositivo {gb} GB de memória: guarde com frequência e mantenha poucos documentos abertos.
+	Image › Image Size makes it lighter if the browser runs short of memory.	Imagem › Tamanho da imagem torna-a mais leve se faltar memória ao navegador.

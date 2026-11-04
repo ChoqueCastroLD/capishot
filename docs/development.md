@@ -182,7 +182,7 @@ By default PhotoCraft's own crates log at `info` and everything else at `warn`. 
 | `PHOTOCRAFT_PRESENT_MODE=novsync` (or `--present-mode`) | Present mode for this launch: `fifo`, `autovsync`, or `novsync` (also `immediate`, `mailbox`: no vsync, the first of Immediate, Mailbox, Fifo the driver offers). Default: vsync, or no vsync when Preferences › Performance › Low-Latency Drawing is on (it ships off). For latency comparisons; shown in the stroke trace. A bad `--present-mode` is a usage error; a bad variable is logged and ignored |
 | `PHOTOCRAFT_FRAME_LATENCY=1` (or `--frame-latency`) | Frames the swap chain may queue, 1 to 3 (wgpu's GL backend ignores it). For latency comparisons; shown in the stroke trace. A bad `--frame-latency` is a usage error; a bad variable is logged and ignored |
 | `PHOTOCRAFT_PRINT_PORTAL=1` | Linux: File › Print always opens the system print dialog (the XDG print portal) instead of talking to CUPS; `0` never does. See [printing](printing.md). |
-| `PHOTOCRAFT_THEME_FILE=tokens.json` | **Debug builds only:** live design-token overrides, re-read on change |
+| `PHOTOCRAFT_THEME_FILE=theme.css` | **Debug builds only:** a `theme.css` (the stylesheet format of `crates/ui-egui/src/theme/css.rs`) re-read and applied on change |
 
 ### Live design tokens
 

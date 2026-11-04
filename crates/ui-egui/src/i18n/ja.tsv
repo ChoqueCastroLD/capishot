@@ -4606,7 +4606,7 @@ curves	Smooth	スムーズ
 	Outline width	縁取りの太さ
 	Color Picker (Outline)	カラーピッカー（縁取り）
 	Edit text	テキストを編集
-	A .capiproj carries the project's settings and its font files, never pages or images.	.capiproj にはプロジェクトの設定とフォントファイルが入ります。ページや画像は入りません。
+	A .proj.capishot carries the project's settings and its font files, never pages or images.	.proj.capishot にはプロジェクトの設定とフォントファイルが入ります。ページや画像は入りません。
 	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	フォントプロジェクトは、シリーズのフォントを役割（セリフ、叫び、ナレーション…）ごとに設定とともに保存します。まず作成してください。
 	Add role	役割を追加
 	Add tag	タグを追加

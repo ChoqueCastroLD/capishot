@@ -31,7 +31,16 @@ impl PhotocraftApp {
         }
     }
 
+    /// Show built-in theme `kind` (leaving a custom theme).
     pub(crate) fn apply_theme(&mut self, ctx: &egui::Context, kind: theme::ThemeKind) {
+        self.prefs_rt.custom_theme = None;
+        self.apply_tokens(ctx, theme::Tokens::for_kind(kind));
+    }
+
+    /// Show `tokens`: a built-in theme's, a custom one's or the Theme editor's preview. The
+    /// layout follows their base theme.
+    pub(crate) fn apply_tokens(&mut self, ctx: &egui::Context, tokens: theme::Tokens) {
+        let kind = tokens.kind;
         // Color and Swatches trade indices between Pro and Studio layouts.
         if let Some(selected) = dock::Group::Color.tabs(theme::Tokens::for_kind(self.ui.theme).pro).get(self.ui.dock_tabs.color)
             && let Some(tab) = dock::Group::Color.tabs(theme::Tokens::for_kind(kind).pro).iter().position(|name| name == selected)
@@ -40,7 +49,7 @@ impl PhotocraftApp {
         }
         self.ui.theme = kind;
         panel_docking::sync_visibility(self);
-        theme::apply(ctx, kind);
+        theme::apply_tokens(ctx, tokens);
         self.checker = None;
     }
 }

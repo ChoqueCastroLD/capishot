@@ -296,6 +296,11 @@ pub struct Interface {
     pub light_theme: LightTheme,
     /// Theme shortcuts shown in the appearance button's context menu.
     pub favorite_themes: Vec<Theme>,
+    /// The user's own colour themes (Preferences › Profile & Themes).
+    pub custom_themes: Vec<CustomTheme>,
+    /// The custom theme in use, by id ("" for the built-in one the appearance mode picks).
+    /// Choosing a built-in theme or appearance mode clears it.
+    pub custom_theme: String,
     /// Pasteboard colour in standard screen mode (`canvasCustomColor` when "custom").
     pub canvas_color: CanvasColor,
     pub canvas_custom_color: String,
@@ -364,6 +369,8 @@ impl Default for Interface {
             dark_theme: DarkTheme::ProMedium,
             light_theme: LightTheme::ProLight,
             favorite_themes: Vec::new(),
+            custom_themes: Vec::new(),
+            custom_theme: String::new(),
             canvas_color: CanvasColor::Default,
             canvas_custom_color: "#282828".into(),
             show_canvas_dots: true,
@@ -389,6 +396,31 @@ impl Default for Interface {
             simple_modifier_button: false,
             simple_two_finger_rotate: false,
         }
+    }
+}
+
+/// One of the user's colour themes (Preferences › Profile & Themes): its `theme.css`, the
+/// stylesheet the shell reads into design tokens (built-in themes are the same kind of
+/// stylesheet), and the description a `.theme.capishot` carries.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CustomTheme {
+    pub id: String,
+    pub name: String,
+    pub css: String,
+    pub meta: crate::package::Meta,
+    /// Its icon: a PNG of at most 256 pixels a side, as base64 ("" for none).
+    pub icon: String,
+}
+
+impl Interface {
+    /// The custom theme in use, if it exists.
+    pub fn active_custom_theme(&self) -> Option<&CustomTheme> {
+        (!self.custom_theme.is_empty()).then(|| self.custom_themes.iter().find(|t| t.id == self.custom_theme)).flatten()
+    }
+
+    fn builtin_choice(&self) -> (Theme, AppearanceMode, DarkTheme, LightTheme) {
+        (self.theme, self.appearance_mode, self.dark_theme, self.light_theme)
     }
 }
 
@@ -496,6 +528,7 @@ pub use photocraft_paint::ResponseCurve as PressureCurve;
 mod cmds;
 mod customize;
 mod files;
+pub mod profile;
 mod shortcuts;
 mod store;
 mod validate;
@@ -1327,6 +1360,9 @@ pub struct Preferences {
     /// Window › Font Projects: the projects and the active one (`font_projects::Projects`; no
     /// font files, which are the user's fonts).
     pub font_projects: Value,
+    /// The profile as it was before the last profile import (`profile.undoImport` restores it):
+    /// sections as [`profile::capture`] makes them.
+    pub profile_backup: Value,
 }
 
 impl Preferences {
@@ -1341,7 +1377,17 @@ impl Preferences {
     }
 
     /// Set a value by dotted path, validating it. Unknown paths and wrong types are errors.
+    /// Choosing a built-in theme or appearance mode leaves the custom theme in use.
     pub fn set(&mut self, path: &str, value: Value) -> std::result::Result<(), String> {
+        let (before, custom) = (self.interface.builtin_choice(), self.interface.custom_theme.clone());
+        self.set_value(path, value)?;
+        if self.interface.builtin_choice() != before && self.interface.custom_theme == custom {
+            self.interface.custom_theme.clear();
+        }
+        Ok(())
+    }
+
+    fn set_value(&mut self, path: &str, value: Value) -> std::result::Result<(), String> {
         if path == "alternateShortcuts" {
             let obj = value.as_object().ok_or("`alternateShortcuts` maps command ids to lists of shortcuts")?;
             let mut map = BTreeMap::new();

@@ -56,6 +56,16 @@ pub const FEATURES: &[&str] = &[
     "batch",
     "layer.setPropsMany",
     "layer.putPixels.src",
+    "layer.getPixels",
+    "layer.dirtySince",
+    "events.documentShown",
+    "events.documentReady",
+    "events.viewportChanged",
+    "events.layerChanged",
+    "events.fontsReady",
+    "document.fontsReady",
+    "fonts.noFallbackFlash",
+    "window.events",
     "document.views",
     "editor.showDocument",
     "editor.setLayout",
@@ -382,7 +392,7 @@ pub struct Snapshot {
     pub view: Option<ViewSnap>,
 }
 
-/// The active document's camera: what `viewChanged` reports.
+/// The active document's camera: what `viewChanged` and `viewportChanged` report.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ViewSnap {
     pub doc: u64,
@@ -392,6 +402,27 @@ pub struct ViewSnap {
     pub center: [f32; 2],
     /// The view's rotation, degrees in (−180, 180].
     pub rotation: f32,
+    /// The canvas area's size in device pixels.
+    pub canvas: [f32; 2],
+}
+
+impl ViewSnap {
+    /// The camera alone (what `viewChanged` compares): not the canvas size.
+    fn camera(&self) -> (u64, f32, [f32; 2], f32) {
+        (self.doc, self.zoom, self.center, self.rotation)
+    }
+
+    /// The document area the canvas shows, `[x, y, width, height]` in document pixels (its
+    /// bounding box when the view is rotated).
+    pub fn visible_rect(&self) -> [f32; 4] {
+        if !(self.zoom.is_finite() && self.zoom > 0.0) {
+            return [self.center[0], self.center[1], 0.0, 0.0];
+        }
+        let (w, h) = (self.canvas[0] / self.zoom, self.canvas[1] / self.zoom);
+        let (sin, cos) = self.rotation.to_radians().sin_cos();
+        let (bw, bh) = (w * cos.abs() + h * sin.abs(), w * sin.abs() + h * cos.abs());
+        [self.center[0] - bw / 2.0, self.center[1] - bh / 2.0, bw, bh]
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -405,6 +436,114 @@ pub struct DocSnap {
     pub order: std::sync::Arc<LayerOrder>,
     /// A hidden helper document: not in the `documents` event.
     pub hidden: bool,
+    /// Every layer's settings ([`layer_props`]).
+    pub props: std::sync::Arc<Vec<LayerProps>>,
+}
+
+/// What `layerChanged` compares: a layer's settings and its type, shape or adjustment
+/// (not its pixels: `layerPixelsChanged` says those).
+#[derive(Clone, Debug, PartialEq)]
+pub struct LayerProps {
+    pub id: u64,
+    pub parent: Option<u64>,
+    pub name: String,
+    pub visible: bool,
+    pub opacity: f32,
+    pub fill_opacity: f32,
+    pub blend: photocraft_engine::doc::BlendMode,
+    pub clipped: bool,
+    pub locks: photocraft_engine::doc::Locks,
+    pub label: photocraft_engine::doc::LabelColor,
+    pub effects: photocraft_engine::doc::Effects,
+    /// The layer mask's switches (its pixels count as pixels).
+    pub mask: Option<(bool, f32, f32)>,
+    pub vector_mask: Option<photocraft_engine::doc::VectorMask>,
+    /// A type or shape layer's model without its rendered pixels, an adjustment's or fill's
+    /// settings; `None` for pixel layers, groups and smart objects.
+    pub content: Option<photocraft_engine::doc::LayerContent>,
+}
+
+/// Every layer's [`LayerProps`], in the document's order.
+pub fn layer_props(doc: &photocraft_engine::doc::Document) -> Vec<LayerProps> {
+    use photocraft_engine::doc::LayerContent;
+    fn rec(layers: &[photocraft_engine::doc::Layer], parent: Option<u64>, out: &mut Vec<LayerProps>) {
+        for l in layers {
+            let content = match &l.content {
+                LayerContent::Text(t) => Some(LayerContent::Text(photocraft_engine::doc::TextLayer { cache: None, psd_raw: None, ..t.clone() })),
+                LayerContent::Shape(sh) => {
+                    let mut sh = sh.clone();
+                    sh.cache = None;
+                    sh.psd_raw = None;
+                    Some(LayerContent::Shape(sh))
+                }
+                c @ (LayerContent::Adjustment(_) | LayerContent::Fill(_)) => Some(c.clone()),
+                _ => None,
+            };
+            out.push(LayerProps {
+                id: l.id.0,
+                parent,
+                name: l.name.clone(),
+                visible: l.visible,
+                opacity: l.opacity,
+                fill_opacity: l.fill_opacity,
+                blend: l.blend,
+                clipped: l.clipped,
+                locks: l.locks,
+                label: l.label,
+                effects: l.effects.clone(),
+                mask: l.mask.as_ref().map(|m| (m.enabled, m.density, m.feather)),
+                vector_mask: l.vector_mask.clone(),
+                content,
+            });
+            if let Some(ch) = l.children() {
+                rec(ch, Some(l.id.0), out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    rec(&doc.layers, None, &mut out);
+    out
+}
+
+/// `layerChanged {document, layer, what}` for every layer whose settings changed, was added or
+/// was removed; `what` lists what changed: `added`, `removed`, `name`, `visible`, `opacity`,
+/// `fillOpacity`, `blend`, `clipped`, `locks`, `label`, `effects`, `mask`, `vectorMask`, `parent`,
+/// `content` (the text and its style, a shape, an adjustment's or fill's settings).
+fn layer_changed_events(document: u64, prev: &[LayerProps], next: &[LayerProps]) -> Vec<Value> {
+    let event = |layer: u64, what: Vec<&str>| json!({ "type": "layerChanged", "document": document, "layer": layer, "what": what });
+    let mut out = Vec::new();
+    for n in next {
+        let Some(p) = prev.iter().find(|p| p.id == n.id) else {
+            out.push(event(n.id, vec!["added"]));
+            continue;
+        };
+        if p == n {
+            continue;
+        }
+        let checks: [(&str, bool); 13] = [
+            ("name", p.name != n.name),
+            ("visible", p.visible != n.visible),
+            ("opacity", p.opacity != n.opacity),
+            ("fillOpacity", p.fill_opacity != n.fill_opacity),
+            ("blend", p.blend != n.blend),
+            ("clipped", p.clipped != n.clipped),
+            ("locks", p.locks != n.locks),
+            ("label", p.label != n.label),
+            ("effects", p.effects != n.effects),
+            ("mask", p.mask != n.mask),
+            ("vectorMask", p.vector_mask != n.vector_mask),
+            ("parent", p.parent != n.parent),
+            ("content", p.content != n.content),
+        ];
+        let what: Vec<&str> = checks.iter().filter(|(_, changed)| *changed).map(|(w, _)| *w).collect();
+        if !what.is_empty() {
+            out.push(event(n.id, what));
+        }
+    }
+    for p in prev.iter().filter(|p| !next.iter().any(|n| n.id == p.id)) {
+        out.push(event(p.id, vec!["removed"]));
+    }
+    out
 }
 
 /// Each group's (`None`: the document's top level) child layer ids, top to bottom.
@@ -450,6 +589,9 @@ pub fn events(prev: Option<&Snapshot>, next: &Snapshot) -> Vec<Value> {
     if ids(prev) != ids(next) || prev.active != next.active {
         out.push(json!({ "type": "documents", "documents": ids(next), "active": next.active }));
     }
+    if let Some(id) = next.active.filter(|a| prev.active != Some(*a)) {
+        out.push(json!({ "type": "documentShown", "id": id, "previous": prev.active }));
+    }
     for d in &next.docs {
         let Some(before) = prev.docs.iter().find(|p| p.id == d.id) else { continue };
         if before.revision != d.revision {
@@ -457,6 +599,9 @@ pub fn events(prev: Option<&Snapshot>, next: &Snapshot) -> Vec<Value> {
         }
         if !std::sync::Arc::ptr_eq(&before.order, &d.order) && before.order != d.order {
             out.extend(reorder_events(d.id, &before.order, &d.order));
+        }
+        if !std::sync::Arc::ptr_eq(&before.props, &d.props) && before.props != d.props {
+            out.extend(layer_changed_events(d.id, &before.props, &d.props));
         }
         if before.dirty != d.dirty {
             out.push(json!({ "type": "dirty", "id": d.id, "dirty": d.dirty }));
@@ -509,6 +654,10 @@ pub fn pixels_changed_event(document: u64, c: &photocraft_engine::pixel_revs::Pi
 /// moved, after `zoom` when the factor changed (or another document's view shows). The host
 /// glue calls it at most once per animation frame with the latest view, so a gesture's frames
 /// coalesce.
+///
+/// `viewportChanged {document, zoom, center, rotation, canvas, rect}` follows whenever anything
+/// moved, the canvas size too: `canvas` `[width, height]` in device pixels, `rect` the document
+/// area it shows `[x, y, width, height]` (document pixels; the bounding box when rotated).
 pub fn view_events(prev: Option<&ViewSnap>, next: &ViewSnap) -> Vec<Value> {
     if prev == Some(next) {
         return Vec::new();
@@ -517,8 +666,89 @@ pub fn view_events(prev: Option<&ViewSnap>, next: &ViewSnap) -> Vec<Value> {
     if prev.is_none_or(|p| p.doc != next.doc || p.zoom != next.zoom) {
         out.push(json!({ "type": "zoom", "id": next.doc, "zoom": next.zoom }));
     }
-    out.push(json!({ "type": "viewChanged", "id": next.doc, "zoom": next.zoom, "center": next.center, "rotation": next.rotation }));
+    if prev.is_none_or(|p| p.camera() != next.camera()) {
+        out.push(json!({ "type": "viewChanged", "id": next.doc, "zoom": next.zoom, "center": next.center, "rotation": next.rotation }));
+    }
+    out.push(json!({
+        "type": "viewportChanged",
+        "document": next.doc,
+        "zoom": next.zoom,
+        "center": next.center,
+        "rotation": next.rotation,
+        "canvas": next.canvas,
+        "rect": next.visible_rect(),
+    }));
     out
+}
+
+/// How long an `open` waits to be matched with the document it makes (ms): one that failed
+/// without saying so is forgotten then.
+const OPEN_MATCH_MS: f64 = 120_000.0;
+
+/// `documentReady` bookkeeping: when each open was asked for, and the documents not complete yet.
+#[derive(Debug, Default)]
+pub struct ReadyTracker {
+    /// Opens asked for and not matched with a document yet, oldest first (ms).
+    opens: std::collections::VecDeque<f64>,
+    /// `(document, asked at, first frame at)` of documents not complete yet.
+    pending: Vec<(u64, f64, f64)>,
+    /// The documents seen so far (a new one is one not in it).
+    seen: Vec<u64>,
+    started: bool,
+}
+
+impl ReadyTracker {
+    /// An `open` / `openDocument` reached the app at `now` (ms).
+    pub fn note_open(&mut self, now: f64) {
+        self.opens.push_back(now);
+        if self.opens.len() > 64 {
+            self.opens.pop_front();
+        }
+    }
+
+    /// The last open noted failed: it makes no document.
+    pub fn open_failed(&mut self) {
+        self.opens.pop_back();
+    }
+
+    /// The end of a frame at `now` (ms) with these documents, each with whether it is complete
+    /// (decoded, fonts settled, nothing working on it): the `documentReady` events. Documents
+    /// open on the first frame are the baseline (hosts read them then).
+    pub fn frame(&mut self, now: f64, docs: &[(u64, bool)]) -> Vec<Value> {
+        while self.opens.front().is_some_and(|t| now - t > OPEN_MATCH_MS) {
+            self.opens.pop_front();
+        }
+        let started = std::mem::replace(&mut self.started, true);
+        for (id, _) in docs {
+            if self.seen.contains(id) {
+                continue;
+            }
+            self.seen.push(*id);
+            if started {
+                let asked = self.opens.pop_front().unwrap_or(now);
+                self.pending.push((*id, asked, now));
+            }
+        }
+        self.seen.retain(|id| docs.iter().any(|(d, _)| d == id));
+        let mut out = Vec::new();
+        self.pending.retain(|&(id, asked, first)| match docs.iter().find(|(d, _)| *d == id) {
+            None => false,
+            Some((_, false)) => true,
+            Some((_, true)) => {
+                out.push(ready_event(id, first - asked, now - asked));
+                false
+            }
+        });
+        out
+    }
+}
+
+/// `documentReady {id, firstFrameMs, finalFrameMs}`: `id` is complete. Both times count from
+/// when it was asked for (`open` / `openDocument`, else the frame it appeared in) to the end of
+/// the first frame that showed it and of the first frame it was complete in.
+pub fn ready_event(id: u64, first_ms: f64, final_ms: f64) -> Value {
+    let ms = |v: f64| (v.max(0.0) * 10.0).round() / 10.0;
+    json!({ "type": "documentReady", "id": id, "firstFrameMs": ms(first_ms), "finalFrameMs": ms(final_ms) })
 }
 
 #[cfg(test)]
@@ -642,7 +872,11 @@ mod tests {
         c.docs.push(DocSnap { id: 2, ..Default::default() });
         c.active = Some(2);
         let e = events(Some(&b), &c);
-        assert_eq!(e, [json!({"type": "documents", "documents": [1, 2], "active": 2})], "the same error isn't repeated");
+        assert_eq!(
+            e,
+            [json!({"type": "documents", "documents": [1, 2], "active": 2}), json!({"type": "documentShown", "id": 2, "previous": 1})],
+            "the same error isn't repeated"
+        );
     }
 
     #[test]
@@ -730,6 +964,54 @@ mod tests {
     }
 
     #[test]
+    fn layer_settings_and_type_changes_are_layer_changed_events() {
+        let mut s = photocraft_engine::Session::new();
+        s.execute("file.new", json!({"width": 64, "height": 64})).expect("a document");
+        let text = s.execute("type.create", json!({"text": "Hi", "x": 4, "y": 30, "size": 12})).expect("type")["layer"].as_u64().expect("an id");
+        let props = |s: &photocraft_engine::Session| std::sync::Arc::new(layer_props(&s.active().expect("a document").doc));
+        let snap = |p| Snapshot { docs: vec![DocSnap { id: 1, props: p, ..Default::default() }], ..Default::default() };
+        let a = snap(props(&s));
+        s.execute("layer.renameLayer", json!({"layer": text, "name": "line"})).expect("rename");
+        s.execute("type.edit", json!({"layer": text, "text": "Hello"})).expect("text");
+        let b = snap(props(&s));
+        assert_eq!(events(Some(&a), &b), [json!({"type": "layerChanged", "document": 1, "layer": text, "what": ["name", "content"]})]);
+        let added = s.execute("layer.new.layer", json!({})).expect("a layer")["layer"].as_u64().expect("an id");
+        let c = snap(props(&s));
+        assert_eq!(events(Some(&b), &c), [json!({"type": "layerChanged", "document": 1, "layer": added, "what": ["added"]})]);
+        s.execute("edit.fill", json!({"contents": "black"})).expect("a fill");
+        assert!(events(Some(&c), &snap(props(&s))).is_empty(), "pixels are layerPixelsChanged's");
+        assert_eq!(events(Some(&c), &b)[0]["what"], json!(["removed"]));
+    }
+
+    #[test]
+    fn the_visible_rect_follows_zoom_and_rotation() {
+        let v = ViewSnap { doc: 1, zoom: 2.0, center: [100.0, 50.0], rotation: 0.0, canvas: [400.0, 200.0] };
+        assert_eq!(v.visible_rect(), [0.0, 0.0, 200.0, 100.0]);
+        let r = ViewSnap { rotation: 90.0, ..v }.visible_rect();
+        assert!((r[2] - 100.0).abs() < 1e-3 && (r[3] - 200.0).abs() < 1e-3, "{r:?}");
+        assert_eq!(ready_event(3, 12.345, 80.0), json!({"type": "documentReady", "id": 3, "firstFrameMs": 12.3, "finalFrameMs": 80.0}));
+    }
+
+    #[test]
+    fn documents_are_ready_once_complete_timed_from_their_open() {
+        let mut r = ReadyTracker::default();
+        assert!(r.frame(0.0, &[(1, true)]).is_empty(), "the first frame is the baseline");
+        r.note_open(10.0);
+        assert!(r.frame(16.0, &[(1, true)]).is_empty(), "still opening");
+        assert!(r.frame(40.0, &[(1, true), (2, false)]).is_empty(), "shown, not complete");
+        assert_eq!(r.frame(90.0, &[(1, true), (2, true)]), [ready_event(2, 30.0, 80.0)]);
+        assert!(r.frame(100.0, &[(1, true), (2, true)]).is_empty(), "once");
+        // A document made without an open counts from the frame it appeared in.
+        assert_eq!(r.frame(120.0, &[(1, true), (2, true), (3, true)]), [ready_event(3, 0.0, 0.0)]);
+        // A failed open isn't matched with the next document; a closed one is dropped.
+        r.note_open(130.0);
+        r.open_failed();
+        r.note_open(200.0);
+        assert!(r.frame(210.0, &[(4, false)]).is_empty());
+        assert!(r.frame(220.0, &[]).is_empty());
+    }
+
+    #[test]
     fn execute_options_go_into_the_request() {
         assert_eq!(execute_request("a.b", json!({}), &Value::Null), Ok(json!({"command": "a.b", "params": {}})));
         assert_eq!(
@@ -752,21 +1034,27 @@ mod tests {
 
     #[test]
     fn view_changes_are_reported_once_per_change() {
-        let view = ViewSnap { doc: 1, zoom: 0.5, center: [400.0, 600.0], rotation: 0.0 };
+        let view = ViewSnap { doc: 1, zoom: 0.5, center: [400.0, 600.0], rotation: 0.0, canvas: [0.0, 0.0] };
         assert!(view_events(Some(&view), &view).is_empty(), "nothing moved");
         // A pan: only viewChanged.
         let panned = ViewSnap { center: [420.0, 610.0], ..view.clone() };
-        assert_eq!(view_events(Some(&view), &panned), [json!({"type": "viewChanged", "id": 1, "zoom": 0.5, "center": [420.0, 610.0], "rotation": 0.0})]);
+        assert_eq!(view_events(Some(&view), &panned)[0], json!({"type": "viewChanged", "id": 1, "zoom": 0.5, "center": [420.0, 610.0], "rotation": 0.0}));
+        assert_eq!(view_events(Some(&view), &panned)[1]["type"], "viewportChanged");
         // A zoom: the zoom event as well, then viewChanged.
         let zoomed = ViewSnap { zoom: 2.0, ..panned.clone() };
         let e = view_events(Some(&panned), &zoomed);
         assert_eq!(e[0], json!({"type": "zoom", "id": 1, "zoom": 2.0}));
-        assert_eq!((e[1]["type"].as_str(), e.len()), (Some("viewChanged"), 2));
+        assert_eq!((e[1]["type"].as_str(), e.len()), (Some("viewChanged"), 3));
         // A rotation; the first view reported, or another document's, says its zoom too.
         let turned = ViewSnap { rotation: 15.0, ..zoomed.clone() };
         assert_eq!(view_events(Some(&zoomed), &turned)[0]["rotation"], json!(15.0));
-        assert_eq!(view_events(None, &turned).len(), 2);
-        assert_eq!(view_events(Some(&turned), &ViewSnap { doc: 2, ..turned.clone() }).len(), 2);
+        assert_eq!(view_events(None, &turned).len(), 3);
+        assert_eq!(view_events(Some(&turned), &ViewSnap { doc: 2, ..turned.clone() }).len(), 3);
+        // The canvas resized: only viewportChanged, with the area it shows.
+        let wide = ViewSnap { canvas: [800.0, 600.0], ..turned.clone() };
+        let e = view_events(Some(&turned), &wide);
+        assert_eq!(e.len(), 1);
+        assert_eq!(e[0]["type"], "viewportChanged");
         // The view isn't part of the per-frame events.
         let a = Snapshot { active: Some(1), view: Some(view.clone()), ..Default::default() };
         let b = Snapshot { view: Some(turned), ..a.clone() };

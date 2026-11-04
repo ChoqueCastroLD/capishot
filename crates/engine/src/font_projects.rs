@@ -8,9 +8,12 @@
 //! ([`RESOURCE_ID`], ignored by Photoshop), and a file name like a remembered one
 //! ([`page_prefix`]) opens with its project.
 //!
-//! A `.capiproj` ([`export`], [`import`]) is a project to share: a zip with `manifest.json` and
-//! the font files the project uses under `fonts/` (with their SHA-256), and optionally TypeR's
-//! style library and Bubble Type's styles. Never pages or images. Fonts whose licence forbids
+//! A `.proj.capishot` ([`export`], [`import`]; `.capiproj` before version 2, still read) is a
+//! project or a Capishot profile to share: a [`crate::package`] with `manifest.json`, the font
+//! files it uses under `fonts/` (with their SHA-256) and, since version 2, `profile.json` with the profile sections the user chose (theme, shortcuts,
+//! workspace, preferences, fonts, presets, TypeR's and Bubble Type's styles; see
+//! [`crate::prefs::profile`]). Version 1 files (a project, `typer.json`, `bubbleStyles.json`)
+//! still open. Never pages or images. Fonts whose licence forbids
 //! redistribution (OS/2 `fsType` bit 1, [`restricted`]) are left out unless asked, and only
 //! named; the team installs them themselves.
 
@@ -18,7 +21,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use crate::commands::CommandSpec;
 use crate::{EngineError, Result, Session};
@@ -27,13 +30,23 @@ use crate::{EngineError, Result, Session};
 pub const RESOURCE_ID: u16 = 4242;
 /// Its name.
 pub const RESOURCE_NAME: &str = "Capishot font project";
-/// The `.capiproj` format version.
-pub const FORMAT_VERSION: u32 = 1;
-/// A `.capiproj` larger than this gets a warning on export (bytes).
+/// The manifest's `format`, and its version: 2 added the profile (`profile.json`, the project
+/// optional) and the package metadata. Older Capishots tell a version 2 file to update.
+pub const FORMAT: &str = "capiproj";
+pub const FORMAT_VERSION: u32 = 2;
+/// The file name ending of a project or profile, and the one version 1 files have.
+pub const EXTENSION: &str = ".proj.capishot";
+pub const LEGACY_EXTENSION: &str = ".capiproj";
+/// A package larger than this gets a warning on export (bytes).
 pub const LARGE_EXPORT: u64 = 50 << 20;
-/// The largest `.capiproj` read (bytes), and the largest font file in one.
-const MAX_IMPORT: usize = 512 << 20;
-const MAX_FONT: usize = 64 << 20;
+/// The largest package read, its most files, and its largest file (a font).
+const LIMITS: crate::package::Limits = crate::package::Limits { total: 512 << 20, files: 4096, file: 64 << 20 };
+
+/// The files a project package may hold.
+fn allowed(name: &str) -> bool {
+    matches!(name, "profile.json" | "typer.json" | "bubbleStyles.json" | "icon.png")
+        || name.strip_prefix("fonts/").is_some_and(|f| !f.is_empty() && !f.contains('/'))
+}
 
 /// The built-in roles: id and English name (the UI translates it).
 pub const BUILTIN_ROLES: [(&str, &str); 6] =
@@ -390,7 +403,7 @@ pub fn restricted(font: &[u8]) -> bool {
     fs_type(font).is_some_and(|f| f & 0x0002 != 0)
 }
 
-// ------------------------------------------------------------------ .capiproj
+// ------------------------------------------------------------------ .proj.capishot
 
 /// A font file for [`export`].
 #[derive(Clone, Debug)]
@@ -400,6 +413,30 @@ pub struct FontFile {
     /// The families it provides.
     pub families: Vec<String>,
     pub bytes: Arc<Vec<u8>>,
+}
+
+/// What [`export`] packs.
+#[derive(Default)]
+pub struct Pack<'a> {
+    /// The archive's name (the project's when there is one).
+    pub name: String,
+    /// A font project to share (the fonts it uses are packed).
+    pub project: Option<&'a Project>,
+    /// Further families to pack (a profile's fonts), with no role.
+    pub families: Vec<String>,
+    /// The font files at hand.
+    pub files: &'a [FontFile],
+    /// Families not to pack (the export dialog's unticked ones).
+    pub skip: &'a [String],
+    /// Pack restricted fonts too.
+    pub include_restricted: bool,
+    /// Family → the name the user gave it; goes with the fonts it names.
+    pub aliases: Option<&'a BTreeMap<String, String>>,
+    /// Profile sections ([`crate::prefs::profile`], plus the shell's `typer` and `bubble`):
+    /// section id → data.
+    pub profile: Map<String, Value>,
+    /// Its description (title, author, licence…).
+    pub meta: crate::package::Meta,
 }
 
 /// What [`export`] made.
@@ -414,48 +451,43 @@ pub struct Exported {
     pub large: bool,
 }
 
-/// Packs `project` as a `.capiproj`: its manifest, the font `files` it uses (each once, by
-/// SHA-256; restricted ones only with `include_restricted`), and `typer` (TypeR's style library)
-/// and `bubble` (Bubble Type's styles) when given. `skip` lists families not to pack (the
-/// export dialog's unticked ones). `aliases` (family → the name the user gave it) go with the
-/// fonts they name.
-pub fn export(
-    project: &Project,
-    files: &[FontFile],
-    skip: &[String],
-    include_restricted: bool,
-    typer: Option<&Value>,
-    bubble: Option<&Value>,
-    aliases: &BTreeMap<String, String>,
-) -> Result<Exported> {
-    let mut zip = photocraft_format::zip::ZipWriter::new();
+/// Packs a `.proj.capishot`: its manifest, the project (if any), the font `files` of its fonts and of
+/// `families` (each once, by SHA-256; restricted ones only with `include_restricted`) and the
+/// profile sections in `profile.json`.
+pub fn export(pack: &Pack) -> Result<Exported> {
+    let mut zip = crate::package::Writer::new(FORMAT, FORMAT_VERSION, &pack.meta, Map::new());
     let mut fonts_json = Vec::new();
     let mut packed: BTreeMap<String, String> = BTreeMap::new();
     let (mut restricted_out, mut referenced) = (Vec::new(), Vec::new());
     let mut total = 0u64;
-    for f in &project.fonts {
-        let file = files.iter().find(|x| x.families.iter().any(|fam| fam == &f.family));
-        let mut entry = json!({"family": f.family, "role": f.role});
-        if let Some(alias) = aliases.get(&f.family).filter(|a| !a.trim().is_empty()) {
+    let mut wanted: Vec<(&str, &str)> = pack.project.map(|p| p.fonts.iter().map(|f| (f.family.as_str(), f.role.as_str())).collect()).unwrap_or_default();
+    for f in &pack.families {
+        if !wanted.iter().any(|(w, _)| w == f) {
+            wanted.push((f, ""));
+        }
+    }
+    for (family, role) in wanted {
+        let file = pack.files.iter().find(|x| x.families.iter().any(|fam| fam == family));
+        let mut entry = json!({"family": family, "role": role});
+        if let Some(alias) = pack.aliases.and_then(|a| a.get(family)).filter(|a| !a.trim().is_empty()) {
             entry["alias"] = json!(alias);
         }
         match file {
-            Some(file) if skip.contains(&f.family) => {
-                let _ = file;
+            Some(_) if pack.skip.iter().any(|s| s == family) => {
                 entry["referenced"] = json!("skipped");
-                referenced.push(f.family.clone());
+                referenced.push(family.to_string());
             }
-            Some(file) if restricted(&file.bytes) && !include_restricted => {
+            Some(file) if restricted(&file.bytes) && !pack.include_restricted => {
                 entry["referenced"] = json!("restricted");
-                restricted_out.push(f.family.clone());
+                restricted_out.push(family.to_string());
             }
             Some(file) => {
                 let sha = photocraft_text::sha256::sha256_hex(&file.bytes);
                 let path = match packed.get(&sha) {
                     Some(p) => p.clone(),
                     None => {
-                        let p = format!("fonts/{}-{}", &sha[..12], safe_name(&file.name));
-                        zip.add(&p, &file.bytes).map_err(|e| EngineError::Other(e.to_string()))?;
+                        let p = format!("fonts/{}-{}", sha.get(..12).unwrap_or(&sha), safe_name(&file.name));
+                        zip.add(&p, &file.bytes)?;
                         total += file.bytes.len() as u64;
                         packed.insert(sha.clone(), p.clone());
                         p
@@ -466,33 +498,27 @@ pub fn export(
             }
             None => {
                 entry["referenced"] = json!("notHere");
-                referenced.push(f.family.clone());
+                referenced.push(family.to_string());
             }
         }
         fonts_json.push(entry);
     }
-    let mut p = project.clone();
-    for f in &mut p.fonts {
-        f.sha256 = fonts_json.iter().find(|e| e["family"] == f.family.as_str()).and_then(|e| e["sha256"].as_str()).map(str::to_string);
-    }
-    let manifest = json!({
-        "format": "capiproj",
-        "version": FORMAT_VERSION,
-        "name": project.name,
-        "project": p,
-        "fonts": fonts_json,
-        "typer": typer.is_some(),
-        "bubbleStyles": bubble.is_some(),
+    let project = pack.project.map(|project| {
+        let mut p = project.clone();
+        for f in &mut p.fonts {
+            f.sha256 = fonts_json.iter().find(|e| e["family"] == f.family.as_str()).and_then(|e| e["sha256"].as_str()).map(str::to_string);
+        }
+        p
     });
-    let text = serde_json::to_vec_pretty(&manifest).map_err(|e| EngineError::Other(e.to_string()))?;
-    zip.add("manifest.json", &text).map_err(|e| EngineError::Other(e.to_string()))?;
-    if let Some(t) = typer {
-        zip.add("typer.json", &serde_json::to_vec(t).map_err(|e| EngineError::Other(e.to_string()))?).map_err(|e| EngineError::Other(e.to_string()))?;
+    let m = zip.manifest_mut();
+    m.insert("name".into(), json!(pack.name));
+    m.insert("project".into(), json!(project));
+    m.insert("fonts".into(), json!(fonts_json));
+    m.insert("sections".into(), json!(pack.profile.keys().collect::<Vec<_>>()));
+    if !pack.profile.is_empty() {
+        zip.add_json("profile.json", &Value::Object(pack.profile.clone()))?;
     }
-    if let Some(b) = bubble {
-        zip.add("bubbleStyles.json", &serde_json::to_vec(b).map_err(|e| EngineError::Other(e.to_string()))?).map_err(|e| EngineError::Other(e.to_string()))?;
-    }
-    let bytes = zip.finish().map_err(|e| EngineError::Other(e.to_string()))?;
+    let bytes = zip.finish()?;
     Ok(Exported { large: total > LARGE_EXPORT, bytes, restricted: restricted_out, referenced })
 }
 
@@ -508,59 +534,62 @@ fn safe_name(name: &str) -> String {
     if n.is_empty() { "font".into() } else { n }
 }
 
-/// A `.capiproj` read.
+/// A `.proj.capishot` (or `.capiproj`) read.
 #[derive(Debug)]
 pub struct Imported {
-    pub project: Project,
+    /// The archive's name.
+    pub name: String,
+    /// Its font project (always there in version 1 files).
+    pub project: Option<Project>,
     /// Its font files (name, bytes), each checked against its SHA-256.
     pub fonts: Vec<(String, Vec<u8>)>,
-    pub typer: Option<Value>,
-    pub bubble: Option<Value>,
     /// Families the project uses but doesn't carry (to install separately).
     pub referenced: Vec<String>,
     /// The display names its fonts were given (family → alias).
     pub aliases: BTreeMap<String, String>,
+    /// Its profile sections (version 1's `typer.json` and `bubbleStyles.json` as `typer` and
+    /// `bubble`).
+    pub profile: Map<String, Value>,
+    pub meta: crate::package::Meta,
 }
 
-/// Reads a `.capiproj`. Only the manifest, font files under `fonts/` and the two style files are
-/// read; anything else in the archive is ignored.
+/// Reads a `.proj.capishot` or `.capiproj` (version 1 or 2). Only the manifest, font files under `fonts/`, the
+/// profile and the two style files of version 1 are read; anything else in the archive is
+/// ignored.
 pub fn import(bytes: &[u8]) -> Result<Imported> {
-    let bad = |m: &str| EngineError::Other(format!("not a Capishot font project: {m}"));
-    if bytes.len() > MAX_IMPORT {
-        return Err(bad("too large"));
-    }
-    let zip = photocraft_format::zip::ZipReader::new(bytes).map_err(|e| bad(&e.to_string()))?;
-    let manifest: Value =
-        serde_json::from_slice(&zip.read_by_name("manifest.json", 4 << 20).map_err(|_| bad("no manifest.json"))?).map_err(|e| bad(&e.to_string()))?;
-    if manifest["format"] != "capiproj" {
-        return Err(bad("unknown format"));
-    }
-    if manifest["version"].as_u64().unwrap_or(0) > u64::from(FORMAT_VERSION) {
-        return Err(EngineError::Other("this font project was made by a newer Capishot; update to open it".into()));
-    }
-    let mut project: Project = serde_json::from_value(manifest["project"].clone()).map_err(|e| bad(&e.to_string()))?;
-    if project.name.trim().is_empty() {
-        project.name = manifest["name"].as_str().unwrap_or("Project").to_string();
-    }
+    let bad = |m: &str| EngineError::Other(format!("not a Capishot profile or font project: {m}"));
+    let pkg = crate::package::Package::open(bytes, "Capishot profile or font project", &[(FORMAT, FORMAT_VERSION)], allowed, LIMITS)?;
+    let manifest = &pkg.manifest;
+    let name = manifest.get("name").and_then(Value::as_str).unwrap_or("Project").to_string();
+    let project = match manifest.get("project").unwrap_or(&Value::Null) {
+        Value::Null => None,
+        v => {
+            let mut project: Project = serde_json::from_value(v.clone()).map_err(|e| bad(&e.to_string()))?;
+            if project.name.trim().is_empty() {
+                project.name.clone_from(&name);
+            }
+            Some(project)
+        }
+    };
     let mut fonts = Vec::new();
     let mut referenced = Vec::new();
     let mut seen = std::collections::HashSet::new();
     let mut aliases = BTreeMap::new();
-    for f in manifest["fonts"].as_array().into_iter().flatten() {
+    for f in manifest.get("fonts").and_then(Value::as_array).into_iter().flatten() {
         let family = f["family"].as_str().unwrap_or_default().to_string();
         if let Some(alias) = f["alias"].as_str().map(str::trim).filter(|a| !a.is_empty() && a.chars().count() <= 120 && !a.chars().any(char::is_control))
             && !family.is_empty()
         {
             aliases.insert(family.clone(), alias.to_string());
         }
-        let Some(path) = f["file"].as_str().filter(|p| p.starts_with("fonts/") && !p.contains("..")) else {
+        let Some(path) = f["file"].as_str().filter(|p| pkg.has(p)) else {
             referenced.push(family);
             continue;
         };
         if !seen.insert(path.to_string()) {
             continue;
         }
-        let data = zip.read_by_name(path, MAX_FONT).map_err(|e| bad(&format!("{path}: {e}")))?;
+        let data = pkg.read(path)?;
         if let Some(sha) = f["sha256"].as_str()
             && photocraft_text::sha256::sha256_hex(&data) != sha
         {
@@ -569,8 +598,20 @@ pub fn import(bytes: &[u8]) -> Result<Imported> {
         let name = path.trim_start_matches("fonts/").split_once('-').map_or(path, |(_, n)| n).to_string();
         fonts.push((name, data));
     }
-    let read_json = |name: &str| zip.read_by_name(name, 16 << 20).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
-    Ok(Imported { project, fonts, typer: read_json("typer.json"), bubble: read_json("bubbleStyles.json"), referenced, aliases })
+    let mut profile = match pkg.read_json("profile.json")? {
+        Some(Value::Object(m)) => m,
+        Some(_) => return Err(bad("profile.json is not an object")),
+        None => Map::new(),
+    };
+    // Version 1 kept TypeR's and Bubble Type's styles in files of their own.
+    for (file, section) in [("typer.json", "typer"), ("bubbleStyles.json", "bubble")] {
+        if !profile.contains_key(section)
+            && let Some(v) = pkg.read_json(file)?
+        {
+            profile.insert(section.into(), v);
+        }
+    }
+    Ok(Imported { name, project, fonts, referenced, aliases, profile, meta: pkg.meta.clone() })
 }
 
 /// Adds (or replaces, by id) an imported project.

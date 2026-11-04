@@ -139,6 +139,20 @@ pub struct Entry {
     compressed: usize,
     uncompressed: usize,
     data_offset: usize,
+    /// Central-directory external attributes (a Unix mode in the high 16 bits).
+    external: u32,
+}
+
+impl Entry {
+    /// The size it declares once decompressed (untrusted until [`ZipReader::read`] checks it).
+    pub fn declared_size(&self) -> usize {
+        self.uncompressed
+    }
+
+    /// Whether a Unix tool stored it as a symbolic link (`S_IFLNK` in the external attributes).
+    pub fn is_symlink(&self) -> bool {
+        (self.external >> 16) & 0o170_000 == 0o120_000
+    }
 }
 
 /// Read-only view of an archive in memory.
@@ -204,6 +218,7 @@ impl<'a> ZipReader<'a> {
             let nlen = u16_at(bytes, p + 28)? as usize;
             let elen = u16_at(bytes, p + 30)? as usize;
             let clen = u16_at(bytes, p + 32)? as usize;
+            let external = u32_at(bytes, p + 38)?;
             let local = u32_at(bytes, p + 42)? as usize;
             let name_end = header_end.checked_add(nlen).filter(|end| *end <= cd_end).ok_or_else(|| FormatError::corrupt("zip entry name out of range"))?;
             let name = bytes.get(header_end..name_end).ok_or_else(|| FormatError::corrupt("truncated zip name"))?;
@@ -235,7 +250,7 @@ impl<'a> ZipReader<'a> {
             }
             // The index borrows valid UTF-8 names; duplicate names keep the first entry.
             by_name.entry(name.clone()).or_insert(entries.len());
-            entries.push(Entry { name: name.into_owned(), method, crc, compressed, uncompressed, data_offset });
+            entries.push(Entry { name: name.into_owned(), method, crc, compressed, uncompressed, data_offset, external });
             p = entry_end;
         }
         Ok(ZipReader { bytes, entries, by_name })
@@ -534,7 +549,7 @@ mod tests {
         let raw = [&[0, 0xff, 0xff, 0, 0][..], &[b'x'; 65535], &[7]].concat();
         let reader = ZipReader { bytes: &raw, entries: Vec::new(), by_name: HashMap::new() };
         for declared in [0, 7] {
-            let entry = Entry { name: "surplus".into(), method: 8, crc: 0, compressed: raw.len(), uncompressed: declared, data_offset: 0 };
+            let entry = Entry { name: "surplus".into(), method: 8, crc: 0, compressed: raw.len(), uncompressed: declared, data_offset: 0, external: 0 };
             let err = reader.read(&entry, usize::MAX).unwrap_err();
             assert!(err.to_string().contains("wrong size"), "{err}");
         }
@@ -546,7 +561,7 @@ mod tests {
         for (raw, content) in [(&[0, 1, 0, 0xfe, 0xff, b'x', 1, 0, 0, 0xff, 0xff][..], &b"x"[..]), (&[3, 0][..], &b""[..])] {
             let reader = ZipReader { bytes: raw, entries: Vec::new(), by_name: HashMap::new() };
             let mut entry =
-                Entry { name: "complete".into(), method: 8, crc: crc32(content), compressed: raw.len(), uncompressed: content.len(), data_offset: 0 };
+                Entry { name: "complete".into(), method: 8, crc: crc32(content), compressed: raw.len(), uncompressed: content.len(), data_offset: 0, external: 0 };
             assert_eq!(reader.read(&entry, content.len()).unwrap(), content);
             for cut in 0..raw.len() {
                 entry.compressed = cut;

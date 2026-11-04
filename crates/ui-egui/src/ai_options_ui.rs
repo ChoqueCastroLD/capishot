@@ -220,7 +220,7 @@ pub fn advanced(app: &mut PhotocraftApp, ui: &mut egui::Ui, kind: Kind, f: &mut 
         return false;
     }
     ui.add_space(6.0);
-    let tokens = crate::theme::Tokens::for_kind(app.ui.theme);
+    let tokens = crate::theme::Tokens::get(ui.ctx());
     let mut model = text_field(f, "model");
     let mut threads = num_field(f, "threads", 0);
     let mut keep = f.get("keepLoaded").and_then(Value::as_bool).unwrap_or(true);
@@ -325,7 +325,7 @@ pub fn open_inpaint_options(app: &mut PhotocraftApp) -> u64 {
 
 /// Draws AI Options…; true when it should close (the user opened the AI Model Manager).
 pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) -> bool {
-    let tokens = crate::theme::Tokens::for_kind(app.ui.theme);
+    let tokens = crate::theme::Tokens::get(ui.ctx());
     ui.label(egui::RichText::new(tl!("Quality and device for Clean Selected Area with AI and the Remove tool's AI mode.")).color(tokens.text_dim));
     ui.add_space(8.0);
     egui::Grid::new("ai-inpaint-opts").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| simple_rows(ui, f));

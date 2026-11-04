@@ -370,13 +370,16 @@ impl GpuCanvas {
     pub fn texture_info(&self, key: u64) -> Option<(wgpu::TextureFormat, u64)> {
         let r = self.rs.renderer.read();
         let d = r.callback_resources.get::<StoredResources>()?.docs.get(&key)?;
-        let bpp = texel_bytes(d.format);
-        let bytes = d
-            .tiles
-            .iter()
-            .map(|t| (0..t.levels.len() as u32).map(|l| ((t.rect[2] >> l).max(1) as u64) * ((t.rect[3] >> l).max(1) as u64) * bpp).sum::<u64>())
-            .sum();
-        Some((d.format, bytes))
+        Some((d.format, d.bytes()))
+    }
+
+    /// GPU bytes held now: the documents' display texture sets and the compositor's layer pages
+    /// (`perf.memory`'s `gpuTexturesMB`).
+    pub fn held_bytes(&self) -> u64 {
+        let r = self.rs.renderer.read();
+        r.callback_resources.get::<StoredResources>().map_or(0, |res| {
+            res.canvas_bytes().saturating_add(res.compositor.as_ref().map_or(0, photocraft_gpu::Compositor::resident_bytes))
+        })
     }
 
     /// Set the GPU memory the wgpu compositor may hold for layer pages and caches (see
@@ -725,6 +728,10 @@ impl GpuCanvas {
             return Err(photocraft_gpu::Unsupported(OVER_BUDGET.into()));
         }
         if fresh {
+            // The open documents share the budget (after upstream PhotoCraft #5332): the sets of
+            // the other tabs go first, and are made again when their tab shows.
+            res.docs.remove(&key);
+            res.make_room(canvas_texture_bytes(size, self.tile, texel_bytes(format)));
             let Some(tex) = DocTextures::new(device, res, size, self.tile, format) else {
                 res.docs.remove(&key);
                 res.compositor = Some(comp);
@@ -1997,8 +2004,36 @@ impl Stale {
 // ---------------------------------------------------------------------------------------------
 // GPU resources
 
-/// Floor of the compositor's memory budget: enough for a viewport's pages of a dozen layers.
+/// Floor of the compositor's memory budget: enough for a viewport's pages of a dozen layers
+/// (on a device with more than [`LOW_MEMORY`]).
 pub const MIN_GPU_BUDGET: u64 = 512 << 20;
+
+/// Physical memory at or under which the device is a phone-class one (`navigator.deviceMemory`
+/// 4 or less): its GPU shares the little memory there is with the page, the browser and the AI
+/// worker, and the browser kills the tab (or drops its WebGPU device) well before a quarter of
+/// it is used. A 4 GB Android phone lost its tab to a 24 MP page's 512 MB budget and 1 GB canvas
+/// allowance.
+pub const LOW_MEMORY: u64 = 4 << 30;
+
+/// GPU bytes the canvas's textures, and separately the compositor's pages, may take on a device
+/// with `ram`: a quarter of it, a sixteenth at [`LOW_MEMORY`] or less (256 MB on a 4 GB phone: a
+/// 24 MP page's canvas fits), a thirty-second at 2 GB or less (64 MB: a 12 MP page's does, a
+/// larger one is drawn on the CPU canvas).
+pub fn gpu_share(ram: u64) -> u64 {
+    if ram <= 2 << 30 {
+        ram / 32
+    } else if ram <= LOW_MEMORY {
+        ram / 16
+    } else {
+        ram / 4
+    }
+}
+
+/// The floor of [`memory_budget`] and [`canvas_budget`]: [`MIN_GPU_BUDGET`], or on a device with
+/// [`LOW_MEMORY`] or less its [`gpu_share`] (a floor above it would undo the share).
+fn min_gpu_budget(ram: u64) -> u64 {
+    if ram <= LOW_MEMORY { gpu_share(ram) } else { MIN_GPU_BUDGET }
+}
 
 /// Why a full refresh whose layer pages don't fit [`memory_budget`] goes to the CPU compositor.
 pub const OVER_BUDGET: &str = "layers exceed the GPU memory budget; full refresh on the CPU";
@@ -2047,13 +2082,13 @@ impl WarmClock {
 
 /// GPU memory the wgpu compositor may hold for layer pages and effect maps: what Memory Usage
 /// (`allowance`, Preferences › Performance) leaves after the document's pixels and History
-/// (`pixels`), at most a quarter of physical memory (`ram`; 16 GB assumed when unknown), and at
-/// least [`MIN_GPU_BUDGET`]. On unified-memory machines these textures share RAM with the
+/// (`pixels`), at most the device's [`gpu_share`] of physical memory (`ram`; 16 GB assumed when
+/// unknown), and at least [`MIN_GPU_BUDGET`] (on a phone-class device, its share). On unified-memory machines these textures share RAM with the
 /// document, so a huge document keeps its layers on the GPU only as far as memory allows; the
 /// rest is uploaded per refresh as the view needs it.
 pub fn memory_budget(allowance: u64, pixels: u64, ram: Option<u64>) -> u64 {
     let ram = ram.unwrap_or(16 << 30);
-    allowance.saturating_sub(pixels).min(ram / 4).max(MIN_GPU_BUDGET)
+    allowance.saturating_sub(pixels).min(gpu_share(ram)).max(min_gpu_budget(ram))
 }
 
 /// Why a document whose display textures don't fit [`canvas_budget`] is drawn on the CPU canvas.
@@ -2063,12 +2098,14 @@ pub const OVER_CANVAS_BUDGET: &str = "the canvas exceeds the GPU texture budget;
 /// was created, and the caller draws the CPU canvas instead.
 pub const REFRESH_OVER_BUDGET: &str = "over-budget";
 
-/// GPU bytes one document's display texture set (every tile and mip level) may take: a quarter
-/// of physical memory (`ram`; 16 GB assumed when unknown), at least [`MIN_GPU_BUDGET`]. The set
-/// covers the whole canvas at full resolution, so its size follows the declared canvas, not the
-/// layer pixels; a larger canvas is drawn on the (reduced) CPU canvas instead (#2934).
+/// GPU bytes the open documents' display texture sets (every tile and mip level) may take
+/// together: the device's [`gpu_share`] of physical memory (`ram`; 16 GB assumed when unknown),
+/// at least [`MIN_GPU_BUDGET`] (on a phone-class device, its share). A set covers the whole
+/// canvas at full resolution, so its size follows the declared canvas, not the layer pixels; a
+/// larger canvas is drawn on the (reduced) CPU canvas instead (#2934).
 pub fn canvas_budget(ram: Option<u64>) -> u64 {
-    (ram.unwrap_or(16 << 30) / 4).max(MIN_GPU_BUDGET)
+    let ram = ram.unwrap_or(16 << 30);
+    gpu_share(ram).max(min_gpu_budget(ram))
 }
 
 /// GPU bytes of a display texture set for a `size` canvas in `tile`-sided tiles of `bpp` bytes
@@ -2519,7 +2556,32 @@ fn init_buffer(device: &wgpu::Device, label: &str, contents: &[u8], usage: wgpu:
     buffer
 }
 
+impl Resources {
+    /// GPU bytes of the documents' display texture sets.
+    fn canvas_bytes(&self) -> u64 {
+        self.docs.values().map(DocTextures::bytes).fold(0, u64::saturating_add)
+    }
+
+    /// Drops the display texture sets of other documents, largest first, until a new set of
+    /// `bytes` fits [`canvas_budget`] beside the rest (each is made again when its tab shows).
+    fn make_room(&mut self, bytes: u64) {
+        while self.canvas_bytes().saturating_add(bytes) > self.canvas_budget {
+            let Some(k) = self.docs.iter().max_by_key(|(_, d)| d.bytes()).map(|(k, _)| *k) else { return };
+            self.docs.remove(&k);
+        }
+    }
+}
+
 impl DocTextures {
+    /// GPU bytes of the set (every tile and mip level).
+    fn bytes(&self) -> u64 {
+        let bpp = texel_bytes(self.format);
+        self.tiles
+            .iter()
+            .map(|t| (0..t.levels.len() as u32).map(|l| u64::from((t.rect[2] >> l).max(1)) * u64::from((t.rect[3] >> l).max(1)) * bpp).sum::<u64>())
+            .fold(0, u64::saturating_add)
+    }
+
     /// The texture set for a `size` canvas, or `None` (nothing created) when it doesn't fit
     /// the canvas budget.
     fn new(device: &wgpu::Device, res: &Resources, size: [u32; 2], tile: u32, format: wgpu::TextureFormat) -> Option<Self> {
@@ -3228,6 +3290,28 @@ mod tests {
         assert!(physical_memory().is_none_or(|b| b >= 256 << 20));
     }
 
+    /// A 4 GB Android phone lost its tab to a 24 MP page: the compositor's 512 MB floor and a
+    /// 1 GB canvas allowance were most of what the browser lets a tab use there. Phone-class
+    /// devices get a sixteenth of their memory (a thirty-second at 2 GB) for each instead.
+    #[test]
+    fn phones_get_a_small_share_of_their_memory() {
+        const G: u64 = 1 << 30;
+        const M: u64 = 1 << 20;
+        // The web shell's Memory Usage cap on a phone is a sixteenth of its memory.
+        for (ram, share) in [(4 * G, 256 * M), (3 * G, 192 * M), (2 * G, 64 * M), (G, 32 * M)] {
+            assert_eq!(memory_budget(ram / 16, 0, Some(ram)), share, "{ram}");
+            assert_eq!(memory_budget(ram / 16, ram, Some(ram)), share, "never below the share: {ram}");
+            assert_eq!(canvas_budget(Some(ram)), share, "{ram}");
+        }
+        let page = |w: u32, h: u32| canvas_texture_bytes([w, h], DEFAULT_TILE, 4);
+        assert!(page(4000, 6000) <= canvas_budget(Some(4 * G)), "a 24 MP page's canvas fits a 4 GB phone");
+        assert!(page(3000, 4000) <= canvas_budget(Some(2 * G)), "a 12 MP page's fits a 2 GB phone");
+        assert!(page(3000, 6000) > canvas_budget(Some(2 * G)), "an 18 MP page is drawn on the CPU canvas there");
+        // Desktops are unchanged.
+        assert_eq!(canvas_budget(Some(8 * G)), 2 * G);
+        assert_eq!(memory_budget(G, 0, Some(8 * G)), MIN_GPU_BUDGET);
+    }
+
     #[test]
     fn canvas_texture_bytes_price_every_tile_and_mip_level() {
         // The same sum DocTextures builds tile by tile (and texture_info reports).
@@ -3251,9 +3335,11 @@ mod tests {
         let huge = canvas_texture_bytes([300_000, 300_000], 8192, 4);
         assert!(huge > 300_000u64 * 300_000 * 4 && huge > canvas_budget(Some(1 << 40)));
         assert_eq!(canvas_texture_bytes([u32::MAX, u32::MAX], 64, 8), u64::MAX, "saturates");
-        // A quarter of RAM (16 GB assumed), never below the compositor's floor.
+        // A quarter of RAM (16 GB assumed), never below the compositor's floor (a phone-class
+        // device's share).
         assert_eq!(canvas_budget(None), 4 << 30);
-        assert_eq!(canvas_budget(Some(1 << 30)), MIN_GPU_BUDGET);
+        assert_eq!(canvas_budget(Some(6 << 30)), 3 << 29);
+        assert_eq!(canvas_budget(Some(1 << 30)), 32 << 20);
         assert!(canvas_texture_bytes([12_000, 8_000], DEFAULT_TILE, 8) < canvas_budget(None), "a 96 MP 16-bit canvas stays on the GPU");
     }
 

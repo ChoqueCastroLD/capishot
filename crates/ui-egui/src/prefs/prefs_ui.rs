@@ -79,6 +79,10 @@ pub struct Runtime {
     pub(crate) snap_cache: Vec<(u64, SnapTargets)>,
     /// Checkerboard colours the cached CPU checker texture was built with.
     pub(crate) checker_key: Option<[[u8; 3]; 2]>,
+    /// The custom theme on screen (`None`: a built-in one), to re-apply it when it changes.
+    pub(crate) custom_theme: Option<prefs::CustomTheme>,
+    /// The Theme editor's tokens, shown live while it's open (`None`: the saved theme).
+    pub(crate) theme_preview: Option<crate::theme::Tokens>,
     /// Style last sent to the GPU canvas.
     pub(crate) gpu_style: Option<crate::gpu_canvas::CanvasStyle>,
     /// `unitsAndRulers.showRulers` as last applied to View › Rulers.

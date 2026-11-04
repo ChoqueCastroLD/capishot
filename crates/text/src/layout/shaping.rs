@@ -41,6 +41,25 @@ pub(super) fn resolve_run_styles(fonts: &mut FontDb, runs: &[photocraft_doc::tex
         .collect()
 }
 
+/// The families of `runs` the host serves that haven't arrived yet (fetched now): laid out now,
+/// they would be drawn with a fallback ([`crate::served::awaited`]).
+pub(crate) fn awaited_families(fonts: &mut FontDb, runs: &[photocraft_doc::text::TextRun]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for r in runs {
+        let mut s = r.style.clone();
+        adopt_postscript_face(fonts, &mut s);
+        if fonts.has_family(&s.font_family) || out.contains(&s.font_family) {
+            continue;
+        }
+        let ps: Vec<String> = r.style.postscript_name.iter().cloned().collect();
+        if crate::served::awaited(&s.font_family, &ps) {
+            crate::served::request_with(&s.font_family, r.style.postscript_name.as_deref());
+            out.push(s.font_family);
+        }
+    }
+    out
+}
+
 /// A style naming a PostScript face the family doesn't carry takes the family the face resolves to.
 fn adopt_postscript_face(fonts: &mut FontDb, s: &mut CharStyle) {
     let Some(ps) = s.postscript_name.clone() else {
