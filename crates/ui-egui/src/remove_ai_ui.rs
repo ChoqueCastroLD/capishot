@@ -152,10 +152,12 @@ pub fn retry_download(app: &mut PhotocraftApp) {
     start_download(app);
 }
 
-/// The options bar: the brush size (the brush chip before this) and Sample All Layers, nothing
-/// else.
+/// The options bar: the brush size (the brush chip before this), Sample All Layers, and Paint
+/// mask, then run (with its eraser, Run and Clear mask: `remove_mask_ui`).
 pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     crate::widgets::checkbox(ui, &mut app.ui.tool_options.sample_all.remove_ai, tl!("Sample All Layers"));
+    crate::widgets::vline(ui, 22.0);
+    crate::remove_mask_ui::options_bar(app, ui, crate::state::Tool::RemoveAi);
 }
 
 #[cfg(test)]

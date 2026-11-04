@@ -32,6 +32,7 @@ pub mod object_finder;
 pub mod perspective_crop_ui;
 pub mod perspective_ui;
 pub mod puppet_ui;
+pub mod remove_mask_ui;
 pub mod retouch_ui;
 pub(super) mod shape_gradient_ui;
 pub(super) mod shape_options;

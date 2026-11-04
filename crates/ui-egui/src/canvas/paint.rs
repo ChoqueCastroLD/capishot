@@ -570,8 +570,8 @@ pub(super) fn draw_tool_state(app: &PhotocraftApp, painter: &egui::Painter, xf: 
 
 pub(super) fn draw_drag_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewXform) {
     draw_tool_state(app, painter, xf, painter.ctx().input(|i| i.pointer.hover_pos()));
-    // Remove strokes waiting for ↩ stay tinted between drags.
-    crate::retouch_ui::draw_remove_pending(app, painter, xf);
+    // A Remove mask waiting for ↩ stays tinted between drags.
+    crate::remove_mask_ui::draw(app, painter, xf);
     let Some(d) = &app.drag else {
         app.trail = None;
         return;
@@ -607,6 +607,12 @@ pub(super) fn draw_drag_preview(app: &mut PhotocraftApp, painter: &egui::Painter
             let col = match t {
                 Tool::QuickSelection => Color32::from_white_alpha(40),
                 // The Remove Tool tints what it will remove, like Photoshop's.
+                // Erasing from a waiting mask: a light veil instead.
+                Tool::Remove | Tool::RemoveAi
+                    if crate::remove_mask_ui::mask_mode(&app.ui.tool_options, t) && crate::remove_mask_ui::erasing(app, d.modifiers) =>
+                {
+                    crate::remove_mask_ui::erase_tint()
+                }
                 Tool::Remove | Tool::RemoveAi => crate::theme::Tokens::get(painter.ctx()).danger.gamma_multiply(0.45),
                 // Photoshop paints the area to heal in half-opaque dark grey while dragging; a faint
                 // white trail barely showed on light pixels (#7342). The heal itself is computed on

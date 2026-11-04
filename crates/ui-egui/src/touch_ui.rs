@@ -221,6 +221,10 @@ pub fn overlays(app: &mut PhotocraftApp, ctx: &egui::Context) {
         if quick_slider_tool(app) {
             size_ring(app, ctx);
         }
+        // A Remove tool's waiting mask: Clear mask, the eraser and Run, above the bottom bars.
+        if !busy && crate::simple_ui::sheet(ctx) == crate::simple_ui::Sheet::Closed && !app.ui.palette_open && crate::remove_mask_ui::live(app) {
+            remove_mask_bar(app, ctx);
+        }
         if !busy && has_selection(app) && crate::simple_ui::sheet(ctx) == crate::simple_ui::Sheet::Closed && !app.ui.palette_open {
             selection_bar(app, ctx);
         } else if !busy && app.ui.tool == crate::state::Tool::Move && crate::simple_ui::sheet(ctx) == crate::simple_ui::Sheet::Closed && !app.ui.palette_open {
@@ -548,6 +552,47 @@ fn selection_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
 }
 
 /// The transform's Done and Cancel, big, at the top of the canvas.
+/// Paint mask, then run's touch bar (`remove_mask_ui`): Clear mask, the eraser toggle (what ⌥
+/// does with a keyboard) and Run, along the bottom of the canvas.
+fn remove_mask_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let area = canvas_area(app, ctx);
+    let (h, gap, erase_w) = (44.0, 8.0, 56.0);
+    let w = ((area.width() - 20.0 - erase_w - 2.0 * gap) / 2.0).min(150.0);
+    let x0 = area.center().x - (2.0 * w + erase_w + 2.0 * gap) / 2.0;
+    let top = area.bottom() - 8.0 - h;
+    let clear = Rect::from_min_size(pos2(x0, top), vec2(w, h));
+    let erase = Rect::from_min_size(pos2(clear.right() + gap, top), vec2(erase_w, h));
+    let run = Rect::from_min_size(pos2(erase.right() + gap, top), vec2(w, h));
+    let mut act = None;
+    let erasing = app.remove_mask.erase;
+    crate::overlay_guard::non_modal(ctx, Id::unique("touch-remove-mask-bar"));
+    egui::Area::new(Id::unique("touch-remove-mask-bar")).order(egui::Order::Foreground).fixed_pos(area.min).show(ctx, |ui| {
+        ui.set_min_size(Vec2::ZERO);
+        if round_button(ui, clear, None, crate::i18n::t("Clear mask"), false).clicked() {
+            act = Some(0);
+        }
+        if round_button(ui, erase, Some("eraser"), crate::i18n::t("Erase from mask"), erasing).on_hover_text(crate::i18n::t("Erase from mask")).clicked() {
+            act = Some(1);
+        }
+        if round_button(ui, run, None, crate::i18n::t("Run"), true).clicked() {
+            act = Some(2);
+        }
+    });
+    note(ctx, "removeMaskClear", clear);
+    note(ctx, "removeMaskErase", erase);
+    note(ctx, "removeMaskRun", run);
+    match act {
+        Some(0) => {
+            crate::remove_mask_ui::clear(app);
+        }
+        Some(1) => app.remove_mask.erase = !erasing,
+        Some(2) => {
+            crate::remove_mask_ui::run(app);
+        }
+        _ => {}
+    }
+}
+
 fn transform_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
     use crate::state::TransformMode as M;
     let area = canvas_area(app, ctx);

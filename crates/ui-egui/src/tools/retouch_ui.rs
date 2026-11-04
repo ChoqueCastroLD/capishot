@@ -125,6 +125,10 @@ pub(crate) fn stroke_seed(points: &[[f64; 3]]) -> u64 {
 
 /// Finish a stroke with a retouching tool. Returns false if `tool` isn't one.
 pub fn finish_stroke(app: &mut PhotocraftApp, tool: Tool, points: &[[f64; 3]], mods: egui::Modifiers) -> bool {
+    // Paint mask, then run: the Remove tools' strokes collect into a mask (`remove_mask_ui`).
+    if crate::remove_mask_ui::finish_stroke(app, tool, points, mods) {
+        return true;
+    }
     let o = app.ui.tool_options.clone();
     let pts = json!(points);
     let (cmd, mut p): (&str, Value) = match tool {
@@ -133,13 +137,7 @@ pub fn finish_stroke(app: &mut PhotocraftApp, tool: Tool, points: &[[f64; 3]], m
             crate::remove_ai_ui::finish_stroke(app, points);
             return true;
         }
-        Tool::Remove => {
-            if !o.remove_after_each_stroke {
-                remove_pending_add(app, points);
-                return true;
-            }
-            ("paint.remove", remove_params(&o))
-        }
+        Tool::Remove => ("paint.remove", remove_params(&o)),
         Tool::MixerBrush => ("paint.mixerBrush", json!({})),
         Tool::ColorReplacement => ("paint.colorReplacement", color_replacement_params(app)),
         Tool::PatternStamp => ("paint.patternStamp", pattern_stamp_params(app, points)),
@@ -205,108 +203,12 @@ pub fn finish_stroke(app: &mut PhotocraftApp, tool: Tool, points: &[[f64; 3]], m
 }
 
 /// `paint.remove` params from the options bar (without the strokes).
-fn remove_params(o: &crate::state::ToolOptions) -> Value {
+pub(crate) fn remove_params(o: &crate::state::ToolOptions) -> Value {
     let mut p = json!({"sampleAllLayers": o.sample_all.remove, "newLayer": o.remove_new_layer});
     if o.remove_ai {
         p["ai"] = json!(true);
     }
     p
-}
-
-/// The selection a queued Remove stroke was drawn against. A later selection must not
-/// redirect the queued strokes to a different layer or colour component.
-#[derive(Clone, PartialEq)]
-pub(crate) struct RemoveTarget {
-    doc: photocraft_doc::DocId,
-    layer: Option<photocraft_doc::LayerId>,
-    channel: photocraft_engine::channel_cmds::ChannelTarget,
-    paint: Value,
-}
-
-fn remove_target(app: &PhotocraftApp) -> Option<RemoveTarget> {
-    let st = app.session.active()?;
-    Some(RemoveTarget { doc: st.doc.id, layer: st.active_layer, channel: st.channel_view.target, paint: crate::canvas::paint_target(app) })
-}
-
-/// Remove after each stroke off: a finished stroke waits with the others, tinted on the canvas,
-/// until ↩ or the options bar's ✓ applies them all as one removal (Esc or ⊘ drops them).
-pub fn remove_pending_add(app: &mut PhotocraftApp, points: &[[f64; 3]]) {
-    let Some(target) = remove_target(app) else { return };
-    let Some(st) = app.session.active() else { return };
-    let size = [st.doc.size.width, st.doc.size.height];
-    if app.remove_pending_target.as_ref() != Some(&target) {
-        app.remove_pending.clear();
-        app.remove_trail = None;
-        app.remove_pending_target = Some(target);
-    }
-    // The brush it was drawn with goes with it: the tint shows it, the removal uses it, however
-    // the brush changes before ↩.
-    let b = &app.session.tools.brush;
-    let entry = json!({"points": points, "size": b.size, "hardness": b.hardness * 100.0, "spacing": b.spacing * 100.0});
-    let brush = || photocraft_engine::retouch_cmds::stroke_brush(&app.session.tools.brush, &entry);
-    app.remove_trail.get_or_insert_with(|| crate::stroke_trail::Trail::new(size)).feed_stroke_reach(points, brush);
-    app.remove_pending.push(entry);
-    app.ui.status = crate::i18n::fmt(tl!("Strokes to remove: {n} (Enter applies, Esc cancels)"), &[("n", &app.remove_pending.len().to_string())]);
-    app.ui.status_error = false;
-}
-
-/// Apply the waiting strokes as one removal (one job, one undo step). False when none wait.
-pub fn remove_pending_commit(app: &mut PhotocraftApp) -> bool {
-    // Enter can arrive before the next canvas frame checks pending-stroke lifetime.
-    if !remove_pending_live(app) {
-        return false;
-    }
-    let strokes = std::mem::take(&mut app.remove_pending);
-    app.remove_trail = None;
-    app.remove_pending_target = None;
-    let mut p = remove_params(&app.ui.tool_options);
-    p["strokes"] = json!(strokes);
-    p["target"] = crate::canvas::paint_target(app);
-    app.ui.status.clear();
-    if let Err(e) = app.run("paint.remove", p) {
-        app.ui.status = e;
-        app.ui.status_error = true;
-    }
-    true
-}
-
-/// Drop the waiting strokes. False when none wait.
-pub fn remove_pending_cancel(app: &mut PhotocraftApp) -> bool {
-    if app.remove_pending.is_empty() {
-        return false;
-    }
-    app.remove_pending.clear();
-    app.remove_trail = None;
-    app.remove_pending_target = None;
-    app.ui.status.clear();
-    app.ui.status_error = false;
-    true
-}
-
-/// Whether Remove strokes are still waiting: they are dropped when the tool or the document
-/// changed under them (checked every frame).
-pub fn remove_pending_live(app: &mut PhotocraftApp) -> bool {
-    if app.remove_pending.is_empty() {
-        return false;
-    }
-    if app.ui.tool == Tool::Remove && remove_target(app).as_ref() == app.remove_pending_target.as_ref() {
-        return true;
-    }
-    remove_pending_cancel(app);
-    false
-}
-
-/// The tint of the waiting Remove strokes, drawn every frame.
-pub fn draw_remove_pending(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewXform) {
-    if !remove_pending_live(app) {
-        return;
-    }
-    let Some(bounds) = app.session.active().map(|st| st.doc.bounds()) else { return };
-    let doc_rect = xf.doc_rect(bounds);
-    let col = Tokens::get(painter.ctx()).danger.gamma_multiply(0.45);
-    if let Some(trail) = app.remove_trail.as_mut() {
-        trail.draw(painter, doc_rect, xf.flip, col);
-    }
 }
 
 /// Patch Tool and Content-Aware Move Tool: a drag that starts inside the selection (without ⇧ or
@@ -585,11 +487,13 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bo
         Tool::BubbleTextRemover => crate::bubble_text_ui::options_bar(app, ui),
         Tool::Remove => {
             // Photoshop's options bar: Sample All Layers, Create a new layer, Remove after each
-            // stroke; with strokes waiting, ✓ applies them and ⊘ drops them.
+            // stroke (here its off state: Paint mask, then run, with its eraser, Run and Clear
+            // mask).
             crate::widgets::checkbox(ui, &mut o.sample_all.remove, tl!("Sample All Layers"));
             crate::widgets::checkbox(ui, &mut o.remove_new_layer, tl!("Create a new layer"));
-            crate::widgets::checkbox(ui, &mut o.remove_after_each_stroke, tl!("Remove after each stroke"));
+            crate::remove_mask_ui::options_bar(app, ui, Tool::Remove);
             crate::widgets::vline(ui, 22.0);
+            let o = &mut app.ui.tool_options;
             // Photoshop's Remove tool has a Generative AI mode here; ours is Manga LaMa, local.
             crate::widgets::checkbox(ui, &mut o.remove_ai, tl!("Use AI")).on_hover_text(tl!(
                 "Fill strokes with AI instead of nearby patches: better on screentone and line art. AI Options… chooses the quality and the device."
@@ -599,18 +503,6 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bo
             // Quality / Device (+ Advanced) for both AI actions here.
             if crate::widgets::secondary_button(ui, tl!("AI Options…"), 0.0).clicked() {
                 crate::ai_options_ui::open_inpaint_options(app);
-            }
-            if !app.remove_pending.is_empty() {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if crate::widgets::primary_button(ui, "✓", 32.0)
-                        .on_hover_text(crate::i18n::fmt(tl!("Apply the removal ({key})"), &[("key", &crate::shortcuts::pretty("Enter"))]))
-                        .clicked()
-                    {
-                        remove_pending_commit(app);
-                    } else if crate::widgets::secondary_button(ui, "⊘", 32.0).on_hover_text(tl!("Cancel (Esc)")).clicked() {
-                        remove_pending_cancel(app);
-                    }
-                });
             }
         }
         Tool::Patch => {

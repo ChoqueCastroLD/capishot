@@ -104,6 +104,30 @@ impl Trail {
         self.feed_reach(points, brush);
     }
 
+    /// Take a whole new drag's reach back out of the mask (Paint mask, then run's eraser): every
+    /// mask pixel the brush reaches is cleared, as the removal leaves it out (`paint.remove`'s
+    /// `erase` strokes).
+    pub fn erase_stroke_reach(&mut self, points: &[[f64; 3]], brush: impl FnOnce() -> BrushSettings) {
+        let mut cut = Trail::new(self.doc);
+        cut.feed_reach(points, brush);
+        let Some(r) = cut.dirty else { return };
+        for (v, c) in self.cov.iter_mut().zip(&cut.cov) {
+            if *c > 0 {
+                *v = 0;
+            }
+        }
+        self.base.clear();
+        self.dabs = None;
+        self.fed = 0;
+        let d = self.dirty.get_or_insert(r);
+        *d = [d[0].min(r[0]), d[1].min(r[1]), d[2].max(r[2]), d[3].max(r[3])];
+    }
+
+    /// Nothing is tinted.
+    pub fn is_empty(&self) -> bool {
+        self.cov.iter().all(|c| *c == 0)
+    }
+
     fn feed_dabs_with(&mut self, points: &[[f64; 3]], brush: impl FnOnce() -> BrushSettings, reach: bool) {
         if self.dabs.is_some() && self.fed >= points.len() {
             return;
