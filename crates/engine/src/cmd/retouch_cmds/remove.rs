@@ -394,22 +394,32 @@ fn run_labelled(s: &mut Session, p: &Value, label: &'static str, ink: bool) -> R
     // waited for on the page's threads): read the window here, fill it tile by tile through the
     // inpainter, and apply when the last tile is back.
     if let Some((svc, opts)) = plan.ai.take() {
-        let mut work = (*doc).clone();
-        let Some(prep) = prepare(&mut work, &plan, &p)? else { return Ok(json!({"changed": false})) };
-        // What edit.inpaintAi would read for a selection of the hole's shape: the same context
-        // around it gives the same fill.
-        let canvas = work.bounds();
-        let win = crate::ai_inpaint_cmds::context_region(hole_bounds(&prep.hole, plan.window), canvas, opts.tiles.margin).intersect(&plan.window);
-        let prep = crop(prep, plan.window, win);
-        let (w, h) = (win.width() as usize, win.height() as usize);
-        let rgb = crate::ai_inpaint_cmds::to_rgb(&prep.fmt, &prep.img.data);
-        let cover: Vec<f32> = prep.hole.iter().map(|m| if *m { 1.0 } else { 0.0 }).collect();
         let device = svc.device();
-        return crate::jobs::run_async(
+        let margin = opts.tiles.margin;
+        let pp = p.clone();
+        return crate::jobs::run_async_prepared(
             s,
             label,
             true,
-            move |ctx, done| {
+            // The window's pixels and the hole (seconds for a big stroke on a phone): on the
+            // browser threads build's pool, not the page's thread.
+            move |_ctx| {
+                let mut work = (*doc).clone();
+                let Some(prep) = prepare(&mut work, &plan, &pp)? else { return Ok(None) };
+                // What edit.inpaintAi would read for a selection of the hole's shape: the same
+                // context around it gives the same fill.
+                let win = crate::ai_inpaint_cmds::context_region(hole_bounds(&prep.hole, plan.window), work.bounds(), margin).intersect(&plan.window);
+                let prep = crop(prep, plan.window, win);
+                let rgb = crate::ai_inpaint_cmds::to_rgb(&prep.fmt, &prep.img.data);
+                let cover: Vec<f32> = prep.hole.iter().map(|m| if *m { 1.0 } else { 0.0 }).collect();
+                Ok(Some((prep, win, rgb, cover)))
+            },
+            // The AI answers asynchronously (in the browser from the AI Web Worker, which can't
+            // be waited for on the page's threads): fill it tile by tile through the inpainter,
+            // and apply when the last tile is back.
+            move |ctx, prepared, done| {
+                let Some((prep, win, rgb, cover)) = prepared else { return done.finish(Ok((None, None))) };
+                let (w, h) = (win.width() as usize, win.height() as usize);
                 ctx.progress(0.0, label);
                 // What ran, as edit.inpaintAi reports it: the device read after the run (a GPU
                 // failure mid-run falls back to the CPU), the model and the time it took.
@@ -425,7 +435,8 @@ fn run_labelled(s: &mut Session, p: &Value, label: &'static str, ink: bool) -> R
                     opts,
                     Box::new(move |r| {
                         let ran = r.as_ref().map(|(_, run)| AiRun::new(&svc2.device(), &device, *run, started)).ok();
-                        done.finish(r.and_then(|(generated, _)| encode_ai(prep, win, &generated)).map(|f| (Some(f), ran)))
+                        // Back into the layer's format off the page's thread too.
+                        crate::jobs::on_pool(move || done.finish(r.and_then(|(generated, _)| encode_ai(prep, win, &generated)).map(|f| (Some(f), ran))));
                     }),
                 );
             },

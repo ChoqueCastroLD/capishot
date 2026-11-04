@@ -5285,3 +5285,6 @@ fontTab	Find More	Buscar más
 	Add Image Layer	Añadir capa de imagen
 	Set Layer Mask	Establecer máscara de capa
 	Set Selection	Establecer selección
+	This page is large for this device	Esta página es grande para este dispositivo
+	The page has {mp} MP and this device {gb} GB of memory: save often, and keep few documents open.	La página tiene {mp} MP y este dispositivo {gb} GB de memoria: guarda a menudo y ten pocos documentos abiertos.
+	Image › Image Size makes it lighter if the browser runs short of memory.	Imagen › Tamaño de imagen la aligera si al navegador le falta memoria.

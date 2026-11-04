@@ -2,8 +2,9 @@
 //!
 //! The window (egui and the canvas) draws through one WebGL or WebGPU context. When the browser
 //! drops it (`webglcontextlost`: a weak GPU that took seconds to build shaders, Windows resetting
-//! the driver) nothing can draw any more, and eframe can't make a new one: the page went black
-//! for good. Now the loss is caught ([`install`]): unsaved documents are written to crash
+//! the driver; a WebGPU device lost, as phones short of memory do, which closed the page) nothing
+//! can draw any more, and eframe can't make a new one: the page went black for good. Now the loss
+//! is caught ([`install`], `gpu_status::check_window`): unsaved documents are written to crash
 //! recovery, and the page reloads on the CPU canvas (`?cpu=1`), where they reopen and a notice
 //! says what happened. A second loss in the same tab (or a canvas pipeline that took over 2 s,
 //! `gpu_status::warm_up`) keeps this device on the CPU canvas (Preferences › Performance ›
@@ -50,15 +51,16 @@ fn session() -> Option<web_sys::Storage> {
     web_sys::window()?.session_storage().ok().flatten()
 }
 
-/// The loss's bookkeeping, once: the counter, the usage event, the notice for the reloaded page,
-/// and on the second loss the CPU canvas from now on. Returns the count.
-pub fn note(app: &mut photocraft_ui_egui::PhotocraftApp) -> u32 {
+/// The loss's bookkeeping, once: the counter, the usage event (`cause`: "context_lost" for WebGL,
+/// "device_lost" for WebGPU), the notice for the reloaded page, and on the second loss the CPU
+/// canvas from now on. Returns the count.
+pub fn note(app: &mut photocraft_ui_egui::PhotocraftApp, cause: &str) -> u32 {
     let n = session().and_then(|s| s.get_item(COUNT_KEY).ok().flatten()).and_then(|v| v.parse::<u32>().ok()).unwrap_or(0) + 1;
     if let Some(s) = session() {
         let _ = s.set_item(COUNT_KEY, &n.to_string());
         let _ = s.set_item(NOTICE_KEY, if n >= 2 { "kept" } else { "lost" });
     }
-    photocraft_ui_egui::gpu_status::record_gpu_lost(app, "context_lost", n, None);
+    photocraft_ui_egui::gpu_status::record_gpu_lost(app, cause, n, None);
     if n >= 2 {
         let _ = app.run("prefs.set", serde_json::json!({"values": {"performance.renderingMode": "cpu"}}));
     }

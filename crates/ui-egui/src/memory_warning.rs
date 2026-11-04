@@ -106,9 +106,54 @@ fn post(app: &mut PhotocraftApp) {
     }
 }
 
+/// The large-page notice's title (an English source string, translated when drawn).
+pub const BIG_PAGE_TITLE: &str = "This page is large for this device";
+
+/// Whether a `w` x `h` page is large for a device with `ram` bytes: on a phone-class device
+/// ([`crate::gpu_canvas::LOW_MEMORY`] or less) its 8-bit RGBA pixels take more than a
+/// thirty-second of the memory (16 MP on a 2 GB phone, 33 MP on a 4 GB one). Such a page still
+/// opens and works (the canvas draws it within the device's budget), but every undo step,
+/// Remove with AI and the browser itself compete for what is left.
+pub fn big_page(w: u32, h: u32, ram: Option<u64>) -> bool {
+    let Some(ram) = ram.filter(|r| *r <= crate::gpu_canvas::LOW_MEMORY) else { return false };
+    u64::from(w).saturating_mul(u64::from(h)).saturating_mul(4) > ram / 32
+}
+
+/// After a page opened: on a phone-class device, a page [`big_page`] for it gets a notice saying
+/// so (and how to make it lighter) rather than the tab closing out of memory later unexplained.
+pub fn after_open(app: &mut PhotocraftApp, document: photocraft_doc::DocId) {
+    let Some(st) = app.session.documents().iter().find(|st| st.doc.id == document) else { return };
+    let (w, h) = (st.doc.size.width, st.doc.size.height);
+    if !big_page(w, h, crate::gpu_canvas::physical_memory()) {
+        return;
+    }
+    let mp = format!("{:.0}", f64::from(w) * f64::from(h) / 1e6);
+    let gb = crate::gpu_canvas::physical_memory().map_or_else(String::new, |r| format!("{:.0}", r as f64 / f64::from(1u32 << 30)));
+    let lines = vec![
+        "The page has {mp} MP and this device {gb} GB of memory: save often, and keep few documents open.".to_owned(),
+        "Image › Image Size makes it lighter if the browser runs short of memory.".to_owned(),
+    ];
+    let id = crate::notices::post(app, BIG_PAGE_TITLE, lines, false, None);
+    if let Some(n) = app.ui.notices.iter_mut().find(|n| n.id == id) {
+        n.args = vec![("mp".into(), mp), ("gb".into(), gb)];
+        n.actions = vec![crate::notices::NoticeAction { label: "Image Size…".into(), command: "image.imageSize".into() }];
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_page_is_large_only_for_a_phone_class_device() {
+        const G: u64 = 1 << 30;
+        assert!(big_page(4000, 6000, Some(2 * G)), "24 MP on a 2 GB phone");
+        assert!(!big_page(3000, 4000, Some(2 * G)), "12 MP on a 2 GB phone is fine");
+        assert!(!big_page(4000, 6000, Some(4 * G)), "24 MP on a 4 GB phone is fine");
+        assert!(big_page(6000, 8000, Some(4 * G)), "48 MP on a 4 GB phone");
+        assert!(!big_page(20_000, 20_000, Some(16 * G)) && !big_page(20_000, 20_000, None), "never on a desktop");
+        assert!(big_page(u32::MAX, u32::MAX, Some(G)), "saturates");
+    }
 
     #[test]
     fn warns_once_then_waits_for_the_higher_threshold() {

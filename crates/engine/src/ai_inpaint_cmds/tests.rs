@@ -328,7 +328,7 @@ fn in_place_tiles_match_tiles_filled_from_the_original() {
     s.execute("select.rect", json!({"x": 90, "y": 22, "width": 30, "height": 20, "mode": "add"})).unwrap();
     let id = active_id(&s);
     let opts = json!({"output": "current", "maxSide": 64, "margin": 24});
-    let p = plan(&s, &opts).unwrap();
+    let p = plan(&s, &opts).unwrap().read().unwrap();
     let (w, h) = (p.region.width() as usize, p.region.height() as usize);
     let t = tiles::plan(&p.cover, w, h, &p.opts.tiles).unwrap();
     assert!(t.len() >= 2, "{} tiles", t.len());

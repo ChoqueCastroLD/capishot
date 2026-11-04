@@ -50,6 +50,11 @@ fn engine_methods(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlReq
         "perf.memory" => {
             #[cfg_attr(not(target_arch = "wasm32"), allow(unused_mut))]
             let mut v = app.session.memory_report();
+            // The GPU canvas's textures (display sets and layer pages): on a phone they share
+            // its memory with the page.
+            if let Some(g) = app.gpu.as_ref() {
+                v["gpuTexturesMB"] = serde_json::json!((g.held_bytes() as f64 / 1e5).round() / 10.0);
+            }
             #[cfg(target_arch = "wasm32")]
             {
                 v["wasmMB"] = serde_json::json!((core::arch::wasm32::memory_size(0) as f64 * 65536.0 / 1e5).round() / 10.0);

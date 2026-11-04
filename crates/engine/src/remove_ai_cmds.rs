@@ -292,6 +292,57 @@ mod tests {
         assert!(r.get("device").is_none() && r.get("damage").is_some(), "{r}");
     }
 
+    /// The browser threads build reads the stroke's window and hole on the pool (seconds on a
+    /// phone: the page froze 2 s in `cmd.run`), then hands them to the page's thread between
+    /// frames, where the AI worker is: here the same path natively.
+    #[test]
+    fn the_window_is_read_off_the_page_thread_and_handed_back_between_frames() {
+        use crate::jobs::{JobOutcome, Started};
+        crate::jobs::TEST_HAND_OFF.with(|h| h.set(true));
+        for (cmd, p) in [(ID, json!({"strokes": [[[29, 22], [35, 22]]], "size": 14})), (crate::ai_inpaint_cmds::ID, json!({"output": "current"}))] {
+            let mut s = page(Arc::new(FakeInpainter::default()), true);
+            if cmd != ID {
+                s.execute("select.rect", json!({"x": 26, "y": 16, "width": 12, "height": 14})).unwrap();
+            }
+            let past = s.active().unwrap().history.past_len();
+            let Started::Job(job) = s.start(cmd, p).unwrap() else { panic!("{cmd}: a background job") };
+            // Without a frame's step the job waits: the AI worker is only called on the page's thread.
+            for _ in 0..20 {
+                assert!(s.poll_jobs().is_empty(), "{cmd}: no result before the hand-off");
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            assert!(s.has_stepped_jobs());
+            let mut done = None;
+            for _ in 0..2000 {
+                s.step_jobs(&|| true);
+                if let Some(e) = s.poll_jobs().into_iter().find(|e| e.id == job) {
+                    done = Some(e);
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            let e = done.unwrap_or_else(|| panic!("{cmd}: the job ended"));
+            assert!(matches!(e.outcome, JobOutcome::Done(_)), "{cmd}: {:?}", e.outcome);
+            assert!(!red_at(&s, 31, 22), "{cmd}: the blob is gone");
+            assert_eq!(s.active().unwrap().history.past_len(), past + 1, "{cmd}: one undo step");
+        }
+        // A stroke over nothing that can change fails the job, as it failed the command before.
+        let mut s = page(Arc::new(FakeInpainter::default()), true);
+        s.execute("select.rect", json!({"x": 0, "y": 0, "width": 4, "height": 4})).unwrap();
+        let Started::Job(job) = s.start(ID, json!({"strokes": [[[40, 40], [44, 40]]], "size": 4})).unwrap() else { panic!("a job") };
+        let mut failed = false;
+        for _ in 0..2000 {
+            s.step_jobs(&|| true);
+            if let Some(e) = s.poll_jobs().into_iter().find(|e| e.id == job) {
+                failed = matches!(e.outcome, JobOutcome::Failed(_));
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        crate::jobs::TEST_HAND_OFF.with(|h| h.set(false));
+        assert!(failed, "the prep's error fails the job");
+    }
+
     #[test]
     fn a_missing_model_is_an_error_unless_downloads_are_allowed() {
         let fake = Arc::new(FakeInpainter { state: Some(photocraft_ai_lama::service::ModelState::NeedsDownload { bytes: 100 << 20 }), ..Default::default() });
