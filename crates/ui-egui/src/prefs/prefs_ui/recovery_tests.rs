@@ -131,7 +131,10 @@ fn recovery_keeps_frames_and_editing_live_and_adopts_the_admitted_document() {
     let recovered = app.session.documents().iter().find(|st| st.doc.id != working_id).unwrap();
     assert_eq!(recovered.path.as_deref(), Some("original.psb"));
     assert!(recovered.is_dirty());
-    assert_eq!(recovered.doc.layers, original.layers);
+    // Adopting a document numbers its layers for PSD saves; the rest comes back as it was.
+    let mut layers = recovered.doc.layers.clone();
+    layers.iter_mut().for_each(|l| l.psd_id = None);
+    assert!(layers == original.layers, "the admitted document's layers");
     assert_eq!(app.prefs_rt.autosaved.get(&recovered.doc.id).map(|stamp| stamp.revision), Some(recovered.revision));
     assert_eq!(app.prefs_rt.recovery_keys.get(&recovered.doc.id).map(String::as_str), Some("pending"));
 }
