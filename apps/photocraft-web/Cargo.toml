@@ -40,6 +40,8 @@ photocraft-ai = { workspace = true }
 # Edit › Clean Selected Area with AI: the Inpainter seam (tiling half only; the model runs in the AI worker).
 photocraft-ai-lama = { workspace = true }
 photocraft-ai-sd = { workspace = true }
+# The AI Web Worker bridge (moved out of this crate so capishot-host can use it too).
+photocraft-ai-web = { workspace = true }
 egui = { workspace = true }
 log = { workspace = true }
 # Inline `data:` images in copied HTML (src/clipboard_data.rs).

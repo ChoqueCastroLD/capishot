@@ -181,19 +181,9 @@ pub fn show_chrome(saved: Option<&Chrome>, panels: &mut Panels, view: &mut ViewO
     }
 }
 
-/// A tool's id for hosts: its name in lowerCamelCase (`brush`, `eraser`, `cloneStamp`).
-pub fn tool_id(t: Tool) -> String {
-    let name = format!("{t:?}");
-    let mut chars = name.chars();
-    match chars.next() {
-        Some(first) => first.to_ascii_lowercase().to_string() + chars.as_str(),
-        None => String::new(),
-    }
-}
-
 /// Every tool id, in toolbar order.
 pub fn tools() -> Vec<String> {
-    Tool::ALL.iter().map(|t| tool_id(*t)).collect()
+    Tool::ALL.iter().map(|t| t.id()).collect()
 }
 
 /// A tool from its id (or any name `ui.set` accepts).
@@ -216,7 +206,7 @@ pub fn set_tool_requests(tool: &str, options: &Value) -> Result<Vec<(&'static st
     if let Some(k) = opts.keys().find(|k| !KEYS.contains(&k.as_str())) {
         return Err(format!("unknown setTool option `{k}` ({})", KEYS.join(", ")));
     }
-    let mut ui = json!({ "tool": tool_id(tool) });
+    let mut ui = json!({ "tool": tool.id() });
     if let Some(size) = opts.get("size") {
         let size = size.as_f64().filter(|s| s.is_finite() && (1.0..=5000.0).contains(s)).ok_or("size must be a number of pixels, 1..5000")?;
         ui["brushSize"] = json!(size);
@@ -473,144 +463,25 @@ pub struct DocSnap {
     pub props: std::sync::Arc<Vec<LayerProps>>,
 }
 
-/// What `layerChanged` compares: a layer's settings and its type, shape or adjustment
-/// (not its pixels: `layerPixelsChanged` says those).
-#[derive(Clone, Debug, PartialEq)]
-pub struct LayerProps {
-    pub id: u64,
-    pub parent: Option<u64>,
-    pub name: String,
-    pub visible: bool,
-    pub opacity: f32,
-    pub fill_opacity: f32,
-    pub blend: photocraft_engine::doc::BlendMode,
-    pub clipped: bool,
-    pub locks: photocraft_engine::doc::Locks,
-    pub label: photocraft_engine::doc::LabelColor,
-    pub effects: photocraft_engine::doc::Effects,
-    /// The layer mask's switches (its pixels count as pixels).
-    pub mask: Option<(bool, f32, f32)>,
-    pub vector_mask: Option<photocraft_engine::doc::VectorMask>,
-    /// A type or shape layer's model without its rendered pixels, an adjustment's or fill's
-    /// settings; `None` for pixel layers, groups and smart objects.
-    pub content: Option<photocraft_engine::doc::LayerContent>,
-}
-
-/// Every layer's [`LayerProps`], in the document's order.
-pub fn layer_props(doc: &photocraft_engine::doc::Document) -> Vec<LayerProps> {
-    use photocraft_engine::doc::LayerContent;
-    fn rec(layers: &[photocraft_engine::doc::Layer], parent: Option<u64>, out: &mut Vec<LayerProps>) {
-        for l in layers {
-            let content = match &l.content {
-                LayerContent::Text(t) => Some(LayerContent::Text(photocraft_engine::doc::TextLayer { cache: None, psd_raw: None, ..t.clone() })),
-                LayerContent::Shape(sh) => {
-                    let mut sh = sh.clone();
-                    sh.cache = None;
-                    sh.psd_raw = None;
-                    Some(LayerContent::Shape(sh))
-                }
-                c @ (LayerContent::Adjustment(_) | LayerContent::Fill(_)) => Some(c.clone()),
-                _ => None,
-            };
-            out.push(LayerProps {
-                id: l.id.0,
-                parent,
-                name: l.name.clone(),
-                visible: l.visible,
-                opacity: l.opacity,
-                fill_opacity: l.fill_opacity,
-                blend: l.blend,
-                clipped: l.clipped,
-                locks: l.locks,
-                label: l.label,
-                effects: l.effects.clone(),
-                mask: l.mask.as_ref().map(|m| (m.enabled, m.density, m.feather)),
-                vector_mask: l.vector_mask.clone(),
-                content,
-            });
-            if let Some(ch) = l.children() {
-                rec(ch, Some(l.id.0), out);
-            }
-        }
-    }
-    let mut out = Vec::new();
-    rec(&doc.layers, None, &mut out);
-    out
-}
+pub use photocraft_engine::doc_events::{LayerOrder, LayerProps, layer_order, layer_props};
+use photocraft_engine::doc_events as doc_events;
 
 /// `layerChanged {document, layer, what}` for every layer whose settings changed, was added or
-/// was removed; `what` lists what changed: `added`, `removed`, `name`, `visible`, `opacity`,
-/// `fillOpacity`, `blend`, `clipped`, `locks`, `label`, `effects`, `mask`, `vectorMask`, `parent`,
-/// `content` (the text and its style, a shape, an adjustment's or fill's settings).
+/// was removed ([`doc_events::layer_changes`] says what `what` lists).
 fn layer_changed_events(document: u64, prev: &[LayerProps], next: &[LayerProps]) -> Vec<Value> {
-    let event = |layer: u64, what: Vec<&str>| json!({ "type": "layerChanged", "document": document, "layer": layer, "what": what });
-    let mut out = Vec::new();
-    for n in next {
-        let Some(p) = prev.iter().find(|p| p.id == n.id) else {
-            out.push(event(n.id, vec!["added"]));
-            continue;
-        };
-        if p == n {
-            continue;
-        }
-        let checks: [(&str, bool); 13] = [
-            ("name", p.name != n.name),
-            ("visible", p.visible != n.visible),
-            ("opacity", p.opacity != n.opacity),
-            ("fillOpacity", p.fill_opacity != n.fill_opacity),
-            ("blend", p.blend != n.blend),
-            ("clipped", p.clipped != n.clipped),
-            ("locks", p.locks != n.locks),
-            ("label", p.label != n.label),
-            ("effects", p.effects != n.effects),
-            ("mask", p.mask != n.mask),
-            ("vectorMask", p.vector_mask != n.vector_mask),
-            ("parent", p.parent != n.parent),
-            ("content", p.content != n.content),
-        ];
-        let what: Vec<&str> = checks.iter().filter(|(_, changed)| *changed).map(|(w, _)| *w).collect();
-        if !what.is_empty() {
-            out.push(event(n.id, what));
-        }
-    }
-    for p in prev.iter().filter(|p| !next.iter().any(|n| n.id == p.id)) {
-        out.push(event(p.id, vec!["removed"]));
-    }
-    out
-}
-
-/// Each group's (`None`: the document's top level) child layer ids, top to bottom.
-pub type LayerOrder = Vec<(Option<u64>, Vec<u64>)>;
-
-/// The stacking order of `doc`'s layers, group by group.
-pub fn layer_order(doc: &photocraft_engine::doc::Document) -> LayerOrder {
-    fn rec(layers: &[photocraft_engine::doc::Layer], parent: Option<u64>, out: &mut LayerOrder) {
-        out.push((parent, layers.iter().rev().map(|l| l.id.0).collect()));
-        for l in layers {
-            if let Some(ch) = l.children() {
-                rec(ch, Some(l.id.0), out);
-            }
-        }
-    }
-    let mut out = Vec::new();
-    rec(&doc.layers, None, &mut out);
-    out
+    doc_events::layer_changes(prev, next)
+        .into_iter()
+        .map(|c| json!({ "type": "layerChanged", "document": document, "layer": c.layer, "what": c.what }))
+        .collect()
 }
 
 /// `layersReordered {document, group, layers}` for every group whose layers kept in it changed
-/// order (`group` null: the top level; `layers` its children now, top to bottom). Layers added,
-/// deleted or moved to another group alone don't count.
+/// order (`group` null: the top level; `layers` its children now, top to bottom).
 fn reorder_events(document: u64, prev: &LayerOrder, next: &LayerOrder) -> Vec<Value> {
-    let mut out = Vec::new();
-    for (group, now) in next {
-        let Some((_, was)) = prev.iter().find(|(g, _)| g == group) else { continue };
-        let kept_now: Vec<u64> = now.iter().copied().filter(|id| was.contains(id)).collect();
-        let kept_was: Vec<u64> = was.iter().copied().filter(|id| now.contains(id)).collect();
-        if kept_now != kept_was {
-            out.push(json!({ "type": "layersReordered", "document": document, "group": group, "layers": now }));
-        }
-    }
-    out
+    doc_events::reordered_groups(prev, next)
+        .into_iter()
+        .map(|(group, layers)| json!({ "type": "layersReordered", "document": document, "group": group, "layers": layers }))
+        .collect()
 }
 
 /// The events between two frames (none for the first one: hosts read the state then).
@@ -714,67 +585,8 @@ pub fn view_events(prev: Option<&ViewSnap>, next: &ViewSnap) -> Vec<Value> {
     out
 }
 
-/// How long an `open` waits to be matched with the document it makes (ms): one that failed
-/// without saying so is forgotten then.
-const OPEN_MATCH_MS: f64 = 120_000.0;
-
-/// `documentReady` bookkeeping: when each open was asked for, and the documents not complete yet.
-#[derive(Debug, Default)]
-pub struct ReadyTracker {
-    /// Opens asked for and not matched with a document yet, oldest first (ms).
-    opens: std::collections::VecDeque<f64>,
-    /// `(document, asked at, first frame at)` of documents not complete yet.
-    pending: Vec<(u64, f64, f64)>,
-    /// The documents seen so far (a new one is one not in it).
-    seen: Vec<u64>,
-    started: bool,
-}
-
-impl ReadyTracker {
-    /// An `open` / `openDocument` reached the app at `now` (ms).
-    pub fn note_open(&mut self, now: f64) {
-        self.opens.push_back(now);
-        if self.opens.len() > 64 {
-            self.opens.pop_front();
-        }
-    }
-
-    /// The last open noted failed: it makes no document.
-    pub fn open_failed(&mut self) {
-        self.opens.pop_back();
-    }
-
-    /// The end of a frame at `now` (ms) with these documents, each with whether it is complete
-    /// (decoded, fonts settled, nothing working on it): the `documentReady` events. Documents
-    /// open on the first frame are the baseline (hosts read them then).
-    pub fn frame(&mut self, now: f64, docs: &[(u64, bool)]) -> Vec<Value> {
-        while self.opens.front().is_some_and(|t| now - t > OPEN_MATCH_MS) {
-            self.opens.pop_front();
-        }
-        let started = std::mem::replace(&mut self.started, true);
-        for (id, _) in docs {
-            if self.seen.contains(id) {
-                continue;
-            }
-            self.seen.push(*id);
-            if started {
-                let asked = self.opens.pop_front().unwrap_or(now);
-                self.pending.push((*id, asked, now));
-            }
-        }
-        self.seen.retain(|id| docs.iter().any(|(d, _)| d == id));
-        let mut out = Vec::new();
-        self.pending.retain(|&(id, asked, first)| match docs.iter().find(|(d, _)| *d == id) {
-            None => false,
-            Some((_, false)) => true,
-            Some((_, true)) => {
-                out.push(ready_event(id, first - asked, now - asked));
-                false
-            }
-        });
-        out
-    }
-}
+/// `documentReady` bookkeeping (shared with `capishot-host`'s `DocumentReady`).
+pub use photocraft_ui_egui::doc_ready::ReadyTracker;
 
 /// `documentReady {id, firstFrameMs, finalFrameMs}`: `id` is complete. Both times count from
 /// when it was asked for (`open` / `openDocument`, else the frame it appeared in) to the end of
@@ -828,10 +640,10 @@ mod tests {
 
     #[test]
     fn tool_ids_are_camel_case_and_parse_back() {
-        assert_eq!(tool_id(Tool::CloneStamp), "cloneStamp");
-        assert_eq!(tool_id(Tool::Brush), "brush");
+        assert_eq!(Tool::CloneStamp.id(), "cloneStamp");
+        assert_eq!(Tool::Brush.id(), "brush");
         for id in tools() {
-            assert_eq!(tool_id(parse_tool(&id).expect("a tool")), id);
+            assert_eq!(parse_tool(&id).expect("a tool").id(), id);
         }
         assert!(parse_tool("flamethrower").is_err());
     }
@@ -1032,25 +844,6 @@ mod tests {
         let r = ViewSnap { rotation: 90.0, ..v }.visible_rect();
         assert!((r[2] - 100.0).abs() < 1e-3 && (r[3] - 200.0).abs() < 1e-3, "{r:?}");
         assert_eq!(ready_event(3, 12.345, 80.0), json!({"type": "documentReady", "id": 3, "firstFrameMs": 12.3, "finalFrameMs": 80.0}));
-    }
-
-    #[test]
-    fn documents_are_ready_once_complete_timed_from_their_open() {
-        let mut r = ReadyTracker::default();
-        assert!(r.frame(0.0, &[(1, true)]).is_empty(), "the first frame is the baseline");
-        r.note_open(10.0);
-        assert!(r.frame(16.0, &[(1, true)]).is_empty(), "still opening");
-        assert!(r.frame(40.0, &[(1, true), (2, false)]).is_empty(), "shown, not complete");
-        assert_eq!(r.frame(90.0, &[(1, true), (2, true)]), [ready_event(2, 30.0, 80.0)]);
-        assert!(r.frame(100.0, &[(1, true), (2, true)]).is_empty(), "once");
-        // A document made without an open counts from the frame it appeared in.
-        assert_eq!(r.frame(120.0, &[(1, true), (2, true), (3, true)]), [ready_event(3, 0.0, 0.0)]);
-        // A failed open isn't matched with the next document; a closed one is dropped.
-        r.note_open(130.0);
-        r.open_failed();
-        r.note_open(200.0);
-        assert!(r.frame(210.0, &[(4, false)]).is_empty());
-        assert!(r.frame(220.0, &[]).is_empty());
     }
 
     #[test]

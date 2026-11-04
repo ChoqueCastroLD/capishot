@@ -24,6 +24,12 @@ impl PhotocraftApp {
 impl PhotocraftApp {
     /// Shared logic body. A wrapping host owns the final reset tail after its own work.
     pub fn logic_frame(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        self.logic_body(ctx, Some(frame));
+    }
+
+    /// [`Self::logic_frame`] with or without eframe's frame (a host app drawing the editor in
+    /// its own window has none: `embed::full_frame`).
+    pub(crate) fn logic_body(&mut self, ctx: &egui::Context, frame: Option<&mut eframe::Frame>) {
         self.cap_frame_rate();
         i18n::set_current(i18n::Lang::from_pref(&self.session.prefs().interface.language));
         // Caps Lock state read from the OS once per frame (see `Services::caps_lock`): the canvas
@@ -88,14 +94,20 @@ impl PhotocraftApp {
             prefs_ui::tick(self, ctx);
         }
         updates_ui::tick(self, ctx);
-        monitor_status::poll_frame(self, ctx, frame);
+        match frame.as_deref() {
+            Some(frame) => monitor_status::poll_frame(self, ctx, frame),
+            None => monitor_status::poll(self, ctx),
+        }
         // Control requests and persisted preferences can change the language in this frame.
         i18n::sync_context(ctx, &self.session.prefs().interface.language);
         type_tool::sync_font_labels(ctx, self.session.prefs().type_.show_font_names_in_english, &self.session.prefs().type_.font_aliases);
         // A window bigger than its display (1440 × 900 on 1366 × 768) runs under the taskbar:
         // maximize it into the work area once (#315).
-        work_area::fit_window(ctx);
-        discard_ui::guard_window_close(self, ctx);
+        // The window is a host's when hosted: it sizes and closes it itself.
+        if !crate::hosted::active() {
+            work_area::fit_window(ctx);
+            discard_ui::guard_window_close(self, ctx);
+        }
         // Background jobs: apply finished ones, keep frames coming, Esc cancels (before the
         // shortcuts see Esc).
         if !screen_picker::tick(self, ctx) {
@@ -151,10 +163,14 @@ impl PhotocraftApp {
         let dropped = ctx.input(|i| i.raw.dropped_files.clone());
         if !dropped.is_empty() {
             let at = self.services.cursor_pos.as_mut().and_then(|f| f(ctx));
-            self.open_dropped(ctx, dropped, at);
+            // Hosted, only files dropped on the editor's rect are its.
+            let mine = !crate::hosted::active() || ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| self.last_canvas_rect.contains(p) || crate::embed::hosted_rect(ctx).is_some_and(|r| r.contains(p)));
+            if mine {
+                self.open_dropped(ctx, dropped, at);
+            }
             // Files dragged in from another app's window: Capishot comes to the front and takes
             // the keyboard, as Photoshop does, instead of staying behind the source (#5687).
-            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            crate::hosted::send(ctx, egui::ViewportCommand::Focus);
         }
         self.place_next_dropped(ctx);
         // Fonts picked, dropped or read back from the browser's store.
@@ -177,17 +193,22 @@ impl PhotocraftApp {
         // window while a slow readback is in flight. Synthetic input queued during hidden ticks
         // needs the same wake: its events sit in eframe's preserved input until a UI pass.
         if self.captures.any_unissued() || self.synthetic_batch.is_some() || !self.synthetic.is_empty() {
-            ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaintWhileHidden);
+            crate::hosted::send(ctx, egui::ViewportCommand::RequestPaintWhileHidden);
         }
         {
             let _s = perf_span::span("file_dialog");
-            self.poll_file_dialog(ctx, Some(frame));
+            self.poll_file_dialog(ctx, frame.as_deref());
         }
     }
 
     /// Shared UI body. A wrapping host must call `finish_type_reset_pass` after return,
     /// including when this body returns early without drawing an editor.
     pub fn ui_frame(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        self.ui_body_frame(ui, Some(frame));
+    }
+
+    /// [`Self::ui_frame`] with or without eframe's frame (see [`Self::logic_body`]).
+    pub(crate) fn ui_body_frame(&mut self, ui: &mut egui::Ui, frame: Option<&mut eframe::Frame>) {
         let ctx = ui.ctx().clone();
         // One control owner even when this callback cannot draw the custom editor.
         if !self.fonts_ready
@@ -227,7 +248,7 @@ impl PhotocraftApp {
             return;
         }
         let t0 = gpu_canvas::now_ms();
-        self.perf.stage.ui_start(t0, frame.info().cpu_usage);
+        self.perf.stage.ui_start(t0, frame.as_deref().and_then(|f| f.info().cpu_usage));
         // A software adapter or CPU mode chosen at startup is every document's reason.
         crate::render_path::frame(self);
         // Every frame that started its stage record closes it, whichever way `ui_body` returns.
@@ -258,7 +279,7 @@ impl PhotocraftApp {
         crate::overlay_guard::end_frame(self, &ctx);
         jobs_ui::keep_polling(self, &ctx);
         // Menus and buttons in this frame may have asked for a file dialog.
-        self.poll_file_dialog(&ctx, Some(frame));
+        self.poll_file_dialog(&ctx, frame.as_deref());
         // The Type tool's IME descriptor is the last writer of this pass: every panel and the
         // canvas have finished mutating the model, and an absent/focus-moved editor ends here.
         type_tool::sync_ime(self, &ctx);

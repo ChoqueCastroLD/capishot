@@ -621,7 +621,7 @@ pub fn get_state() -> js_sys::Promise {
         let mode = HOST.with(|h| h.borrow().mode);
         Ok(to_js(&json!({
             "mode": mode.id(),
-            "tool": core::tool_id(app.ui.tool),
+            "tool": app.ui.tool.id(),
             "active": app.session.active().map(|st| st.doc.id.0),
             "documents": documents(app),
         })))
@@ -734,7 +734,7 @@ pub fn set_tool(tool: String, options: JsValue) -> js_sys::Promise {
         for (method, params) in steps {
             JsFuture::from(control(method, params)).await?;
         }
-        Ok(JsValue::from_str(&core::tool_id(core::parse_tool(&tool).map_err(|e| error(&e))?)))
+        Ok(JsValue::from_str(&core::parse_tool(&tool).map_err(|e| error(&e))?.id()))
     })
 }
 

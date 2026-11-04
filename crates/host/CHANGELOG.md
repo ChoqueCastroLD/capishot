@@ -1,0 +1,48 @@
+# capishot-host changelog
+
+Every change to the stable API is listed here with the commit to pin. Breaking changes are under
+**Breaking** and bump `API_VERSION`. Experimental items (`live`, `Host::session`,
+`Host::session_mut`, `unstable`, `view::CapishotView::app`/`app_mut`/`with_services`/`control`)
+may change in any commit; their changes are listed under **Experimental**. A change to the
+`[patch]` pins (README.md) is listed too: copy the blocks again when you move the pin.
+
+## API_VERSION 1, additions (full mode)
+
+- `view::Mode::{Embedded, Full}`, `CapishotView::{set_mode, mode}`, `CapishotEditor::{set_mode,
+  mode}`, `ViewOptions::{mode, full_theme}`, `view::FullTheme`: Capishot's whole interface in the
+  widget's rect, on the same open documents. Feature `full` (default).
+- `ViewEvent::{Window, FileDialog, WriteFile, OpenUrl, DocumentReady}`, `view::{WindowRequest,
+  FileDialog, FileRequest}`. `ViewOptions` gained fields: build it with `..Default::default()`.
+- `Keys::{deny, allow_only, filter, routing}` and `Shortcut` (with `Shortcut::opacity_digits`).
+- `CameraChange::ZoomBy`; `CapishotView::raw_input_hook` (optional, pinch and touch).
+- `Host::{open_rgba, put_rgba, add_rgba}`, `RgbaImage`, `PutRgba`, `AddRgba`: raw pixels, no PNG or base64.
+- `Host::add_document_fonts`, `Event::FontsReady`.
+- Features `full`, `camera-raw`, `exr`, `heif`, `all-catalogs`.
+- `ViewOptions::rulers` applies when it changes, no longer every frame: the person's View ›
+  Rulers stays.
+
+## API_VERSION 1 (first release)
+
+- `Host`: `execute`, `execute_with`, `execute_request`, `commands`; jobs (`start`, `job`, `jobs`,
+  `cancel`, native `wait`); `poll`, `subscribe`, `unsubscribe`, `events`; documents (`documents`,
+  `active_document`, `open`, `start_open`, `show`, `prewarm`, `close`, `save`, `save_psd`,
+  `start_save`, `take_saved`, `inspect`); pixels (`get_pixels`, `put_pixels`); `batch`, `undo`,
+  `redo`, `begin_group`, `end_group`, `group`, `in_group`; views (`views`, `define_view`,
+  `apply_view`); tools (`tool`, `set_tool`); `set_view_hooks` / `ViewHooks`.
+- Files: `OpenOptions`, `Opened`, `SaveFormat`, `SaveOptions`, `Saved`, `files::MAX_FILE_BYTES`.
+- Rendering: `Host::render`, `Host::snapshot`, `render::{RenderOptions, Rgba, Snapshot}`.
+- Fonts: `Host::{add_fonts, fonts_ready, request_missing_fonts, pending_font_layers,
+  refresh_fonts, layout_digest}`; `fonts::{register, unregister, check, families,
+  family_status, use_system_fonts, FontProvider}`.
+- AI: `Host::{install_ai, uninstall_ai, ai_availability, prepare_remove_ai, ai_model_status,
+  download_ai_model}`; `ai::{AiConfig, AiDevice, AiAvailability, Readiness, RemoveAi, InpaintAi,
+  RemoveBubbleText, UpscaleAi, AiReply}` and the command id constants. Features `ai-native`,
+  `ai-web`.
+- Widget (feature `view`, default): `view::{CapishotView, CapishotEditor, ViewOptions,
+  ViewOutput, ViewEvent, CanvasTransform, Overlay, HostTheme, DocumentCamera}`.
+- `Event` (serialises as the web embed's events), `Origin`, `JobEnd`, `Error`, ids
+  (`DocumentId`, `LayerId`, `LayerUid`, `JobHandle`) and the option/result structs.
+- **Experimental**: `live` (`Op`, `Envelope`, `Applied`; `Host::live_start`, `live_stop`,
+  `is_live`, `live_apply`, `live_take_local`, `layer_uid`).
+- Pins: egui `storytold/egui@6d518fc`, winit `storytold/winit@a517b38`, `egui-wgpu` from this
+  repository's `vendor/egui-wgpu`.

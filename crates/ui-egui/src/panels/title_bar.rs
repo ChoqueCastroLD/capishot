@@ -39,7 +39,7 @@ pub fn title_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             }
             if drag.double_clicked() {
                 let max = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
+                crate::hosted::send(ui.ctx(), egui::ViewportCommand::Maximized(!max));
             }
             // Preferences › Interface › Show File Name In Title: with it off the bar keeps the
             // app name and the unsaved dot, since the tabs already name the file (#5037).
@@ -178,7 +178,7 @@ pub fn sync_window_title(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let want = window_title(app);
     if app.last_window_title != want {
         app.last_window_title = want.clone();
-        ctx.send_viewport_cmd(egui::ViewportCommand::Title(want));
+        crate::hosted::send(ctx, egui::ViewportCommand::Title(want));
     }
 }
 

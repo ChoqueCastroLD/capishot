@@ -1,0 +1,62 @@
+[package]
+name = "capishot-host"
+description = "Capishot as a library: the in-process engine API and canvas widget for host apps (native and wasm32)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["view", "full"]
+# The canvas widget (`view::CapishotView`): draws in the host's egui context on its wgpu device.
+view = ["dep:photocraft-ui-egui", "dep:egui"]
+# `view::Mode::Full`: Capishot's whole interface (menus, panels, dialogs, every tool) in the same
+# widget, switchable with the canvas alone. Without it only the canvas's code is linked.
+full = ["view"]
+# Camera raw development (Camera Raw dialog, raw decoders). Without it a raw file opens as its
+# embedded JPEG preview with a warning.
+camera-raw = ["photocraft-io/camera-raw"]
+# OpenEXR files. Without it they are recognised and refused with a clear error.
+exr = ["photocraft-codecs/exr"]
+# HEIC/HEIF files. Without it they are recognised and refused with a clear error.
+heif = ["photocraft-io/heif"]
+# Every translation catalog in the binary. Without it: English, Spanish and Brazilian Portuguese
+# (a host can fetch the others, `i18n::take_catalog_requests`).
+all-catalogs = ["photocraft-ui-egui?/all-catalogs"]
+# Sandboxed WebAssembly filter plug-ins (the engine's `plugin.*` commands). Off for hosts unless
+# they need them: it adds the wasmi interpreter.
+plugins = ["photocraft-engine/plugins", "photocraft-ui-egui?/plugins"]
+# AI natively (desktop): burn on wgpu/CPU, DirectML on Windows (ONNX Runtime loaded at run time).
+# Enable it for native targets only (see `ai`'s docs): never in a wasm build.
+ai-native = [
+    "photocraft-ai/gpu", "photocraft-ai/cpu", "photocraft-ai/download", "photocraft-ai/directml",
+    "photocraft-ai-lama/flex", "photocraft-ai-lama/wgpu", "photocraft-ai-lama/rayon", "photocraft-ai-lama/directml",
+    "photocraft-ai-sd/flex", "photocraft-ai-sd/wgpu", "photocraft-ai-sd/rayon", "photocraft-ai-sd/native",
+]
+# AI in the browser: the AI Web Worker bridge (the host serves the worker that
+# packaging/web-ai/build.sh builds). Empty on native targets.
+ai-web = ["dep:photocraft-ai-web"]
+
+[dependencies]
+photocraft-engine = { workspace = true }
+photocraft-doc = { workspace = true }
+photocraft-io = { workspace = true }
+photocraft-format = { workspace = true }
+photocraft-paint = { workspace = true }
+photocraft-raster = { workspace = true }
+photocraft-codecs = { workspace = true }
+photocraft-compose = { workspace = true }
+photocraft-geom = { workspace = true }
+photocraft-text = { workspace = true }
+photocraft-ai = { workspace = true }
+photocraft-ai-lama = { workspace = true }
+photocraft-ai-sd = { workspace = true }
+photocraft-ai-web = { workspace = true, optional = true }
+photocraft-ui-egui = { workspace = true, optional = true }
+egui = { workspace = true, optional = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+wasm_sync = "0.1"

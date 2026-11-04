@@ -350,7 +350,7 @@ fn invoke_file_commands(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, 
         "file.exit" => {
             crate::prefs_ui::retire_all(app);
             app.allow_close = true;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            crate::hosted::send(ctx, egui::ViewportCommand::Close);
             Ok(Value::Null)
         }
         "file.clearRecent" => {

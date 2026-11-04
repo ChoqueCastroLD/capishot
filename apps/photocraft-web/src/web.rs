@@ -334,7 +334,7 @@ impl Boot {
             }
             recovery.discover(true);
         }
-        // Image › Upscale with AI…: the AI worker module, loaded on first use (ai_bridge.rs).
+        // Image › Upscale with AI…: the AI worker module, loaded on first use (photocraft-ai-web).
         // Window › AI Models… (`ai.models.*`): downloads through a second worker instance.
         if let Some(ai) = crate::ai_bridge::from_page() {
             app.session.set_ai_upscaler(Some(ai.upscaler));

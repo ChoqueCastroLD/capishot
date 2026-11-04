@@ -96,6 +96,12 @@ pub use flat::{
 pub use psd_export::{PsdExportOptions, document_to_psd, document_to_psd_with};
 pub use psd_import::{psd_to_document, psd_to_document_with};
 
+/// A decoded flat image (raw pixels a host hands over, for one) as a single-layer document, as
+/// [`import`] makes one from a PNG: a locked "Background" when opaque, "Layer 0" otherwise.
+pub fn import_image(name: &str, image: &photocraft_codecs::Image) -> Result<ImportResult, IoError> {
+    flat::image_to_document(name, image)
+}
+
 /// Errors from import/export.
 #[derive(Debug, thiserror::Error)]
 pub enum IoError {

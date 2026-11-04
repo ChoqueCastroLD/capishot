@@ -72,7 +72,7 @@ pub(crate) fn modal_drag_overlay(ctx: &egui::Context) {
         }
         if response.double_clicked() {
             let max = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
-            ctx.send_viewport_cmd(ViewportCommand::Maximized(!max));
+            crate::hosted::send(ctx, ViewportCommand::Maximized(!max));
         }
     });
 }
@@ -249,7 +249,7 @@ fn maximized(ctx: &egui::Context) -> bool {
 }
 
 fn toggle_maximize(ctx: &egui::Context) {
-    ctx.send_viewport_cmd(ViewportCommand::Maximized(!maximized(ctx)));
+    crate::hosted::send(ctx, ViewportCommand::Maximized(!maximized(ctx)));
 }
 
 /// The caption buttons at the ends of `bar` (the title bar's outer rect), full bar height, flush
@@ -296,7 +296,7 @@ pub fn caption_buttons(app: &mut PhotocraftApp, ui: &mut Ui, bar: Rect) {
         }
     }
     match clicked {
-        Some(Caption::Minimize) => ui.ctx().send_viewport_cmd(ViewportCommand::Minimized(true)),
+        Some(Caption::Minimize) => crate::hosted::send(ui.ctx(), ViewportCommand::Minimized(true)),
         Some(Caption::Maximize) => toggle_maximize(ui.ctx()),
         Some(Caption::Close) => {
             let ctx = ui.ctx().clone();
@@ -486,7 +486,7 @@ fn hand_off(ctx: &egui::Context) {
 /// that of a resize and keeps its release, so egui kept the drag: every other move failed, and a
 /// resize right after one (#5725). The same hand-off ends it.
 pub(crate) fn start_os_move(ctx: &egui::Context) {
-    ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+    crate::hosted::send(ctx, ViewportCommand::StartDrag);
     hand_off(ctx);
 }
 
@@ -538,7 +538,7 @@ pub fn resize_zones(ui: &mut Ui) {
     for (i, (r, dir, cursor)) in zones(w).into_iter().enumerate() {
         let resp = zui.interact(r, Id::unique(("titlebar-resize", i)), Sense::drag()).on_hover_cursor(cursor);
         if resp.drag_started_by(PointerButton::Primary) {
-            ctx.send_viewport_cmd(ViewportCommand::BeginResize(dir));
+            crate::hosted::send(&ctx, ViewportCommand::BeginResize(dir));
             hand_off(&ctx);
         }
     }

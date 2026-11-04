@@ -750,7 +750,7 @@ fn open_window_drops(app: &mut PhotocraftApp, ctx: &egui::Context, windows: Vec<
     let dropped: Vec<egui::DroppedFileHandle> = windows.into_iter().flat_map(|window| window.dropped).collect();
     if !dropped.is_empty() {
         app.open_dropped(ctx, dropped, None);
-        ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Focus);
+        crate::hosted::send_to(ctx, egui::ViewportId::ROOT, egui::ViewportCommand::Focus);
     }
 }
 

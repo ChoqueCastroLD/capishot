@@ -403,12 +403,6 @@ pub fn finish_custom_shape(app: &mut PhotocraftApp, rect: [f64; 4], keep: bool, 
 
 // ------------------------------------------------------------------ Tool Presets
 
-pub(super) fn tool_id(t: Tool) -> String {
-    let s = format!("{t:?}");
-    let mut c = s.chars();
-    c.next().map(|f| f.to_ascii_lowercase().to_string() + c.as_str()).unwrap_or_default()
-}
-
 /// Apply a tool preset: the engine sets the brush/colour, the shell switches tool and options.
 pub fn select_tool_preset(app: &mut PhotocraftApp, name: &str) {
     let before_ratio = crate::crop_ui::preset_ratio(app);
@@ -458,7 +452,7 @@ pub(super) fn new_tool_preset_params(app: &PhotocraftApp, tool: Tool) -> Value {
     {
         own.insert("sample_all".into(), json!({ k: v }));
     }
-    json!({"name": tool.label(), "tool": tool_id(tool), "options": {"toolOptions": own}})
+    json!({"name": tool.label(), "tool": tool.id(), "options": {"toolOptions": own}})
 }
 
 pub fn tool_presets_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {

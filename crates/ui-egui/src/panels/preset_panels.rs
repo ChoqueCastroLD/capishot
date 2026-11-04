@@ -25,7 +25,7 @@ pub use panels::{
     tool_presets_panel, windows,
 };
 #[cfg(test)]
-use panels::{new_tool_preset_params, tool_id};
+use panels::new_tool_preset_params;
 
 /// Panel state (serde, so the control channel can read and drive it).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -749,9 +749,9 @@ mod tests {
         select_tool_preset(&mut app, "Soft Eraser 60 px");
         assert_eq!(app.ui.tool, Tool::Eraser);
         assert_eq!(app.session.tools.brush.size, 60.0);
-        assert_eq!(tool_id(Tool::CloneStamp), "cloneStamp");
-        assert_eq!(tool_id(Tool::PatternStamp), "patternStamp");
-        assert_eq!(Tool::from_name(&tool_id(Tool::CustomShape)), Some(Tool::CustomShape));
+        assert_eq!(Tool::CloneStamp.id(), "cloneStamp");
+        assert_eq!(Tool::PatternStamp.id(), "patternStamp");
+        assert_eq!(Tool::from_name(&Tool::CustomShape.id()), Some(Tool::CustomShape));
     }
 
     /// A crop preset picked in Tool Presets fits the frame to its ratio at once, as the options

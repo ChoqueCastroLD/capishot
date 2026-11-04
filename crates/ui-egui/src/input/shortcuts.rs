@@ -326,7 +326,7 @@ pub fn clipboard_keys(ctx: &egui::Context, typing: bool, raw: &mut egui::RawInpu
                 (true, false) => *e = egui::Event::Copy,
                 // Text fields need the clipboard text: egui-winit reads it and sends a Paste event.
                 (false, true) if typing => {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+                    crate::hosted::send(ctx, egui::ViewportCommand::RequestPaste);
                     return false;
                 }
                 (false, true) => *e = press(Key::V, Modifiers::COMMAND),
@@ -351,7 +351,7 @@ pub fn clipboard_keys(ctx: &egui::Context, typing: bool, raw: &mut egui::RawInpu
                 Key::C => *e = egui::Event::Copy,
                 Key::X => *e = egui::Event::Cut,
                 Key::V => {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+                    crate::hosted::send(ctx, egui::ViewportCommand::RequestPaste);
                     return false;
                 }
                 _ => {}

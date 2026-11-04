@@ -34,6 +34,7 @@ crates/
   io plugins                 L4 document <-> PSD / flat formats; sandboxed WebAssembly plug-ins
   engine                     L5 Session + command registry (every action is a command)
   ui-egui automation fontfetch  L6 egui shell (thin: all actions go through the engine); MCP server; Google Fonts HTTPS fetcher + font store
+  host                       L7 capishot-host: Capishot as a library for host apps (in-process engine API, events, jobs, live sync); stable API, own CHANGELOG
   testkit                    test helpers
 apps/
   photocraft                 desktop app (eframe/wgpu), TCP control server

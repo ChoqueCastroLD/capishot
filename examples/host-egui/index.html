@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Capishot host example</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #1b1b1f; }
+    #host_canvas { display: block; width: 100%; height: 100%; }
+  </style>
+  <!-- The binary on wasm32 (its `main` starts the app on #host_canvas). -->
+  <link data-trunk rel="rust" data-bin="capishot-host-egui" data-cargo-profile="wasm-release" data-wasm-opt="z" />
+</head>
+<body>
+  <canvas id="host_canvas"></canvas>
+</body>
+</html>

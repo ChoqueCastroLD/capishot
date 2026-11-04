@@ -1,0 +1,151 @@
+name: Host contract (examples/host-egui)
+
+# The host contract example (examples/host-egui) is its own Cargo workspace, built the way an
+# outside host builds Capishot: native (build, contract tests, clippy) and wasm32 (Trunk). On
+# main it is also built from a copy outside the checkout that takes capishot-host and egui-wgpu by
+# git at the pushed commit, exactly as a host's manifest does.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "crates/**"
+      - "vendor/**"
+      - "examples/host-egui/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain*"
+      - ".github/workflows/host-egui.yml"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
+concurrency:
+  group: host-egui-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    working-directory: examples/host-egui
+
+jobs:
+  native:
+    timeout-minutes: 60
+    name: native build and contract tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Linux system dependencies (egui/winit)
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev \
+            xvfb mesa-vulkan-drivers
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: host-egui-native
+          workspaces: examples/host-egui -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
+      - name: Build
+        run: cargo build
+      - name: Contract tests
+        run: cargo test
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Clippy, canvas-only host (no `full`)
+        run: cargo clippy --all-targets --no-default-features -- -D warnings
+      - name: Binary size (release)
+        run: |
+          cargo build --release
+          bytes=$(wc -c < target/release/capishot-host-egui | tr -d ' ')
+          echo "capishot-host-egui release binary: $bytes bytes" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Run the contract in the real app (lavapipe, no AI in this build)
+        env:
+          WGPU_BACKEND: vulkan
+        run: xvfb-run -a -s "-screen 0 1400x900x24" target/release/capishot-host-egui --selftest selftest
+
+  wasm:
+    timeout-minutes: 60
+    name: wasm32 build (Trunk)
+    runs-on: ubuntu-latest
+    env:
+      TRUNK_VERSION: 0.21.14
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: host-egui-wasm
+          workspaces: examples/host-egui -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
+      - name: Install trunk
+        working-directory: .
+        run: |
+          curl --proto '=https' -fsSL "https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar -xz -C "$HOME/.cargo/bin" trunk
+          trunk --version
+      - name: Clippy (wasm32)
+        run: cargo clippy --target wasm32-unknown-unknown -- -D warnings
+      - name: Trunk build
+        run: trunk build --release
+      - name: Wasm size
+        run: |
+          for wasm in dist/*.wasm; do
+            bytes=$(wc -c < "$wasm" | tr -d ' ')
+            echo "$(basename "$wasm"): $bytes bytes" | tee -a "$GITHUB_STEP_SUMMARY"
+          done
+
+  # The same example outside the checkout, depending on Capishot by git at the pushed commit: what
+  # a host's manifest does. Only on main (a PR's commit may not be fetchable from this repository).
+  external:
+    if: github.event_name == 'push'
+    timeout-minutes: 60
+    name: native and wasm32 from a git dependency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Linux system dependencies (egui/winit)
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Copy the example out of the checkout, with git dependencies
+        env:
+          REPO: ${{ github.server_url }}/${{ github.repository }}
+          REV: ${{ github.sha }}
+        run: |
+          dst="$RUNNER_TEMP/host"
+          rm -rf "$dst" && cp -r . "$dst" && rm -rf "$dst/target"
+          sed -i \
+            -e "s#capishot-host = { path = \"../../crates/host\",#capishot-host = { git = \"$REPO\", rev = \"$REV\",#" \
+            -e "s#egui-wgpu = { path = \"../../vendor/egui-wgpu\" }#egui-wgpu = { git = \"$REPO\", rev = \"$REV\" }#" \
+            "$dst/Cargo.toml"
+          if grep -n 'path = "\.\./\.\./' "$dst/Cargo.toml"; then
+            echo "a path into the Capishot checkout is left: the copy would not be external" >&2
+            exit 1
+          fi
+          echo "HOST_DIR=$dst" >> "$GITHUB_ENV"
+      - name: Native check
+        working-directory: ${{ env.HOST_DIR }}
+        run: cargo check --all-targets
+      - name: Wasm32 check
+        working-directory: ${{ env.HOST_DIR }}
+        run: cargo check --target wasm32-unknown-unknown

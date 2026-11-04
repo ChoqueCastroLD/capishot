@@ -12,6 +12,35 @@ pub fn document_area(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     crate::paint_mouse::show_picker(app, ui.ctx());
 }
 
+/// The embedded canvas (`embed.rs`): the active document alone in `rect`, without the tab
+/// strip, start screen, open cards or Window › Arrange tiles. An empty area without a document.
+/// Returns whether a document was drawn.
+pub(crate) fn embedded_area(app: &mut PhotocraftApp, ui: &mut egui::Ui, rect: Rect) -> bool {
+    crate::distort_ui::drop_foreign(app);
+    app.drop_canvas_rect = None;
+    app.tab_strip = None;
+    retain_gpu_documents(app);
+    crate::transform_tool::track_steps(app, ui.ctx());
+    crate::cas_transform::tick(app, ui.ctx());
+    crate::symmetry_ui::track(app, ui.ctx());
+    let shown = app.session.active_index().and_then(|idx| app.ui.views.get(idx).cloned().map(|view| (idx, view)));
+    let drawn = match shown {
+        Some((idx, view)) => {
+            app.last_canvas_rect = rect;
+            app.drop_canvas_rect = Some(rect);
+            canvas_view(app, ui, idx, rect, view, true);
+            true
+        }
+        None => {
+            paint_dots(ui, rect, app.session.prefs().interface.show_canvas_dots);
+            false
+        }
+    };
+    crate::layer_transfer::finish(app, ui.ctx());
+    crate::paint_mouse::show_picker(app, ui.ctx());
+    drawn
+}
+
 /// Window › Arrange tiles: each document shown with its tile in `rect`, or `None` when the
 /// active document fills the area.
 pub(crate) fn arranged_cells(app: &PhotocraftApp, rect: Rect) -> Option<Vec<(usize, Rect)>> {

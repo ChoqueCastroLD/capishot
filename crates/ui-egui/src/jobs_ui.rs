@@ -192,6 +192,8 @@ pub struct SaveJob {
 /// The shell's job bookkeeping.
 #[derive(Default)]
 pub struct JobsUi {
+    /// Jobs that ended in hosted frames, for the host API (`embed::full_frame` takes them).
+    pub(crate) hosted_ended: Vec<JobEvent>,
     /// Control replies waiting for a job to end.
     pub(crate) waiters: Vec<(JobId, Sender<ControlResponse>)>,
     /// Background opens, in tab order.
@@ -701,13 +703,23 @@ fn finish_save(app: &mut PhotocraftApp, ctx: &egui::Context, save: SaveJob, labe
 fn close_after_saves(app: &mut PhotocraftApp, ctx: &egui::Context) {
     app.jobs.saves.retain(|s| !(s.ended && s.state.finished()));
     if !app.saving() && !app.printing() && std::mem::take(&mut app.jobs.close_after_saves) {
-        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        crate::hosted::send(ctx, egui::ViewportCommand::Close);
     }
 }
 
 /// Per frame: apply finished jobs and react to them; keep frames coming while jobs run; Esc
 /// cancels the job in view.
 pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let ended = tick_events(app, ctx);
+    // In a host app's window the host API reports them (it can't poll the session for them).
+    if crate::hosted::active() {
+        app.jobs.hosted_ended.extend(ended);
+    }
+}
+
+/// [`tick`], returning the jobs that ended this frame: the embedded canvas (`embed.rs`) hands
+/// them on to its host, which can't poll the session for them itself (they're taken here).
+pub(crate) fn tick_events(app: &mut PhotocraftApp, ctx: &egui::Context) -> Vec<JobEvent> {
     {
         let _s = crate::perf_span::span("history.cache");
         app.session.poll_history_cache();
@@ -734,7 +746,7 @@ pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
         let _s = crate::perf_span::span("jobs.apply");
         app.session.poll_jobs()
     };
-    for e in events {
+    for e in events.iter().cloned() {
         let _s = crate::perf_span::span("jobs.event");
         on_event(app, ctx, e);
     }
@@ -748,7 +760,7 @@ pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
     }
     if !keep_polling(app, ctx) {
-        return;
+        return events;
     }
     if let Some(job) = job_in_view(app)
         && !ctx.text_edit_focused()
@@ -756,6 +768,7 @@ pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
     {
         cancel(app, job.id);
     }
+    events
 }
 
 /// Keep the event loop awake while a background document job exists.

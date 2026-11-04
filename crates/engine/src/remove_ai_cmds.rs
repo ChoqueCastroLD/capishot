@@ -343,6 +343,81 @@ mod tests {
         assert!(failed, "the prep's error fails the job");
     }
 
+    /// Capikoma #34: Remove with AI's result is one undo step whatever it paints into (the
+    /// layer's pixels, its layer mask, an alpha channel, the Quick Mask) and however the job
+    /// runs (on a worker natively, handed back between frames as in the browser): one undo takes
+    /// the whole result back and leaves everything else as it was.
+    #[test]
+    fn remove_ai_is_one_undo_step_on_every_target() {
+        use crate::jobs::{JobOutcome, Started};
+        // Every surface a target can be: the layer, its mask, the alpha channels, the Quick Mask.
+        let surfaces = |s: &Session| {
+            let st = s.active().unwrap();
+            let (doc, b) = (&st.doc, st.doc.bounds());
+            let layer = doc.layer(st.active_layer.unwrap()).unwrap();
+            let mut v = vec![layer.surface().unwrap().read_region(b)];
+            v.extend(layer.mask.as_ref().map(|m| m.surface.read_region(b)));
+            v.extend(doc.channels.iter().map(|c| c.surface.read_region(b)));
+            v.extend(doc.quick_mask.as_ref().map(|c| c.surface.read_region(b)));
+            v
+        };
+        for target in [json!("pixels"), json!("mask"), json!({"channel": 0}), json!("quickMask")] {
+            for hand_off in [false, true] {
+                let mut s = page(Arc::new(FakeInpainter::default()), true);
+                // A blob in the target for the fill to change.
+                match target.as_str() {
+                    Some("mask") => s.execute("layer.layerMask.revealAll", json!({})).map(|_| ()).unwrap(),
+                    Some("quickMask") => s.execute("select.editInQuickMaskMode", json!({"on": true})).map(|_| ()).unwrap(),
+                    Some(_) => {}
+                    None => s.execute("channel.new", json!({"fill": "black"})).map(|_| ()).unwrap(),
+                }
+                let t = target.clone();
+                s.edit("blob", |doc, active| {
+                    let (r, px): (Rect, &[f32]) = (Rect::new(28, 18, 36, 28), &[1.0]);
+                    match t.as_str() {
+                        Some("mask") => doc.layer_mut(active.unwrap()).unwrap().mask.as_mut().unwrap().surface.fill_rect(r, &[0.0]),
+                        // A Quick Mask without a selection is all white: the blob is black.
+                        Some("quickMask") => doc.quick_mask.as_mut().unwrap().surface.fill_rect(r, &[0.0]),
+                        Some(_) => {}
+                        None => doc.channels.first_mut().unwrap().surface.fill_rect(r, px),
+                    }
+                    Ok(())
+                })
+                .unwrap();
+                let (before, past) = (surfaces(&s), s.active().unwrap().history.past_len());
+                crate::jobs::TEST_HAND_OFF.with(|h| h.set(hand_off));
+                let p = json!({"strokes": [[[29, 22], [35, 22]]], "size": 14, "target": target});
+                let outcome = match s.start(ID, p).unwrap() {
+                    Started::Done(v) => JobOutcome::Done(v),
+                    Started::Job(job) => {
+                        let mut end = None;
+                        for _ in 0..5000 {
+                            s.step_jobs(&|| true);
+                            if let Some(e) = s.poll_jobs().into_iter().find(|e| e.id == job) {
+                                end = Some(e.outcome);
+                                break;
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(1));
+                        }
+                        end.unwrap_or_else(|| panic!("{target} hand-off {hand_off}: the job ended"))
+                    }
+                };
+                crate::jobs::TEST_HAND_OFF.with(|h| h.set(false));
+                let what = format!("{target}, hand-off {hand_off}");
+                assert!(matches!(outcome, JobOutcome::Done(_)), "{what}: {outcome:?}");
+                let after = surfaces(&s);
+                assert_ne!(after, before, "{what}: the fill landed");
+                let st = s.active().unwrap();
+                assert_eq!(st.history.past_len(), past + 1, "{what}: one step");
+                assert_eq!(st.history.entries().last().map(String::as_str), Some(LABEL), "{what}");
+                assert!(s.undo());
+                assert_eq!(surfaces(&s), before, "{what}: one undo takes it all back");
+                assert!(s.redo());
+                assert_eq!(surfaces(&s), after, "{what}: one redo puts it all back");
+            }
+        }
+    }
+
     #[test]
     fn a_missing_model_is_an_error_unless_downloads_are_allowed() {
         let fake = Arc::new(FakeInpainter { state: Some(photocraft_ai_lama::service::ModelState::NeedsDownload { bytes: 100 << 20 }), ..Default::default() });

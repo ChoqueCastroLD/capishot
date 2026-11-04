@@ -644,5 +644,5 @@ pub fn now() -> Instant {
 
 /// The `Screenshot` command that carries `callback` to the renderer.
 pub fn send_command(ctx: &Context, callback: ScreenshotCallback) {
-    ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(callback));
+    crate::hosted::send(ctx, egui::ViewportCommand::Screenshot(callback));
 }

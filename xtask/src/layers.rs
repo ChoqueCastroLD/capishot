@@ -70,6 +70,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("tools", Class::Layer(4)),
     ("viewport", Class::Layer(4)),
     ("ml", Class::Layer(4)),
+    // The AI services in the browser (the AI Web Worker bridge), for the web app and capishot-host.
+    ("ai-web", Class::Layer(4)),
     ("plugins", Class::Layer(4)),
     ("engine", Class::Layer(5)),
     ("ui-egui", Class::Layer(6)),
@@ -77,6 +79,9 @@ pub const TABLE: &[(&str, Class)] = &[
     ("platform", Class::Layer(6)),
     // Google Fonts download services (HTTPS fetcher + app-private store) for the app and the CLI.
     ("fontfetch", Class::Layer(6)),
+    // Capishot as a library for host apps (the in-process engine API, then the egui widget): above
+    // the egui shell, below the apps.
+    ("capishot-host", Class::Layer(7)),
     ("testkit", Class::Testkit),
     // L7 apps and tooling
     ("photocraft", Class::Exempt),

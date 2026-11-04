@@ -35,9 +35,25 @@ pub(crate) use thumbs::layer_thumb_frame;
 pub use thumbs::{THUMBS_PER_FRAME, surface_fingerprint};
 
 impl PhotocraftApp {
-    pub fn new(mut session: Session, mut services: Services) -> Self {
+    pub fn new(session: Session, services: Services) -> Self {
+        let mut app = Self::bare(session, services);
+        // Saved preferences are in place before the first frame; recovery starts in upkeep.
+        prefs_ui::load(&mut app);
+        layers_panel_ui::restore_options(&mut app);
+        histogram_panel::restore_options(&mut app);
+        // After the saved preferences, which say whether the set was already offered.
+        kys_import::offer_import(&mut app);
+        notices::wayland_file_drop_guidance(&mut app);
+        // File › Scripts › Script Events Manager: "Start Application".
+        photocraft_engine::automate_cmds::fire_event(&mut app.session, "startApplication");
+        app
+    }
+
+    /// The app's state with nothing read from disk and no startup work: what [`Self::new`]
+    /// builds on, and the embedded canvas (`embed.rs`) uses as it is.
+    pub(crate) fn bare(mut session: Session, mut services: Services) -> Self {
         session.updates.check = services.check_updates.take();
-        let mut app = Self {
+        Self {
             session,
             ui: UiState::default(),
             services,
@@ -239,17 +255,31 @@ impl PhotocraftApp {
             jobs: Default::default(),
             #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
             live_tokens: theme::live::LiveTokens::from_env(),
-        };
-        // Saved preferences are in place before the first frame; recovery starts in upkeep.
-        prefs_ui::load(&mut app);
-        layers_panel_ui::restore_options(&mut app);
-        histogram_panel::restore_options(&mut app);
-        // After the saved preferences, which say whether the set was already offered.
-        kys_import::offer_import(&mut app);
-        notices::wayland_file_drop_guidance(&mut app);
-        // File › Scripts › Script Events Manager: "Start Application".
-        photocraft_engine::automate_cmds::fire_event(&mut app.session, "startApplication");
-        app
+        }
+    }
+}
+
+impl PhotocraftApp {
+    /// The input steps that have to happen before egui reads the input: pinches, the control
+    /// channel's events, control-click, fingers and the pen. The standalone app's input hook runs
+    /// them; a host app that wants them in its window forwards its own hook here (optional:
+    /// `capishot_host::view::CapishotView::raw_input_hook`).
+    pub fn gesture_input(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        // Windows precision touchpads and some Linux Wayland compositors send pinches
+        // as fractional Ctrl + wheel rather than a native Zoom event (#4566).
+        // Leave Ctrl+whole-notch mouse scrolling alone, and honour the pinch preference.
+        if cfg!(any(target_os = "windows", target_os = "linux")) && self.session.prefs().enhanced_controls.zoom_with_trackpad_pinch {
+            wheel_nav::fold_legacy_pinch(ctx, raw_input);
+        }
+        self.inject_synthetic(ctx, raw_input);
+        // After the control channel's own events (`ui.type`) join the OS's, before any widget.
+        widgets::cap_text_events(&mut raw_input.events);
+        self.control_click.normalize(&mut raw_input.events, cfg!(target_os = "macos"));
+        // Fingers: the tool's, the modifier button's, navigation, taps (touch_input.rs).
+        crate::touch_ui::route(self, ctx, raw_input);
+        // A pen held still is no touch screen's press-and-hold right click (stylus.rs).
+        let pen_down = self.stylus.pen_contacts.observe(&raw_input.events);
+        stylus::pen_hold_is_no_right_click(ctx, pen_down);
     }
 }
 
@@ -288,21 +318,7 @@ impl eframe::App for PhotocraftApp {
         if craft_ui::docking::typing_window(ctx).is_none() {
             shortcuts::clipboard_keys(ctx, ctx.text_edit_focused() || self.ui.text_edit.is_some(), raw_input);
         }
-        // Windows precision touchpads and some Linux Wayland compositors send pinches
-        // as fractional Ctrl + wheel rather than a native Zoom event (#4566).
-        // Leave Ctrl+whole-notch mouse scrolling alone, and honour the pinch preference.
-        if cfg!(any(target_os = "windows", target_os = "linux")) && self.session.prefs().enhanced_controls.zoom_with_trackpad_pinch {
-            wheel_nav::fold_legacy_pinch(ctx, raw_input);
-        }
-        self.inject_synthetic(ctx, raw_input);
-        // After the control channel's own events (`ui.type`) join the OS's, before any widget.
-        widgets::cap_text_events(&mut raw_input.events);
-        self.control_click.normalize(&mut raw_input.events, cfg!(target_os = "macos"));
-        // Fingers: the tool's, the modifier button's, navigation, taps (touch_input.rs).
-        crate::touch_ui::route(self, ctx, raw_input);
-        // A pen held still is no touch screen's press-and-hold right click (stylus.rs).
-        let pen_down = self.stylus.pen_contacts.observe(&raw_input.events);
-        stylus::pen_hold_is_no_right_click(ctx, pen_down);
+        self.gesture_input(ctx, raw_input);
         if self.custom_titlebar {
             titlebar::release_after_os_resize(ctx, raw_input);
         }

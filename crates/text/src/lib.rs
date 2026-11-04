@@ -204,13 +204,32 @@ pub type SharedEngine = wasm_sync::Mutex<TextEngine>;
 
 static SHARED: warm::Warm<SharedEngine> = warm::Warm::new();
 
+/// [`set_system_fonts`]`(false)` was called: [`shared`] leaves the installed fonts out.
+static NO_SYSTEM_FONTS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// [`shared`] has started building (its system font choice is made).
+static SHARED_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Whether [`shared`] scans the installed fonts (native builds, outside tests, unless
-/// `PHOTOCRAFT_NO_SYSTEM_FONTS` is set). Without the scan it is cheap to build.
+/// `PHOTOCRAFT_NO_SYSTEM_FONTS` is set or a host turned them off). Without the scan it is cheap
+/// to build.
 fn uses_system_fonts() -> bool {
-    cfg!(not(target_arch = "wasm32")) && !cfg!(test) && std::env::var_os("PHOTOCRAFT_NO_SYSTEM_FONTS").is_none()
+    cfg!(not(target_arch = "wasm32"))
+        && !cfg!(test)
+        && !NO_SYSTEM_FONTS.load(std::sync::atomic::Ordering::SeqCst)
+        && std::env::var_os("PHOTOCRAFT_NO_SYSTEM_FONTS").is_none()
+}
+
+/// A host embedding the engine chooses whether [`shared`] uses the installed fonts: off, type
+/// lays out with the bundled fonts and the ones the host registers only, as in the browser, so
+/// `type.layoutDigest` is the same on every target. Takes effect only before [`shared`] is first
+/// built; returns whether it did (`false`: too late, the engine already chose).
+pub fn set_system_fonts(on: bool) -> bool {
+    NO_SYSTEM_FONTS.store(!on, std::sync::atomic::Ordering::SeqCst);
+    !SHARED_STARTED.load(std::sync::atomic::Ordering::SeqCst)
 }
 
 fn new_shared() -> SharedEngine {
+    SHARED_STARTED.store(true, std::sync::atomic::Ordering::SeqCst);
     let mut engine = if uses_system_fonts() { TextEngine::with_system_fonts() } else { TextEngine::new() };
     engine.fonts.mark_shared();
     SharedEngine::new(engine)

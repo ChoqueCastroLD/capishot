@@ -100,7 +100,7 @@ pub fn check_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
         Ok(()) => {
             app.window_recovery_retry = None;
             app.allow_close = true;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            crate::hosted::send(ctx, egui::ViewportCommand::Close);
         }
         Err(e) => {
             log::error!("{e}; keeping the documents open and trying again in {RECOVERY_RETRY_SECS} s");
