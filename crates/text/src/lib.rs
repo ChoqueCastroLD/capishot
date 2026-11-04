@@ -167,6 +167,12 @@ impl TextEngine {
         k.is_finite().then_some(k)
     }
 
+    /// The families `layer` uses that the host serves (`served`) and that are still on their way
+    /// (or the manifest is): drawn now they would show a fallback font first. Asks for them.
+    pub fn awaited_fonts(&mut self, layer: &TextLayer) -> Vec<String> {
+        layout::awaited_families(&mut self.fonts, &layer.char_runs())
+    }
+
     /// Lays out and rasterizes a text layer into document space.
     pub fn render(&mut self, layer: &TextLayer, dpi: f32, format: PixelFormat) -> (TextLayout, Rendered) {
         let l = self.layout(layer, dpi);

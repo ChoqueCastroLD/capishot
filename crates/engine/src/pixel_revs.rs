@@ -9,7 +9,7 @@
 //! scan. The tracker keeps the document it saw last (one more `Arc`, so a freed tile's address
 //! can't come back as a false "unchanged").
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use photocraft_doc::{Document, Layer, LayerId};
@@ -19,6 +19,10 @@ use photocraft_raster::Surface;
 /// The most layers whose dirty rects wait to be taken ([`PixelRevs::take_changes`]); past it the
 /// oldest are dropped (their revisions still move), so a session nobody drains stays small.
 const MAX_PENDING: usize = 4096;
+
+/// The most changes [`PixelRevs::dirty_since`] remembers; older ones are forgotten and asking
+/// about them answers [`Dirty::Full`].
+const MAX_LOG: usize = 2048;
 
 /// One layer's pixel change since the last [`PixelRevs::take_changes`].
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,6 +41,22 @@ struct Track {
     /// The last revision handed out (revisions are unique within the document).
     counter: u64,
     pending: Vec<PixelChange>,
+    /// Every change with its revision, oldest first, at most [`MAX_LOG`].
+    log: VecDeque<(u64, LayerId, Rect)>,
+    /// The newest revision forgotten from `log`: changes after it are all there.
+    floor: u64,
+}
+
+/// What changed in a layer since a revision ([`PixelRevs::dirty_since`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Dirty {
+    /// Nothing: the layer is as it was at that revision.
+    Clean,
+    /// The area that changed (document pixels, tile-aligned), the union of every change since.
+    Rect(Rect),
+    /// Unknown: the revision is older than what is remembered (or not one of this document's).
+    /// Read the whole layer again.
+    Full,
 }
 
 /// The tracker a [`crate::DocState`] keeps. Reads (`&self`) update it, so `document.inspect` can
@@ -66,6 +86,21 @@ impl PixelRevs {
         Some(t.revs.get(&layer).copied().unwrap_or(0))
     }
 
+    /// Where `layer` changed after revision `since` (a `pixelRev` read earlier), with its
+    /// `pixelRev` now; `None`: no such layer. Changes are remembered for the last
+    /// [`MAX_LOG`] of them, across layers; before that the answer is [`Dirty::Full`].
+    pub fn dirty_since(&self, doc: &Arc<Document>, layer: LayerId, since: u64) -> Option<(Dirty, u64)> {
+        doc.layer(layer)?;
+        let mut t = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        sync(&mut t, doc);
+        let rev = t.revs.get(&layer).copied().unwrap_or(0);
+        if since > t.counter || since < t.floor {
+            return Some((Dirty::Full, rev));
+        }
+        let rect = t.log.iter().filter(|(r, l, _)| *r > since && *l == layer).map(|(_, _, rect)| *rect).reduce(|a, b| a.union(&b));
+        Some((rect.map_or(Dirty::Clean, Dirty::Rect), rev))
+    }
+
     /// The layers whose pixels or mask changed since the last call, with the changed area.
     pub fn take_changes(&self, doc: &Arc<Document>) -> Vec<PixelChange> {
         let mut t = self.0.lock().unwrap_or_else(PoisonError::into_inner);
@@ -93,6 +128,12 @@ fn sync(t: &mut Track, doc: &Arc<Document>) {
         t.counter = t.counter.saturating_add(1);
         let rev = t.counter;
         t.revs.insert(l.id, rev);
+        t.log.push_back((rev, l.id, rect));
+        if t.log.len() > MAX_LOG
+            && let Some((old, ..)) = t.log.pop_front()
+        {
+            t.floor = old;
+        }
         match t.pending.iter_mut().find(|c| c.layer == l.id) {
             Some(c) => {
                 c.rect = c.rect.union(&rect);
@@ -202,6 +243,39 @@ mod tests {
         let mut d2 = (*d0).clone();
         d2.layers.push(Layer::new("empty", LayerContent::Raster(Surface::new(PixelFormat::RGBA8))));
         assert!(revs.take_changes(&Arc::new(d2)).is_empty());
+    }
+
+    #[test]
+    fn dirty_since_unions_the_changes_after_a_revision() {
+        let layer = Layer::new("a", LayerContent::Raster(Surface::new(PixelFormat::RGBA8)));
+        let id = layer.id;
+        let mut d = Arc::new(doc_with(vec![layer]));
+        let revs = PixelRevs::default();
+        assert_eq!(revs.dirty_since(&d, id, 0), Some((Dirty::Clean, 0)));
+        let paint = |d: &Arc<Document>, r: Rect| {
+            let mut n = (**d).clone();
+            if let Some(s) = n.layer_mut(id).and_then(Layer::surface_mut) {
+                s.fill_rect(r, &[1.0, 0.0, 0.0, 1.0]);
+            }
+            Arc::new(n)
+        };
+        d = paint(&d, Rect::new(0, 0, 4, 4));
+        let (_, r1) = revs.dirty_since(&d, id, 0).unwrap();
+        d = paint(&d, Rect::new(300, 300, 304, 304));
+        let (dirty, r2) = revs.dirty_since(&d, id, r1).unwrap();
+        let Dirty::Rect(rect) = dirty else { panic!("{dirty:?}") };
+        assert!(rect.contains_rect(&Rect::new(300, 300, 304, 304)) && !rect.contains_rect(&Rect::new(0, 0, 4, 4)), "{rect:?}");
+        let Dirty::Rect(all) = revs.dirty_since(&d, id, 0).unwrap().0 else { panic!() };
+        assert!(all.contains_rect(&Rect::new(0, 0, 304, 304)));
+        assert_eq!(revs.dirty_since(&d, id, r2), Some((Dirty::Clean, r2)));
+        assert_eq!(revs.dirty_since(&d, id, r2 + 7).map(|d| d.0), Some(Dirty::Full), "a revision from elsewhere");
+        assert_eq!(revs.dirty_since(&d, LayerId(u64::MAX), 0), None);
+        // Past the remembered changes: the whole layer.
+        for i in 0..MAX_LOG as i32 + 1 {
+            d = paint(&d, Rect::new(i % 4, 0, i % 4 + 1, 1));
+            revs.revisions(&d);
+        }
+        assert_eq!(revs.dirty_since(&d, id, r2).map(|d| d.0), Some(Dirty::Full));
     }
 
     #[test]

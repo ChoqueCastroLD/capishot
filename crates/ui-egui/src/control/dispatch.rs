@@ -36,6 +36,7 @@ fn engine_methods(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlReq
         "jobs.list" => wrap(app.session.execute("jobs.list", json!({})).map_err(|e| e.to_string())),
         "fonts.preload" => fonts_preload(&req.params),
         "fonts.status" => fonts_status(&req.params),
+        "document.fontsReady" => document_fonts_ready(app, &req.params),
         "jobs.cancel" => jobs_cancel(app, &req.params),
         "ui.menu.list" => {
             // Report the same enablement the native menu shows, so a listed item is invokable.
@@ -309,6 +310,34 @@ fn fonts_preload(p: &Value) -> Outcome {
         },
     };
     Outcome::AfterFonts { families, timeout_s: timeout_ms / 1000.0, id }
+}
+
+/// `document.fontsReady {document?, timeoutMs?}` (control.rs).
+fn document_fonts_ready(app: &PhotocraftApp, p: &Value) -> Outcome {
+    if !(p.is_null() || p.is_object()) {
+        return err("params must be an object");
+    }
+    if let Some(field) = p.as_object().and_then(|o| o.keys().find(|k| !matches!(k.as_str(), "document" | "timeoutMs"))) {
+        return err(format!("unknown field `{field}` (fields: document, timeoutMs)"));
+    }
+    let doc = match p.get("document").filter(|v| !v.is_null()) {
+        None => match app.session.active() {
+            Some(st) => st.doc.id,
+            None => return err("no document is open"),
+        },
+        Some(v) => match v.as_u64().filter(|id| app.session.documents().iter().any(|d| d.doc.id.0 == *id)) {
+            Some(id) => photocraft_doc::DocId(id),
+            None => return err(format!("no open document {v}")),
+        },
+    };
+    let timeout_ms = match p.get("timeoutMs").filter(|v| !v.is_null()) {
+        None => 10_000.0,
+        Some(v) => match v.as_f64().filter(|t| t.is_finite() && (0.0..=120_000.0).contains(t)) {
+            Some(t) => t,
+            None => return err("`timeoutMs` must be a number from 0 to 120000"),
+        },
+    };
+    Outcome::AfterDocumentFonts { doc, timeout_s: timeout_ms / 1000.0 }
 }
 
 fn ui_set(app: &mut PhotocraftApp, ctx: &egui::Context, p: &Value) -> Outcome {

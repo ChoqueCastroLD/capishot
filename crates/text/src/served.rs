@@ -481,6 +481,17 @@ pub fn lookup(family: &str, postscript: &[String]) -> Lookup {
     }
 }
 
+/// Will `family` (or one of `postscript`) arrive from the host: it serves it and the download
+/// hasn't arrived or failed yet, or the manifest is still being read. `false` without a host
+/// that serves fonts (the desktop app, the CLI).
+pub fn awaited(family: &str, postscript: &[String]) -> bool {
+    match lookup(family, postscript) {
+        Lookup::Served(f) => matches!(family_status(&f), Status::Pending | Status::NotRequested),
+        Lookup::ManifestPending => true,
+        Lookup::NotServed => false,
+    }
+}
+
 /// The manifest's files for `family`.
 pub fn files_of(family: &str) -> Vec<ServedFont> {
     state().fonts.iter().filter(|f| f.family == family).cloned().collect()

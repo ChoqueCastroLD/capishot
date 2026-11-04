@@ -119,7 +119,7 @@ pub fn install(app: &mut PhotocraftApp, ctx: &egui::Context, delivered: Vec<(Str
             for (_, _, l) in st.doc.walk() {
                 if let LayerContent::Text(t) = &l.content
                     && redraws_for(t, &families)
-                    && crate::type_tool::shows_own_layout(&st.doc, t)
+                    && (photocraft_engine::type_cmds::awaits_redraw(t) || crate::type_tool::shows_own_layout(&st.doc, t))
                     && !layers.contains(&(st.doc.id, l.id))
                 {
                     layers.push((st.doc.id, l.id));
@@ -140,6 +140,21 @@ pub fn install(app: &mut PhotocraftApp, ctx: &egui::Context, delivered: Vec<(Str
                 photocraft_text::served::fetch_failed(&file, "not a readable font file");
             } else {
                 photocraft_text::served::fetch_arrived(&file);
+            }
+        }
+    }
+    // A download failed or the manifest changed: layers kept waiting for a font draw now (with
+    // the fallback when it isn't coming; one still on its way keeps them waiting).
+    if manifest_changed {
+        for st in app.session.documents() {
+            for (_, _, l) in st.doc.walk() {
+                if let LayerContent::Text(t) = &l.content
+                    && !t.text.is_empty()
+                    && photocraft_engine::type_cmds::awaits_redraw(t)
+                    && !layers.contains(&(st.doc.id, l.id))
+                {
+                    layers.push((st.doc.id, l.id));
+                }
             }
         }
     }
