@@ -1,6 +1,6 @@
 use super::appearance::{canvas_style, sync_animations, sync_appearance, sync_display_scale, sync_tooltips};
 use super::startup::{load, presets_store, recovery, sync_rulers};
-use super::{CheckpointStamp, recovery_context};
+use super::{CheckpointStamp, EditSeen, recovery_context};
 use super::{DocId, HashSet, PhotocraftApp, Value, prefs};
 
 /// Per-frame upkeep: theme sync, persistence, autosave and the history log.
@@ -400,7 +400,8 @@ fn autosave(app: &mut PhotocraftApp) {
             }
         }
     }
-    if !due && app.prefs_rt.catch_up.is_empty() && !app.prefs_rt.retry_after.values().any(|time| now >= *time) {
+    let soon = if app.services.autosave_after_edit { edits_due(app, now) } else { HashSet::new() };
+    if !due && soon.is_empty() && app.prefs_rt.catch_up.is_empty() && !app.prefs_rt.retry_after.values().any(|time| now >= *time) {
         return;
     }
     let jobs: Vec<_> = app
@@ -420,7 +421,7 @@ fn autosave(app: &mut PhotocraftApp) {
             }
             let stamp = CheckpointStamp::of(st, recovery_context(app, index, st));
             let retry_due = app.prefs_rt.retry_after.get(&st.doc.id).is_some_and(|time| now >= *time);
-            if (!due && !retry_due && !app.prefs_rt.catch_up.contains(&st.doc.id))
+            if (!due && !retry_due && !app.prefs_rt.catch_up.contains(&st.doc.id) && !soon.contains(&st.doc.id))
                 || app.prefs_rt.pending_autosaves.contains_key(&st.doc.id)
                 || app.prefs_rt.autosaved.get(&st.doc.id) == Some(&stamp)
                 || app.prefs_rt.retry_after.get(&st.doc.id).is_some_and(|time| now < *time)
@@ -436,6 +437,7 @@ fn autosave(app: &mut PhotocraftApp) {
                 Ok(()) => {
                     app.prefs_rt.pending_autosaves.insert(doc.id, stamp);
                     app.prefs_rt.catch_up.remove(&doc.id);
+                    app.prefs_rt.edits.remove(&doc.id);
                 }
                 Err(e) => {
                     app.prefs_rt.retry_after.insert(doc.id, now + 30_000.0);
@@ -444,6 +446,44 @@ fn autosave(app: &mut PhotocraftApp) {
             }
         }
     }
+}
+
+/// A checkpoint follows an edit once no other came for this long ([`edits_due`])…
+pub const EDIT_QUIET_MS: f64 = 2_000.0;
+/// …or this long after the first edit not checkpointed yet (painting without a pause).
+pub const EDIT_MAX_WAIT_MS: f64 = 15_000.0;
+
+/// Documents whose edits should be checkpointed now ([`crate::Services::autosave_after_edit`]):
+/// [`EDIT_QUIET_MS`] after the last edit, [`EDIT_MAX_WAIT_MS`] after the first one not stored
+/// yet, or at once when a background job (Remove with AI, a filter…) runs on the document, so a
+/// tab dropped during it keeps what came before. Updates [`super::Runtime::edits`].
+pub(super) fn edits_due(app: &mut PhotocraftApp, now: f64) -> HashSet<DocId> {
+    let mut due = HashSet::new();
+    let mut open = HashSet::new();
+    for st in app.session.documents() {
+        if st.hidden {
+            continue;
+        }
+        let id = st.doc.id;
+        open.insert(id);
+        let unsaved = !app.services.autosave_unsaved_only || (st.is_dirty() && app.prefs_rt.written_at.get(&id) != Some(&st.revision));
+        let stored = app.prefs_rt.autosaved.get(&id).is_some_and(|s| s.revision == st.revision);
+        let queued = app.prefs_rt.pending_autosaves.get(&id).is_some_and(|s| s.revision == st.revision);
+        if !unsaved || stored || queued {
+            app.prefs_rt.edits.remove(&id);
+            continue;
+        }
+        let seen = app.prefs_rt.edits.entry(id).or_insert(EditSeen { revision: st.revision, first_ms: now, last_ms: now });
+        if seen.revision != st.revision {
+            seen.revision = st.revision;
+            seen.last_ms = now;
+        }
+        if app.session.job_on(id).is_some() || now - seen.last_ms >= EDIT_QUIET_MS || now - seen.first_ms >= EDIT_MAX_WAIT_MS {
+            due.insert(id);
+        }
+    }
+    app.prefs_rt.edits.retain(|id, _| open.contains(id));
+    due
 }
 
 /// The status bar's autosave note for the active document: when its last checkpoint was stored,
