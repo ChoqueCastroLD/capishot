@@ -248,7 +248,7 @@ fn status_message(app: &PhotocraftApp, ui: &mut egui::Ui, t: &Tokens) {
 /// Home button at the very start of Photoshop 2026's options bar: toggles the Home (start)
 /// screen over the open documents, which stay open.
 pub fn home_button(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
-    let n = app.session.documents().len();
+    let n = app.session.visible_count();
     let auto = app.session.prefs().general.auto_show_home_screen;
     let on = app.ui.chrome.shows_home(n, auto);
     // With no documents and auto-show on, Home can't be dismissed (there's nothing behind it).

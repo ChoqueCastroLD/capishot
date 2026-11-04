@@ -2114,3 +2114,102 @@ fn engine_execute_targets_another_document_and_skips_history() {
         assert_eq!(call(&mut app, &ctx, "engine.execute", req.clone())["ok"], false, "{req}");
     }
 }
+
+fn png_b64(w: u32, h: u32, rgba: [u8; 4]) -> String {
+    let data: Vec<u8> = (0..w * h).flat_map(|_| rgba).collect();
+    let img = photocraft_codecs::Image::from_raw(w, h, photocraft_codecs::ChannelLayout::Rgba, photocraft_codecs::SampleType::U8, data).unwrap();
+    photocraft_engine::paint::tile::b64_encode(&photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &Default::default()).unwrap())
+}
+
+/// A hidden document is reachable by id but never shown, tabbed or activated, and no call on it
+/// (or on another shown document) moves anything of the person's active document: its pixels,
+/// selection, layers and history, its view, the tool, the focus, the active generation.
+#[test]
+fn calls_on_hidden_and_other_documents_leave_the_active_one_alone() {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    let ctx = egui::Context::default();
+    app.run("file.new", json!({"width": 64, "height": 64})).unwrap();
+    let other = app.session.active().unwrap().doc.id.0;
+    app.run("file.new", json!({"width": 64, "height": 64})).unwrap();
+    app.run("select.rect", json!({"x": 2, "y": 2, "width": 10, "height": 10})).unwrap();
+    app.ui.tool = Tool::Lasso;
+    app.sync_views();
+    let ai = app.session.active_index().unwrap();
+    app.ui.views[ai].zoom = 2.5;
+    app.ui.views[ai].center = [11.0, 17.0];
+    let made = call(&mut app, &ctx, "engine.execute", json!({"command": "file.new", "params": {"width": 32, "height": 32, "hidden": true}}));
+    assert_eq!(made["ok"], true, "{made}");
+    let hidden = made["result"]["id"].as_u64().unwrap();
+    app.sync_views();
+    assert_eq!((app.session.visible_count(), app.session.documents().len()), (2, 3));
+    let hidden_layer =
+        call(&mut app, &ctx, "engine.execute", json!({"command": "layer.new.layer", "params": {}, "document": hidden}))["result"]["layer"].as_u64().unwrap();
+    let other_layer =
+        call(&mut app, &ctx, "engine.execute", json!({"command": "layer.new.layer", "params": {}, "document": other}))["result"]["layer"].as_u64().unwrap();
+
+    let st = app.session.active().unwrap();
+    let before = (st.doc.clone(), st.active_layer, st.selected_layers.clone(), st.history.entries(), st.revision);
+    let view = (app.ui.views[ai].zoom, app.ui.views[ai].center, app.ui.views[ai].rotation);
+    let generation = app.session.active_generation();
+    let png = png_b64(4, 4, [255, 0, 0, 255]);
+    for (target, layer) in [(hidden, hidden_layer), (other, other_layer)] {
+        let calls = [
+            ("layer.setProps", json!({"layer": layer, "opacity": 0.5, "name": "x"})),
+            ("layer.setPropsMany", json!({"layers": [{"layer": layer, "visible": false}, {"layer": layer, "visible": true}]})),
+            ("layer.putPixels", json!({"layer": layer, "src": png})),
+            ("layer.putPixels", json!({"layer": layer, "png": png, "x": 3, "y": 3, "mode": "over"})),
+            ("layer.addImage", json!({"png": png, "x": 1, "y": 1})),
+            ("select.rect", json!({"x": 0, "y": 0, "width": 4, "height": 4})),
+            ("selection.get", json!({})),
+            ("select.all", json!({})),
+            ("edit.fill", json!({"contents": "black"})),
+            ("select.deselect", json!({})),
+            ("layer.duplicate", json!({"layer": layer})),
+            (
+                "document.batch",
+                json!({"commands": [{"command": "layer.new.layer"}, {"command": "layer.setProps", "params": {"layer": layer, "fill": 0.5}}], "inspect": true}),
+            ),
+            ("document.batch", json!({"commands": [{"command": "layer.new.layer"}, {"command": "layer.delete", "params": {"layer": 999_999}}]})),
+            ("layer.new.layer", json!({"name": "n"})),
+            ("document.inspect", json!({})),
+            ("image.canvasSize", json!({"width": 40, "height": 40})),
+            ("tools.setBrush", json!({"size": 7})),
+        ];
+        for (command, params) in calls {
+            for history in [Value::Null, json!("none")] {
+                // Some fail (the second batch, by design): failing must leave nothing behind either.
+                call(&mut app, &ctx, "engine.execute", json!({"command": command, "params": params, "document": target, "history": history}));
+                let st = app.session.active().unwrap();
+                let what = format!("{command} on {target} ({history})");
+                assert!(std::sync::Arc::ptr_eq(&st.doc, &before.0), "{what}: the active document's pixels and layers");
+                assert_eq!(
+                    (st.active_layer, &st.selected_layers, st.history.entries(), st.revision),
+                    (before.1, &before.2, before.3.clone(), before.4),
+                    "{what}"
+                );
+                assert_eq!(app.session.active_generation(), generation, "{what}: no switch");
+                assert_eq!((app.ui.views[ai].zoom, app.ui.views[ai].center, app.ui.views[ai].rotation), view, "{what}: the view");
+                assert_eq!(app.ui.tool, Tool::Lasso, "{what}: the tool");
+                assert!(ctx.memory(|m| m.focused()).is_none(), "{what}: the focus");
+                assert_eq!(app.session.visible_count(), 2, "{what}");
+            }
+        }
+    }
+    // Copying from the hidden document to the other shown one by id activates nothing either.
+    let r = call(
+        &mut app,
+        &ctx,
+        "engine.execute",
+        json!({"command": "layer.copyToDocument", "params": {"fromDocument": hidden, "toDocument": other, "layers": [hidden_layer]}}),
+    );
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(app.session.active_generation(), generation);
+    assert!(std::sync::Arc::ptr_eq(&app.session.active().unwrap().doc, &before.0));
+    // The Window menu lists the shown documents only, and Next Document skips the hidden one.
+    let docs = crate::menus::menu_items(&app).into_iter().filter(|i| i.id.starts_with("window.document.")).count();
+    assert_eq!(docs, 2, "document rows");
+    for _ in 0..3 {
+        crate::menus::invoke(&mut app, &ctx, "window.nextDocument", json!({})).unwrap();
+        assert!(app.session.active().is_some_and(|st| !st.hidden));
+    }
+}

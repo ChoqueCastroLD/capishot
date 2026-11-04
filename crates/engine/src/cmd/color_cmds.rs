@@ -1144,6 +1144,13 @@ impl Session {
         let report = self.color.open_policy(&mut doc, self.prefs().file_handling.ignore_exif_profile_tag);
         (self.add_document(doc, path), report)
     }
+
+    /// [`Self::open_document`] as a hidden helper document ([`Self::add_hidden_document`]): the
+    /// Color Settings policy applies without asking, nothing is shown or made active.
+    pub fn open_hidden_document(&mut self, mut doc: Document, path: Option<String>) -> (usize, Value) {
+        let report = self.color.open_policy(&mut doc, self.prefs().file_handling.ignore_exif_profile_tag);
+        (self.add_hidden_document(doc, path), report)
+    }
 }
 
 macro_rules! spec {

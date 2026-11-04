@@ -316,7 +316,9 @@ impl PhotocraftApp {
         self.ui.views = views.into_iter().map(Option::unwrap_or_default).collect();
         self.ui.windows.retain_mut(|w| now(w.document).map(|d| w.document = d).is_some());
         if !self.session.prefs().workspace.open_documents_as_tabs {
-            let new_docs: Vec<usize> = ids.iter().enumerate().filter(|(_, id)| !self.view_docs.contains(id)).map(|(i, _)| i).collect();
+            // A hidden helper document never gets a window.
+            let shown = self.session.visible_count();
+            let new_docs: Vec<usize> = ids.iter().enumerate().filter(|(i, id)| *i < shown && !self.view_docs.contains(id)).map(|(i, _)| i).collect();
             for &idx in &new_docs {
                 if !self.ui.windows.iter().any(|w| w.document == idx) {
                     crate::view_cmds::float_window(self, idx, idx);

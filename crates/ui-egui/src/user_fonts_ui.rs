@@ -613,6 +613,11 @@ fn verdict(family: &str, ps: &[String]) -> Verdict {
 pub fn after_open(app: &mut PhotocraftApp) {
     let Some(st) = app.session.active() else { return };
     let doc = st.doc.id;
+    check_fonts_of(app, doc);
+}
+
+/// [`after_open`] for open document `doc`, active or not (a hidden helper document).
+pub fn check_fonts_of(app: &mut PhotocraftApp, doc: photocraft_doc::DocId) {
     if !app.font_checks.checks.iter().any(|c| c.doc == doc) {
         app.font_checks.checks.push(Check { doc, since: None });
     }

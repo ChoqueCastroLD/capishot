@@ -16,7 +16,8 @@ pub fn document_area(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 /// active document fills the area.
 pub(crate) fn arranged_cells(app: &PhotocraftApp, rect: Rect) -> Option<Vec<(usize, Rect)>> {
     let idx = app.session.active_index()?;
-    let n = app.session.documents().len();
+    // Hidden helper documents (after the shown ones) never get a tile.
+    let n = app.session.visible_count();
     let cells = crate::view_cmds::cells(&app.ui.view.arrange, rect, n)?;
     // Each document keeps its tile: a click into another one activates it where it is (#6017; it
     // used to move to the first tile). With more documents than tiles, the shown run stays put
@@ -33,7 +34,8 @@ fn documents(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     crate::transform_tool::track_steps(app, ui.ctx());
     crate::cas_transform::tick(app, ui.ctx());
     crate::symmetry_ui::track(app, ui.ctx());
-    let n = app.session.documents().len();
+    // Shown documents only: a host's hidden helpers have no tab, tile or canvas.
+    let n = app.session.visible_count();
     // Files opening in the background (#210) have tabs before they have documents.
     let opening = !app.jobs.opens.is_empty();
     if !opening && app.ui.chrome.shows_home(n, app.session.prefs().general.auto_show_home_screen) {
@@ -98,7 +100,7 @@ pub(super) fn tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
         return pro_tabs(app, ui);
     }
     let active = app.session.active_index();
-    let tab_count = app.session.documents().len();
+    let tab_count = app.session.visible_count();
     let mut doc_tabs = Vec::with_capacity(tab_count);
     let mut activate = None;
     let mut close = None;
@@ -120,7 +122,7 @@ pub(super) fn tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
     // Every tab's natural width, whether or not it stays on the strip.
     let natural: Vec<f32> = app
         .session
-        .documents()
+        .visible_documents()
         .iter()
         .map(|st| {
             let name = studio_tab_name(app, st);
@@ -478,7 +480,7 @@ fn pro_tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
     let mut tab_action = None;
     let mut tab_move = None;
     let mut tear_off = None;
-    let tab_count = app.session.documents().len();
+    let tab_count = app.session.visible_count();
     let dragging = crate::layer_transfer::pointer_if_armed(app, ui.ctx());
     let mut drag_over = None;
     let mac = ui.ctx().os() == egui::os::OperatingSystem::Mac;

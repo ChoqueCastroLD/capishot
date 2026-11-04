@@ -26,8 +26,8 @@ fn bad(msg: impl Into<String>) -> EngineError {
 }
 
 fn enabled(s: &Session) -> std::result::Result<(), String> {
-    let d = s.active().ok_or("no document open")?;
-    d.active_layer.ok_or("no active layer")?;
+    // `fromDocument` names the source: the active document may have no layer, or there may be
+    // none (only hidden helper documents); `run` checks the source it is given.
     if s.documents().len() < 2 { Err("no other document is open".into()) } else { Ok(()) }
 }
 
@@ -39,6 +39,13 @@ fn doc_index(s: &Session, p: &Value, key: &str) -> Result<Option<usize>> {
         return Err(bad(format!("no document {i} (there are {})", s.documents().len())));
     }
     Ok(Some(i))
+}
+
+/// A document id param (`fromDocument`, `toDocument`; `None` when absent) → its index.
+fn doc_by_id(s: &Session, p: &Value, key: &str) -> Result<Option<usize>> {
+    let Some(v) = p.get(key).filter(|v| !v.is_null()) else { return Ok(None) };
+    let id = v.as_u64().ok_or_else(|| bad(format!("`{key}` must be an open document's id")))?;
+    s.index_of_document(photocraft_doc::DocId(id)).map(Some).ok_or_else(|| bad(format!("no open document {id}")))
 }
 
 /// An `[x, y]` param of finite numbers within ±10⁷ pixels.
@@ -221,9 +228,10 @@ impl Placement {
     }
 }
 
-/// Puts `clip`'s copies above the active layer of document `dest` (one history step there) and
-/// makes `dest` active; on failure document `restore` stays active.
-fn land(s: &mut Session, clip: LayerClip, dest: usize, restore: usize, place: &Placement, label: &str) -> Result<Value> {
+/// Puts `clip`'s copies above the active layer of document `dest` (one history step there) and,
+/// with `activate`, makes `dest` active (on failure document `restore` stays active). Without
+/// it the active document stays as it is, nothing announced ([`Session::begin_scope`]).
+fn land(s: &mut Session, clip: LayerClip, dest: usize, restore: usize, place: &Placement, label: &str, activate: bool) -> Result<Value> {
     let ddoc = s.documents().get(dest).ok_or(EngineError::NoDocument)?.doc.clone();
     if !layered(ddoc.mode) {
         return Err(EngineError::Other(format!("layers can't be copied into a {:?} document", ddoc.mode)));
@@ -253,7 +261,12 @@ fn land(s: &mut Session, clip: LayerClip, dest: usize, restore: usize, place: &P
     let (dx, dy) = (dx.round() as i32, dy.round() as i32);
     translate_copies(&mut copies, &ddoc, dx, dy);
     let patterns: Vec<_> = patterns.into_iter().filter(|pat| !ddoc.patterns.iter().any(|d| d.id == pat.id)).collect();
-    s.set_active(dest);
+    let scope = if activate {
+        s.set_active(dest);
+        None
+    } else {
+        Some(s.begin_scope(Some(ddoc.id), crate::HistoryMode::Step)?)
+    };
     let edited = s.edit(label, |doc, active| {
         doc.patterns.extend(patterns);
         let mut above = *active;
@@ -272,21 +285,32 @@ fn land(s: &mut Session, clip: LayerClip, dest: usize, restore: usize, place: &P
         Ok(new)
     });
     // Nothing changed: the source stays the active document.
-    if edited.is_err() {
+    if edited.is_err() && scope.is_none() {
         s.set_active(restore);
     }
+    if let Ok(new) = &edited {
+        crate::layer_multi_cmds::reselect(s, new.clone(), new.last().copied());
+    }
+    if let Some(scope) = scope {
+        s.end_scope(scope);
+    }
     let new = edited?;
-    let last = new.last().copied();
-    crate::layer_multi_cmds::reselect(s, new.clone(), last);
-    Ok(json!({"document": dest, "layers": new.iter().map(|l| l.0).collect::<Vec<_>>(), "offset": [dx, dy]}))
+    Ok(json!({"document": dest, "id": ddoc.id.0, "layers": new.iter().map(|l| l.0).collect::<Vec<_>>(), "offset": [dx, dy]}))
 }
 
 /// `layer.copyToDocument`.
 fn copy_to_document(s: &mut Session, p: &Value) -> Result<Value> {
-    let dest = doc_index(s, p, "document")?.ok_or_else(|| bad("missing `document` (the destination's index)"))?;
-    let src = match doc_index(s, p, "source")? {
+    // Named by id (`fromDocument`, `toDocument`), nothing is activated: a host copies between
+    // documents (hidden helpers too) without the person seeing a switch.
+    let by_id = (doc_by_id(s, p, "fromDocument")?, doc_by_id(s, p, "toDocument")?);
+    let activate = by_id == (None, None);
+    let dest = match by_id.1 {
         Some(i) => i,
-        None => s.active_index().ok_or(EngineError::NoDocument)?,
+        None => doc_index(s, p, "document")?.ok_or_else(|| bad("missing `toDocument` (the destination's id) or `document` (its index)"))?,
+    };
+    let src = match by_id.0 {
+        Some(i) => i,
+        None => doc_index(s, p, "source")?.or(s.active_index()).ok_or(EngineError::NoDocument)?,
     };
     if src == dest {
         return Err(bad("the destination is the source document (use layer.duplicate)"));
@@ -300,7 +324,7 @@ fn copy_to_document(s: &mut Session, p: &Value) -> Result<Value> {
         clip.backgrounds.clear();
     }
     let label = if ids.len() == 1 { "Duplicate Layer" } else { "Duplicate Layers" };
-    land(s, clip, dest, src, &Placement::parse(p)?, label)
+    land(s, clip, dest, src, &Placement::parse(p)?, label, activate)
 }
 
 const COPY: &str = "layer.copyLayers";
@@ -332,7 +356,7 @@ fn paste_layers(s: &mut Session, p: &Value) -> Result<Value> {
     let dest = s.active_index().ok_or(EngineError::NoDocument)?;
     let clip = s.layer_clipboard.clone().ok_or_else(|| EngineError::Other("no layers have been copied".into()))?;
     let label = if clip.len() == 1 { "Paste Layer" } else { "Paste Layers" };
-    land(s, clip, dest, dest, &place, label)
+    land(s, clip, dest, dest, &place, label, true)
 }
 
 fn copy_enabled(s: &Session) -> std::result::Result<(), String> {
@@ -413,7 +437,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Copy Layers to Document",
             menu: &[],
             shortcut: None,
-            params: r##"{"document":index (destination),"layers":[id,…]?=the source's selected layers,"source":index?=active,"center":bool=false (centre on the destination's canvas),"at":[x,y]? (centre the copies on this point),"offset":[dx,dy]?=[0,0] (from their place in the source),"name":str? (one layer: the copy's name)}"##,
+            params: r##"{"document":index (destination),"toDocument":id? (the destination by document id; with it or fromDocument nothing is activated),"fromDocument":id? (the source by document id),"layers":[id,…]?=the source's selected layers,"source":index?=active,"center":bool=false (centre on the destination's canvas),"at":[x,y]? (centre the copies on this point),"offset":[dx,dy]?=[0,0] (from their place in the source),"name":str? (one layer: the copy's name)}"##,
             enabled,
             run: copy_to_document,
             journal: true,

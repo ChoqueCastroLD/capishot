@@ -172,3 +172,9 @@ Chromium in `CHROME`):
   only Node and a Chromium: `CHROME=<chromium> node e2e/hidden-tab-boot.mjs <url>`.
 - `e2e/save-to-device.mjs`: where the browser can save to a picked file, Save As asks once and
   File › Save writes that file again in place (no download); elsewhere saves download.
+- `e2e/embed-hidden-batch.mjs`: a host page prepares pages in hidden documents (`openDocument`/
+  `newDocument` `{hidden}`, `batch`, `layer.putPixels {src}` from base64, a Blob, an ArrayBuffer and
+  a URL, `layer.setPropsMany`) and copies a layer out with `layer.copyToDocument {fromDocument,
+  toDocument}`, while every screenshot of the shown page must stay identical (no blank, partial or
+  flickering frame) and no switch or view event goes out; prints each call's time and the longest
+  animation frame. Serves the build itself: `CHROME=<chromium> node e2e/embed-hidden-batch.mjs <dist dir>`.

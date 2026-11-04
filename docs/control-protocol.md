@@ -311,6 +311,52 @@ For hosts that keep one document in step between collaborators (the embed API an
   mask); a new mask's rest is `fill: "reveal"` (default) or `"hide"`. Images convert to the
   document's colour profile and depth as copied layers do. Each is one history step (none with
   `history: "none"`). Fetching a URL is the host's job: pass the bytes as base64.
+  `layer.putPixels {layer, src, x?, y?}` replaces the **whole layer**: it becomes the image at
+  `(x, y)` (default the origin) and nothing else, the old pixels dropped without being read (at
+  the origin the decoded image is the layer's surface as it is; no temporary document, one
+  history step, one revision so one repaint). `src` takes base64 or a `data:` URL; the embed API
+  (`execute` and `window.photocraft.request`) also takes a `Blob`, an `ArrayBuffer`, a typed array
+  or a URL (a string with `:`, `.`, `?` or `#`, fetched as the page fetches) and sends it as
+  base64. `src` with `png`, or with `mode: "over"`, is refused (embed feature `layer.putPixels.src`).
+- **Hidden helper documents.** `file.new {…, hidden: true}` (embed API: `newDocument({…, hidden:
+  true})`, `openDocument(bytes, name, {hidden: true})`, `window.photocraft.open(bytes, name,
+  {hidden: true})`) makes a document that commands reach by id (`engine.execute {document}`) but
+  that is never shown: no tab, tile, window, Window-menu row or canvas, never made active (also
+  not by Next Document, closing the active one or `activateDocument`), not in the `documents`
+  event, not asked about by Close All or on leaving the page, not counted as unsaved work; the
+  active document, its view, the tool and the focus stay as they are. Close All leaves it open;
+  `closeDocument(id)` / `file.close {document: index}` closes it. Hidden documents sit after the
+  shown ones in `session.list` order; `listDocuments` and `document.inspect` report `hidden: true`.
+  `file.new` returns `{document: index, id}`. A hidden open is decoded at once (no background
+  tab), the Color Settings policy applied without a prompt; its served fonts are fetched as an
+  opened document's are (embed feature `documents.hidden`).
+- **Copy layers between documents without a switch.** `layer.copyToDocument {fromDocument,
+  toDocument, layers?, center?, at?, offset?, name?}` names both documents by id (hidden ones
+  too) and activates nothing: the copies land above the destination's active layer in one step
+  there and are selected there; the active document is untouched (`document`/`source`, the
+  indexes, still activate the destination as the Layers-panel drag does). Result `{document, id,
+  layers, offset}` (embed feature `layer.copyToDocument.ids`).
+- **Batches: one transaction, one repaint.** `document.batch {commands: [{command, params?}],
+  history?: "one" | "step", inspect?}` runs the commands in order on one document as one
+  transaction: `"one"` (default) makes the whole batch one undo step (named after its first
+  step), `"step"` one step each; a failing command undoes everything the batch did (document,
+  history, selected layers) and fails with that command's error ("command 2 (`layer.setProps`): …; the
+  batch was undone"). File, window, undo/redo and nested batches are refused before anything
+  runs, as is a step that switches documents. Everything runs inside one frame, so the canvas is
+  drawn once, at the end (a hidden or other document's canvas isn't drawn at all). `inspect:
+  true` (or `document.inspect`'s params) adds the document after the batch as `inspect`. Result
+  `{results: [each command's result], inspect?}`. With `engine.execute {document, history:
+  "none"}` the batch runs on another document with no undo step. `layer.setPropsMany {layers:
+  [{layer, visible?, opacity?, fill?, blend?, name?, locks?, …}], history?}` is `layer.setProps`
+  for each through the same batch (one step, all or nothing) → `{layers: n}`. Embed API:
+  `batch(commands, {document?, history?: "one" | "step" | "none", render?: "end", inspect?})`,
+  also `window.photocraft.batch` (features `batch`, `layer.setPropsMany`).
+- **No side effects on the person's document.** A call with `document` (another shown document
+  or a hidden one) changes nothing of the active document: not its pixels, layers, selection,
+  selected layers or history, not its view (zoom, centre, rotation, scroll), not the tool and not
+  the keyboard focus, and announces no switch (`ui-egui` test
+  `calls_on_hidden_and_other_documents_leave_the_active_one_alone` runs a broad set of commands
+  this way).
 - **The person's selection and selected layers.** `selection.get {png?}` keeps the current
   selection (or its absence) in memory and returns `{id, bounds}` (with `png: true` also the mask
   as a grey PNG cropped to `bounds`, at `x, y`); no channel is created and nothing is saved.
@@ -331,6 +377,8 @@ Example (CLI session, one JSON per line):
 {"id":2,"method":"engine.execute","params":{"command":"layer.putPixels","document":7,"history":"none","params":{"layer":28,"png":"iVBORw0…","x":120,"y":340,"mode":"over"}}}
 {"id":3,"method":"engine.execute","params":{"command":"layer.layerMask.set","index":0,"params":{"layer":28,"png":"iVBORw0…","x":0,"y":0}}}
 {"id":4,"method":"doc.inspect","params":{"index":0,"textStyle":true}}
+{"id":5,"method":"engine.execute","params":{"command":"file.new","params":{"width":1200,"height":1800,"hidden":true}}}
+{"id":6,"method":"engine.execute","params":{"command":"document.batch","document":7,"history":"none","params":{"commands":[{"command":"layer.setProps","params":{"layer":28,"opacity":0.5}},{"command":"layer.putPixels","params":{"layer":29,"src":"/9j/4AAQ…"}}],"inspect":true}}}
 ```
 
 ### Same type layout in the browser and the CLI
