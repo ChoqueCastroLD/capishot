@@ -2229,7 +2229,8 @@ fn show_document_swaps_a_hidden_page_in_with_the_view_kept() {
     assert_eq!(call(&mut app, &ctx, "editor.setLayout", json!({"single": true}))["result"]["single"], true);
     assert!(app.ui.view.single_document);
     let history = app.session.documents().iter().map(|st| st.history.entries().len()).collect::<Vec<_>>();
-    // No GPU canvas here: nothing to draw ahead, so the swap is immediate.
+    // No GPU canvas here: the CPU canvas's tiles are drawn ahead (in the frame, in tests).
+    app.last_canvas_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
     let (req, rx) = ControlRequest::new("editor.showDocument", json!({"id": next, "viewport": "keep"}));
     assert!(matches!(handle(&mut app, &ctx, &req), Outcome::Pending));
     let r = rx.try_recv().expect("replied in the same frame");
@@ -2252,7 +2253,10 @@ fn show_document_swaps_a_hidden_page_in_with_the_view_kept() {
     assert_eq!(rx.try_recv().unwrap()["result"]["id"], next);
     let mem = call(&mut app, &ctx, "document.memory", json!({}));
     assert_eq!(mem["result"]["documents"].as_array().map(Vec::len), Some(2), "{mem}");
+    assert!(mem["result"]["documents"].as_array().unwrap().iter().all(|d| d["warm"] == true), "both pages' tiles drawn: {mem}");
     assert_eq!(call(&mut app, &ctx, "editor.setMemoryBudget", json!({"mb": 64}))["result"]["mb"], 64.0);
+    let evicted = call(&mut app, &ctx, "editor.setMemoryBudget", json!({"mb": 0}));
+    assert_eq!(evicted["result"]["evicted"], json!([next]), "the hidden page's tiles go: {evicted}");
     assert_eq!(call(&mut app, &ctx, "editor.setMemoryBudget", json!({"mb": null}))["ok"], true);
     // Bad params are errors, never a panic.
     for (method, p) in [

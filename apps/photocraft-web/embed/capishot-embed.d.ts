@@ -476,7 +476,7 @@ export function request(method: 'editor.showDocument', params: ShowDocumentOptio
 export function request(method: 'document.prewarm', params: PrewarmOptions & { id: DocumentId }): Promise<SwitchResult>;
 /** One visible document: no tiles, tabs, floating windows or open cards (feature `editor.setLayout`). */
 export function request(method: 'editor.setLayout', params: { single: boolean }): Promise<{ single: boolean }>;
-/** GPU canvas textures all documents may hold; least recently shown evicted first, parsed data kept (feature `editor.setMemoryBudget`). */
+/** Canvas textures (GPU canvas, CPU canvas tiles) all documents may hold; least recently shown evicted first, parsed data kept (feature `editor.setMemoryBudget`). */
 export function request(method: 'editor.setMemoryBudget', params: { mb: number | null }): Promise<{ mb: number | null; evicted: DocumentId[] }>;
 export function request(method: 'document.memory', params?: {} | null): Promise<DocumentMemory>;
 export function request(method: string, params?: { [key: string]: Json } | null): Promise<Json>;

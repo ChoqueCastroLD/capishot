@@ -2,8 +2,8 @@
 //! methods `editor.showDocument`, `document.prewarm`, `editor.setLayout`,
 //! `editor.setMemoryBudget` and `document.memory`.
 //!
-//! A document is shown double-buffered: its GPU canvas texture is drawn first for the view it
-//! will have ([`crate::canvas::prewarm_gpu`]) while the document shown before stays on screen,
+//! A document is shown double-buffered: its canvas (the GPU canvas texture, or the CPU canvas's
+//! tiles) is drawn first for the view it will have ([`crate::canvas::prewarm`]) while the document shown before stays on screen,
 //! and the swap (the session's [`photocraft_engine::Session::show_document`]) happens at the
 //! start of the frame that draws it, so no frame shows a blank, partial or half-switched canvas.
 //! A document whose texture is current (prewarmed, or shown before and kept warm) swaps in the
@@ -55,7 +55,7 @@ struct Waiting {
 #[derive(Default)]
 pub struct DocSwitch {
     waiting: Vec<Waiting>,
-    /// `editor.setMemoryBudget`: the GPU canvas textures every document may hold (bytes).
+    /// `editor.setMemoryBudget`: the canvas textures every document may hold (bytes).
     budget: Option<u64>,
     /// Frame each document was last the active one in ([`PhotocraftApp::frame`]).
     shown: HashMap<DocId, u64>,
@@ -224,8 +224,7 @@ pub(crate) fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 reply_err(&w.reply, format!("document {} was closed", w.id.0));
                 continue;
             };
-            // The CPU canvas (no GPU canvas, or a view it can't draw) has nothing to draw ahead.
-            let drawn = crate::canvas::prewarm_gpu(app, ctx, idx, w.full).unwrap_or(true);
+            let drawn = crate::canvas::prewarm(app, ctx, idx, w.full);
             let ready = drawn && crate::user_fonts_ui::fonts_settled(app, w.id);
             let elapsed = now - w.started_ms;
             if !ready && elapsed < w.timeout_ms {
@@ -244,7 +243,7 @@ pub(crate) fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 out["shown"] = json!(true);
                 out["index"] = json!(index);
             }
-            out["gpuBytes"] = json!(app.gpu.as_ref().and_then(|g| g.texture_info(w.id.0)).map_or(0, |(_, b)| b));
+            out["gpuBytes"] = json!(canvas_bytes(app, w.id));
             reply_ok(&w.reply, out);
         }
         app.doc_switch.waiting.extend(keep);
@@ -257,13 +256,21 @@ pub(crate) fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
 }
 
-/// Evict the GPU canvas textures of the least recently shown documents until every document's
-/// fit the budget; the active document and those being shown or prewarmed keep theirs.
+/// The canvas textures document `id` holds: its GPU canvas texture set and its CPU canvas tiles.
+fn canvas_bytes(app: &PhotocraftApp, id: DocId) -> u64 {
+    let gpu = app.gpu.as_ref().and_then(|g| g.texture_info(id.0)).map_or(0, |(_, b)| b);
+    let tiles: usize = app.canvases.iter().filter(|((d, _), _)| *d == id).filter_map(|(_, c)| c.tiles.as_ref()).map(|t| t.texture_bytes()).sum();
+    gpu.saturating_add(tiles as u64)
+}
+
+/// Evict the canvas textures of the least recently shown documents until every document's fit
+/// the budget; the active document and those being shown or prewarmed keep theirs. The documents
+/// stay open: the next frame that shows one draws it again.
 fn enforce_budget(app: &mut PhotocraftApp) -> Vec<DocId> {
-    let (Some(budget), Some(gpu)) = (app.doc_switch.budget, app.gpu.as_ref()) else { return Vec::new() };
+    let Some(budget) = app.doc_switch.budget else { return Vec::new() };
     let active = app.session.active().map(|st| st.doc.id);
     let mut held: Vec<(DocId, u64)> =
-        app.session.documents().iter().filter_map(|st| gpu.texture_info(st.doc.id.0).map(|(_, b)| (st.doc.id, b))).collect();
+        app.session.documents().iter().map(|st| (st.doc.id, canvas_bytes(app, st.doc.id))).filter(|(_, b)| *b > 0).collect();
     let mut total: u64 = held.iter().map(|(_, b)| b).sum();
     if total <= budget {
         return Vec::new();
@@ -278,14 +285,14 @@ fn enforce_budget(app: &mut PhotocraftApp) -> Vec<DocId> {
         if Some(id) == active || app.doc_switch.waiting.iter().any(|w| w.id == id) {
             continue;
         }
-        gpu.evict(id.0);
         total = total.saturating_sub(bytes);
         evicted.push(id);
     }
     for id in &evicted {
-        if let Some(c) = app.canvases.get_mut(&(*id, crate::canvas::GPU_OUTPUT)) {
-            c.on_gpu = false;
+        if let Some(gpu) = app.gpu.as_ref() {
+            gpu.evict(id.0);
         }
+        app.canvases.retain(|(d, _), _| d != id);
     }
     evicted
 }
@@ -301,7 +308,7 @@ fn memory(app: &PhotocraftApp) -> Value {
         .documents()
         .iter()
         .map(|st| {
-            let gpu_bytes = gpu.and_then(|g| g.texture_info(st.doc.id.0)).map_or(0, |(_, b)| b);
+            let gpu_bytes = canvas_bytes(app, st.doc.id);
             gpu_total += gpu_bytes;
             let pixel_bytes = st.history.pixel_bytes(&st.doc) as u64;
             json!({

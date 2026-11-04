@@ -131,7 +131,7 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
     draws it ahead so the swap is instant (feature `document.prewarm`). `request('editor.setLayout',
     {single: true})` keeps one visible document (no tiles, tabs or open cards; feature
     `editor.setLayout`), `request('editor.setMemoryBudget', {mb})` evicts the least recently shown
-    documents' GPU textures beyond `mb` (feature `editor.setMemoryBudget`) and
+    documents' canvas textures beyond `mb` (feature `editor.setMemoryBudget`) and
     `request('document.memory')` reports each document's use (feature `document.memory`).
     `window.photocraft.request(…)` takes the same methods.
 

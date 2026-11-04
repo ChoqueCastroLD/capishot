@@ -584,6 +584,18 @@ pub fn paint(
     }
 }
 
+/// Whether document `idx`'s CPU canvas on `output` holds every tile `visible` needs at `zoom`'s
+/// level, current, with nothing left on the worker pool: [`paint`] then draws it complete
+/// (`canvas::prewarm`).
+pub(crate) fn drawn_in(app: &PhotocraftApp, idx: usize, output: Option<u32>, zoom: f32, visible: DRect) -> bool {
+    let Some(st) = app.session.documents().get(idx) else { return false };
+    let size = [st.doc.size.width, st.doc.size.height];
+    let Some(tc) = app.canvases.get(&crate::canvas::cache_key(st.doc.id, output)).and_then(|c| c.tiles.as_ref()) else { return false };
+    tc.pending.is_none()
+        && tc.shown.is_some_and(|(revision, _)| revision == st.revision)
+        && tiles_in(visible.intersect(&st.doc.bounds()), level_for(zoom, size), size).iter().all(|k| tc.tiles.get(k).is_some_and(|t| t.dirty.is_none()))
+}
+
 impl TileCanvas {
     /// Drop the least recently drawn tiles until the textures fit `budget` bytes; the tiles this
     /// frame drew stay whatever they cost.

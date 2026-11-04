@@ -364,8 +364,8 @@ For hosts that keep one document in step between collaborators (the embed API an
 - **One-frame document switches** (shell control methods, also through the embed API's
   `request`):
   - `editor.showDocument {id, viewport?: "own" | "keep" | {zoom, x, y}, hidePrevious? = true,
-    timeoutMs? = 1000}` shows open document `id` (a hidden one too) double-buffered: its GPU
-    canvas texture is drawn for the view it gets (`keep`: the active document's zoom, centre and
+    timeoutMs? = 1000}` shows open document `id` (a hidden one too) double-buffered: its canvas
+    is drawn for the view it gets (`keep`: the active document's zoom, centre and
     rotation; `{zoom, x, y}`: zoom in device pixels per document pixel, document point `x, y` at
     the centre; `own`, the default: its own, fit the first time) while the document shown before
     stays on screen, with its served fonts in; then the swap happens at the start of the frame
@@ -374,15 +374,15 @@ For hosts that keep one document in step between collaborators (the embed API an
     With `hidePrevious` the document shown before becomes a hidden helper with its textures kept.
     → `{id, shown, index, frames, ms, timedOut, gpuBytes}` (`frames` waited: 0 when warm); a
     later call replaces one still waiting (`{shown: false, superseded: true}`). After `timeoutMs`
-    it swaps whatever is drawn (`timedOut: true`). The CPU canvas (no GPU canvas) draws nothing
-    ahead: it swaps at once and draws its tiles as they come.
+    it swaps whatever is drawn (`timedOut: true`). Without a GPU canvas (or for a view it can't
+    draw) the CPU canvas's tiles for that view are composited ahead the same way.
   - `document.prewarm {id, viewport?, full? = false, timeoutMs? = 10000}`: the same drawing ahead
     without the swap (`full`: the whole document at full size) → `{id, frames, ms, timedOut,
     gpuBytes}`. A hidden document's layers are decoded when it opens.
   - `editor.setLayout {single: true}`: one visible document; Window › Arrange tiles, document
     tabs, "open documents as windows" and the open card of a file opening in the background
     never show while a document is shown (not saved; `false` restores them).
-  - `editor.setMemoryBudget {mb | null}`: the GPU canvas textures all documents may hold;
+  - `editor.setMemoryBudget {mb | null}`: the canvas textures (GPU canvas texture, CPU canvas tiles) all documents may hold;
     beyond it the least recently shown documents' textures (and their compositor layer pages)
     are evicted, never the active one's or one being shown or prewarmed; the documents stay open
     with their pixels → `{mb, evicted: [id]}`. `document.memory` → `{documents: [{id, hidden,
