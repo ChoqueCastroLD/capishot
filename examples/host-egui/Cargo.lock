@@ -1536,7 +1536,7 @@ dependencies = [
 
 [[package]]
 name = "capishot-host"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "egui",
  "photocraft-ai",
@@ -6712,7 +6712,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-affinity"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "crc32fast",
  "flate2",
@@ -6721,7 +6721,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-ai"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "burn",
  "half",
@@ -6737,7 +6737,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-ai-lama"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "burn",
  "half",
@@ -6748,7 +6748,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-ai-sd"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "burn",
  "half",
@@ -6762,7 +6762,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-ai-web"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "js-sys",
  "log",
@@ -6777,7 +6777,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-algo"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "photocraft-color",
  "photocraft-geom",
@@ -6789,7 +6789,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-cms"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "rayon",
  "wasm_sync",
@@ -6797,7 +6797,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-codecs"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "craft-jpeg",
  "exr",
@@ -6817,7 +6817,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-color"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "photocraft-cms",
  "serde",
@@ -6825,7 +6825,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-compose"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "photocraft-color",
  "photocraft-doc",
@@ -6838,7 +6838,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-doc"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "photocraft-color",
  "photocraft-geom",
@@ -6849,7 +6849,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-engine"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "blake3",
  "chrono",
@@ -6891,7 +6891,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-format"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "blake3",
  "crc32fast",
@@ -6917,14 +6917,14 @@ dependencies = [
 
 [[package]]
 name = "photocraft-geom"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "photocraft-gpu"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "bytemuck",
  "half",
@@ -6941,7 +6941,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-io"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "blake3",
  "craft-docpath",
@@ -6972,18 +6972,18 @@ dependencies = [
 
 [[package]]
 name = "photocraft-ipp"
-version = "0.13.6"
+version = "0.13.7"
 
 [[package]]
 name = "photocraft-ops"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "photocraft-doc",
 ]
 
 [[package]]
 name = "photocraft-paint"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "photocraft-color",
  "photocraft-geom",
@@ -6995,7 +6995,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-plugins"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "photocraft-color",
  "photocraft-geom",
@@ -7010,7 +7010,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-psd"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "flate2",
  "rayon",
@@ -7019,7 +7019,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-raster"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "photocraft-color",
  "photocraft-geom",
@@ -7029,7 +7029,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-raw"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "flate2",
  "jxl-oxide",
@@ -7040,7 +7040,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-text"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "flate2",
  "hypher",
@@ -7060,7 +7060,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-typer"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "photocraft-algo",
  "photocraft-color",
@@ -7073,7 +7073,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-ui-egui"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "base64 0.23.1",
  "craft-print",
@@ -7120,7 +7120,7 @@ dependencies = [
 
 [[package]]
 name = "photocraft-vector"
-version = "0.13.6"
+version = "0.13.7"
 dependencies = [
  "photocraft-color",
  "photocraft-doc",
