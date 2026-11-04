@@ -70,8 +70,15 @@ pub const FEATURES: &[&str] = &[
     "open.cache",
     "open.cache.sharedPixels",
     "open.quiet",
+    "open.quiet.prewarm",
     "fonts.noFallbackFlash",
     "window.events",
+    "document.views",
+    "editor.showDocument",
+    "editor.setLayout",
+    "document.prewarm",
+    "editor.setMemoryBudget",
+    "document.memory",
 ];
 
 /// The build stamp: the Capishot commit and the build id, set by `scripts/build-embed.sh`
@@ -342,6 +349,19 @@ pub fn open_options(options: &Value) -> Result<OpenOptions, String> {
         Some(_) => return Err("cacheKey must be a non-empty string".into()),
     };
     Ok(OpenOptions { hidden, cache, quiet })
+}
+
+/// `showDocument(id, options)` / `prewarmDocument(id, options)` → the control request's params:
+/// the options object (or none) with `id`.
+pub fn document_call(id: &Value, options: &Value) -> Result<Value, String> {
+    let id = id.as_u64().ok_or("needs a document id")?;
+    let mut params = match options {
+        Value::Null => serde_json::Map::new(),
+        Value::Object(m) => m.clone(),
+        _ => return Err("options must be an object".into()),
+    };
+    params.insert("id".into(), json!(id));
+    Ok(Value::Object(params))
 }
 
 /// `batch(commands, options)` → `engine.execute`'s request for `document.batch`. `commands`:
@@ -943,6 +963,13 @@ mod tests {
             assert!(batch_request(cmds.clone(), &bad).is_err(), "{bad}");
         }
         assert!(batch_request(json!({}), &Value::Null).is_err(), "a list of commands");
+    }
+
+    #[test]
+    fn document_calls_carry_the_id() {
+        assert_eq!(document_call(&json!(4), &Value::Null), Ok(json!({"id": 4})));
+        assert_eq!(document_call(&json!(4), &json!({"viewport": "keep"})), Ok(json!({"id": 4, "viewport": "keep"})));
+        assert!(document_call(&json!("4"), &Value::Null).is_err() && document_call(&json!(4), &json!(1)).is_err());
     }
 
     #[test]

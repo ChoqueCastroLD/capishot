@@ -9,7 +9,7 @@ use super::{ControlRequest, DialogKind, Outcome, PhotocraftApp, SHELL_DIALOG, To
 type Handler = fn(&mut PhotocraftApp, &egui::Context, &ControlRequest) -> Option<Outcome>;
 
 pub(super) fn dispatch(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) -> Outcome {
-    const HANDLERS: [Handler; 5] = [engine_methods, shell_methods, dialog_methods, input_methods, app_methods];
+    const HANDLERS: [Handler; 6] = [engine_methods, shell_methods, dialog_methods, input_methods, app_methods, crate::doc_switch::methods];
     HANDLERS.iter().find_map(|handler| handler(app, ctx, req)).unwrap_or_else(|| err(format!("unknown method `{}`", req.method)))
 }
 

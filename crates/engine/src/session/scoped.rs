@@ -7,8 +7,10 @@
 //! step through the user's own changes with the collaborator's change kept in each. The patch is
 //! per layer: a layer the command changed is replaced (a group keeps each state's own children),
 //! a layer it added is added, one it deleted is deleted and one it moved is moved, in every state
-//! that has (or lacks) it. Document-wide changes (canvas size, mode, guides, selection, channels)
-//! are not carried: they stay in the current document only.
+//! that has (or lacks) it; a layer whose visibility is all that changed only has its visibility
+//! set (each state keeps its own pixels). Layer comps (and so `document.views`) are carried too.
+//! Other document-wide changes (canvas size, mode, guides, selection, channels) are not carried:
+//! they stay in the current document only.
 
 use std::collections::HashMap;
 
@@ -182,6 +184,10 @@ pub(crate) struct LayerPatch {
     removed: Vec<LayerId>,
     /// Changed layers (groups without children), by id.
     changed: Vec<Layer>,
+    /// Layers whose visibility is all that changed: shown (`true`) or hidden.
+    shown: Vec<(LayerId, bool)>,
+    /// The layer comps, the last applied one and the Last Document State, when they changed.
+    comps: Option<(Vec<photocraft_doc::LayerComp>, Option<u32>, Option<photocraft_doc::LayerComp>)>,
     /// Added (with their children) or moved layers, bottom to top, outer before inner.
     placed: Vec<(LayerId, Place, Option<Layer>)>,
 }
@@ -191,6 +197,12 @@ impl LayerPatch {
         let (pb, pa) = (places(before), places(after));
         let old: HashMap<LayerId, &Layer> = before.walk().into_iter().map(|(_, _, l)| (l.id, l)).collect();
         let mut patch = LayerPatch { removed: old.keys().filter(|id| !pa.contains_key(id)).copied().collect(), ..Default::default() };
+        if before.layer_comps != after.layer_comps
+            || before.last_applied_comp != after.last_applied_comp
+            || before.last_document_state != after.last_document_state
+        {
+            patch.comps = Some((after.layer_comps.clone(), after.last_applied_comp, after.last_document_state.clone()));
+        }
         for (_, _, l) in after.walk() {
             let Some(place) = pa.get(&l.id).copied() else { continue };
             match old.get(&l.id) {
@@ -201,7 +213,9 @@ impl LayerPatch {
                     }
                 }
                 Some(o) => {
-                    if !same_shallow(o, l) {
+                    if o.visible != l.visible && same_shallow(&Layer { visible: l.visible, ..shallow(o) }, &shallow(l)) {
+                        patch.shown.push((l.id, l.visible));
+                    } else if !same_shallow(o, l) {
                         patch.changed.push(shallow(l));
                     }
                     if pb.get(&l.id) != Some(&place) {
@@ -214,7 +228,7 @@ impl LayerPatch {
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.removed.is_empty() && self.changed.is_empty() && self.placed.is_empty()
+        self.removed.is_empty() && self.changed.is_empty() && self.shown.is_empty() && self.placed.is_empty() && self.comps.is_none()
     }
 
     /// `doc` with the patch applied (`None`: nothing to change in it).
@@ -231,6 +245,18 @@ impl LayerPatch {
                 *kids = std::mem::take(own);
             }
             *slot = l;
+            touched = true;
+        }
+        for (id, visible) in &self.shown {
+            if let Some(l) = d.layer_mut(*id) {
+                touched |= l.visible != *visible;
+                l.visible = *visible;
+            }
+        }
+        if let Some((comps, last, state)) = &self.comps {
+            d.layer_comps = comps.clone();
+            d.last_applied_comp = *last;
+            d.last_document_state = state.clone();
             touched = true;
         }
         for (id, place, layer) in &self.placed {
@@ -347,6 +373,31 @@ mod tests {
         s.execute_scoped("layer.new.layer", json!({}), Some(hidden), HistoryMode::None).unwrap();
         assert_eq!(s.active_index(), None);
         assert!(s.close(0).is_some());
+    }
+
+    #[test]
+    fn showing_a_hidden_document_swaps_it_with_the_active_one() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 8, "height": 8})).unwrap();
+        let a = s.active().unwrap().doc.id;
+        s.execute("file.new", json!({"width": 8, "height": 8})).unwrap();
+        let b = s.active().unwrap().doc.id;
+        let h = DocId(s.execute("file.new", json!({"width": 4, "height": 4, "hidden": true})).unwrap()["id"].as_u64().unwrap());
+        let generation = s.active_generation();
+        let ids = |s: &Session| s.documents().iter().map(|st| (st.doc.id, st.hidden)).collect::<Vec<_>>();
+        // The helper is shown and active; the page shown before becomes a helper, kept open.
+        assert_eq!(s.show_document(h, true), Some(1));
+        assert_eq!(ids(&s), [(a, false), (h, false), (b, true)]);
+        assert_eq!(s.active().unwrap().doc.id, h);
+        assert_ne!(s.active_generation(), generation);
+        // Back: the same swap the other way; without hiding, both stay shown.
+        assert_eq!(s.show_document(b, true), Some(1));
+        assert_eq!(ids(&s), [(a, false), (b, false), (h, true)]);
+        assert_eq!(s.show_document(a, false), Some(0));
+        assert_eq!(ids(&s), [(a, false), (b, false), (h, true)]);
+        assert_eq!(s.show_document(a, true), Some(0), "showing the active document hides nothing");
+        assert_eq!(s.show_document(DocId(u64::MAX), true), None);
+        assert_eq!(s.visible_count(), 2);
     }
 
     #[test]

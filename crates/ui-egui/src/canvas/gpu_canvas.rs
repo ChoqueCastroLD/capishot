@@ -1173,18 +1173,25 @@ impl GpuCanvas {
         }
     }
 
+    /// Free document `key`'s display textures and its layer pages on the GPU (a document kept
+    /// open whose GPU memory is wanted elsewhere: the next refresh draws it again). Returns the
+    /// display texture bytes freed.
+    pub fn evict(&self, key: u64) -> u64 {
+        let bytes = self.texture_info(key).map_or(0, |(_, b)| b);
+        let mut renderer = self.rs.renderer.write();
+        if let Some(res) = renderer.callback_resources.get_mut::<StoredResources>() {
+            res.forget(&[key]);
+        }
+        bytes
+    }
+
     /// Free textures, display LUTs and their signatures for documents not in `live`.
     pub fn retain(&self, live: &[u64]) {
         let mut renderer = self.rs.renderer.write();
         let Some(res) = renderer.callback_resources.get_mut::<StoredResources>() else { return };
         if res.docs.keys().any(|k| !live.contains(k)) {
             let gone: Vec<u64> = res.docs.keys().filter(|k| !live.contains(k)).copied().collect();
-            if let Some(c) = res.compositor.as_mut() {
-                for k in &gone {
-                    c.forget_doc(photocraft_doc::DocId(*k));
-                }
-            }
-            res.docs.retain(|k, _| live.contains(k));
+            res.forget(&gone);
         }
         // LUTs and identity-transform signatures can outlive document textures. Prune both,
         // or a preserved-ID reopen can skip rebuilding a missing LUT.
@@ -2241,6 +2248,18 @@ struct Resources {
     identity_lut: wgpu::BindGroup,
     /// Transparency checkerboard and gamut warning colours (Preferences › Transparency & Gamut).
     style: CanvasStyle,
+}
+
+impl Resources {
+    /// Drop the display textures and compositor pages of documents `keys`.
+    fn forget(&mut self, keys: &[u64]) {
+        if let Some(c) = self.compositor.as_mut() {
+            for k in keys {
+                c.forget_doc(photocraft_doc::DocId(*k));
+            }
+        }
+        self.docs.retain(|k, _| !keys.contains(k));
+    }
 }
 
 /// Canvas colours from Preferences › Transparency & Gamut.

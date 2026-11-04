@@ -1680,19 +1680,9 @@ fn save_in_worker(_outbox: Outbox) -> Option<photocraft_ui_egui::SaveFileFn> {
     None
 }
 
-/// The `content` of the page's `<meta name="…">`, when present and not empty (the deploy scripts
-/// write them: `capishot-channel`, `capishot-telemetry`).
-pub(crate) fn page_meta(name: &str) -> Option<String> {
-    let doc = web_sys::window()?.document()?;
-    let el = doc.query_selector(&format!("meta[name=\"{name}\"]")).ok()??;
-    let content = el.get_attribute("content")?.trim().to_string();
-    (!content.is_empty()).then_some(content)
-}
-
 fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig>, outbox: Outbox) -> Services {
     Services {
         save_file: save_in_worker(outbox),
-        channel: page_meta("capishot-channel"),
         // A finished AI run taps the phone (browsers without vibration, or before a user
         // gesture, ignore it).
         vibrate: Some(|ms| {

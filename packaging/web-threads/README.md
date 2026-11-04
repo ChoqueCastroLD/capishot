@@ -134,8 +134,7 @@ both ways, 3 interleaved runs each, medians): a one-line `ui-egui` change rebuil
 gzip +20%), but on the phone tour (`e2e/no-freeze.mjs`, CPU 4x) the time to interactive went
 1514 → 1798 ms (+19%), opening a JPEG +11%, a PSD +8.5%, a PNG export +10-14%; on the desktop
 frame times went up 5-8% at the median (brush, eraser, marquee) and filters 7-12% (Add Noise,
-Image Size, Flatten). Preview deploys (`deploy-preview.sh` outside the repository, served at
-`/capishot/preview/`) use it: they carry the PREVIEW badge and send no usage statistics.
+Image Size, Flatten). `--preview` is only for local test builds.
 
 ## Release checklist
 
@@ -178,3 +177,8 @@ Chromium in `CHROME`):
   toDocument}`, while every screenshot of the shown page must stay identical (no blank, partial or
   flickering frame) and no switch or view event goes out; prints each call's time and the longest
   animation frame. Serves the build itself: `CHROME=<chromium> node e2e/embed-hidden-batch.mjs <dist dir>`.
+- `e2e/embed-doc-switch.mjs`: one visible document (`editor.setLayout {single}`) switched between
+  views (`document.views.apply`) and pages (`prewarmDocument`, `showDocument {viewport: keep}`, a
+  cold page, a page whose textures `editor.setMemoryBudget` evicted); every animation frame the page
+  reads the canvas back and counts blank or partial frames, and times the call to the final frame.
+  `CHROME=<chromium> node e2e/embed-doc-switch.mjs <dist dir>`.

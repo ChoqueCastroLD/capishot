@@ -16,6 +16,10 @@ pub fn document_area(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 /// active document fills the area.
 pub(crate) fn arranged_cells(app: &PhotocraftApp, rect: Rect) -> Option<Vec<(usize, Rect)>> {
     let idx = app.session.active_index()?;
+    // `editor.setLayout {single}`: the active document fills the area.
+    if app.ui.view.single_document {
+        return None;
+    }
     // Hidden helper documents (after the shown ones) never get a tile.
     let n = app.session.visible_count();
     let cells = crate::view_cmds::cells(&app.ui.view.arrange, rect, n)?;
@@ -36,8 +40,10 @@ fn documents(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     crate::symmetry_ui::track(app, ui.ctx());
     // Shown documents only: a host's hidden helpers have no tab, tile or canvas.
     let n = app.session.visible_count();
-    // Files opening in the background (#210) have tabs before they have documents.
-    let opening = !app.jobs.opens.is_empty();
+    // Files opening in the background (#210) have tabs before they have documents; in the single
+    // document layout the shown document stays, without tabs, until the next one is shown.
+    let single = app.ui.view.single_document && n > 0;
+    let opening = !app.jobs.opens.is_empty() && !single;
     if !opening && app.ui.chrome.shows_home(n, app.session.prefs().general.auto_show_home_screen) {
         start_screen(app, ui);
         return;
@@ -51,8 +57,8 @@ fn documents(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
     // The simple interface names a lone document in its top bar instead. A quiet open (the embed
     // API's) brings no tab strip of its own: the page it previews keeps its place.
-    let opening_tab = app.jobs.opens.iter().any(|o| !o.quiet);
-    if (!app.ui.view.hides_tabs() && !(app.simple && n <= 1)) || opening_tab {
+    let opening_tab = !single && app.jobs.opens.iter().any(|o| !o.quiet);
+    if (!app.ui.view.hides_tabs() && !(app.simple && n <= 1) && !single) || opening_tab {
         // Flat Spectrum tabs sit directly against the canvas. The parent's default vertical
         // item spacing would otherwise leave a visible gap below the tab strip (#2188).
         let spacing = ui.spacing().item_spacing.y;
@@ -63,7 +69,7 @@ fn documents(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         ui.spacing_mut().item_spacing.y = spacing;
         drop_slot_line(app, ui);
     }
-    if let Some(job) = app.jobs.focus.or_else(|| (n == 0).then(|| app.jobs.opens.last().map(|o| o.job)).flatten()) {
+    if let Some(job) = app.jobs.focus.filter(|_| !single).or_else(|| (n == 0).then(|| app.jobs.opens.last().map(|o| o.job)).flatten()) {
         crate::jobs_ui::open_card(app, ui, job);
         return;
     }
@@ -71,6 +77,10 @@ fn documents(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let rect = ui.available_rect_before_wrap();
     app.last_canvas_rect = rect;
     app.drop_canvas_rect = Some(rect);
+    // A quiet open's page keeps its preview until its canvas is drawn.
+    if crate::jobs_ui::landing(app, ui, idx, rect) {
+        return;
+    }
     // Window › Arrange: tiled / n-up layouts show several documents side by side; the active one
     // takes input, a click elsewhere activates that document.
     if let Some(shown) = arranged_cells(app, rect) {

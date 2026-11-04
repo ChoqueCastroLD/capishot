@@ -351,6 +351,43 @@ For hosts that keep one document in step between collaborators (the embed API an
   for each through the same batch (one step, all or nothing) → `{layers: n}`. Embed API:
   `batch(commands, {document?, history?: "one" | "step" | "none", render?: "end", inspect?})`,
   also `window.photocraft.batch` (features `batch`, `layer.setPropsMany`).
+- **Views** (feature `document.views`): `document.views.define {name, visible?: [layer], hidden?:
+  [layer]}` names which layers a page shows (a layer is an id, its name or its group path
+  `"Group/Name"`; a group stands for its contents) and `document.views.apply {name}` switches to
+  it in one change → `{name, comp, changed, missingLayers}`; `document.views.list` →
+  `{views: [{name, comp, visible, hidden, applied}]}`, `document.views.delete {name}`. A view is a
+  layer comp that restores visibility only (saved in the PSD and `.pcraft`, listed in Layer Comps).
+  Defining, applying and deleting one is never a history step: undo and redo keep it, and each
+  history state keeps its own pixels (only the visibility is carried into it). Applying changes
+  visibility only: the GPU canvas recomposites the layer pages it already holds, no type is laid
+  out or rasterized again.
+- **One-frame document switches** (shell control methods, also through the embed API's
+  `request`):
+  - `editor.showDocument {id, viewport?: "own" | "keep" | {zoom, x, y}, hidePrevious? = true,
+    timeoutMs? = 1000}` shows open document `id` (a hidden one too) double-buffered: its canvas
+    is drawn for the view it gets (`keep`: the active document's zoom, centre and
+    rotation; `{zoom, x, y}`: zoom in device pixels per document pixel, document point `x, y` at
+    the centre; `own`, the default: its own, fit the first time) while the document shown before
+    stays on screen, with its served fonts in; then the swap happens at the start of the frame
+    that draws it. No blank, partial or half-switched frame, no zoom animation, no history step.
+    A warm document (prewarmed, or shown before and not evicted) swaps in the frame of the call.
+    With `hidePrevious` the document shown before becomes a hidden helper with its textures kept.
+    → `{id, shown, index, frames, ms, timedOut, gpuBytes}` (`frames` waited: 0 when warm); a
+    later call replaces one still waiting (`{shown: false, superseded: true}`). After `timeoutMs`
+    it swaps whatever is drawn (`timedOut: true`). Without a GPU canvas (or for a view it can't
+    draw) the CPU canvas's tiles for that view are composited ahead the same way.
+  - `document.prewarm {id, viewport?, full? = false, timeoutMs? = 10000}`: the same drawing ahead
+    without the swap (`full`: the whole document at full size) → `{id, frames, ms, timedOut,
+    gpuBytes}`. A hidden document's layers are decoded when it opens.
+  - `editor.setLayout {single: true}`: one visible document; Window › Arrange tiles, document
+    tabs, "open documents as windows" and the open card of a file opening in the background
+    never show while a document is shown (not saved; `false` restores them).
+  - `editor.setMemoryBudget {mb | null}`: the canvas textures (GPU canvas texture, CPU canvas tiles) all documents may hold;
+    beyond it the least recently shown documents' textures (and their compositor layer pages)
+    are evicted, never the active one's or one being shown or prewarmed; the documents stay open
+    with their pixels → `{mb, evicted: [id]}`. `document.memory` → `{documents: [{id, hidden,
+    active, width, height, gpuMB, warm, pixelMB, framesSinceShown}], gpuMB, compositorMB,
+    budgetMB, gpu}`.
 - **No side effects on the person's document.** A call with `document` (another shown document
   or a hidden one) changes nothing of the active document: not its pixels, layers, selection,
   selected layers or history, not its view (zoom, centre, rotation, scroll), not the tool and not
@@ -420,7 +457,8 @@ For hosts that keep one document in step between collaborators (the embed API an
   frames in the single-threaded one; no merged preview is read; feature
   `open.hidden.background`). `{quiet: true}`: while a PSD/PSB decodes, its merged image shows
   alone at the view the page will have, a thin progress bar along the canvas's top, no opening
-  card over it (feature `open.quiet`). `{cacheKey, version}` keeps the decoded document in the session's
+  card over it (feature `open.quiet`); once it lands the preview stays until the canvas has
+  drawn the view offscreen, at most 1 s, so no half-composited frame shows (`open.quiet.prewarm`). `{cacheKey, version}` keeps the decoded document in the session's
   decoded-document cache (`photocraft_engine::doc_cache`, least recently used first, 512 MB by
   default) and opens it from there at once while it holds that key at that version (`data`
   `null`: from the cache only, else an error); a different version decodes the bytes again. A

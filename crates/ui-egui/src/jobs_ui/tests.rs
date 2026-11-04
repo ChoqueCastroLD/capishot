@@ -444,6 +444,62 @@ fn a_quiet_open_shows_the_preview_alone() {
     h.run_steps(4);
 }
 
+/// A quiet open's landed document keeps its preview until its canvas has drawn the view, then
+/// the canvas shows; a landing whose document isn't the active one is dropped.
+#[test]
+fn a_quiet_open_keeps_its_preview_until_the_canvas_is_drawn() {
+    let mut h = app_harness();
+    h.state_mut().ui.view.screen_mode = "full".into();
+    // Stepped, as in the single-threaded browser build: the merged image is read a frame before
+    // the layers.
+    h.state_mut().background_jobs = false;
+    h.state_mut().stepped_opens = true;
+    h.run_steps(2);
+    // Not one flat colour: a merged image that can stand for the page.
+    let mut s = photocraft_engine::Session::new();
+    s.execute("file.new", json!({"width": 64, "height": 48})).unwrap();
+    s.execute("filter.render.clouds", json!({})).unwrap();
+    let page = photocraft_io::export(&s.active().unwrap().doc, "x.psd", &Default::default()).unwrap().bytes;
+    h.state_mut().open_owned("page.psd", page).unwrap();
+    h.state_mut().jobs.opens[0].quiet = true;
+    h.state_mut().jobs.focus = Some(h.state().jobs.opens[0].job);
+    let t = Instant::now();
+    let mut landed = false;
+    while t.elapsed() < Duration::from_secs(30) {
+        let had_texture = h.state().jobs.opens.first().is_some_and(|o| o.texture.is_some());
+        h.step();
+        if h.state().jobs.opens.is_empty() {
+            landed = had_texture;
+            break;
+        }
+    }
+    assert!(h.state().jobs.opens.is_empty(), "the open finished");
+    assert!(landed, "the preview showed before the layers landed");
+    // A small page is drawn in the frame it lands in: no frame of preview after it.
+    let id = h.state().session.active().map(|st| st.doc.id).unwrap();
+    let idx = h.state().session.active_index().unwrap();
+    assert!(h.state().jobs.landing.is_none(), "the canvas took over");
+    let ctx = h.ctx.clone();
+    assert!(crate::canvas::prewarm(h.state_mut(), &ctx, idx, false), "the landed page's view is drawn");
+
+    // A landing whose canvas isn't drawn yet and has run out of time also gives way.
+    let tex = h.ctx.load_texture("t", egui::ColorImage::new([1, 1], vec![egui::Color32::WHITE]), egui::TextureOptions::LINEAR);
+    let preview = super::PreviewTexture(tex, egui::vec2(1.0, 1.0));
+    h.state_mut().jobs.landing = Some(super::Landing { doc: id, texture: preview.clone(), started_ms: -1e9 });
+    h.run_steps(1);
+    assert!(h.state().jobs.landing.is_none(), "timed out");
+    assert_eq!(h.state().session.active().map(|st| st.doc.size.width), Some(64));
+
+    // A landing for a document that isn't the active one goes away without drawing.
+    let other = h.state().session.documents()[0].doc.id;
+    let active = h.state().session.active().map(|st| st.doc.id);
+    if Some(other) != active {
+        h.state_mut().jobs.landing = Some(super::Landing { doc: other, texture: preview, started_ms: crate::gpu_canvas::now_ms() });
+        h.run_steps(1);
+        assert!(h.state().jobs.landing.is_none());
+    }
+}
+
 /// The single-threaded browser build (no background jobs, opens a step at a time): a PSD handed
 /// over opens as a job with an opening tab, not inline; other files still open inline.
 #[test]

@@ -145,6 +145,31 @@ impl Session {
         self.docs.len() - 1
     }
 
+    /// Make open document `id` the shown, active one (`editor.showDocument`): a hidden helper
+    /// becomes the last shown document; with `hide_previous` the document active before becomes
+    /// a hidden helper (kept open, after the shown ones). Returns its index.
+    pub fn show_document(&mut self, id: photocraft_doc::DocId, hide_previous: bool) -> Option<usize> {
+        let mut index = self.docs.iter().position(|st| st.doc.id == id)?;
+        let previous = self.active().map(|st| st.doc.id).filter(|p| *p != id);
+        if self.docs.get(index).is_some_and(|st| st.hidden) {
+            let shown = self.visible_count();
+            index = move_item(&mut self.docs, index, shown)?;
+            self.docs.get_mut(index)?.hidden = false;
+        }
+        if hide_previous && let Some(p) = previous.and_then(|p| self.docs.iter().position(|st| st.doc.id == p)) {
+            let shown = self.visible_count();
+            let at = move_item(&mut self.docs, p, shown.saturating_sub(1))?;
+            if let Some(st) = self.docs.get_mut(at) {
+                st.hidden = true;
+            }
+            index = self.docs.iter().position(|st| st.doc.id == id)?;
+        }
+        self.active = Some(index);
+        self.note_active_change();
+        self.sync_tools_mask_target();
+        Some(index)
+    }
+
     /// A new document's editing state, its id made unique among the open documents.
     fn admit_document(&self, mut doc: Document, path: Option<String>) -> DocState {
         // Persisted IDs can overlap the allocator, so check every replacement too.

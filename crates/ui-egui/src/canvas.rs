@@ -63,7 +63,6 @@ pub(crate) use cursors::{
     alt_samples, composite_color, paint_bucket_cursor, pen_cursor, pencil_cursor_rect, pencil_tip_is_round, pipette_cursor, sample_eyedropper,
 };
 use cursors::{brush_tip_centre, eyedropper_ring, precise_other_cursor, visible_crosshair};
-#[cfg(test)]
 pub(crate) use display::GPU_OUTPUT;
 #[cfg(test)]
 use display::texture_key;
@@ -1795,6 +1794,38 @@ fn layer_picker_eyedropper(app: &mut PhotocraftApp, ui: &egui::Ui, ctx: &egui::C
         let d = xf.to_doc(p);
         crate::layer_picker::sample_at(app, d[0], d[1]);
     }
+}
+
+/// Draw document `idx`'s canvas without showing it (`document.prewarm`, the offscreen half of
+/// `editor.showDocument`), for the view it will have in the document area: a pending fit is
+/// settled now, so the swap shows the camera this drew for. The GPU canvas composites into the
+/// document's texture; the CPU canvas composites its tiles through [`cpu_canvas::paint`] with a
+/// painter that draws nothing. True once what that view shows is current at the level it samples
+/// (`full`: all of the document; at full size on the GPU canvas).
+pub(crate) fn prewarm(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize, full: bool) -> bool {
+    let Some(doc) = app.session.documents().get(idx).map(|st| st.doc.clone()) else { return false };
+    let Some(mut view) = app.ui.views.get(idx).cloned() else { return false };
+    let rect = crate::rulers::content_rect(app, app.last_canvas_rect);
+    let ppp = app.canvas_ppp();
+    let aspect = sync_view_to_document(app, ctx, &mut view, &doc, rect, ppp);
+    let flip = app.ui.view.flip_horizontal;
+    let xf = ViewXform { rect, zoom: view.zoom / ppp, center: view.center, flip, rotation: view.rotation, aspect };
+    let level = crate::gpu_canvas::lod_level(view.zoom);
+    let visible = if full { doc.bounds() } else { visible_doc_rect(&xf) };
+    let zoom = view.zoom;
+    if let Some(stored) = app.ui.views.get_mut(idx) {
+        *stored = view;
+    }
+    if app.gpu.is_some() && crate::gpu_canvas::gpu_view_ok(flip, xf.rotation, aspect) && ensure_gpu(app, idx, visible, level, level, ctx) {
+        let Some(gpu) = app.gpu.as_ref() else { return false };
+        let current = gpu.has(doc.id.0, [doc.size.width, doc.size.height])
+            && app.canvases.get(&(doc.id, GPU_OUTPUT)).is_some_and(|c| c.on_gpu && Some(c.revision) == app.session.documents().get(idx).map(|st| st.revision));
+        return current && if full { !gpu.has_stale(doc.id.0) } else { gpu.current_in(doc.id.0, visible, level) };
+    }
+    let output = crate::monitor_status::view_display(app, ctx);
+    let offscreen = egui::Painter::new(ctx.clone(), egui::LayerId::background(), Rect::NOTHING);
+    crate::cpu_canvas::paint(app, ctx, &offscreen, &xf, idx, output, zoom, visible);
+    crate::cpu_canvas::drawn_in(app, idx, output, zoom, visible)
 }
 
 /// Per-frame reconciliation of the camera with its document: resize re-centre, pending fit/fill,

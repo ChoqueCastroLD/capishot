@@ -151,6 +151,7 @@ impl PhotocraftApp {
             zip_export: crate::zip_export_ui::State::default(),
             ai_progress: Default::default(),
             font_checks: Default::default(),
+            doc_switch: Default::default(),
             guide_drag: None,
             layer_box: None,
             crop: Default::default(),

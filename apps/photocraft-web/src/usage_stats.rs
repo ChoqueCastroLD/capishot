@@ -2,8 +2,7 @@
 //! [`photocraft_ui_egui::telemetry`] (what is recorded is documented there).
 //!
 //! Only on Capishot's own hosts, and only while Preferences › General › Send anonymous usage
-//! statistics is on and the browser sends neither Do Not Track nor Global Privacy Control, and never
-//! from a page with `<meta name="capishot-telemetry" content="off">` (the preview deploy).
+//! statistics is on and the browser sends neither Do Not Track nor Global Privacy Control.
 //! Batches go to the page's own origin (`/capishot/api/t`, so the cross-origin isolated page needs
 //! nothing third-party) every 30 s and when the page hides, with `navigator.sendBeacon` (falling
 //! back to a `keepalive` fetch). A failed send is dropped, never retried. Errors are silent.
@@ -40,7 +39,7 @@ thread_local! {
 pub fn init(gpu: &'static str, gpu_vendor: &'static str) {
     let Some(window) = web_sys::window() else { return };
     let host = window.location().hostname().unwrap_or_default();
-    if !HOSTS.contains(&host.as_str()) || privacy_signal(&window) || telemetry_off() {
+    if !HOSTS.contains(&host.as_str()) || privacy_signal(&window) {
         return;
     }
     telemetry::set_clock(js_sys::Date::now);
@@ -97,11 +96,6 @@ fn start_session(mut env: Environment) {
         recorder.event(e);
     }
     telemetry::start(recorder);
-}
-
-/// The page opts out (`<meta name="capishot-telemetry" content="off">`: a preview deploy).
-fn telemetry_off() -> bool {
-    crate::web::page_meta("capishot-telemetry").is_some_and(|v| v.eq_ignore_ascii_case("off"))
 }
 
 /// A document was opened (`file` is only used for its extension).

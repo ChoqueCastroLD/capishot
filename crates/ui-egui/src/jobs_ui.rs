@@ -223,6 +223,21 @@ pub struct JobsUi {
     /// those that ended ([`JobsUi::take_open_outcomes`]).
     tracked: Vec<JobId>,
     outcomes: Vec<(JobId, OpenOutcome)>,
+    /// A quiet open whose document is in place but not drawn yet ([`landing`]).
+    pub(crate) landing: Option<Landing>,
+}
+
+/// How long a quiet open's preview may stand in for its landed document's canvas (ms).
+const LANDING_TIMEOUT_MS: f64 = 1000.0;
+
+/// A quiet open's document has landed: its preview stays in the canvas area, as during the
+/// decode, until the canvas has drawn the view it shows ([`crate::canvas::prewarm`]), so no frame
+/// shows a half-composited page.
+#[derive(Clone, Debug)]
+pub(crate) struct Landing {
+    doc: DocId,
+    texture: PreviewTexture,
+    started_ms: f64,
 }
 
 /// How a tracked open ended: the document and its import warnings, or why it didn't open.
@@ -878,7 +893,13 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
         let tab = app.jobs.opens.remove(i);
         let outcome = match e.outcome {
             JobOutcome::Done(v) => match finish_open_tab(app, &tab, &v) {
-                Ok(()) => opened_of(&v),
+                Ok(()) => {
+                    let opened = opened_of(&v);
+                    if let (true, Some(texture), Ok((doc, _))) = (tab.quiet, tab.texture.clone(), &opened) {
+                        app.jobs.landing = Some(Landing { doc: *doc, texture, started_ms: crate::gpu_canvas::now_ms() });
+                    }
+                    opened
+                }
                 Err(err) => {
                     app.open_failed(&tab.name, &err);
                     Err(err)
@@ -1354,6 +1375,29 @@ fn fit_rect(area: Rect, size: egui::Vec2, ppp: f32) -> Rect {
     // As `view_xform::fit_view`: 20 points around, never past one image pixel per screen pixel.
     let k = ((area.width() - 40.0) / size.x.max(1.0)).min((area.height() - 40.0) / size.y.max(1.0)).min(1.0 / ppp.max(0.01)).max(0.0);
     Rect::from_center_size(area.center(), size * k)
+}
+
+/// While a quiet open's document `idx` (the active one) lands: draw its canvas offscreen and,
+/// until that is current, its preview in `area` as during the decode. True when the preview was
+/// drawn (the canvas isn't, this frame).
+pub(crate) fn landing(app: &mut PhotocraftApp, ui: &egui::Ui, idx: usize, area: Rect) -> bool {
+    let Some(l) = app.jobs.landing.clone() else { return false };
+    if app.session.documents().get(idx).map(|st| st.doc.id) != Some(l.doc) {
+        app.jobs.landing = None;
+        return false;
+    }
+    let ready = crate::canvas::prewarm(app, ui.ctx(), idx, false);
+    if ready || crate::gpu_canvas::now_ms() - l.started_ms > LANDING_TIMEOUT_MS {
+        app.jobs.landing = None;
+        return false;
+    }
+    let t = Tokens::get(ui.ctx());
+    ui.painter().rect_filled(area, 0.0, t.canvas);
+    let PreviewTexture(tex, size) = &l.texture;
+    let r = fit_rect(area, *size, ui.ctx().pixels_per_point());
+    ui.painter().image(tex.id(), r, Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+    ui.ctx().request_repaint();
+    true
 }
 
 /// Draws an opening PSD's preview at fit in `area` (true once there is one), uploading it once

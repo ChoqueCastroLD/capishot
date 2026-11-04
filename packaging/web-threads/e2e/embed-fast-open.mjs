@@ -5,7 +5,8 @@
 //   - a cold `openDocument(bytes)` (opening card over the merged preview), and a quiet one
 //     (`{quiet: true}`, the merged preview alone): the first usable frame (≤ 500 ms for the
 //     quiet one), the final frame, no blank or partial frame while the preview stands in, and the
-//     frames that differ from the final while the new document's canvas composites (reported);
+//     frames that differ from the final while the new document's canvas composites (reported;
+//     none for the quiet one: its preview stays until the canvas is drawn, `open.quiet.prewarm`);
 //     the promise settles with the document's id once it is in place (`open.whenOpen`);
 //   - `openDocument(…, {cacheKey, version})` again: from the decoded-document cache (`cached`),
 //     at least 3× faster than the cold open; the same key opened hidden (a raw helper) shares the
@@ -282,6 +283,7 @@ const timedOpen = (src, name, options) =>
       const ready = window.events.find((e) => e.type === 'documentReady' && e.at >= t0);
       const docAt = ready ? ready.at - (ready.finalFrameMs - ready.firstFrameMs) - 4 : Infinity;
       const blankAfterFirst = after.filter((x) => x.t < docAt && like(x) < 0.9).length;
+      const unlikeAfterFirst = after.filter((x) => like(x) < 0.9).length;
       const partialAtSwap = s.filter((x) => x.t >= docAt && x.t < firstFinal.t && like(x) < 0.9).length;
       const timeline = s.map((x) => `${(x.t - t0).toFixed(0)}:${like(x).toFixed(2)}/${x.cover.toFixed(2)}`).join(' ');
       for (const x of window.samples) delete x.d;
@@ -291,6 +293,7 @@ const timedOpen = (src, name, options) =>
         finalMs: firstFinal ? firstFinal.t - t0 : null,
         blankAfterFirst,
         partialAtSwap,
+        unlikeAfterFirst,
         timeline,
         longestFrame: Math.max(0, ...gaps),
         cover: final.cover,
@@ -366,6 +369,7 @@ report(`${build} quiet cold open (merged preview alone): ${fmt(quiet)}`);
 if (process.env.DEBUG) console.log(quiet.timeline);
 check(quiet.firstMs != null && quiet.firstMs <= 500, `first usable frame ≤ 500 ms (${quiet.firstMs?.toFixed(0)} ms)`);
 check(quiet.blankAfterFirst === 0, `the preview stays, no blank or partial frame, until the document lands (${quiet.blankAfterFirst})`);
+check(quiet.unlikeAfterFirst === 0, `no half-composited frame once the page shows, the landing included (open.quiet.prewarm; ${quiet.unlikeAfterFirst})`);
 await closeAll();
 
 // 5. A hidden helper PSD beside a shown page: decoded off the frame, nothing shown.
