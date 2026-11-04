@@ -142,7 +142,7 @@ fn plan(s: &Session, p: &Value, ink: bool) -> Result<Plan> {
     // A mask or channel has no "above": the fill goes where the stroke went.
     let new_layer = flag(p, "newLayer", false) && targets_pixels(p);
     let ai = if flag(p, "ai", false) {
-        let opts = crate::ai_inpaint_cmds::ai_options(s, p, CMD)?;
+        let opts = crate::ai_inpaint_cmds::ai_options(s, p, CMD, true)?;
         Some((crate::ai_inpaint_cmds::ready_inpainter(s, &opts)?, opts))
     } else {
         None

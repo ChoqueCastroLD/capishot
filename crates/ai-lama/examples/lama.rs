@@ -2,12 +2,13 @@
 //!
 //! ```sh
 //! cargo run --release -p photocraft-ai-lama --features flex,rayon --example lama -- \
-//!     WEIGHTS.safetensors IMAGE.png MASK.png OUT_PREFIX [flex|wgpu] [raw|tiles] [max_side]
+//!     WEIGHTS.safetensors IMAGE.png MASK.png OUT_PREFIX [flex|wgpu] [raw|tiles|full] [max_side]
 //! ```
 //!
 //! `raw` runs the whole image once (mirror-padded to a multiple of 8, like the PyTorch
 //! reference) and also writes the generator output as planar `f32` (`OUT_PREFIX.raw.f32`);
-//! `tiles` runs the crop-around-mask pipeline.
+//! `tiles` runs the crop-around-mask pipeline (crops over `max_side` downscaled), `full` the same
+//! with large crops split into overlapping full-resolution tiles (`TileOptions::full_res`).
 
 use std::time::Instant;
 
@@ -18,7 +19,7 @@ use photocraft_ai_lama::tiles::{self, Fit, Rect, Tile, TileOptions};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let a: Vec<String> = std::env::args().collect();
     if a.len() < 5 {
-        return Err("usage: lama WEIGHTS IMAGE MASK OUT_PREFIX [flex|wgpu] [raw|tiles] [max_side]".into());
+        return Err("usage: lama WEIGHTS IMAGE MASK OUT_PREFIX [flex|wgpu] [raw|tiles|full] [max_side]".into());
     }
     let dev_name = a.get(5).map(String::as_str).unwrap_or("flex");
     let mode = a.get(6).map(String::as_str).unwrap_or("raw");
@@ -41,13 +42,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let out_prefix = &a[4];
     let tile_list = if mode == "raw" {
         let full = Rect { x: 0, y: 0, w, h };
-        vec![Tile { rect: full, core: full, work_w: w.div_ceil(8) * 8, work_h: h.div_ceil(8) * 8, fit: Fit::Pad }]
+        vec![Tile { rect: full, core: full, work_w: w.div_ceil(8) * 8, work_h: h.div_ceil(8) * 8, fit: Fit::Pad, split: false }]
     } else {
-        tiles::plan(&mask, w, h, &TileOptions { max_side, ..TileOptions::default() })?
+        tiles::plan(&mask, w, h, &TileOptions { max_side, full_res: mode == "full", ..TileOptions::default() })?
     };
     let src = rgb.clone();
+    let mut split = tiles::Split::new(w, h, max_side)?;
     for (i, t) in tile_list.iter().enumerate() {
-        let inp = tiles::extract(&src, &mask, w, h, t)?;
+        let (inp, weights) = if t.split {
+            match split.extract(&rgb, &mask, t)? {
+                Some((inp, wts)) => (inp, Some(wts)),
+                None => continue,
+            }
+        } else {
+            (tiles::extract(&src, &mask, w, h, t)?, None)
+        };
         // Warm-up run on the first tile so the timing excludes kernel compilation/autotune.
         if i == 0 && std::env::var_os("LAMA_WARMUP").is_some() {
             model.generate(&inp.rgb, &inp.mask, inp.w, inp.h)?;
@@ -66,7 +75,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let bytes: Vec<u8> = planar.iter().flat_map(|v| v.to_le_bytes()).collect();
             std::fs::write(format!("{out_prefix}.raw.f32"), bytes)?;
         }
-        tiles::paste(&mut rgb, &mask, w, h, t, &out)?;
+        match weights {
+            Some(wts) => {
+                split.paste(&mut rgb, t, &out, &wts)?;
+            }
+            None => {
+                tiles::paste(&mut rgb, &mask, w, h, t, &out)?;
+            }
+        }
     }
     // 8-bit output as the reference does: truncate, not round.
     let px: Vec<u8> = rgb.iter().map(|v| (v * 255.0).clamp(0.0, 255.0) as u8).collect();

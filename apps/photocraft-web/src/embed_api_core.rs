@@ -49,6 +49,7 @@ pub const FEATURES: &[&str] = &[
     "type.layoutDigest",
     "fonts.status",
     "events.fontsPreloadProgress",
+    "removeAi.fullRes",
 ];
 
 /// The build stamp: the Capishot commit and the build id, set by `scripts/build-embed.sh`
