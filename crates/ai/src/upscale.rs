@@ -59,7 +59,7 @@ enum Backend {
     /// burn, on the runtime it was loaded on (wgpu or the CPU).
     Burn(Box<Net>),
     /// ONNX Runtime on DirectML or its CPU provider (Windows; ESRGAN, FDAT and Compact).
-    #[cfg(all(feature = "directml", windows))]
+    #[cfg(all(feature = "directml", any(windows, target_os = "linux")))]
     DirectMl(crate::directml::DmlUpscaler),
 }
 
@@ -98,18 +98,18 @@ impl Loaded {
     }
 
     /// Parses `bytes` for `model` and builds its ONNX Runtime session on DirectML (Windows).
-    #[cfg(all(feature = "directml", windows))]
+    #[cfg(all(feature = "directml", any(windows, target_os = "linux")))]
     pub fn new_directml(model: &'static ModelInfo, bytes: &[u8], grayscale: bool) -> Result<Self> {
         Self::new_onnx(model, bytes, grayscale, None)
     }
 
     /// As [`Self::new_directml`] on ONNX Runtime's CPU provider, with `threads` (0: one per core).
-    #[cfg(all(feature = "directml", windows))]
+    #[cfg(all(feature = "directml", any(windows, target_os = "linux")))]
     pub fn new_onnx_cpu(model: &'static ModelInfo, bytes: &[u8], grayscale: bool, threads: usize) -> Result<Self> {
         Self::new_onnx(model, bytes, grayscale, Some(threads))
     }
 
-    #[cfg(all(feature = "directml", windows))]
+    #[cfg(all(feature = "directml", any(windows, target_os = "linux")))]
     fn new_onnx(model: &'static ModelInfo, bytes: &[u8], grayscale: bool, cpu: Option<usize>) -> Result<Self> {
         if !Self::directml_supports(model) {
             return Err(crate::AiError::Device(format!("{} doesn't run on ONNX Runtime", model.id)));
@@ -129,7 +129,7 @@ impl Loaded {
     pub fn is_directml(&self) -> bool {
         match &self.backend {
             Backend::Burn(_) => false,
-            #[cfg(all(feature = "directml", windows))]
+            #[cfg(all(feature = "directml", any(windows, target_os = "linux")))]
             Backend::DirectMl(n) => n.cpu_threads().is_none(),
         }
     }
@@ -143,7 +143,7 @@ impl Loaded {
     pub fn onnx_cpu_threads(&self) -> Option<usize> {
         match &self.backend {
             Backend::Burn(_) => None,
-            #[cfg(all(feature = "directml", windows))]
+            #[cfg(all(feature = "directml", any(windows, target_os = "linux")))]
             Backend::DirectMl(n) => n.cpu_threads(),
         }
     }
@@ -152,7 +152,7 @@ impl Loaded {
     pub fn out_channels(&self) -> usize {
         match &self.backend {
             Backend::Burn(n) => n.out_channels(),
-            #[cfg(all(feature = "directml", windows))]
+            #[cfg(all(feature = "directml", any(windows, target_os = "linux")))]
             Backend::DirectMl(n) => n.out_channels(),
         }
     }
@@ -165,7 +165,7 @@ pub async fn upscale(rt: &Runtime, model: &Loaded, input: &Planar, tiles: TileOp
     let input = if model.grayscale && input.channels != 1 { crate::mangajanai::to_gray(input) } else { input.clone() };
     let out = match &model.backend {
         Backend::Burn(net) => run_tiled(rt, net.as_ref(), &input, tiles, progress).await?,
-        #[cfg(all(feature = "directml", windows))]
+        #[cfg(all(feature = "directml", any(windows, target_os = "linux")))]
         Backend::DirectMl(_) => return upscale_directml(model, &input, tiles, progress),
     };
     Ok(clamped(out, model))
@@ -173,7 +173,7 @@ pub async fn upscale(rt: &Runtime, model: &Loaded, input: &Planar, tiles: TileOp
 
 /// [`upscale`] for a model loaded with [`Loaded::new_directml`] or [`Loaded::new_onnx_cpu`] (no
 /// burn runtime involved).
-#[cfg(all(feature = "directml", windows))]
+#[cfg(all(feature = "directml", any(windows, target_os = "linux")))]
 pub fn upscale_directml(model: &Loaded, input: &Planar, tiles: TileOptions, progress: &dyn Progress) -> Result<Planar> {
     let Backend::DirectMl(net) = &model.backend else {
         return Err(crate::AiError::Inference(format!("{} isn't loaded on DirectML", model.id)));

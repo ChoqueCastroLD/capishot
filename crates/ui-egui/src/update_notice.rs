@@ -8,6 +8,11 @@
 //! "sha256": {"zip": "…", "msi": "…"}, "size": {"zip": n, "msi": n}?, "min_version": "…"?,
 //! "notes": "…"?, "notes_url": "https://…"?}`. The portable build takes the zip, an installed one
 //! the MSI. Below `min_version` the update can't be skipped.
+//!
+//! Linux copies ([`Channel`]) read their own optional keys, which Windows copies ignore:
+//! `url_appimage`, `url_tar` and `url_deb`, with `appimage`, `tar` and `deb` entries in `sha256`
+//! and `size`, and `download_page`. An AppImage takes the AppImage and a tar.gz copy the tar.gz
+//! (both install themselves); a .deb install only links `download_page` (else the .deb).
 
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -37,12 +42,44 @@ pub const RECHECK_SECS: f64 = 6.0 * 3600.0;
 /// `prefs.dialogs` key holding the version whose notice was dismissed: it isn't offered again.
 const DISMISSED: &str = "ui.updateDismissed";
 
+/// Which download a copy takes, by how it was installed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Channel {
+    /// Windows, installed with the MSI.
+    #[default]
+    Msi,
+    /// Windows, the portable ZIP.
+    Zip,
+    /// Linux, the AppImage (`$APPIMAGE`): replaced in place.
+    AppImage,
+    /// Linux, the portable tar.gz folder: swapped like the Windows ZIP.
+    Tar,
+    /// Linux, the .deb (apt owns the files): the notice only links the download page.
+    Deb,
+}
+
+impl Channel {
+    /// The manifest keys to try, in order (`url_<key>`, and the key in `sha256` and `size`). A
+    /// Linux copy never takes a Windows download, nor another Linux package than its own.
+    fn keys(self) -> &'static [&'static str] {
+        match self {
+            Self::Msi => &["msi", "zip", ""],
+            Self::Zip => &["zip", "msi", ""],
+            Self::AppImage => &["appimage"],
+            Self::Tar => &["tar"],
+            Self::Deb => &["download_page", "deb"],
+        }
+    }
+}
+
 /// The shell's half: it fills `manifest` once (from any thread); the next frame reads it.
 #[derive(Clone, Debug, Default)]
 pub struct UpdateCheck {
     pub manifest: Arc<Mutex<Option<String>>>,
     /// This copy runs in portable mode, so the zip is the download to offer.
     pub portable: bool,
+    /// How this copy was installed; `None`: Windows, the MSI or (`portable`) the ZIP.
+    pub channel: Option<Channel>,
     /// The manifest's address, for the checks after the launch's (none: the launch's only).
     pub url: Option<String>,
     /// This app can download and install updates itself (Windows).
@@ -50,6 +87,13 @@ pub struct UpdateCheck {
     /// The last check's time (egui input time) and whether it was asked for (Help › Check for
     /// Updates: the result is reported even when there is nothing new).
     pub state: Arc<Mutex<CheckState>>,
+}
+
+impl UpdateCheck {
+    /// The download this copy takes.
+    pub fn channel(&self) -> Channel {
+        self.channel.unwrap_or(if self.portable { Channel::Zip } else { Channel::Msi })
+    }
 }
 
 /// When the manifest was last asked for, and whether the user asked.
@@ -68,6 +112,14 @@ struct Manifest {
     url_msi: Option<String>,
     #[serde(default)]
     url: Option<String>,
+    #[serde(default)]
+    url_appimage: Option<String>,
+    #[serde(default)]
+    url_tar: Option<String>,
+    #[serde(default)]
+    url_deb: Option<String>,
+    #[serde(default)]
+    download_page: Option<String>,
     #[serde(default)]
     notes: Option<String>,
     #[serde(default)]
@@ -102,15 +154,29 @@ pub struct Update {
 
 /// The update `body` offers over `current`, if any: a newer version with an `https://` link.
 pub fn parse(body: &str, current: &str, portable: bool) -> Option<Update> {
+    parse_for(body, current, if portable { Channel::Zip } else { Channel::Msi })
+}
+
+/// [`parse`] for a copy installed through `channel`.
+pub fn parse_for(body: &str, current: &str, channel: Channel) -> Option<Update> {
     let m: Manifest = serde_json::from_str(body).ok()?;
     let version = m.version.trim().to_string();
     if !is_newer(&version, current) {
         return None;
     }
-    let (first, second) = if portable { (("zip", m.url_zip), ("msi", m.url_msi)) } else { (("msi", m.url_msi), ("zip", m.url_zip)) };
-    let (kind, url) = [first, second, ("", m.url)]
-        .into_iter()
-        .filter_map(|(k, u)| u.map(|u| (k, u.trim().to_string())))
+    let link = |key: &str| match key {
+        "msi" => m.url_msi.clone(),
+        "zip" => m.url_zip.clone(),
+        "appimage" => m.url_appimage.clone(),
+        "tar" => m.url_tar.clone(),
+        "deb" => m.url_deb.clone(),
+        "download_page" => m.download_page.clone(),
+        _ => m.url.clone(),
+    };
+    let (kind, url) = channel
+        .keys()
+        .iter()
+        .filter_map(|&k| link(k).map(|u| (k, u.trim().to_string())))
         .find(|(_, u)| u.starts_with("https://") || (u.starts_with("http://") && is_loopback(u)))?;
     let notes = m.notes.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
     let sha256 = m
@@ -200,7 +266,7 @@ pub fn poll(app: &mut PhotocraftApp, now: f64) {
     }
     let Some(body) = check.manifest.lock().unwrap_or_else(PoisonError::into_inner).take() else { return };
     let manual = std::mem::take(&mut check.state.lock().unwrap_or_else(PoisonError::into_inner).manual);
-    match parse(&body, photocraft_engine::build_info::VERSION, check.portable) {
+    match parse_for(&body, photocraft_engine::build_info::VERSION, check.channel()) {
         Some(update) => {
             if manual {
                 app.session.prefs.edit(|p| {
@@ -239,7 +305,7 @@ pub fn refetch(check: &UpdateCheck) {
 
 /// Help › Check for Updates: fetch now and report the result, even when nothing is new.
 pub fn check_now(app: &mut PhotocraftApp) -> Result<Value, String> {
-    let Some(check) = app.services.update_check.clone() else { return Err(tl!("Updates are checked in the Windows app only").into()) };
+    let Some(check) = app.services.update_check.clone() else { return Err(tl!("Updates are checked in the desktop app only").into()) };
     check.state.lock().unwrap_or_else(PoisonError::into_inner).manual = true;
     refetch(&check);
     app.ui.status = tl!("Checking for updates…").into();
@@ -365,6 +431,58 @@ mod tests {
         assert_eq!(parse(BODY, "9.1.0", false), None);
         assert_eq!(parse(r#"{"version": "9.1.0", "url_zip": "http://example.com/c.zip"}"#, "0.12.0", true), None);
         assert_eq!(parse("<html>404</html>", "0.12.0", false), None);
+    }
+
+    /// The manifest a release publishes for Windows and Linux together.
+    const BOTH: &str = r#"{"version": "9.1.0", "url_zip": "https://example.com/w.zip", "url_msi": "https://example.com/w.msi",
+        "url_appimage": "https://example.com/l.AppImage", "url_tar": "https://example.com/l.tar.gz", "url_deb": "https://example.com/l.deb",
+        "download_page": "https://example.com/download",
+        "sha256": {"zip": "1111111111111111111111111111111111111111111111111111111111111111",
+                   "msi": "2222222222222222222222222222222222222222222222222222222222222222",
+                   "appimage": "3333333333333333333333333333333333333333333333333333333333333333",
+                   "tar": "4444444444444444444444444444444444444444444444444444444444444444",
+                   "deb": "5555555555555555555555555555555555555555555555555555555555555555"},
+        "size": {"zip": 1, "msi": 2, "appimage": 3, "tar": 4, "deb": 5}, "notes": "Linux too"}"#;
+
+    /// 0.13.5 and later Windows copies read the combined manifest as before: the Linux keys are
+    /// ignored and the MSI or ZIP comes with its own checksum and size.
+    #[test]
+    fn windows_copies_ignore_the_linux_keys() {
+        // The manifest as 0.13.5 declared it: unknown keys must not fail the parse.
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct Old {
+            version: String,
+            url_zip: Option<String>,
+            url_msi: Option<String>,
+            sha256: Option<std::collections::HashMap<String, String>>,
+            size: Option<std::collections::HashMap<String, u64>>,
+        }
+        let old: Old = serde_json::from_str(BOTH).unwrap();
+        assert_eq!(old.url_msi.as_deref(), Some("https://example.com/w.msi"));
+        let msi = parse(BOTH, "0.13.5", false).unwrap();
+        assert_eq!((msi.url.as_str(), msi.sha256.as_deref(), msi.size), ("https://example.com/w.msi", Some("2".repeat(64).as_str()), Some(2)));
+        let zip = parse(BOTH, "0.13.5", true).unwrap();
+        assert_eq!((zip.url.as_str(), zip.sha256.as_deref(), zip.size), ("https://example.com/w.zip", Some("1".repeat(64).as_str()), Some(1)));
+    }
+
+    #[test]
+    fn linux_copies_take_their_own_package_and_never_a_windows_one() {
+        let a = parse_for(BOTH, "0.13.5", Channel::AppImage).unwrap();
+        assert_eq!((a.url.as_str(), a.sha256.as_deref(), a.size), ("https://example.com/l.AppImage", Some("3".repeat(64).as_str()), Some(3)));
+        let t = parse_for(BOTH, "0.13.5", Channel::Tar).unwrap();
+        assert_eq!((t.url.as_str(), t.size), ("https://example.com/l.tar.gz", Some(4)));
+        let d = parse_for(BOTH, "0.13.5", Channel::Deb).unwrap();
+        assert_eq!((d.url.as_str(), d.sha256), ("https://example.com/download", None), "a .deb install opens the download page");
+        let deb_only = r#"{"version": "9.1.0", "url_deb": "https://example.com/l.deb"}"#;
+        assert_eq!(parse_for(deb_only, "0.13.5", Channel::Deb).unwrap().url, "https://example.com/l.deb");
+        // A Windows-only manifest offers Linux copies nothing.
+        for c in [Channel::AppImage, Channel::Tar, Channel::Deb] {
+            assert_eq!(parse_for(BODY, "0.12.0", c), None, "{c:?}");
+        }
+        assert_eq!(parse_for(r#"{"version": "9.1.0", "url_tar": "https://example.com/l.tar.gz"}"#, "0.13.5", Channel::AppImage), None);
+        assert_eq!(UpdateCheck { portable: true, ..Default::default() }.channel(), Channel::Zip);
+        assert_eq!(UpdateCheck::default().channel(), Channel::Msi);
     }
 
     #[test]

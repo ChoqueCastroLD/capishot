@@ -50,7 +50,7 @@ pub mod weights;
 
 #[cfg(feature = "runtime")]
 pub mod compact;
-#[cfg(all(feature = "directml", windows))]
+#[cfg(all(feature = "directml", any(windows, target_os = "linux")))]
 pub mod directml;
 #[cfg(feature = "runtime")]
 pub mod esrgan;
@@ -58,7 +58,7 @@ pub mod esrgan;
 pub mod fdat;
 #[cfg(all(feature = "runtime", not(target_family = "wasm")))]
 pub mod native;
-#[cfg(all(feature = "directml", windows))]
+#[cfg(all(feature = "directml", any(windows, target_os = "linux")))]
 mod onnx;
 #[cfg(feature = "runtime")]
 pub mod runtime;

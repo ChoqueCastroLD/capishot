@@ -8,11 +8,16 @@
 //! - an installed copy (the per-machine MSI): `msiexec /i <msi> /passive /norestart` (Windows asks
 //!   for administrator rights);
 //! - a portable copy (`portable.txt` beside the exe): the new ZIP, extracted beforehand, copied over
-//!   the app's folder, its `CapishotData` (settings, presets, recovery) kept.
+//!   the app's folder, its `CapishotData` (settings, presets, recovery) kept;
+//! - Linux, an AppImage: the new AppImage replaces the file `$APPIMAGE` names (written beside it,
+//!   then renamed over it);
+//! - Linux, the tar.gz folder: the new tar.gz, extracted beforehand, copied over the app's folder
+//!   like the Windows ZIP (each file renamed into place). A .deb install isn't updated here: apt
+//!   owns its files, so the notice links the download page ([`crate::update_notice::Channel`]).
 //!
 //! What happened is written to `last-update.json` in the updates folder; the next launch reports a
 //! failure or a cancelled administrator prompt. Downloads go to `%LOCALAPPDATA%\Capishot\updates`
-//! (a portable copy: `CapishotData\updates`).
+//! (Linux: `$XDG_CACHE_HOME/capishot/updates`; a portable copy: `CapishotData/updates`).
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -23,7 +28,7 @@ use serde_json::{Value, json};
 
 use crate::PhotocraftApp;
 
-/// The helper's flag: `--apply-update <msi|zip> <file-or-folder> --pid <n> --exe <path> --version <v>`.
+/// The helper's flag: `--apply-update <msi|zip|appimage|tar> <file-or-folder> --pid <n> --exe <path> --version <v>`.
 pub const HELPER_FLAG: &str = "--apply-update";
 /// The user data folder of a portable copy: never replaced.
 pub const PORTABLE_DATA: &str = "CapishotData";
@@ -36,15 +41,32 @@ pub const RESULT_FILE: &str = "last-update.json";
 pub enum Kind {
     Msi,
     Zip,
+    /// Linux: the new AppImage, put in place of `Plan::exe`.
+    AppImage,
+    /// Linux: the extracted tar.gz folder, copied over `Plan::exe`'s folder.
+    Tar,
+}
+
+impl Kind {
+    /// The helper's name for it.
+    fn name(self) -> &'static str {
+        match self {
+            Self::Msi => "msi",
+            Self::Zip => "zip",
+            Self::AppImage => "appimage",
+            Self::Tar => "tar",
+        }
+    }
 }
 
 /// What the helper does after the app exits.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Plan {
     pub kind: Kind,
-    /// The MSI, or the extracted portable folder (the one holding `capishot.exe`).
+    /// The MSI or AppImage, or the extracted portable folder (the one holding `capishot.exe`).
     pub source: PathBuf,
-    /// The app to start again (for a portable copy: in the folder to replace).
+    /// The app to start again (for a portable copy: in the folder to replace; an AppImage: the
+    /// file to replace).
     pub exe: PathBuf,
     pub version: String,
     /// Where the result file goes.
@@ -73,18 +95,20 @@ pub fn updates_dir(portable: bool) -> PathBuf {
     if portable && let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
         return dir.join(PORTABLE_DATA).join("updates");
     }
-    let base = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
-    base.join("Capishot").join("updates")
+    let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
+    if cfg!(windows) {
+        return env("LOCALAPPDATA").unwrap_or_else(std::env::temp_dir).join("Capishot").join("updates");
+    }
+    // XDG: a relative XDG_CACHE_HOME is ignored, as the spec asks.
+    let cache = env("XDG_CACHE_HOME").filter(|p| p.is_absolute()).or_else(|| env("HOME").map(|h| h.join(".cache")));
+    cache.unwrap_or_else(std::env::temp_dir).join("capishot").join("updates")
 }
 
 /// The helper's arguments for `plan`, run from the app with process id `pid`.
 pub fn helper_args(plan: &Plan, pid: u32) -> Vec<OsString> {
     vec![
         HELPER_FLAG.into(),
-        match plan.kind {
-            Kind::Msi => "msi".into(),
-            Kind::Zip => "zip".into(),
-        },
+        plan.kind.name().into(),
         plan.source.clone().into_os_string(),
         "--pid".into(),
         pid.to_string().into(),
@@ -105,6 +129,8 @@ pub fn parse_helper_args(args: &[OsString]) -> Option<Result<(Plan, u32), String
     let kind = match args.get(1).and_then(|a| a.to_str()) {
         Some("msi") => Kind::Msi,
         Some("zip") => Kind::Zip,
+        Some("appimage") => Kind::AppImage,
+        Some("tar") => Kind::Tar,
         other => return Some(Err(format!("unknown update kind {other:?}"))),
     };
     let Some(source) = args.get(2).map(PathBuf::from) else { return Some(Err("no update file".into())) };
@@ -131,8 +157,9 @@ pub fn parse_helper_args(args: &[OsString]) -> Option<Result<(Plan, u32), String
 /// Starts the helper for `plan`, detached (it outlives this process).
 pub fn spawn_helper(plan: &Plan) -> std::io::Result<()> {
     let exe = std::env::current_exe()?;
-    // A portable copy's exe is replaced: run the helper from a copy outside the folder.
-    let helper = if plan.kind == Kind::Zip {
+    // A portable copy's exe is replaced, and an AppImage's mount goes away when it exits: run the
+    // helper from a copy outside them.
+    let helper = if plan.kind != Kind::Msi {
         std::fs::create_dir_all(&plan.updates_dir)?;
         let copy = plan.updates_dir.join(format!("capishot-update-helper{}", std::env::consts::EXE_SUFFIX));
         std::fs::copy(&exe, &copy)?;
@@ -147,6 +174,12 @@ pub fn spawn_helper(plan: &Plan) -> std::io::Result<()> {
         use std::os::windows::process::CommandExt;
         // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP: not tied to this process or its console.
         cmd.creation_flags(0x0000_0008 | 0x0000_0200);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // Its own process group: a terminal closing with the app doesn't take it down.
+        cmd.process_group(0);
     }
     cmd.spawn().map(|_| ())
 }
@@ -187,10 +220,81 @@ fn alive(pid: u32) -> bool {
             .output()
             .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains(&format!("\"{pid}\"")))
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        Path::new("/proc").join(pid.to_string()).exists()
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         std::process::Command::new("kill").args(["-0", &pid.to_string()]).status().is_ok_and(|s| s.success())
     }
+}
+
+/// Copies `from` to `to`. On Unix through a temporary file renamed over `to`, so a program still
+/// mapped from the old file (or busy) keeps its copy and nothing is left half-written.
+fn copy_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut name = to.file_name().unwrap_or_default().to_os_string();
+        name.push(".capishot-update");
+        let tmp = to.with_file_name(name);
+        let r = std::fs::copy(from, &tmp).and_then(|_| std::fs::rename(&tmp, to));
+        if r.is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+        r
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::copy(from, to).map(|_| ())
+    }
+}
+
+/// Puts the downloaded AppImage `src` in place of `dst` (executable, renamed over it).
+pub fn replace_appimage(src: &Path, dst: &Path) -> std::io::Result<()> {
+    copy_file(src, dst)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dst, std::fs::Permissions::from_mode(0o755))?;
+    }
+    Ok(())
+}
+
+/// Extracts the tar.gz at `file` into `dest` with the system's `tar` (entries with an absolute
+/// path or `..` refused, links refused, owners not restored).
+pub fn extract_tar(file: &Path, dest: &Path) -> Result<(), String> {
+    let list = std::process::Command::new("tar").arg("-tvzf").arg(file).output().map_err(|e| format!("tar: {e}"))?;
+    if !list.status.success() {
+        return Err(format!("{}: not a readable tar.gz", file.display()));
+    }
+    let names = std::process::Command::new("tar").arg("-tzf").arg(file).output().map_err(|e| format!("tar: {e}"))?;
+    for line in String::from_utf8_lossy(&list.stdout).lines() {
+        // `tar -tv` starts each line with the entry's type: only files and folders are taken.
+        if !(line.starts_with('-') || line.starts_with('d')) {
+            return Err(format!("unsupported entry in the update: {line}"));
+        }
+    }
+    for name in String::from_utf8_lossy(&names.stdout).lines() {
+        let rel = Path::new(name);
+        if rel.is_absolute() || rel.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            return Err(format!("unsafe path in the update: {name}"));
+        }
+    }
+    let _ = std::fs::remove_dir_all(dest);
+    std::fs::create_dir_all(dest).map_err(|e| format!("{}: {e}", dest.display()))?;
+    let out = std::process::Command::new("tar")
+        .arg("-xzf")
+        .arg(file)
+        .arg("-C")
+        .arg(dest)
+        .arg("--no-same-owner")
+        .output()
+        .map_err(|e| format!("tar: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("tar: {}", String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    Ok(())
 }
 
 /// Copies the extracted portable folder `src` over `dst`, keeping `dst`'s [`PORTABLE_DATA`].
@@ -210,7 +314,7 @@ pub fn swap_portable(src: &Path, dst: &Path) -> std::io::Result<usize> {
             } else {
                 let mut tries = 0;
                 loop {
-                    match std::fs::copy(&from, &to) {
+                    match copy_file(&from, &to) {
                         Ok(_) => break,
                         Err(e) if tries < 40 => {
                             tries += 1;
@@ -293,13 +397,19 @@ pub fn run_helper(args: &[OsString]) -> Option<Result<(), String>> {
                 Err(e) => Outcome { version: plan.version.clone(), ok: false, code: None, message: format!("The installer didn't start: {e}") },
             }
         }
-        Kind::Zip => {
+        Kind::Zip | Kind::Tar => {
             let dst = plan.exe.parent().map(Path::to_path_buf).unwrap_or_default();
             match swap_portable(&plan.source, &dst) {
                 Ok(_) => Outcome { version: plan.version.clone(), ok: true, code: None, message: String::new() },
                 Err(e) => Outcome { version: plan.version.clone(), ok: false, code: None, message: format!("The files couldn't be replaced: {e}") },
             }
         }
+        Kind::AppImage => match replace_appimage(&plan.source, &plan.exe) {
+            Ok(()) => Outcome { version: plan.version.clone(), ok: true, code: None, message: String::new() },
+            Err(e) => {
+                Outcome { version: plan.version.clone(), ok: false, code: None, message: format!("{} couldn't be replaced: {e}", plan.exe.display()) }
+            }
+        },
     };
     write_outcome(&plan.updates_dir, &outcome);
     let _ = std::process::Command::new(&plan.exe).spawn();
@@ -334,11 +444,22 @@ pub fn download(app: &mut PhotocraftApp) -> Result<Value, String> {
         return Err(tl!("This update publishes no checksum: download it from the website").into());
     };
     let portable = app.services.update_check.as_ref().is_some_and(|c| c.portable);
-    let kind = if portable { Kind::Zip } else { Kind::Msi };
+    let channel = app.services.update_check.as_ref().map(crate::update_notice::UpdateCheck::channel).unwrap_or_default();
+    let kind = match channel {
+        crate::update_notice::Channel::Msi => Kind::Msi,
+        crate::update_notice::Channel::Zip => Kind::Zip,
+        crate::update_notice::Channel::AppImage => Kind::AppImage,
+        crate::update_notice::Channel::Tar => Kind::Tar,
+        crate::update_notice::Channel::Deb => return Err(tl!("This copy is updated by its package manager: download the update from the website").into()),
+    };
     let dir = updates_dir(portable);
     let file = update.url.rsplit('/').next().filter(|f| !f.is_empty()).unwrap_or("capishot-update").to_string();
     let dest = dir.join(&file);
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let exe = match kind {
+        // The AppImage file itself, not the binary in its (temporary) mount.
+        Kind::AppImage => std::env::var_os("APPIMAGE").filter(|p| !p.is_empty()).map(PathBuf::from).ok_or_else(|| tl!("APPIMAGE isn't set: download the update from the website").to_string())?,
+        _ => std::env::current_exe().map_err(|e| e.to_string())?,
+    };
     let (url, size, version) = (update.url.clone(), update.size.unwrap_or(0), update.version.clone());
     app.ui.notices.retain(|n| n.tag.as_deref() != Some(crate::update_notice::TAG));
     let label = crate::i18n::fmt(tl!("Downloading Capishot {version}"), &[("version", &version)]);
@@ -366,11 +487,16 @@ pub fn download(app: &mut PhotocraftApp) -> Result<Value, String> {
             }
             r.map_err(photocraft_engine::EngineError::Other)?;
             let source = match kind {
-                Kind::Msi => dest.clone(),
+                Kind::Msi | Kind::AppImage => dest.clone(),
                 Kind::Zip => {
                     let out = dest.with_extension("extracted");
                     extract_zip(&dest, &out).map_err(photocraft_engine::EngineError::Other)?;
                     app_folder(&out).ok_or_else(|| photocraft_engine::EngineError::Other("capishot.exe isn't in the update".into()))?
+                }
+                Kind::Tar => {
+                    let out = dest.with_extension("extracted");
+                    extract_tar(&dest, &out).map_err(photocraft_engine::EngineError::Other)?;
+                    app_folder(&out).ok_or_else(|| photocraft_engine::EngineError::Other("capishot isn't in the update".into()))?
                 }
             };
             Ok(Plan { kind, source, exe, version, updates_dir: dir })
@@ -498,6 +624,73 @@ mod tests {
         assert_eq!(read("portable.txt"), "portable");
         assert_eq!(read("CapishotData/prefs.json"), "mine", "the user's data stays");
         assert_eq!(read("CapishotData/recovery/a.pcraft"), "doc");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn linux_helper_kinds_round_trip() {
+        for kind in [Kind::AppImage, Kind::Tar] {
+            let plan = Plan {
+                kind,
+                source: PathBuf::from("/home/a b/.cache/capishot/updates/capishot-0.13.9-linux-x86_64.AppImage"),
+                exe: PathBuf::from("/home/a b/Apps/Capishot.AppImage"),
+                version: "0.13.9".into(),
+                updates_dir: PathBuf::from("/home/a b/.cache/capishot/updates"),
+            };
+            assert_eq!(parse_helper_args(&helper_args(&plan, 7)), Some(Ok((plan, 7))));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_appimage_is_replaced_in_place_and_stays_executable() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tmp("appimage");
+        let (new, app) = (root.join("new.AppImage"), root.join("Capishot.AppImage"));
+        std::fs::write(&new, "new").unwrap();
+        std::fs::write(&app, "old").unwrap();
+        std::fs::write(root.join("prefs.json"), "mine").unwrap();
+        replace_appimage(&new, &app).unwrap();
+        assert_eq!(std::fs::read_to_string(&app).unwrap(), "new");
+        assert_eq!(std::fs::metadata(&app).unwrap().permissions().mode() & 0o777, 0o755);
+        assert_eq!(std::fs::read_to_string(root.join("prefs.json")).unwrap(), "mine");
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 3, "no temporary file left");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_tar_gz_extracts_swaps_and_unsafe_ones_are_refused() {
+        let root = tmp("tar");
+        let top = root.join("src/capishot-0.13.9-linux-x86_64");
+        std::fs::create_dir_all(top.join("licenses")).unwrap();
+        std::fs::write(top.join("capishot"), "new exe").unwrap();
+        std::fs::write(top.join("licenses/NOTICE"), "n").unwrap();
+        let tgz = root.join("u.tar.gz");
+        assert!(std::process::Command::new("tar").arg("-czf").arg(&tgz).arg("-C").arg(root.join("src")).arg(".").status().unwrap().success());
+        extract_tar(&tgz, &root.join("out")).unwrap();
+        let folder = app_folder(&root.join("out")).unwrap();
+        assert_eq!(folder, root.join("out/capishot-0.13.9-linux-x86_64"));
+        let app = root.join("app");
+        std::fs::create_dir_all(app.join(PORTABLE_DATA)).unwrap();
+        std::fs::write(app.join("capishot"), "old exe").unwrap();
+        std::fs::write(app.join(PORTABLE_DATA).join("prefs.json"), "mine").unwrap();
+        swap_portable(&folder, &app).unwrap();
+        assert_eq!(std::fs::read_to_string(app.join("capishot")).unwrap(), "new exe");
+        assert_eq!(std::fs::read_to_string(app.join(PORTABLE_DATA).join("prefs.json")).unwrap(), "mine");
+        // A link (it could point anywhere) and a parent path are refused.
+        let bad = root.join("bad");
+        std::fs::create_dir_all(&bad).unwrap();
+        std::os::unix::fs::symlink("/etc/passwd", bad.join("capishot")).unwrap();
+        let bad_tgz = root.join("bad.tar.gz");
+        assert!(std::process::Command::new("tar").arg("-czf").arg(&bad_tgz).arg("-C").arg(&bad).arg(".").status().unwrap().success());
+        assert!(extract_tar(&bad_tgz, &root.join("out2")).is_err());
+        let dotdot = root.join("dotdot.tar.gz");
+        assert!(
+            std::process::Command::new("tar").arg("-czf").arg(&dotdot).arg("-C").arg(&top).arg("--transform=s,^,../,").arg("capishot").status().unwrap().success()
+        );
+        assert!(extract_tar(&dotdot, &root.join("out3")).is_err());
+        assert!(extract_tar(&root.join("missing.tar.gz"), &root.join("out4")).is_err());
         let _ = std::fs::remove_dir_all(root);
     }
 

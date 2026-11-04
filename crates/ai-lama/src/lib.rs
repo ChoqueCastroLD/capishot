@@ -23,7 +23,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod dft;
-#[cfg(all(feature = "directml", windows))]
+#[cfg(all(feature = "directml", any(windows, target_os = "linux")))]
 pub mod directml;
 pub mod service;
 pub mod tiles;
@@ -36,7 +36,7 @@ mod migan;
 mod model;
 #[cfg(all(feature = "model", not(target_family = "wasm")))]
 pub mod native;
-#[cfg(all(feature = "directml", windows))]
+#[cfg(all(feature = "directml", any(windows, target_os = "linux")))]
 mod onnx;
 #[cfg(feature = "model")]
 mod weights;

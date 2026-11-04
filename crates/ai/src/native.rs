@@ -54,7 +54,7 @@ struct Inner {
     #[cfg_attr(not(all(feature = "directml", windows)), allow(dead_code))]
     directml_failed: Option<String>,
     /// Why ONNX Runtime's CPU provider couldn't run a model (then CPU requests stay on burn).
-    #[cfg_attr(not(all(feature = "directml", windows)), allow(dead_code))]
+    #[cfg_attr(not(all(feature = "directml", any(windows, target_os = "linux"))), allow(dead_code))]
     onnx_cpu_failed: Option<String>,
 }
 
@@ -168,7 +168,7 @@ impl NativeUpscaler {
     /// the CPU tiling; `None` runs it on burn instead (a model it doesn't take, no ONNX Runtime
     /// library, or a failure loading or running there, remembered: the CPU path never gets
     /// worse than burn's).
-    #[cfg(all(feature = "directml", windows))]
+    #[cfg(all(feature = "directml", any(windows, target_os = "linux")))]
     fn run_onnx_cpu(&self, req: &Request, bytes: &[u8], inner: &mut Inner, hooks: &dyn Hooks) -> Option<Result<crate::Planar>> {
         if !Loaded::directml_supports(req.model) || inner.onnx_cpu_failed.is_some() || crate::directml::available().is_err() {
             return None;
@@ -204,7 +204,7 @@ impl NativeUpscaler {
         }
     }
 
-    #[cfg(not(all(feature = "directml", windows)))]
+    #[cfg(not(all(feature = "directml", any(windows, target_os = "linux"))))]
     fn run_onnx_cpu(&self, _: &Request, _: &[u8], _: &mut Inner, _: &dyn Hooks) -> Option<Result<crate::Planar>> {
         None
     }

@@ -49,7 +49,7 @@ rayon = { workspace = true, optional = true }
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 ureq = { version = "3", default-features = false, features = ["rustls"], optional = true }
 
-[target.'cfg(windows)'.dependencies]
+[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
 # Dynamically loaded (no download at build time, nothing linked): see the `directml` feature.
 ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic", "directml", "api-24"], optional = true }
 
