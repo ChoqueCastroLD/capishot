@@ -15,6 +15,7 @@ mod channel_clip;
 mod clip_group;
 mod crop_fill;
 pub mod display_color;
+pub mod doc_events;
 pub mod doc_path;
 pub mod filters;
 pub mod filters_ext;
@@ -92,7 +93,7 @@ pub mod cmd;
 mod doc_state;
 mod error;
 mod session;
-pub use session::batch::{Batch, BatchHistory};
+pub use session::batch::{Batch, BatchHistory, parse_steps as parse_batch_steps};
 pub use session::{ExecScope, HistoryMode};
 
 pub use cmd as commands;

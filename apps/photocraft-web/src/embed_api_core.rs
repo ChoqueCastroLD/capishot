@@ -440,144 +440,25 @@ pub struct DocSnap {
     pub props: std::sync::Arc<Vec<LayerProps>>,
 }
 
-/// What `layerChanged` compares: a layer's settings and its type, shape or adjustment
-/// (not its pixels: `layerPixelsChanged` says those).
-#[derive(Clone, Debug, PartialEq)]
-pub struct LayerProps {
-    pub id: u64,
-    pub parent: Option<u64>,
-    pub name: String,
-    pub visible: bool,
-    pub opacity: f32,
-    pub fill_opacity: f32,
-    pub blend: photocraft_engine::doc::BlendMode,
-    pub clipped: bool,
-    pub locks: photocraft_engine::doc::Locks,
-    pub label: photocraft_engine::doc::LabelColor,
-    pub effects: photocraft_engine::doc::Effects,
-    /// The layer mask's switches (its pixels count as pixels).
-    pub mask: Option<(bool, f32, f32)>,
-    pub vector_mask: Option<photocraft_engine::doc::VectorMask>,
-    /// A type or shape layer's model without its rendered pixels, an adjustment's or fill's
-    /// settings; `None` for pixel layers, groups and smart objects.
-    pub content: Option<photocraft_engine::doc::LayerContent>,
-}
-
-/// Every layer's [`LayerProps`], in the document's order.
-pub fn layer_props(doc: &photocraft_engine::doc::Document) -> Vec<LayerProps> {
-    use photocraft_engine::doc::LayerContent;
-    fn rec(layers: &[photocraft_engine::doc::Layer], parent: Option<u64>, out: &mut Vec<LayerProps>) {
-        for l in layers {
-            let content = match &l.content {
-                LayerContent::Text(t) => Some(LayerContent::Text(photocraft_engine::doc::TextLayer { cache: None, psd_raw: None, ..t.clone() })),
-                LayerContent::Shape(sh) => {
-                    let mut sh = sh.clone();
-                    sh.cache = None;
-                    sh.psd_raw = None;
-                    Some(LayerContent::Shape(sh))
-                }
-                c @ (LayerContent::Adjustment(_) | LayerContent::Fill(_)) => Some(c.clone()),
-                _ => None,
-            };
-            out.push(LayerProps {
-                id: l.id.0,
-                parent,
-                name: l.name.clone(),
-                visible: l.visible,
-                opacity: l.opacity,
-                fill_opacity: l.fill_opacity,
-                blend: l.blend,
-                clipped: l.clipped,
-                locks: l.locks,
-                label: l.label,
-                effects: l.effects.clone(),
-                mask: l.mask.as_ref().map(|m| (m.enabled, m.density, m.feather)),
-                vector_mask: l.vector_mask.clone(),
-                content,
-            });
-            if let Some(ch) = l.children() {
-                rec(ch, Some(l.id.0), out);
-            }
-        }
-    }
-    let mut out = Vec::new();
-    rec(&doc.layers, None, &mut out);
-    out
-}
+pub use photocraft_engine::doc_events::{LayerOrder, LayerProps, layer_order, layer_props};
+use photocraft_engine::doc_events as doc_events;
 
 /// `layerChanged {document, layer, what}` for every layer whose settings changed, was added or
-/// was removed; `what` lists what changed: `added`, `removed`, `name`, `visible`, `opacity`,
-/// `fillOpacity`, `blend`, `clipped`, `locks`, `label`, `effects`, `mask`, `vectorMask`, `parent`,
-/// `content` (the text and its style, a shape, an adjustment's or fill's settings).
+/// was removed ([`doc_events::layer_changes`] says what `what` lists).
 fn layer_changed_events(document: u64, prev: &[LayerProps], next: &[LayerProps]) -> Vec<Value> {
-    let event = |layer: u64, what: Vec<&str>| json!({ "type": "layerChanged", "document": document, "layer": layer, "what": what });
-    let mut out = Vec::new();
-    for n in next {
-        let Some(p) = prev.iter().find(|p| p.id == n.id) else {
-            out.push(event(n.id, vec!["added"]));
-            continue;
-        };
-        if p == n {
-            continue;
-        }
-        let checks: [(&str, bool); 13] = [
-            ("name", p.name != n.name),
-            ("visible", p.visible != n.visible),
-            ("opacity", p.opacity != n.opacity),
-            ("fillOpacity", p.fill_opacity != n.fill_opacity),
-            ("blend", p.blend != n.blend),
-            ("clipped", p.clipped != n.clipped),
-            ("locks", p.locks != n.locks),
-            ("label", p.label != n.label),
-            ("effects", p.effects != n.effects),
-            ("mask", p.mask != n.mask),
-            ("vectorMask", p.vector_mask != n.vector_mask),
-            ("parent", p.parent != n.parent),
-            ("content", p.content != n.content),
-        ];
-        let what: Vec<&str> = checks.iter().filter(|(_, changed)| *changed).map(|(w, _)| *w).collect();
-        if !what.is_empty() {
-            out.push(event(n.id, what));
-        }
-    }
-    for p in prev.iter().filter(|p| !next.iter().any(|n| n.id == p.id)) {
-        out.push(event(p.id, vec!["removed"]));
-    }
-    out
-}
-
-/// Each group's (`None`: the document's top level) child layer ids, top to bottom.
-pub type LayerOrder = Vec<(Option<u64>, Vec<u64>)>;
-
-/// The stacking order of `doc`'s layers, group by group.
-pub fn layer_order(doc: &photocraft_engine::doc::Document) -> LayerOrder {
-    fn rec(layers: &[photocraft_engine::doc::Layer], parent: Option<u64>, out: &mut LayerOrder) {
-        out.push((parent, layers.iter().rev().map(|l| l.id.0).collect()));
-        for l in layers {
-            if let Some(ch) = l.children() {
-                rec(ch, Some(l.id.0), out);
-            }
-        }
-    }
-    let mut out = Vec::new();
-    rec(&doc.layers, None, &mut out);
-    out
+    doc_events::layer_changes(prev, next)
+        .into_iter()
+        .map(|c| json!({ "type": "layerChanged", "document": document, "layer": c.layer, "what": c.what }))
+        .collect()
 }
 
 /// `layersReordered {document, group, layers}` for every group whose layers kept in it changed
-/// order (`group` null: the top level; `layers` its children now, top to bottom). Layers added,
-/// deleted or moved to another group alone don't count.
+/// order (`group` null: the top level; `layers` its children now, top to bottom).
 fn reorder_events(document: u64, prev: &LayerOrder, next: &LayerOrder) -> Vec<Value> {
-    let mut out = Vec::new();
-    for (group, now) in next {
-        let Some((_, was)) = prev.iter().find(|(g, _)| g == group) else { continue };
-        let kept_now: Vec<u64> = now.iter().copied().filter(|id| was.contains(id)).collect();
-        let kept_was: Vec<u64> = was.iter().copied().filter(|id| now.contains(id)).collect();
-        if kept_now != kept_was {
-            out.push(json!({ "type": "layersReordered", "document": document, "group": group, "layers": now }));
-        }
-    }
-    out
+    doc_events::reordered_groups(prev, next)
+        .into_iter()
+        .map(|(group, layers)| json!({ "type": "layersReordered", "document": document, "group": group, "layers": layers }))
+        .collect()
 }
 
 /// The events between two frames (none for the first one: hosts read the state then).
