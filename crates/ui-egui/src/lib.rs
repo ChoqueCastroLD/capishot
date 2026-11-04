@@ -114,7 +114,7 @@ mod tools;
 #[cfg(test)]
 use app::layer_thumb_frame;
 use app::read_dropped;
-pub use app::{THUMBS_PER_FRAME, surface_fingerprint};
+pub use app::{Opening, THUMBS_PER_FRAME, surface_fingerprint};
 pub(crate) use app::{adjustment_layer_active, remember_new_document};
 use canvas::ants;
 pub use canvas::artboard_ui;

@@ -41,6 +41,9 @@
 //! - `document.fontsReady {document?, timeoutMs?}`: reply once every font the document's type uses
 //!   has arrived or failed (what is still on its way after `timeoutMs`, default 10000, counts as
 //!   failed), its type drawn with them: `{document, ready, missing, failed}`
+//! - `document.cache {remove?, clear?, budgetMb?}`: the decoded-document cache the embed API's
+//!   `open(…, {cacheKey, version})` fills (remove one key, empty it, set its budget; default
+//!   512 MB) → `{budgetMb, usedMb, entries: [{key, version, mb}]}`
 //! - `jobs.list` / `jobs.cancel {job?}`: background jobs (#210) with progress; cancel one (or all).
 //!   `engine.execute`, `ui.menu.invoke` and `ui.dialog.confirm` wait for a command that runs as a
 //!   job unless `wait: false` (then the reply is `{job, pending: true}`)
@@ -157,7 +160,10 @@ pub enum Outcome {
         id: Option<String>,
     },
     /// `document.fontsReady`: reply once the document's fonts have arrived or failed.
-    AfterDocumentFonts { doc: photocraft_doc::DocId, timeout_s: f64 },
+    AfterDocumentFonts {
+        doc: photocraft_doc::DocId,
+        timeout_s: f64,
+    },
 }
 
 fn wrap(r: Result<Value, String>) -> Outcome {

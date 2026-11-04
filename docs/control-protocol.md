@@ -410,6 +410,26 @@ For hosts that keep one document in step between collaborators (the embed API an
   the document's type uses has arrived or failed and its type is drawn with them: `{document,
   ready, missing, failed}` (what is still on its way after `timeoutMs`, default 10000, counts as
   failed); the `fontsPreloadProgress` events of a `fonts.preload` show the downloads' progress.
+- **Opening pages fast.** The embed API's `openDocument(data, name?, options?)` and
+  `window.photocraft.open(data, name?, options?)` settle once the document is in place, with its
+  id, also when a PSD/PSB decodes in a job (its merged image shown at fit meanwhile; feature
+  `open.whenOpen`). `data` may be a URL: fetched as the page fetches and read from the response
+  stream chunk by chunk into one buffer as it arrives (the page keeps drawing; the name defaults
+  to the URL's last segment; feature `open.url`; never over `postMessage`). `{hidden: true}`
+  decodes a PSD/PSB off the frame (on a worker in the threads build, a step at a time between
+  frames in the single-threaded one; no merged preview is read; feature
+  `open.hidden.background`). `{quiet: true}`: while a PSD/PSB decodes, its merged image shows
+  alone at the view the page will have, a thin progress bar along the canvas's top, no opening
+  card over it (feature `open.quiet`). `{cacheKey, version}` keeps the decoded document in the session's
+  decoded-document cache (`photocraft_engine::doc_cache`, least recently used first, 512 MB by
+  default) and opens it from there at once while it holds that key at that version (`data`
+  `null`: from the cache only, else an error); a different version decodes the bytes again. A
+  document from the cache gets a fresh id and shares its tiles with the cache and every other
+  copy (copy-on-write), so a hidden raw helper and the shown page made from one file hold one
+  copy of its pixels until either is edited (features `open.cache`, `open.cache.sharedPixels`).
+  The result adds `cached`. `document.cache {remove?, clear?, budgetMb?}` (a control method)
+  changes the cache → `{budgetMb, usedMb, entries: [{key, version, mb}]}`; `perf.memory` adds
+  `pixelsMB` (the open documents' and the cache's pixels, each tile once) and `docCacheMB`.
 
 Example (CLI session, one JSON per line):
 

@@ -343,7 +343,16 @@ fn the_opening_card_keeps_a_long_name_and_cancel_inside() {
     let long = "a7rv-test_2024_02_17_shot_30_3705_with_an_even_longer_suffix_that_never_ends.psb";
     for name in ["short.psd", long] {
         h.state_mut().jobs.opens.clear();
-        h.state_mut().jobs.opens.push(crate::jobs_ui::OpenTab { job, name: name.to_string(), path: None, slot: None, order: None, preview: None, texture: None });
+        h.state_mut().jobs.opens.push(crate::jobs_ui::OpenTab {
+            job,
+            name: name.to_string(),
+            path: None,
+            slot: None,
+            order: None,
+            preview: None,
+            texture: None,
+            quiet: false,
+        });
         h.state_mut().jobs.focus = Some(job);
         h.run_steps(4);
         let r = crate::jobs_ui::open_card_rects(&h.ctx).expect("the opening card was drawn");
@@ -367,7 +376,16 @@ fn the_opening_card_shows_the_preview_once_read() {
     let gate = Arc::new(AtomicBool::new(false));
     let job = slow_job(h.state_mut(), &gate);
     let slot: photocraft_engine::jobs::PreviewSlot = Arc::default();
-    let tab = crate::jobs_ui::OpenTab { job, name: "page.psd".into(), path: None, slot: None, order: None, preview: Some(Arc::clone(&slot)), texture: None };
+    let tab = crate::jobs_ui::OpenTab {
+        job,
+        name: "page.psd".into(),
+        path: None,
+        slot: None,
+        order: None,
+        preview: Some(Arc::clone(&slot)),
+        texture: None,
+        quiet: false,
+    };
     h.state_mut().jobs.opens.push(tab);
     h.state_mut().jobs.focus = Some(job);
     h.run_steps(3);
@@ -375,14 +393,51 @@ fn the_opening_card_shows_the_preview_once_read() {
     assert!(h.state().jobs.opens[0].texture.is_none(), "nothing read yet");
     let (w, h_) = (60u32, 90u32);
     let rgba: Vec<u8> = (0..w * h_).flat_map(|i| [(i % 251) as u8, 40, 200, 255]).collect();
-    *slot.lock().unwrap() =
-        Some(photocraft_engine::jobs::OpenPreview { width: w, height: h_, doc_width: 600, doc_height: 900, gray: false, icc: None, rgba });
+    *slot.lock().unwrap() = Some(photocraft_engine::jobs::OpenPreview { width: w, height: h_, doc_width: 600, doc_height: 900, gray: false, icc: None, rgba });
     h.run_steps(3);
     assert!(h.state().jobs.opens[0].texture.is_some(), "the preview was uploaded");
     let after = crate::jobs_ui::open_card_rects(&h.ctx).expect("the opening card was drawn");
     assert!(after.card.center().y > before.card.center().y + 50.0, "the card moved below the page: {:?} → {:?}", before.card, after.card);
     let inspect = crate::jobs_ui::inspect(h.state());
     assert_eq!(inspect["opening"][0]["preview"], true);
+    gate.store(true, Ordering::Relaxed);
+    h.state_mut().jobs.focus = None;
+    h.state_mut().jobs.opens.clear();
+    h.run_steps(4);
+}
+
+/// A quiet open (the embed API's `{quiet: true}`): the card shows until the merged image is read,
+/// then the page shows alone (no card over it).
+#[test]
+fn a_quiet_open_shows_the_preview_alone() {
+    let mut h = app_harness();
+    // A host's full-screen canvas (no tab strip), as the embedded mode has.
+    h.state_mut().ui.view.screen_mode = "full".into();
+    h.run_steps(2);
+    let gate = Arc::new(AtomicBool::new(false));
+    let job = slow_job(h.state_mut(), &gate);
+    let slot: photocraft_engine::jobs::PreviewSlot = Arc::default();
+    let tab = crate::jobs_ui::OpenTab {
+        job,
+        name: "page.psd".into(),
+        path: None,
+        slot: None,
+        order: None,
+        preview: Some(Arc::clone(&slot)),
+        texture: None,
+        quiet: true,
+    };
+    h.state_mut().jobs.opens.push(tab);
+    h.state_mut().jobs.focus = Some(job);
+    h.run_steps(3);
+    assert!(crate::jobs_ui::open_card_rects(&h.ctx).is_some(), "the card until the preview is read");
+    assert!(h.state().tab_strip.is_none(), "no tab strip: the canvas keeps its place");
+    let rgba: Vec<u8> = (0..60 * 90).flat_map(|i| [(i % 251) as u8, 40, 200, 255]).collect();
+    *slot.lock().unwrap() = Some(photocraft_engine::jobs::OpenPreview { width: 60, height: 90, doc_width: 600, doc_height: 900, gray: false, icc: None, rgba });
+    h.ctx.data_mut(|d| d.remove::<crate::jobs_ui::OpenCardRects>(super::open_card_rects_id()));
+    h.run_steps(3);
+    assert!(h.state().jobs.opens[0].texture.is_some(), "the preview shows");
+    assert!(crate::jobs_ui::open_card_rects(&h.ctx).is_none(), "no card over it");
     gate.store(true, Ordering::Relaxed);
     h.state_mut().jobs.focus = None;
     h.state_mut().jobs.opens.clear();
@@ -406,6 +461,133 @@ fn handed_over_psds_open_as_a_job_when_opens_are_stepped() {
     }
     assert_eq!(h.state().session.documents().len(), docs + 1);
     assert!(h.state().jobs.opens.is_empty());
+}
+
+/// Steps `h` until a tracked open ends; its outcome.
+fn outcome_of(h: &mut Harness<'static, PhotocraftApp>, job: JobId) -> crate::jobs_ui::OpenOutcome {
+    let t = Instant::now();
+    loop {
+        h.step();
+        if let Some((_, o)) = h.state_mut().jobs.take_open_outcomes().into_iter().find(|(j, _)| *j == job) {
+            return o;
+        }
+        assert!(t.elapsed() < Duration::from_secs(30), "the open never ended");
+    }
+}
+
+/// A hidden helper PSD the embed API opens decodes off the frame (a worker, or a step at a time
+/// in the single-threaded browser build): no tab, no card, no status, nothing made active; its
+/// tracked outcome names the hidden document. Bad bytes fail the outcome, nothing added.
+#[test]
+fn hidden_psds_open_in_a_job_without_a_tab() {
+    for (background, stepped) in [(true, false), (false, true)] {
+        let mut h = app_harness();
+        h.state_mut().background_jobs = background;
+        h.state_mut().stepped_opens = stepped;
+        let active = h.state().session.active().map(|st| st.doc.id);
+        let (docs, shown) = (h.state().session.documents().len(), h.state().session.visible_count());
+        let status = h.state().ui.status.clone();
+        let Ok(crate::Opening::Job(job)) = h.state_mut().open_hidden_owned("raw.psd", psd_bytes()) else { panic!("a job") };
+        h.state_mut().jobs.track_open(job);
+        assert!(h.state().jobs.opens.is_empty() && h.state().jobs.focus.is_none(), "no opening tab");
+        let (id, _) = outcome_of(&mut h, job).expect("opened");
+        let app = h.state();
+        let st = app.session.documents().iter().find(|st| st.doc.id == id).expect("the document");
+        assert!(st.hidden && st.doc.size.width == 64, "a hidden 64 px document");
+        assert_eq!((app.session.documents().len(), app.session.visible_count()), (docs + 1, shown));
+        assert_eq!(app.session.active().map(|st| st.doc.id), active, "the active document stays");
+        assert_eq!(app.ui.status, status, "nothing said");
+        let Ok(crate::Opening::Job(job)) = h.state_mut().open_hidden_owned("bad.psd", b"8BPS broken".to_vec()) else { panic!("a job") };
+        h.state_mut().jobs.track_open(job);
+        assert!(outcome_of(&mut h, job).is_err());
+        assert_eq!(h.state().session.documents().len(), docs + 1);
+    }
+    // Stepped opens take a PSD only: other files open at once, as before.
+    let mut h = app_harness();
+    (h.state_mut().background_jobs, h.state_mut().stepped_opens) = (false, true);
+    let doc = (*h.state().session.active().unwrap().doc).clone();
+    let png = photocraft_io::export(&doc, "a.png", &Default::default()).unwrap().bytes;
+    assert!(!matches!(h.state_mut().open_hidden_owned("a.png", png), Ok(crate::Opening::Job(_))), "not a job");
+}
+
+/// A shown open's tracked outcome is the document once it is in place (the embed API settles
+/// `openDocument` with it), after the opening tab gave way to it.
+#[test]
+fn tracked_opens_report_the_document_once_in_place() {
+    let mut h = app_harness();
+    h.state_mut().open_owned("page.psd", psd_bytes()).unwrap();
+    let job = h.state().jobs.opens[0].job;
+    h.state_mut().jobs.track_open(job);
+    let (id, warnings) = outcome_of(&mut h, job).expect("opened");
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(h.state().session.active().map(|st| st.doc.id), Some(id));
+    assert!(h.state().jobs.opens.is_empty());
+    // A cancelled one says so.
+    h.state_mut().open_owned("page2.psd", psd_bytes()).unwrap();
+    let job = h.state().jobs.opens[0].job;
+    h.state_mut().jobs.track_open(job);
+    crate::jobs_ui::cancel(h.state_mut(), job);
+    let r = outcome_of(&mut h, job);
+    assert!(r.is_err() || h.state().session.documents().iter().any(|st| Ok(st.doc.id) == r.as_ref().map(|(id, _)| *id).map_err(|_| ())), "{r:?}");
+    // Untracked opens keep nothing.
+    h.state_mut().open_owned("page3.psd", psd_bytes()).unwrap();
+    h.run_steps(8);
+    let t = Instant::now();
+    while !h.state().jobs.opens.is_empty() && t.elapsed() < Duration::from_secs(30) {
+        h.step();
+    }
+    assert!(h.state_mut().jobs.take_open_outcomes().is_empty());
+}
+
+/// A document from the decoded-document cache opens at once, shown or hidden, sharing its
+/// pixels with the cache and with every other copy (copy-on-write); `document.cache` reports,
+/// removes and budgets the entries.
+#[test]
+fn cached_documents_reopen_sharing_their_pixels() {
+    let mut h = app_harness();
+    let ctx = h.ctx.clone();
+    let st = h.state().session.active().unwrap();
+    let (first, doc) = (st.doc.id, Arc::clone(&st.doc));
+    h.state_mut().session.doc_cache.put("p13", "v1", Arc::clone(&doc), vec!["note".into()]);
+    let (raw, warnings) = h.state_mut().session.doc_cache.get("p13", "v1").unwrap();
+    assert_eq!(warnings, ["note"]);
+    let i = h.state_mut().open_decoded(raw, true).unwrap();
+    let raw_id = h.state().session.documents()[i].doc.id;
+    assert_eq!(h.state().session.active().map(|st| st.doc.id), Some(first), "a hidden copy leaves the active document");
+    let (page, _) = h.state_mut().session.doc_cache.get("p13", "v1").unwrap();
+    let shown = h.state_mut().open_decoded(page, false).unwrap();
+    assert_eq!(h.state().session.active_index(), Some(shown), "a shown copy is made active");
+    let hidden = h.state().session.documents().iter().position(|st| st.doc.id == raw_id).unwrap();
+    let tiles = |i: usize| -> Vec<usize> {
+        let st = &h.state().session.documents()[i];
+        let mut out = Vec::new();
+        for l in st.doc.layers.iter() {
+            if let photocraft_doc::LayerContent::Raster(s) = &l.content {
+                out.extend(s.tiles().map(|(_, t)| Arc::as_ptr(t) as usize));
+            }
+        }
+        out
+    };
+    let ids: Vec<_> = h.state().session.documents().iter().map(|st| st.doc.id).collect();
+    assert!(ids[hidden] != first && ids[shown] != first && ids[hidden] != ids[shown], "fresh ids");
+    assert!(!tiles(hidden).is_empty() && tiles(hidden) == tiles(shown), "the raw and the page share their tiles");
+    assert!(h.state().session.documents()[hidden].hidden);
+    let control = |h: &mut Harness<'static, PhotocraftApp>, params: Value| match crate::control::handle(
+        h.state_mut(),
+        &ctx,
+        &crate::ControlRequest::new("document.cache", params).0,
+    ) {
+        crate::control::Outcome::Done(v) => v,
+        _ => panic!("a reply"),
+    };
+    let info = control(&mut h, json!({}));
+    assert_eq!(info["result"]["entries"][0]["key"], "p13", "{info}");
+    assert!(info["result"]["usedMb"].as_f64().unwrap() > 0.0);
+    let info = control(&mut h, json!({"remove": "p13", "budgetMb": 64}));
+    assert_eq!((info["result"]["entries"].as_array().map(Vec::len), info["result"]["budgetMb"].as_f64()), (Some(0), Some(64.0)), "{info}");
+    for bad in [json!({"remove": 3}), json!({"clear": "yes"}), json!({"budgetMb": -1}), json!({"nope": 1}), json!(4)] {
+        assert_eq!(control(&mut h, bad.clone())["ok"], false, "{bad}");
+    }
 }
 
 #[test]

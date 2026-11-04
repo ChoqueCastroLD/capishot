@@ -800,13 +800,24 @@ fn prepare_opened(ctx: &JobCtx, imported: (photocraft_io::ImportResult, bool)) -
 }
 
 /// An open job's last part, on the session's thread: the document joins the session (or is held
-/// for the Color Settings or damage prompts); see [`Session::start_open`].
-fn open_apply(name: &str, confirm_damage: bool) -> impl FnOnce(&mut Session, (photocraft_io::ImportResult, bool)) -> Result<Value> + Send + 'static {
+/// for the Color Settings or damage prompts); see [`Session::start_open`]. A `hidden` open adds a
+/// hidden helper document, the Color Settings policy applied without asking
+/// ([`Session::start_open_hidden`]).
+fn open_apply(
+    name: &str,
+    confirm_damage: bool,
+    hidden: bool,
+) -> impl FnOnce(&mut Session, (photocraft_io::ImportResult, bool)) -> Result<Value> + Send + 'static {
     let name_a = name.to_string();
     move |s, (mut r, damaged)| {
         // File Handling's ACEScg option, before the colour prompt looks at the profile.
         crate::file_cmds::tag_exr_colorspace(s, &name_a, &mut r.document);
         crate::file_cmds::raw_defaults(s, &r.warnings, &mut r.document);
+        if hidden {
+            let (index, _) = s.open_hidden_document(r.document, None);
+            let id = s.documents().get(index).ok_or(EngineError::NoDocument)?.doc.id;
+            return Ok(json!({"document": index, "docId": id.0, "name": name_a, "warnings": r.warnings, "hidden": true}));
+        }
         // Ask When Opening: held back until the prompt is answered (`take_held_open`). A
         // developed raw has no embedded profile to ask about.
         let raw = r.warnings.iter().any(|w| w.contains(photocraft_io::raw::DEVELOPED_NOTE));
@@ -871,14 +882,25 @@ impl Session {
     /// result is `{held, name, warnings, color}` (`color` the question): take it with
     /// [`Session::take_held_open`] once answered.
     pub fn start_open(&mut self, name: &str, source: OpenSource) -> Result<Started> {
-        self.start_open_inner(name, source, false, None)
+        self.start_open_inner(name, source, false, None, false)
+    }
+
+    /// [`Session::start_open`] of a hidden helper document ([`Session::open_hidden_document`]):
+    /// nothing is shown or made active, the Color Settings policy applies without asking and a
+    /// damaged PSD opens as read. In the single-threaded browser build a PSD/PSB opens a step at a
+    /// time between frames (no merged preview: nothing shows it). The result adds `hidden: true`.
+    pub fn start_open_hidden(&mut self, name: &str, source: OpenSource) -> Result<Started> {
+        if !SPAWNS && matches!(&source, OpenSource::Bytes(b) if photocraft_io::is_psd(b)) {
+            return self.start_stepped_open_inner(name, source, None, true);
+        }
+        self.start_open_inner(name, source, false, None, true)
     }
 
     /// Interactive opening: hold a damaged PSD until the user answers a damage
     /// confirmation, without changing import or subsequent save behaviour.
     /// Headless callers keep using [`Self::start_open`].
     pub fn start_open_for_user(&mut self, name: &str, source: OpenSource) -> Result<Started> {
-        self.start_open_inner(name, source, true, None)
+        self.start_open_inner(name, source, true, None, false)
     }
 
     /// [`Session::start_open_for_user`] that first puts a PSD/PSB's merged image, reduced, in
@@ -889,12 +911,12 @@ impl Session {
         if !SPAWNS && matches!(&source, OpenSource::Bytes(b) if photocraft_io::is_psd(b)) {
             return self.start_stepped_open(name, source, preview);
         }
-        self.start_open_inner(name, source, true, Some(preview))
+        self.start_open_inner(name, source, true, Some(preview), false)
     }
 
     /// Decodes a file in a job and optionally holds damaged PSD content for
     /// interactive confirmation while leaving headless opens non-interactive.
-    fn start_open_inner(&mut self, name: &str, source: OpenSource, confirm_damage: bool, preview: Option<PreviewSlot>) -> Result<Started> {
+    fn start_open_inner(&mut self, name: &str, source: OpenSource, confirm_damage: bool, preview: Option<PreviewSlot>, hidden: bool) -> Result<Started> {
         let label = format!("Opening {name}");
         let name_w = name.to_string();
         let opts = import_options(self.prefs());
@@ -926,7 +948,7 @@ impl Session {
                 .map_err(open_error)?;
                 prepare_opened(ctx, imported)
             },
-            open_apply(name, confirm_damage),
+            open_apply(name, confirm_damage, hidden),
         )
     }
 
@@ -935,6 +957,12 @@ impl Session {
     /// shown while the rest goes on), then the parse, the layers' pixels a band at a time, and the
     /// document. The single-threaded browser build opens so, keeping the page responsive.
     pub fn start_stepped_open(&mut self, name: &str, source: OpenSource, preview: PreviewSlot) -> Result<Started> {
+        self.start_stepped_open_inner(name, source, Some(preview), false)
+    }
+
+    /// [`Self::start_stepped_open`]; no merged preview read without a `preview` slot, a `hidden`
+    /// helper document ([`Self::start_open_hidden`]).
+    fn start_stepped_open_inner(&mut self, name: &str, source: OpenSource, preview: Option<PreviewSlot>, hidden: bool) -> Result<Started> {
         enum Stage {
             Preview(Arc<Vec<u8>>),
             Parse(Arc<Vec<u8>>),
@@ -943,7 +971,7 @@ impl Session {
             Done,
         }
         let OpenSource::Bytes(bytes) = source else {
-            return self.start_open_inner(name, source, true, Some(preview));
+            return self.start_open_inner(name, source, !hidden, preview, hidden);
         };
         let label = format!("Opening {name}");
         let name_w = name.to_string();
@@ -957,10 +985,15 @@ impl Session {
                     stage = match std::mem::replace(&mut stage, Stage::Done) {
                         Stage::Preview(bytes) => {
                             ctx.progress(0.0, "Reading");
-                            put_preview(&preview, open_preview(&OpenSource::Bytes(Arc::clone(&bytes))));
-                            // Shown before anything else is done.
-                            stage = Stage::Parse(bytes);
-                            return None;
+                            match &preview {
+                                None => Stage::Parse(bytes),
+                                Some(slot) => {
+                                    put_preview(slot, open_preview(&OpenSource::Bytes(Arc::clone(&bytes))));
+                                    // Shown before anything else is done.
+                                    stage = Stage::Parse(bytes);
+                                    return None;
+                                }
+                            }
                         }
                         Stage::Parse(bytes) => {
                             ctx.progress(0.02, "Decoding");
@@ -1001,7 +1034,7 @@ impl Session {
                     }
                 }
             },
-            open_apply(name, true),
+            open_apply(name, !hidden, hidden),
         )
     }
 
