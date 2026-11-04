@@ -155,19 +155,41 @@ export interface DocumentInfo {
   hidden: boolean;
 }
 
-/** `openDocument`'s third argument (feature `documents.hidden`). */
+/** `openDocument`'s third argument (features `documents.hidden`, `open.cache`). */
 export interface OpenOptions {
   /**
    * A hidden helper document: reachable with `execute(…, {document})`, never shown, given a tab,
    * listed in `documents` events or made active; the active document, its view, the tool and the
-   * focus stay as they are. Decoded at once. Default `false`.
+   * focus stay as they are. A PSD/PSB decodes off the frame (on a worker in the threads build, a
+   * step at a time between frames in the single-threaded one; feature `open.hidden.background`),
+   * other files at once. Default `false`.
    */
   hidden?: boolean;
+  /**
+   * While a PSD/PSB decodes, its merged image (read first) shows alone at the view the page
+   * will have, a thin progress bar along the canvas's top: no opening card over the page
+   * (feature `open.quiet`). Once the layers land the preview stays until the canvas has drawn
+   * the view offscreen, at most 1 s (feature `open.quiet.prewarm`). Default `false`.
+   */
+  quiet?: boolean;
+  /**
+   * Keep the decoded document in the decoded-document cache under this key, and open it from
+   * there when it holds the key at `version`: at once, nothing decoded, its pixels shared with
+   * the cache and every other document opened from it (copy-on-write; a hidden raw helper and
+   * the shown page hold one copy). An entry at another version is stale: dropped, the file
+   * decoded again. Least recently used entries go past the budget (`request('document.cache',
+   * {budgetMb})`, default 512 MB). Feature `open.cache`, `open.cache.sharedPixels`.
+   */
+  cacheKey?: string;
+  /** The caller's version stamp of the file under `cacheKey` (a revision, a hash…). Default `""`. */
+  version?: string | number;
 }
 
 export interface OpenedDocument extends DocumentInfo {
   /** Import notes ("adjustment layer flattened"…). */
   warnings: string[];
+  /** Opened from the decoded-document cache (`OpenOptions.cacheKey`), nothing decoded. */
+  cached: boolean;
 }
 
 export interface NewDocumentOptions {
@@ -325,6 +347,25 @@ export interface DirtySince {
   full: boolean;
 }
 
+/** `request('document.cache', …)`: change the decoded-document cache (feature `open.cache`). */
+export interface DocumentCacheParams {
+  /** Drop this key's entry. */
+  remove?: string;
+  /** Drop every entry. */
+  clear?: boolean;
+  /** Keep at most this much (default 512; 0 keeps nothing). */
+  budgetMb?: number;
+}
+
+/** The decoded-document cache after `request('document.cache', …)`. */
+export interface DocumentCacheInfo {
+  budgetMb: number;
+  /** What the entries hold; most of it is shared with open documents opened from them. */
+  usedMb: number;
+  /** Least recently used first. */
+  entries: { key: string; version: string; mb: number }[];
+}
+
 /** `request('document.fontsReady', …)` (feature `document.fontsReady`). */
 export interface DocumentFontsReadyParams {
   /** Default the active document. */
@@ -352,7 +393,15 @@ export function destroy(): void;
 export function onEvent(listener: ((event: EmbedEvent) => void) | null): void;
 
 /** PSD/PSB/.pcraft/PNG/JPEG/WebP/… bytes → a new active document (a flat image becomes one layer). */
-export function openDocument(data: ArrayBuffer | ArrayBufferView | Blob, filename: string, options?: OpenOptions | null): Promise<OpenedDocument>;
+/**
+ * Opens a file as a document and settles once it is in place (a PSD/PSB decodes in the
+ * background, its merged image shown meanwhile; feature `open.whenOpen`). `data`: the file's
+ * bytes, a URL (fetched as the page fetches, read from the response stream as it arrives; the
+ * name defaults to the URL's last segment; feature `open.url`), or `null` with
+ * `options.cacheKey` to open from the decoded-document cache only (rejects when it isn't there
+ * at that version).
+ */
+export function openDocument(data: ArrayBuffer | ArrayBufferView | Blob | string | null, filename?: string | null, options?: OpenOptions | null): Promise<OpenedDocument>;
 export function newDocument(options: NewDocumentOptions): Promise<DocumentInfo>;
 /** `id` null = the active document. PSD keeps layers; a layered save marks the document clean.
  * PSD saves are incremental (unchanged layers aren't encoded again); the bytes are a full save's. */
@@ -472,6 +521,7 @@ export function request(method: 'fonts.preload', params: FontsPreloadParams): Pr
 export function request(method: 'fonts.status', params?: FontsStatusParams | null): Promise<FontsStatusResult>;
 /** Resolves once the document's fonts have arrived or failed and its type is drawn with them. */
 export function request(method: 'document.fontsReady', params?: DocumentFontsReadyParams | null): Promise<DocumentFontsReady>;
+export function request(method: 'document.cache', params?: DocumentCacheParams | null): Promise<DocumentCacheInfo>;
 export function request(method: 'editor.showDocument', params: ShowDocumentOptions & { id: DocumentId }): Promise<SwitchResult>;
 export function request(method: 'document.prewarm', params: PrewarmOptions & { id: DocumentId }): Promise<SwitchResult>;
 /** One visible document: no tiles, tabs, floating windows or open cards (feature `editor.setLayout`). */

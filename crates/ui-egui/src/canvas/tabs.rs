@@ -84,8 +84,10 @@ fn documents(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         open_on_double_click(app, ui, area);
         return;
     }
-    // The simple interface names a lone document in its top bar instead.
-    if (!app.ui.view.hides_tabs() && !(app.simple && n <= 1) && !single) || opening {
+    // The simple interface names a lone document in its top bar instead. A quiet open (the embed
+    // API's) brings no tab strip of its own: the page it previews keeps its place.
+    let opening_tab = !single && app.jobs.opens.iter().any(|o| !o.quiet);
+    if (!app.ui.view.hides_tabs() && !(app.simple && n <= 1) && !single) || opening_tab {
         // Flat Spectrum tabs sit directly against the canvas. The parent's default vertical
         // item spacing would otherwise leave a visible gap below the tab strip (#2188).
         let spacing = ui.spacing().item_spacing.y;
@@ -104,6 +106,10 @@ fn documents(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let rect = ui.available_rect_before_wrap();
     app.last_canvas_rect = rect;
     app.drop_canvas_rect = Some(rect);
+    // A quiet open's page keeps its preview until its canvas is drawn.
+    if crate::jobs_ui::landing(app, ui, idx, rect) {
+        return;
+    }
     // Window › Arrange: tiled / n-up layouts show several documents side by side; the active one
     // takes input, a click elsewhere activates that document.
     if let Some(shown) = arranged_cells(app, rect) {

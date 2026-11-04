@@ -74,6 +74,8 @@ mod embed_api;
 mod embed_api_core;
 #[cfg(target_arch = "wasm32")]
 mod embed_events;
+#[cfg(target_arch = "wasm32")]
+mod embed_open;
 
 #[cfg(target_arch = "wasm32")]
 mod wheel_guard;

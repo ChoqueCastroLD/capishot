@@ -5,8 +5,11 @@
 //! ```js
 //! photocraft.info()                       // {app: "0.6.0", format: 1}
 //! photocraft.isDirty()                    // unsaved changes in an open document?
-//! await photocraft.open(bytes, "a.psd")   // ArrayBuffer, typed array or Blob → {warnings, id} once open
+//! await photocraft.open(bytes, "a.psd")   // ArrayBuffer, typed array or Blob → {warnings, id, cached} once open
 //! await photocraft.open(bytes, "p.psd", {hidden: true})   // a hidden helper document: never shown or activated
+//! await photocraft.open("https://cdn.example/p13.psd", null, {quiet: true, cacheKey: "p13", version: 4})
+//!                                         // a URL streamed in; kept decoded: the same key and version opens at once
+//! await photocraft.open(null, "p13.psd", {cacheKey: "p13", version: 4})  // from the cache only → {warnings, id, cached}
 //! await photocraft.batch([{command, params}], {document, history: "one"})   // one transaction → {results}
 //! await photocraft.save("psd")            // the active document as a Uint8Array (pcraft, psd, png…)
 //! await photocraft.request("ui.inspect")  // a desktop control-channel method → its result
@@ -54,8 +57,9 @@ use wasm_bindgen_futures::JsFuture;
 use crate::embed_protocol::{self as protocol, Call, PhotopeaConfig};
 
 type Settle = (js_sys::Function, js_sys::Function);
-/// An open waiting for the app: the file's name, its bytes, whether it opens hidden.
-type Open = (String, Vec<u8>, bool, Settle);
+/// An open waiting for the app: the file's name, its bytes (`None`: from the cache only), its
+/// options.
+type Open = (String, Option<Vec<u8>>, crate::embed_api_core::OpenOptions, Settle);
 
 thread_local! {
     static CTX: RefCell<Option<egui::Context>> = const { RefCell::new(None) };
@@ -151,25 +155,21 @@ pub fn process(app: &mut PhotocraftApp) {
     let names: Vec<String> = OPENS.with(|o| o.borrow().iter().map(|(n, ..)| n.clone()).collect());
     let ready = photocraft_ui_egui::code_gate::files_ready(app) && names.iter().all(|n| photocraft_ui_egui::code_gate::open_ready(app, n));
     let opens = if ready && photocraft_ui_egui::code_gate::files_ready(app) { OPENS.with(|o| std::mem::take(&mut *o.borrow_mut())) } else { Vec::new() };
-    for (name, bytes, hidden, (resolve, reject)) in opens {
+    for (name, bytes, options, (resolve, reject)) in opens {
         events(|e| e.note_open());
-        let opened = if hidden {
-            // A helper document: no tab, no notice, the active document stays.
-            app.open_hidden(&name, &bytes).map(|(i, warnings)| json!({ "warnings": warnings, "id": app.session.documents().get(i).map(|st| st.doc.id.0) }))
-        } else {
-            let before = app.session.active().map(|st| st.doc.id);
-            app.open_owned(&name, bytes)
-                .map(|warnings| json!({ "warnings": warnings, "id": app.session.active().map(|st| st.doc.id.0).filter(|id| Some(*id) != before.map(|b| b.0)) }))
-                .inspect_err(|e| app.open_failed(&name, e))
+        // Settled once the document is in place (a PSD decodes in a background or stepped job).
+        let done = move |r: Result<crate::embed_open::Opened, String>| match r {
+            Ok(o) => {
+                resolve.call1(&JsValue::NULL, &to_js(&json!({ "warnings": o.warnings, "id": o.id(), "cached": o.cached }))).ok();
+            }
+            Err(e) => {
+                events(|e| e.open_failed());
+                reject.call1(&JsValue::NULL, &js_sys::Error::new(&e)).ok();
+            }
         };
-        if opened.is_err() {
-            events(|e| e.open_failed());
-        }
-        match opened {
-            Ok(v) => resolve.call1(&JsValue::NULL, &to_js(&v)).ok(),
-            Err(e) => reject.call1(&JsValue::NULL, &js_sys::Error::new(&e)).ok(),
-        };
+        crate::embed_open::start(app, &name, bytes, &options, Box::new(done));
     }
+    crate::embed_open::poll(app);
     for (format, (resolve, reject)) in SAVES.with(|s| std::mem::take(&mut *s.borrow_mut())) {
         match save_active(app, &format) {
             Ok(bytes) => resolve.call1(&JsValue::NULL, &js_sys::Uint8Array::from(bytes.as_slice())).ok(),
@@ -263,8 +263,8 @@ fn error(msg: &str) -> JsValue {
 
 /// Opens `bytes` as `name` on the next frame, as File › Open does; settles once it is open (with
 /// its warnings) or has failed (as File › Open reports it, too).
-fn open_queued(name: String, bytes: Vec<u8>, hidden: bool) -> js_sys::Promise {
-    let p = promise(|settle| OPENS.with(|o| o.borrow_mut().push((name, bytes, hidden, settle))));
+fn open_queued(name: String, bytes: Option<Vec<u8>>, options: crate::embed_api_core::OpenOptions) -> js_sys::Promise {
+    let p = promise(|settle| OPENS.with(|o| o.borrow_mut().push((name, bytes, options, settle))));
     repaint();
     p
 }
@@ -330,15 +330,23 @@ async fn bytes_of(data: JsValue) -> Result<Vec<u8>, String> {
     Err("open takes an ArrayBuffer, a typed array or a Blob".into())
 }
 
+/// `open(data, name?, options?)`: `data` an ArrayBuffer, a typed array, a Blob or a URL (fetched
+/// and streamed in), or `null` to open from the document cache only (`options.cacheKey`).
 fn open(data: JsValue, name: Option<String>, options: JsValue) -> js_sys::Promise {
-    let name = name.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| "document".into());
-    let hidden = match crate::embed_api_core::open_options(&from_js(&options)) {
-        Ok(h) => h,
+    let options = match crate::embed_api_core::open_options(&from_js(&options)) {
+        Ok(o) => o,
         Err(e) => return js_sys::Promise::reject(&error(&e)),
     };
+    let url = data.as_string();
+    let name = name.filter(|n| !n.trim().is_empty()).or_else(|| url.as_deref().map(crate::embed_open::name_of_url)).unwrap_or_else(|| "document".into());
     wasm_bindgen_futures::future_to_promise(async move {
-        let bytes = bytes_of(data).await.map_err(|e| error(&e))?;
-        JsFuture::from(open_queued(name, bytes, hidden)).await
+        let cached = options.cache.as_ref().is_some_and(|_| data.is_null() || data.is_undefined());
+        let bytes = match url {
+            _ if cached => None,
+            Some(url) => Some(crate::embed_open::fetch_streamed(&url).await.map_err(|e| error(&e))?),
+            None => Some(bytes_of(data).await.map_err(|e| error(&e))?),
+        };
+        JsFuture::from(open_queued(name, bytes, options)).await
     })
 }
 
@@ -410,7 +418,11 @@ fn listen(window: &web_sys::Window, origin: &str) {
         let pending = match call {
             Call::Info => return post(&protocol::reply(&id, Ok(protocol::info())), None),
             Call::IsDirty => return post(&protocol::reply(&id, Ok(Value::Bool(DIRTY.with(Cell::get)))), None),
-            Call::Open { name } => open(js_sys::Reflect::get(&data, &"data".into()).unwrap_or(JsValue::UNDEFINED), Some(name), JsValue::UNDEFINED),
+            // Bytes only: a URL would be fetched with this page's origin and cookies.
+            Call::Open { name } => match js_sys::Reflect::get(&data, &"data".into()).unwrap_or(JsValue::UNDEFINED) {
+                d if d.is_string() => js_sys::Promise::reject(&error("open over postMessage takes an ArrayBuffer")),
+                d => open(d, Some(name), JsValue::UNDEFINED),
+            },
             Call::Save { format } => save(format),
         };
         wasm_bindgen_futures::spawn_local(async move {
@@ -480,7 +492,7 @@ pub fn open_config_files(config: &PhotopeaConfig) {
             let name = protocol::file_name(&url);
             post_status(&format!("loading:{name}"));
             let opened = match fetch_bytes(&url).await {
-                Ok(bytes) => JsFuture::from(open_queued(name.clone(), bytes, false)).await.map(|_| ()).map_err(js_err),
+                Ok(bytes) => JsFuture::from(open_queued(name.clone(), Some(bytes), Default::default())).await.map(|_| ()).map_err(js_err),
                 Err(e) => Err(e),
             };
             if let Err(e) = opened {
