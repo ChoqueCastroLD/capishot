@@ -225,6 +225,8 @@ pub fn set_camera(app: &mut PhotocraftApp, index: usize, change: CameraChange) -
 pub fn frame(app: &mut PhotocraftApp, ui: &mut egui::Ui, rect: Rect, opts: &EmbedOptions) -> EmbedFrame {
     let ctx = ui.ctx().clone();
     install(&ctx);
+    // The host's fonts: Capishot's named weights don't exist in its context.
+    let _fonts = crate::theme::HostFonts::enter();
     let (jobs, took_keys) = logic(app, &ctx, rect, opts);
     let drawn = draw(app, ui, rect, opts);
     let xform = if drawn { ViewXform::active(app) } else { None };

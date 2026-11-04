@@ -443,7 +443,6 @@ pub fn install_fonts_with(ctx: &egui::Context, cjk: crate::cjk_fonts::Sources) {
         size_ui_font(ctx, name, Arc::make_mut(data));
     }
     ctx.set_fonts(fonts);
-    NAMED_WEIGHTS.store(true, std::sync::atomic::Ordering::Relaxed);
     // egui keeps the first plugin of a type, so a re-install (language change) resets the
     // existing one. The new definitions land next pass: the plugin must not rescale before then.
     if ctx
@@ -579,18 +578,30 @@ impl egui::Plugin for UiFontSizePlugin {
     }
 }
 
-/// Whether [`install_fonts`] registered the named weights (`medium`, `semibold`) in this
-/// process. The embedded canvas (`embed.rs`) leaves the host's fonts alone, so they don't exist
-/// there and naming them would make egui panic: [`medium`] and [`semibold`] fall back to the
-/// host's proportional font.
-static NAMED_WEIGHTS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+thread_local! {
+    /// Drawing inside a host's own fonts (the embedded canvas, `embed.rs`), where
+    /// [`install_fonts`]' named weights don't exist and naming them would make egui panic.
+    static HOST_FONTS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// While it lives, this thread draws with a host's fonts: [`medium`] and [`semibold`] give the
+/// host's proportional font. Restores the previous state when dropped (also on a panic).
+pub(crate) struct HostFonts(bool);
+
+impl HostFonts {
+    pub(crate) fn enter() -> Self {
+        HostFonts(HOST_FONTS.with(|f| f.replace(true)))
+    }
+}
+
+impl Drop for HostFonts {
+    fn drop(&mut self) {
+        HOST_FONTS.with(|f| f.set(self.0));
+    }
+}
 
 fn named_weight(size: f32, name: &str) -> FontId {
-    if NAMED_WEIGHTS.load(std::sync::atomic::Ordering::Relaxed) {
-        FontId::new(size, FontFamily::Name(name.into()))
-    } else {
-        FontId::proportional(size)
-    }
+    if HOST_FONTS.with(std::cell::Cell::get) { FontId::proportional(size) } else { FontId::new(size, FontFamily::Name(name.into())) }
 }
 
 pub fn medium(size: f32) -> FontId {

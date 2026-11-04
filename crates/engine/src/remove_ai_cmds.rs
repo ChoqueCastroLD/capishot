@@ -376,7 +376,8 @@ mod tests {
                     let (r, px): (Rect, &[f32]) = (Rect::new(28, 18, 36, 28), &[1.0]);
                     match t.as_str() {
                         Some("mask") => doc.layer_mut(active.unwrap()).unwrap().mask.as_mut().unwrap().surface.fill_rect(r, &[0.0]),
-                        Some("quickMask") => doc.quick_mask.as_mut().unwrap().surface.fill_rect(r, px),
+                        // A Quick Mask without a selection is all white: the blob is black.
+                        Some("quickMask") => doc.quick_mask.as_mut().unwrap().surface.fill_rect(r, &[0.0]),
                         Some(_) => {}
                         None => doc.channels.first_mut().unwrap().surface.fill_rect(r, px),
                     }

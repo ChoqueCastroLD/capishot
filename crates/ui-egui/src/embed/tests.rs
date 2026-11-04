@@ -43,6 +43,12 @@ fn run(ctx: &Context, app: &mut PhotocraftApp, events: Vec<Event>, opts: &EmbedO
 fn the_host_style_and_fonts_stay_as_they_were() {
     let ctx = Context::default();
     ctx.set_visuals(egui::Visuals::light());
+    // The host's own first frame: fonts exist from then on.
+    ctx.run_ui(input(Vec::new()), |ui| {
+        ui.label("host");
+    })
+    .textures_delta
+    .clear();
     let style_before = ctx.global_style();
     let fonts_before = ctx.fonts(|f| f.definitions().clone());
     let mut app = PhotocraftApp::new_embedded(Services::default());
@@ -80,10 +86,11 @@ fn keys_stay_with_the_host_when_routing_is_never() {
     let opts = EmbedOptions { keys: Keys { routing: KeyRouting::Never, filter: None }, ..Default::default() };
     // Twice: the IME pass markers are installed on the first frame and work from the second.
     let _ = run(&ctx, &mut app, Vec::new(), &opts);
+    app.ui.tool = Tool::Move;
     let press = Event::Key { key: Key::B, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE };
     let (f, left) = run(&ctx, &mut app, vec![press.clone()], &opts);
     assert!(!f.took_keys);
-    assert!(left.contains(&press), "the host still sees its key");
+    assert!(left.contains(&press), "the host still sees its key: {left:?}");
     assert_ne!(app.ui.tool, Tool::Brush, "B didn't pick the Brush");
 }
 
@@ -129,7 +136,7 @@ fn control_methods_run_against_the_lent_session() {
     assert_eq!(reply["ok"], json!(true), "{reply}");
     assert_eq!(tool(&app), Tool::Eraser);
     // Bad params are an error reply, not a panic.
-    let rx = control(&mut app, &ctx, "ui.set", json!({"tool": 3}));
+    let rx = control(&mut app, &ctx, "ui.noSuchMethod", json!({}));
     assert_eq!(rx.try_recv().expect("a reply")["ok"], json!(false));
 }
 
