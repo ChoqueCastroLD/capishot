@@ -68,6 +68,8 @@ impl PhotocraftApp {
             let _s = perf_span::span("logic.control");
             self.drain_control(ctx);
         }
+        // Documents waiting to be shown or prewarmed: a ready one swaps in before this frame draws.
+        crate::doc_switch::tick(self, ctx);
         native_menu::run(self, ctx);
         // Switching tools commits, also between the Type and Type Mask tools.
         if self.ui.text_edit.as_ref().is_some_and(|ed| !self.ui.tool.is_type() || ed.mask != self.ui.tool.is_type_mask()) {

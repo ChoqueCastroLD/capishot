@@ -121,6 +121,27 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
   await capishot.execute('layer.copyToDocument', {fromDocument: helper.id, toDocument: page.id, layers: [12]});
   ```
 
+  - Views and one-frame page switches (`docs/control-protocol.md` › Live sync): `execute(
+    'document.views.define', {name, visible, hidden})` / `execute('document.views.apply', {name})`
+    switch which layers show, no history step, nothing re-rasterized (feature `document.views`).
+    `showDocument(id, {viewport: 'keep' | 'own' | {zoom, x, y}, hidePrevious, timeoutMs})` draws
+    the document's canvas offscreen, then swaps it in one frame (the document shown before becomes
+    a warm hidden helper; feature `editor.showDocument`); `prewarmDocument(id, {viewport, full})`
+    draws it ahead so the swap is instant (feature `document.prewarm`). `request('editor.setLayout',
+    {single: true})` keeps one visible document (no tiles, tabs or open cards; feature
+    `editor.setLayout`), `request('editor.setMemoryBudget', {mb})` evicts the least recently shown
+    documents' GPU textures beyond `mb` (feature `editor.setMemoryBudget`) and
+    `request('document.memory')` reports each document's use (feature `document.memory`).
+    `window.photocraft.request(…)` takes the same methods.
+
+  ```js
+  await capishot.request('editor.setLayout', {single: true});
+  const next = await capishot.openDocument(nextBytes, 'p13.psd', {hidden: true});
+  await capishot.prewarmDocument(next.id, {viewport: 'keep'});       // while p12 is on screen
+  await capishot.showDocument(next.id, {viewport: 'keep'});          // {frames: 0, …}: one frame
+  await capishot.execute('document.views.apply', {name: 'raw'}, {document: next.id});
+  ```
+
   `batch` sends its commands as JSON: a `src` inside it must be base64 or a `data:` URL; a `Blob`
   or URL goes through `execute('layer.putPixels', …)`.
 

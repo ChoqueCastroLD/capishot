@@ -536,6 +536,13 @@ impl Default for FontChecks {
     }
 }
 
+impl FontChecks {
+    /// Whether document `doc`'s served fonts are still on their way.
+    pub fn waiting_for(&self, doc: DocId) -> bool {
+        self.checks.iter().any(|c| c.doc == doc)
+    }
+}
+
 struct Check {
     doc: DocId,
     /// When the check first ran with a clock (egui time).

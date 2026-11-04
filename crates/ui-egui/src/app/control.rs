@@ -53,6 +53,7 @@ impl PhotocraftApp {
                 let _ = reply.send(v);
             }
             crate::control::Outcome::AfterInput => self.input_waiters.push(reply),
+            crate::control::Outcome::Pending => {}
             crate::control::Outcome::AfterJob(job) => self.jobs.waiters.push((job, reply)),
             crate::control::Outcome::AfterFonts { families, timeout_s, id } => {
                 crate::user_fonts_ui::preload(self, crate::user_fonts_ui::Preload::new(families, timeout_s, reply).with_id(id));

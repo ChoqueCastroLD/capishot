@@ -831,3 +831,25 @@ pub fn undo() -> js_sys::Promise {
 pub fn redo() -> js_sys::Promise {
     control("engine.execute", json!({ "command": "edit.redo", "params": {} }))
 }
+
+/// Shows document `id` (hidden helpers too) in one frame, double-buffered: its canvas is drawn
+/// first while the shown document stays on screen (`editor.showDocument`); `options` `{viewport?:
+/// "keep" | "own" | {zoom, x, y}, hidePrevious?, timeoutMs?}` (feature `editor.showDocument`).
+#[wasm_bindgen(js_name = showDocument)]
+pub fn show_document(id: JsValue, options: JsValue) -> js_sys::Promise {
+    match core::document_call(&from_js(&id), &from_js(&options)) {
+        Ok(params) => control("editor.showDocument", params),
+        Err(e) => js_sys::Promise::reject(&error(&e)),
+    }
+}
+
+/// Draws document `id`'s canvas ahead (fonts in, GPU textures uploaded) so showing it later is
+/// instant (`document.prewarm`); `options` `{viewport?, full?, timeoutMs?}` (feature
+/// `document.prewarm`).
+#[wasm_bindgen(js_name = prewarmDocument)]
+pub fn prewarm_document(id: JsValue, options: JsValue) -> js_sys::Promise {
+    match core::document_call(&from_js(&id), &from_js(&options)) {
+        Ok(params) => control("document.prewarm", params),
+        Err(e) => js_sys::Promise::reject(&error(&e)),
+    }
+}
