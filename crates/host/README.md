@@ -6,12 +6,14 @@ Capishot's editor as a library, in the host app's own process, native and
 - **`Host`**: the engine. Open documents from bytes, run any control-protocol command by id,
   read and write pixels, group undo steps, run long commands as jobs, get events, keep a document
   in step between collaborators.
-- **`view::CapishotView`** (feature `view`): the canvas as an egui widget, drawn in the host's
-  own eframe/egui context on its wgpu device. It changes no global egui style or fonts.
+- **`view::CapishotView`** (feature `view`): the editor as an egui widget, drawn in the host's
+  own eframe/egui context on its wgpu device, in two modes on the same open documents:
+  `Mode::Embedded`, the canvas alone, and `Mode::Full` (feature `full`), Capishot's whole
+  interface (menus, panels, dialogs, every tool). It changes no global egui style or fonts.
 - **`files`, `fonts`, `render`, `ai`**: options and results for open/save from bytes, the
   host's fonts, rendering a region to RGBA, and in-process AI. The calls are `Host` methods.
 
-Nothing of the app shell (menus, file dialogs, windows) is in it.
+Window-level actions and file pickers go to the host as events: the window stays the host's.
 `examples/host-egui` is the contract: a separate Cargo workspace that depends on this crate as
 an outside host does.
 
@@ -70,13 +72,17 @@ These blocks are the root `Cargo.toml`'s at that commit; when you move the pin, 
 | Feature | Default | What it adds |
 |---|---|---|
 | `view` | yes | `view::CapishotView`, the canvas widget (pulls `photocraft-ui-egui` without its plug-ins or extra catalogs) |
+| `full` | yes | `view::Mode::Full`, Capishot's whole interface in the widget |
+| `camera-raw` | no | Camera Raw development. Without it a raw file opens as its embedded preview, with a warning |
+| `exr`, `heif` | no | OpenEXR and HEIC/HEIF files. Without them they are recognised and refused with a clear error |
+| `all-catalogs` | no | Every translation catalog in the binary (default: English, Spanish, Brazilian Portuguese) |
 | `plugins` | no | Sandboxed WebAssembly filter plug-ins (`plugin.*` commands; the wasmi interpreter) |
 | `ai-native` | no | In-process AI natively: burn on wgpu/Vulkan/Metal/DX12, DirectML on Windows, CPU fallback. **Native targets only** |
 | `ai-web` | no | In-process AI in the browser through the AI Web Worker the host serves (`packaging/web-ai/build.sh`). Empty natively |
 
-A host build: `default-features = false, features = ["view"]`, plus `ai-native`/`ai-web` per
-target when it runs Remove with AI or the upscales in process. Release builds should strip debug
-info (`examples/host-egui/Cargo.toml` › profiles; sizes in its README).
+A host build: `default-features = false, features = ["view", "full"]` (or only `view` for the
+canvas alone), plus `ai-native`/`ai-web` per target when it runs Remove with AI or the upscales in
+process. Sizes and what to trim: [Binary size](#binary-size).
 
 ## Using it
 
@@ -113,6 +119,67 @@ if let Some(overlay) = out.overlay() {
 for event in &out.events { /* layerPixelsChanged, toolChanged, jobFinished… */ }
 ```
 
+### The two modes
+
+```rust
+use capishot_host::view::{CapishotEditor, Keys, Mode, Shortcut, ViewEvent, WindowRequest};
+
+let mut editor = CapishotEditor::new(cc.wgpu_render_state.clone());   // one object: `editor.host` + the view
+editor.view.options_mut().keys = Keys::deny(Shortcut::opacity_digits()); // the host keeps 0-9
+
+// Each frame, the one call: no forwarding, no sync calls.
+let out = editor.ui_in_rect(ui, rect);
+for e in &out.view_events {
+    match e {
+        ViewEvent::Window(WindowRequest::Title(t)) => { /* the host's window, the host's choice */ }
+        ViewEvent::Window(WindowRequest::Close) => editor.set_mode(Mode::Embedded), // File › Exit
+        ViewEvent::FileDialog(d) => { /* its own picker, then d.contents(..) / d.save_to(..) / d.cancel() */ }
+        ViewEvent::WriteFile { name, bytes } => { /* store the saved file */ }
+        ViewEvent::DocumentReady { document, first_frame_ms, final_frame_ms } => { /* fully drawn */ }
+        _ => {}
+    }
+}
+editor.set_mode(Mode::Full); // any frame: same documents, nothing reopened
+```
+
+- **Style.** Capishot's style is its own drawing's for the length of the call (the context's styles
+  are swapped and put back, also on a panic); the host's widgets before and after it, its theme
+  preference and its fonts stay as they are. Capishot's text uses the host's fonts.
+  `ViewOptions::full_theme`: `FullTheme::Host` (default) builds Capishot's interface from the
+  host's colours, `FullTheme::Capishot` keeps Capishot's own theme.
+- **Window.** The window close prompt and the fit-to-display step don't run. File › Exit, the
+  window title, Screen Mode, maximize, focus and "zoom resizes window" arrive as
+  `ViewEvent::Window(WindowRequest::…)`. `WindowRequest::Close` asks nothing about unsaved work:
+  `Host::documents()` says what is dirty.
+- **Files.** Decoding and encoding are built in; a picker is `ViewEvent::FileDialog` (the host
+  answers later, with contents natively and in the browser), a save is `ViewEvent::WriteFile`, a
+  link is `ViewEvent::OpenUrl`.
+- **Keys.** `ViewOptions::keys` in both modes: `Keys::deny([...])`, `Keys::allow_only([...])` or
+  `Keys::filter(|event| ...)`; `.routing(KeyRouting::Never | WhenActive | Always)` says when. In full
+  mode `WhenActive` follows the last press: inside the rect (or on Capishot's windows) the keyboard
+  is Capishot's until a press on the host's UI. Withheld keys stay in egui's input for the host's
+  widgets drawn after the editor; draw those after it. Keep `options.zoom_with_keyboard = false`
+  if ⌘+/⌘- should zoom only the canvas (egui handles those before any widget, and it is the
+  host's option to set).
+- **Tools, rulers, zoom**: `Host::set_tool`, `ViewOptions::rulers`, `CapishotView::set_camera`
+  (`Fit`, `Fill`, `Set`, `ZoomBy`).
+- **Optional:** forward eframe's `raw_input_hook` to `CapishotView::raw_input_hook` for Windows and
+  Wayland pinch zoom and finger gestures (they must run before egui reads the input). Nothing
+  else needs it.
+- **Not carried over in `Mode::Full`:** Capishot's preferences file, crash recovery and auto-update
+  (`Services` left empty: preferences last the session). `CapishotView::with_services` can set them
+  (unstable).
+
+### Raw pixels, hidden documents
+
+`Host::open(bytes, OpenOptions { hidden: true, .. })` opens a hidden document in the host's own
+session (`start_open` does it on a worker), so nothing has to be built elsewhere and moved.
+`Host::put_rgba(doc, layer, &RgbaImage { width, height, stride, data }, PutRgba { .. })` and
+`Host::add_rgba(doc, &image, AddRgba { .. })` take raw 8-bit straight RGBA rows (sRGB, any stride),
+with no PNG or base64.
+
+### Reference
+
 - **Commands**: `execute(id, params)` / `execute_with(id, params, ExecOptions { document, history })`
   take the ids and params of [`docs/control-protocol.md`](../../docs/control-protocol.md) ›
   Engine commands. `execute_request(&json)` takes an `engine.execute` request as is.
@@ -129,26 +196,33 @@ for event in &out.events { /* layerPixelsChanged, toolChanged, jobFinished… */
 - **Rendering**: `render(doc, &RenderOptions { rect, scale, max_side, layers, uids }) -> Rgba`;
   `snapshot(doc)` to render on another thread (`Snapshot::render`, `Snapshot::thumbnail`).
 - **Fonts**: `add_fonts(files)` registers font files and redraws the type that waited for them;
-  `fonts_ready(doc)`, `request_missing_fonts(doc, &provider)`, `layout_digest(doc, layer, hashes)`;
+  `add_document_fonts(doc, files)` holds them for one document (unregistered when the last holder
+  closes; the registry is the process's, so type elsewhere can use them meanwhile);
+  `fonts_ready(doc)`, `Event::FontsReady {document, ready}` (once per document, when it has them
+  all), `request_missing_fonts(doc, &provider)`, `layout_digest(doc, layer, hashes)`;
   `fonts::use_system_fonts(false)` at start-up for the same layout on native and wasm.
 - **AI**: `install_ai(&AiConfig { models_dir, models_url, device, worker_url, .. })`,
   `ai_availability()`, `prepare_remove_ai()`, `ai_model_status(model)`, `download_ai_model(model)`;
   typed params (`ai::RemoveAi`, `InpaintAi`, `RemoveBubbleText`, `UpscaleAi`) and replies
   (`ai::AiReply`: device, cpu, fellBack, notices, ms). Remove with AI is one undo step.
-- **Other helpers**: `get_pixels`, `put_pixels`, `batch`, `undo`/`redo`,
+- **Other helpers**: `get_pixels`, `put_pixels`, `put_rgba`, `add_rgba`, `batch`, `undo`/`redo`,
   `begin_group`/`end_group`/`group`, `views`/`define_view`/`apply_view`, `show`, `prewarm`,
   `close`, `tool`/`set_tool`.
 - **Events**: `poll()` returns them (the widget polls for you); `subscribe(callback)` and
   `events()` (an `mpsc` channel) get them too. Kinds: `layerPixelsChanged {document, layer, uid,
   rect, pixelRev, origin}`, `layersChanged {…, what}`, `layersReordered`, `textChanged`,
   `selectionChanged`, `toolChanged`, `historyChanged`, `documentChanged`, `documentsChanged`,
-  `jobFinished`.
+  `jobFinished`, `fontsReady`.
 - **Live sync** (experimental, module `live`): `live_start(doc, peer)`, `live_take_local(doc)` →
   `Vec<Envelope>` (serde JSON) to send, `live_apply(doc, &envelope)` for what arrives; no undo
   step, per layer last writer wins, layers addressed by `uid`.
 
 What is stable and what is experimental is listed at the top of the crate docs (`cargo doc -p
 capishot-host --open`).
+
+## Binary size
+
+SIZE_PLACEHOLDER
 
 ## License
 

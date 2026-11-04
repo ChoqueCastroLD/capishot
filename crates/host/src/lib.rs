@@ -60,9 +60,10 @@ pub use error::{Error, Result};
 pub use events::{Event, JobEnd, Origin};
 pub use files::{OpenOptions, Opened, SaveFormat, SaveOptions, Saved};
 pub use host::{
-    BatchSteps, DocumentInfo, ExecOptions, GetPixels, History, Host, InspectOptions, JobStatus, Pixels, PutPixels, SaveStarted, Started, Subscription,
-    ViewHooks,
+    AddRgba, BatchSteps, DocumentInfo, ExecOptions, GetPixels, History, Host, InspectOptions, JobStatus, Pixels, PutPixels, PutRgba, SaveStarted, Started,
+    Subscription, ViewHooks,
 };
+pub use photocraft_engine::live_cmds::RgbaImage;
 pub use ids::{DocumentId, JobHandle, LayerId, LayerUid};
 pub use serde_json::{self, Value};
 

@@ -156,6 +156,87 @@ fn put_pixels(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let (x, y) = origin(ID, p)?;
     let bytes = image_bytes(ID, p)?;
+    put_image(s, ID, id, &Pixels::Encoded(&bytes), x, y, if whole { None } else { Some(mode) })
+}
+
+/// Pixels handed to [`put_rgba`] / [`add_rgba`] (and the commands' encoded images).
+enum Pixels<'a> {
+    /// A PNG, JPEG, WebP… file.
+    Encoded(&'a [u8]),
+    /// Raw rows.
+    Rgba(&'a RgbaImage<'a>),
+}
+
+/// Raw 8-bit straight-alpha RGBA rows (sRGB) a host hands over without encoding them:
+/// `height` rows of `width` pixels, row `y` starting at byte `y * stride`.
+#[derive(Clone, Copy, Debug)]
+pub struct RgbaImage<'a> {
+    /// Pixels per row.
+    pub width: u32,
+    /// Rows.
+    pub height: u32,
+    /// Bytes from one row's start to the next's (at least `width * 4`).
+    pub stride: usize,
+    /// The rows.
+    pub data: &'a [u8],
+}
+
+/// The most pixels one raw image may have (as `layer.getPixels` reads at most).
+const MAX_RAW_PIXELS: u64 = 100_000_000;
+
+impl RgbaImage<'_> {
+    /// The rows packed (no padding), checked against the size.
+    fn packed(&self, cmd: &str) -> Result<Vec<u8>> {
+        let (w, h) = (u64::from(self.width), u64::from(self.height));
+        if w == 0 || h == 0 || w.saturating_mul(h) > MAX_RAW_PIXELS {
+            return Err(bad(cmd, format!("a {}×{} image (at most {MAX_RAW_PIXELS} pixels, none empty)", self.width, self.height)));
+        }
+        let row = usize::try_from(w * 4).map_err(|_| bad(cmd, "the image is too wide"))?;
+        if self.stride < row {
+            return Err(bad(cmd, format!("stride {} is less than width × 4 ({row})", self.stride)));
+        }
+        let rows = usize::try_from(h).map_err(|_| bad(cmd, "the image is too tall"))?;
+        let need = self.stride.checked_mul(rows - 1).and_then(|n| n.checked_add(row)).ok_or_else(|| bad(cmd, "the image is too large"))?;
+        if self.data.len() < need {
+            return Err(bad(cmd, format!("{} bytes for a {}×{} image with stride {} (needs {need})", self.data.len(), self.width, self.height, self.stride)));
+        }
+        let mut out = Vec::new();
+        out.try_reserve_exact(row * rows).map_err(|_| EngineError::Other(format!("{cmd}: out of memory for the image")))?;
+        for y in 0..rows {
+            let start = y * self.stride;
+            out.extend_from_slice(self.data.get(start..start + row).ok_or_else(|| bad(cmd, "the image rows end early"))?);
+        }
+        Ok(out)
+    }
+}
+
+/// `layer.putPixels` from raw RGBA: layer `layer` of the active document gets the image with its
+/// top-left at `(x, y)`, converted to the document's profile and depth. `whole`: the layer becomes
+/// the image (its old pixels dropped); otherwise the image's rect is replaced. One undo step.
+pub fn put_rgba(s: &mut Session, layer: LayerId, image: &RgbaImage<'_>, x: i32, y: i32, whole: bool) -> Result<Value> {
+    const ID: &str = "layer.putPixels";
+    s.active().ok_or(EngineError::NoDocument)?.doc.layer(layer).ok_or(EngineError::NoLayer(layer))?;
+    put_image(s, ID, layer, &Pixels::Rgba(image), x, y, if whole { None } else { Some(PutMode::Replace) })
+}
+
+/// `layer.addImage` from raw RGBA: a new pixel layer in the active document holding the image at
+/// `(x, y)`, above `above` (default the active layer), named `name` (default "Layer n"). One undo
+/// step; the active layer stays active.
+pub fn add_rgba(s: &mut Session, image: &RgbaImage<'_>, x: i32, y: i32, name: Option<String>, above: Option<LayerId>) -> Result<Value> {
+    const ID: &str = "layer.addImage";
+    let st = s.active().ok_or(EngineError::NoDocument)?;
+    if let Some(id) = above {
+        st.doc.layer(id).ok_or(EngineError::NoLayer(id))?;
+    }
+    let above = above.or(st.active_layer);
+    if name.as_ref().is_some_and(|n| n.chars().count() > 255) {
+        return Err(bad(ID, "`name` must be at most 255 characters"));
+    }
+    add_layer(s, ID, &Pixels::Rgba(image), x, y, name, above)
+}
+
+/// The image into layer `id`: the whole layer (`mode` `None`) or its rect (`Some`).
+fn put_image(s: &mut Session, cmd: &str, id: LayerId, src: &Pixels<'_>, x: i32, y: i32, mode: Option<PutMode>) -> Result<Value> {
     let st = s.active().ok_or(EngineError::NoDocument)?;
     let layer = st.doc.layer(id).ok_or(EngineError::NoLayer(id))?;
     let LayerContent::Raster(dst) = &layer.content else {
@@ -167,8 +248,8 @@ fn put_pixels(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let dst_format = dst.format();
     let blank = dst.default_pixel();
-    if whole {
-        let (w, h, image) = image_surface(s, ID, &bytes, dst_format)?;
+    let Some(mode) = mode else {
+        let (w, h, image) = image_surface(s, cmd, src, dst_format)?;
         // At the origin the converted surface is the layer; elsewhere it is written there.
         let surface = if (x, y) == (0, 0) {
             image
@@ -183,8 +264,8 @@ fn put_pixels(s: &mut Session, p: &Value) -> Result<Value> {
             Ok(())
         })?;
         return Ok(json!({"layer": id.0, "rect": [x, y, w, h]}));
-    }
-    let (w, h, mut data) = image_pixels(s, ID, &bytes, dst_format)?;
+    };
+    let (w, h, mut data) = image_pixels(s, cmd, src, dst_format)?;
     let rect = Rect::from_xywh(x, y, w, h);
     s.edit("Put Pixels", |doc, _| {
         let surf = doc.layer_mut(id).and_then(|l| l.surface_mut()).ok_or(EngineError::NoLayer(id))?;
@@ -201,17 +282,27 @@ fn put_pixels(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// The image `bytes` decoded, converted to the active document's profile and depth (as a copied
 /// layer is) and to `format`: `(width, height, pixels)`.
-fn image_pixels(s: &Session, cmd: &str, bytes: &[u8], format: photocraft_color::PixelFormat) -> Result<(u32, u32, Vec<f32>)> {
+fn image_pixels(s: &Session, cmd: &str, bytes: &Pixels<'_>, format: photocraft_color::PixelFormat) -> Result<(u32, u32, Vec<f32>)> {
     let (w, h, surface) = image_surface(s, cmd, bytes, format)?;
     Ok((w, h, surface.read_region(Rect::from_xywh(0, 0, w, h))))
 }
 
 /// [`image_pixels`] as a surface, its top-left at the origin.
-fn image_surface(s: &Session, cmd: &str, bytes: &[u8], format: photocraft_color::PixelFormat) -> Result<(u32, u32, Surface)> {
+fn image_surface(s: &Session, cmd: &str, pixels: &Pixels<'_>, format: photocraft_color::PixelFormat) -> Result<(u32, u32, Surface)> {
     let dest = s.active().ok_or(EngineError::NoDocument)?.doc.clone();
-    let kind = photocraft_codecs::detect(bytes).ok_or_else(|| bad(cmd, "`png` is not an image this build reads"))?;
-    let ext = kind.extensions().first().copied().unwrap_or("png");
-    let mut src = photocraft_io::import(&format!("pixels.{ext}"), bytes).map_err(|e| EngineError::Other(format!("{cmd}: {e}")))?.document;
+    let imported = match pixels {
+        Pixels::Encoded(bytes) => {
+            let kind = photocraft_codecs::detect(bytes).ok_or_else(|| bad(cmd, "`png` is not an image this build reads"))?;
+            let ext = kind.extensions().first().copied().unwrap_or("png");
+            photocraft_io::import(&format!("pixels.{ext}"), bytes)
+        }
+        Pixels::Rgba(image) => {
+            let raw = photocraft_codecs::Image::from_u8(image.width, image.height, photocraft_codecs::ChannelLayout::Rgba, image.packed(cmd)?)
+                .map_err(|e| bad(cmd, e.to_string()))?;
+            photocraft_io::import_image("pixels.rgba", &raw)
+        }
+    };
+    let mut src = imported.map_err(|e| EngineError::Other(format!("{cmd}: {e}")))?.document;
     if src.layers.len() != 1 || !matches!(src.layers.first().map(|l| &l.content), Some(LayerContent::Raster(_))) {
         return Err(bad(cmd, "`png` must be a flat image (PNG, JPEG, WebP…), not a layered file"));
     }
@@ -242,9 +333,15 @@ fn add_image(s: &mut Session, p: &Value) -> Result<Value> {
             Some(id)
         }
     };
-    let format = photocraft_color::PixelFormat { alpha: true, ..st.doc.pixel_format() };
     let bytes = image_bytes(ID, p)?;
-    let (w, h, data) = image_pixels(s, ID, &bytes, format)?;
+    add_layer(s, ID, &Pixels::Encoded(&bytes), x, y, name, above)
+}
+
+/// A new pixel layer holding the image at `(x, y)` above `above`, in one step.
+fn add_layer(s: &mut Session, cmd: &str, src: &Pixels<'_>, x: i32, y: i32, name: Option<String>, above: Option<LayerId>) -> Result<Value> {
+    let st = s.active().ok_or(EngineError::NoDocument)?;
+    let format = photocraft_color::PixelFormat { alpha: true, ..st.doc.pixel_format() };
+    let (w, h, data) = image_pixels(s, cmd, src, format)?;
     let mut surface = photocraft_raster::Surface::new(format);
     surface.write_region(Rect::from_xywh(x, y, w, h), &data);
     let id = s.edit("Add Image Layer", |doc, active| {
@@ -590,6 +687,40 @@ mod tests {
         ] {
             assert!(s.execute("layer.putPixels", bad.clone()).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn raw_rgba_goes_in_without_encoding_with_any_stride() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 16, "height": 16})).unwrap();
+        let layer = s.execute("layer.new.layer", json!({})).unwrap()["layer"].as_u64().unwrap();
+        // 2×2 red with a padded stride (12 bytes per row, 8 used).
+        let mut data = vec![0u8; 12 * 2];
+        for y in 0..2 {
+            for x in 0..2 {
+                data[y * 12 + x * 4..y * 12 + x * 4 + 4].copy_from_slice(&[255, 0, 0, 255]);
+            }
+        }
+        let img = RgbaImage { width: 2, height: 2, stride: 12, data: &data };
+        let steps = s.active().unwrap().history.entries().len();
+        let r = put_rgba(&mut s, LayerId(layer), &img, 3, 4, true).unwrap();
+        assert_eq!(r["rect"], json!([3, 4, 2, 2]));
+        assert_eq!(pixel(&s, layer, 4, 5), vec![1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(s.active().unwrap().history.entries().len(), steps + 1, "one step");
+        let before = s.active().unwrap().doc.layers.len();
+        let added = add_rgba(&mut s, &img, 0, 0, Some("Raw".into()), None).unwrap();
+        let id = added["layer"].as_u64().unwrap();
+        assert_eq!(s.active().unwrap().doc.layers.len(), before + 1);
+        assert_eq!(s.active().unwrap().doc.layer(LayerId(id)).unwrap().name, "Raw");
+        assert_eq!(pixel(&s, id, 1, 1), vec![1.0, 0.0, 0.0, 1.0]);
+        // Bad sizes and short buffers are errors, never panics.
+        for (w, h, stride, len) in [(0, 2, 8, 16), (2, 2, 4, 16), (2, 2, 8, 15), (100_000, 100_000, 400_000, 16), (2, 2, usize::MAX, 16)] {
+            let data = vec![0u8; len];
+            let img = RgbaImage { width: w, height: h, stride, data: &data };
+            assert!(put_rgba(&mut s, LayerId(layer), &img, 0, 0, false).is_err(), "{w}x{h} stride {stride} len {len}");
+            assert!(add_rgba(&mut s, &img, 0, 0, None, None).is_err());
+        }
+        assert!(put_rgba(&mut s, LayerId(999_999), &img, 0, 0, false).is_err());
     }
 
     fn pixel(s: &Session, layer: u64, x: i32, y: i32) -> Vec<f32> {

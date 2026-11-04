@@ -552,67 +552,8 @@ pub fn view_events(prev: Option<&ViewSnap>, next: &ViewSnap) -> Vec<Value> {
     out
 }
 
-/// How long an `open` waits to be matched with the document it makes (ms): one that failed
-/// without saying so is forgotten then.
-const OPEN_MATCH_MS: f64 = 120_000.0;
-
-/// `documentReady` bookkeeping: when each open was asked for, and the documents not complete yet.
-#[derive(Debug, Default)]
-pub struct ReadyTracker {
-    /// Opens asked for and not matched with a document yet, oldest first (ms).
-    opens: std::collections::VecDeque<f64>,
-    /// `(document, asked at, first frame at)` of documents not complete yet.
-    pending: Vec<(u64, f64, f64)>,
-    /// The documents seen so far (a new one is one not in it).
-    seen: Vec<u64>,
-    started: bool,
-}
-
-impl ReadyTracker {
-    /// An `open` / `openDocument` reached the app at `now` (ms).
-    pub fn note_open(&mut self, now: f64) {
-        self.opens.push_back(now);
-        if self.opens.len() > 64 {
-            self.opens.pop_front();
-        }
-    }
-
-    /// The last open noted failed: it makes no document.
-    pub fn open_failed(&mut self) {
-        self.opens.pop_back();
-    }
-
-    /// The end of a frame at `now` (ms) with these documents, each with whether it is complete
-    /// (decoded, fonts settled, nothing working on it): the `documentReady` events. Documents
-    /// open on the first frame are the baseline (hosts read them then).
-    pub fn frame(&mut self, now: f64, docs: &[(u64, bool)]) -> Vec<Value> {
-        while self.opens.front().is_some_and(|t| now - t > OPEN_MATCH_MS) {
-            self.opens.pop_front();
-        }
-        let started = std::mem::replace(&mut self.started, true);
-        for (id, _) in docs {
-            if self.seen.contains(id) {
-                continue;
-            }
-            self.seen.push(*id);
-            if started {
-                let asked = self.opens.pop_front().unwrap_or(now);
-                self.pending.push((*id, asked, now));
-            }
-        }
-        self.seen.retain(|id| docs.iter().any(|(d, _)| d == id));
-        let mut out = Vec::new();
-        self.pending.retain(|&(id, asked, first)| match docs.iter().find(|(d, _)| *d == id) {
-            None => false,
-            Some((_, false)) => true,
-            Some((_, true)) => {
-                out.push(ready_event(id, first - asked, now - asked));
-                false
-            }
-        });
-        out
-    }
-}
+/// `documentReady` bookkeeping (shared with `capishot-host`'s `DocumentReady`).
+pub use photocraft_ui_egui::doc_ready::ReadyTracker;
 
 /// `documentReady {id, firstFrameMs, finalFrameMs}`: `id` is complete. Both times count from
 /// when it was asked for (`open` / `openDocument`, else the frame it appeared in) to the end of
@@ -861,25 +802,6 @@ mod tests {
         let r = ViewSnap { rotation: 90.0, ..v }.visible_rect();
         assert!((r[2] - 100.0).abs() < 1e-3 && (r[3] - 200.0).abs() < 1e-3, "{r:?}");
         assert_eq!(ready_event(3, 12.345, 80.0), json!({"type": "documentReady", "id": 3, "firstFrameMs": 12.3, "finalFrameMs": 80.0}));
-    }
-
-    #[test]
-    fn documents_are_ready_once_complete_timed_from_their_open() {
-        let mut r = ReadyTracker::default();
-        assert!(r.frame(0.0, &[(1, true)]).is_empty(), "the first frame is the baseline");
-        r.note_open(10.0);
-        assert!(r.frame(16.0, &[(1, true)]).is_empty(), "still opening");
-        assert!(r.frame(40.0, &[(1, true), (2, false)]).is_empty(), "shown, not complete");
-        assert_eq!(r.frame(90.0, &[(1, true), (2, true)]), [ready_event(2, 30.0, 80.0)]);
-        assert!(r.frame(100.0, &[(1, true), (2, true)]).is_empty(), "once");
-        // A document made without an open counts from the frame it appeared in.
-        assert_eq!(r.frame(120.0, &[(1, true), (2, true), (3, true)]), [ready_event(3, 0.0, 0.0)]);
-        // A failed open isn't matched with the next document; a closed one is dropped.
-        r.note_open(130.0);
-        r.open_failed();
-        r.note_open(200.0);
-        assert!(r.frame(210.0, &[(4, false)]).is_empty());
-        assert!(r.frame(220.0, &[]).is_empty());
     }
 
     #[test]

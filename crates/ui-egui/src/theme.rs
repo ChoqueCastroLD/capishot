@@ -393,6 +393,10 @@ pub fn install_fonts(ctx: &egui::Context) {
 
 /// [`install_fonts`] with the CJK and other-script fallback fonts taken from `cjk` (tests swap the sources).
 pub fn install_fonts_with(ctx: &egui::Context, cjk: crate::cjk_fonts::Sources) {
+    // Inside a host's own context the fonts are the host's: never replaced.
+    if HOST_FONTS.with(std::cell::Cell::get) {
+        return;
+    }
     // egui's default fonts stay last in the stack, for symbols and emoji Inter lacks.
     // egui's own default fonts only where egui is built with them (the desktop): the web build
     // leaves out Ubuntu Light and Hack, and `add_symbol_fonts` adds the two emoji/icon fonts.
@@ -631,10 +635,26 @@ pub fn apply(ctx: &egui::Context, kind: ThemeKind) {
 /// `--hover` and `--pressed` (with the accent border) when hovered and pressed, the panels' for
 /// labels.
 pub fn apply_tokens(ctx: &egui::Context, t: Tokens) {
+    // In a host app's window the context's style and theme preference are the host's: the editor
+    // area takes the tokens' style for its own frame only (`embed::full_frame`).
+    if crate::hosted::active() {
+        publish_tokens(ctx, t);
+        return;
+    }
     // Keep native windows at SystemDefault so macOS continues reporting OS appearance changes,
     // including when an integration or restored egui state pinned its own theme preference.
     ctx.set_theme(egui::ThemePreference::System);
     ctx.data_mut(|d| d.insert_temp(egui::Id::unique("photocraft-theme"), t));
+    let style = Arc::new(styled(&t, (*ctx.global_style()).clone()));
+    // egui selects its style branch using OS appearance, independently of Capishot's fixed
+    // Dark/Light mode or platform appearance service. Both branches need the selected palette.
+    ctx.set_style_of(egui::Theme::Light, Arc::clone(&style));
+    ctx.set_style_of(egui::Theme::Dark, style);
+}
+
+/// `style` with tokens `t` applied (visuals, text styles, spacing): what [`apply_tokens`] makes
+/// the context's style, and what a host app's editor area draws with (`embed::full_frame`).
+pub fn styled(t: &Tokens, mut style: egui::Style) -> egui::Style {
     let st = t.style;
     let shadow = |s: ShadowTokens| egui::Shadow { offset: s.offset, blur: s.blur, spread: s.spread, color: s.color.unwrap_or(t.shadow) };
     let radius = |r: f32| CornerRadius::same(r.clamp(0.0, 255.0) as u8);
@@ -674,44 +694,39 @@ pub fn apply_tokens(ctx: &egui::Context, t: Tokens) {
         wv.corner_radius = radius(tok.radius.unwrap_or(t.radius_sm));
         wv.expansion = tok.expansion;
     }
-    ctx.set_visuals(v);
+    style.visuals = v;
     let margin = |m: f32| egui::Margin::same(m.clamp(0.0, 127.0) as i8);
-    ctx.global_style_mut(|s| {
-        s.text_styles = [
-            (TextStyle::Small, FontId::proportional(st.font_small)),
-            (TextStyle::Body, FontId::proportional(st.font_body)),
-            (TextStyle::Button, FontId::proportional(st.font_button)),
-            (TextStyle::Heading, semibold(st.font_heading)),
-            (TextStyle::Monospace, FontId::monospace(st.font_mono)),
-        ]
-        .into();
-        s.spacing.item_spacing = st.item_spacing;
-        s.spacing.button_padding = st.button_padding;
-        s.spacing.interact_size = st.interact_size;
-        s.spacing.slider_width = st.slider_width;
-        s.spacing.combo_width = st.combo_width;
-        s.spacing.menu_margin = margin(st.menu_margin);
-        s.spacing.window_margin = margin(st.window_margin);
-        s.spacing.icon_width = st.icon_width;
-        s.visuals.indent_has_left_vline = false;
-        s.interaction.tooltip_delay = TOOLTIP_DELAY;
-        // Thin overlay scrollbars that appear on hover (Photoshop/macOS style).
-        // Thin bars stay visible, including while the pointer is on them. The stock thin
-        // style fades the handle to the same opacity as the track, so the thumb disappears (#4611).
-        let mut scroll = if t.bevel { egui::style::ScrollStyle::solid() } else { egui::style::ScrollStyle::thin() };
-        if scroll.floating {
-            scroll.interact_handle_opacity = 1.0;
-            scroll.interact_background_opacity = 0.4;
-            scroll.floating_width = st.scroll_width;
-        }
-        s.spacing.scroll = scroll;
-        s.spacing.tooltip_width = st.tooltip_width;
-    });
-    // egui selects its style branch using OS appearance, independently of Capishot's fixed
-    // Dark/Light mode or platform appearance service. Both branches need the selected palette.
-    let style = ctx.global_style();
-    ctx.set_style_of(egui::Theme::Light, Arc::clone(&style));
-    ctx.set_style_of(egui::Theme::Dark, style);
+    let s = &mut style;
+    s.text_styles = [
+        (TextStyle::Small, FontId::proportional(st.font_small)),
+        (TextStyle::Body, FontId::proportional(st.font_body)),
+        (TextStyle::Button, FontId::proportional(st.font_button)),
+        (TextStyle::Heading, semibold(st.font_heading)),
+        (TextStyle::Monospace, FontId::monospace(st.font_mono)),
+    ]
+    .into();
+    s.spacing.item_spacing = st.item_spacing;
+    s.spacing.button_padding = st.button_padding;
+    s.spacing.interact_size = st.interact_size;
+    s.spacing.slider_width = st.slider_width;
+    s.spacing.combo_width = st.combo_width;
+    s.spacing.menu_margin = margin(st.menu_margin);
+    s.spacing.window_margin = margin(st.window_margin);
+    s.spacing.icon_width = st.icon_width;
+    s.visuals.indent_has_left_vline = false;
+    s.interaction.tooltip_delay = TOOLTIP_DELAY;
+    // Thin overlay scrollbars that appear on hover (Photoshop/macOS style).
+    // Thin bars stay visible, including while the pointer is on them. The stock thin
+    // style fades the handle to the same opacity as the track, so the thumb disappears (#4611).
+    let mut scroll = if t.bevel { egui::style::ScrollStyle::solid() } else { egui::style::ScrollStyle::thin() };
+    if scroll.floating {
+        scroll.interact_handle_opacity = 1.0;
+        scroll.interact_background_opacity = 0.4;
+        scroll.floating_width = st.scroll_width;
+    }
+    s.spacing.scroll = scroll;
+    s.spacing.tooltip_width = st.tooltip_width;
+    style
 }
 
 /// Seconds the pointer rests on a control before its tooltip shows.

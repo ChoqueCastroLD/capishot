@@ -201,3 +201,253 @@ fn host_theme_colours_reach_the_tokens() {
     assert_eq!(t.canvas, egui::Color32::from_rgb(1, 1, 1));
     assert!(t.dark);
 }
+
+fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+    egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers }
+}
+
+fn frame_with(ctx: &Context, editor: &mut CapishotEditor, events: Vec<egui::Event>) -> (ViewOutput, Vec<egui::Event>) {
+    let mut out = None;
+    let mut left = Vec::new();
+    let raw = RawInput { events, ..input() };
+    let mut o = ctx.run_ui(raw, |ui| {
+        out = Some(editor.ui_in_rect(ui, Rect::from_min_size(Pos2::new(200.0, 0.0), vec2(600.0, 600.0))));
+        left = ui.ctx().input(|i| i.events.clone());
+    });
+    o.textures_delta.clear();
+    (out.expect("the frame ran"), left)
+}
+
+#[cfg(feature = "full")]
+#[test]
+fn full_mode_draws_the_whole_editor_and_leaves_the_hosts_look_alone() {
+    let ctx = Context::default();
+    ctx.set_visuals(egui::Visuals::light());
+    ctx.run_ui(input(), |ui| {
+        ui.label("host list");
+    })
+    .textures_delta
+    .clear();
+    let style = ctx.global_style();
+    let (light, dark) = (ctx.style_of(egui::Theme::Light), ctx.style_of(egui::Theme::Dark));
+    let preference = ctx.options(|o| o.theme_preference);
+    let fonts = ctx.fonts(|f| f.definitions().clone());
+    let (mut editor, doc) = editor_with_doc();
+    let embedded = frame(&ctx, &mut editor);
+    assert_eq!(embedded.document, Some(doc));
+    editor.set_mode(Mode::Full);
+    assert_eq!(editor.mode(), Mode::Full);
+    // What a host widget sees right after the editor drew in this same pass.
+    let mut after = None;
+    for _ in 0..3 {
+        let mut o = ctx.run_ui(input(), |ui| {
+            let out = editor.ui_in_rect(ui, Rect::from_min_size(Pos2::new(200.0, 0.0), vec2(600.0, 600.0)));
+            assert_eq!(out.document, Some(doc), "the same document, not reopened");
+            assert!(out.transform.is_some(), "the canvas is drawn inside the full interface");
+            after = Some((ui.style().clone(), ui.ctx().global_style()));
+        });
+        o.textures_delta.clear();
+    }
+    let (ui_style, global) = after.expect("the frame ran");
+    assert_eq!(*ui_style, *style, "the host's Ui keeps its style");
+    assert_eq!(*global, *style, "the context's style is back right after the editor");
+    assert_eq!(*ctx.global_style(), *style, "no global style change");
+    assert_eq!(*ctx.style_of(egui::Theme::Light), *light);
+    assert_eq!(*ctx.style_of(egui::Theme::Dark), *dark);
+    assert_eq!(ctx.options(|o| o.theme_preference), preference, "the theme preference is the host's");
+    assert_eq!(ctx.fonts(|f| f.definitions().clone()), fonts, "no font change");
+    // And back: one document all along, nothing reopened.
+    editor.set_mode(Mode::Embedded);
+    let back = frame(&ctx, &mut editor);
+    assert_eq!(back.document, Some(doc));
+    assert_eq!(editor.host.documents().len(), 1);
+    assert_eq!(*ctx.global_style(), *style);
+}
+
+#[cfg(feature = "full")]
+#[test]
+fn window_actions_become_host_events() {
+    let ctx = Context::default();
+    let (mut editor, _) = editor_with_doc();
+    editor.set_mode(Mode::Full);
+    let titled = (0..3).flat_map(|_| frame(&ctx, &mut editor).view_events).any(|e| matches!(e, ViewEvent::Window(WindowRequest::Title(t)) if t.contains("Capishot")));
+    assert!(titled, "the title reaches the host, not the OS window");
+    editor.view.control("app.quit", json!({}));
+    let out = frame(&ctx, &mut editor);
+    assert!(out.view_events.iter().any(|e| *e == ViewEvent::Window(WindowRequest::Close)), "{:?}", out.view_events);
+    let sent = ctx.viewport(|v| v.commands.iter().any(|c| matches!(c, egui::ViewportCommand::Close | egui::ViewportCommand::Title(_))));
+    assert!(!sent, "nothing went to the host's own window");
+}
+
+#[test]
+fn the_host_chooses_the_keys_in_both_modes() {
+    let modes = [
+        Mode::Embedded,
+        #[cfg(feature = "full")]
+        Mode::Full,
+    ];
+    for mode in modes {
+        let ctx = Context::default();
+        let (mut editor, doc) = editor_with_doc();
+        let layer = editor.host.execute("layer.new.layer", json!({"name": "Ink"})).expect("a layer")["layer"].as_u64().expect("its id");
+        editor.set_mode(mode);
+        editor.view.options_mut().keys = Keys::deny(Shortcut::opacity_digits()).routing(KeyRouting::Always);
+        for _ in 0..3 {
+            let _ = frame(&ctx, &mut editor);
+        }
+        let opacity = |editor: &CapishotEditor| {
+            let tree = editor.host.inspect(doc, crate::InspectOptions::default()).expect("inspect");
+            tree["layers"].as_array().expect("layers").iter().find(|l| l["id"] == json!(layer)).expect("the layer")["opacity"].as_f64().expect("opacity")
+        };
+        let press = key(egui::Key::Num5, egui::Modifiers::NONE);
+        let before = opacity(&editor);
+        let (_, left) = frame_with(&ctx, &mut editor, vec![press.clone()]);
+        assert_eq!(opacity(&editor), before, "{mode:?}: denied");
+        assert!(left.contains(&press), "{mode:?}: the host still has its key: {left:?}");
+        // Without the filter the same key is the editor's.
+        editor.view.options_mut().keys = Keys::default().routing(KeyRouting::Always);
+        let _ = frame_with(&ctx, &mut editor, vec![press.clone()]);
+        let _ = frame(&ctx, &mut editor);
+        assert_ne!(opacity(&editor), before, "{mode:?}: let through");
+        // Never: no key at all.
+        editor.view.options_mut().keys = Keys::default().routing(KeyRouting::Never);
+        let (out, _) = frame_with(&ctx, &mut editor, vec![key(egui::Key::B, egui::Modifiers::NONE)]);
+        assert!(!out.took_keys, "{mode:?}");
+    }
+}
+
+#[test]
+fn shortcuts_match_exact_modifiers() {
+    let s = Shortcut::command(egui::Key::S).shift();
+    assert!(s.matches(&key(egui::Key::S, egui::Modifiers::COMMAND | egui::Modifiers::SHIFT)));
+    assert!(!s.matches(&key(egui::Key::S, egui::Modifiers::COMMAND)));
+    assert!(!s.matches(&egui::Event::Text("s".into())));
+    let only = Keys::allow_only([Shortcut::key(egui::Key::B)]);
+    let f = only.filter.expect("a filter");
+    assert!(f(&key(egui::Key::B, egui::Modifiers::NONE)));
+    assert!(!f(&key(egui::Key::V, egui::Modifiers::NONE)));
+    assert!(f(&egui::Event::Text("v".into())), "typing still gets through");
+}
+
+#[test]
+fn a_shown_document_reports_ready_each_time() {
+    let ctx = Context::default();
+    let mut editor = CapishotEditor::new(None);
+    let a = editor.host.open(psd(32, 32), OpenOptions::named("a.psd")).expect("opened").document;
+    let b = editor.host.open(psd(32, 32), OpenOptions { name: Some("b.psd".into()), hidden: true }).expect("opened").document;
+    let ready = |events: &[ViewEvent], doc: DocumentId| {
+        events.iter().any(|e| matches!(e, ViewEvent::DocumentReady { document, first_frame_ms, final_frame_ms } if *document == doc && *final_frame_ms >= *first_frame_ms))
+    };
+    let mut seen = false;
+    for _ in 0..10 {
+        seen |= ready(&frame(&ctx, &mut editor).view_events, a);
+    }
+    assert!(seen, "a is drawn");
+    editor.host.show(b, false).expect("shown");
+    let mut seen = false;
+    for _ in 0..10 {
+        seen |= ready(&frame(&ctx, &mut editor).view_events, b);
+    }
+    assert!(seen, "b is drawn");
+    editor.host.show(a, false).expect("shown");
+    let mut seen = false;
+    for _ in 0..10 {
+        seen |= ready(&frame(&ctx, &mut editor).view_events, a);
+    }
+    assert!(seen, "a again: new each time it is shown");
+}
+
+#[cfg(feature = "full")]
+#[test]
+fn full_mode_reports_job_ends_to_the_host() {
+    let ctx = Context::default();
+    let (mut editor, _) = editor_with_doc();
+    editor.set_mode(Mode::Full);
+    let _ = frame(&ctx, &mut editor);
+    let started = editor.host.start("filter.blur.gaussianBlur", json!({"radius": 1.0}), None);
+    if let Ok(crate::Started::Job(job)) = started {
+        let mut ended = false;
+        for _ in 0..2000 {
+            ended |= frame(&ctx, &mut editor).events.iter().any(|e| matches!(e, Event::JobFinished { job: j, .. } if *j == job));
+            if ended {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(ended, "the job's end reached the host");
+    }
+}
+
+#[test]
+fn zoom_by_moves_the_camera_and_bad_factors_are_reported() {
+    let ctx = Context::default();
+    let (mut editor, doc) = editor_with_doc();
+    let _ = frame(&ctx, &mut editor);
+    let before = editor.view.camera(doc).expect("a camera").zoom;
+    editor.view.set_camera(doc, CameraChange::ZoomBy(2.0));
+    let _ = frame(&ctx, &mut editor);
+    let after = editor.view.camera(doc).expect("a camera").zoom;
+    assert!((after - before * 2.0).abs() < 1e-3, "{before} → {after}");
+    editor.view.set_camera(doc, CameraChange::ZoomBy(f32::NAN));
+    assert!(frame(&ctx, &mut editor).view_events.iter().any(|e| matches!(e, ViewEvent::Failed { .. })));
+}
+
+#[cfg(feature = "full")]
+#[test]
+fn file_pickers_and_writes_go_to_the_host() {
+    let ctx = Context::default();
+    let (mut editor, doc) = editor_with_doc();
+    editor.set_mode(Mode::Full);
+    let _ = frame(&ctx, &mut editor);
+    let picker = |events: Vec<ViewEvent>| {
+        events.into_iter().find_map(|e| match e {
+            ViewEvent::FileDialog(d) => Some(d),
+            _ => None,
+        })
+    };
+    // File › Open: the host's picker, its bytes, a new document.
+    editor.view.control("ui.menu.invoke", json!({"command": "file.open"}));
+    let mut dialog = None;
+    for _ in 0..4 {
+        dialog = dialog.or(picker(frame(&ctx, &mut editor).view_events));
+    }
+    let dialog = dialog.expect("the host is asked");
+    assert!(matches!(dialog.request(), FileRequest::Open { multiple: true, .. }), "{:?}", dialog.request());
+    dialog.contents(vec![("two.psd".into(), psd(20, 10))]);
+    let mut opened = false;
+    for _ in 0..200 {
+        let _ = frame(&ctx, &mut editor);
+        opened = editor.host.documents().iter().any(|d| d.name == "two.psd");
+        if opened {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(opened, "opened: {:?}", editor.host.documents());
+    // File › Save As: the host's picker, then the bytes come to the host.
+    let second = editor.host.active_document().expect("active");
+    assert_ne!(second, doc);
+    editor.view.control("ui.menu.invoke", json!({"command": "file.saveAs"}));
+    let mut dialog = None;
+    for _ in 0..4 {
+        dialog = dialog.or(picker(frame(&ctx, &mut editor).view_events));
+    }
+    let dialog = dialog.expect("the host is asked where");
+    assert!(matches!(dialog.request(), FileRequest::Save { .. }), "{:?}", dialog.request());
+    dialog.save_to("out.psd");
+    let mut written = None;
+    for _ in 0..400 {
+        for e in frame(&ctx, &mut editor).view_events {
+            if let ViewEvent::WriteFile { name, bytes } = e {
+                written = Some((name, bytes.len()));
+            }
+        }
+        if written.is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let (name, len) = written.expect("the file reached the host");
+    assert_eq!(name, "out.psd");
+    assert!(len > 0);
+}

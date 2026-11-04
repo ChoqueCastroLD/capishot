@@ -23,6 +23,9 @@ use crate::state::Tool;
 use crate::{ControlRequest, PhotocraftApp, Services, shortcuts, theme, type_tool};
 
 pub use eframe::egui_wgpu::RenderState;
+pub use full::{FullFrame, FullOptions, FullState, full_frame, hosted_rect};
+
+mod full;
 
 /// When the embedded editor takes keys (its shortcuts, undo/redo, the Type tool's typing).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -48,6 +51,81 @@ pub struct Keys {
     /// Which key events it may take; `None` is [`default_filter`] (every key but the app
     /// shell's: Open, New, Save, Close, Quit, Print, Preferences).
     pub filter: Option<KeyFilter>,
+}
+
+/// A key with exactly these modifiers (⌘ is Ctrl off macOS), for [`Keys::deny`] and
+/// [`Keys::allow_only`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Shortcut {
+    pub key: Key,
+    /// ⌘ on macOS, Ctrl elsewhere.
+    pub command: bool,
+    pub shift: bool,
+    pub alt: bool,
+}
+
+impl Shortcut {
+    /// The bare key.
+    pub const fn key(key: Key) -> Self {
+        Shortcut { key, command: false, shift: false, alt: false }
+    }
+
+    /// ⌘ (Ctrl off macOS) + the key.
+    pub const fn command(key: Key) -> Self {
+        Shortcut { key, command: true, shift: false, alt: false }
+    }
+
+    /// With ⇧ too.
+    pub const fn shift(self) -> Self {
+        Shortcut { shift: true, ..self }
+    }
+
+    /// With ⌥/Alt too.
+    pub const fn alt(self) -> Self {
+        Shortcut { alt: true, ..self }
+    }
+
+    /// Whether key event `e` is this shortcut (pressed, repeated or released).
+    pub fn matches(&self, e: &egui::Event) -> bool {
+        matches!(e, egui::Event::Key { key, modifiers, .. }
+            if *key == self.key && modifiers.command == self.command && modifiers.shift == self.shift && modifiers.alt == self.alt)
+    }
+
+    /// Photoshop's digit keys: layer or tool opacity (0–9) and flow (⇧ + 0–9).
+    pub fn opacity_digits() -> Vec<Shortcut> {
+        const DIGITS: [Key; 10] = [Key::Num0, Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6, Key::Num7, Key::Num8, Key::Num9];
+        DIGITS.into_iter().flat_map(|k| [Shortcut::key(k), Shortcut::key(k).shift()]).collect()
+    }
+}
+
+impl Keys {
+    /// Every key but these and the app shell's ([`default_filter`]). `deny(Shortcut::opacity_digits())`
+    /// leaves the digit keys to the host; the digits still type into the editor's text fields.
+    pub fn deny(shortcuts: impl IntoIterator<Item = Shortcut>) -> Self {
+        let denied: Vec<Shortcut> = shortcuts.into_iter().collect();
+        Keys { routing: KeyRouting::default(), filter: Some(Arc::new(move |e| default_filter(e) && !denied.iter().any(|s| s.matches(e)))) }
+    }
+
+    /// Only these key presses as shortcuts; typing (text, IME, clipboard) still reaches the editor's
+    /// text fields and the Type tool.
+    pub fn allow_only(shortcuts: impl IntoIterator<Item = Shortcut>) -> Self {
+        let allowed: Vec<Shortcut> = shortcuts.into_iter().collect();
+        Keys {
+            routing: KeyRouting::default(),
+            filter: Some(Arc::new(move |e| !matches!(e, egui::Event::Key { .. }) || allowed.iter().any(|s| s.matches(e)))),
+        }
+    }
+
+    /// A filter of the host's: `true` lets the keyboard event through.
+    pub fn filter(f: impl Fn(&egui::Event) -> bool + Send + Sync + 'static) -> Self {
+        Keys { routing: KeyRouting::default(), filter: Some(Arc::new(f)) }
+    }
+
+    /// The same keys under another routing.
+    #[must_use]
+    pub fn routing(self, routing: KeyRouting) -> Self {
+        Keys { routing, ..self }
+    }
 }
 
 impl std::fmt::Debug for Keys {
@@ -85,6 +163,8 @@ pub struct EmbedFrame {
     pub jobs: Vec<JobEvent>,
     /// The editor took keys this frame.
     pub took_keys: bool,
+    /// What the editor asked of the window (the host's), oldest first (see [`crate::hosted`]).
+    pub window: Vec<egui::ViewportCommand>,
 }
 
 /// The ctx data key marking [`install`] done.
@@ -161,6 +241,10 @@ pub struct Camera {
     pub rotation: f32,
 }
 
+/// The zoom [`CameraChange::ZoomBy`] stays within (device pixels per document pixel).
+const MIN_ZOOM: f32 = 0.001;
+const MAX_ZOOM: f32 = 320.0;
+
 /// How a host moves a document's camera.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CameraChange {
@@ -170,6 +254,8 @@ pub enum CameraChange {
     Fill,
     /// Any of zoom, centre and rotation; `None` keeps that part.
     Set { zoom: Option<f32>, center: Option<[f32; 2]>, rotation: Option<f32> },
+    /// The zoom times `factor` about the canvas centre.
+    ZoomBy(f32),
 }
 
 /// The camera of the view of session document `index` (after [`frame`] made its view).
@@ -192,6 +278,11 @@ pub fn set_camera(app: &mut PhotocraftApp, index: usize, change: CameraChange) -
             return Err("center and rotation must be finite".into());
         }
     }
+    if let CameraChange::ZoomBy(f) = change
+        && (!f.is_finite() || f <= 0.0)
+    {
+        return Err("the zoom factor must be a finite number above 0".into());
+    }
     let Some(view) = app.ui.views.get_mut(index) else { return Err(format!("no view for document {index}")) };
     view.zoom_animating = false;
     view.zoom_anchor = None;
@@ -200,6 +291,11 @@ pub fn set_camera(app: &mut PhotocraftApp, index: usize, change: CameraChange) -
     match change {
         CameraChange::Fit => view.fit_pending = true,
         CameraChange::Fill => view.fill_pending = true,
+        CameraChange::ZoomBy(f) => {
+            view.zoom = (view.zoom * f).clamp(MIN_ZOOM, MAX_ZOOM);
+            view.fit_pending = false;
+            view.fill_pending = false;
+        }
         CameraChange::Set { zoom, center, rotation } => {
             if let Some(z) = zoom {
                 view.zoom = z;
@@ -225,12 +321,13 @@ pub fn set_camera(app: &mut PhotocraftApp, index: usize, change: CameraChange) -
 pub fn frame(app: &mut PhotocraftApp, ui: &mut egui::Ui, rect: Rect, opts: &EmbedOptions) -> EmbedFrame {
     let ctx = ui.ctx().clone();
     install(&ctx);
-    // The host's fonts: Capishot's named weights don't exist in its context.
-    let _fonts = crate::theme::HostFonts::enter();
+    // The host's fonts (Capishot's named weights don't exist in its context) and window.
+    let hosted = crate::hosted::Hosted::enter();
     let (jobs, took_keys) = logic(app, &ctx, rect, opts);
     let drawn = draw(app, ui, rect, opts);
     let xform = if drawn { ViewXform::active(app) } else { None };
-    EmbedFrame { drawn, xform, jobs, took_keys }
+    let window = hosted.finish().into_iter().filter(|c| !matches!(c, egui::ViewportCommand::RequestPaintWhileHidden)).collect();
+    EmbedFrame { drawn, xform, jobs, took_keys, window }
 }
 
 /// `logic_frame`'s part the canvas needs. Returns the ended jobs and whether keys were taken.

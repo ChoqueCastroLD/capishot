@@ -2,7 +2,7 @@
 //! host creates `CapishotView` on its own wgpu device, draws it in a rect it chooses, and paints
 //! its overlays in document coordinates. Everything else in the example uses the engine API.
 
-use capishot_host::view::{CameraChange, CapishotView, ViewOutput};
+use capishot_host::view::{CameraChange, CapishotView, Keys, Mode, Shortcut, ViewOutput};
 use capishot_host::{DocumentId, Host};
 
 /// The canvas plus what the host draws over it.
@@ -17,7 +17,25 @@ impl Canvas {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // The Type tool's IME hooks, from the first frame on.
         CapishotView::install(&cc.egui_ctx);
-        Canvas { view: CapishotView::new(cc.wgpu_render_state.clone()) }
+        let mut view = CapishotView::new(cc.wgpu_render_state.clone());
+        // This host keeps the digit keys for itself (Photoshop's opacity keys clash with them).
+        view.options_mut().keys = Keys::deny(Shortcut::opacity_digits());
+        Canvas { view }
+    }
+
+    /// The canvas alone or Capishot's whole interface, on the same open documents.
+    pub fn set_mode(&mut self, mode: Mode) {
+        self.view.set_mode(mode);
+    }
+
+    /// The mode drawn.
+    pub fn mode(&self) -> Mode {
+        self.view.mode()
+    }
+
+    /// Whether Capishot gets the digit keys (Photoshop's opacity keys) or the host keeps them.
+    pub fn set_digit_keys(&mut self, capishot: bool) {
+        self.view.options_mut().keys = if capishot { Keys::default() } else { Keys::deny(Shortcut::opacity_digits()) };
     }
 
     /// Draw the shown document in all of `ui`'s remaining space, then the host's overlay: a box

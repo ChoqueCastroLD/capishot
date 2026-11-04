@@ -189,6 +189,8 @@ pub struct SaveJob {
 /// The shell's job bookkeeping.
 #[derive(Default)]
 pub struct JobsUi {
+    /// Jobs that ended in hosted frames, for the host API (`embed::full_frame` takes them).
+    pub(crate) hosted_ended: Vec<JobEvent>,
     /// Control replies waiting for a job to end.
     pub(crate) waiters: Vec<(JobId, Sender<ControlResponse>)>,
     /// Background opens, in tab order.
@@ -636,14 +638,18 @@ fn finish_save(app: &mut PhotocraftApp, ctx: &egui::Context, save: SaveJob, labe
 fn close_after_saves(app: &mut PhotocraftApp, ctx: &egui::Context) {
     app.jobs.saves.retain(|s| !(s.ended && s.state.finished()));
     if !app.saving() && !app.printing() && std::mem::take(&mut app.jobs.close_after_saves) {
-        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        crate::hosted::send(ctx, egui::ViewportCommand::Close);
     }
 }
 
 /// Per frame: apply finished jobs and react to them; keep frames coming while jobs run; Esc
 /// cancels the job in view.
 pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
-    tick_events(app, ctx);
+    let ended = tick_events(app, ctx);
+    // In a host app's window the host API reports them (it can't poll the session for them).
+    if crate::hosted::active() {
+        app.jobs.hosted_ended.extend(ended);
+    }
 }
 
 /// [`tick`], returning the jobs that ended this frame: the embedded canvas (`embed.rs`) hands

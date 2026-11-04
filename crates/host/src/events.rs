@@ -159,6 +159,14 @@ pub enum Event {
         /// How it ended.
         end: JobEnd,
     },
+    /// A document has all the fonts its type uses (see [`crate::fonts`]): at its first poll when
+    /// none is missing, else after the registration that completed them. Once per document.
+    FontsReady {
+        /// The document.
+        document: DocumentId,
+        /// The families its type uses.
+        ready: Vec<String>,
+    },
 }
 
 impl Event {

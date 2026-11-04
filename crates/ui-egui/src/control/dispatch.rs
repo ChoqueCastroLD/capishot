@@ -190,14 +190,14 @@ fn shell_methods(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequ
         }
         "ui.resize" => {
             let (w, h) = (p.get("width").and_then(Value::as_f64).unwrap_or(1280.0), p.get("height").and_then(Value::as_f64).unwrap_or(800.0));
-            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w as f32, h as f32)));
+            crate::hosted::send(ctx, egui::ViewportCommand::InnerSize(egui::vec2(w as f32, h as f32)));
             ok(Value::Null)
         }
         "ui.gpu.simulateLoss" => simulate_gpu_loss(app, ctx, p),
         "ui.focus" => {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            crate::hosted::send(ctx, egui::ViewportCommand::Visible(true));
+            crate::hosted::send(ctx, egui::ViewportCommand::Minimized(false));
+            crate::hosted::send(ctx, egui::ViewportCommand::Focus);
             ctx.request_repaint();
             ok(Value::Null)
         }
@@ -239,7 +239,7 @@ fn screenshot(app: &mut PhotocraftApp, ctx: &egui::Context, p: &Value) -> Outcom
     };
     // Occluded windows don't render on macOS, so the screenshot would never arrive: raise first.
     if focus.unwrap_or(true) {
-        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        crate::hosted::send(ctx, egui::ViewportCommand::Focus);
     }
     // The capture itself is admitted by `PhotocraftApp::drain_control` (budget and
     // geometry) and issued from a later `App::ui` pass once open/close animations
@@ -1481,7 +1481,7 @@ fn app_methods(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlReques
         },
         "app.quit" => {
             app.allow_close = true;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            crate::hosted::send(ctx, egui::ViewportCommand::Close);
             ok(Value::Null)
         }
         _ => return None,

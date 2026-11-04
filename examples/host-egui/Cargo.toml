@@ -43,7 +43,7 @@ plugins = ["capishot-host/plugins"]
 #   capishot-host = { git = "https://github.com/ChoqueCastroLD/capishot", rev = "<commit>", default-features = false, features = ["view"] }
 # `default-features = false` leaves out what a host build doesn't need (README.md › Binary size);
 # `view` is the canvas widget (`capishot_host::view::CapishotView`).
-capishot-host = { path = "../../crates/host", default-features = false, features = ["view"] }
+capishot-host = { path = "../../crates/host", default-features = false, features = ["view", "full"] }
 # The same egui and eframe the patches below pin (0.37 on storytold's fork).
 egui = { version = "0.37", default-features = false }
 serde_json = "1"

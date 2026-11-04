@@ -440,3 +440,41 @@ fn saves_are_incremental_flat_formats_work_and_edits_during_a_save_keep_it_dirty
     }
     assert!(h.documents()[0].dirty);
 }
+
+#[test]
+fn raw_rgba_needs_no_png() {
+    use capishot_host::{AddRgba, PutRgba, RgbaImage};
+    let mut host = Host::new();
+    host.execute("file.new", json!({"width": 32, "height": 32})).unwrap();
+    let doc = host.active_document().unwrap();
+    let layer = host.execute("layer.new.layer", json!({})).unwrap()["layer"].as_u64().map(LayerId).unwrap();
+    let _ = host.poll();
+    let data = [0u8, 255, 0, 255].repeat(4 * 4);
+    let image = RgbaImage { width: 4, height: 4, stride: 16, data: &data };
+    host.put_rgba(doc, layer, &image, PutRgba { x: 2, y: 2, ..Default::default() }).unwrap();
+    let px = host.get_pixels(doc, layer, GetPixels { rect: Some([3, 3, 1, 1]), mask: false, raw: true }).unwrap();
+    assert_eq!(px.data, [0, 255, 0, 255]);
+    assert!(host.poll().iter().any(|e| matches!(e, Event::LayerPixelsChanged { layer: l, .. } if *l == layer)));
+    // A new layer, on a hidden document: the active document stays as it is.
+    let hidden = host.open(host_png(), OpenOptions { name: Some("h.png".into()), hidden: true }).unwrap().document;
+    let added = host.add_rgba(hidden, &image, AddRgba { name: Some("Raw".into()), ..Default::default() }).unwrap();
+    assert_eq!(host.active_document(), Some(doc));
+    let tree = host.inspect(hidden, InspectOptions::default()).unwrap();
+    assert!(tree["layers"].as_array().unwrap().iter().any(|l| l["name"] == "Raw" && l["id"] == added.0));
+    // Inside a group: one undo step with the rest; a short buffer is an error, not a panic.
+    host.group(Some(doc), |h| {
+        h.add_rgba(doc, &image, AddRgba::default())?;
+        h.put_rgba(doc, layer, &image, PutRgba::default())
+    })
+    .unwrap();
+    let short = RgbaImage { width: 4, height: 4, stride: 16, data: &data[..8] };
+    assert!(host.put_rgba(doc, layer, &short, PutRgba::default()).is_err());
+    assert!(host.add_rgba(DocumentId(987_654), &image, AddRgba::default()).is_err());
+}
+
+fn host_png() -> Vec<u8> {
+    let mut maker = Host::new();
+    maker.execute("file.new", json!({"width": 8, "height": 8})).unwrap();
+    let d = maker.active_document().unwrap();
+    maker.save(d, &SaveOptions { format: capishot_host::SaveFormat::Png, ..Default::default() }).unwrap().bytes
+}

@@ -15,7 +15,14 @@
 //! empty `missing` list. A host that reads font files on a worker thread calls [`register`]
 //! there, then [`crate::Host::pending_font_layers`] (before) and
 //! [`crate::Host::refresh_fonts`] (after) on the editor's thread.
+//!
+//! **Per document:** [`crate::Host::add_document_fonts`] registers files for one document: they
+//! are unregistered when it closes, unless another document or [`crate::Host::add_fonts`] (global)
+//! holds them too. The registry is the process's: while registered, a font is usable by type in
+//! any document. [`crate::Event::FontsReady`] says when a document has all its fonts: at its first
+//! poll when none is missing, otherwise after the registration that completes them.
 
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, PoisonError};
 
 use photocraft_doc::{DocId, Document, LayerContent, LayerId, TextLayer};
@@ -267,6 +274,74 @@ fn layout_digest(session: &mut Session, doc: DocumentId, layer: Option<HostLayer
     Ok(session.execute_scoped("type.layoutDigest", p, Some(doc.into()), HistoryMode::None)?)
 }
 
+/// Who holds which registered font (by id), and which documents wait for fonts.
+#[derive(Debug, Default)]
+pub(crate) struct FontBook {
+    global: HashSet<String>,
+    per_document: HashMap<DocumentId, HashSet<String>>,
+    /// Documents seen, and whether their [`crate::Event::FontsReady`] went out.
+    reported: HashMap<DocumentId, bool>,
+    /// Fonts changed since the waiting documents were last checked.
+    dirty: bool,
+}
+
+impl FontBook {
+    /// `font` now belongs to `document`, unless it is global.
+    fn hold(&mut self, font: &RegisteredFont, document: Option<DocumentId>) {
+        match document {
+            None => {
+                self.global.insert(font.id.clone());
+            }
+            // Registered by someone else before (a free `register`, another process part): not ours to
+            // unregister, unless a document of ours registered it.
+            Some(d) => {
+                let ours = !font.duplicate || self.per_document.values().any(|f| f.contains(&font.id));
+                if ours && !self.global.contains(&font.id) {
+                    self.per_document.entry(d).or_default().insert(font.id.clone());
+                }
+            }
+        }
+    }
+
+    /// `document` closed: the fonts only it held are unregistered.
+    pub(crate) fn document_closed(&mut self, document: DocumentId) {
+        self.reported.remove(&document);
+        let Some(held) = self.per_document.remove(&document) else { return };
+        for id in held {
+            if !self.global.contains(&id) && !self.per_document.values().any(|f| f.contains(&id)) {
+                unregister(&id);
+            }
+        }
+    }
+}
+
+/// The poll's [`crate::Event::FontsReady`] events: documents seen for the first time with all
+/// their fonts, and waiting ones the last registrations completed. A document still opening
+/// waits (its layers aren't all there).
+pub(crate) fn collect_ready(session: &Session, book: &mut FontBook) -> Vec<crate::Event> {
+    let open: Vec<DocumentId> = session.documents().iter().map(|st| st.doc.id.into()).collect();
+    book.reported.retain(|d, _| open.contains(d));
+    // Closed from the editor's own File menu, not through `Host::close`.
+    let gone: Vec<DocumentId> = book.per_document.keys().filter(|d| !open.contains(d)).copied().collect();
+    for d in gone {
+        book.document_closed(d);
+    }
+    let dirty = std::mem::take(&mut book.dirty);
+    let mut out = Vec::new();
+    for d in open {
+        if book.reported.get(&d) == Some(&true) || (!dirty && book.reported.contains_key(&d)) || session.job_on(d.into()).is_some() {
+            continue;
+        }
+        let Ok(state) = fonts_ready(session, d) else { continue };
+        let done = state.is_ready();
+        book.reported.insert(d, done);
+        if done {
+            out.push(crate::Event::FontsReady { document: d, ready: state.ready });
+        }
+    }
+    out
+}
+
 impl crate::Host {
     /// Which families open document `document`'s type uses, and which are missing.
     pub fn fonts_ready(&self, document: DocumentId) -> Result<FontsReady> {
@@ -282,6 +357,27 @@ impl crate::Host {
     /// mapping loosely spelled missing names to them (one undo step per document; a clean
     /// document stays clean). Returns each file's outcome, in order, and what was redrawn.
     pub fn add_fonts(&mut self, files: Vec<(String, Vec<u8>)>) -> (Vec<Result<RegisteredFont>>, Refreshed) {
+        let (out, refreshed) = self.add_font_files(files);
+        for font in out.iter().flatten() {
+            self.fonts.hold(font, None);
+        }
+        (out, refreshed)
+    }
+
+    /// [`Self::add_fonts`] for one document: the files are held by `document` and unregistered
+    /// when it closes, unless another document or [`Self::add_fonts`] holds them too. While
+    /// registered they are usable by type in any document (the registry is the process's), and
+    /// layers waiting for them anywhere are redrawn. `Err` for a document that isn't open.
+    pub fn add_document_fonts(&mut self, document: DocumentId, files: Vec<(String, Vec<u8>)>) -> Result<(Vec<Result<RegisteredFont>>, Refreshed)> {
+        self::document(self.session(), document)?;
+        let (out, refreshed) = self.add_font_files(files);
+        for font in out.iter().flatten() {
+            self.fonts.hold(font, Some(document));
+        }
+        Ok((out, refreshed))
+    }
+
+    fn add_font_files(&mut self, files: Vec<(String, Vec<u8>)>) -> (Vec<Result<RegisteredFont>>, Refreshed) {
         let prepared: Vec<Result<photocraft_text::user_fonts::Prepared>> = files.into_iter().map(|(name, bytes)| prepare(&name, bytes)).collect();
         // The faces' families and PostScript names, to find the layers drawn by our fallback
         // before the new fonts change what "our layout" is.
@@ -312,6 +408,7 @@ impl crate::Host {
     /// `waiting` is what [`Self::pending_font_layers`] returned before the fonts were
     /// registered; `None` redraws every type layer that uses `families`.
     pub fn refresh_fonts(&mut self, families: &[String], waiting: Option<&[(DocumentId, HostLayerId)]>, auto_resolve: bool) -> Refreshed {
+        self.fonts.dirty = true;
         refresh(self.session_mut(), families, waiting, auto_resolve)
     }
 
@@ -362,6 +459,54 @@ mod tests {
         assert!(register("x.woff2", b"wOF2....".to_vec()).is_err());
         assert!(check("x.otf", vec![1, 2, 3]).is_err());
         assert!(check("x.otf", Vec::new()).is_err());
+    }
+
+    #[test]
+    fn document_fonts_go_when_the_last_holder_closes_and_global_ones_stay() {
+        let inter = || vec![("Inter.ttf".to_string(), photocraft_text::fonts::INTER_REGULAR.as_slice().to_vec())];
+        let has = |id: &str| photocraft_text::shared().lock().unwrap_or_else(PoisonError::into_inner).fonts.has_user_font(id);
+        let mut host = crate::Host::new();
+        let new_doc = |host: &mut crate::Host| {
+            host.execute("file.new", json!({"width": 8, "height": 8})).unwrap();
+            host.active_document().unwrap()
+        };
+        let (a, b) = (new_doc(&mut host), new_doc(&mut host));
+        let (fonts, _) = host.add_document_fonts(a, inter()).unwrap();
+        let id = fonts.first().unwrap().as_ref().unwrap().id.clone();
+        assert!(has(&id));
+        host.add_document_fonts(b, inter()).unwrap();
+        host.close(a, true).unwrap();
+        assert!(has(&id), "b still holds it");
+        host.close(b, true).unwrap();
+        assert!(!has(&id), "the last holder closed");
+        // Held globally: stays.
+        let c = new_doc(&mut host);
+        host.add_document_fonts(c, inter()).unwrap();
+        host.add_fonts(inter());
+        host.close(c, true).unwrap();
+        assert!(has(&id), "global");
+        unregister(&id);
+        // A document that isn't open.
+        assert!(host.add_document_fonts(a, inter()).is_err());
+    }
+
+    #[test]
+    fn fonts_ready_comes_once_and_only_with_every_family_there() {
+        let mut host = crate::Host::new();
+        host.execute("file.new", json!({"width": 64, "height": 64})).unwrap();
+        let plain = host.active_document().unwrap();
+        let ready = |events: &[crate::Event]| events.iter().filter(|e| matches!(e, crate::Event::FontsReady { .. })).count();
+        assert_eq!(ready(&host.poll()), 1, "no type: ready at once");
+        assert_eq!(ready(&host.poll()), 0, "once");
+        host.execute("file.new", json!({"width": 64, "height": 64})).unwrap();
+        let layer = host.execute("type.create", json!({"text": "HI", "x": 5, "y": 30, "size": 12})).unwrap()["layer"].clone();
+        host.execute("type.setStyle", json!({"layer": layer, "fontFamily": "No Such Family Anywhere"})).ok();
+        let waiting = host.active_document().unwrap();
+        if !host.fonts_ready(waiting).unwrap().is_ready() {
+            assert_eq!(ready(&host.poll()), 0, "a family is missing");
+            assert_eq!(ready(&host.poll()), 0);
+        }
+        host.close(plain, true).unwrap();
     }
 
     #[test]

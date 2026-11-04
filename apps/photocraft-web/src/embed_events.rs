@@ -85,9 +85,10 @@ impl Events {
             sink(&e);
         }
         self.last = Some(snap);
-        let docs: Vec<(u64, bool)> = app.session.documents().iter().map(|st| (st.doc.id.0, complete(app, st.doc.id))).collect();
-        for e in self.ready.frame(crate::frame_perf::now_ms(), &docs) {
-            sink(&e);
+        let docs: Vec<u64> = app.session.documents().iter().map(|st| st.doc.id.0).collect();
+        let ready = self.ready.frame(crate::frame_perf::now_ms(), &docs, |id| photocraft_ui_egui::doc_ready::complete(app, photocraft_engine::doc::DocId(id)));
+        for r in ready {
+            sink(&core::ready_event(r.id, r.first_ms, r.final_ms));
         }
         let Some(view) = self.last.as_ref().and_then(|s| s.view.clone()) else { return };
         let ask = {
@@ -167,8 +168,3 @@ fn cached<T: Clone>(cache: &mut Vec<(u64, u64, T)>, id: u64, rev: u64, make: imp
     v
 }
 
-/// Is the document complete: no job works on it (a stepped open, a background filter) and the
-/// fonts its type uses have arrived or failed (that type drawn with them).
-fn complete(app: &PhotocraftApp, doc: photocraft_engine::doc::DocId) -> bool {
-    app.session.job_on(doc).is_none() && photocraft_ui_egui::user_fonts_ui::fonts_settled(app, doc)
-}

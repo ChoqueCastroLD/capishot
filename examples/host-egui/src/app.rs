@@ -4,6 +4,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use capishot_host::view::{Mode, ViewEvent, ViewOutput, WindowRequest};
 use capishot_host::{DocumentId, Event, Host, JobEnd, JobHandle, LayerId};
 
 use crate::script::{self, LayerRow, Removal};
@@ -12,7 +13,9 @@ use crate::view::Canvas;
 /// The example app.
 pub struct HostApp {
     pub(crate) host: Host,
-    canvas: Option<Canvas>,
+    pub(crate) canvas: Option<Canvas>,
+    /// Capishot gets the digit keys (off: the host keeps them).
+    digit_keys: bool,
     pub(crate) doc: Option<DocumentId>,
     layers: Vec<LayerRow>,
     /// Remove with AI's running job.
@@ -51,6 +54,7 @@ impl HostApp {
         let mut app = HostApp {
             host,
             canvas,
+            digit_keys: false,
             doc: None,
             layers: Vec::new(),
             job: None,
@@ -133,6 +137,22 @@ impl HostApp {
     fn side_panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("Host");
         ui.label(&self.status);
+        ui.separator();
+
+        // The host's say: which interface, which keys. Same open documents in both modes.
+        if let Some(c) = self.canvas.as_mut() {
+            let mut mode = c.mode();
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut mode, Mode::Embedded, "Canvas");
+                ui.selectable_value(&mut mode, Mode::Full, "Full Capishot");
+            });
+            if mode != c.mode() {
+                c.set_mode(mode);
+            }
+            if ui.checkbox(&mut self.digit_keys, "Capishot gets the 1–9 keys").changed() {
+                c.set_digit_keys(self.digit_keys);
+            }
+        }
         ui.separator();
 
         let doc = self.doc;
@@ -231,6 +251,29 @@ impl HostApp {
         }
     }
 
+    /// What the view reported besides the host's events: the window is this host's to manage.
+    fn view_events(&mut self, ctx: &egui::Context, out: &ViewOutput) {
+        for e in &out.view_events {
+            match e {
+                ViewEvent::Window(WindowRequest::Title(title)) => ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!("{title} — host"))),
+                // File › Exit in the full interface: this host goes back to its canvas.
+                ViewEvent::Window(WindowRequest::Close) => {
+                    if let Some(c) = self.canvas.as_mut() {
+                        c.set_mode(Mode::Embedded);
+                    }
+                }
+                ViewEvent::DocumentReady { document, first_frame_ms, final_frame_ms } => {
+                    self.log.push(format!("documentReady {} first {first_frame_ms} ms, final {final_frame_ms} ms", document.0));
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if let Some(t) = self.selftest.as_mut() {
+                        t.ready(*document);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// The selected layer's bounds, for the host overlay.
     fn highlight(&self) -> Option<[f32; 4]> {
         self.layers.iter().find(|r| r.selected && r.kind != "group").and_then(|r| r.bounds)
@@ -247,13 +290,17 @@ impl eframe::App for HostApp {
             egui::ScrollArea::vertical().show(ui, |ui| self.side_panel(ui));
         });
         let highlight = self.highlight();
-        let mut drawn = None;
+        let mut out = None;
         egui::CentralPanel::default().show(ui, |ui| match self.canvas.as_mut() {
-            Some(c) => drawn = c.ui(ui, &mut self.host, highlight).document,
+            Some(c) => out = Some(c.ui(ui, &mut self.host, highlight)),
             None => {
                 ui.centered_and_justified(|ui| ui.label("The canvas needs the wgpu renderer."));
             }
         });
+        let drawn = out.as_ref().and_then(|o| o.document);
+        if let Some(out) = &out {
+            self.view_events(ui.ctx(), out);
+        }
         // The events the view's poll just gave (job ends, the person's tool…).
         self.take_events();
         #[cfg(not(target_arch = "wasm32"))]

@@ -93,7 +93,7 @@ pub(crate) fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             craft_update::updater::Action::OpenUrl(url) => download = Some(url),
             // The guarded close path asks about unsaved work and waits for saves; the restart helper
             // relaunches once the process exits.
-            craft_update::updater::Action::Close => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            craft_update::updater::Action::Close => crate::hosted::send(ctx, egui::ViewportCommand::Close),
         }
         if was_open && !app.updates_rt.updater.prompt_open() {
             app.ui.updates_open = false;

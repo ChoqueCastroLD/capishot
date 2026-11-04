@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use photocraft_engine::jobs;
+use photocraft_engine::live_cmds::RgbaImage;
 use photocraft_engine::{BatchHistory, DocState, HistoryMode, Session};
 use serde_json::{Value, json};
 
@@ -153,6 +154,35 @@ pub struct PutPixels {
     pub history: History,
 }
 
+/// [`Host::put_rgba`]'s options.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PutRgba {
+    /// Where the image's top-left goes (document pixels; default the origin).
+    pub x: i32,
+    /// Where the image's top-left goes (document pixels; default the origin).
+    pub y: i32,
+    /// The layer becomes the image, its old pixels dropped. Default: only the image's rect is
+    /// replaced (its transparency too).
+    pub whole_layer: bool,
+    /// Undo history behaviour.
+    pub history: History,
+}
+
+/// [`Host::add_rgba`]'s options.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AddRgba {
+    /// Where the image's top-left goes (document pixels; default the origin).
+    pub x: i32,
+    /// Where the image's top-left goes (document pixels; default the origin).
+    pub y: i32,
+    /// The new layer's name (default "Layer n").
+    pub name: Option<String>,
+    /// The layer it goes above (default the active layer).
+    pub above: Option<LayerId>,
+    /// Undo history behaviour.
+    pub history: History,
+}
+
 /// [`Host::batch`]'s history: one step for the batch or one per command.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum BatchSteps {
@@ -214,6 +244,7 @@ pub struct Host {
     hooks: Option<Box<dyn ViewHooks>>,
     saved: HashMap<u64, Slot>,
     pub(crate) live: HashMap<DocumentId, LiveState>,
+    pub(crate) fonts: crate::fonts::FontBook,
 }
 
 impl Default for Host {
@@ -250,6 +281,7 @@ impl Host {
             hooks: None,
             saved: HashMap::new(),
             live: HashMap::new(),
+            fonts: Default::default(),
         };
         // The baseline: events report changes from here on.
         host.tracker.collect(&host.session, &host.tool, Origin::Local);
@@ -379,6 +411,8 @@ impl Host {
     pub(crate) fn poll_from_view(&mut self, jobs: Vec<jobs::JobEvent>) -> Vec<Event> {
         self.queue.extend(jobs.into_iter().map(job_event));
         self.collect(Origin::Local);
+        let ready = crate::fonts::collect_ready(&self.session, &mut self.fonts);
+        self.queue.extend(ready);
         let events = std::mem::take(&mut self.queue);
         for e in &events {
             for (_, f) in &mut self.subscribers {
@@ -534,6 +568,7 @@ impl Host {
         let i = self.session.index_of_document(document.into()).ok_or(Error::NoDocument(document))?;
         self.session.close(i);
         self.live.remove(&document);
+        self.fonts.document_closed(document);
         Ok(())
     }
 
@@ -643,6 +678,48 @@ impl Host {
     pub fn put_pixels(&mut self, document: DocumentId, layer: LayerId, src: &[u8], opts: PutPixels) -> Result<Value> {
         let p = json!({"layer": layer.0, "src": photocraft_paint::tile::b64_encode(src), "x": opts.x, "y": opts.y});
         self.execute_with("layer.putPixels", p, ExecOptions { document: Some(document), history: opts.history })
+    }
+
+    /// Put raw 8-bit straight RGBA (sRGB) rows into a pixel layer, with no PNG or base64 on the
+    /// way: `layer.putPixels`' conversion to the document's profile and depth, on `image`'s rows
+    /// (any stride). One undo step (none with [`History::None`]); in a group, part of the group.
+    /// A bad size or short buffer is an error. Returns `{layer, rect}`.
+    pub fn put_rgba(&mut self, document: DocumentId, layer: LayerId, image: &RgbaImage<'_>, opts: PutRgba) -> Result<Value> {
+        self.raw_pixels("layer.putPixels", document, opts.history, |s| {
+            photocraft_engine::live_cmds::put_rgba(s, layer.into(), image, opts.x, opts.y, opts.whole_layer)
+        })
+    }
+
+    /// A new pixel layer from raw 8-bit straight RGBA (sRGB) rows, with no PNG or base64 on the
+    /// way (`layer.addImage`'s conversion and placement). The active layer stays active. One undo
+    /// step (none with [`History::None`]); in a group, part of the group. Returns its id.
+    pub fn add_rgba(&mut self, document: DocumentId, image: &RgbaImage<'_>, opts: AddRgba) -> Result<LayerId> {
+        let AddRgba { x, y, name, above, history } = opts;
+        let v = self.raw_pixels("layer.addImage", document, history, |s| {
+            photocraft_engine::live_cmds::add_rgba(s, image, x, y, name, above.map(Into::into))
+        })?;
+        v.get("layer").and_then(Value::as_u64).map(LayerId).ok_or_else(|| Error::Engine("layer.addImage: no `layer` in the reply".into()))
+    }
+
+    /// Run a raw pixel call on `document`, as [`Self::execute_with`] runs a command.
+    fn raw_pixels(&mut self, command: &str, document: DocumentId, history: History, f: impl FnOnce(&mut Session) -> photocraft_engine::Result<Value>) -> Result<Value> {
+        if let Some(g) = self.group.as_ref() {
+            let target = DocumentId::from(g.scope.target());
+            if document != target {
+                return Err(bad(command, format!("a group is open on document {}: commands run on it", target.0)));
+            }
+            if history == History::None {
+                return Err(bad(command, "history none can't run inside a group"));
+            }
+            let v = f(&mut self.session)?;
+            let g = self.group.as_ref().ok_or_else(|| bad(command, "no group is open"))?;
+            self.session.batch_step_check(&g.batch, 0, command)?;
+            return Ok(v);
+        }
+        let scope = self.session.begin_scope(Some(document.into()), history.into())?;
+        let r = f(&mut self.session);
+        self.session.end_scope(scope);
+        Ok(r?)
     }
 
     // ---------- batches, history, groups ----------

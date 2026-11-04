@@ -19,6 +19,14 @@
 //!
 //! [`CapishotEditor`] bundles a [`Host`] and its view for hosts that want one object.
 //!
+//! **Two modes** on the same open documents ([`CapishotView::set_mode`], any frame, nothing
+//! reopened): [`Mode::Embedded`] is the canvas alone (the host draws its own panels around it);
+//! [`Mode::Full`] is Capishot's whole interface (menus, options bar, toolbar, panels, dialogs,
+//! every tool, as the standalone app and the web's full mode have it) in the same rect. In both
+//! the host's own style, theme preference and fonts stay as they are: Capishot's style applies to
+//! its own drawing only for the length of the call. What would act on the window (File › Exit,
+//! the window title, full screen, maximize, focus) arrives as [`ViewEvent::Window`] instead.
+//!
 //! **The session is lent.** The [`Host`] owns the documents. For the length of [`CapishotView::ui`]
 //! the view borrows the host's session (a move, not a copy) and gives it back before returning,
 //! also when the editor panics (the panic is caught and reported as [`ViewEvent::Failed`]). Every
@@ -37,6 +45,7 @@
 
 mod hooks;
 mod overlay;
+mod shell;
 mod theme;
 
 use std::collections::HashMap;
@@ -48,7 +57,8 @@ use photocraft_ui_egui::embed::{self, EmbedOptions};
 use serde_json::{Value, json};
 
 pub use overlay::{CanvasTransform, Overlay};
-pub use photocraft_ui_egui::embed::{Camera, CameraChange, KeyFilter, KeyRouting, Keys, RenderState, default_filter};
+pub use shell::{FileDialog, FileRequest};
+pub use photocraft_ui_egui::embed::{Camera, CameraChange, KeyFilter, KeyRouting, Keys, RenderState, Shortcut, default_filter};
 pub use theme::HostTheme;
 
 use crate::{DocumentId, Event, Host};
@@ -73,24 +83,92 @@ pub enum DocumentCamera {
     },
 }
 
+/// What the widget draws.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Mode {
+    /// The canvas alone; the host draws its own panels around it.
+    #[default]
+    Embedded,
+    /// Capishot's whole interface: menus, options bar, toolbar, panels, dialogs, every tool
+    /// (cargo feature `full`).
+    #[cfg(feature = "full")]
+    Full,
+}
+
+/// The colours of Capishot's own interface in [`Mode::Full`].
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum FullTheme {
+    /// The host's: [`ViewOptions::theme`], else its egui visuals (default).
+    #[default]
+    Host,
+    /// Capishot's own theme (Preferences › Interface › Theme).
+    Capishot,
+}
+
+/// Something the editor asked of the window, which is the host's: carry it out or ignore it.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub enum WindowRequest {
+    /// File › Exit / Quit (or a closing step that ends the app): leave the editor. Unsaved
+    /// documents were not asked about; [`Host::documents`] says which are dirty.
+    Close,
+    /// The window title for the active document (`*name — Capishot`).
+    Title(String),
+    /// View › Screen Mode › Full Screen (`true`) or back (`false`).
+    Fullscreen(bool),
+    /// Maximize (`true`) or restore.
+    Maximized(bool),
+    /// Minimize (`true`) or restore.
+    Minimized(bool),
+    /// Bring the window to the front (files dropped, a prompt that needs an answer).
+    Focus,
+    /// A window size in points (View › Zoom Resizes Windows, the control channel's `ui.resize`).
+    InnerSize([f32; 2]),
+    /// Any other window command, as egui has it.
+    Other(egui::ViewportCommand),
+}
+
+impl From<egui::ViewportCommand> for WindowRequest {
+    fn from(c: egui::ViewportCommand) -> Self {
+        use egui::ViewportCommand as C;
+        match c {
+            C::Close => WindowRequest::Close,
+            C::Title(t) => WindowRequest::Title(t),
+            C::Fullscreen(b) => WindowRequest::Fullscreen(b),
+            C::Maximized(b) => WindowRequest::Maximized(b),
+            C::Minimized(b) => WindowRequest::Minimized(b),
+            C::Focus => WindowRequest::Focus,
+            C::InnerSize(v) => WindowRequest::InnerSize([v.x, v.y]),
+            other => WindowRequest::Other(other),
+        }
+    }
+}
+
 /// The widget's options; change them any time ([`CapishotView::options_mut`]).
 #[derive(Clone, Debug)]
 pub struct ViewOptions {
-    /// The host's say over the keyboard.
+    /// Canvas only, or Capishot's whole interface ([`CapishotView::set_mode`]).
+    pub mode: Mode,
+    /// The colours of Capishot's interface in [`Mode::Full`].
+    pub full_theme: FullTheme,
+    /// The host's say over the keyboard, in both modes: when the editor takes keys and which
+    /// ones ([`Keys::deny`], [`Keys::allow_only`], [`Keys::filter`]).
     pub keys: Keys,
-    /// Draw the editor's own dialogs and cards (Remove with AI progress and model consent,
-    /// prompts, notices) as egui windows in the host's look. Off: dialogs a shortcut opens are
-    /// closed at once; the host runs commands through the API instead.
+    /// [`Mode::Embedded`]: draw the editor's own dialogs and cards (Remove with AI progress and
+    /// model consent, prompts, notices) as egui windows in the host's look. Off: dialogs a
+    /// shortcut opens are closed at once; the host runs commands through the API instead.
+    /// [`Mode::Full`] always has them.
     pub dialogs: bool,
     /// The canvas chrome's colours; `None` follows the host's egui visuals every frame.
     pub theme: Option<HostTheme>,
-    /// Rulers along the canvas (View › Rulers); `None` leaves them as the editor has them.
+    /// Rulers along the canvas (View › Rulers), applied when it changes; `None` leaves them as
+    /// the editor (and the person, through View › Rulers) has them.
     pub rulers: Option<bool>,
 }
 
 impl Default for ViewOptions {
     fn default() -> Self {
-        ViewOptions { keys: Keys::default(), dialogs: true, theme: None, rulers: Some(false) }
+        ViewOptions { mode: Mode::Embedded, full_theme: FullTheme::Host, keys: Keys::default(), dialogs: true, theme: None, rulers: Some(false) }
     }
 }
 
@@ -132,6 +210,34 @@ pub enum ViewEvent {
         /// Its camera now.
         camera: Camera,
     },
+    /// A newly shown document is complete on screen: decoded, its fonts settled, nothing working
+    /// on it and its canvas drawn for its view. Both times count from when it was asked for
+    /// ([`CapishotView::show_document`], [`Host::show`]; else the frame it became the shown one)
+    /// to the end of the first frame that showed it and of the first frame it was complete in.
+    /// Reported each time a document becomes the shown one.
+    DocumentReady {
+        /// The document.
+        document: DocumentId,
+        /// To its first frame on screen (ms).
+        first_frame_ms: f64,
+        /// To its first complete frame (ms).
+        final_frame_ms: f64,
+    },
+    /// The editor asked something of the window (the host's): see [`WindowRequest`].
+    Window(WindowRequest),
+    /// File › Open, Save As, Place…: the host shows its own picker and answers
+    /// ([`FileDialog`]). The editor goes on drawing meanwhile.
+    FileDialog(FileDialog),
+    /// A file the editor wrote (File › Save, Export…): store `bytes` under `name` (the name or
+    /// path the host answered in [`ViewEvent::FileDialog`]). The document counts as saved.
+    WriteFile {
+        /// Where.
+        name: String,
+        /// The file.
+        bytes: std::sync::Arc<Vec<u8>>,
+    },
+    /// A link in the editor (Help, an attribution): open `url` as the host sees fit.
+    OpenUrl(String),
     /// Something the view was asked failed, or the editor hit an internal error in this frame
     /// (caught; the documents are intact).
     Failed {
@@ -182,6 +288,16 @@ pub struct CapishotView {
     cameras: HashMap<DocumentId, Camera>,
     /// The active document and its camera after the last frame.
     last_active: Option<(DocumentId, Camera)>,
+    /// The mode the app was last set up for.
+    applied_mode: Mode,
+    /// The rulers setting last applied.
+    applied_rulers: Option<bool>,
+    /// [`Mode::Full`]'s keyboard focus.
+    full: photocraft_ui_egui::embed::FullState,
+    /// `DocumentReady` bookkeeping.
+    ready: photocraft_ui_egui::doc_ready::ReadyTracker,
+    /// What the editor's services asked of the host.
+    shell: shell::Queue,
 }
 
 impl std::fmt::Debug for CapishotView {
@@ -200,7 +316,9 @@ impl CapishotView {
 
     /// **Unstable.** [`Self::new`] with the editor's platform services (clipboard, beep, file
     /// pickers…); their shape may change in any release.
-    pub fn with_services(render_state: Option<RenderState>, services: photocraft_ui_egui::Services) -> Self {
+    pub fn with_services(render_state: Option<RenderState>, mut services: photocraft_ui_egui::Services) -> Self {
+        let shell = shell::Queue::default();
+        shell::fill(&mut services, &shell);
         let mut app = Box::new(PhotocraftApp::new_embedded(services));
         if let Some(rs) = render_state {
             app.set_wgpu(rs);
@@ -214,7 +332,23 @@ impl CapishotView {
             synced_tool: None,
             cameras: HashMap::new(),
             last_active: None,
+            shell,
+            applied_mode: Mode::Embedded,
+            applied_rulers: None,
+            full: Default::default(),
+            ready: photocraft_ui_egui::doc_ready::ReadyTracker::without_baseline(),
         }
+    }
+
+    /// What the widget draws: the canvas alone or Capishot's whole interface. Switches on the
+    /// next frame, on the same open documents (nothing is reopened or redrawn from scratch).
+    pub fn set_mode(&mut self, mode: Mode) {
+        self.options.mode = mode;
+    }
+
+    /// The mode drawn.
+    pub fn mode(&self) -> Mode {
+        self.options.mode
     }
 
     /// Optional, in the eframe app creator: the context hooks the editor needs (the Type tool's IME
@@ -265,6 +399,7 @@ impl CapishotView {
     /// hidden (it keeps its canvas until the memory budget needs it). Answered by
     /// [`ViewEvent::Shown`]. ([`Host::show`] swaps at once instead.)
     pub fn show_document(&mut self, document: DocumentId, hide_previous: bool, camera: DocumentCamera) {
+        self.ready.note_asked(document.0, photocraft_ui_egui::telemetry::now_ms());
         let mut p = json!({"id": document.0, "hidePrevious": hide_previous});
         if let Some(v) = viewport(camera) {
             p["viewport"] = v;
@@ -309,6 +444,13 @@ impl CapishotView {
     /// [`ViewEvent::Reply`] carries.
     pub fn control(&mut self, method: &str, params: Value) -> u64 {
         self.queue.control(method, params, Awaited::Reply)
+    }
+
+    /// **Optional**: forward eframe's `raw_input_hook` here for what must happen before egui reads
+    /// the input: Windows and Wayland pinch zoom, pen press-and-hold, finger gestures, and the
+    /// control channel's synthetic input. Everything else works without it.
+    pub fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        self.app.gesture_input(ctx, raw);
     }
 
     /// The widget for this frame in all the space `ui` has left. See [`Self::ui_in_rect`].
@@ -371,8 +513,17 @@ impl CapishotView {
     fn lent_frame(&mut self, ui: &mut egui::Ui, rect: Rect, host_tool: &str) -> (Lent, Vec<ViewEvent>, Option<String>) {
         let ctx = ui.ctx().clone();
         let mut events = Vec::new();
-        if let Some(rulers) = self.options.rulers {
-            self.app.ui.extras.rulers = rulers;
+        if self.options.mode != self.applied_mode {
+            self.applied_mode = self.options.mode;
+            // Full: the app's tabs, tiled and floating document windows; embedded: one document
+            // shown at a time.
+            self.app.ui.view.single_document = self.options.mode == Mode::Embedded;
+        }
+        if self.options.rulers != self.applied_rulers {
+            self.applied_rulers = self.options.rulers;
+            if let Some(rulers) = self.options.rulers {
+                self.app.ui.extras.rulers = rulers;
+            }
         }
         // The host's tool, when the host changed it since the last frame.
         if self.synced_tool.as_deref() != Some(host_tool) {
@@ -389,8 +540,28 @@ impl CapishotView {
             }
         }
         self.run_requests(&ctx, &mut events);
-        let opts = EmbedOptions { keys: self.options.keys.clone(), dialogs: self.options.dialogs };
-        let f = embed::frame(&mut self.app, ui, rect, &opts);
+        let f = match self.options.mode {
+            Mode::Embedded => {
+                let opts = EmbedOptions { keys: self.options.keys.clone(), dialogs: self.options.dialogs };
+                let f = embed::frame(&mut self.app, ui, rect, &opts);
+                Drawn { jobs: f.jobs, took_keys: f.took_keys, window: f.window, xform: f.xform }
+            }
+            #[cfg(feature = "full")]
+            Mode::Full => {
+                let tokens = match self.options.full_theme {
+                    FullTheme::Host => Some(match &self.options.theme {
+                        Some(t) => t.tokens(ui.visuals()),
+                        None => embed::tokens_for_visuals(ui.visuals()),
+                    }),
+                    FullTheme::Capishot => None,
+                };
+                let opts = embed::FullOptions { keys: self.options.keys.clone(), tokens };
+                let f = embed::full_frame(&mut self.app, ui, rect, &opts, &mut self.full);
+                Drawn { jobs: f.jobs, took_keys: f.took_keys, window: f.window, xform: f.xform }
+            }
+        };
+        events.extend(f.window.into_iter().map(|c| ViewEvent::Window(c.into())));
+        events.extend(self.shell.take());
         // Replies that arrived (a document switch replies in the frame it swaps).
         self.pending.retain(|(token, awaited, rx)| match rx.try_recv() {
             Ok(v) => {
@@ -416,6 +587,12 @@ impl CapishotView {
             }
         }
         let document = active.and_then(|i| ids.get(i).copied());
+        // `DocumentReady`: the shown document, new each time it becomes the shown one.
+        let shown: Vec<u64> = document.map(|d| vec![d.0]).unwrap_or_default();
+        let app = &mut self.app;
+        for r in self.ready.frame(photocraft_ui_egui::telemetry::now_ms(), &shown, |id| photocraft_ui_egui::doc_ready::complete_on_screen(app, &ctx, photocraft_doc::DocId(id))) {
+            events.push(ViewEvent::DocumentReady { document: DocumentId(r.id), first_frame_ms: round_ms(r.first_ms), final_frame_ms: round_ms(r.final_ms) });
+        }
         self.last_active = document.and_then(|d| self.cameras.get(&d).map(|c| (d, *c)));
         let size = active.and_then(|i| self.app.session.documents().get(i)).map(|st| [st.doc.size.width, st.doc.size.height]);
         let transform = match (f.xform, document, size) {
@@ -449,6 +626,7 @@ impl CapishotView {
                     }
                 }
                 Request::Shown { document, camera } => {
+                    self.ready.note_asked(document.0, photocraft_ui_egui::telemetry::now_ms());
                     let change = match camera {
                         DocumentCamera::Own => None,
                         DocumentCamera::Keep => self
@@ -467,6 +645,19 @@ impl CapishotView {
             }
         }
     }
+}
+
+/// What either mode's frame drew.
+struct Drawn {
+    jobs: Vec<photocraft_engine::jobs::JobEvent>,
+    took_keys: bool,
+    window: Vec<egui::ViewportCommand>,
+    xform: Option<photocraft_ui_egui::canvas::ViewXform>,
+}
+
+/// Milliseconds to a tenth.
+fn round_ms(v: f64) -> f64 {
+    (v.max(0.0) * 10.0).round() / 10.0
 }
 
 /// What the lent frame did.
@@ -531,6 +722,16 @@ impl CapishotEditor {
     /// The editor for this frame in `rect` ([`CapishotView::ui_in_rect`]).
     pub fn ui_in_rect(&mut self, ui: &mut egui::Ui, rect: Rect) -> ViewOutput {
         self.view.ui_in_rect(ui, rect, &mut self.host)
+    }
+
+    /// Canvas only or Capishot's whole interface ([`CapishotView::set_mode`]).
+    pub fn set_mode(&mut self, mode: Mode) {
+        self.view.set_mode(mode);
+    }
+
+    /// The mode drawn.
+    pub fn mode(&self) -> Mode {
+        self.view.mode()
     }
 }
 

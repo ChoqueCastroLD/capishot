@@ -27,6 +27,10 @@ enum Step {
     Removed,
     Undone,
     Text,
+    /// The whole Capishot interface in the same rect, on the same document.
+    Full,
+    /// Back to the canvas alone.
+    Back,
     Done,
 }
 
@@ -51,6 +55,8 @@ pub struct SelfTest {
     removal: Option<Removal>,
     shots: Arc<Mutex<Vec<String>>>,
     asked: usize,
+    /// `DocumentReady` reports.
+    ready: Vec<DocumentId>,
 }
 
 impl SelfTest {
@@ -80,6 +86,7 @@ impl SelfTest {
             removal: None,
             shots: Arc::default(),
             asked: 0,
+            ready: Vec::new(),
         })
     }
 
@@ -88,6 +95,11 @@ impl SelfTest {
         if self.look.is_none() {
             self.look = Some((ctx.global_style(), ctx.fonts(|f| f.definitions().clone())));
         }
+    }
+
+    /// The view reported `DocumentReady`.
+    pub fn ready(&mut self, document: DocumentId) {
+        self.ready.push(document);
     }
 
     /// Events the host reported this frame.
@@ -248,6 +260,25 @@ impl SelfTest {
                     }
                     Err(e) => self.check(false, &format!("saved: {e}")),
                 }
+                self.check(self.ready.contains(&doc), "DocumentReady reported for the shown page");
+                if let Some(c) = app.canvas.as_mut() {
+                    c.set_mode(capishot_host::view::Mode::Full);
+                }
+                self.next(Step::Full);
+            }
+            Step::Full if self.frames == 3 * SETTLE => {
+                self.check(drawn == Some(doc) && app.host.documents().iter().filter(|d| d.id == doc).count() == 1, "the full interface draws the same document");
+                self.screenshot(ctx, "5-full");
+            }
+            Step::Full if self.frames >= 4 * SETTLE => {
+                if let Some(c) = app.canvas.as_mut() {
+                    c.set_mode(capishot_host::view::Mode::Embedded);
+                }
+                self.next(Step::Back);
+            }
+            Step::Back if self.frames == SETTLE => {
+                self.check(drawn == Some(doc), "back on the canvas, same document");
+                self.screenshot(ctx, "6-back");
                 self.next(Step::Done);
             }
             Step::Done => {
