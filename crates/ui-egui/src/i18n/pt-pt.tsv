@@ -3499,9 +3499,6 @@ fontWeight	Italic	Itálico
 	Move folder up	Mover pasta para cima
 	Move folder down	Mover pasta para baixo
 
-# Preview channel badge (title bar of a test deploy)
-	PREVIEW	PRÉVIA
-	Preview build, for testing before a release. It sends no usage statistics.	Versão prévia, para testar antes de publicar. Não envia estatísticas de utilização.
 	This page is large for this device	Esta página é grande para este dispositivo
 	The page has {mp} MP and this device {gb} GB of memory: save often, and keep few documents open.	A página tem {mp} MP e este dispositivo {gb} GB de memória: guarde com frequência e mantenha poucos documentos abertos.
 	Image › Image Size makes it lighter if the browser runs short of memory.	Imagem › Tamanho da imagem torna-a mais leve se faltar memória ao navegador.
