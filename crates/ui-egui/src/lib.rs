@@ -325,6 +325,7 @@ pub use tools::object_finder;
 pub use tools::perspective_crop_ui;
 pub use tools::perspective_ui;
 pub use tools::puppet_ui;
+pub use tools::remove_mask_ui;
 pub use tools::retouch_ui;
 use tools::shape_gradient_ui;
 use tools::shape_options;
@@ -410,13 +411,9 @@ pub struct PhotocraftApp {
     pub(crate) simple: bool,
     /// Footprint trail of a retouching drag (see `stroke_trail`).
     trail: Option<stroke_trail::Trail>,
-    /// Remove tool strokes waiting to be applied together (Remove after each stroke off), the
-    /// document, layer and channel they belong to, and their tint on the canvas (`retouch_ui`).
-    /// Each as a `paint.remove` `strokes` entry: its points and the size, hardness and spacing it
-    /// was drawn with, which its tint shows and its removal uses.
-    pub(crate) remove_pending: Vec<serde_json::Value>,
-    pub(crate) remove_pending_target: Option<retouch_ui::RemoveTarget>,
-    pub(crate) remove_trail: Option<stroke_trail::Trail>,
+    /// The Remove Tool's and Remove with AI's masks waiting to run (Paint mask, then run), with
+    /// their tint on the canvas and the eraser toggle (`remove_mask_ui`).
+    pub(crate) remove_mask: remove_mask_ui::RemoveMasks,
     /// The open menus' items, reused between frames (`menus::ItemCache`).
     pub(crate) menu_cache: Option<menus::ItemCache>,
     /// Move tool drag shown live (`move_ui`).

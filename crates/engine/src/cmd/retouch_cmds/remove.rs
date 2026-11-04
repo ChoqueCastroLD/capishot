@@ -13,6 +13,10 @@
 //! instead of sampling from an area the next stroke is about to remove. With `newLayer` the fill
 //! lands on a new layer above the target, only where the hole is, and the target stays as it was
 //! (Photoshop's *Create a new layer*; with Sample All Layers it fills from the composite).
+//!
+//! A `strokes` entry with `"erase": true` takes its footprint back out of the hole (the mask
+//! painted with Paint mask, then run's eraser, or ⌥): entries apply in order, so a later stroke
+//! paints over an earlier erasure, and an erased pixel stays out however the hole grows.
 
 use super::content_aware_move::{Target, replace};
 use super::patch::coverage;
@@ -55,6 +59,8 @@ struct Plan {
     id: Option<LayerId>,
     /// One stroke (`points`), or several applied together (`strokes`).
     strokes: Vec<Stroke>,
+    /// Per stroke: it erases from the hole instead of adding to it (`"erase": true`).
+    erase: Vec<bool>,
     /// Where the fill samples from: the strokes plus a margin, on the canvas.
     window: Rect,
     close_loops: bool,
@@ -81,18 +87,19 @@ fn stroke_bounds(stroke: &Stroke) -> Rect {
 
 /// The strokes of the request: `strokes` (several, each a list of points, sharing the brush
 /// and the target) or the one in `points`.
-fn parse_strokes(s: &Session, p: &Value) -> Result<(Vec<Stroke>, Option<LayerId>)> {
+fn parse_strokes(s: &Session, p: &Value) -> Result<(Vec<Stroke>, Vec<bool>, Option<LayerId>)> {
     let Some(list) = p.get("strokes") else {
         let (stroke, id) = parse_brush(s, p, CMD)?;
         reject_huge_stroke(CMD, &stroke)?;
-        return Ok((vec![stroke], id));
+        return Ok((vec![stroke], vec![false], id));
     };
-    const ENTRY: &str = "each `strokes` entry is a point list or {\"points\", \"size\"?, \"hardness\"?, \"spacing\"?}";
+    const ENTRY: &str = "each `strokes` entry is a point list or {\"points\", \"size\"?, \"hardness\"?, \"spacing\"?, \"erase\"?}";
     let list = list.as_array().ok_or_else(|| bad(CMD, ENTRY))?;
     if list.is_empty() {
         return Err(bad(CMD, "`strokes` is empty"));
     }
     let mut strokes = Vec::with_capacity(list.len());
+    let mut erase = Vec::with_capacity(list.len());
     let mut id = None;
     for entry in list {
         let mut one = p.clone();
@@ -103,6 +110,10 @@ fn parse_strokes(s: &Session, p: &Value) -> Result<(Vec<Stroke>, Option<LayerId>
             // each stroke off keep the size, hardness and spacing each was drawn with).
             Value::Object(e) => {
                 let points = e.get("points").ok_or_else(|| bad(CMD, ENTRY))?;
+                erase.push(match e.get("erase") {
+                    None | Some(Value::Null) => false,
+                    Some(v) => v.as_bool().ok_or_else(|| bad(CMD, "`erase` must be a boolean"))?,
+                });
                 o.insert("points".into(), points.clone());
                 for k in ["size", "hardness", "spacing"] {
                     if let Some(v) = e.get(k) {
@@ -112,6 +123,7 @@ fn parse_strokes(s: &Session, p: &Value) -> Result<(Vec<Stroke>, Option<LayerId>
             }
             points => {
                 o.insert("points".into(), points.clone());
+                erase.push(false);
             }
         }
         let (stroke, layer) = parse_brush(s, &one, CMD)?;
@@ -119,14 +131,21 @@ fn parse_strokes(s: &Session, p: &Value) -> Result<(Vec<Stroke>, Option<LayerId>
         strokes.push(stroke);
         id = layer;
     }
-    Ok((strokes, id))
+    Ok((strokes, erase, id))
 }
 
 fn plan(s: &Session, p: &Value, ink: bool) -> Result<Plan> {
-    let (strokes, id) = parse_strokes(s, p)?;
+    let (strokes, erase, id) = parse_strokes(s, p)?;
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let canvas = d.doc.bounds();
-    let bounds = strokes.iter().map(stroke_bounds).reduce(|a, b| a.union(&b)).ok_or_else(|| bad(CMD, "`strokes` is empty"))?;
+    // An erasing stroke only takes away: the painted strokes alone set the window.
+    let bounds = strokes
+        .iter()
+        .zip(&erase)
+        .filter(|(_, e)| !**e)
+        .map(|(s, _)| stroke_bounds(s))
+        .reduce(|a, b| a.union(&b))
+        .ok_or_else(|| bad(CMD, "nothing to remove: every stroke erases"))?;
     let pixels = u64::from(bounds.width()) * u64::from(bounds.height());
     if pixels > MAX_PIXELS {
         return Err(bad(CMD, format!("the stroke is too large to remove ({pixels} pixels, at most {MAX_PIXELS})")));
@@ -147,15 +166,17 @@ fn plan(s: &Session, p: &Value, ink: bool) -> Result<Plan> {
     } else {
         None
     };
-    Ok(Plan { id, strokes, window, close_loops, all_layers, new_layer, ai, ink })
+    Ok(Plan { id, strokes, erase, window, close_loops, all_layers, new_layer, ai, ink })
 }
 
-/// The strokes' footprints and their enclosed areas over the plan's window.
-fn painted(plan: &Plan) -> Result<Vec<bool>> {
+/// The strokes' footprints and their enclosed areas over the plan's window, and where the last
+/// stroke over a pixel erased it (kept out of the hole).
+fn painted(plan: &Plan) -> Result<(Vec<bool>, Vec<bool>)> {
     let win = plan.window;
     let (w, h) = (win.width() as usize, win.height() as usize);
     let mut m = vec![false; w * h];
-    for stroke in &plan.strokes {
+    let mut erased = vec![false; if plan.erase.contains(&true) { w * h } else { 0 }];
+    for (stroke, erase) in plan.strokes.iter().zip(&plan.erase) {
         let (bounds, cov) = super::coverage(CMD, stroke)?;
         let bw = bounds.width() as usize;
         for (i, c) in cov.iter().enumerate() {
@@ -163,7 +184,10 @@ fn painted(plan: &Plan) -> Result<Vec<bool>> {
             if *c > 0.0 && win.contains(x, y) {
                 let j = (y - win.y0) as usize * w + (x - win.x0) as usize;
                 if let Some(v) = m.get_mut(j) {
-                    *v = true;
+                    *v = !*erase;
+                }
+                if let Some(v) = erased.get_mut(j) {
+                    *v = *erase;
                 }
             }
         }
@@ -171,7 +195,7 @@ fn painted(plan: &Plan) -> Result<Vec<bool>> {
     if plan.close_loops {
         m = photocraft_algo::remove::close_loops(w, h, &m);
     }
-    Ok(m)
+    Ok((m, erased))
 }
 
 /// The hole over the plan's window: the painted area grown by [`GROW`] (or by the ink it
@@ -179,16 +203,19 @@ fn painted(plan: &Plan) -> Result<Vec<bool>> {
 fn hole(plan: &Plan, doc: &Document, img: &Region, fmt: &photocraft_color::PixelFormat) -> Result<Vec<bool>> {
     let win = plan.window;
     let (w, h) = (win.width() as usize, win.height() as usize);
-    let painted = painted(plan)?;
+    let (painted, erased) = painted(plan)?;
     let mut m = if plan.ink {
         let page = doc.bounds();
-        let brush = plan.strokes.iter().map(|s| s.brush.size).fold(0.0, f32::max);
+        let brush = plan.strokes.iter().zip(&plan.erase).filter(|(_, e)| !**e).map(|(s, _)| s.brush.size).fold(0.0, f32::max);
         let g = super::ink_mask::Grow::for_page(page.width().min(page.height()), brush);
         let lum = super::ink_mask::luminance(&crate::ai_inpaint_cmds::to_rgb(fmt, &img.data));
         super::ink_mask::expand(w, h, &lum, &painted, g)
     } else {
         photocraft_algo::remove::dilate(w, h, &painted, GROW)
     };
+    for (v, e) in m.iter_mut().zip(&erased) {
+        *v &= !*e;
+    }
     if let Some(sel) = doc.selection.as_ref() {
         for (i, c) in coverage(sel, win).into_iter().enumerate() {
             if c <= 0.0 {

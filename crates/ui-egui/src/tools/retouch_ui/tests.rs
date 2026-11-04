@@ -569,13 +569,13 @@ fn waiting_remove_strokes_keep_their_own_brush() {
     };
     app.run("tools.setBrush", json!({"brush": {"size": 20, "hardness": 0.0}})).unwrap();
     stroke(&mut app, 25.0);
-    let tint = |app: &PhotocraftApp| app.remove_trail.as_ref().map(|t| (0..100).filter(|&x| t.coverage(x, 30) > 0).count());
+    let tint = |app: &PhotocraftApp| app.remove_mask.remove.trail.as_ref().map(|t| (0..100).filter(|&x| t.coverage(x, 30) > 0).count());
     let first = tint(&app);
     app.run("tools.setBrush", json!({"brush": {"size": 4, "hardness": 1.0}})).unwrap();
     stroke(&mut app, 75.0);
     assert!(tint(&app).unwrap() > first.unwrap(), "the second stroke adds its tint");
-    assert!((0..100).filter(|&x| app.remove_trail.as_ref().unwrap().coverage(x, 30) > 0).any(|x| x < 25 - 10), "the first keeps its soft 20 px reach");
-    assert!(remove_pending_commit(&mut app));
+    assert!((0..100).filter(|&x| app.remove_mask.remove.trail.as_ref().unwrap().coverage(x, 30) > 0).any(|x| x < 25 - 10), "the first keeps its soft 20 px reach");
+    assert!(crate::remove_mask_ui::run(&mut app));
     assert!(!app.ui.status_error, "{}", app.ui.status);
     let (_, p) = app.session.journal.last().cloned().expect("a journaled command");
     let sizes: Vec<_> = p["strokes"].as_array().unwrap().iter().map(|e| (e["size"].as_f64(), e["hardness"].as_f64())).collect();
@@ -598,29 +598,29 @@ fn remove_after_each_stroke_off_collects_strokes_until_enter_or_escape() {
     }
     // Nothing ran yet: the strokes wait, tinted, and the status says so.
     assert_eq!(app.session.journal.len(), journal, "no command before Enter");
-    assert_eq!(app.remove_pending.len(), 2);
-    assert!(app.remove_trail.is_some());
+    assert_eq!(app.remove_mask.remove.strokes.len(), 2);
+    assert!(app.remove_mask.remove.trail.is_some());
     assert!(app.ui.status.contains("2") && !app.ui.status_error, "{}", app.ui.status);
     // Esc drops them.
-    assert!(remove_pending_cancel(&mut app));
-    assert!(app.remove_pending.is_empty() && app.remove_trail.is_none());
-    assert!(!remove_pending_cancel(&mut app));
+    assert!(crate::remove_mask_ui::clear(&mut app));
+    assert!(app.remove_mask.remove.strokes.is_empty() && app.remove_mask.remove.trail.is_none());
+    assert!(!crate::remove_mask_ui::clear(&mut app));
     // Collected again, Enter applies them as one `paint.remove` with both strokes.
     for x in [28.0, 32.0] {
         tool_event(&mut app, ToolEvent::Down { x, y: 18.0, pressure: 1.0 }, m);
         tool_event(&mut app, ToolEvent::Up { x, y: 42.0 }, m);
     }
     let bg = active(&app).surface().unwrap().rgba(70, 30);
-    assert!(remove_pending_commit(&mut app));
+    assert!(crate::remove_mask_ui::run(&mut app));
     assert!(!app.ui.status_error, "{}", app.ui.status);
     let (id, p) = app.session.journal.last().cloned().expect("a journaled command");
     assert_eq!(id, "paint.remove");
     assert_eq!(p["strokes"].as_array().map(Vec::len), Some(2));
     assert!(p.get("points").is_none());
-    assert!(app.remove_pending.is_empty());
+    assert!(app.remove_mask.remove.strokes.is_empty());
     let px = active(&app).surface().unwrap().rgba(30, 30);
     assert!(px.iter().zip(bg).all(|(a, b)| (a - b).abs() < 0.02), "{px:?} vs {bg:?}");
-    assert!(!remove_pending_commit(&mut app), "nothing left to apply");
+    assert!(!crate::remove_mask_ui::run(&mut app), "nothing left to apply");
 }
 
 #[test]
@@ -635,10 +635,10 @@ fn every_waiting_remove_stroke_is_tinted_in_full() {
         &[[10.0, 50.0, 1.0], [20.0, 50.0, 1.0], [30.0, 50.0, 1.0], [50.0, 50.0, 1.0], [90.0, 50.0, 1.0]],
     ];
     for s in strokes {
-        remove_pending_add(&mut app, s);
+        crate::remove_mask_ui::add(&mut app, Tool::Remove, s, false);
     }
-    assert_eq!(app.remove_pending.len(), 3);
-    let t = app.remove_trail.as_ref().expect("the waiting strokes are tinted");
+    assert_eq!(app.remove_mask.remove.strokes.len(), 3);
+    let t = app.remove_mask.remove.trail.as_ref().expect("the waiting strokes are tinted");
     let k = f64::from(t.scale());
     for s in strokes {
         for w in s.windows(2) {
@@ -649,18 +649,24 @@ fn every_waiting_remove_stroke_is_tinted_in_full() {
             }
         }
     }
-    // Enter, Esc, another tool and another document all drop the tint with the strokes.
-    assert!(remove_pending_commit(&mut app));
-    assert!(app.remove_trail.is_none());
-    remove_pending_add(&mut app, strokes[0]);
-    assert!(remove_pending_cancel(&mut app) && app.remove_trail.is_none());
-    remove_pending_add(&mut app, strokes[1]);
+    // Enter and Esc drop the tint with the strokes.
+    assert!(crate::remove_mask_ui::run(&mut app));
+    assert!(app.remove_mask.remove.trail.is_none());
+    crate::remove_mask_ui::add(&mut app, Tool::Remove, strokes[0], false);
+    assert!(crate::remove_mask_ui::clear(&mut app) && app.remove_mask.remove.trail.is_none());
+    // Another tool or another document hides it; it shows again when they come back, and goes
+    // when its document closes.
+    crate::remove_mask_ui::add(&mut app, Tool::Remove, strokes[1], false);
     app.ui.tool = Tool::SpotHealing;
-    assert!(!remove_pending_live(&mut app) && app.remove_trail.is_none());
+    assert!(!crate::remove_mask_ui::live(&mut app) && app.remove_mask.remove.trail.is_some());
     app.ui.tool = Tool::Remove;
-    remove_pending_add(&mut app, strokes[2]);
+    assert!(crate::remove_mask_ui::live(&mut app));
     app.run("file.new", json!({"width": 100, "height": 60})).unwrap();
-    assert!(!remove_pending_live(&mut app) && app.remove_trail.is_none());
+    assert!(!crate::remove_mask_ui::live(&mut app) && app.remove_mask.remove.trail.is_some());
+    assert!(app.session.set_active(0));
+    assert!(crate::remove_mask_ui::live(&mut app), "back on its document");
+    app.run("file.close", json!({"document": 0})).unwrap();
+    assert!(!crate::remove_mask_ui::live(&mut app) && app.remove_mask.remove.trail.is_none(), "its document closed");
 }
 
 #[test]
@@ -673,9 +679,9 @@ fn queued_remove_cannot_commit_after_layer_or_channel_target_changes() {
         }
         app.ui.tool = Tool::Remove;
         app.ui.tool_options.remove_after_each_stroke = false;
-        remove_pending_add(&mut app, &[[12.0, 10.0, 1.0], [16.0, 12.0, 1.0]]);
-        assert_eq!(app.remove_pending.len(), 1);
-        assert!(remove_pending_live(&mut app));
+        crate::remove_mask_ui::add(&mut app, Tool::Remove, &[[12.0, 10.0, 1.0], [16.0, 12.0, 1.0]], false);
+        assert_eq!(app.remove_mask.remove.strokes.len(), 1);
+        assert!(crate::remove_mask_ui::live(&mut app));
 
         match change {
             "layer" => {
@@ -691,10 +697,10 @@ fn queued_remove_cannot_commit_after_layer_or_channel_target_changes() {
         }
 
         let journal = app.session.journal.len();
-        assert!(!remove_pending_commit(&mut app), "{change}: Enter must not retarget a queued stroke");
+        assert!(!crate::remove_mask_ui::run(&mut app), "{change}: Enter must not retarget a queued stroke");
         assert_eq!(app.session.journal.len(), journal, "{change}: no Remove command ran");
-        assert!(app.remove_pending.is_empty() && app.remove_trail.is_none(), "{change}: queue cleared");
-        assert!(app.remove_pending_target.is_none());
+        assert!(app.remove_mask.remove.strokes.is_empty() && app.remove_mask.remove.trail.is_none(), "{change}: queue cleared");
+        assert!(app.remove_mask.remove.target.is_none());
     }
 }
 
@@ -704,25 +710,27 @@ fn queued_remove_starts_a_new_queue_after_target_switch() {
     app.run("layer.new.layer", json!({"name": "Original"})).unwrap();
     app.ui.tool = Tool::Remove;
     app.ui.tool_options.remove_after_each_stroke = false;
-    remove_pending_add(&mut app, &[[12.0, 10.0, 1.0], [16.0, 12.0, 1.0]]);
+    crate::remove_mask_ui::add(&mut app, Tool::Remove, &[[12.0, 10.0, 1.0], [16.0, 12.0, 1.0]], false);
     app.run("layer.new.layer", json!({"name": "Other"})).unwrap();
-    remove_pending_add(&mut app, &[[40.0, 10.0, 1.0], [44.0, 12.0, 1.0]]);
-    assert_eq!(app.remove_pending.len(), 1, "strokes from different layers must not be combined");
-    assert_eq!(app.remove_pending[0]["points"][0][0], 40.0);
-    assert!(remove_pending_live(&mut app));
+    crate::remove_mask_ui::add(&mut app, Tool::Remove, &[[40.0, 10.0, 1.0], [44.0, 12.0, 1.0]], false);
+    assert_eq!(app.remove_mask.remove.strokes.len(), 1, "strokes from different layers must not be combined");
+    assert_eq!(app.remove_mask.remove.strokes[0]["points"][0][0], 40.0);
+    assert!(crate::remove_mask_ui::live(&mut app));
 }
 
 #[test]
-fn remove_strokes_waiting_are_dropped_when_the_tool_changes() {
+fn remove_strokes_waiting_are_kept_while_another_tool_is_in_use() {
     let mut app = app();
     app.ui.tool = Tool::Remove;
     app.ui.tool_options.remove_after_each_stroke = false;
-    remove_pending_add(&mut app, &[[10.0, 10.0, 1.0], [20.0, 10.0, 1.0]]);
-    assert_eq!(app.remove_pending.len(), 1);
-    assert!(remove_pending_live(&mut app));
+    crate::remove_mask_ui::add(&mut app, Tool::Remove, &[[10.0, 10.0, 1.0], [20.0, 10.0, 1.0]], false);
+    assert_eq!(app.remove_mask.remove.strokes.len(), 1);
+    assert!(crate::remove_mask_ui::live(&mut app));
     app.ui.tool = Tool::SpotHealing;
-    assert!(!remove_pending_live(&mut app));
-    assert!(app.remove_pending.is_empty(), "the strokes belong to the Remove tool");
+    assert!(!crate::remove_mask_ui::live(&mut app), "not shown, Enter doesn't run it");
+    assert_eq!(app.remove_mask.remove.strokes.len(), 1, "kept for when the Remove tool comes back");
+    app.ui.tool = Tool::Remove;
+    assert!(crate::remove_mask_ui::live(&mut app));
 }
 
 #[test]

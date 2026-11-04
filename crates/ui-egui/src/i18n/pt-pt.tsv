@@ -3502,3 +3502,14 @@ fontWeight	Italic	Itálico
 	This page is large for this device	Esta página é grande para este dispositivo
 	The page has {mp} MP and this device {gb} GB of memory: save often, and keep few documents open.	A página tem {mp} MP e este dispositivo {gb} GB de memória: guarde com frequência e mantenha poucos documentos abertos.
 	Image › Image Size makes it lighter if the browser runs short of memory.	Imagem › Tamanho da imagem torna-a mais leve se faltar memória ao navegador.
+	Paint mask, then run	Pintar máscara e depois executar
+	Strokes collect into a mask (tinted red) instead of running when released. Run fills the whole mask at once, as one undo step. Photoshop: Remove after each stroke, off.	Os traços acumulam-se numa máscara (tingida de vermelho) em vez de serem executados ao largar. Executar preenche toda a máscara de uma vez, num só passo de anular. Photoshop: Remover após cada traço, desativado.
+	Erase from mask	Apagar da máscara
+	Strokes take away from the mask (hold Alt for one stroke)	Os traços retiram da máscara (mantenha Alt premido para um só traço)
+	Strokes take away from the mask (hold Option for one stroke)	Os traços retiram da máscara (mantenha Option premido para um só traço)
+	Run	Executar
+	Fill the whole mask at once ({key})	Preencher toda a máscara de uma vez ({key})
+	Clear mask	Limpar máscara
+	Drop the mask (Esc)	Descartar a máscara (Esc)
+	Mask: {n} strokes (Enter runs, Esc clears)	Máscara: {n} traços (Enter executa, Esc limpa)
+	The mask is empty: paint over what to remove	A máscara está vazia: pinte sobre o que pretende remover

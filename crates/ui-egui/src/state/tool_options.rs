@@ -95,6 +95,10 @@ pub struct ToolOptions {
     pub remove_after_each_stroke: bool,
     /// Remove tool: fill the stroke with Manga LaMa (`paint.remove` `ai`) instead of patches.
     pub remove_ai: bool,
+    /// Remove with AI: Paint mask, then run. Strokes collect into a mask (tinted on the canvas)
+    /// and Run (↩) fills it all at once; off, each stroke runs when released. The Remove tool's
+    /// own switch is `remove_after_each_stroke` off (Photoshop's).
+    pub remove_ai_paint_mask: bool,
     pub feather: f32,
     /// linear | radial | angle | reflected | diamond
     pub gradient_style: String,
@@ -469,6 +473,7 @@ impl Default for ToolOptions {
             remove_new_layer: false,
             remove_after_each_stroke: true,
             remove_ai: false,
+            remove_ai_paint_mask: false,
             feather: 0.0,
             gradient_style: "linear".into(),
             gradient_reverse: false,
