@@ -3290,7 +3290,7 @@ mod tests {
         assert!(page(3000, 6000) > canvas_budget(Some(2 * G)), "an 18 MP page is drawn on the CPU canvas there");
         // Desktops are unchanged.
         assert_eq!(canvas_budget(Some(8 * G)), 2 * G);
-        assert_eq!(memory_budget(G, 0, Some(8 * G)), MIN_GPU_BUDGET);
+        assert_eq!(memory_budget(G, 2 * G, Some(8 * G)), MIN_GPU_BUDGET, "the desktop floor");
     }
 
     #[test]
