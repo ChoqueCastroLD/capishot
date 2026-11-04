@@ -236,11 +236,13 @@ pub fn availability(session: &Session) -> AiAvailability {
 // The CPU-only wrappers: every request skips the GPU.
 
 /// `inner`, or with `cpu` every request on the CPU.
+#[cfg_attr(not(any(feature = "ai-native", feature = "ai-web")), allow(dead_code))]
 pub(crate) fn cpu_inpainter(inner: Arc<dyn photocraft_ai_lama::service::Inpainter>, cpu: bool) -> Arc<dyn photocraft_ai_lama::service::Inpainter> {
     if cpu { Arc::new(CpuOnly(inner)) } else { inner }
 }
 
 /// `inner`, or with `cpu` every request on the CPU.
+#[cfg_attr(not(any(feature = "ai-native", feature = "ai-web")), allow(dead_code))]
 pub(crate) fn cpu_genfill(inner: Arc<dyn photocraft_ai_sd::service::GenFill>, cpu: bool) -> Arc<dyn photocraft_ai_sd::service::GenFill> {
     if cpu { Arc::new(CpuOnly(inner)) } else { inner }
 }
