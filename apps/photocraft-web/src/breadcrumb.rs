@@ -25,6 +25,9 @@ thread_local! {
     static FOUND: RefCell<Vec<(String, Value)>> = const { RefCell::new(Vec::new()) };
     /// Breadcrumbs taken into a statistics batch, removed once it is sent ([`reported`]).
     static TAKEN: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    /// A breadcrumb looked alive at start: a page reopened right after a crash finds its
+    /// predecessor's heartbeat only seconds old, so it is checked again once that is long enough.
+    static RECHECK: Cell<bool> = const { Cell::new(false) };
 }
 
 fn storage() -> Option<web_sys::Storage> {
@@ -43,18 +46,23 @@ pub fn memory_bytes() -> u64 {
     }
 }
 
-/// At start: collects the breadcrumbs of dead pages and starts this page's.
-pub fn start() {
-    let now = js_sys::Date::now();
-    STARTED.with(|s| s.set(now));
-    let Some(st) = storage() else { return };
+/// Moves the breadcrumbs of dead pages (no heartbeat for [`DEAD_MS`]) not seen yet into
+/// [`FOUND`]. Returns whether another page's breadcrumb still looked alive.
+fn collect(now: f64) -> bool {
+    let Some(st) = storage() else { return false };
+    let own = KEY.with(|k| k.borrow().clone());
     let len = st.length().unwrap_or(0);
     let keys: Vec<String> = (0..len).filter_map(|i| st.key(i).ok().flatten()).filter(|k| k.starts_with(PREFIX)).collect();
+    let mut alive = false;
     for k in keys {
+        if own.as_deref() == Some(k.as_str()) || FOUND.with(|f| f.borrow().iter().any(|(f, _)| *f == k)) || TAKEN.with(|t| t.borrow().contains(&k)) {
+            continue;
+        }
         let v: Option<Value> = st.get_item(&k).ok().flatten().and_then(|t| serde_json::from_str(&t).ok());
         let beat = v.as_ref().and_then(|v| v.get("t")).and_then(Value::as_f64).unwrap_or(0.0);
         if now - beat < DEAD_MS {
-            continue; // another tab, alive
+            alive = true; // another tab, alive (or a page that died seconds ago: checked again)
+            continue;
         }
         // Kept until the statistics have sent it ([`reported`]): this page may die before then.
         match v {
@@ -67,6 +75,15 @@ pub fn start() {
             }
         }
     }
+    alive
+}
+
+/// At start: collects the breadcrumbs of dead pages and starts this page's.
+pub fn start() {
+    let now = js_sys::Date::now();
+    STARTED.with(|s| s.set(now));
+    let recheck = collect(now);
+    RECHECK.with(|r| r.set(recheck));
     let key = format!("{PREFIX}{:x}{:x}", now as u64, (js_sys::Math::random() * 1e9) as u64);
     KEY.with(|k| *k.borrow_mut() = Some(key));
     // A normal close (or entering the back/forward cache) is clean; coming back starts again.
@@ -91,6 +108,22 @@ pub fn tick(app: &PhotocraftApp) {
         return;
     }
     LAST.with(|l| l.set(now));
+    if RECHECK.with(Cell::get) && now - STARTED.with(Cell::get) > DEAD_MS + BEAT_MS {
+        RECHECK.with(|r| r.set(false));
+        collect(now);
+        if photocraft_ui_egui::telemetry::is_active() {
+            let events = take_events();
+            if !events.is_empty() {
+                photocraft_ui_egui::telemetry::with(|r| {
+                    for e in events {
+                        r.event(e);
+                    }
+                });
+                crate::usage_stats::flush_now();
+                reported();
+            }
+        }
+    }
     // A minute in, statistics that would report the dead pages have (they start on the first
     // frames); otherwise they are off, and the breadcrumbs go.
     if now - STARTED.with(Cell::get) > 60_000.0 && FOUND.with(|f| !f.borrow().is_empty()) {
