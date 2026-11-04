@@ -49,7 +49,7 @@ pub fn start(app: &mut PhotocraftApp, name: &str, bytes: Option<Vec<u8>>, option
         && let Some((mut doc, warnings)) = app.session.doc_cache.get(key, version)
     {
         doc.name = name.to_string();
-        let r = app.open_decoded(doc, options.hidden).and_then(|i| info_of(app, i)).map(|info| Opened { info, warnings, cached: true });
+        let r = app.open_decoded(doc, options.hidden, options.quiet).and_then(|i| info_of(app, i)).map(|info| Opened { info, warnings, cached: true });
         return done(r);
     }
     let Some(bytes) = bytes else {

@@ -77,9 +77,16 @@ fn documents(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let rect = ui.available_rect_before_wrap();
     app.last_canvas_rect = rect;
     app.drop_canvas_rect = Some(rect);
-    // A quiet open's page keeps its preview until its canvas is drawn.
-    if crate::jobs_ui::landing(app, ui, idx, rect) {
-        return;
+    // An open's preview, card or the page shown before stays until its canvas is drawn.
+    match crate::jobs_ui::landing(app, ui, idx, rect) {
+        crate::jobs_ui::StandIn::Canvas => {}
+        crate::jobs_ui::StandIn::Drawn => return,
+        crate::jobs_ui::StandIn::Previous(prev) => {
+            if let Some(view) = app.ui.views.get(prev).cloned() {
+                canvas_view(app, ui, prev, rect, view, false);
+            }
+            return;
+        }
     }
     // Window › Arrange: tiled / n-up layouts show several documents side by side; the active one
     // takes input, a click elsewhere activates that document.
