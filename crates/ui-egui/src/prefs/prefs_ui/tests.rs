@@ -2235,3 +2235,46 @@ fn reset_section_on_type_keeps_the_favourite_fonts() {
     assert_eq!(prefs.favorite_fonts, ["Bebas Neue"], "the favourites are kept");
     assert_eq!(stored(&store)["type"]["favoriteFonts"], json!(["Bebas Neue"]));
 }
+
+/// The browser checkpoints soon after an edit (`autosave_after_edit`), not only every N minutes:
+/// once edits pause for `EDIT_QUIET_MS`, or `EDIT_MAX_WAIT_MS` into a run of edits without one.
+/// A stored or queued revision, or a saved document, needs none.
+#[test]
+fn edits_are_checkpointed_after_a_pause_or_a_bounded_wait() {
+    use super::save::edits_due;
+    let (mut app, _queued, completed) = checkpoint_app();
+    app.services.autosave_unsaved_only = true;
+    app.services.autosave_after_edit = true;
+    app.run("file.new", json!({"width": 8, "height": 8})).unwrap();
+    let id = app.session.active().unwrap().doc.id;
+    app.session.active_mut().unwrap().saved_revision = app.session.active().unwrap().revision;
+    assert!(edits_due(&mut app, 0.0).is_empty(), "nothing unsaved");
+    app.run("edit.fill", json!({"color": "#ff0000"})).unwrap();
+    assert!(edits_due(&mut app, 1_000.0).is_empty());
+    assert!(edits_due(&mut app, 1_000.0 + EDIT_QUIET_MS - 1.0).is_empty());
+    assert!(edits_due(&mut app, 1_000.0 + EDIT_QUIET_MS).contains(&id), "a pause after the edit");
+    // A run of edits a second apart: checkpointed within the bounded wait anyway.
+    let mut app2 = checkpoint_app().0;
+    app2.services.autosave_unsaved_only = true;
+    app2.run("file.new", json!({"width": 8, "height": 8})).unwrap();
+    let id2 = app2.session.active().unwrap().doc.id;
+    let mut t = 0.0;
+    let mut first_due = None;
+    while t <= EDIT_MAX_WAIT_MS + 1_000.0 {
+        app2.run("edit.fill", json!({"color": if (t as u64 / 1000).is_multiple_of(2) { "#ff0000" } else { "#00ff00" }})).unwrap();
+        if first_due.is_none() && edits_due(&mut app2, t).contains(&id2) {
+            first_due = Some(t);
+        }
+        t += 1_000.0;
+    }
+    assert_eq!(first_due, Some(EDIT_MAX_WAIT_MS));
+    // Stored at this revision: nothing due, and the edit record goes.
+    let revision = app.session.active().unwrap().revision;
+    let ctx = egui::Context::default();
+    autosave_now(&mut app);
+    tick(&mut app, &ctx);
+    complete(&completed, id, revision, Ok(()));
+    tick(&mut app, &ctx);
+    assert!(edits_due(&mut app, 60_000.0).is_empty());
+    assert!(app.prefs_rt.edits.is_empty());
+}

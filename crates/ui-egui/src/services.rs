@@ -478,6 +478,11 @@ pub struct Services {
     /// it is saved (the browser, whose storage is small); off natively, where a saved document
     /// keeps its checkpoint for its undo history.
     pub autosave_unsaved_only: bool,
+    /// Also checkpoint a few seconds after each edit (at most [`crate::prefs_ui::EDIT_MAX_WAIT_MS`]
+    /// after the first one not checkpointed yet) and as soon as a background job starts on a
+    /// document, not only every N minutes: the browser, where a phone drops a tab without warning
+    /// and the autosave timer alone lost minutes of work.
+    pub autosave_after_edit: bool,
     /// The shell can list its recovery checkpoints at any time (the browser): File › Recover
     /// Documents… is enabled and asks it to (`recovery_ui`).
     pub recovery_menu: bool,

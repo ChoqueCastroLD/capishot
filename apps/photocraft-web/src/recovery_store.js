@@ -10,7 +10,9 @@
 // don't match their sums is passed over for the one before (or reported damaged).
 //
 // Sessions: each page holds a Web Lock named after its session while it lives, and marks the
-// session closed cleanly on `pagehide`. Checkpoints of a session that holds no lock and didn't
+// session closed cleanly on `pagehide` when it has no unsaved work (`rcv_set_unsaved`): a phone
+// closing a frozen tab, or a tab the system drops, runs `pagehide` too, and its work must be
+// offered on the next load. Checkpoints of a session that holds no lock and didn't
 // close cleanly were left by a crash (or a killed tab). Nothing here runs at import time: the
 // worker pool of the threads build imports this module too.
 
@@ -286,10 +288,10 @@ function markClean(id, on) {
 }
 
 // Starts this page's session: holds its lock while the page lives, and marks it closed cleanly
-// when the page goes away normally (not after a crash: `rcv_mark_crashed`).
+// when the page goes away with nothing unsaved (not after a crash: `rcv_mark_crashed`).
 export function rcv_session_start(id) {
   if (navigator.locks && navigator.locks.request) navigator.locks.request(LOCK + id, () => new Promise(() => {})).catch(() => {});
-  addEventListener('pagehide', () => { if (!self.__capishotCrashed) markClean(id, true); });
+  addEventListener('pagehide', () => { if (!self.__capishotCrashed && !self.__capishotUnsaved) markClean(id, true); });
   addEventListener('pageshow', (e) => { if (e.persisted) markClean(id, false); });
 }
 
@@ -297,6 +299,11 @@ export function rcv_session_start(id) {
 export function rcv_mark_crashed(id) {
   self.__capishotCrashed = true;
   markClean(id, false);
+}
+
+// Whether the page holds unsaved work: leaving it then isn't a clean close.
+export function rcv_set_unsaved(on) {
+  self.__capishotUnsaved = !!on;
 }
 
 export function rcv_clean_sessions() {
