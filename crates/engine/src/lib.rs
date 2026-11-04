@@ -15,6 +15,7 @@ mod channel_clip;
 mod clip_group;
 mod crop_fill;
 pub mod display_color;
+pub mod doc_cache;
 pub mod doc_events;
 pub mod doc_path;
 pub mod filters;
@@ -323,6 +324,9 @@ pub struct Session {
     /// document, source read-only)`. The shell takes them with [`Session::take_held_open`].
     held_opens: Vec<(u64, Document, bool)>,
     next_held_open: u64,
+    /// Decoded documents kept for reopening at once (the embed API's `open(…, {cacheKey,
+    /// version})`); see [`doc_cache`].
+    pub doc_cache: doc_cache::DocCache,
     /// Google Fonts download services (fetcher, store, index), injected by the shell; `None`
     /// where online fonts are unavailable (see `font_download_cmds`).
     font_services: Option<Arc<font_download_cmds::FontServices>>,
@@ -366,8 +370,17 @@ mod tests;
 mod fx_mode_tests;
 
 impl Session {
+    /// The pixel bytes of the open documents and of the decoded-document cache, every tile
+    /// counted once: documents opened from one cache entry share theirs (copy-on-write).
+    pub fn pixel_bytes(&self) -> usize {
+        let mut seen = std::collections::HashSet::new();
+        let docs = self.docs.iter().map(|st| &*st.doc).chain(self.doc_cache.documents());
+        docs.fold(0usize, |n, d| n.saturating_add(photocraft_ops::document_bytes(d, &mut seen)))
+    }
+
     /// What the session holds in memory, for diagnostics (`perf.memory`) and the crash
-    /// breadcrumbs: undo history (resident), the cached page of bubble scans, documents, layers.
+    /// breadcrumbs: undo history (resident), the cached page of bubble scans, the pixels (each
+    /// tile once) and the decoded-document cache, documents, layers.
     pub fn memory_report(&self) -> serde_json::Value {
         let layers: usize = self.docs.iter().map(|st| st.doc.walk().len()).sum();
         let mb = |b: usize| (b as f64 / 1e5).round() / 10.0;
@@ -376,6 +389,8 @@ impl Session {
             "historyMetaMB": mb(self.history_metadata_bytes()),
             "historyStates": self.docs.iter().map(|st| st.history.entries().len()).sum::<usize>(),
             "pageCacheMB": mb(self.typer.place.page_bytes()),
+            "pixelsMB": mb(self.pixel_bytes()),
+            "docCacheMB": mb(self.doc_cache.used()),
             "docs": self.docs.len(),
             "layers": layers,
             "budgetMB": mb(self.prefs().performance.history_budget_bytes()),

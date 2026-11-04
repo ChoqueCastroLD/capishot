@@ -66,6 +66,9 @@ pub struct OpenTab {
     pub preview: Option<photocraft_engine::jobs::PreviewSlot>,
     /// The preview on the GPU, and the document's size (drawn by [`open_card`]).
     pub texture: Option<PreviewTexture>,
+    /// Once the preview shows, it shows alone: no card, a thin progress bar along the canvas's
+    /// top (the embed API's `open(…, {quiet: true})`).
+    pub quiet: bool,
 }
 
 /// An opening file's preview on the GPU, and its document's size.
@@ -215,6 +218,59 @@ pub struct JobsUi {
     /// A place decoding in the background ([`PhotocraftApp::place_bytes`]): Free Transform starts
     /// on its layer when it lands ([`placed`]); further dropped files wait for it.
     pub(crate) placing: Option<JobId>,
+    /// Hidden helper documents opening in the background ([`PhotocraftApp::open_hidden_owned`]):
+    /// no tab, no card, nothing made active.
+    pub(crate) hidden_opens: Vec<JobId>,
+    /// Open jobs whose outcome someone waits for ([`JobsUi::track_open`]), and the outcomes of
+    /// those that ended ([`JobsUi::take_open_outcomes`]).
+    tracked: Vec<JobId>,
+    outcomes: Vec<(JobId, OpenOutcome)>,
+    /// A quiet open whose document is in place but not drawn yet ([`landing`]).
+    pub(crate) landing: Option<Landing>,
+}
+
+/// How long a quiet open's preview may stand in for its landed document's canvas (ms).
+const LANDING_TIMEOUT_MS: f64 = 1000.0;
+
+/// A quiet open's document has landed: its preview stays in the canvas area, as during the
+/// decode, until the canvas has drawn the view it shows ([`crate::canvas::prewarm`]), so no frame
+/// shows a half-composited page.
+#[derive(Clone, Debug)]
+pub(crate) struct Landing {
+    doc: DocId,
+    texture: PreviewTexture,
+    started_ms: f64,
+}
+
+/// How a tracked open ended: the document and its import warnings, or why it didn't open.
+pub type OpenOutcome = Result<(DocId, Vec<String>), String>;
+
+impl JobsUi {
+    /// Keep the outcome of the open job `job` for [`Self::take_open_outcomes`] (the embed API
+    /// settles an `open` once its document is in place).
+    pub fn track_open(&mut self, job: JobId) {
+        self.tracked.push(job);
+    }
+
+    /// The outcomes of the tracked opens that ended since the last call.
+    pub fn take_open_outcomes(&mut self) -> Vec<(JobId, OpenOutcome)> {
+        std::mem::take(&mut self.outcomes)
+    }
+
+    fn ended(&mut self, job: JobId, outcome: OpenOutcome) {
+        if let Some(i) = self.tracked.iter().position(|j| *j == job) {
+            self.tracked.swap_remove(i);
+            self.outcomes.push((job, outcome));
+        }
+    }
+}
+
+/// The document and warnings a finished open job reports (`{docId, warnings}`); held for a
+/// prompt, it has none yet.
+fn opened_of(v: &Value) -> OpenOutcome {
+    let id = v.get("docId").and_then(Value::as_u64).map(DocId).ok_or("the document waits for the Color Settings or damage prompt")?;
+    let warnings = v.get("warnings").and_then(Value::as_array).map(|a| a.iter().filter_map(|w| w.as_str().map(str::to_string)).collect()).unwrap_or_default();
+    Ok((id, warnings))
 }
 
 /// A file encoded off this thread, for the platform writer (a download in the browser).
@@ -472,7 +528,16 @@ fn start_open_inner(app: &mut PhotocraftApp, name: &str, path: Option<String>, s
         // Inline (wasm): finish now, like a background open that ended at once.
         Started::Done(v) => finish_open(app, name, path.as_deref(), &v, None),
         Started::Job(job) => {
-            app.jobs.opens.push(OpenTab { job, name: name.to_string(), path, slot: None, order: None, preview: (!deep).then_some(preview), texture: None });
+            app.jobs.opens.push(OpenTab {
+                job,
+                name: name.to_string(),
+                path,
+                slot: None,
+                order: None,
+                preview: (!deep).then_some(preview),
+                texture: None,
+                quiet: false,
+            });
             app.jobs.focus = Some(job);
             app.ui.chrome.home = None;
             app.ui.status = crate::i18n::fmt(tl!("Opening {name}…"), &[("name", name)]);
@@ -824,21 +889,46 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
         finish_save(app, ctx, save, &e.label, e.outcome);
         return;
     }
+    if e.command == OPEN_JOB
+        && let Some(i) = app.jobs.hidden_opens.iter().position(|j| *j == e.id)
+    {
+        app.jobs.hidden_opens.remove(i);
+        let outcome = match e.outcome {
+            JobOutcome::Done(v) => opened_of(&v).inspect(|(id, _)| app.hidden_opened(*id)),
+            JobOutcome::Failed(err) => Err(err),
+            JobOutcome::Cancelled => Err("the open was cancelled".into()),
+        };
+        app.jobs.ended(e.id, outcome);
+        return;
+    }
     if e.command == OPEN_JOB {
         let Some(i) = app.jobs.opens.iter().position(|o| o.job == e.id) else { return };
         let tab = app.jobs.opens.remove(i);
-        match e.outcome {
-            JobOutcome::Done(v) => {
-                if let Err(err) = finish_open_tab(app, &tab, &v) {
-                    app.open_failed(&tab.name, &err);
+        let outcome = match e.outcome {
+            JobOutcome::Done(v) => match finish_open_tab(app, &tab, &v) {
+                Ok(()) => {
+                    let opened = opened_of(&v);
+                    if let (true, Some(texture), Ok((doc, _))) = (tab.quiet, tab.texture.clone(), &opened) {
+                        app.jobs.landing = Some(Landing { doc: *doc, texture, started_ms: crate::gpu_canvas::now_ms() });
+                    }
+                    opened
                 }
+                Err(err) => {
+                    app.open_failed(&tab.name, &err);
+                    Err(err)
+                }
+            },
+            JobOutcome::Failed(err) => {
+                app.open_failed(&tab.name, &err);
+                Err(err)
             }
-            JobOutcome::Failed(err) => app.open_failed(&tab.name, &err),
             JobOutcome::Cancelled => {
                 app.ui.status = crate::i18n::fmt(tl!("Cancelled opening {name}"), &[("name", &tab.name)]);
                 app.ui.status_error = false;
+                Err("the open was cancelled".into())
             }
-        }
+        };
+        app.jobs.ended(e.id, outcome);
         end_batch(&mut app.jobs);
         return;
     }
@@ -1242,6 +1332,12 @@ pub fn open_card(app: &mut PhotocraftApp, ui: &mut egui::Ui, job: JobId) {
     // A PSD's merged image, as soon as the job has read it: the page shows at once, the card
     // below it while the layers are built.
     let shown = app.jobs.opens.iter_mut().find(|o| o.job == job).is_some_and(|tab| preview_image(ui, area, tab));
+    if shown && tab.quiet {
+        let line = Rect::from_min_size(area.min, vec2(area.width(), 2.0));
+        let done = Rect::from_min_size(line.min, vec2(line.width() * shown_fraction(&j).unwrap_or(0.0).clamp(0.0, 1.0), line.height()));
+        ui.painter().rect_filled(done, 0.0, t.accent);
+        return;
+    }
     // Centre the card at the height its content needed last frame; the background is painted
     // once the rows are laid out, so a taller content (a long translation) still gets a card.
     let height_id = egui::Id::unique(("open-card-height", job));
@@ -1292,6 +1388,29 @@ fn fit_rect(area: Rect, size: egui::Vec2, ppp: f32) -> Rect {
     // As `view_xform::fit_view`: 20 points around, never past one image pixel per screen pixel.
     let k = ((area.width() - 40.0) / size.x.max(1.0)).min((area.height() - 40.0) / size.y.max(1.0)).min(1.0 / ppp.max(0.01)).max(0.0);
     Rect::from_center_size(area.center(), size * k)
+}
+
+/// While a quiet open's document `idx` (the active one) lands: draw its canvas offscreen and,
+/// until that is current, its preview in `area` as during the decode. True when the preview was
+/// drawn (the canvas isn't, this frame).
+pub(crate) fn landing(app: &mut PhotocraftApp, ui: &egui::Ui, idx: usize, area: Rect) -> bool {
+    let Some(l) = app.jobs.landing.clone() else { return false };
+    if app.session.documents().get(idx).map(|st| st.doc.id) != Some(l.doc) {
+        app.jobs.landing = None;
+        return false;
+    }
+    let ready = crate::canvas::prewarm(app, ui.ctx(), idx, false);
+    if ready || crate::gpu_canvas::now_ms() - l.started_ms > LANDING_TIMEOUT_MS {
+        app.jobs.landing = None;
+        return false;
+    }
+    let t = Tokens::get(ui.ctx());
+    ui.painter().rect_filled(area, 0.0, t.canvas);
+    let PreviewTexture(tex, size) = &l.texture;
+    let r = fit_rect(area, *size, ui.ctx().pixels_per_point());
+    ui.painter().image(tex.id(), r, Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+    ui.ctx().request_repaint();
+    true
 }
 
 /// Draws an opening PSD's preview at fit in `area` (true once there is one), uploading it once

@@ -19,13 +19,14 @@ import http from 'node:http';
 import path from 'node:path';
 import zlib from 'node:zlib';
 
-const [dist] = process.argv.slice(2);
-if (!dist || !process.env.CHROME) {
+const [distArg] = process.argv.slice(2);
+if (!distArg || !process.env.CHROME) {
   console.error('usage: CHROME=<chromium> node embed-doc-switch.mjs <dist dir>');
   process.exit(2);
 }
 // The single-threaded build (Trunk's dist/web) or the threads build (dist/web-threads: the module
 // gzipped in v/<hash>/, started after its Web Worker pool).
+const dist = path.resolve(distArg);
 const files = fs.readdirSync(dist);
 const version = fs.existsSync(path.join(dist, 'v')) ? fs.readdirSync(path.join(dist, 'v'))[0] : null;
 const threads = !!version;
@@ -130,7 +131,7 @@ const server = http.createServer((req, res) => {
     return res.end(host);
   }
   const file = path.join(dist, path.normalize(url).replace(/^(\.\.[/\\])+/, ''));
-  if (!file.startsWith(path.resolve(dist)) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+  if (!file.startsWith(dist) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
     res.statusCode = 404;
     return res.end();
   }

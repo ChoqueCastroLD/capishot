@@ -11,7 +11,7 @@ What it does, one button each (`src/script.rs`, also run headless by `tests/cont
    `CapishotView`, next to a layer list the host draws itself (eye and select through commands);
 2. sets the editor's tool from the host (`removeAi`, `brush`, `eraser`, `cloneStamp`…);
 3. runs Remove with AI over a blob as a background job (progress, cancel), one undo step; on a
-   build or device without AI it runs the plain Remove instead;
+   build without AI (or with no models folder) it runs the plain Remove instead;
 4. undoes it;
 5. adds a text layer;
 6. saves the document as PSD bytes (incremental).
@@ -34,6 +34,8 @@ file, in three parts to copy:
    capishot-host = { git = "https://github.com/ChoqueCastroLD/capishot", rev = "<commit>", default-features = false, features = ["view"] }
    ```
 
+   Start from this directory's `Cargo.lock` too: it is the set of versions the contract ran with.
+
 2. **The `[patch]` blocks.** Capishot builds on reviewed forks: egui 0.37 at
    `storytold/egui@6d518fc`, winit at `storytold/winit@a517b38`, and a vendored `egui-wgpu`
    (0.37 with 0.36's renderer; `vendor/egui-wgpu/README.md`). Cargo applies `[patch]` only in the
@@ -53,14 +55,24 @@ file, in three parts to copy:
 ## Binary size
 
 A debug build of a whole Capishot shell was 169 MB. Almost all of that is debug info and features
-a host doesn't use. This example's settings, and what to leave out:
+a host doesn't use. Measured on Linux x86-64 with this example's settings:
+
+| Build | Binary | Fully stripped (`strip`) |
+|---|---|---|
+| native release, `view` only (no AI) | 97 MB | 84 MB |
+| native release, `view` + `ai-native` | 146 MB | 122 MB (33 MB compressed with xz) |
+
+`strip = true` in `[profile.release]` gives the stripped size directly (panic backtraces then lose
+function names); this example keeps `strip = "debuginfo"`.
+
+What to leave out:
 
 | Leave out | How | Saves |
 |---|---|---|
 | Debug info of dependencies | `[profile.dev.package."*"] debug = false`, `[profile.dev] debug = "line-tables-only"` | most of a debug binary (it is mostly DWARF) |
 | Debug info in release | `[profile.release] strip = "debuginfo"` | the rest |
 | WebAssembly filter plug-ins (wasmi interpreter, `plugin.*` commands) | `default-features = false` on `capishot-host` (feature `plugins`) | a few MB |
-| In-process AI (burn, its wgpu/CubeCL kernels, ONNX Runtime loader) | don't enable `ai` unless you run Remove with AI / upscales in process | tens of MB |
+| In-process AI (burn, its wgpu/CubeCL kernels, ONNX Runtime loader) | don't enable `ai-native` / `ai-web` unless you run Remove with AI / upscales in process | about 40 MB natively |
 | Camera raw development, OpenEXR, HEIC | not enabled by `capishot-host` (Capishot's own app and CLI turn them on) | several MB |
 | Translation catalogs other than Spanish and Portuguese | not enabled (`photocraft-ui-egui/all-catalogs`) | about 1 MB |
 | egui's glow renderer | eframe with `wgpu` only (`default-features = false`) | a renderer |
@@ -83,8 +95,22 @@ rustup target add wasm32-unknown-unknown
 trunk build --release           # dist/; `trunk serve --release` serves it on 127.0.0.1:8766
 ```
 
-With `--features ai`, Remove with AI runs Manga LaMa in process (the model downloads once, about
-100 MB, where the host says; see `capishot_host::ai`).
+With `--features ai-native` (`ai-web` in a browser build, which also needs the AI worker
+`packaging/web-ai/build.sh` builds), Remove with AI runs Manga LaMa in process. The host says where
+models live (`Host::install_ai`, `capishot_host::ai`); this example reads `CAPISHOT_MODELS_DIR`,
+`CAPISHOT_MODELS_URL` (empty: no downloads) and `CAPISHOT_AI_DEVICE` (`cpu`, `gpu`, `auto`).
+`CAPISHOT_HOST_PSD=<file>` opens that PSD's bytes instead of the generated page.
+
+## Running the contract in the real app
+
+```sh
+cargo run --release -- --selftest out/
+```
+
+The app runs the steps frame by frame with the canvas drawing (open, tool, Remove with AI, one undo
+step, text, save, reopen), checks every frame that the widget left the host's egui style and fonts
+unchanged, writes a screenshot per step and `out/selftest.json`, and exits with code 1 if a check
+failed. CI runs it under Xvfb on lavapipe.
 
 ## License
 

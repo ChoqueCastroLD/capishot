@@ -145,6 +145,51 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
 
   `batch` sends its commands as JSON: a `src` inside it must be base64 or a `data:` URL; a `Blob`
   or URL goes through `execute('layer.putPixels', …)`.
+- Opening pages fast (`docs/control-protocol.md` › Live sync, "Opening pages fast"):
+  - `openDocument` (and `window.photocraft.open`) settles once the document is in place, with its
+    id, also when a PSD/PSB decodes in a job (feature `open.whenOpen`; before, a PSD on the web
+    settled early without an id).
+  - `{quiet: true}`: while a PSD/PSB decodes, its merged image (read first) shows alone at the
+    view the page will have, with a thin progress bar along the canvas top: no opening card and no
+    tab strip over or above the page (feature `open.quiet`). Once the layers land, the preview
+    stays until the page's canvas has drawn its view offscreen (as `editor.showDocument` does), so
+    no frame shows a half-composited page (feature `open.quiet.prewarm`, at most 1 s).
+  - `openDocument(url)`: fetched as the page fetches, read from the response stream as it arrives
+    into one buffer (the page keeps drawing); the name defaults to the URL's last segment
+    (feature `open.url`).
+  - `{hidden: true}` decodes a PSD/PSB off the frame: on a worker in the threads build, a step at
+    a time between frames in the single-threaded one (feature `open.hidden.background`).
+  - `{cacheKey, version}`: the decoded document is kept in a memory LRU (512 MB by default) and
+    the same key at the same version opens again at once, nothing decoded (`data` may then be
+    `null`); another version decodes again. Every document opened from one entry shares its
+    pixels with the cache and the others (copy-on-write tiles): a hidden raw helper and the
+    shown page hold one copy until one of them is edited. `cached` in the result says which
+    (features `open.cache`, `open.cache.sharedPixels`). `request('document.cache', {remove?,
+    clear?, budgetMb?})` → `{budgetMb, usedMb, entries}`; `request('perf.memory')` reports
+    `pixelsMB` (every tile once) and `docCacheMB`. The cache lives in memory only (not
+    IndexedDB: what it saves is the decode, and the browser's HTTP cache already keeps the
+    file's bytes).
+
+  ```js
+  const page = await capishot.openDocument('https://cdn.example/w/12/p13.psd', null,
+                                           {quiet: true, cacheKey: 'w12/p13', version: rev});
+  const raw = await capishot.openDocument(null, 'p13-raw.psd',
+                                          {hidden: true, cacheKey: 'w12/p13', version: rev}); // at once, shared pixels
+  // Later, back on page 13: from the cache, or decoded again if the file changed.
+  await capishot.openDocument(await fetchIfChanged(), 'p13.psd', {cacheKey: 'w12/p13', version: rev});
+  ```
+
+  Measured by `packaging/web-threads/e2e/embed-fast-open.mjs` (headless Chromium, software GL
+  (SwiftShader), a 2480×3508 page with eight full-page layers, 40 MB PSD; single-threaded /
+  threads build): a quiet cold open shows the page (its merged preview) after 78 / 80 ms and the
+  final page after 710 / 308 ms; with the opening card the first page-like frame is the final
+  one, 755 / 743 ms. From the cache: settled in 158 / 13 ms, the page drawn after 199 / 110 ms
+  (the new document's first composite; switching to a page already open takes 46 / 40 ms). A
+  hidden raw copy of the cached page adds no pixel memory (185.1 → 185.1 MB `pixelsMB`). A hidden
+  PSD helper opens with the longest frame 93 / 36 ms and the canvas unchanged. The URL open,
+  streamed in 16 chunks over about 320 ms, keeps frames under 173 / 38 ms. Still open: on its
+  first frames a new document's canvas can be partly composited (one to five frames here, the
+  rest filled in on the next), after the preview and with a cached reopen alike.
 - Pixels without touching anything (features `layer.getPixels`, `layer.dirtySince`):
   `getPixels({layer, rect?, format?: 'png' | 'rgba', mask?}, {document?})` reads a layer's pixels
   (or its mask) from its tiles, on any open document, with no document switch, no history step and

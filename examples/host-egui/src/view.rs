@@ -57,6 +57,7 @@ impl Canvas {
     }
 
     /// The widget draws with the GPU (eframe's wgpu device), not the CPU fallback.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn gpu_active(&self) -> bool {
         self.view.gpu_active()
     }

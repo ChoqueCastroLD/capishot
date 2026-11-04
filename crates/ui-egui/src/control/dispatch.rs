@@ -37,6 +37,7 @@ fn engine_methods(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlReq
         "fonts.preload" => fonts_preload(&req.params),
         "fonts.status" => fonts_status(&req.params),
         "document.fontsReady" => document_fonts_ready(app, &req.params),
+        "document.cache" => document_cache(app, &req.params),
         "jobs.cancel" => jobs_cancel(app, &req.params),
         "ui.menu.list" => {
             // Report the same enablement the native menu shows, so a listed item is invokable.
@@ -338,6 +339,50 @@ fn document_fonts_ready(app: &PhotocraftApp, p: &Value) -> Outcome {
         },
     };
     Outcome::AfterDocumentFonts { doc, timeout_s: timeout_ms / 1000.0 }
+}
+
+/// `document.cache {remove?: key, clear?: bool, budgetMb?: number}`: the decoded-document cache
+/// the embed API's `open(…, {cacheKey, version})` fills (`photocraft_engine::doc_cache`), after
+/// the change: `{budgetMb, usedMb, entries: [{key, version, mb}]}`, least recently used first.
+fn document_cache(app: &mut PhotocraftApp, p: &Value) -> Outcome {
+    if !(p.is_null() || p.is_object()) {
+        return err("params must be an object");
+    }
+    if let Some(field) = p.as_object().and_then(|o| o.keys().find(|k| !matches!(k.as_str(), "remove" | "clear" | "budgetMb"))) {
+        return err(format!("unknown field `{field}` (fields: remove, clear, budgetMb)"));
+    }
+    let remove = match p.get("remove").filter(|v| !v.is_null()) {
+        None => None,
+        Some(v) => match v.as_str() {
+            Some(k) => Some(k),
+            None => return err("`remove` is a cache key (a string)"),
+        },
+    };
+    let clear = match p.get("clear").filter(|v| !v.is_null()) {
+        None => false,
+        Some(v) => match v.as_bool() {
+            Some(b) => b,
+            None => return err("`clear` must be true or false"),
+        },
+    };
+    let budget = match p.get("budgetMb").filter(|v| !v.is_null()) {
+        None => None,
+        Some(v) => match v.as_f64().filter(|mb| mb.is_finite() && (0.0..=1_048_576.0).contains(mb)) {
+            Some(mb) => Some((mb * 1_048_576.0) as usize),
+            None => return err("`budgetMb` must be a number from 0 to 1048576"),
+        },
+    };
+    let cache = &mut app.session.doc_cache;
+    if let Some(k) = remove {
+        cache.remove(k);
+    }
+    if clear {
+        cache.clear();
+    }
+    if let Some(b) = budget {
+        cache.set_budget(b);
+    }
+    ok(cache.info())
 }
 
 fn ui_set(app: &mut PhotocraftApp, ctx: &egui::Context, p: &Value) -> Outcome {

@@ -45,7 +45,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev
+            libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev \
+            xvfb mesa-vulkan-drivers
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           components: clippy
@@ -66,6 +67,10 @@ jobs:
           cargo build --release
           bytes=$(wc -c < target/release/capishot-host-egui | tr -d ' ')
           echo "capishot-host-egui release binary: $bytes bytes" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Run the contract in the real app (lavapipe, no AI in this build)
+        env:
+          WGPU_BACKEND: vulkan
+        run: xvfb-run -a -s "-screen 0 1400x900x24" target/release/capishot-host-egui --selftest selftest
 
   wasm:
     timeout-minutes: 60
@@ -126,7 +131,7 @@ jobs:
           REV: ${{ github.sha }}
         run: |
           dst="$RUNNER_TEMP/host"
-          rm -rf "$dst" && cp -r . "$dst" && rm -rf "$dst/target" "$dst/Cargo.lock"
+          rm -rf "$dst" && cp -r . "$dst" && rm -rf "$dst/target"
           sed -i \
             -e "s#capishot-host = { path = \"../../crates/host\",#capishot-host = { git = \"$REPO\", rev = \"$REV\",#" \
             -e "s#egui-wgpu = { path = \"../../vendor/egui-wgpu\" }#egui-wgpu = { git = \"$REPO\", rev = \"$REV\" }#" \

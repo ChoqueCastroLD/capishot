@@ -74,11 +74,60 @@ impl PhotocraftApp {
         let (mut doc, warnings) = import(name, bytes, &opts)?;
         photocraft_engine::file_cmds::raw_defaults(&self.session, &warnings, &mut doc);
         let (index, _) = self.session.open_hidden_document(doc, None);
-        self.sync_views();
         if let Some(id) = self.session.documents().get(index).map(|st| st.doc.id) {
-            user_fonts_ui::check_fonts_of(self, id);
+            self.hidden_opened(id);
         }
         Ok((index, warnings))
+    }
+
+    /// [`Self::open_hidden`] for bytes the caller hands over, decoded off the frame where the
+    /// build can: on a worker in the browser threads build, a PSD/PSB a step at a time between
+    /// frames in the single-threaded one (`Session::start_open_hidden`). A helper the size of a
+    /// page then never holds a frame. [`Opening::Job`]: its outcome comes through
+    /// [`jobs_ui::JobsUi::track_open`].
+    pub fn open_hidden_owned(&mut self, name: &str, bytes: Vec<u8>) -> Result<Opening, String> {
+        if !(self.background_jobs || self.stepped_opens && photocraft_io::is_psd(&bytes)) {
+            return self.open_hidden(name, &bytes).map(|(index, warnings)| Opening::Opened(index, warnings));
+        }
+        let started =
+            self.session.start_open_hidden(name, photocraft_engine::jobs::OpenSource::Bytes(std::sync::Arc::new(bytes))).map_err(|e| e.to_string())?;
+        match started {
+            photocraft_engine::jobs::Started::Job(job) => {
+                self.jobs.hidden_opens.push(job);
+                Ok(Opening::Job(job))
+            }
+            photocraft_engine::jobs::Started::Done(v) => {
+                let id = v.get("docId").and_then(Value::as_u64).map(DocId).ok_or("the open returned no document")?;
+                self.hidden_opened(id);
+                let index = self.session.documents().iter().position(|st| st.doc.id == id).ok_or("the opened document is missing")?;
+                let warnings =
+                    v.get("warnings").and_then(Value::as_array).map(|a| a.iter().filter_map(|w| w.as_str().map(str::to_string)).collect()).unwrap_or_default();
+                Ok(Opening::Opened(index, warnings))
+            }
+        }
+    }
+
+    /// A hidden helper document is in place: its served fonts are fetched as an opened
+    /// document's are.
+    pub(crate) fn hidden_opened(&mut self, id: DocId) {
+        self.sync_views();
+        user_fonts_ui::check_fonts_of(self, id);
+    }
+
+    /// Open `doc`, already decoded and through the Color Settings policy (a copy from the
+    /// session's [`DocCache`](photocraft_engine::doc_cache::DocCache)), as `name`: hidden, or
+    /// shown and made active as a finished open is (no warnings notice: they were shown when the
+    /// file was decoded). Returns its index.
+    pub fn open_decoded(&mut self, doc: photocraft_doc::Document, hidden: bool) -> Result<usize, String> {
+        let name = doc.name.clone();
+        let index = if hidden { self.session.add_hidden_document(doc, None) } else { self.session.add_document(doc, None) };
+        let id = self.session.documents().get(index).map(|st| st.doc.id).ok_or("the document is missing")?;
+        if hidden {
+            self.hidden_opened(id);
+        } else {
+            jobs_ui::after_open(self, id, &name, None, &[], None)?;
+        }
+        self.session.documents().iter().position(|st| st.doc.id == id).ok_or_else(|| "the document closed".into())
     }
 
     /// [`Self::open_bytes`] for bytes the caller hands over (the web's picked, dropped and
@@ -859,4 +908,12 @@ impl OpenData<'_> {
             OpenData::Shared(b) => b.clone(),
         }
     }
+}
+
+/// How an open the embed API asked for went: the document is in place (its index and import
+/// warnings), or it opens in a background job.
+#[derive(Debug)]
+pub enum Opening {
+    Opened(usize, Vec<String>),
+    Job(photocraft_engine::jobs::JobId),
 }
