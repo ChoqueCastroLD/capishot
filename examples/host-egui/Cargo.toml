@@ -1,0 +1,133 @@
+# Capishot's host contract example: its OWN Cargo workspace, not Capishot's (the empty
+# `[workspace]` below), so it builds exactly as an outside host does. Native:
+#   cargo run --release
+# Browser (wasm32): trunk build --release   (index.html, Trunk.toml)
+#
+# An outside host copies this file's three parts: the `capishot-host` dependency (as a git
+# dependency at a pinned commit, see README.md), the `[patch]` blocks (Capishot builds on reviewed
+# forks of egui and winit; patches apply only in the root workspace, so every host must repeat
+# them), and the size settings (`default-features = false`, the profiles).
+
+[workspace]
+
+[package]
+name = "capishot-host-egui"
+description = "Contract example: a tiny egui host app that embeds Capishot through capishot-host (native and wasm32)"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "capishot-host-egui"
+path = "src/main.rs"
+
+[features]
+default = []
+# In-process AI (Manga LaMa for Remove with AI, the upscales): adds burn and its GPU stack, tens
+# of MB. Without it `edit.removeAi` is disabled and the example falls back to the plain Remove.
+ai = ["capishot-host/ai"]
+# Sandboxed WebAssembly filter plug-ins (the `plugin.*` commands, a wasmi interpreter): a host
+# rarely needs them.
+plugins = ["capishot-host/plugins"]
+
+[dependencies]
+# In this repository: the checkout itself, so CI checks the contract against every commit.
+# An outside host pins a commit instead (README.md):
+#   capishot-host = { git = "https://github.com/ChoqueCastroLD/capishot", rev = "<commit>", default-features = false, features = ["view"] }
+# `default-features = false` leaves out what a host build doesn't need (README.md › Binary size);
+# `view` is the canvas widget (`capishot_host::view::CapishotView`).
+capishot-host = { path = "../../crates/host", default-features = false, features = ["view"] }
+# The same egui and eframe the patches below pin (0.37 on storytold's fork).
+egui = { version = "0.37", default-features = false }
+serde_json = "1"
+log = "0.4"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# `wgpu`: the canvas draws on eframe's wgpu device (no glow). `default_fonts`: the host's own UI
+# font; Capishot's canvas brings what it needs and changes no global fonts.
+eframe = { version = "0.37", default-features = false, features = ["wgpu", "accesskit", "default_fonts", "wayland", "x11", "winit/default"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+eframe = { version = "0.37", default-features = false, features = ["wgpu", "accesskit", "default_fonts"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+# ---------------------------------------------------------------------------------------------
+# Capishot's pins. Copy both blocks verbatim, with the revisions of the Capishot commit you pin
+# (its root Cargo.toml has the same blocks; update them together when you move the pin).
+# ---------------------------------------------------------------------------------------------
+
+# The egui family and the native event bridge on reviewed fork commits.
+[patch.crates-io]
+ecolor = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+emath = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+epaint = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+epaint_default_fonts = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui-winit = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_glow = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_extras = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_kittest = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_system_font_provider = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+eframe = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_demo_lib = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_inspection = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+winit = { git = "https://github.com/storytold/winit.git", rev = "a517b3846ee8457d84ee4975110bfda6797c44dc" }
+
+# egui-wgpu 0.37 with 0.36's renderer (Capishot's vendor/egui-wgpu, see its README.md). In this
+# repository, the path; an outside host takes it from the Capishot commit it pins:
+#   egui-wgpu = { git = "https://github.com/ChoqueCastroLD/capishot", rev = "<commit>" }
+[patch."https://github.com/storytold/egui.git"]
+egui-wgpu = { path = "../../vendor/egui-wgpu" }
+
+# ---------------------------------------------------------------------------------------------
+# Size and speed (README.md › Binary size). Most of a 150+ MB debug binary is debug info.
+# ---------------------------------------------------------------------------------------------
+
+# Dependencies optimized and without debug info: Capishot's pixel code is unusably slow at
+# opt-level 0, and their debug info is most of a debug binary's size.
+[profile.dev.package."*"]
+opt-level = 2
+debug = false
+
+[profile.dev]
+opt-level = 1
+# file:line in panic backtraces, no variable info.
+debug = "line-tables-only"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
+
+# The browser build (Trunk's `data-cargo-profile`): size first, pixel code kept fast.
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+strip = "debuginfo"
+
+[profile.wasm-release.package."*"]
+opt-level = "s"
+
+[profile.wasm-release.package.photocraft-compose]
+opt-level = 3
+
+[profile.wasm-release.package.photocraft-raster]
+opt-level = 3
+
+[profile.wasm-release.package.photocraft-algo]
+opt-level = 3
+
+[profile.wasm-release.package.photocraft-paint]
+opt-level = 3
