@@ -185,7 +185,9 @@ async function reopen(name, want, W, H, { auto = false, crashWhileLoading = fals
   // Statistics: this page's session_start, and the previous page's unclean exit, within seconds.
   const ev = await waitFor(async () => { const e = statsEvents(since); return e.some((x) => x.e === 'session_start') ? e : null; }, 20000);
   ok(`${name}: session_start reaches the collector within 20 s`, !!ev);
-  if (name !== 'close' && !auto) ok(`${name}: unclean_exit reaches the collector`, (ev || []).some((x) => x.e === 'unclean_exit'));
+  // A page reopened seconds after the crash finds a recent heartbeat: it reports the crash once
+  // that heartbeat is 15 s old.
+  if (name !== 'close' && !auto) ok(`${name}: unclean_exit reaches the collector within 40 s`, !!(await waitFor(async () => statsEvents(since).some((x) => x.e === 'unclean_exit'), 40000)));
   return s;
 }
 

@@ -2261,7 +2261,7 @@ fn edits_are_checkpointed_after_a_pause_or_a_bounded_wait() {
     let mut t = 0.0;
     let mut first_due = None;
     while t <= EDIT_MAX_WAIT_MS + 1_000.0 {
-        app2.run("edit.fill", json!({"color": if (t as u64 / 1000) % 2 == 0 { "#ff0000" } else { "#00ff00" }})).unwrap();
+        app2.run("edit.fill", json!({"color": if (t as u64 / 1000).is_multiple_of(2) { "#ff0000" } else { "#00ff00" }})).unwrap();
         if first_due.is_none() && edits_due(&mut app2, t).contains(&id2) {
             first_due = Some(t);
         }
