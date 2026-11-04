@@ -223,7 +223,67 @@ capishot-host --open`).
 
 ## Binary size
 
-SIZE_PLACEHOLDER
+Where the size goes, measured on Capishot's own 0.13.7 release builds (`capishot` Linux x86-64,
+the same code as the 101 MB Windows exe; the web app's `wasm-bindgen` output before the split),
+by crate from the symbols (`nm` natively, `twiggy` on wasm):
+
+| Part | Native app (109 MB of code and data) | Web app (45.6 MB wasm) |
+|---|---|---|
+| In-process AI: burn, CubeCL/cubek kernels, pliron, `photocraft-ai*` | 25.2 MB (23%) | none (the AI worker is its own wasm) |
+| Rust std/core/alloc, serde, rayon, hashbrown (mostly generic code instantiated for Capishot) | 21.7 MB (20%) | 4.9 MB (11%) |
+| Engine, document model, paint, algorithms, compositor, GPU, vector | 15.7 MB (14%) | 8.1 MB (18%) |
+| Capishot's interface (`photocraft-ui-egui`, `craft-ui`, the app shell) | 15.1 MB (14%) | 6.1 MB (13%) |
+| File formats (PSD, TIFF, EXR, JPEG XL, raw, Affinity, PDF, image codecs) | 10.1 MB (9%) | 5.2 MB (11%) |
+| egui, eframe, winit, wgpu, naga | 8.6 MB (8%) | 2.4 MB (5%) |
+| Type (shaping, font parsing) | 3.0 MB (3%) | 2.0 MB (4%) |
+| Networking and D-Bus (rustls, ureq, zbus: updates, model downloads, portals) | 2.6 MB (2%) | none |
+| Vector rasterizing (vello, tiny-skia, usvg) | 1.5 MB (1%) | 2.2 MB (5%) |
+| Plug-ins (wasmi) | 0.6 MB | none |
+| Data: fonts (Inter, the UI's fallbacks), icons, ICC profiles, presets, catalogs | in 11.5 MB `.rodata` | 4.8 MB (10%) |
+| Function names (the wasm `name` section) | stripped | 9.0 MB (20%), stripped by the web build's split step |
+
+Natively, unwinding tables add 11 MB (`.eh_frame`, `.gcc_except_table`): they are what lets a
+host survive a panic in the editor (the view catches it and reports `ViewEvent::Failed`), so keep
+`panic = "unwind"`. The symbol table adds 27 MB to an unstripped binary. No test assets are linked
+in; debug info is already off in Capishot's release profile.
+
+What a host leaves out, and how:
+
+| Leave out | How | Saves |
+|---|---|---|
+| In-process AI | don't enable `ai-native` / `ai-web` (run Remove with AI on a server, or use the plain Remove) | about 40 MB natively, measured (`examples/host-egui/README.md`) |
+| Capishot's full interface | `features = ["view"]` without `full` (the canvas alone) | see the table below |
+| Camera raw, OpenEXR, HEIC | off unless you enable `camera-raw`, `exr`, `heif` | several MB |
+| WebAssembly plug-ins | off unless you enable `plugins` | 0.6 MB |
+| Translation catalogs beyond English, Spanish and Brazilian Portuguese | off unless you enable `all-catalogs` (others can be fetched at run time) | about 1 MB |
+| The symbol table | `[profile.release] strip = true` (`"symbols"`) | 15–25% of the file (panic backtraces lose function names) |
+| Debug info | `strip = "debuginfo"` at least; in dev, `[profile.dev.package."*"] debug = false` | most of a debug build |
+| The wasm `name` section | `wasm-opt --strip-debug`, or `wasm-bindgen` without `--keep-debug` | 20% of the wasm |
+
+Release profile advice (what `examples/host-egui/Cargo.toml` uses):
+
+```toml
+[profile.release]
+lto = "thin"          # "fat" is a few % smaller and links much slower
+codegen-units = 1
+strip = true          # or "debuginfo" to keep symbol names in backtraces
+# panic stays "unwind": the view catches an editor panic and the host keeps running
+
+[profile.wasm-release] # the browser build (Trunk: data-cargo-profile="wasm-release")
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+
+[profile.wasm-release.package."*"]
+opt-level = "s"
+# pixel crates fast: photocraft-compose, -raster, -algo, -paint at opt-level = 3
+```
+
+`opt-level = "s"` natively makes the binary smaller and the pixel code slower; keep 3 for the
+pixel crates if you try it. Nothing above drops a feature from Capishot's own app or web build:
+they enable what they ship.
+
+HOST_SIZE_TABLE
 
 ## License
 
