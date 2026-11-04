@@ -2,8 +2,9 @@
 //! Worker (`apps/photocraft-ai-worker`), a second wasm module this page loads only when an
 //! upscale runs, so the main module doesn't carry the inference stack.
 //!
-//! The page says where things are with two `<meta>` tags (relative URLs resolve against the
-//! page; packaging/web-ai/build.sh writes the first, the host the second):
+//! The page says where things are with two `<meta>` tags ([`from_page`]; relative URLs resolve
+//! against the page; packaging/web-ai/build.sh writes the first, the host the second), or an app
+//! embedding Capishot passes the same URLs in a [`WebAiConfig`] ([`from_config`]):
 //!
 //! ```html
 //! <meta name="capishot-ai-worker" content="ai/photocraft_ai_worker-<hash>.js">
@@ -104,13 +105,38 @@ pub struct Services {
     pub models: Arc<dyn ModelStore>,
 }
 
+/// Where the AI Web Worker and the models are, for [`from_config`]. URLs may be relative: they
+/// resolve against the page's base URL.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WebAiConfig {
+    /// The worker's wasm-bindgen glue (`ai/photocraft_ai_worker-<hash>.js`, from
+    /// packaging/web-ai/build.sh). Empty: no AI on this page.
+    pub worker_url: String,
+    /// The worker's threads variant (`ai/<hash>/photocraft_ai_worker_mt.js`), used for CPU runs on
+    /// a cross-origin isolated page; ignored on other pages.
+    pub worker_threads_url: Option<String>,
+    /// Where model files are downloaded from (a folder URL). `None`: only models already in the
+    /// browser's Cache Storage ([`WEB_CACHE`]) run.
+    pub models_url: Option<String>,
+}
+
 /// The upscaler, the inpainter and the model store for this page, if it names an AI worker (one
 /// worker runs both; downloads use a second instance).
 pub fn from_page() -> Option<Services> {
-    let worker_url = meta_url("capishot-ai-worker")?;
-    let models_base = meta_url("capishot-ai-models").map(|u| if u.ends_with('/') { u } else { format!("{u}/") });
+    from_config(&WebAiConfig {
+        worker_url: meta_url("capishot-ai-worker")?,
+        worker_threads_url: meta_url("capishot-ai-worker-threads"),
+        models_url: meta_url("capishot-ai-models"),
+    })
+}
+
+/// The services for the worker and models `config` names (`None`: no worker URL, or it doesn't
+/// resolve against the page). Call once per page: the services share one worker.
+pub fn from_config(config: &WebAiConfig) -> Option<Services> {
+    let worker_url = resolve(&config.worker_url)?;
+    let models_base = config.models_url.as_deref().and_then(resolve).map(|u| if u.ends_with('/') { u } else { format!("{u}/") });
     let isolated = Reflect::get(&js_sys::global(), &"crossOriginIsolated".into()).ok().and_then(|v| v.as_bool()).unwrap_or(false);
-    let worker_mt_url = if isolated { meta_url("capishot-ai-worker-threads") } else { None };
+    let worker_mt_url = if isolated { config.worker_threads_url.as_deref().and_then(resolve) } else { None };
     let shared = Arc::new(Mutex::new(Shared { worker_url: Some(worker_url), worker_mt_url, models_base, ..Default::default() }));
     probe(shared.clone(), worker_mt_url_present(&shared));
     scan(shared.clone());
@@ -297,15 +323,21 @@ fn refresh_storage(shared: Arc<Mutex<Shared>>) {
     });
 }
 
+/// A `<meta name>`'s content, as written (resolved by [`from_config`]).
 fn meta_url(name: &str) -> Option<String> {
     let doc = web_sys::window()?.document()?;
     let el = doc.query_selector(&format!("meta[name=\"{name}\"]")).ok()??;
-    let content = el.get_attribute("content")?.trim().to_string();
-    if content.is_empty() {
+    el.get_attribute("content")
+}
+
+/// `url` resolved against the page's base URL (`None`: empty or not a URL).
+fn resolve(url: &str) -> Option<String> {
+    let url = url.trim();
+    if url.is_empty() {
         return None;
     }
-    let base = doc.base_uri().ok()??;
-    web_sys::Url::new_with_base(&content, &base).ok().map(|u| u.href())
+    let base = web_sys::window()?.document()?.base_uri().ok()??;
+    web_sys::Url::new_with_base(url, &base).ok().map(|u| u.href())
 }
 
 impl WebUpscaler {
