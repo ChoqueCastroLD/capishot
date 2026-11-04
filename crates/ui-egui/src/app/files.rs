@@ -63,6 +63,24 @@ impl PhotocraftApp {
         self.open_data(name, OpenData::Borrowed(bytes), None)
     }
 
+    /// Open a flat image, PSD, PSB or `.pcraft` as a hidden helper document (the embed API's
+    /// `openDocument(…, {hidden: true})`): decoded now, the Color Settings policy applied without
+    /// a prompt, never shown, given a tab or made active; the active document, its view and the
+    /// focus stay as they are. Its served fonts are fetched as an opened document's are. Returns
+    /// its index and the import warnings.
+    pub fn open_hidden(&mut self, name: &str, bytes: &[u8]) -> Result<(usize, Vec<String>), String> {
+        let import = self.services.import.as_ref().ok_or("no importer configured")?;
+        let opts = photocraft_engine::jobs::import_options(self.session.prefs());
+        let (mut doc, warnings) = import(name, bytes, &opts)?;
+        photocraft_engine::file_cmds::raw_defaults(&self.session, &warnings, &mut doc);
+        let (index, _) = self.session.open_hidden_document(doc, None);
+        self.sync_views();
+        if let Some(id) = self.session.documents().get(index).map(|st| st.doc.id) {
+            user_fonts_ui::check_fonts_of(self, id);
+        }
+        Ok((index, warnings))
+    }
+
     /// [`Self::open_bytes`] for bytes the caller hands over (the web's picked, dropped and
     /// embedded files): a PSD/PSB is decoded from them in place, never copied first.
     pub fn open_owned(&mut self, name: &str, bytes: Vec<u8>) -> Result<Vec<String>, String> {

@@ -5,7 +5,9 @@
 //! ```js
 //! photocraft.info()                       // {app: "0.6.0", format: 1}
 //! photocraft.isDirty()                    // unsaved changes in an open document?
-//! await photocraft.open(bytes, "a.psd")   // ArrayBuffer, typed array or Blob → {warnings} once open
+//! await photocraft.open(bytes, "a.psd")   // ArrayBuffer, typed array or Blob → {warnings, id} once open
+//! await photocraft.open(bytes, "p.psd", {hidden: true})   // a hidden helper document: never shown or activated
+//! await photocraft.batch([{command, params}], {document, history: "one"})   // one transaction → {results}
 //! await photocraft.save("psd")            // the active document as a Uint8Array (pcraft, psd, png…)
 //! await photocraft.request("ui.inspect")  // a desktop control-channel method → its result
 //! window.addEventListener("photocraft-dirty", e => e.detail)   // true / false as it changes
@@ -40,12 +42,14 @@ use wasm_bindgen_futures::JsFuture;
 use crate::embed_protocol::{self as protocol, Call, PhotopeaConfig};
 
 type Settle = (js_sys::Function, js_sys::Function);
+/// An open waiting for the app: the file's name, its bytes, whether it opens hidden.
+type Open = (String, Vec<u8>, bool, Settle);
 
 thread_local! {
     static CTX: RefCell<Option<egui::Context>> = const { RefCell::new(None) };
     static CONTROL: RefCell<Option<Sender<ControlRequest>>> = const { RefCell::new(None) };
     /// Opens and saves waiting for the next frame (they need the app), with how to settle each.
-    static OPENS: RefCell<Vec<(String, Vec<u8>, Settle)>> = const { RefCell::new(Vec::new()) };
+    static OPENS: RefCell<Vec<Open>> = const { RefCell::new(Vec::new()) };
     static SAVES: RefCell<Vec<(String, Settle)>> = const { RefCell::new(Vec::new()) };
     /// Control requests sent, waiting for the app's reply.
     static WAITING: RefCell<Vec<(Receiver<ControlResponse>, Settle)>> = const { RefCell::new(Vec::new()) };
@@ -89,13 +93,19 @@ pub fn process(app: &mut PhotocraftApp) {
     let names: Vec<String> = OPENS.with(|o| o.borrow().iter().map(|(n, ..)| n.clone()).collect());
     let ready = photocraft_ui_egui::code_gate::files_ready(app) && names.iter().all(|n| photocraft_ui_egui::code_gate::open_ready(app, n));
     let opens = if ready && photocraft_ui_egui::code_gate::files_ready(app) { OPENS.with(|o| std::mem::take(&mut *o.borrow_mut())) } else { Vec::new() };
-    for (name, bytes, (resolve, reject)) in opens {
-        match app.open_owned(&name, bytes) {
-            Ok(warnings) => resolve.call1(&JsValue::NULL, &to_js(&json!({ "warnings": warnings }))).ok(),
-            Err(e) => {
-                app.open_failed(&name, &e);
-                reject.call1(&JsValue::NULL, &js_sys::Error::new(&e)).ok()
-            }
+    for (name, bytes, hidden, (resolve, reject)) in opens {
+        let opened = if hidden {
+            // A helper document: no tab, no notice, the active document stays.
+            app.open_hidden(&name, &bytes).map(|(i, warnings)| json!({ "warnings": warnings, "id": app.session.documents().get(i).map(|st| st.doc.id.0) }))
+        } else {
+            let before = app.session.active().map(|st| st.doc.id);
+            app.open_owned(&name, bytes)
+                .map(|warnings| json!({ "warnings": warnings, "id": app.session.active().map(|st| st.doc.id.0).filter(|id| Some(*id) != before.map(|b| b.0)) }))
+                .inspect_err(|e| app.open_failed(&name, e))
+        };
+        match opened {
+            Ok(v) => resolve.call1(&JsValue::NULL, &to_js(&v)).ok(),
+            Err(e) => reject.call1(&JsValue::NULL, &js_sys::Error::new(&e)).ok(),
         };
     }
     for (format, (resolve, reject)) in SAVES.with(|s| std::mem::take(&mut *s.borrow_mut())) {
@@ -204,8 +214,8 @@ fn error(msg: &str) -> JsValue {
 
 /// Opens `bytes` as `name` on the next frame, as File › Open does; settles once it is open (with
 /// its warnings) or has failed (as File › Open reports it, too).
-fn open_queued(name: String, bytes: Vec<u8>) -> js_sys::Promise {
-    let p = promise(|settle| OPENS.with(|o| o.borrow_mut().push((name, bytes, settle))));
+fn open_queued(name: String, bytes: Vec<u8>, hidden: bool) -> js_sys::Promise {
+    let p = promise(|settle| OPENS.with(|o| o.borrow_mut().push((name, bytes, hidden, settle))));
     repaint();
     p
 }
@@ -214,6 +224,26 @@ fn save(format: String) -> js_sys::Promise {
     let p = promise(|settle| SAVES.with(|s| s.borrow_mut().push((format, settle))));
     repaint();
     p
+}
+
+/// `request` from the page: an `engine.execute` of `layer.putPixels {src}` with a Blob, an
+/// ArrayBuffer or a URL reads it first ([`crate::src_param`]).
+fn request_js(method: String, params: JsValue) -> js_sys::Promise {
+    let inner = js_sys::Reflect::get(&params, &"params".into()).unwrap_or(JsValue::UNDEFINED);
+    let command = js_sys::Reflect::get(&params, &"command".into()).ok().and_then(|c| c.as_string());
+    if method == "engine.execute" && command.as_deref() == Some("layer.putPixels") && crate::src_param::needs_reading(&inner) {
+        return wasm_bindgen_futures::future_to_promise(async move {
+            let inner = crate::src_param::read(inner).await.map_err(|e| error(&e))?;
+            let mut req = from_js(&{
+                let outer = js_sys::Object::assign(&js_sys::Object::new(), params.unchecked_ref());
+                js_sys::Reflect::delete_property(&outer, &"params".into()).ok();
+                outer.into()
+            });
+            req["params"] = inner;
+            JsFuture::from(request(method, req)).await
+        });
+    }
+    request(method, from_js(&params))
 }
 
 fn request(method: String, params: Value) -> js_sys::Promise {
@@ -240,12 +270,25 @@ async fn bytes_of(data: JsValue) -> Result<Vec<u8>, String> {
     Err("open takes an ArrayBuffer, a typed array or a Blob".into())
 }
 
-fn open(data: JsValue, name: Option<String>) -> js_sys::Promise {
+fn open(data: JsValue, name: Option<String>, options: JsValue) -> js_sys::Promise {
     let name = name.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| "document".into());
+    let hidden = match crate::embed_api_core::open_options(&from_js(&options)) {
+        Ok(h) => h,
+        Err(e) => return js_sys::Promise::reject(&error(&e)),
+    };
     wasm_bindgen_futures::future_to_promise(async move {
         let bytes = bytes_of(data).await.map_err(|e| error(&e))?;
-        JsFuture::from(open_queued(name, bytes)).await
+        JsFuture::from(open_queued(name, bytes, hidden)).await
     })
+}
+
+/// `photocraft.batch(commands, options)`: `document.batch` as one transaction (the embed API's
+/// `batch`, `embed/README.md`).
+fn batch(commands: JsValue, options: JsValue) -> js_sys::Promise {
+    match crate::embed_api_core::batch_request(from_js(&commands), &from_js(&options)) {
+        Ok(req) => request("engine.execute".into(), req),
+        Err(e) => js_sys::Promise::reject(&error(&e)),
+    }
 }
 
 /// `window.photocraft`.
@@ -256,16 +299,20 @@ fn api_object() -> JsValue {
     };
     set("info", Closure::<dyn Fn() -> JsValue>::new(|| to_js(&protocol::info())).into_js_value());
     set("isDirty", Closure::<dyn Fn() -> bool>::new(|| DIRTY.with(Cell::get)).into_js_value());
-    set("open", Closure::<dyn Fn(JsValue, JsValue) -> js_sys::Promise>::new(|data: JsValue, name: JsValue| open(data, name.as_string())).into_js_value());
+    set(
+        "open",
+        Closure::<dyn Fn(JsValue, JsValue, JsValue) -> js_sys::Promise>::new(|data: JsValue, name: JsValue, options: JsValue| {
+            open(data, name.as_string(), options)
+        })
+        .into_js_value(),
+    );
+    set("batch", Closure::<dyn Fn(JsValue, JsValue) -> js_sys::Promise>::new(batch).into_js_value());
     set(
         "save",
         Closure::<dyn Fn(JsValue) -> js_sys::Promise>::new(|format: JsValue| save(format.as_string().unwrap_or_else(|| photocraft_format::EXTENSION.into())))
             .into_js_value(),
     );
-    set(
-        "request",
-        Closure::<dyn Fn(String, JsValue) -> js_sys::Promise>::new(|method: String, params: JsValue| request(method, from_js(&params))).into_js_value(),
-    );
+    set("request", Closure::<dyn Fn(String, JsValue) -> js_sys::Promise>::new(request_js).into_js_value());
     obj.into()
 }
 
@@ -302,7 +349,7 @@ fn listen(window: &web_sys::Window, origin: &str) {
         let pending = match call {
             Call::Info => return post(&protocol::reply(&id, Ok(protocol::info())), None),
             Call::IsDirty => return post(&protocol::reply(&id, Ok(Value::Bool(DIRTY.with(Cell::get)))), None),
-            Call::Open { name } => open(js_sys::Reflect::get(&data, &"data".into()).unwrap_or(JsValue::UNDEFINED), Some(name)),
+            Call::Open { name } => open(js_sys::Reflect::get(&data, &"data".into()).unwrap_or(JsValue::UNDEFINED), Some(name), JsValue::UNDEFINED),
             Call::Save { format } => save(format),
         };
         wasm_bindgen_futures::spawn_local(async move {
@@ -372,7 +419,7 @@ pub fn open_config_files(config: &PhotopeaConfig) {
             let name = protocol::file_name(&url);
             post_status(&format!("loading:{name}"));
             let opened = match fetch_bytes(&url).await {
-                Ok(bytes) => JsFuture::from(open_queued(name.clone(), bytes)).await.map(|_| ()).map_err(js_err),
+                Ok(bytes) => JsFuture::from(open_queued(name.clone(), bytes, false)).await.map(|_| ()).map_err(js_err),
                 Err(e) => Err(e),
             };
             if let Err(e) = opened {

@@ -55,8 +55,20 @@ impl Session {
         }
     }
 
+    /// How many documents are shown (tabs, tiles, windows): the first ones of
+    /// [`Self::documents`]; hidden helper documents follow them ([`DocState::hidden`]).
+    pub fn visible_count(&self) -> usize {
+        self.docs.iter().take_while(|st| !st.hidden).count()
+    }
+
+    /// The shown documents (every one but the hidden helpers), in tab order.
+    pub fn visible_documents(&self) -> &[DocState] {
+        self.docs.get(..self.visible_count()).unwrap_or_default()
+    }
+
+    /// Make shown document `index` active. A hidden one is never made active: `false`.
     pub fn set_active(&mut self, index: usize) -> bool {
-        if index < self.docs.len() {
+        if index < self.visible_count() {
             self.active = Some(index);
             self.note_active_change();
             self.sync_tools_mask_target();
@@ -95,8 +107,13 @@ impl Session {
     /// Move the document at `from` to tab position `to` (clamped to the last), keeping the active
     /// document active. Returns its new index; `None` when `from` is out of range.
     pub fn move_document(&mut self, from: usize, to: usize) -> Option<usize> {
+        // Tabs move among the shown documents; hidden ones stay after them.
+        let shown = self.visible_count();
+        if from >= shown {
+            return None;
+        }
         let active = self.active().map(|d| d.doc.id);
-        let to = move_item(&mut self.docs, from, to)?;
+        let to = move_item(&mut self.docs, from, to.min(shown.saturating_sub(1)))?;
         self.active = active.and_then(|id| self.docs.iter().position(|d| d.doc.id == id));
         self.note_active_change();
         Some(to)
@@ -105,7 +122,31 @@ impl Session {
     /// Add a document (from File → New, an import, etc.) and make it active.
     /// Preserve its identity unless another open document already owns it.
     /// Identity-dependent callers must read the admitted document at the returned index.
-    pub fn add_document(&mut self, mut doc: Document, path: Option<String>) -> usize {
+    pub fn add_document(&mut self, doc: Document, path: Option<String>) -> usize {
+        let st = self.admit_document(doc, path);
+        // After the shown documents, before the hidden ones.
+        let i = self.visible_count();
+        self.docs.insert(i, st);
+        self.active = Some(i);
+        self.note_active_change();
+        self.history_cache.dirty = true;
+        self.poll_history_cache();
+        i
+    }
+
+    /// Add a hidden helper document ([`DocState::hidden`]): after every other document, never
+    /// active; the active document stays as it is. Returns its index.
+    pub fn add_hidden_document(&mut self, doc: Document, path: Option<String>) -> usize {
+        let mut st = self.admit_document(doc, path);
+        st.hidden = true;
+        self.docs.push(st);
+        self.history_cache.dirty = true;
+        self.poll_history_cache();
+        self.docs.len() - 1
+    }
+
+    /// A new document's editing state, its id made unique among the open documents.
+    fn admit_document(&self, mut doc: Document, path: Option<String>) -> DocState {
         // Persisted IDs can overlap the allocator, so check every replacement too.
         while self.docs.iter().any(|st| st.doc.id == doc.id) {
             doc.id = photocraft_doc::DocId::fresh();
@@ -115,13 +156,7 @@ impl Session {
         // Session-wide accounting replaces per-document trimming.
         st.history.max_bytes = 0;
         st.history.non_linear = self.prefs.get().history_options.allow_non_linear_history;
-        self.docs.push(st);
-        let i = self.docs.len() - 1;
-        self.active = Some(i);
-        self.note_active_change();
-        self.history_cache.dirty = true;
-        self.poll_history_cache();
-        i
+        st
     }
 
     /// Holds a decoded document back from opening (see `held_opens`); returns its id.
@@ -151,14 +186,13 @@ impl Session {
             self.object_finder.forget_doc(id);
         }
         let d = self.docs.remove(index);
-        self.active = if self.docs.is_empty() {
-            None
-        } else {
-            Some(match self.active {
-                Some(active) if active > index => active - 1,
-                Some(active) if active < index => active,
-                _ => index.min(self.docs.len() - 1),
-            })
+        // The next shown document becomes active, never a hidden one.
+        let shown = self.visible_count();
+        self.active = match self.active {
+            Some(active) if active > index => Some(active - 1),
+            Some(active) if active < index => Some(active),
+            _ if shown == 0 => None,
+            _ => Some(index.min(shown - 1)),
         };
         self.note_active_change();
         self.history_cache.dirty = true;

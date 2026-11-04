@@ -409,6 +409,10 @@ fn autosave(app: &mut PhotocraftApp) {
         .iter()
         .enumerate()
         .filter_map(|(index, st)| {
+            // A host's hidden helper document is its own: never checkpointed (or recovered as a tab).
+            if st.hidden {
+                return None;
+            }
             // The browser keeps checkpoints of unsaved work only: a document written to its file
             // (or downloaded) at this revision needs none.
             if app.services.autosave_unsaved_only && (!st.is_dirty() || app.prefs_rt.written_at.get(&st.doc.id) == Some(&st.revision)) {

@@ -7,6 +7,7 @@
 
 use photocraft_doc::{LayerContent, LayerId, LayerMask};
 use photocraft_geom::Rect;
+use photocraft_raster::Surface;
 use serde_json::{Value, json};
 
 use crate::commands::CommandSpec;
@@ -56,9 +57,15 @@ fn pixel_revision(s: &mut Session, p: &Value) -> Result<Value> {
     }
 }
 
-/// The image of a `png` (or `data`) param: base64, with or without a `data:…;base64,` prefix.
+/// The image of a `png` (or `data`, or `layer.putPixels`' `src`) param: base64, with or without
+/// a `data:…;base64,` prefix.
 pub(crate) fn image_bytes(cmd: &str, p: &Value) -> Result<Vec<u8>> {
-    let text = p.get("png").or_else(|| p.get("data")).and_then(Value::as_str).ok_or_else(|| bad(cmd, "needs `png`: the image as base64 (PNG, JPEG, WebP…)"))?;
+    let text = p
+        .get("png")
+        .or_else(|| p.get("data"))
+        .or_else(|| p.get("src"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| bad(cmd, "needs `png`: the image as base64 (PNG, JPEG, WebP…)"))?;
     let text = match text.split_once(";base64,") {
         Some((head, rest)) if head.starts_with("data:") => rest,
         _ => text,
@@ -133,11 +140,20 @@ fn over(top: &[f32], under: &mut [f32], n: usize) {
 /// `layer.putPixels {layer, png, x, y, mode}`: an image into an existing pixel layer, its
 /// top-left at `(x, y)`, converted to the document's colour profile and depth as a copied layer
 /// is. `replace` sets the rect to the image (its transparency too), `over` composites it on top.
+/// `{layer, src}` instead of `png` replaces the whole layer: the image (at `(x, y)`, default the
+/// origin) and nothing else, its old pixels dropped without being read.
 fn put_pixels(s: &mut Session, p: &Value) -> Result<Value> {
     const ID: &str = "layer.putPixels";
-    object(p, ID)?.ok_or_else(|| bad(ID, "needs {layer, png, x, y}"))?;
+    let o = object(p, ID)?.ok_or_else(|| bad(ID, "needs {layer, png, x, y} or {layer, src}"))?;
+    let whole = o.contains_key("src");
+    if whole && (o.contains_key("png") || o.contains_key("data")) {
+        return Err(bad(ID, "give `src` (the whole layer) or `png` (a rect), not both"));
+    }
     let id = target_layer(s, p)?;
     let mode = put_mode(ID, p)?;
+    if whole && mode == PutMode::Over {
+        return Err(bad(ID, "`src` replaces the whole layer: no `mode: \"over\"`"));
+    }
     let (x, y) = origin(ID, p)?;
     let bytes = image_bytes(ID, p)?;
     let st = s.active().ok_or(EngineError::NoDocument)?;
@@ -150,6 +166,24 @@ fn put_pixels(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(EngineError::Other(format!("layer {}'s pixels are locked", id.0)));
     }
     let dst_format = dst.format();
+    let blank = dst.default_pixel();
+    if whole {
+        let (w, h, image) = image_surface(s, ID, &bytes, dst_format)?;
+        // At the origin the converted surface is the layer; elsewhere it is written there.
+        let surface = if (x, y) == (0, 0) {
+            image
+        } else {
+            let mut fresh = Surface::with_default(dst_format, &blank);
+            fresh.write_region_par(Rect::from_xywh(x, y, w, h), &image.read_region(Rect::from_xywh(0, 0, w, h)));
+            fresh
+        };
+        s.edit("Put Pixels", |doc, _| {
+            let surf = doc.layer_mut(id).and_then(|l| l.surface_mut()).ok_or(EngineError::NoLayer(id))?;
+            *surf = surface;
+            Ok(())
+        })?;
+        return Ok(json!({"layer": id.0, "rect": [x, y, w, h]}));
+    }
     let (w, h, mut data) = image_pixels(s, ID, &bytes, dst_format)?;
     let rect = Rect::from_xywh(x, y, w, h);
     s.edit("Put Pixels", |doc, _| {
@@ -168,6 +202,12 @@ fn put_pixels(s: &mut Session, p: &Value) -> Result<Value> {
 /// The image `bytes` decoded, converted to the active document's profile and depth (as a copied
 /// layer is) and to `format`: `(width, height, pixels)`.
 fn image_pixels(s: &Session, cmd: &str, bytes: &[u8], format: photocraft_color::PixelFormat) -> Result<(u32, u32, Vec<f32>)> {
+    let (w, h, surface) = image_surface(s, cmd, bytes, format)?;
+    Ok((w, h, surface.read_region(Rect::from_xywh(0, 0, w, h))))
+}
+
+/// [`image_pixels`] as a surface, its top-left at the origin.
+fn image_surface(s: &Session, cmd: &str, bytes: &[u8], format: photocraft_color::PixelFormat) -> Result<(u32, u32, Surface)> {
     let dest = s.active().ok_or(EngineError::NoDocument)?.doc.clone();
     let kind = photocraft_codecs::detect(bytes).ok_or_else(|| bad(cmd, "`png` is not an image this build reads"))?;
     let ext = kind.extensions().first().copied().unwrap_or("png");
@@ -177,8 +217,9 @@ fn image_pixels(s: &Session, cmd: &str, bytes: &[u8], format: photocraft_color::
     }
     crate::layer_copy_cmds::adapt_copies(s, &mut src, &dest)?;
     let (w, h) = (src.size.width, src.size.height);
-    let surface = src.layers.first().and_then(|l| l.surface()).ok_or_else(|| bad(cmd, "the image has no pixels"))?.convert(format);
-    Ok((w, h, surface.read_region(Rect::from_xywh(0, 0, w, h))))
+    let surface = src.layers.first().and_then(|l| l.surface()).ok_or_else(|| bad(cmd, "the image has no pixels"))?;
+    let surface = if surface.format() == format { surface.clone() } else { surface.convert(format) };
+    Ok((w, h, surface))
 }
 
 /// `layer.addImage {png, x, y, name?, above?}`: a new pixel layer holding the image at `(x, y)`,
@@ -298,7 +339,8 @@ fn selection_get(s: &mut Session, p: &Value) -> Result<Value> {
         let data: Vec<u8> = sel.read_region(r).iter().step_by(sel.format().channels().max(1)).map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8).collect();
         let img = photocraft_codecs::Image::from_raw(r.width(), r.height(), photocraft_codecs::ChannelLayout::Gray, photocraft_codecs::SampleType::U8, data)
             .map_err(|e| EngineError::Other(format!("{ID}: {e}")))?;
-        let bytes = photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &Default::default()).map_err(|e| EngineError::Other(format!("{ID}: {e}")))?;
+        let bytes =
+            photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &Default::default()).map_err(|e| EngineError::Other(format!("{ID}: {e}")))?;
         out["png"] = json!(photocraft_paint::tile::b64_encode(&bytes));
         out["x"] = json!(r.x0);
         out["y"] = json!(r.y0);
@@ -321,7 +363,11 @@ fn selection_set(s: &mut Session, p: &Value) -> Result<Value> {
         (Some(v), None, None) => {
             let id = v.as_u64().ok_or_else(|| bad(ID, "`id` must be a selection id from selection.get"))?;
             let st = s.active().ok_or(EngineError::NoDocument)?;
-            st.saved_selections.iter().find(|(i, _)| *i == id).map(|(_, m)| m.clone()).ok_or_else(|| bad(ID, format!("no saved selection {id} in this document")))?
+            st.saved_selections
+                .iter()
+                .find(|(i, _)| *i == id)
+                .map(|(_, m)| m.clone())
+                .ok_or_else(|| bad(ID, format!("no saved selection {id} in this document")))?
         }
         (None, Some(_), None) => {
             let (x, y) = origin(ID, p)?;
@@ -389,76 +435,78 @@ fn select_many(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 pub fn specs() -> Vec<CommandSpec> {
-    vec![CommandSpec {
-        id: "layer.pixelRevision",
-        label: "Layer Pixel Revision",
-        menu: &[],
-        shortcut: None,
-        params: r##"{"layer":id?} → {layer, pixelRev} ({layers:[{layer, pixelRev}]} without `layer`): a counter that moves whenever the layer's pixels or layer mask change (strokes, fills, Remove, clears, undo, redo, jobs); also `pixelRev` on every layer of document.inspect"##,
-        enabled: has_doc,
-        journal: false,
-        run: pixel_revision,
-    },
-    CommandSpec {
-        id: "layer.putPixels",
-        label: "Put Pixels",
-        menu: &[],
-        shortcut: None,
-        params: r##"{"layer":id,"png":base64 image (PNG, JPEG, WebP…; a data: URL works),"x":px=0,"y":px=0,"mode":"replace|over"="replace"} → {layer, rect:[x,y,w,h]}: the image into an existing pixel layer, its top-left at (x, y), in one history step (layer id and name kept). replace: the rect becomes the image, transparency included; over: composited on top. Converted to the document's profile and depth"##,
-        enabled: has_doc,
-        journal: true,
-        run: put_pixels,
-    },
-    CommandSpec {
-        id: "layer.addImage",
-        label: "Add Image Layer",
-        menu: &[],
-        shortcut: None,
-        params: r##"{"png":base64 image (PNG, JPEG, WebP…; a data: URL works),"x":px=0,"y":px=0,"name":str?,"above":id? (default the active layer)} → {layer, rect:[x,y,w,h]}: a new pixel layer with the image at (x, y), converted to the document's profile and depth, in one history step; the active layer stays active"##,
-        enabled: has_doc,
-        journal: true,
-        run: add_image,
-    },
-    CommandSpec {
-        id: "layer.layerMask.set",
-        label: "Set Layer Mask from Image",
-        menu: &[],
-        shortcut: None,
-        params: r##"{"layer":id,"png":base64 image,"x":px=0,"y":px=0,"mode":"replace|over"="replace","fill":"reveal|hide"="reveal" (the rest of a new mask)} → {layer, rect, created}: the image's luminance (white reveals) times its alpha becomes the mask in that rect (over: transparent pixels keep the mask); creates the mask when the layer has none. One history step"##,
-        enabled: has_doc,
-        journal: true,
-        run: set_mask,
-    },
-    CommandSpec {
-        id: "selection.get",
-        label: "Save Selection in Memory",
-        menu: &[],
-        shortcut: None,
-        params: r##"{"png":bool=false} → {id, bounds:[x,y,w,h]|null, png?, x?, y?}: keeps the selection (or its absence) in memory under `id` for selection.set (no channel is made, nothing is saved; the 32 most recent per document); `png`: the selection mask as a grey PNG (base64) cropped to `bounds`, its top-left at (x, y)"##,
-        enabled: has_doc,
-        journal: false,
-        run: selection_get,
-    },
-    CommandSpec {
-        id: "selection.set",
-        label: "Restore Selection",
-        menu: &[],
-        shortcut: None,
-        params: r##"{"id":selection.get's id} | {"png":base64 grey mask (white selected, alpha multiplies),"x":px=0,"y":px=0} | {"none":true}, "step":bool=false → {bounds}: puts that selection back; without `step` it's no history step and leaves a clean document clean"##,
-        enabled: has_doc,
-        journal: false,
-        run: selection_set,
-    },
-    CommandSpec {
-        id: "layer.selectMany",
-        label: "Select Layers",
-        menu: &[],
-        shortcut: None,
-        params: r##"{"layers":[id] (empty: no layer selected),"active":id? (one of them; default the last)} → {active, selected}: exactly these layers selected in the Layers panel (not a history step)"##,
-        enabled: has_doc,
-        journal: false,
-        run: select_many,
-    }]
+    vec![
+        CommandSpec {
+            id: "layer.pixelRevision",
+            label: "Layer Pixel Revision",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"layer":id?} → {layer, pixelRev} ({layers:[{layer, pixelRev}]} without `layer`): a counter that moves whenever the layer's pixels or layer mask change (strokes, fills, Remove, clears, undo, redo, jobs); also `pixelRev` on every layer of document.inspect"##,
+            enabled: has_doc,
+            journal: false,
+            run: pixel_revision,
+        },
+        CommandSpec {
+            id: "layer.putPixels",
+            label: "Put Pixels",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"layer":id,"png":base64 image (PNG, JPEG, WebP…; a data: URL works),"src":base64 image? (instead of png: the whole layer becomes the image at (x, y), nothing else kept; the embed API also takes a Blob, an ArrayBuffer or a URL),"x":px=0,"y":px=0,"mode":"replace|over"="replace"} → {layer, rect:[x,y,w,h]}: the image into an existing pixel layer, its top-left at (x, y), in one history step (layer id and name kept). replace: the rect becomes the image, transparency included; over: composited on top. Converted to the document's profile and depth"##,
+            enabled: has_doc,
+            journal: true,
+            run: put_pixels,
+        },
+        CommandSpec {
+            id: "layer.addImage",
+            label: "Add Image Layer",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"png":base64 image (PNG, JPEG, WebP…; a data: URL works),"x":px=0,"y":px=0,"name":str?,"above":id? (default the active layer)} → {layer, rect:[x,y,w,h]}: a new pixel layer with the image at (x, y), converted to the document's profile and depth, in one history step; the active layer stays active"##,
+            enabled: has_doc,
+            journal: true,
+            run: add_image,
+        },
+        CommandSpec {
+            id: "layer.layerMask.set",
+            label: "Set Layer Mask from Image",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"layer":id,"png":base64 image,"x":px=0,"y":px=0,"mode":"replace|over"="replace","fill":"reveal|hide"="reveal" (the rest of a new mask)} → {layer, rect, created}: the image's luminance (white reveals) times its alpha becomes the mask in that rect (over: transparent pixels keep the mask); creates the mask when the layer has none. One history step"##,
+            enabled: has_doc,
+            journal: true,
+            run: set_mask,
+        },
+        CommandSpec {
+            id: "selection.get",
+            label: "Save Selection in Memory",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"png":bool=false} → {id, bounds:[x,y,w,h]|null, png?, x?, y?}: keeps the selection (or its absence) in memory under `id` for selection.set (no channel is made, nothing is saved; the 32 most recent per document); `png`: the selection mask as a grey PNG (base64) cropped to `bounds`, its top-left at (x, y)"##,
+            enabled: has_doc,
+            journal: false,
+            run: selection_get,
+        },
+        CommandSpec {
+            id: "selection.set",
+            label: "Restore Selection",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"id":selection.get's id} | {"png":base64 grey mask (white selected, alpha multiplies),"x":px=0,"y":px=0} | {"none":true}, "step":bool=false → {bounds}: puts that selection back; without `step` it's no history step and leaves a clean document clean"##,
+            enabled: has_doc,
+            journal: false,
+            run: selection_set,
+        },
+        CommandSpec {
+            id: "layer.selectMany",
+            label: "Select Layers",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"layers":[id] (empty: no layer selected),"active":id? (one of them; default the last)} → {active, selected}: exactly these layers selected in the Layers panel (not a history step)"##,
+            enabled: has_doc,
+            journal: false,
+            run: select_many,
+        },
+    ]
 }
 
 #[cfg(test)]
@@ -514,6 +562,34 @@ mod tests {
         let img = photocraft_codecs::Image::from_raw(w, h, photocraft_codecs::ChannelLayout::Rgba, photocraft_codecs::SampleType::U8, data).unwrap();
         let bytes = photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &Default::default()).unwrap();
         photocraft_paint::tile::b64_encode(&bytes)
+    }
+
+    #[test]
+    fn put_pixels_src_replaces_the_whole_layer_in_one_step() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 16, "height": 16})).unwrap();
+        let layer = s.execute("layer.new.layer", json!({})).unwrap()["layer"].as_u64().unwrap();
+        s.execute("edit.fill", json!({"contents": "black"})).unwrap();
+        let steps = s.active().unwrap().history.entries().len();
+        let r = s.execute("layer.putPixels", json!({"layer": layer, "src": png(4, 4, [255, 0, 0, 255])})).unwrap();
+        assert_eq!(r["rect"], json!([0, 0, 4, 4]));
+        assert_eq!(pixel(&s, layer, 1, 1), vec![1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(pixel(&s, layer, 10, 10)[3], 0.0, "the rest of the old pixels is gone");
+        assert_eq!(s.active().unwrap().history.entries().len(), steps + 1, "one step");
+        // Placed elsewhere, as a data: URL.
+        s.execute("layer.putPixels", json!({"layer": layer, "src": format!("data:image/png;base64,{}", png(2, 2, [0, 0, 255, 255])), "x": 8, "y": 8})).unwrap();
+        assert_eq!(pixel(&s, layer, 1, 1)[3], 0.0);
+        assert_eq!(pixel(&s, layer, 9, 9), vec![0.0, 0.0, 1.0, 1.0]);
+        let png1 = png(1, 1, [0, 0, 0, 255]);
+        for bad in [
+            json!({"layer": layer, "src": png1.clone(), "png": png1.clone()}),
+            json!({"layer": layer, "src": png1.clone(), "mode": "over"}),
+            json!({"layer": layer, "src": "not base64!"}),
+            json!({"layer": layer, "src": 3}),
+            json!({"layer": 999_999, "src": png1}),
+        ] {
+            assert!(s.execute("layer.putPixels", bad.clone()).is_err(), "{bad}");
+        }
     }
 
     fn pixel(s: &Session, layer: u64, x: i32, y: i32) -> Vec<f32> {
@@ -641,7 +717,9 @@ mod tests {
         assert_eq!(r["bounds"], json!([4, 5, 10, 8]), "the PNG round-trips");
         s.execute("selection.set", json!({"none": true, "step": true})).unwrap();
         assert_eq!(s.active().unwrap().history.entries().len(), clean_steps + 1);
-        for p in [json!({}), json!({"id": 0}), json!({"id": got["id"], "none": true}), json!({"none": false}), json!({"png": "zz"}), json!({"id": 1, "step": "no"})] {
+        for p in
+            [json!({}), json!({"id": 0}), json!({"id": got["id"], "none": true}), json!({"none": false}), json!({"png": "zz"}), json!({"id": 1, "step": "no"})]
+        {
             assert!(s.execute("selection.set", p.clone()).is_err(), "{p}");
         }
         assert!(s.execute("selection.get", json!({"png": 1})).is_err());

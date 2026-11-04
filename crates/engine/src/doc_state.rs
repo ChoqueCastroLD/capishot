@@ -64,6 +64,11 @@ pub struct DocState {
     /// The highest stable layer id (`psd_id`) this document has held this session
     /// ([`crate::layer_uids`]).
     pub(crate) uid_high: u32,
+    /// A helper document a host opened hidden (`file.new {hidden: true}`, the embed API's
+    /// `openDocument(…, {hidden: true})`): commands reach it by id (`engine.execute {document}`),
+    /// but it is never shown, listed as a tab or made active. Hidden documents sit after every
+    /// shown one in [`crate::Session::documents`] ([`crate::Session::visible_count`]).
+    pub hidden: bool,
 }
 
 impl DocState {
@@ -119,6 +124,7 @@ impl DocState {
             pixel_revs: Default::default(),
             saved_selections: Vec::new(),
             uid_high,
+            hidden: false,
         }
     }
     /// The selected layers in bottom-to-top document order, always including the active layer.

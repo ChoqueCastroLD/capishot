@@ -49,6 +49,11 @@ pub const FEATURES: &[&str] = &[
     "type.layoutDigest",
     "fonts.status",
     "events.fontsPreloadProgress",
+    "documents.hidden",
+    "layer.copyToDocument.ids",
+    "batch",
+    "layer.setPropsMany",
+    "layer.putPixels.src",
 ];
 
 /// The build stamp: the Capishot commit and the build id, set by `scripts/build-embed.sh`
@@ -240,7 +245,7 @@ pub fn zoom_request(level: &Value) -> Result<(&'static str, Value), String> {
 /// `background` (`white`, `transparent`, `black`, `#rrggbb`), `resolution` (ppi), `mode`, `depth`.
 pub fn new_document_params(opts: &Value) -> Result<Value, String> {
     let o = opts.as_object().ok_or("newDocument takes {width, height, …}")?;
-    const KEYS: [&str; 7] = ["width", "height", "name", "background", "resolution", "mode", "depth"];
+    const KEYS: [&str; 8] = ["width", "height", "name", "background", "resolution", "mode", "depth", "hidden"];
     if let Some(k) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
         return Err(format!("unknown newDocument option `{k}` ({})", KEYS.join(", ")));
     }
@@ -249,6 +254,9 @@ pub fn new_document_params(opts: &Value) -> Result<Value, String> {
         if !ok {
             return Err(format!("{k} must be a whole number of pixels, 1..300000"));
         }
+    }
+    if o.get("hidden").is_some_and(|h| !h.is_boolean()) {
+        return Err("hidden must be true or false".into());
     }
     Ok(Value::Object(o.clone()))
 }
@@ -270,7 +278,75 @@ pub fn doc_info(st: &DocState, active: bool) -> Value {
         "revision": st.revision,
         "dirty": st.revision != st.saved_revision,
         "active": active,
+        "hidden": st.hidden,
     })
+}
+
+/// `openDocument`'s and `window.photocraft.open`'s options: `{hidden?: bool}` → hidden.
+pub fn open_options(options: &Value) -> Result<bool, String> {
+    match options {
+        Value::Null => Ok(false),
+        Value::Object(o) => {
+            if let Some(k) = o.keys().find(|k| k.as_str() != "hidden") {
+                return Err(format!("unknown openDocument option `{k}` (hidden)"));
+            }
+            match o.get("hidden") {
+                None | Some(Value::Null) => Ok(false),
+                Some(Value::Bool(b)) => Ok(*b),
+                Some(_) => Err("hidden must be true or false".into()),
+            }
+        }
+        _ => Err("openDocument options must be an object ({hidden})".into()),
+    }
+}
+
+/// `batch(commands, options)` → `engine.execute`'s request for `document.batch`. `commands`:
+/// `[{command, params?}]`; `options` (all optional): `document` (an open document's id),
+/// `history` (`one`, the default: one undo step; `step`: one each; `none` / `silent`: no undo
+/// step, kept through the user's undo and redo), `render` (`end`: the only way, one repaint at the
+/// end, none for a hidden document) and `inspect` (`true` or `document.inspect`'s params: the
+/// document after the batch, in the result).
+pub fn batch_request(commands: Value, options: &Value) -> Result<Value, String> {
+    let empty = serde_json::Map::new();
+    let o = match options {
+        Value::Null => &empty,
+        Value::Object(o) => o,
+        _ => return Err("batch options must be an object".into()),
+    };
+    const KEYS: [&str; 4] = ["document", "history", "render", "inspect"];
+    if let Some(k) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
+        return Err(format!("unknown batch option `{k}` ({})", KEYS.join(", ")));
+    }
+    if !commands.is_array() {
+        return Err("batch takes a list of {command, params}".into());
+    }
+    match o.get("render") {
+        None | Some(Value::Null) => {}
+        Some(Value::String(r)) if r == "end" => {}
+        Some(v) => return Err(format!("render must be \"end\", got {v}")),
+    }
+    let mut params = json!({ "commands": commands });
+    let mut req = json!({ "command": "document.batch" });
+    match o.get("history").and_then(Value::as_str) {
+        None if o.get("history").is_none_or(Value::is_null) => {}
+        Some(h @ ("one" | "step")) => params["history"] = json!(h),
+        Some(h @ ("none" | "silent")) => req["history"] = json!(h),
+        _ => return Err("history must be \"one\", \"step\", \"none\" or \"silent\"".into()),
+    }
+    if let Some(i) = o.get("inspect").filter(|v| !v.is_null()) {
+        params["inspect"] = i.clone();
+    }
+    if let Some(d) = o.get("document").filter(|v| !v.is_null()) {
+        req["document"] = d.clone();
+    }
+    req["params"] = params;
+    Ok(req)
+}
+
+/// Whether a `layer.putPixels` `src` string is a URL to fetch rather than base64: base64 has
+/// no `:`, `.`, `?` or `#` (a `data:` URL is decoded as it is).
+pub fn src_is_url(src: &str) -> bool {
+    !src.starts_with("data:") && src.contains([':', '.', '?', '#'])
 }
 
 /// What the events compare from one frame to the next.
@@ -306,6 +382,8 @@ pub struct DocSnap {
     pub selection: Option<[i32; 4]>,
     /// Every group's children, top to bottom ([`layer_order`]).
     pub order: std::sync::Arc<LayerOrder>,
+    /// A hidden helper document: not in the `documents` event.
+    pub hidden: bool,
 }
 
 /// Each group's (`None`: the document's top level) child layer ids, top to bottom.
@@ -346,7 +424,8 @@ fn reorder_events(document: u64, prev: &LayerOrder, next: &LayerOrder) -> Vec<Va
 pub fn events(prev: Option<&Snapshot>, next: &Snapshot) -> Vec<Value> {
     let Some(prev) = prev else { return Vec::new() };
     let mut out = Vec::new();
-    let ids = |s: &Snapshot| s.docs.iter().map(|d| d.id).collect::<Vec<_>>();
+    // Hidden helper documents are never listed (they still report their own changes).
+    let ids = |s: &Snapshot| s.docs.iter().filter(|d| !d.hidden).map(|d| d.id).collect::<Vec<_>>();
     if ids(prev) != ids(next) || prev.active != next.active {
         out.push(json!({ "type": "documents", "documents": ids(next), "active": next.active }));
     }
@@ -548,7 +627,12 @@ mod tests {
     #[test]
     fn layer_order_lists_each_group_top_to_bottom() {
         use photocraft_engine::doc::{Layer, LayerContent};
-        let mut doc = photocraft_engine::doc::Document::new("t", photocraft_engine::doc::Size::new(4, 4), photocraft_engine::doc::ColorMode::Rgb, photocraft_engine::doc::SampleType::U8);
+        let mut doc = photocraft_engine::doc::Document::new(
+            "t",
+            photocraft_engine::doc::Size::new(4, 4),
+            photocraft_engine::doc::ColorMode::Rgb,
+            photocraft_engine::doc::SampleType::U8,
+        );
         let raster = |n: &str| Layer::new(n, LayerContent::Raster(photocraft_raster_surface()));
         let (a, b) = (raster("a"), raster("b"));
         let (ia, ib) = (a.id.0, b.id.0);
@@ -576,6 +660,48 @@ mod tests {
     }
 
     #[test]
+    fn batches_become_one_document_batch_request() {
+        let cmds = json!([{"command": "layer.setProps", "params": {"layer": 3, "opacity": 0.5}}]);
+        assert_eq!(batch_request(cmds.clone(), &Value::Null), Ok(json!({"command": "document.batch", "params": {"commands": cmds}})));
+        assert_eq!(
+            batch_request(cmds.clone(), &json!({"document": 7, "history": "none", "render": "end", "inspect": true})),
+            Ok(json!({"command": "document.batch", "document": 7, "history": "none", "params": {"commands": cmds, "inspect": true}}))
+        );
+        assert_eq!(
+            batch_request(cmds.clone(), &json!({"history": "step"})),
+            Ok(json!({"command": "document.batch", "params": {"commands": cmds, "history": "step"}}))
+        );
+        for bad in [json!({"render": "now"}), json!({"history": "later"}), json!({"nope": 1}), json!(3)] {
+            assert!(batch_request(cmds.clone(), &bad).is_err(), "{bad}");
+        }
+        assert!(batch_request(json!({}), &Value::Null).is_err(), "a list of commands");
+    }
+
+    #[test]
+    fn hidden_opens_and_src_urls() {
+        assert_eq!(open_options(&Value::Null), Ok(false));
+        assert_eq!(open_options(&json!({"hidden": true})), Ok(true));
+        assert!(open_options(&json!({"hidden": 1})).is_err() && open_options(&json!({"x": 1})).is_err() && open_options(&json!("x")).is_err());
+        assert!(new_document_params(&json!({"width": 8, "height": 8, "hidden": true})).is_ok());
+        assert!(new_document_params(&json!({"width": 8, "height": 8, "hidden": "yes"})).is_err());
+        assert!(src_is_url("https://cdn.example/p/1.jpg") && src_is_url("blob:https://a/b") && src_is_url("/pages/12.png") && src_is_url("p.png?v=2"));
+        assert!(!src_is_url("/9j/4AAQSkZJRgABAQ==") && !src_is_url("iVBORw0KGgo=") && !src_is_url("data:image/png;base64,iVBOR"));
+        let hidden =
+            Snapshot { docs: vec![DocSnap { id: 1, ..Default::default() }, DocSnap { id: 2, hidden: true, ..Default::default() }], ..Default::default() };
+        let more = Snapshot {
+            docs: vec![
+                DocSnap { id: 1, ..Default::default() },
+                DocSnap { id: 2, hidden: true, revision: 1, ..Default::default() },
+                DocSnap { id: 3, hidden: true, ..Default::default() },
+            ],
+            ..Default::default()
+        };
+        let e = events(Some(&hidden), &more);
+        assert!(e.iter().all(|e| e["type"] != "documents"), "a hidden document isn't listed: {e:?}");
+        assert!(e.iter().any(|e| e["type"] == "documentChanged" && e["id"] == 2), "its changes still go out");
+    }
+
+    #[test]
     fn execute_options_go_into_the_request() {
         assert_eq!(execute_request("a.b", json!({}), &Value::Null), Ok(json!({"command": "a.b", "params": {}})));
         assert_eq!(
@@ -588,11 +714,12 @@ mod tests {
 
     #[test]
     fn pixel_changes_become_events() {
-        let c = photocraft_engine::pixel_revs::PixelChange { layer: photocraft_engine::doc::LayerId(7), rect: photocraft_engine::doc::Rect::new(64, 0, 128, 64), rev: 3 };
-        assert_eq!(
-            pixels_changed_event(2, &c),
-            json!({"type": "layerPixelsChanged", "document": 2, "layer": 7, "rect": [64, 0, 64, 64], "pixelRev": 3})
-        );
+        let c = photocraft_engine::pixel_revs::PixelChange {
+            layer: photocraft_engine::doc::LayerId(7),
+            rect: photocraft_engine::doc::Rect::new(64, 0, 128, 64),
+            rev: 3,
+        };
+        assert_eq!(pixels_changed_event(2, &c), json!({"type": "layerPixelsChanged", "document": 2, "layer": 7, "rect": [64, 0, 64, 64], "pixelRev": 3}));
     }
 
     #[test]
