@@ -16,6 +16,9 @@
 //! run time from `PHOTOCRAFT_AI_ONNXRUNTIME` (the file, or the folder holding it) or from the
 //! executable's folder, with `DirectML.dll` from the same folder. Without it [`available`] says
 //! why and the burn path runs instead.
+//!
+//! Linux: only the CPU provider, from the official CPU build's `libonnxruntime.so` (1.24 or
+//! later) found the same way; the GPU stays on burn's wgpu (Vulkan) path.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -38,15 +41,18 @@ use crate::{AiError, Planar, Progress, Result};
 /// Tiles no smaller than this are split in four when they fail (out of device memory).
 const MIN_SPLIT: usize = 64;
 
+/// ONNX Runtime's file name: a DirectML build on Windows, the official CPU build on Linux.
+const LIBRARY: &str = if cfg!(windows) { "onnxruntime.dll" } else { "libonnxruntime.so" };
+
 /// The ONNX Runtime library to load: `PHOTOCRAFT_AI_ONNXRUNTIME` (a file or a folder), else
-/// `onnxruntime.dll` next to the executable.
+/// [`LIBRARY`] next to the executable.
 fn library() -> Option<PathBuf> {
-    let file = |p: PathBuf| if p.is_dir() { p.join("onnxruntime.dll") } else { p };
+    let file = |p: PathBuf| if p.is_dir() { p.join(LIBRARY) } else { p };
     if let Some(p) = std::env::var_os("PHOTOCRAFT_AI_ONNXRUNTIME").filter(|p| !p.is_empty()) {
         return Some(file(PathBuf::from(p)));
     }
     let exe = std::env::current_exe().ok()?;
-    let p = exe.parent()?.join("onnxruntime.dll");
+    let p = exe.parent()?.join(LIBRARY);
     p.is_file().then_some(p)
 }
 
@@ -54,7 +60,7 @@ static ENV: OnceLock<std::result::Result<Environment, String>> = OnceLock::new()
 
 fn environment() -> std::result::Result<&'static Environment, String> {
     ENV.get_or_init(|| {
-        let path = library().ok_or_else(|| "onnxruntime.dll not found (next to the executable or in PHOTOCRAFT_AI_ONNXRUNTIME)".to_string())?;
+        let path = library().ok_or_else(|| format!("{LIBRARY} not found (next to the executable or in PHOTOCRAFT_AI_ONNXRUNTIME)"))?;
         load(&path)
     })
     .as_ref()
@@ -67,7 +73,7 @@ fn load(path: &Path) -> std::result::Result<Environment, String> {
     }
     // Windows ships an older DirectML.dll in System32: the one next to ONNX Runtime goes first.
     let dml = path.with_file_name("DirectML.dll");
-    if dml.is_file() {
+    if cfg!(windows) && dml.is_file() {
         ort::util::preload_dylib(&dml).map_err(|e| format!("{}: {e}", dml.display()))?;
     }
     // A broken or mismatched library must not take the app down.
@@ -547,7 +553,9 @@ pub(crate) mod tests {
         if let Err(e) = available() {
             return eprintln!("ONNX Runtime with DirectML not available ({e}): skipped");
         }
-        for (shuffle, cpu) in [(1, None), (2, None), (1, Some(0)), (2, Some(2))] {
+        // Linux has no DirectML: only the CPU provider.
+        let cases: &[(usize, Option<usize>)] = if cfg!(windows) { &[(1, None), (2, None), (1, Some(0)), (2, Some(2))] } else { &[(1, Some(0)), (2, Some(2))] };
+        for &(shuffle, cpu) in cases {
             let w = tiny_fdat(shuffle);
             let dml = DmlUpscaler::fdat(w.clone(), cpu).unwrap();
             assert_eq!((dml.scale(), dml.in_channels(), dml.out_channels()), (4 / shuffle, 3, 3));
@@ -594,7 +602,8 @@ pub(crate) mod tests {
         let rgb = crate::esrgan::tests::tiny(3, "1");
         let compact = crate::compact::tests::tiny();
         let opts = TileOptions { tile: 24, overlap: 4 };
-        for cpu in [None, Some(0), Some(3)] {
+        let modes: &[Option<usize>] = if cfg!(windows) { &[None, Some(0), Some(3)] } else { &[Some(0), Some(3)] };
+        for &cpu in modes {
             let nets: Vec<(&str, Box<dyn Network>, DmlUpscaler, Planar)> = vec![
                 (
                     "esrgan gray",

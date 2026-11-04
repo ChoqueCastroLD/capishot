@@ -4,27 +4,55 @@
 //! no usage data). On Windows the notice's Update downloads and installs it
 //! (`photocraft_ui_egui::win_update`).
 //!
-//! On by default in the Windows app only (the manifest lists Windows downloads).
-//! `CAPISHOT_UPDATE_URL` points it at another manifest on any platform (`off` turns it off).
+//! On by default in the Windows app and in the official Linux packages (AppImage, tar.gz, .deb),
+//! which say how they were installed in a [`CHANNEL_FILE`] beside the binary: the AppImage and
+//! the tar.gz install updates themselves, the .deb only links the download page. Other Linux
+//! builds (from source, distributions) don't check. `CAPISHOT_UPDATE_URL` points it at another
+//! manifest on any platform (`off` turns it off).
 
-use photocraft_ui_egui::update_notice::{MANIFEST_URL, MAX_MANIFEST_BYTES, UpdateCheck};
+use std::path::Path;
 
-/// The manifest to fetch, from `CAPISHOT_UPDATE_URL`'s value (`None`: unset), if any.
-fn manifest_url(var: Option<String>) -> Option<String> {
+use photocraft_ui_egui::update_notice::{Channel, MANIFEST_URL, MAX_MANIFEST_BYTES, UpdateCheck};
+
+/// The file the Linux packages put beside `capishot`: `appimage`, `tar` or `deb`.
+pub const CHANNEL_FILE: &str = "capishot.channel";
+
+/// How this Linux copy was installed, from the [`CHANNEL_FILE`] in `exe_dir`; an AppImage only
+/// when it runs as one (`appimage`, the runtime's `$APPIMAGE`, is set).
+fn linux_channel(exe_dir: Option<&Path>, appimage: bool) -> Option<Channel> {
+    let text = std::fs::read_to_string(exe_dir?.join(CHANNEL_FILE)).ok()?;
+    match text.trim() {
+        "appimage" if appimage => Some(Channel::AppImage),
+        "tar" => Some(Channel::Tar),
+        "deb" => Some(Channel::Deb),
+        _ => None,
+    }
+}
+
+/// The manifest to fetch, from `CAPISHOT_UPDATE_URL`'s value (`None`: unset), if any; `known`:
+/// this copy's download is one the manifest lists.
+fn manifest_url(var: Option<String>, known: bool) -> Option<String> {
     match var.as_deref().map(str::trim) {
         Some("" | "off" | "0") => None,
         Some(url) => Some(url.to_string()),
-        None => cfg!(windows).then(|| MANIFEST_URL.to_string()),
+        None => known.then(|| MANIFEST_URL.to_string()),
     }
 }
 
 /// Start the check; `None` when it is off. A failed request (offline, no manifest yet) is only
 /// logged.
 pub fn start(portable: bool) -> Option<UpdateCheck> {
-    let url = manifest_url(std::env::var("CAPISHOT_UPDATE_URL").ok())?;
-    // Re-checked every few hours by the app; Windows copies download and install updates
-    // themselves (`win_update`).
-    let check = UpdateCheck { portable, url: Some(url.clone()), installs: cfg!(windows), ..Default::default() };
+    let channel = if cfg!(target_os = "linux") {
+        let exe = std::env::current_exe().ok();
+        linux_channel(exe.as_deref().and_then(Path::parent), std::env::var_os("APPIMAGE").is_some_and(|v| !v.is_empty()))
+    } else {
+        None
+    };
+    let url = manifest_url(std::env::var("CAPISHOT_UPDATE_URL").ok(), cfg!(windows) || channel.is_some())?;
+    // Re-checked every few hours by the app; Windows copies, AppImages and tar.gz folders
+    // download and install updates themselves (`win_update`).
+    let installs = cfg!(windows) || matches!(channel, Some(Channel::AppImage | Channel::Tar));
+    let check = UpdateCheck { portable, channel, url: Some(url.clone()), installs, ..Default::default() };
     let slot = check.manifest.clone();
     let spawned =
         std::thread::Builder::new().name("capishot-update-check".into()).spawn(move || match photocraft_fontfetch::get_small(&url, MAX_MANIFEST_BYTES) {
@@ -45,9 +73,29 @@ mod tests {
 
     #[test]
     fn the_variable_overrides_or_turns_off_the_default() {
-        assert_eq!(manifest_url(None), cfg!(windows).then(|| MANIFEST_URL.to_string()));
-        assert_eq!(manifest_url(Some("off".into())), None);
-        assert_eq!(manifest_url(Some(" ".into())), None);
-        assert_eq!(manifest_url(Some("http://127.0.0.1:9/latest.json".into())).as_deref(), Some("http://127.0.0.1:9/latest.json"));
+        assert_eq!(manifest_url(None, true).as_deref(), Some(MANIFEST_URL));
+        assert_eq!(manifest_url(None, false), None);
+        assert_eq!(manifest_url(Some("off".into()), true), None);
+        assert_eq!(manifest_url(Some(" ".into()), true), None);
+        assert_eq!(manifest_url(Some("http://127.0.0.1:9/latest.json".into()), false).as_deref(), Some("http://127.0.0.1:9/latest.json"));
+    }
+
+    #[test]
+    fn the_linux_packages_say_how_they_were_installed() {
+        let dir = std::env::temp_dir().join(format!("capishot-channel-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(linux_channel(Some(&dir), true), None, "no file: a build from source");
+        for (text, appimage, want) in [
+            ("appimage\n", true, Some(Channel::AppImage)),
+            ("appimage", false, None),
+            ("tar", false, Some(Channel::Tar)),
+            ("deb", false, Some(Channel::Deb)),
+            ("rpm", false, None),
+        ] {
+            std::fs::write(dir.join(CHANNEL_FILE), text).unwrap();
+            assert_eq!(linux_channel(Some(&dir), appimage), want, "{text:?}");
+        }
+        assert_eq!(linux_channel(None, false), None);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

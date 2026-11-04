@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata (software centres). Template: packaging/linux/package.sh
+     substitutes @VERSION@ and @DATE@ from Cargo.toml and the build date. -->
+<component type="desktop-application">
+  <id>com.capichan.capishot</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT OR Apache-2.0</project_license>
+  <name>Capishot</name>
+  <summary>Edit manga, comics and layered PSD pages</summary>
+  <developer id="com.capichan">
+    <name>Capishot contributors</name>
+  </developer>
+  <description>
+    <p>
+      Capishot is an open-source, native image editor for scanlation: cleaning, redrawing
+      and typesetting manga and comic pages, with the familiar menus, shortcuts, panels and
+      tools of a professional editor.
+    </p>
+    <ul>
+      <li>Open, edit and save layered PSD and PSB files</li>
+      <li>Type tools for lettering, with fonts from Google Fonts</li>
+      <li>AI upscaling and cleaning, on the GPU (Vulkan) or the CPU</li>
+      <li>Every action is a command, scriptable from capishot-cli</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">com.capichan.capishot.desktop</launchable>
+  <icon type="stock">com.capichan.capishot</icon>
+  <url type="homepage">https://capichan.com/capishot</url>
+  <categories>
+    <category>Graphics</category>
+    <category>RasterGraphics</category>
+  </categories>
+  <keywords>
+    <keyword>manga</keyword>
+    <keyword>scanlation</keyword>
+    <keyword>image editor</keyword>
+    <keyword>psd</keyword>
+  </keywords>
+  <requires>
+    <display_length compare="ge">760</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+    <control>tablet</control>
+  </supports>
+  <provides>
+    <binary>capishot</binary>
+    <binary>capishot-cli</binary>
+    <mediatype>application/x-capishot</mediatype>
+    <mediatype>image/vnd.adobe.photoshop</mediatype>
+    <mediatype>image/x-psb</mediatype>
+  </provides>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="@VERSION@" date="@DATE@"/>
+  </releases>
+</component>

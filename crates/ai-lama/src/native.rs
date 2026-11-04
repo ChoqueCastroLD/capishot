@@ -29,9 +29,9 @@ pub const MIGAN_BYTES: u64 = 13_198_644;
 /// Larger files are refused before reading (the f32 file is 204 MB).
 const MAX_WEIGHTS_BYTES: u64 = 512 << 20;
 
-#[cfg(all(feature = "directml", windows))]
+#[cfg(all(feature = "directml", any(windows, target_os = "linux")))]
 type Dml = crate::directml::DmlLama;
-#[cfg(not(all(feature = "directml", windows)))]
+#[cfg(not(all(feature = "directml", any(windows, target_os = "linux"))))]
 type Dml = ();
 
 /// See the module docs.
@@ -235,7 +235,7 @@ impl NativeInpainter {
     /// Runs a CPU request for Manga LaMa on ONNX Runtime's CPU provider; `None` runs it on
     /// burn's CPU backend instead (no ONNX Runtime library, a failed session or run: the CPU
     /// path never gets worse than burn's).
-    #[cfg(all(feature = "directml", windows))]
+    #[cfg(all(feature = "directml", any(windows, target_os = "linux")))]
     fn run_ort_cpu(&self, req: &Request) -> Option<Result<Vec<f32>>> {
         let cpu = req.cpu || std::env::var("CAPISHOT_AI_DEVICE").is_ok_and(|v| v.eq_ignore_ascii_case("cpu"));
         if req.model != LAMA || !cpu || *self.ort_cpu_failed.lock().unwrap_or_else(PoisonError::into_inner) {
@@ -276,7 +276,7 @@ impl NativeInpainter {
         }
     }
 
-    #[cfg(not(all(feature = "directml", windows)))]
+    #[cfg(not(all(feature = "directml", any(windows, target_os = "linux"))))]
     fn run_ort_cpu(&self, _req: &Request) -> Option<Result<Vec<f32>>> {
         None
     }

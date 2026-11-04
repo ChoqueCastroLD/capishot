@@ -216,89 +216,37 @@ Locally on Windows: `dotnet tool install -g wix --version 5.0.2`,
 
 ### Linux
 
-`packaging/linux/package.sh` stages one FHS tree and makes every format from it. The tree
-holds both binaries, `ai.storyteller.photocraft.desktop`, hicolor icons from 16 px to 512 px
-plus a scalable SVG, AppStream metainfo, a shared-mime-info file for `.pcraft`, `.psb` and
-`.qoi`, and `photocraft-cli`'s man pages and bash, zsh and fish completions. The
-`man-and-completions` example, built with the binaries, writes those; a cross build runs it
-through `EMULATOR` and leaves them out without one. The zsh completion is in
-`/usr/share/zsh/site-functions`, which Fedora's and openSUSE's zsh read; the `.deb` also links it
-from `/usr/share/zsh/vendor-completions`, which Debian's zsh reads instead.
+Every Capishot desktop release ships for Windows and Linux. `packaging/release-desktop.sh` builds
+both into one folder (`$DIST`) with `SHA256SUMS` and the combined `latest.json`; nothing is
+uploaded. `packaging/linux/package.sh` is the Linux half:
 
-Why these formats:
+- The binaries (`--features heif,ai`) are built in an Ubuntu 22.04 container
+  (`packaging/linux/Dockerfile`), so they need **glibc ≥ 2.35** (Ubuntu 22.04+, Debian 12+,
+  Mint 21+); the script refuses a binary that asks for a newer glibc symbol.
+- AI: the GPU runs burn's wgpu path (Vulkan). The CPU runs ONNX Runtime's CPU provider, as on
+  Windows: `libonnxruntime.so` (the official 1.24.4 release, SHA-256 pinned) sits beside the
+  binaries and is loaded at run time (`PHOTOCRAFT_AI_ONNXRUNTIME` overrides); without it burn's CPU
+  backend runs.
+- **AppImage** (`capishot-<v>-linux-x86_64.AppImage`): pinned appimagetool 1.9.1 and the static
+  type2 runtime (no libfuse2). `AppRun` installs the desktop entry and icons into
+  `$XDG_DATA_HOME` on launch so Wayland docks show the icon (`CAPISHOT_NO_DESKTOP_INTEGRATION=1`
+  opts out; tested by `packaging/linux/apprun-test.sh`).
+- **.deb** (Ubuntu, Debian, Mint): built with `dpkg-deb`; the app lives in `/usr/lib/capishot`,
+  linked from `/usr/bin`; the menu, MIME and icon caches are refreshed by `postinst.sh`.
+- **.tar.gz**: one folder to unpack anywhere (`README-linux.txt` inside); an empty `portable.txt`
+  beside `capishot` keeps settings in `CapishotData` there.
 
-- **AppImage** runs on any distribution without installing anything. The
-  download-and-go option and the fallback for distros the packages don't cover. It's built
-  with the maintained `AppImage/appimagetool`, whose static runtime doesn't need libfuse2.
-  The packaging script verifies pinned AppImageTool 1.9.1 and type2 runtime 20251108 binaries.
-  For an offline build, pre-seed `$CARGO_TARGET_DIR/appimagetool-1.9.1-$ARCH.AppImage` and
-  `$CARGO_TARGET_DIR/type2-runtime-20251108-$ARCH` with the matching official release assets;
-  the script checks both SHA-256 digests and makes the cached AppImageTool executable after verification;
-  the runtime is only read as data.
-  An `APPIMAGETOOL` override must point to that same verified AppImageTool binary and already be
-  executable (`chmod +x` it before packaging).
-  Each AppImage embeds update information (`gh-releases-zsync|…|latest|…`, #349) and ships
-  with a `.zsync` beside it, so AppImageUpdate, AppImageLauncher and similar tools can find
-  the next release and download only the blocks that changed.
-  Its `AppRun` (`packaging/linux/AppRun`) also integrates with the desktop on launch: on
-  Wayland the dock icon comes from the compositor resolving the window's app_id against an
-  *installed* `.desktop` file, which an AppImage alone never provides — without this every
-  AppImage run shows the generic Wayland logo (#593). Best effort: it installs
-  `~/.local/share/applications/ai.storyteller.photocraft.desktop` with `Exec` rewritten to
-  the AppImage's path (`TryExec` dropped, the binary isn't on the host PATH) and the
-  hicolor icons beside it, rewriting only when the content changed, and any failure leaves
-  the launch untouched. `PHOTOCRAFT_NO_DESKTOP_INTEGRATION=1` opts out; to uninstall, `rm
-  ~/.local/share/applications/ai.storyteller.photocraft.desktop` and `find
-  ~/.local/share/icons/hicolor -name 'ai.storyteller.photocraft*' -delete`. The script is
-  covered by `packaging/linux/apprun-test.sh` in the packaging-lint workflow.
-- **.deb** covers Debian, Ubuntu, Mint, Pop!_OS and elementary. **.rpm** covers Fedora, RHEL
-  and its clones, and openSUSE. Both integrate with the menu, MIME and icon caches (the
-  `postinst.sh` hook) and uninstall cleanly. Both are built by
-  [nfpm](https://nfpm.goreleaser.com/): one maintained, dependency-free tool and one config
-  (`nfpm.yaml`). It doesn't need cargo-deb and cargo-generate-rpm metadata in our crates, and
-  it can build both formats on Ubuntu.
-- **.tar.gz** is for people who manage their own `/opt` or `~/.local`.
-- **Flatpak bundle** (`.flatpak`) is a single file that installs into Flatpak, sandboxed and
-  updatable by installing a newer bundle, for people who prefer Flatpak to AppImage.
-  `packaging/linux/flatpak-bundle.sh` repackages the job's `.tar.gz` with
-  `packaging/linux/flatpak/ai.storyteller.photocraft.bundle.yml` on the freedesktop 26.08
-  runtime. It does no Rust build and needs no network inside `flatpak-builder`, so the bundle
-  holds the same binaries as the other formats. A separate `flatpak` job per architecture
-  (`ubuntu-24.04` and `ubuntu-24.04-arm`, for flatpak-builder 1.4) downloads the Linux job's
-  artifact, runs the script, installs the bundle and runs `photocraft-cli --version` inside the
-  sandbox as a smoke test. The bundle names Flathub as its runtime repo, so users install
-  it with:
+Each package writes `capishot.channel` (`appimage`, `deb` or `tar`) beside the binaries. With it
+the app checks `latest.json` like the Windows app; the AppImage replaces its own file (`$APPIMAGE`)
+and the tar.gz folder swaps its files (keeping `CapishotData`) after the app exits, from the
+`url_appimage` / `url_tar` downloads and their `sha256`/`size` entries. A .deb install only opens
+`download_page` (apt owns its files). Builds without the file (from source, distributions) don't
+check. Windows copies ignore the Linux keys.
 
-  ```sh
-  flatpak install --user photocraft-<v>-linux-x86_64.flatpak   # pulls org.freedesktop.Platform//26.08 from Flathub if missing
-  flatpak run ai.storyteller.photocraft
-  ```
-
-  Sandbox permissions (justified in the manifest): Wayland with X11 fallback, IPC (X11
-  shared memory), `dri` for the GPU, and read/write access to Pictures and Documents. Every
-  other file goes through the file-chooser and document portals. Network access enables update
-  checks and makes the optional loopback `--control` server reachable from the host. Host fonts
-  are read from `/run/host/fonts` and `/run/host/user-fonts`. Locally (on Linux, with `flatpak` and
-  `flatpak-builder`): `packaging/linux/package.sh --formats tar && packaging/linux/flatpak-bundle.sh`.
-- **Flathub**: `packaging/linux/flatpak/ai.storyteller.photocraft.yml` builds from source and
-  is ready for a Flathub submission (it keeps the same runtime and `finish-args` as the bundle
-  manifest, which packaging-lint checks). CI doesn't build it. A real build needs vendored crate
-  sources (`cargo-sources.json` from `flatpak-cargo-generator.py`) and adds 20+ minutes per
-  architecture. Build it by hand with the commands in the manifest's header.
-
-All Linux binaries are built on Ubuntu 22.04 and need **glibc ≥ 2.35**: Ubuntu 22.04+,
-Debian 12+, Fedora 36+, RHEL 10, openSUSE Tumbleweed. They link only glibc and libgcc_s. X11,
-Wayland, xkbcommon, Vulkan and EGL are loaded at runtime from the system, which is also where
-the GPU driver has to come from. That's why the .deb and .rpm declare them as dependencies
-(the full list, and why each is there, is in `packaging/linux/nfpm.yaml`) and the AppImage
-doesn't bundle them. The Flatpak gets them from the freedesktop runtime. Because the AppImage
-and the tarball can't declare dependencies, `photocraft` checks for the libraries its session
-(X11 or Wayland) needs before it opens a window (`apps/photocraft/src/linux_libs.rs`) and, if
-one is missing, prints the package to install and exits with status 1 instead of crashing.
-`PHOTOCRAFT_SKIP_LIB_CHECK=1` skips the check.
-
-Locally (on Linux): install [nfpm](https://nfpm.goreleaser.com/install/), then
-`packaging/linux/package.sh` (or `--formats "deb tar"`).
+The app id is `com.capichan.capishot` (desktop entry, icon name, Wayland app_id, AppStream id).
+Locally: `packaging/linux/package.sh` (needs docker and dpkg-deb), or `--skip-build` to package
+the binaries already built in `$CARGO_TARGET_DIR/docker/target/release`. The upstream Flatpak
+and .rpm recipes (`packaging/linux/flatpak*`) are not maintained for Capishot.
 
 ### FreeBSD
 

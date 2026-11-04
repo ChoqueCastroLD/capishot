@@ -5242,9 +5242,11 @@ fontTab	Find More	Buscar más
 	You have {current}.	Tienes la {current}.
 	This version is required: yours is no longer supported.	Esta versión es obligatoria: la tuya ya no tiene soporte.
 	Capishot {version} is up to date	Capishot {version} está actualizado
-	Updates are checked in the Windows app only	Las actualizaciones solo se buscan en la app de Windows
+	Updates are checked in the desktop app only	Las actualizaciones solo se buscan en la app de escritorio
 	Downloading Capishot {version}	Descargando Capishot {version}
 	This update publishes no checksum: download it from the website	Esta actualización no publica su suma de verificación: descárgala desde la web
+	This copy is updated by its package manager: download the update from the website	Esta copia se actualiza con su gestor de paquetes: descarga la actualización desde la web
+	APPIMAGE isn't set: download the update from the website	APPIMAGE no está definida: descarga la actualización desde la web
 	No update has been downloaded	No se ha descargado ninguna actualización
 	Capishot {version} is ready to install	Capishot {version} está listo para instalarse
 	Capishot {version} ready to install	Capishot {version} listo para instalar
