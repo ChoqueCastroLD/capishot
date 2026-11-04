@@ -8111,6 +8111,7 @@ version = "0.13.6"
 dependencies = [
  "flate2",
  "hypher",
+ "libm",
  "parley",
  "photocraft-color",
  "photocraft-doc",

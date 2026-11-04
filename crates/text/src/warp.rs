@@ -138,7 +138,7 @@ impl PathFrame {
             if p.iter().any(|q| !q.0.is_finite() || !q.1.is_finite()) {
                 return None;
             }
-            let poly = (p[1].0 - p[0].0).hypot(p[1].1 - p[0].1) + (p[2].0 - p[1].0).hypot(p[2].1 - p[1].1) + (p[3].0 - p[2].0).hypot(p[3].1 - p[2].1);
+            let poly = libm::hypot(p[1].0 - p[0].0, p[1].1 - p[0].1) + libm::hypot(p[2].0 - p[1].0, p[2].1 - p[1].1) + libm::hypot(p[3].0 - p[2].0, p[3].1 - p[2].1);
             let n = ((poly / 2.0).ceil() as usize).clamp(4, 128);
             if pts.is_empty() {
                 pts.push(p[0]);
@@ -159,7 +159,7 @@ impl PathFrame {
         let mut acc = 0.0;
         for (i, p) in pts.iter().enumerate() {
             if let Some(q) = i.checked_sub(1).and_then(|j| pts.get(j)) {
-                acc += (p.0 - q.0).hypot(p.1 - q.1);
+                acc += libm::hypot(p.0 - q.0, p.1 - q.1);
             }
             cum.push(acc);
         }
@@ -178,7 +178,7 @@ impl PathFrame {
             let (dx, dy) = (b.0 - a.0, b.1 - a.1);
             let len2 = dx * dx + dy * dy;
             let t = if len2 > 0.0 { (((x - a.0) * dx + (y - a.1) * dy) / len2).clamp(0.0, 1.0) } else { 0.0 };
-            let d = (a.0 + dx * t - x).hypot(a.1 + dy * t - y);
+            let d = libm::hypot(a.0 + dx * t - x, a.1 + dy * t - y);
             if d < best.0 {
                 best = (d, self.cum.get(i).copied().unwrap_or(0.0) + len2.sqrt() * t);
             }
@@ -191,7 +191,7 @@ impl PathFrame {
         let last = self.pts.len() - 1;
         let i = self.cum.partition_point(|&c| c < s).clamp(1, last);
         let (a, b) = (self.pts[i - 1], self.pts[i]);
-        let len = (b.0 - a.0).hypot(b.1 - a.1).max(1e-12);
+        let len = libm::hypot(b.0 - a.0, b.1 - a.1).max(1e-12);
         let t = ((b.0 - a.0) / len, (b.1 - a.1) / len);
         let along = s - self.cum[i - 1];
         ((a.0 + t.0 * along, a.1 + t.1 * along), t)

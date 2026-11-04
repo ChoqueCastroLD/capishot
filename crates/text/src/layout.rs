@@ -26,6 +26,8 @@ use crate::fonts::FontDb;
 
 mod area;
 mod capishot;
+mod digest;
+pub use digest::layout_digest;
 use capishot::Fit;
 mod lines;
 mod navigate;

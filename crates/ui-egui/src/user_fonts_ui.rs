@@ -525,11 +525,14 @@ pub struct FontChecks {
     pub notice: bool,
     /// Families reported missing since the shell last looked (`fontsMissing` events).
     pub events: Vec<Vec<String>>,
+    /// `fontsPreloadProgress` events since the shell last looked: one per family of a
+    /// `fonts.preload` as it settles (`{id?, family, status, done, total}`).
+    pub progress: Vec<Value>,
 }
 
 impl Default for FontChecks {
     fn default() -> Self {
-        Self { checks: Vec::new(), preloads: Vec::new(), notice: true, events: Vec::new() }
+        Self { checks: Vec::new(), preloads: Vec::new(), notice: true, events: Vec::new(), progress: Vec::new() }
     }
 }
 
@@ -544,12 +547,23 @@ pub struct Preload {
     pub families: Vec<String>,
     pub timeout_s: f64,
     pub reply: std::sync::mpsc::Sender<Value>,
+    /// The caller's tag, echoed in its `fontsPreloadProgress` events.
+    pub id: Option<String>,
     since: Option<f64>,
+    /// Families whose progress event went out.
+    reported: Vec<bool>,
 }
 
 impl Preload {
     pub fn new(families: Vec<String>, timeout_s: f64, reply: std::sync::mpsc::Sender<Value>) -> Self {
-        Self { families, timeout_s, reply, since: None }
+        let reported = vec![false; families.len()];
+        Self { families, timeout_s, reply, id: None, since: None, reported }
+    }
+
+    /// Tags the `fontsPreloadProgress` events of this preload.
+    pub fn with_id(mut self, id: Option<String>) -> Self {
+        self.id = id;
+        self
     }
 }
 
@@ -655,14 +669,45 @@ pub fn tick_checks(app: &mut PhotocraftApp, now: Option<f64>) {
                 p.since = Some(t);
             }
             let timed_out = matches!((now, p.since), (Some(t), Some(s)) if t - s > p.timeout_s);
-            match preload_result(&p.families, timed_out) {
-                Some(v) => {
-                    let _ = p.reply.send(json!({"ok": true, "result": v}));
-                }
-                None => app.font_checks.preloads.push(p),
-            }
+            settle_preload(app, p, timed_out);
         }
     }
+}
+
+/// Sends the progress events of `p`'s newly settled families, then its reply once every family
+/// has settled (or keeps it waiting).
+fn settle_preload(app: &mut PhotocraftApp, mut p: Preload, timed_out: bool) {
+    let states: Vec<FamilyState> = p.families.iter().map(|f| family_state(f)).collect();
+    let settled = |st: FamilyState| if timed_out && st == FamilyState::Loading { FamilyState::Failed } else { st };
+    let total = p.families.len();
+    for (i, st) in states.iter().enumerate() {
+        let st = settled(*st);
+        if st == FamilyState::Loading || p.reported.get(i).copied().unwrap_or(true) {
+            continue;
+        }
+        if let Some(r) = p.reported.get_mut(i) {
+            *r = true;
+        }
+        let done = p.reported.iter().filter(|r| **r).count();
+        let mut e = json!({"family": p.families.get(i), "status": st.name(), "done": done, "total": total});
+        if let Some(id) = &p.id {
+            e["id"] = json!(id);
+        }
+        app.font_checks.progress.push(e);
+    }
+    if states.iter().any(|st| settled(*st) == FamilyState::Loading) {
+        app.font_checks.preloads.push(p);
+        return;
+    }
+    let (mut ready, mut missing, mut failed) = (Vec::new(), Vec::new(), Vec::new());
+    for (f, st) in p.families.iter().zip(&states) {
+        match settled(*st) {
+            FamilyState::Loaded => ready.push(f.clone()),
+            FamilyState::Missing => missing.push(f.clone()),
+            _ => failed.push(f.clone()),
+        }
+    }
+    let _ = p.reply.send(json!({"ok": true, "result": {"ready": ready, "missing": missing, "failed": failed}}));
 }
 
 /// Something waits for fonts (a document's check or a `fonts.preload`).
@@ -675,42 +720,100 @@ pub fn preload(app: &mut PhotocraftApp, p: Preload) {
     for f in &p.families {
         photocraft_text::served::request(f);
     }
-    match preload_result(&p.families, false) {
-        Some(v) => {
-            let _ = p.reply.send(json!({"ok": true, "result": v}));
+    settle_preload(app, p, false);
+}
+
+/// Where a family stands for `fonts.preload` and `fonts.status`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FamilyState {
+    /// Installed, bundled, stored, or served and arrived: type can use it now.
+    Loaded,
+    /// Served and on its way (or the manifest is still being read).
+    Loading,
+    /// Served, but its download failed.
+    Failed,
+    /// Served and not asked for yet (`fonts.status` only: asking for it fetches it).
+    Available,
+    /// Not installed and not served.
+    Missing,
+}
+
+impl FamilyState {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Loaded => "loaded",
+            Self::Loading => "loading",
+            Self::Failed => "failed",
+            Self::Available => "available",
+            Self::Missing => "missing",
         }
-        None => app.font_checks.preloads.push(p),
     }
 }
 
-/// `{ready, missing, failed}` for `families`, or `None` while one is still on its way (unless
-/// `timed_out`: then those count as failed).
-fn preload_result(families: &[String], timed_out: bool) -> Option<Value> {
+/// `family`'s state now. A served family nobody asked for counts as [`FamilyState::Loading`]
+/// here (`fonts.preload` has asked for it); [`family_status`] tells it apart.
+fn family_state(family: &str) -> FamilyState {
+    match family_status(family) {
+        FamilyState::Available => FamilyState::Loading,
+        st => st,
+    }
+}
+
+/// `family`'s state without asking for anything (`fonts.status`).
+pub fn family_status(family: &str) -> FamilyState {
     use photocraft_text::served::{Lookup, Status};
-    let (mut ready, mut missing, mut failed) = (Vec::new(), Vec::new(), Vec::new());
+    if photocraft_text::shared().lock().unwrap_or_else(PoisonError::into_inner).fonts.has_family(family) {
+        return FamilyState::Loaded;
+    }
+    match photocraft_text::served::lookup(family, &[]) {
+        Lookup::Served(served) => match photocraft_text::served::family_status(&served) {
+            Status::Ready => FamilyState::Loaded,
+            Status::Failed(_) => FamilyState::Failed,
+            Status::Pending => FamilyState::Loading,
+            Status::NotRequested => FamilyState::Available,
+        },
+        Lookup::ManifestPending => FamilyState::Loading,
+        Lookup::NotServed => FamilyState::Missing,
+    }
+}
+
+/// `fonts.status {families?}`: each family's state, grouped (`loaded`, `loading`, `failed`,
+/// `available`, `missing`), plus where the manifest is. Without `families`, every family the
+/// host serves. Asks for nothing.
+pub fn fonts_status(families: Option<&[String]>) -> Value {
+    use photocraft_text::served::ManifestState;
+    let all;
+    let families = match families {
+        Some(f) => f,
+        None => {
+            all = photocraft_text::served::families();
+            &all[..]
+        }
+    };
+    let mut groups: [(FamilyState, Vec<&str>); 5] = [
+        (FamilyState::Loaded, Vec::new()),
+        (FamilyState::Loading, Vec::new()),
+        (FamilyState::Failed, Vec::new()),
+        (FamilyState::Available, Vec::new()),
+        (FamilyState::Missing, Vec::new()),
+    ];
     for f in families {
-        let installed = photocraft_text::shared().lock().unwrap_or_else(PoisonError::into_inner).fonts.has_family(f);
-        let state = match photocraft_text::served::lookup(f, &[]) {
-            _ if installed => Some(true),
-            Lookup::Served(served) => match photocraft_text::served::family_status(&served) {
-                Status::Ready => Some(true),
-                Status::Failed(_) => Some(false),
-                Status::Pending | Status::NotRequested => None,
-            },
-            Lookup::ManifestPending => None,
-            Lookup::NotServed => {
-                missing.push(f.clone());
-                continue;
-            }
-        };
-        match state {
-            Some(true) => ready.push(f.clone()),
-            Some(false) => failed.push(f.clone()),
-            None if timed_out => failed.push(f.clone()),
-            None => return None,
+        let st = family_status(f);
+        if let Some((_, v)) = groups.iter_mut().find(|(g, _)| *g == st) {
+            v.push(f);
         }
     }
-    Some(json!({"ready": ready, "missing": missing, "failed": failed}))
+    let mut out = serde_json::Map::new();
+    for (st, v) in groups {
+        out.insert(st.name().into(), json!(v));
+    }
+    let manifest = match photocraft_text::served::manifest_state() {
+        ManifestState::Loading => "loading",
+        ManifestState::Loaded => "loaded",
+        ManifestState::None => "none",
+    };
+    out.insert("manifest".into(), json!(manifest));
+    Value::Object(out)
 }
 
 /// The notice (unless turned off) and the `fontsMissing` event for `doc`'s truly missing families

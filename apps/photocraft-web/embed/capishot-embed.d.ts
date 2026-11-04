@@ -59,12 +59,77 @@ export interface InitOptions {
   fontsNotice?: boolean;
 }
 
+/** `execute('edit.removeBubbleText', …)` params. */
+export interface RemoveBubbleTextParams {
+  /** The click, document pixels. */
+  x: number;
+  y: number;
+  /** 1..255: how far from the background (a colour difference) a pixel counts as text. Default `auto`. */
+  tolerance?: number | 'auto';
+  /** Model the background from every visible layer. Default false. */
+  sampleAll?: boolean;
+  /** The result on a new layer above. Default false. */
+  newLayer?: boolean;
+  /** 1..32 px: outline gaps up to about twice this wide stay shut. Default `auto` (2 px on a 1x page, scaled with the ink's stroke width) (feature `removeBubbleText.search`). */
+  gapRadius?: number | 'auto';
+  /** 1..512 px: how far from the click a light pixel to start from may be. Default `auto` (24 px at 1x, scaled) (feature `removeBubbleText.search`). */
+  reach?: number | 'auto';
+  /** 16..65536 px: half the side of the largest square searched around the click, or the whole page. Default `auto` (1024 px at 1x, scaled, at most 35 % of the page's short side when that is more) (feature `removeBubbleText.search`). */
+  window?: number | 'page' | 'auto';
+}
+
+/** `execute('edit.removeBubbleText', …)` result. Errors start `noBubble (dark|edge|tooBig|tooSmall|notBubble|beyondWindow)`, `notPlain:` or `noText:`. */
+export interface RemoveBubbleTextResult {
+  ok: true;
+  layer: number;
+  /** `[x, y, w, h]`, document pixels. */
+  bubbleBounds: [number, number, number, number];
+  /** Pixels painted. */
+  pixels: number;
+  background: 'solid' | 'gradient';
+  /** How the bubble was bounded: its outline, the image edge, or its lettering's block. */
+  region: 'bubble' | 'edge' | 'textCluster';
+  newLayer: boolean;
+  /** The sizes the search used (feature `removeBubbleText.search`). */
+  search: {
+    /** The page's scale against a 1x page, from the ink's stroke width. */
+    scale: number;
+    gapRadius: number;
+    reach: number;
+    window: number | 'page';
+  };
+}
+
 /** `request('fonts.preload', …)` params (feature `fonts.preload`). */
 export interface FontsPreloadParams {
   /** Family names, matched as documents' are: case, spaces, punctuation and parentheses aside, PostScript names too. */
   families: string[];
   /** Give up on downloads still running after this long (those count as `failed`). Default 10000, at most 120000. */
   timeoutMs?: number;
+  /** Tag echoed in this preload's `fontsPreloadProgress` events (at most 200 characters). */
+  id?: string;
+}
+
+/** `request('fonts.status', …)` params (feature `fonts.status`). */
+export interface FontsStatusParams {
+  /** Family names (matched as in `fonts.preload`). Default: every family the host serves. */
+  families?: string[];
+}
+
+/** `request('fonts.status', …)` result: each family in one of the lists. Asks for nothing. */
+export interface FontsStatusResult {
+  /** Usable now: installed, bundled, stored, or served and downloaded. */
+  loaded: string[];
+  /** Served and downloading (or the manifest is still being read). */
+  loading: string[];
+  /** Served, but the download failed. */
+  failed: string[];
+  /** Served and not asked for yet: `fonts.preload` fetches it. */
+  available: string[];
+  /** Not installed and not served. */
+  missing: string[];
+  /** The served fonts manifest: `loading`, `loaded` or `none` (no manifest). */
+  manifest: 'loading' | 'loaded' | 'none';
 }
 
 /** `request('fonts.preload', …)` result: each asked family in one of the lists. */
@@ -163,6 +228,13 @@ export type EmbedEvent =
    */
   | { type: 'fontsMissing'; families: string[] }
   /**
+   * One family of a `fonts.preload` settled: `status` `loaded`, `failed` (download failed or
+   * timed out) or `missing`; `done` of `total` families of that preload have settled, so the
+   * last event has `done === total`. `id`: the preload's `id` param (feature
+   * `events.fontsPreloadProgress`).
+   */
+  | { type: 'fontsPreloadProgress'; id?: string; family: string; status: 'loaded' | 'failed' | 'missing'; done: number; total: number }
+  /**
    * A layer's pixels or layer mask changed (strokes, fills, Remove, clears, undo, redo…): `rect`
    * in document pixels, tile-aligned, the union of the changes since the last event. `pixelRev`
    * is the layer's new `pixelRev` (as in `document.inspect`). Feature `events.layerPixelsChanged`.
@@ -208,10 +280,16 @@ export interface ExecuteOptions {
   history?: 'step' | 'none' | 'silent';
 }
 
-/** Runs a command by id (`engine.execute` of the control protocol); params: object or JSON string. */
+/**
+ * Runs a command by id (`engine.execute` of the control protocol); params: object or JSON string.
+ * `edit.removeAi` and `paint.remove` with `ai: true` take `maxSide`: 0 (default) fills a hole larger
+ * than 512 px at full resolution in overlapping, feathered tiles; 64..2048 downscales to it as
+ * before (feature `removeAi.fullRes`).
+ */
 export function execute(command: string, params?: { [key: string]: Json } | string | null, options?: ExecuteOptions | null): Promise<Json>;
 /** Any control-protocol method (`ui.inspect`, `ui.pointer`, …). */
 export function request(method: 'fonts.preload', params: FontsPreloadParams): Promise<FontsPreloadResult>;
+export function request(method: 'fonts.status', params?: FontsStatusParams | null): Promise<FontsStatusResult>;
 export function request(method: string, params?: { [key: string]: Json } | null): Promise<Json>;
 export function listCommands(): Promise<CommandInfo[]>;
 /** Tool ids, e.g. `brush`, `eraser`, `cloneStamp` (sync). */

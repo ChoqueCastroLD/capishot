@@ -125,14 +125,22 @@ pub fn model_state(s: &Session, p: &Value) -> Option<(&'static ModelInfo, ModelS
     Some((model, s.inpainter.as_ref()?.model_state_of(model.id)))
 }
 
-pub(crate) fn ai_options(s: &Session, p: &Value, cmd: &str) -> Result<AiOptions> {
+/// `full_res_default`: without `maxSide`, crops larger than the working side are split into
+/// full-resolution tiles (the Remove tools) rather than downscaled (`edit.inpaintAi`).
+pub(crate) fn ai_options(s: &Session, p: &Value, cmd: &str, full_res_default: bool) -> Result<AiOptions> {
     let bad = |m: String| EngineError::BadParams { cmd: cmd.into(), msg: m };
     let (model, run) = model_for(s, p, cmd)?;
     let uint = |k: &str, d: u64, lo: u64, hi: u64| -> Result<u64> { Ok(crate::ai_cmds::uint_param(p, k, lo, hi, cmd)?.unwrap_or(d)) };
     // MI-GAN works on at most 512 × 512; LaMa takes smaller crops on machines with little memory.
     let lite = model.arch == catalog::Arch::Migan;
     let default_side = if lite || !run.choice.small_tiles { 512 } else { 384 };
-    let max_side = uint("maxSide", default_side, 64, 2048)?;
+    // 0: full resolution, larger crops split into overlapping tiles of the default side.
+    let (max_side, full_res) = match crate::ai_cmds::uint_param(p, "maxSide", 0, 2048, cmd)? {
+        None => (default_side, full_res_default),
+        Some(0) => (default_side, true),
+        Some(v) if v < 64 => return Err(bad("`maxSide` must be 0 (full resolution) or an integer in 64..=2048".into())),
+        Some(v) => (v, false),
+    };
     if !max_side.is_multiple_of(8) {
         return Err(bad("`maxSide` must be a multiple of 8".into()));
     }
@@ -145,7 +153,7 @@ pub(crate) fn ai_options(s: &Session, p: &Value, cmd: &str) -> Result<AiOptions>
     let threads = uint("threads", 0, 0, 64)? as usize;
     let unload = !crate::ai_cmds::keep_loaded(p, cmd)?;
     let pinned = !matches!(p.get("model").and_then(Value::as_str).unwrap_or("auto"), "auto" | "");
-    Ok(AiOptions { tiles: TileOptions { max_side: max_side as usize, margin: margin as usize }, allow_download, model, run, threads, unload, pinned })
+    Ok(AiOptions { tiles: TileOptions { max_side: max_side as usize, margin: margin as usize, full_res }, allow_download, model, run, threads, unload, pinned })
 }
 
 /// The service, if it can run `opts.model` now (else the reason, for the user).
@@ -232,8 +240,20 @@ pub(crate) fn ai_fill_rgb_async(
         Err(e) => return finish(Err(bad(e.to_string()))),
     };
     let binary: Vec<f32> = cover.iter().map(|c| if *c > 0.0 { 1.0 } else { 0.0 }).collect();
-    let state = FillState { svc, ctx, rgb, cover, binary, w, h, opts, plan, next: 0, fell_back: false, finish };
+    let split = match split_state(&plan, w, h, &opts) {
+        Ok(sp) => sp,
+        Err(e) => return finish(Err(e)),
+    };
+    let state = FillState { svc, ctx, rgb, cover, binary, w, h, opts, plan, split, next: 0, fell_back: false, finish };
     fill_step(state);
+}
+
+/// What the plan's split tiles share ([`tiles::Split`]), when it has any.
+fn split_state(plan: &[tiles::Tile], w: usize, h: usize, opts: &AiOptions) -> Result<Option<tiles::Split>> {
+    if !plan.iter().any(|t| t.split) {
+        return Ok(None);
+    }
+    tiles::Split::new(w, h, opts.tiles.max_side).map(Some).map_err(|e| bad(e.to_string()))
 }
 
 struct FillState {
@@ -249,6 +269,8 @@ struct FillState {
     h: usize,
     opts: AiOptions,
     plan: Vec<tiles::Tile>,
+    /// The fill so far of a large crop split into full-resolution tiles.
+    split: Option<tiles::Split>,
     next: usize,
     /// The GPU failed and the rest runs on the CPU ([`gpu_fallback`]).
     fell_back: bool,
@@ -256,16 +278,28 @@ struct FillState {
 }
 
 fn fill_step(mut st: FillState) {
-    let Some(t) = st.plan.get(st.next).cloned() else {
-        let FillState { rgb, finish, opts, fell_back, .. } = st;
-        return finish(Ok((rgb, FillRun { model: opts.model, cpu: opts.run.choice.cpu, fell_back })));
-    };
-    if let Err(e) = st.ctx.check() {
-        return (st.finish)(Err(e));
-    }
-    let input = match tiles::extract(&st.rgb, &st.cover, st.w, st.h, &t) {
-        Ok(i) => i,
-        Err(e) => return (st.finish)(Err(bad(e.to_string()))),
+    // The next tile with something to fill (a split tile whose hole the ones before it filled has none).
+    let (t, input, weights) = loop {
+        let Some(t) = st.plan.get(st.next).cloned() else {
+            let FillState { rgb, finish, opts, fell_back, .. } = st;
+            return finish(Ok((rgb, FillRun { model: opts.model, cpu: opts.run.choice.cpu, fell_back })));
+        };
+        if let Err(e) = st.ctx.check() {
+            return (st.finish)(Err(e));
+        }
+        let cut = match (t.split, st.split.as_ref()) {
+            (true, Some(sp)) => sp.extract(&st.rgb, &st.cover, &t).map(|r| r.map(|(i, w)| (i, Some(w)))),
+            (true, None) => Err(LamaError::Input("a split tile without its state".into())),
+            (false, _) => tiles::extract(&st.rgb, &st.cover, st.w, st.h, &t).map(|i| Some((i, None))),
+        };
+        match cut {
+            Ok(Some((input, weights))) => break (t, input, weights),
+            Ok(None) => {
+                st.next += 1;
+                st.ctx.progress(st.next as f32 / st.plan.len() as f32, "");
+            }
+            Err(e) => return (st.finish)(Err(bad(e.to_string()))),
+        }
     };
     let n = st.plan.len() as f32;
     let i = st.next;
@@ -284,7 +318,11 @@ fn fill_step(mut st: FillState) {
                 Err(LamaError::Gpu(why)) if !st.opts.run.choice.cpu => return gpu_fallback(st, &why),
                 Err(e) => return (st.finish)(Err(lama_err(e))),
             };
-            if let Err(e) = tiles::paste(&mut st.rgb, &st.binary, st.w, st.h, &t, &out) {
+            let pasted = match (weights, st.split.as_mut()) {
+                (Some(wts), Some(sp)) => sp.paste(&mut st.rgb, &t, &out, &wts),
+                _ => tiles::paste(&mut st.rgb, &st.binary, st.w, st.h, &t, &out),
+            };
+            if let Err(e) = pasted {
                 return (st.finish)(Err(lama_err(e)));
             }
             st.ctx.progress(b, "");
@@ -322,6 +360,10 @@ fn gpu_fallback(mut st: FillState, why: &str) {
             Ok(p) if !p.is_empty() => p,
             Ok(_) => return (st.finish)(Err(bad("nothing to clean: the area is empty"))),
             Err(e) => return (st.finish)(Err(bad(e.to_string()))),
+        };
+        st.split = match split_state(&st.plan, st.w, st.h, &st.opts) {
+            Ok(sp) => sp,
+            Err(e) => return (st.finish)(Err(e)),
         };
         st.next = 0;
     }
@@ -386,7 +428,7 @@ fn plan(s: &Session, p: &Value) -> Result<Plan> {
         Some("current") => false,
         Some(o) => return Err(bad(format!("unknown `output` {o:?} (new|current)"))),
     };
-    let opts = ai_options(s, p, ID)?;
+    let opts = ai_options(s, p, ID, false)?;
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let doc = &d.doc;
     let canvas = doc.bounds();
@@ -528,7 +570,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: "Clean Selected Area with AI",
         menu: &["Edit"],
         shortcut: None,
-        params: r#"{"output"?: "new" (default: the result on a new layer above, alpha = selection coverage) | "current" (paint it into the layer), "layer"?: layer id (default: the active pixel layer), "maxSide"?: 64..2048, multiple of 8 (default 512: larger crops are downscaled to this working size), "margin"?: 0..1024 px of context around each masked blob (default 64), "allowDownload"?: bool (fetch the model's weights when not cached: Manga LaMa about 100 MB, MI-GAN 13 MB; default false), "quality"?: "auto"|"fast"|"best" (fast: the lite MI-GAN, at most 512 px tiles; auto: Manga LaMa on a capable GPU, MI-GAN on the CPU, phones and weak machines), "device"?: "auto"|"gpu"|"cpu"|"directml"|"wgpu" (directml, wgpu: natively, that GPU runtime; auto picks DirectML on Windows for Manga LaMa when ONNX Runtime is installed), "model"?: "auto"|"manga-lama"|"migan-512", "threads"?: 0..64 (CPU threads, 0 = one per core), "keepLoaded"?: bool (default true)} -> {"layer", "pixels", "region": [x,y,w,h], "device", "model", "lite", "cpu" (it ran on the CPU), "fellBack" (the GPU failed mid-run and the CPU finished it), "ms" (the run's wall time)}. Erases what the selection covers (text, SFX) and fills it with Manga LaMa (or MI-GAN). Background job, one undo step."#,
+        params: r#"{"output"?: "new" (default: the result on a new layer above, alpha = selection coverage) | "current" (paint it into the layer), "layer"?: layer id (default: the active pixel layer), "maxSide"?: 0 or 64..2048, multiple of 8 (default 512: larger crops are downscaled to this working size; 0: full resolution, larger crops split into overlapping 512 px tiles feathered at their seams), "margin"?: 0..1024 px of context around each masked blob (default 64), "allowDownload"?: bool (fetch the model's weights when not cached: Manga LaMa about 100 MB, MI-GAN 13 MB; default false), "quality"?: "auto"|"fast"|"best" (fast: the lite MI-GAN, at most 512 px tiles; auto: Manga LaMa on a capable GPU, MI-GAN on the CPU, phones and weak machines), "device"?: "auto"|"gpu"|"cpu"|"directml"|"wgpu" (directml, wgpu: natively, that GPU runtime; auto picks DirectML on Windows for Manga LaMa when ONNX Runtime is installed), "model"?: "auto"|"manga-lama"|"migan-512", "threads"?: 0..64 (CPU threads, 0 = one per core), "keepLoaded"?: bool (default true)} -> {"layer", "pixels", "region": [x,y,w,h], "device", "model", "lite", "cpu" (it ran on the CPU), "fellBack" (the GPU failed mid-run and the CPU finished it), "ms" (the run's wall time)}. Erases what the selection covers (text, SFX) and fills it with Manga LaMa (or MI-GAN). Background job, one undo step."#,
         enabled,
         run: inpaint_ai,
         journal: true,

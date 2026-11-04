@@ -33,7 +33,11 @@
 //! - `fonts.preload {families, timeoutMs?}`: fetch the served fonts of `families` (names matched as
 //!   documents' are: case, spaces and punctuation aside, PostScript names too) and reply once each
 //!   has arrived or failed: `{ready, missing, failed}` (`missing`: nobody serves it; `failed`: its
-//!   download failed or didn't finish in `timeoutMs`, default 10000)
+//!   download failed or didn't finish in `timeoutMs`, default 10000). Each family sends one
+//!   `fontsPreloadProgress {id?, family, status, done, total}` event as it settles (web build;
+//!   `id` is the request's optional `id` param)
+//! - `fonts.status {families?}`: where families stand, asking for nothing: `{loaded, loading,
+//!   failed, available, missing, manifest}` (without `families`, every family the host serves)
 //! - `jobs.list` / `jobs.cancel {job?}`: background jobs (#210) with progress; cancel one (or all).
 //!   `engine.execute`, `ui.menu.invoke` and `ui.dialog.confirm` wait for a command that runs as a
 //!   job unless `wait: false` (then the reply is `{job, pending: true}`)
@@ -146,6 +150,8 @@ pub enum Outcome {
     AfterFonts {
         families: Vec<String>,
         timeout_s: f64,
+        /// The caller's tag for its `fontsPreloadProgress` events.
+        id: Option<String>,
     },
 }
 

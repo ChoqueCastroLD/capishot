@@ -75,9 +75,9 @@ fn shape_antialias_coverage(cv: f32, mode: AntiAlias) -> f32 {
             }
         }
         AntiAlias::Smooth => cv,
-        AntiAlias::Strong => cv.powf(0.55),
-        AntiAlias::Crisp => cv.powf(1.35),
-        AntiAlias::Sharp | AntiAlias::Windows | AntiAlias::WindowsLcd => cv.powf(2.2),
+        AntiAlias::Strong => libm::powf(cv, 0.55),
+        AntiAlias::Crisp => libm::powf(cv, 1.35),
+        AntiAlias::Sharp | AntiAlias::Windows | AntiAlias::WindowsLcd => libm::powf(cv, 2.2),
     }
 }
 
@@ -293,7 +293,7 @@ fn glyph_xform(layout: &TextLayout, g: &PlacedGlyph, face_skew_deg: f32) -> Xfor
     let hs = if st.horizontal_scale > 0.0 { st.horizontal_scale } else { 1.0 } as f64;
     let vs = if st.vertical_scale > 0.0 { st.vertical_scale } else { 1.0 } as f64;
     let skew_deg = if st.faux_italic { FAUX_ITALIC_DEG } else { 0.0 } + face_skew_deg;
-    let skew = (skew_deg as f64).to_radians().tan() * vs;
+    let skew = libm::tan((skew_deg as f64).to_radians()) * vs;
     let shift = (st.baseline_shift_pt * layout.px_per_pt) as f64;
     let (x, y) = (g.x as f64, g.y as f64);
     match g.orient {

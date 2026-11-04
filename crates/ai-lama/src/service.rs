@@ -113,6 +113,8 @@ pub struct FakeInpainter {
     pub state: Option<ModelState>,
     /// The last request's model id and CPU flag.
     pub last: std::sync::Mutex<Option<(&'static str, bool)>>,
+    /// Every request's working size.
+    pub sizes: std::sync::Mutex<Vec<(usize, usize)>>,
 }
 
 impl Inpainter for FakeInpainter {
@@ -130,6 +132,7 @@ impl Inpainter for FakeInpainter {
 
     fn run(&self, req: Request, hooks: Arc<dyn Hooks>, done: Done) {
         *self.last.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((req.model, req.cpu));
+        self.sizes.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((req.tile.w, req.tile.h));
         if hooks.cancelled() {
             return done(Err(LamaError::Cancelled));
         }

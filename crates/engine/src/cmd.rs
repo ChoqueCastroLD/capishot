@@ -1290,6 +1290,7 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::layer_copy_cmds::specs());
     v.extend(crate::layer_key_cmds::specs());
     v.extend(crate::live_cmds::specs());
+    v.extend(crate::type_layout_cmds::specs());
     v.extend(crate::prefs::specs());
     v.extend(crate::prefs::profile::specs());
     v.extend(crate::theme_cmds::specs());

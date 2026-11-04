@@ -35,6 +35,7 @@ fn engine_methods(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlReq
         // Background jobs (#210): running ones with progress, then the last few that ended.
         "jobs.list" => wrap(app.session.execute("jobs.list", json!({})).map_err(|e| e.to_string())),
         "fonts.preload" => fonts_preload(&req.params),
+        "fonts.status" => fonts_status(&req.params),
         "jobs.cancel" => jobs_cancel(app, &req.params),
         "ui.menu.list" => {
             // Report the same enablement the native menu shows, so a listed item is invokable.
@@ -244,24 +245,57 @@ fn screenshot(app: &mut PhotocraftApp, ctx: &egui::Context, p: &Value) -> Outcom
 
 // ---- ui.set: every field is validated and materialized into a `UiSet` before the first one is applied ----
 
-/// `fonts.preload {families, timeoutMs?}` (control.rs).
-fn fonts_preload(p: &Value) -> Outcome {
-    if let Some(field) = p.as_object().and_then(|o| o.keys().find(|k| !matches!(k.as_str(), "families" | "timeoutMs"))) {
-        return err(format!("unknown field `{field}` (fields: families, timeoutMs)"));
-    }
-    let Some(list) = p.get("families").and_then(Value::as_array) else { return err("`families` must be a list of family names") };
+/// `families`: at most 500 distinct non-empty names of at most 200 characters.
+fn family_list(p: &Value) -> Result<Vec<String>, &'static str> {
+    let Some(list) = p.get("families").and_then(Value::as_array) else { return Err("`families` must be a list of family names") };
     if list.len() > 500 {
-        return err("at most 500 families");
+        return Err("at most 500 families");
     }
     let mut families: Vec<String> = Vec::new();
     for f in list {
         let Some(name) = f.as_str().map(str::trim).filter(|n| !n.is_empty() && n.chars().count() <= 200) else {
-            return err("each family must be a non-empty name of at most 200 characters");
+            return Err("each family must be a non-empty name of at most 200 characters");
         };
         if !families.iter().any(|x| x == name) {
             families.push(name.to_string());
         }
     }
+    Ok(families)
+}
+
+/// `fonts.status {families?}` (control.rs).
+fn fonts_status(p: &Value) -> Outcome {
+    if !(p.is_null() || p.is_object()) {
+        return err("params must be an object");
+    }
+    if let Some(field) = p.as_object().and_then(|o| o.keys().find(|k| k.as_str() != "families")) {
+        return err(format!("unknown field `{field}` (fields: families)"));
+    }
+    if p.get("families").is_none_or(Value::is_null) {
+        return ok(crate::user_fonts_ui::fonts_status(None));
+    }
+    match family_list(p) {
+        Ok(families) => ok(crate::user_fonts_ui::fonts_status(Some(&families))),
+        Err(e) => err(e),
+    }
+}
+
+/// `fonts.preload {families, timeoutMs?, id?}` (control.rs).
+fn fonts_preload(p: &Value) -> Outcome {
+    if let Some(field) = p.as_object().and_then(|o| o.keys().find(|k| !matches!(k.as_str(), "families" | "timeoutMs" | "id"))) {
+        return err(format!("unknown field `{field}` (fields: families, timeoutMs, id)"));
+    }
+    let families = match family_list(p) {
+        Ok(f) => f,
+        Err(e) => return err(e),
+    };
+    let id = match p.get("id") {
+        None | Some(Value::Null) => None,
+        Some(v) => match v.as_str().filter(|s| s.chars().count() <= 200) {
+            Some(s) => Some(s.to_string()),
+            None => return err("`id` must be a string of at most 200 characters"),
+        },
+    };
     let timeout_ms = match p.get("timeoutMs") {
         None => 10_000.0,
         Some(v) => match v.as_f64().filter(|t| t.is_finite() && (0.0..=120_000.0).contains(t)) {
@@ -269,7 +303,7 @@ fn fonts_preload(p: &Value) -> Outcome {
             None => return err("`timeoutMs` must be a number from 0 to 120000"),
         },
     };
-    Outcome::AfterFonts { families, timeout_s: timeout_ms / 1000.0 }
+    Outcome::AfterFonts { families, timeout_s: timeout_ms / 1000.0, id }
 }
 
 fn ui_set(app: &mut PhotocraftApp, ctx: &egui::Context, p: &Value) -> Outcome {

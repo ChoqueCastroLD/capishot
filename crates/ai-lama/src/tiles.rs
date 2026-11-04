@@ -10,7 +10,11 @@
 //! overlap merge as long as the merged crop still fits `max_side` (neighbouring tiles may share
 //! context; each masked pixel is written by exactly one tile, its blob's). A tile whose crop fits within `max_side` runs at full resolution, padded on the
 //! right and bottom by mirroring (`numpy.pad(mode="symmetric")`, as the reference does) up to a
-//! multiple of 8; a larger crop is resized down to fit and its result resized back up.
+//! multiple of 8; a larger crop is resized down to fit and its result resized back up, or, with
+//! [`TileOptions::full_res`], split into overlapping full-resolution tiles of at most `max_side`
+//! a side ([`Split`]): they run in rows, top to bottom, left to right; each sees the real pixels
+//! around it and what the tiles before it filled as context, regenerates a band of that fill
+//! next to its own hole and feathers into it, so no seam shows (screentone keeps its phase).
 
 use crate::{LamaError, MAX_WORK_SIDE, MIN_WORK_SIDE, Result, SIZE_MULTIPLE};
 
@@ -62,11 +66,14 @@ pub struct TileOptions {
     pub max_side: usize,
     /// Minimum context margin around each blob, in pixels.
     pub margin: usize,
+    /// A crop larger than `max_side` is split into overlapping full-resolution tiles (see
+    /// [`Split`]) instead of resized down (which blurs screentone and fine detail).
+    pub full_res: bool,
 }
 
 impl Default for TileOptions {
     fn default() -> Self {
-        Self { max_side: 512, margin: 64 }
+        Self { max_side: 512, margin: 64, full_res: false }
     }
 }
 
@@ -84,6 +91,9 @@ pub struct Tile {
     pub work_h: usize,
     /// Crop-to-working-size mapping.
     pub fit: Fit,
+    /// One of the overlapping full-resolution tiles a large crop was split into: cut out and
+    /// pasted with [`Split::extract`] and [`Split::paste`] (its `core` is the whole crop's).
+    pub split: bool,
 }
 
 /// The model's input for one tile.
@@ -211,14 +221,220 @@ pub fn plan(mask: &[f32], w: usize, h: usize, opts: &TileOptions) -> Result<Vec<
             // Full resolution: use real pixels for the padding where the image has them.
             let (tw, th) = (round_up8(crop.w.max(MIN_WORK_SIDE)), round_up8(crop.h.max(MIN_WORK_SIDE)));
             let rect = grow_to(crop, tw, th, w, h);
-            tiles.push(Tile { rect, core, work_w: tw, work_h: th, fit: Fit::Pad });
+            tiles.push(Tile { rect, core, work_w: tw, work_h: th, fit: Fit::Pad, split: false });
+        } else if opts.full_res {
+            split_grid(&mut tiles, core, crop, mask, w, h, opts.max_side);
         } else {
             let s = opts.max_side as f64 / long as f64;
             let side = |v: usize| round_up8(((v as f64 * s).ceil() as usize).max(MIN_WORK_SIDE)).min(opts.max_side);
-            tiles.push(Tile { rect: crop, core, work_w: side(crop.w), work_h: side(crop.h), fit: Fit::Resize });
+            tiles.push(Tile { rect: crop, core, work_w: side(crop.w), work_h: side(crop.h), fit: Fit::Resize, split: false });
         }
     }
     Ok(tiles)
+}
+
+/// How far neighbouring tiles of a split crop overlap: a quarter of the side.
+pub fn split_overlap(side: usize) -> usize {
+    side / 4
+}
+
+/// How far into what earlier tiles filled a split tile regenerates and feathers: half the overlap
+/// (the other half stays as context, so the new fill continues the old one's pattern).
+pub fn split_band(side: usize) -> usize {
+    split_overlap(side) / 2
+}
+
+/// Tile spans `(start, len)` covering `start..start + len`, at most `side` long, overlapping by at
+/// least [`split_overlap`] and evenly spread.
+fn spans(start: usize, len: usize, side: usize) -> Vec<(usize, usize)> {
+    if len <= side {
+        return vec![(start, len)];
+    }
+    let overlap = split_overlap(side);
+    let n = (len - overlap).div_ceil(side - overlap).max(2);
+    (0..n).map(|i| (start + (i * (len - side) + (n - 1) / 2) / (n - 1), side)).collect()
+}
+
+/// The overlapping full-resolution tiles of a crop larger than `side`, in rows, skipping those
+/// without any of the core's hole.
+fn split_grid(out: &mut Vec<Tile>, core: Rect, crop: Rect, mask: &[f32], w: usize, h: usize, side: usize) {
+    for (y, th) in spans(crop.y, crop.h, side) {
+        for (x, tw) in spans(crop.x, crop.w, side) {
+            let r = Rect { x, y, w: tw, h: th };
+            let hole = (r.y.max(core.y)..r.bottom().min(core.bottom())).any(|yy| (r.x.max(core.x)..r.right().min(core.right())).any(|xx| mask[yy * w + xx] > 0.0));
+            if !hole {
+                continue;
+            }
+            let (ww, wh) = (round_up8(tw.max(MIN_WORK_SIDE)), round_up8(th.max(MIN_WORK_SIDE)));
+            let rect = grow_to(r, ww, wh, w, h);
+            out.push(Tile { rect, core, work_w: ww, work_h: wh, fit: Fit::Pad, split: true });
+        }
+    }
+}
+
+/// What the split tiles of a run have filled so far ([`Tile::split`]): later tiles take it as
+/// context, except a band of [`split_band`] pixels next to their own unfilled hole, which they
+/// regenerate and blend into with a linear ramp.
+#[derive(Debug, Clone)]
+pub struct Split {
+    w: usize,
+    h: usize,
+    band: usize,
+    done: Vec<bool>,
+}
+
+impl Split {
+    /// For a `w×h` image tiled at `max_side`.
+    pub fn new(w: usize, h: usize, max_side: usize) -> Result<Self> {
+        let n = w.checked_mul(h).filter(|n| *n > 0).ok_or_else(|| LamaError::Input("empty image".into()))?;
+        Ok(Self { w, h, band: split_band(max_side).max(1), done: vec![false; n] })
+    }
+
+    /// Forgets what was filled (a run that starts its tiles over).
+    pub fn restart(&mut self) {
+        self.done.fill(false);
+    }
+
+    /// A split tile's model input and, per pixel of its `rect`, how much of its output to paste
+    /// (0 = nothing). `None` when earlier tiles already filled all of its hole.
+    pub fn extract(&self, rgb: &[f32], mask: &[f32], t: &Tile) -> Result<Option<(TileInput, Vec<f32>)>> {
+        let (w, h) = (self.w, self.h);
+        check_buffers(rgb.len(), mask, w, h)?;
+        check_tile(t, w, h)?;
+        if t.fit != Fit::Pad {
+            return Err(LamaError::Input("a split tile runs at full resolution".into()));
+        }
+        let r = t.rect;
+        let at = |lx: usize, ly: usize| (r.y + ly) * w + r.x + lx;
+        let own = |lx: usize, ly: usize| t.core.contains(r.x + lx, r.y + ly);
+        // Chessboard distance to the nearest own hole pixel no tile filled yet, capped past the band.
+        let cap = u32::try_from(self.band).unwrap_or(u32::MAX).saturating_add(1);
+        let mut dist = vec![cap; r.w * r.h];
+        let mut fresh = false;
+        for ly in 0..r.h {
+            for lx in 0..r.w {
+                let i = at(lx, ly);
+                if mask[i] > 0.0 && !self.done[i] && own(lx, ly) {
+                    dist[ly * r.w + lx] = 0;
+                    fresh = true;
+                }
+            }
+        }
+        if !fresh {
+            return Ok(None);
+        }
+        chamfer(&mut dist, r.w, r.h);
+        let band = self.band as f32 + 1.0;
+        let mut weights = vec![0f32; r.w * r.h];
+        let mut local_mask = vec![0f32; r.w * r.h];
+        for ly in 0..r.h {
+            for lx in 0..r.w {
+                let (i, j) = (at(lx, ly), ly * r.w + lx);
+                if mask[i] <= 0.0 {
+                    continue;
+                }
+                let wgt = match (own(lx, ly), self.done[i]) {
+                    (false, _) => 0.0,
+                    (true, false) => 1.0,
+                    (true, true) => (1.0 - dist[j] as f32 / band).max(0.0),
+                };
+                weights[j] = wgt;
+                if !self.done[i] || wgt > 0.0 {
+                    local_mask[j] = 1.0;
+                }
+            }
+        }
+        let (tw, th) = (t.work_w, t.work_h);
+        let mut o = Vec::with_capacity(tw * th * 3);
+        let mut m = Vec::with_capacity(tw * th);
+        for y in 0..th {
+            let ly = mirror(y, r.h);
+            for x in 0..tw {
+                let lx = mirror(x, r.w);
+                let i = at(lx, ly);
+                o.extend_from_slice(&rgb[i * 3..i * 3 + 3]);
+                m.push(local_mask[ly * r.w + lx]);
+            }
+        }
+        Ok(Some((TileInput { rgb: o, mask: m, w: tw, h: th }, weights)))
+    }
+
+    /// Writes a split tile's model output into `rgb` with `weights` (from [`Split::extract`]):
+    /// `cur + (out − cur)·weight`, and marks those pixels filled. The hole counts as fully
+    /// covered (blend soft coverage afterwards, as [`paste`] with a binary mask). Returns the
+    /// number of pixels written.
+    pub fn paste(&mut self, rgb: &mut [f32], t: &Tile, out: &[f32], weights: &[f32]) -> Result<usize> {
+        let (w, h) = (self.w, self.h);
+        if rgb.len() != w * h * 3 {
+            return Err(LamaError::Input(format!("{w}x{h} needs {} RGB samples, got {}", w * h * 3, rgb.len())));
+        }
+        check_tile(t, w, h)?;
+        let r = t.rect;
+        if t.fit != Fit::Pad || out.len() != t.work_w * t.work_h * 3 || weights.len() != r.w * r.h {
+            return Err(LamaError::Input(format!("split tile output has {} samples and {} weights, expected {} and {}", out.len(), weights.len(), t.work_w * t.work_h * 3, r.w * r.h)));
+        }
+        let mut n = 0;
+        for ly in 0..r.h {
+            for lx in 0..r.w {
+                let wgt = weights[ly * r.w + lx];
+                if wgt <= 0.0 || !wgt.is_finite() {
+                    continue;
+                }
+                let wgt = wgt.min(1.0);
+                let i = (r.y + ly) * w + r.x + lx;
+                let s = (ly * t.work_w + lx) * 3;
+                for c in 0..3 {
+                    let o = rgb[i * 3 + c];
+                    rgb[i * 3 + c] = o + (out[s + c].clamp(0.0, 1.0) - o) * wgt;
+                }
+                self.done[i] = true;
+                n += 1;
+            }
+        }
+        Ok(n)
+    }
+}
+
+/// Two-pass chessboard distance transform of `d` (`w×h`; seeds 0, the rest at a cap).
+fn chamfer(d: &mut [u32], w: usize, h: usize) {
+    for y in 0..h {
+        for x in 0..w {
+            let mut v = d[y * w + x];
+            if x > 0 {
+                v = v.min(d[y * w + x - 1] + 1);
+            }
+            if y > 0 {
+                let up = (y - 1) * w;
+                v = v.min(d[up + x] + 1);
+                if x > 0 {
+                    v = v.min(d[up + x - 1] + 1);
+                }
+                if x + 1 < w {
+                    v = v.min(d[up + x + 1] + 1);
+                }
+            }
+            d[y * w + x] = v;
+        }
+    }
+    for y in (0..h).rev() {
+        for x in (0..w).rev() {
+            let mut v = d[y * w + x];
+            if x + 1 < w {
+                v = v.min(d[y * w + x + 1] + 1);
+            }
+            if y + 1 < h {
+                let dn = (y + 1) * w;
+                v = v.min(d[dn + x] + 1);
+                if x > 0 {
+                    v = v.min(d[dn + x - 1] + 1);
+                }
+                if x + 1 < w {
+                    v = v.min(d[dn + x + 1] + 1);
+                }
+            }
+            d[y * w + x] = v;
+        }
+    }
 }
 
 /// Mirror index for `numpy.pad(mode="symmetric")`: …2 1 0 | 0 1 2 … n−1 | n−1 n−2 …
@@ -518,14 +734,225 @@ mod tests {
     fn bad_inputs_are_errors() {
         let o = TileOptions::default();
         assert!(plan(&[1.0; 10], 4, 4, &o).is_err());
-        assert!(plan(&[1.0; 16], 4, 4, &TileOptions { max_side: 500, margin: 0 }).is_err());
-        assert!(plan(&[1.0; 16], 4, 4, &TileOptions { max_side: 8, margin: 0 }).is_err());
+        assert!(plan(&[1.0; 16], 4, 4, &TileOptions { max_side: 500, margin: 0, full_res: false }).is_err());
+        assert!(plan(&[1.0; 16], 4, 4, &TileOptions { max_side: 8, margin: 0, full_res: true }).is_err());
         assert!(plan(&[], 0, 0, &o).is_err());
-        let t = Tile { rect: Rect { x: 0, y: 0, w: 10, h: 10 }, core: Rect { x: 0, y: 0, w: 10, h: 10 }, work_w: 64, work_h: 64, fit: Fit::Pad };
+        let t = Tile { rect: Rect { x: 0, y: 0, w: 10, h: 10 }, core: Rect { x: 0, y: 0, w: 10, h: 10 }, work_w: 64, work_h: 64, fit: Fit::Pad, split: false };
         let (img, m) = (rgb(8, 8), vec![1.0; 64]);
         assert!(extract(&img, &m, 8, 8, &t).is_err(), "tile larger than the image");
         let mut img2 = rgb(16, 16);
         assert!(paste(&mut img2, &[1.0; 256], 16, 16, &t, &[0.0; 5]).is_err());
         assert!(resample(&[0.0; 5], 2, 2, 3, 4, 4).len() == 48);
+    }
+
+    #[test]
+    fn big_crops_split_into_overlapping_full_res_tiles() {
+        let (w, h) = (2000, 1500);
+        let full = TileOptions { full_res: true, ..TileOptions::default() };
+        // A small hole plans as without full_res.
+        let small = mask_with(w, h, &[Rect { x: 100, y: 100, w: 120, h: 40 }]);
+        assert_eq!(plan(&small, w, h, &full).unwrap(), plan(&small, w, h, &TileOptions::default()).unwrap());
+        let hole = Rect { x: 100, y: 100, w: 900, h: 300 };
+        let m = mask_with(w, h, &[hole]);
+        let t = plan(&m, w, h, &full).unwrap();
+        assert!(t.len() > 2, "{t:?}");
+        for a in &t {
+            assert!(a.split && a.fit == Fit::Pad && a.core == hole, "{a:?}");
+            assert!(a.rect.w <= 512 && a.rect.h <= 512 && a.rect.w == a.work_w && a.rect.h == a.work_h, "{a:?}");
+            assert!(a.rect.right() <= w && a.rect.bottom() <= h);
+        }
+        // Neighbours overlap by at least a quarter of the side, and every hole pixel is in a tile.
+        for p in t.windows(2).filter(|p| p[0].rect.y == p[1].rect.y) {
+            assert!(p[0].rect.right() >= p[1].rect.x + split_overlap(512), "{p:?}");
+        }
+        for y in hole.y..hole.bottom() {
+            for x in hole.x..hole.right() {
+                assert!(t.iter().any(|a| a.rect.contains(x, y)), "({x},{y}) uncovered");
+            }
+        }
+        // Tiles with none of the hole are skipped (an L-shaped hole's empty corner).
+        let l = mask_with(w, h, &[Rect { x: 100, y: 100, w: 1400, h: 30 }, Rect { x: 100, y: 100, w: 30, h: 1200 }]);
+        let t = plan(&l, w, h, &full).unwrap();
+        assert!(t.iter().all(|a| !a.rect.contains(1000, 1000)), "nothing far from the L");
+    }
+
+    #[test]
+    fn split_extract_and_paste_reject_bad_input() {
+        let (w, h) = (100, 80);
+        assert!(Split::new(0, 5, 512).is_err());
+        let mut sp = Split::new(w, h, 64).unwrap();
+        let t = Tile { rect: Rect { x: 0, y: 0, w: 64, h: 64 }, core: Rect { x: 0, y: 0, w: 64, h: 64 }, work_w: 64, work_h: 64, fit: Fit::Pad, split: true };
+        let (img, m) = (rgb(w, h), vec![1.0; w * h]);
+        assert!(sp.extract(&img, &m[..10], &t).is_err());
+        assert!(sp.extract(&img, &m, &Tile { fit: Fit::Resize, ..t }).is_err());
+        assert!(sp.extract(&img, &m, &Tile { rect: Rect { x: 50, ..t.rect }, ..t }).is_err(), "outside the image");
+        let (inp, wts) = sp.extract(&img, &m, &t).unwrap().unwrap();
+        let mut img2 = img.clone();
+        assert!(sp.paste(&mut img2, &t, &inp.rgb[..5], &wts).is_err());
+        assert!(sp.paste(&mut img2, &t, &inp.rgb, &wts[..5]).is_err());
+        assert!(sp.paste(&mut img2[..9], &t, &inp.rgb, &wts).is_err());
+        assert_eq!(sp.paste(&mut img2, &t, &inp.rgb, &wts).unwrap(), 64 * 64);
+        assert!(sp.extract(&img2, &m, &t).unwrap().is_none(), "all filled");
+        sp.restart();
+        assert!(sp.extract(&img2, &m, &t).unwrap().is_some());
+    }
+
+    /// A screentone (8 px dots) under a grid of building windows (40 px).
+    fn manga(x: usize, y: usize) -> f32 {
+        let (dx, dy) = ((x % 8) as f32 - 3.5, (y % 8) as f32 - 3.5);
+        if x % 40 < 4 || y % 40 < 4 {
+            0.05
+        } else if dx * dx + dy * dy < 5.0 {
+            0.2
+        } else {
+            0.85
+        }
+    }
+
+    /// A content-aware stand-in for the model, local to its input: it finds the pattern's period
+    /// along x and y from the known pixels and copies along it into the hole (an unknown period, a
+    /// downscaled tile, gets a poor copy, as a real model blurs), plus an offset that differs
+    /// from tile to tile (models drift: a hard seam would show it) and a little noise of its own.
+    fn periodic_fake(inp: &TileInput, offset: f32) -> Vec<f32> {
+        let (w, h) = (inp.w, inp.h);
+        let g = |x: usize, y: usize| inp.rgb[(y * w + x) * 3];
+        let known = |x: usize, y: usize| inp.mask[y * w + x] == 0.0;
+        let period = |horiz: bool| {
+            let mut best = (f32::MAX, 1);
+            for p in 2..=64usize {
+                let (mut e, mut n) = (0.0, 0u32);
+                for y in (0..h).step_by(3) {
+                    for x in (0..w).step_by(3) {
+                        let (x2, y2) = if horiz { (x + p, y) } else { (x, y + p) };
+                        if x2 < w && y2 < h && known(x, y) && known(x2, y2) {
+                            e += (g(x, y) - g(x2, y2)).abs();
+                            n += 1;
+                        }
+                    }
+                }
+                if n > 50 && e / (n as f32) < best.0 - 1e-4 {
+                    best = (e / n as f32, p);
+                }
+            }
+            best.1
+        };
+        let (px, py) = (period(true), period(false));
+        let mut out = inp.rgb.clone();
+        for y in 0..h {
+            for x in 0..w {
+                if known(x, y) {
+                    continue;
+                }
+                // The nearest known pixel a whole number of periods to the left, else above, right,
+                // below: one consistent source, as a model continues what it sees.
+                let (x0, y0) = (x as isize, y as isize);
+                let dirs = [(-(px as isize), 0), (0, -(py as isize)), (px as isize, 0), (0, py as isize)];
+                let v = dirs
+                    .iter()
+                    .find_map(|(dx, dy)| {
+                        (1..w.max(h) as isize).map(|k| (x0 + k * dx, y0 + k * dy)).take_while(|(cx, cy)| *cx >= 0 && *cy >= 0 && (*cx as usize) < w && (*cy as usize) < h).find(|(cx, cy)| known(*cx as usize, *cy as usize))
+                    })
+                    .map_or(0.5, |(cx, cy)| g(cx as usize, cy as usize));
+                let noise = ((x * 7919 + y * 104_729 + (offset.to_bits() as usize % 997)) % 1000) as f32 / 1000.0 - 0.5;
+                for c in 0..3 {
+                    out[(y * w + x) * 3 + c] = v + offset + noise * 0.01;
+                }
+            }
+        }
+        out
+    }
+
+    /// The engine's loop: tiles in order, filled in place, the binary hole pasted. `band` overrides
+    /// the split band (0: a hard switch between tiles, the control).
+    fn run(img: &[f32], m: &[f32], w: usize, h: usize, opts: &TileOptions, band: Option<usize>) -> (Vec<f32>, Vec<Tile>) {
+        let t = plan(m, w, h, opts).unwrap();
+        let mut out = img.to_vec();
+        let mut sp = Split::new(w, h, opts.max_side).unwrap();
+        if let Some(b) = band {
+            sp.band = b;
+        }
+        for (i, tile) in t.iter().enumerate() {
+            let offset = if i % 2 == 0 { 0.04 } else { -0.04 };
+            if tile.split {
+                let Some((inp, wts)) = sp.extract(&out, m, tile).unwrap() else { continue };
+                sp.paste(&mut out, tile, &periodic_fake(&inp, offset), &wts).unwrap();
+            } else {
+                let inp = extract(&out, m, w, h, tile).unwrap();
+                paste(&mut out, m, w, h, tile, &periodic_fake(&inp, offset)).unwrap();
+            }
+        }
+        (out, t)
+    }
+
+    /// #21: a hole far larger than the working side, over screentone and a window grid. Downscaled,
+    /// the fill loses the pattern; split into full-resolution tiles it keeps it, and the seams
+    /// between tiles are no more visible than the fill's own variation.
+    #[test]
+    fn full_res_tiles_keep_screentone_sharp_without_seams() {
+        let (w, h) = (1400, 1000);
+        let hole = Rect { x: 200, y: 150, w: 1000, h: 700 };
+        let m = mask_with(w, h, &[hole]);
+        let gt: Vec<f32> = (0..w * h).flat_map(|i| [manga(i % w, i / w); 3]).collect();
+        let mut img = gt.clone();
+        for (i, c) in m.iter().enumerate() {
+            if *c > 0.0 {
+                img[i * 3..i * 3 + 3].fill(0.5);
+            }
+        }
+        let at = |v: &[f32], x: usize, y: usize| v[(y * w + x) * 3];
+        // Detail: mean gradient magnitude in the hole; error: mean distance to the true pattern.
+        let detail = |v: &[f32]| {
+            let mut s = 0.0;
+            for y in hole.y..hole.bottom() - 1 {
+                for x in hole.x..hole.right() - 1 {
+                    s += (at(v, x + 1, y) - at(v, x, y)).abs() + (at(v, x, y + 1) - at(v, x, y)).abs();
+                }
+            }
+            s / ((hole.w - 1) * (hole.h - 1)) as f32
+        };
+        let error = |v: &[f32]| {
+            let mut s = 0.0;
+            for y in hole.y..hole.bottom() {
+                for x in hole.x..hole.right() {
+                    s += (at(v, x, y) - at(&gt, x, y)).abs();
+                }
+            }
+            s / (hole.w * hole.h) as f32
+        };
+        // Seams: per column (and row) of the hole, the mean step of the error image (fill minus
+        // truth) across it: the columns at tile edges against the rest.
+        let seams = |v: &[f32], t: &[Tile]| {
+            let e = |x: usize, y: usize| at(v, x, y) - at(&gt, x, y);
+            let col = |x: usize| (hole.y..hole.bottom()).map(|y| (e(x + 1, y) - e(x, y)).abs()).sum::<f32>() / hole.h as f32;
+            let row = |y: usize| (hole.x..hole.right()).map(|x| (e(x, y + 1) - e(x, y)).abs()).sum::<f32>() / hole.w as f32;
+            let near = |p: usize, edges: &[usize]| edges.iter().any(|e| p + 3 >= *e && p <= e + 3);
+            let xs: Vec<usize> = t.iter().flat_map(|a| [a.rect.x, a.rect.right()]).collect();
+            let ys: Vec<usize> = t.iter().flat_map(|a| [a.rect.y, a.rect.bottom()]).collect();
+            let (mut seam, mut inner) = (0f32, Vec::new());
+            for x in hole.x + 4..hole.right() - 5 {
+                if near(x, &xs) { seam = seam.max(col(x)) } else { inner.push(col(x)) }
+            }
+            for y in hole.y + 4..hole.bottom() - 5 {
+                if near(y, &ys) { seam = seam.max(row(y)) } else { inner.push(row(y)) }
+            }
+            let mean = inner.iter().sum::<f32>() / inner.len() as f32;
+            let sd = (inner.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / inner.len() as f32).sqrt();
+            (seam, mean + 3.0 * sd)
+        };
+        let down = TileOptions::default();
+        let full = TileOptions { full_res: true, ..down };
+        let (a, ta) = run(&img, &m, w, h, &down, None);
+        let (b, tb) = run(&img, &m, w, h, &full, None);
+        let (c, tc) = run(&img, &m, w, h, &full, Some(0));
+        assert!(ta.len() == 1 && ta[0].fit == Fit::Resize && tb.len() > 4 && tb.iter().all(|t| t.split), "{} {}", ta.len(), tb.len());
+        let (dg, da, db) = (detail(&gt), detail(&a), detail(&b));
+        let (ea, eb) = (error(&a), error(&b));
+        let (sb, ib) = seams(&b, &tb);
+        let (sc, ic) = seams(&c, &tc);
+        eprintln!("detail: truth {dg:.4} downscaled {da:.4} full {db:.4}; error: downscaled {ea:.4} full {eb:.4}; seams: feathered {sb:.4} (interior {ib:.4}), hard {sc:.4} (interior {ic:.4})");
+        assert!(db > da * 1.2 && (db - dg).abs() < dg * 0.1, "full resolution keeps the pattern's detail");
+        assert!(eb < ea * 0.5, "and its phase");
+        assert!(sb <= ib && sb < sc / 4.0, "no seam shows: {sb} vs {ib}");
+        assert!(sc > ic, "the control: a hard switch between tiles does show ({sc} vs {ic})");
     }
 }

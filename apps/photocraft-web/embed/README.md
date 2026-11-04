@@ -79,6 +79,12 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
   await capishot.execute('selection.set', {id: sel.id}, {document: doc});
   ```
 
+- `execute('type.layoutDigest', {layer?, fontHashes?})` fingerprints how type lays out: the same
+  digest from the browser and from a `photocraft-cli serve` session means every glyph sits at the
+  same place (layout is deterministic given the same font files; `docs/control-protocol.md` ›
+  Same type layout in the browser and the CLI lists what can still differ). Feature
+  `type.layoutDigest`.
+
 - Type layers through `execute` (`docs/control-protocol.md`): `type.frame {layer}` gives a layer's
   frame without its layout (`shape` point/box/path/inPath with its geometry, `transform`, `bounds`),
   and `type.edit {layer, path | inPath, vertical?, inset?}` gives type in a path a new path (document
@@ -88,6 +94,34 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
 - `execute('type.createInBubble', {x, y, style?, styles?})` puts type at a document point as the
   Bubble Type tool does: in the speech bubble or narration box there, else floating text
   (`style` in the result: `bubble`, `narration` or `floating`).
+
+- Remove with AI at full resolution: `execute('edit.removeAi', {strokes, size})` (and
+  `paint.remove` with `ai: true`) fills a hole larger than the 512 px working side in overlapping
+  512 px tiles at full resolution, feathered at their seams, instead of downscaling it (screentone
+  and window grids stay sharp). `maxSide: 0` (the default) is that; `maxSide: 64..2048` (multiple
+  of 8) downscales larger crops to it as before. Holes up to 512 px are filled as before.
+  `edit.inpaintAi` keeps downscaling unless it gets `maxSide: 0` (feature `removeAi.fullRes`).
+
+  ```js
+  await capishot.execute('edit.removeAi', {strokes: [[[300, 500], [1100, 500]]], size: 300});
+  await capishot.execute('edit.removeAi', {maxSide: 512}); // the selection, downscaled as before
+  ```
+
+- `execute('edit.removeBubbleText', {x, y, gapRadius?, reach?, window?})` (feature
+  `removeBubbleText.search`): the search for the bubble is sized for the page's resolution (from
+  the ink's stroke width around the click, not resolution metadata), so a 2x or 3x page finds its
+  bubbles on the first try; a click with no bubble answers at once with `noBubble (<reason>)`
+  (`beyondWindow` when the light area reaches past the search window) instead of searching the
+  page. `gapRadius` (px, outline gaps up to about twice it stay shut), `reach` (px, how far from
+  the click a light pixel to start from may be) and `window` (px, half the side of the largest
+  square searched around the click, or `'page'`) override the automatic sizes; the result's
+  `search` says which were used (`RemoveBubbleTextParams`, `RemoveBubbleTextResult`).
+
+  ```js
+  const r = await capishot.execute('edit.removeBubbleText', {x: 1830, y: 2410});
+  // r.search: {scale: 2, gapRadius: 4, reach: 48, window: 1048}
+  await capishot.execute('edit.removeBubbleText', {x: 1830, y: 2410, gapRadius: 6, window: 'page'});
+  ```
 
 - Fonts the host serves (`fonts/manifest.txt` next to the page, craft-fonts' format
   `family | style | file | …`; file paths may have spaces and other characters, they are
@@ -99,8 +133,23 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
   (`PatrickHand-Regular`) and the names in the font file (name IDs 1, 4, 6, 16, 17) find it too.
   The "Missing fonts" notice lists only families nobody serves, and those whose download failed
   ("couldn't download it").
-  - `request('fonts.preload', {families, timeoutMs?})` fetches families ahead and resolves once
-    each has arrived or failed: `{ready, missing, failed}` (feature `fonts.preload`).
+  - `request('fonts.preload', {families, timeoutMs?, id?})` fetches families ahead and resolves once
+    each has arrived or failed: `{ready, missing, failed}` (feature `fonts.preload`). A family
+    already loaded or on its way is not fetched again. As each family settles, a
+    `fontsPreloadProgress` event `{id?, family, status: 'loaded' | 'failed' | 'missing', done,
+    total}` goes out (`id`: the call's `id`; `done === total` on the last one); with
+    `window.photocraft` it is the `photocraft-fontsPreloadProgress` window event (`detail`), over
+    `postMessage` `{photocraft: "fontsPreloadProgress", …}` (feature `events.fontsPreloadProgress`).
+  - `request('fonts.status', {families?})` says where families stand without fetching anything:
+    `{loaded, loading, failed, available, missing, manifest}` (`available`: served, not asked for
+    yet; without `families`, every family the host serves; `manifest`: `loading`, `loaded` or
+    `none`). Preload only what isn't `loaded` or `loading` (feature `fonts.status`).
+
+    ```js
+    const st = await capishot.request('fonts.status', {families: workFonts});
+    capishot.onEvent((e) => e.type === 'fontsPreloadProgress' && e.id === 'work-12' && bar(e.done / e.total));
+    await capishot.request('fonts.preload', {families: st.available, id: 'work-12', timeoutMs: 60000});
+    ```
   - `init({fontsNotice: false})` (or `request('ui.set', {fontsNotice: false})`) hides the notice;
     the `fontsMissing` event `{families}` goes out either way (features `fonts.notice`,
     `events.fontsMissing`). A page using `window.photocraft` gets it as the

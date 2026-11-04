@@ -46,6 +46,11 @@ pub const FEATURES: &[&str] = &[
     "execute.history",
     "events.layersReordered",
     "inspect.uid",
+    "type.layoutDigest",
+    "fonts.status",
+    "events.fontsPreloadProgress",
+    "removeAi.fullRes",
+    "removeBubbleText.search",
 ];
 
 /// The build stamp: the Capishot commit and the build id, set by `scripts/build-embed.sh`

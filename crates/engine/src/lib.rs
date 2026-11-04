@@ -55,6 +55,7 @@ pub mod genfill_cmds;
 mod history_cache;
 pub mod layer_key_cmds;
 pub mod live_cmds;
+pub mod type_layout_cmds;
 mod lut_id_params;
 pub mod lut_library;
 pub mod lut_library_cmds;

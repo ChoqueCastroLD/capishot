@@ -557,7 +557,7 @@ fn fonts_preload_waits_for_downloads() {
     let mut app = PhotocraftApp::new(Session::new(), Services::default());
     let ctx = egui::Context::default();
     let (req, rx) = crate::control::ControlRequest::new("fonts.preload", json!({"families": [served, broken, absent, "Inter"], "timeoutMs": 5000}));
-    let crate::control::Outcome::AfterFonts { families, timeout_s } = crate::control::handle(&mut app, &ctx, &req) else { panic!("waits for fonts") };
+    let crate::control::Outcome::AfterFonts { families, timeout_s, .. } = crate::control::handle(&mut app, &ctx, &req) else { panic!("waits for fonts") };
     preload(&mut app, Preload::new(families, timeout_s, req.reply.clone()));
     assert!(rx.try_recv().is_err(), "waits while the downloads run");
     // (The requests go to the shell; the queue is process-wide, so other tests may take them.)
@@ -584,6 +584,73 @@ fn fonts_preload_waits_for_downloads() {
     let bad_params =
         [json!({}), json!({"families": "x"}), json!({"families": [""]}), json!({"families": ["a"], "timeoutMs": -1}), json!({"families": ["a"], "x": 1})];
     for bad in bad_params {
+        let (req, _rx) = crate::control::ControlRequest::new("fonts.preload", bad.clone());
+        assert!(matches!(crate::control::handle(&mut app, &ctx, &req), crate::control::Outcome::Done(v) if v["ok"] == false), "{bad}");
+    }
+}
+
+/// `fonts.preload {id}` sends one `fontsPreloadProgress` event per family as it settles, and
+/// `fonts.status` says where families stand without asking for any.
+#[test]
+fn fonts_preload_progress_and_status() {
+    let (served, broken, idle, absent) = ("Served Mono QQ", "Served Mono RR", "Served Mono SS", "Nowhere Mono T");
+    serve(served);
+    serve(broken);
+    serve(idle);
+    let mut app = PhotocraftApp::new(Session::new(), Services::default());
+    let ctx = egui::Context::default();
+    let status = |app: &mut PhotocraftApp, p: serde_json::Value| {
+        let (req, _rx) = crate::control::ControlRequest::new("fonts.status", p);
+        match crate::control::handle(app, &ctx, &req) {
+            crate::control::Outcome::Done(v) => v,
+            _ => panic!("answers at once"),
+        }
+    };
+    let before = status(&mut app, json!({"families": [served, idle, absent, "Inter"]}));
+    assert_eq!(before["ok"], json!(true));
+    let r = &before["result"];
+    assert_eq!(r["available"], json!([served, idle]), "{r}");
+    assert_eq!(r["loaded"], json!(["Inter"]));
+    assert_eq!(r["missing"], json!([absent]));
+    assert_eq!(r["manifest"], json!("loaded"));
+    let all = status(&mut app, json!({}));
+    let listed: Vec<&serde_json::Value> = ["loaded", "loading", "failed", "available", "missing"].iter().flat_map(|k| all["result"][k].as_array().unwrap()).collect();
+    assert!(listed.contains(&&json!(idle)), "every served family: {all}");
+    assert!(crate::served_fonts::take_requests().iter().all(|f| f != idle), "status asks for nothing");
+
+    let (req, rx) = crate::control::ControlRequest::new("fonts.preload", json!({"families": [served, broken, absent, "Inter"], "id": "work-12"}));
+    let crate::control::Outcome::AfterFonts { families, timeout_s, id } = crate::control::handle(&mut app, &ctx, &req) else { panic!("waits for fonts") };
+    assert_eq!(id.as_deref(), Some("work-12"));
+    preload(&mut app, Preload::new(families, timeout_s, req.reply.clone()).with_id(id));
+    let progress = std::mem::take(&mut app.font_checks.progress);
+    assert_eq!(progress, [
+        json!({"id": "work-12", "family": absent, "status": "missing", "done": 1, "total": 4}),
+        json!({"id": "work-12", "family": "Inter", "status": "loaded", "done": 2, "total": 4}),
+    ]);
+    photocraft_text::served::fetch_started(&served_file(served));
+    photocraft_text::served::fetch_started(&served_file(broken));
+    assert_eq!(status(&mut app, json!({"families": [served]}))["result"]["loading"], json!([served]));
+    tick_checks(&mut app, Some(0.0));
+    assert!(app.font_checks.progress.is_empty(), "nothing settled");
+    photocraft_text::served::fetch_failed(&served_file(broken), "HTTP 404");
+    tick_checks(&mut app, Some(0.1));
+    assert_eq!(std::mem::take(&mut app.font_checks.progress), [json!({"id": "work-12", "family": broken, "status": "failed", "done": 3, "total": 4})]);
+    assert!(rx.try_recv().is_err(), "one family still on its way");
+    arrive(&mut app, &served_file(served), mono(served));
+    assert_eq!(std::mem::take(&mut app.font_checks.progress), [json!({"id": "work-12", "family": served, "status": "loaded", "done": 4, "total": 4})]);
+    assert_eq!(rx.try_recv().expect("answered")["result"], json!({"ready": [served, "Inter"], "missing": [absent], "failed": [broken]}));
+    let after = status(&mut app, json!({"families": [served, broken]}));
+    assert_eq!(after["result"]["loaded"], json!([served]));
+    assert_eq!(after["result"]["failed"], json!([broken]));
+    // A preload without `id` sends events without one.
+    let (req, _rx) = crate::control::ControlRequest::new("fonts.preload", json!({"families": ["Inter"]}));
+    preload(&mut app, Preload::new(vec!["Inter".into()], 1.0, req.reply.clone()));
+    assert_eq!(std::mem::take(&mut app.font_checks.progress), [json!({"family": "Inter", "status": "loaded", "done": 1, "total": 1})]);
+    // Bad params are refused.
+    for bad in [json!({"families": "x"}), json!({"families": [""]}), json!({"families": [1]}), json!({"x": 1}), json!([1])] {
+        assert_eq!(status(&mut app, bad.clone())["ok"], json!(false), "{bad}");
+    }
+    for bad in [json!({"families": ["a"], "id": 3}), json!({"families": ["a"], "id": "x".repeat(201)})] {
         let (req, _rx) = crate::control::ControlRequest::new("fonts.preload", bad.clone());
         assert!(matches!(crate::control::handle(&mut app, &ctx, &req), crate::control::Outcome::Done(v) if v["ok"] == false), "{bad}");
     }
