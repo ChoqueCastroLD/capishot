@@ -359,6 +359,58 @@ export function newDocument(options: NewDocumentOptions): Promise<DocumentInfo>;
 export function saveDocument(id: DocumentId | null, format: SaveFormat): Promise<Uint8Array>;
 export function closeDocument(id: DocumentId | null, force?: boolean): Promise<void>;
 export function activateDocument(id: DocumentId): Promise<DocumentInfo>;
+
+/** A shown or prewarmed document's camera: its own (fit the first time), the active document's
+ * (`keep`), or `zoom` (device pixels per document pixel) with document point (`x`, `y`) centred. */
+export type Viewport = 'keep' | 'own' | { zoom: number; x: number; y: number };
+
+export interface ShowDocumentOptions {
+  viewport?: Viewport;
+  /** The document shown before becomes a hidden helper, textures kept (default true). */
+  hidePrevious?: boolean;
+  /** Swap anyway after this long if the canvas isn't drawn yet (default 1000). */
+  timeoutMs?: number;
+}
+
+export interface PrewarmOptions {
+  viewport?: Viewport;
+  /** The whole document at full size, not just what the view will show (default false). */
+  full?: boolean;
+  /** Reply after this long whatever is drawn (default 10000). */
+  timeoutMs?: number;
+}
+
+export interface SwitchResult {
+  id: DocumentId;
+  /** Frames waited for the canvas (0: it was warm, swapped in the frame of the call). */
+  frames: number;
+  ms: number;
+  /** The wait ran out before the canvas (or the fonts) were ready. */
+  timedOut: boolean;
+  /** GPU bytes of the document's canvas textures. */
+  gpuBytes: number;
+  /** showDocument: shown (false: `superseded` by a later showDocument). */
+  shown?: boolean;
+  superseded?: boolean;
+  index?: number;
+}
+
+/**
+ * Shows document `id` (a hidden helper too) double-buffered (`editor.showDocument`, feature
+ * `editor.showDocument`): its canvas is drawn for the view first while the shown document stays on
+ * screen, then swapped in one frame; no blank or partial frame, no history step, no animation.
+ */
+export function showDocument(id: DocumentId, options?: ShowDocumentOptions | null): Promise<SwitchResult>;
+/** Draws document `id`'s canvas ahead, fonts in (`document.prewarm`, feature `document.prewarm`). */
+export function prewarmDocument(id: DocumentId, options?: PrewarmOptions | null): Promise<SwitchResult>;
+
+export interface DocumentMemory {
+  documents: { id: DocumentId; hidden: boolean; active: boolean; width: number; height: number; gpuMB: number; warm: boolean; pixelMB: number; framesSinceShown: number | null }[];
+  gpuMB: number;
+  compositorMB: number;
+  budgetMB: number | null;
+  gpu: boolean;
+}
 export function listDocuments(): Promise<DocumentInfo[]>;
 export function getState(): Promise<EmbedState>;
 
@@ -420,6 +472,13 @@ export function request(method: 'fonts.preload', params: FontsPreloadParams): Pr
 export function request(method: 'fonts.status', params?: FontsStatusParams | null): Promise<FontsStatusResult>;
 /** Resolves once the document's fonts have arrived or failed and its type is drawn with them. */
 export function request(method: 'document.fontsReady', params?: DocumentFontsReadyParams | null): Promise<DocumentFontsReady>;
+export function request(method: 'editor.showDocument', params: ShowDocumentOptions & { id: DocumentId }): Promise<SwitchResult>;
+export function request(method: 'document.prewarm', params: PrewarmOptions & { id: DocumentId }): Promise<SwitchResult>;
+/** One visible document: no tiles, tabs, floating windows or open cards (feature `editor.setLayout`). */
+export function request(method: 'editor.setLayout', params: { single: boolean }): Promise<{ single: boolean }>;
+/** Canvas textures (GPU canvas, CPU canvas tiles) all documents may hold; least recently shown evicted first, parsed data kept (feature `editor.setMemoryBudget`). */
+export function request(method: 'editor.setMemoryBudget', params: { mb: number | null }): Promise<{ mb: number | null; evicted: DocumentId[] }>;
+export function request(method: 'document.memory', params?: {} | null): Promise<DocumentMemory>;
 export function request(method: string, params?: { [key: string]: Json } | null): Promise<Json>;
 /** A layer's pixels or mask, read from its tiles: no document switch, no history step, nothing redrawn. */
 export function getPixels(params: GetPixelsParams, options?: { document?: DocumentId } | null): Promise<LayerPixels>;

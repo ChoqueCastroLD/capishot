@@ -117,6 +117,10 @@ pub struct ViewOptions {
     /// Developer overlay of the active layer's storage tiles (tile_overlay.rs), set with the
     /// control channel's `ui.set {"tileGrid": true}`.
     pub tile_grid: bool,
+    /// One document at a time (`editor.setLayout {single}`, an embedding host's pages): no
+    /// tiles, tabs, floating windows or open cards while a document is shown. Not saved.
+    #[serde(skip)]
+    pub single_document: bool,
 }
 
 /// Factory New Guide Layout values (Alt+Reset and a fresh ViewOptions).
@@ -143,6 +147,7 @@ impl Default for ViewOptions {
             middle_eastern_composer: false,
             guide_layout: default_guide_layout(),
             tile_grid: false,
+            single_document: false,
         }
     }
 }

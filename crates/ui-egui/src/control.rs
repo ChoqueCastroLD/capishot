@@ -41,6 +41,9 @@
 //! - `document.fontsReady {document?, timeoutMs?}`: reply once every font the document's type uses
 //!   has arrived or failed (what is still on its way after `timeoutMs`, default 10000, counts as
 //!   failed), its type drawn with them: `{document, ready, missing, failed}`
+//! - `editor.showDocument {id, viewport?, hidePrevious?, timeoutMs?}`, `document.prewarm {id,
+//!   viewport?, full?, timeoutMs?}`, `editor.setLayout {single}`, `editor.setMemoryBudget {mb}`,
+//!   `document.memory`: page switching for hosts with one visible document (`doc_switch`)
 //! - `jobs.list` / `jobs.cancel {job?}`: background jobs (#210) with progress; cancel one (or all).
 //!   `engine.execute`, `ui.menu.invoke` and `ui.dialog.confirm` wait for a command that runs as a
 //!   job unless `wait: false` (then the reply is `{job, pending: true}`)
@@ -149,6 +152,8 @@ pub enum Outcome {
     /// A command started a background job and the caller waits for it: reply with its result
     /// once it has been applied (or with its error / "cancelled").
     AfterJob(photocraft_engine::jobs::JobId),
+    /// The handler kept the request's reply sender and answers later (`doc_switch`).
+    Pending,
     /// `fonts.preload`: reply once each family has arrived or failed (or `timeout_s` passed).
     AfterFonts {
         families: Vec<String>,

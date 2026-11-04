@@ -1292,6 +1292,7 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::layer_copy_cmds::specs());
     v.extend(crate::layer_key_cmds::specs());
     v.extend(crate::live_cmds::specs());
+    v.extend(crate::doc_views_cmds::specs());
     v.extend(crate::session::batch::specs());
     v.extend(crate::pixel_read_cmds::specs());
     v.extend(crate::type_layout_cmds::specs());

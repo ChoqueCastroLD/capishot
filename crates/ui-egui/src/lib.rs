@@ -17,6 +17,7 @@ macro_rules! tl {
 pub mod canvas;
 pub mod control;
 pub mod dialogs;
+pub mod doc_switch;
 pub mod dock;
 pub mod file_dialog;
 pub mod file_open;
@@ -696,6 +697,8 @@ pub struct PhotocraftApp {
     /// Documents whose missing fonts wait for served fonts, `fonts.preload` requests, and the
     /// host's missing-fonts notice setting and events (`user_fonts_ui`).
     pub font_checks: user_fonts_ui::FontChecks,
+    /// `editor.showDocument`, `document.prewarm` and the GPU memory budget (`doc_switch`).
+    pub(crate) doc_switch: doc_switch::DocSwitch,
     /// Channel thumbnails for one document snapshot; view-only revisions reuse their pixels.
     channel_thumbs: Option<(DocId, std::sync::Weak<Document>, bool, Vec<egui::TextureHandle>)>,
     /// Channels panel overlays / channel views drawn over the canvas, per document id.
@@ -841,6 +844,8 @@ mod screenshot_tests;
 
 #[cfg(test)]
 mod bubble_text_ui_tests;
+#[cfg(test)]
+mod doc_switch_tests;
 #[cfg(test)]
 mod navigator_gpu_tests;
 #[cfg(test)]

@@ -54,6 +54,7 @@ pub mod font_projects;
 pub mod genfill_cmds;
 mod history_cache;
 pub mod layer_key_cmds;
+pub mod doc_views_cmds;
 pub mod live_cmds;
 pub mod pixel_read_cmds;
 mod lut_id_params;

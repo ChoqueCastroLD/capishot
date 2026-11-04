@@ -2213,3 +2213,69 @@ fn calls_on_hidden_and_other_documents_leave_the_active_one_alone() {
         assert!(app.session.active().is_some_and(|st| !st.hidden));
     }
 }
+
+#[test]
+fn show_document_swaps_a_hidden_page_in_with_the_view_kept() {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    let ctx = egui::Context::default();
+    app.run("file.new", json!({"width": 64, "height": 64})).unwrap();
+    let page = app.session.active().unwrap().doc.id.0;
+    let made = call(&mut app, &ctx, "engine.execute", json!({"command": "file.new", "params": {"width": 64, "height": 64, "hidden": true}}));
+    let next = made["result"]["id"].as_u64().unwrap();
+    app.sync_views();
+    let ai = app.session.active_index().unwrap();
+    app.ui.views[ai].zoom = 2.5;
+    app.ui.views[ai].center = [11.0, 17.0];
+    assert_eq!(call(&mut app, &ctx, "editor.setLayout", json!({"single": true}))["result"]["single"], true);
+    assert!(app.ui.view.single_document);
+    let history = app.session.documents().iter().map(|st| st.history.entries().len()).collect::<Vec<_>>();
+    // No GPU canvas here: the CPU canvas's tiles are drawn ahead (in the frame, in tests).
+    app.last_canvas_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+    let (req, rx) = ControlRequest::new("editor.showDocument", json!({"id": next, "viewport": "keep"}));
+    assert!(matches!(handle(&mut app, &ctx, &req), Outcome::Pending));
+    let r = rx.try_recv().expect("replied in the same frame");
+    assert_eq!((r["ok"].clone(), r["result"]["shown"].clone(), r["result"]["frames"].clone()), (json!(true), json!(true), json!(0)), "{r}");
+    let st = app.session.active().unwrap();
+    assert_eq!(st.doc.id.0, next);
+    let i = app.session.active_index().unwrap();
+    assert_eq!((app.ui.views[i].zoom, app.ui.views[i].center, app.ui.views[i].fit_pending), (2.5, [11.0, 17.0], false));
+    assert_eq!(app.session.visible_count(), 1, "the page shown before is a hidden helper now");
+    assert!(app.session.documents().iter().any(|st| st.doc.id.0 == page && st.hidden));
+    assert_eq!(app.session.documents().iter().map(|st| st.history.entries().len()).collect::<Vec<_>>().iter().sum::<usize>(), history.iter().sum::<usize>());
+    // An explicit camera, then back.
+    let (req, rx) = ControlRequest::new("editor.showDocument", json!({"id": page, "viewport": {"zoom": 0.5, "x": 3, "y": 4}}));
+    handle(&mut app, &ctx, &req);
+    assert_eq!(rx.try_recv().unwrap()["ok"], true);
+    let i = app.session.active_index().unwrap();
+    assert_eq!((app.session.active().unwrap().doc.id.0, app.ui.views[i].zoom, app.ui.views[i].center), (page, 0.5, [3.0, 4.0]));
+    let (req, rx) = ControlRequest::new("document.prewarm", json!({"id": next, "full": true}));
+    handle(&mut app, &ctx, &req);
+    assert_eq!(rx.try_recv().unwrap()["result"]["id"], next);
+    let mem = call(&mut app, &ctx, "document.memory", json!({}));
+    assert_eq!(mem["result"]["documents"].as_array().map(Vec::len), Some(2), "{mem}");
+    assert!(mem["result"]["documents"].as_array().unwrap().iter().all(|d| d["warm"] == true), "both pages' tiles drawn: {mem}");
+    assert_eq!(call(&mut app, &ctx, "editor.setMemoryBudget", json!({"mb": 64}))["result"]["mb"], 64.0);
+    let evicted = call(&mut app, &ctx, "editor.setMemoryBudget", json!({"mb": 0}));
+    assert_eq!(evicted["result"]["evicted"], json!([next]), "the hidden page's tiles go: {evicted}");
+    assert_eq!(call(&mut app, &ctx, "editor.setMemoryBudget", json!({"mb": null}))["ok"], true);
+    // Bad params are errors, never a panic.
+    for (method, p) in [
+        ("editor.showDocument", json!({})),
+        ("editor.showDocument", json!({"id": 999_999})),
+        ("editor.showDocument", json!({"id": next, "viewport": "far"})),
+        ("editor.showDocument", json!({"id": next, "viewport": {"zoom": 0, "x": 0, "y": 0}})),
+        ("editor.showDocument", json!({"id": next, "viewport": {"zoom": 1, "x": "a", "y": 0}})),
+        ("editor.showDocument", json!({"id": next, "timeoutMs": -1})),
+        ("editor.showDocument", json!({"id": next, "nope": 1})),
+        ("document.prewarm", json!({"id": next, "full": 1})),
+        ("editor.setLayout", json!({})),
+        ("editor.setLayout", json!({"single": "yes"})),
+        ("editor.setMemoryBudget", json!({})),
+        ("editor.setMemoryBudget", json!({"mb": -5})),
+        ("document.memory", json!({"x": 1})),
+        ("document.memory", json!(3)),
+    ] {
+        assert_eq!(call(&mut app, &ctx, method, p.clone())["ok"], false, "{method} {p}");
+    }
+    assert_eq!(app.session.active().unwrap().doc.id.0, page, "nothing moved");
+}
