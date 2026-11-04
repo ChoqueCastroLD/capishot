@@ -245,6 +245,13 @@ Long commands (every `filter.*`, `edit.contentAwareFill`, `edit.inpaintAi`, `edi
 
 Served fonts (the web build, `fonts/manifest.txt` next to the page): `fonts.preload {families, timeoutMs?}` fetches the served fonts of `families` and replies once each has arrived or failed, as `{ready, missing, failed}` (`missing`: not installed and not in the manifest; `failed`: the download failed or didn't end within `timeoutMs`, default 10000, at most 120000). Names match as documents' do: without case, spaces, punctuation or parentheses, and by PostScript name. A family the manifest lists is never reported missing: until the manifest is read, and while a document's served fonts download, the "Missing fonts" notice waits, and it lists only absent families and those whose download failed. `ui.set {fontsNotice: false}` hides the notice (an embedding page reports missing fonts itself; the web build also sends a `photocraft-fontsMissing` event).
 
+`fonts.preload` also takes `id` (a string): as each family settles, the web build sends a `fontsPreloadProgress` event `{id?, family, status, done, total}` (`status`: `loaded`, `failed` or `missing`; `done` of the call's `total` families have settled, so the last has `done == total`), as the `photocraft-fontsPreloadProgress` window event, `{photocraft: "fontsPreloadProgress", …}` over `postMessage`, and the embed API's `fontsPreloadProgress` event. A family already loaded or on its way is not fetched twice. `fonts.status {families?}` says where families stand and fetches nothing: `{loaded, loading, failed, available, missing, manifest}`, each family in one list (`loaded`: usable now (installed, bundled, stored, or served and downloaded); `loading`: downloading, or the manifest is still being read; `failed`: the download failed; `available`: served, not asked for yet; `missing`: nobody has it); without `families`, every family the manifest lists; `manifest`: `loading`, `loaded` or `none`. A host preloading a whole work's fonts in the background asks `fonts.status` first and preloads only the `available` ones:
+
+```json
+{"id":1,"method":"fonts.status","params":{"families":["Patrick Hand","Bangers"]}}
+{"id":2,"method":"fonts.preload","params":{"families":["Bangers"],"id":"work-12","timeoutMs":60000}}
+```
+
 ### Live sync (several people and agents on one document)
 
 For hosts that keep one document in step between collaborators (the embed API and
