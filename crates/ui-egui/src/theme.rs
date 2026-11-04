@@ -443,6 +443,7 @@ pub fn install_fonts_with(ctx: &egui::Context, cjk: crate::cjk_fonts::Sources) {
         size_ui_font(ctx, name, Arc::make_mut(data));
     }
     ctx.set_fonts(fonts);
+    NAMED_WEIGHTS.store(true, std::sync::atomic::Ordering::Relaxed);
     // egui keeps the first plugin of a type, so a re-install (language change) resets the
     // existing one. The new definitions land next pass: the plugin must not rescale before then.
     if ctx
@@ -578,14 +579,35 @@ impl egui::Plugin for UiFontSizePlugin {
     }
 }
 
+/// Whether [`install_fonts`] registered the named weights (`medium`, `semibold`) in this
+/// process. The embedded canvas (`embed.rs`) leaves the host's fonts alone, so they don't exist
+/// there and naming them would make egui panic: [`medium`] and [`semibold`] fall back to the
+/// host's proportional font.
+static NAMED_WEIGHTS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn named_weight(size: f32, name: &str) -> FontId {
+    if NAMED_WEIGHTS.load(std::sync::atomic::Ordering::Relaxed) {
+        FontId::new(size, FontFamily::Name(name.into()))
+    } else {
+        FontId::proportional(size)
+    }
+}
+
 pub fn medium(size: f32) -> FontId {
-    FontId::new(size, FontFamily::Name("medium".into()))
+    named_weight(size, "medium")
 }
 pub fn semibold(size: f32) -> FontId {
-    FontId::new(size, FontFamily::Name("semibold".into()))
+    named_weight(size, "semibold")
 }
 pub fn mono(size: f32) -> FontId {
     FontId::monospace(size)
+}
+
+/// Publish `t` for Capishot's own drawing ([`Tokens::get`]) without touching egui's style,
+/// visuals, fonts or theme preference: the embedded canvas (`embed.rs`) draws with a host's
+/// colours inside the host's own look.
+pub fn publish_tokens(ctx: &egui::Context, t: Tokens) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique("photocraft-theme"), t));
 }
 
 /// Apply a built-in theme to egui's global style and publish its tokens.

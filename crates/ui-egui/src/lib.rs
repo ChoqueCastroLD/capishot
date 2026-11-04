@@ -18,6 +18,7 @@ pub mod canvas;
 pub mod control;
 pub mod dialogs;
 pub mod doc_switch;
+pub mod embed;
 pub mod dock;
 pub mod file_dialog;
 pub mod file_open;
