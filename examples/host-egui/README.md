@@ -59,7 +59,8 @@ a host doesn't use. Measured on Linux x86-64 with this example's settings:
 
 | Build | Binary | Fully stripped (`strip`) |
 |---|---|---|
-| native release, `view` only (no AI) | 97 MB | 84 MB |
+| native release, `view` only (no AI, `--no-default-features`) | 97 MB | 84 MB |
+| native release, `view` + `full` (this example's default) | 109 MB | 94 MB |
 | native release, `view` + `ai-native` | 146 MB | 122 MB (33 MB compressed with xz) |
 
 `strip = true` in `[profile.release]` gives the stripped size directly (panic backtraces then lose

@@ -293,6 +293,7 @@ pub struct CapishotView {
     /// The rulers setting last applied.
     applied_rulers: Option<bool>,
     /// [`Mode::Full`]'s keyboard focus.
+    #[cfg(feature = "full")]
     full: photocraft_ui_egui::embed::FullState,
     /// `DocumentReady` bookkeeping.
     ready: photocraft_ui_egui::doc_ready::ReadyTracker,
@@ -335,6 +336,7 @@ impl CapishotView {
             shell,
             applied_mode: Mode::Embedded,
             applied_rulers: None,
+            #[cfg(feature = "full")]
             full: Default::default(),
             ready: photocraft_ui_egui::doc_ready::ReadyTracker::without_baseline(),
         }

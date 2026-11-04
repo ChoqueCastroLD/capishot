@@ -260,13 +260,13 @@ What a host leaves out, and how:
 | Debug info | `strip = "debuginfo"` at least; in dev, `[profile.dev.package."*"] debug = false` | most of a debug build |
 | The wasm `name` section | `wasm-opt --strip-debug`, or `wasm-bindgen` without `--keep-debug` | 20% of the wasm |
 
-Release profile advice (what `examples/host-egui/Cargo.toml` uses):
+Release profile advice (`examples/host-egui/Cargo.toml` has these):
 
 ```toml
 [profile.release]
 lto = "thin"          # "fat" is a few % smaller and links much slower
 codegen-units = 1
-strip = true          # or "debuginfo" to keep symbol names in backtraces
+strip = "debuginfo"   # this example; `true` also drops the symbol table (13–14 MB above, backtraces lose names)
 # panic stays "unwind": the view catches an editor panic and the host keeps running
 
 [profile.wasm-release] # the browser build (Trunk: data-cargo-profile="wasm-release")
@@ -283,7 +283,16 @@ opt-level = "s"
 pixel crates if you try it. Nothing above drops a feature from Capishot's own app or web build:
 they enable what they ship.
 
-HOST_SIZE_TABLE
+What a host binary weighs (`examples/host-egui`, Linux x86-64 release, thin LTO, no AI):
+
+| Build | Binary (`strip = "debuginfo"`) | Fully stripped | xz |
+|---|---|---|---|
+| `features = ["view"]`: the canvas alone | 97.1 MB | 83.7 MB | 26.9 MB |
+| `features = ["view", "full"]`: plus the whole interface | 108.7 MB | 94.2 MB | 30.1 MB |
+| either, plus `ai-native` | about 40 MB more (`examples/host-egui/README.md`) | | |
+
+The canvas alone already links most of the engine, the formats and the canvas; `full` adds the
+menus, panels and dialogs (about 11 MB).
 
 ## License
 
