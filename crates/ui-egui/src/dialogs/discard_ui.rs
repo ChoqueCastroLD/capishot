@@ -53,7 +53,8 @@ fn reach(id: &str) -> Option<Reach> {
 /// The command's target document and the unsaved documents it would discard (empty for commands
 /// that discard nothing).
 fn discarded(app: &PhotocraftApp, id: &str, params: &Value) -> (Option<DocId>, Vec<DocId>) {
-    let docs = app.session.documents();
+    // A host's hidden helper documents are its own: never asked about.
+    let docs = app.session.visible_documents();
     let target = params.get("document").and_then(Value::as_u64).map(|i| i as usize).or(app.session.active_index());
     let affected: Vec<usize> = match reach(id) {
         Some(Reach::Target) => target.into_iter().collect(),
@@ -114,7 +115,7 @@ impl PhotocraftApp {
     /// Whether closing now would lose work: a document has unsaved changes and closing wasn't
     /// confirmed. The web build has the browser ask before leaving the page while this holds (#1380).
     pub fn has_unsaved_work(&self) -> bool {
-        !self.allow_close && self.session.documents().iter().any(|d| d.is_dirty())
+        !self.allow_close && self.session.visible_documents().iter().any(|d| d.is_dirty())
     }
 }
 
@@ -174,7 +175,7 @@ fn advance(app: &mut PhotocraftApp, ctx: &egui::Context) {
             .session
             .documents()
             .iter()
-            .filter(|d| d.is_dirty() && (matches!(reach(&id), Some(Reach::All)) || Some(d.doc.id) != target))
+            .filter(|d| d.is_dirty() && !d.hidden && (matches!(reach(&id), Some(Reach::All)) || Some(d.doc.id) != target))
             .map(|d| d.doc.id)
             .collect();
         if !rest.is_empty() {

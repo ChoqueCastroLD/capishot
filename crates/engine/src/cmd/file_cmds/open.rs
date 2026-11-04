@@ -37,21 +37,22 @@ fn import_result(name: &str, bytes: &[u8]) -> Result<photocraft_io::ImportResult
 
 // ---------- close / revert / save a copy / open as ----------
 
+/// Closes every shown document; a host's hidden helper documents stay open.
 pub(super) fn close_all(s: &mut Session) -> Result<Value> {
-    let n = s.documents().len();
-    while !s.documents().is_empty() {
-        s.close(s.documents().len() - 1);
+    let n = s.visible_count();
+    while let Some(last) = s.visible_count().checked_sub(1) {
+        s.close(last);
     }
     Ok(json!({"closed": n}))
 }
 
 pub(super) fn close_others(s: &mut Session, p: &Value) -> Result<Value> {
     let keep = p.get("document").and_then(Value::as_u64).map(|v| v as usize).or(s.active_index()).ok_or(EngineError::NoDocument)?;
-    if keep >= s.documents().len() {
+    if keep >= s.visible_count() {
         return Err(EngineError::BadParams { cmd: "file.closeOthers".into(), msg: format!("no document {keep}") });
     }
-    let n = s.documents().len() - 1;
-    for i in (0..s.documents().len()).rev() {
+    let n = s.visible_count() - 1;
+    for i in (0..s.visible_count()).rev() {
         if i != keep {
             s.close(i);
         }
@@ -216,11 +217,10 @@ impl PlaceRect {
         let num = |k: &str, min: f64| -> Result<Option<f64>> {
             match p.get(k) {
                 None | Some(Value::Null) => Ok(None),
-                Some(v) => v
-                    .as_f64()
-                    .filter(|v| v.is_finite() && *v >= min && v.abs() <= 1e7)
-                    .map(Some)
-                    .ok_or_else(|| EngineError::BadParams { cmd: "file.placeEmbedded".into(), msg: format!("`{k}` must be a number of pixels{}", if min > 0.0 { " above 0" } else { "" }) }),
+                Some(v) => v.as_f64().filter(|v| v.is_finite() && *v >= min && v.abs() <= 1e7).map(Some).ok_or_else(|| EngineError::BadParams {
+                    cmd: "file.placeEmbedded".into(),
+                    msg: format!("`{k}` must be a number of pixels{}", if min > 0.0 { " above 0" } else { "" }),
+                }),
             }
         };
         let (width, height) = (num("width", f64::MIN_POSITIVE)?, num("height", f64::MIN_POSITIVE)?);

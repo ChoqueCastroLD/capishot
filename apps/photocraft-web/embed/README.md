@@ -88,6 +88,42 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
   await capishot.execute('selection.set', {id: sel.id}, {document: doc});
   ```
 
+- Smooth page switching for hosts that keep one visible document per page
+  (`docs/control-protocol.md` › Live sync):
+  - Hidden helper documents (feature `documents.hidden`): `openDocument(bytes, name, {hidden:
+    true})`, `newDocument({…, hidden: true})` (`window.photocraft.open(bytes, name, {hidden:
+    true})` → `{warnings, id}`). Reachable with `execute(…, {document})`, never shown, given a tab
+    or tile, made active (`activateDocument` refuses one) or listed in the `documents` event; the
+    active document, its view, the tool and the focus stay as they are. `DocumentInfo.hidden`
+    says which. `closeDocument(id)` closes one; Close All leaves them.
+  - `execute('layer.copyToDocument', {fromDocument, toDocument, layers?, at?, center?, offset?})`
+    copies layers between documents by id, hidden ones too, activating nothing (feature
+    `layer.copyToDocument.ids`).
+  - `batch(commands, {document?, history?: 'one' | 'step' | 'none', render?: 'end', inspect?})`
+    (also `window.photocraft.batch`) runs `[{command, params}]` as one transaction: one undo step
+    (`one`, default), one each (`step`) or none (`none`); all or nothing (a failing command undoes
+    the batch); drawn once, at the end (a hidden document not at all) → `{results, inspect?}`
+    (feature `batch`). `execute('layer.setPropsMany', {layers: [{layer, visible, opacity, …}]})`
+    is the same batch of `layer.setProps` (feature `layer.setPropsMany`).
+  - `execute('layer.putPixels', {layer, src})` replaces the whole layer with an image: `src` a
+    `Blob`, an `ArrayBuffer`, a typed array, a URL, base64 or a `data:` URL; one step, one repaint,
+    no temporary document (feature `layer.putPixels.src`).
+  - No call with `{document}` moves anything of the person's active document (pixels, selection,
+    layers, history, view, tool, focus).
+
+  ```js
+  const helper = await capishot.openDocument(nextPageBytes, 'p13.psd', {hidden: true});
+  await capishot.execute('layer.putPixels', {layer: 4, src: 'https://cdn.example/p13/clean.jpg'}, {document: helper.id});
+  await capishot.batch([
+    {command: 'layer.setProps', params: {layer: 9, visible: false}},
+    {command: 'layer.setProps', params: {layer: 10, opacity: 0.5}},
+  ], {document: helper.id, history: 'none', inspect: true});
+  await capishot.execute('layer.copyToDocument', {fromDocument: helper.id, toDocument: page.id, layers: [12]});
+  ```
+
+  `batch` sends its commands as JSON: a `src` inside it must be base64 or a `data:` URL; a `Blob`
+  or URL goes through `execute('layer.putPixels', …)`.
+
 - `execute('type.layoutDigest', {layer?, fontHashes?})` fingerprints how type lays out: the same
   digest from the browser and from a `photocraft-cli serve` session means every glyph sits at the
   same place (layout is deterministic given the same font files; `docs/control-protocol.md` ›

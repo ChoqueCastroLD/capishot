@@ -802,7 +802,7 @@ fn invoke_window_command(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str)
         }
         "window.togglePanels" => Some(toggle_panels(app)),
         "window.nextDocument" | "window.previousDocument" => Some((|| {
-            let count = app.session.documents().len();
+            let count = app.session.visible_count().max(1);
             let active = app.session.active_index().ok_or("no document open")?;
             let next = if id == "window.nextDocument" { (active + 1) % count } else { (active + count - 1) % count };
             app.session.set_active(next);
@@ -810,7 +810,7 @@ fn invoke_window_command(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str)
             Ok(json!({"document": next}))
         })()),
         _ if id.starts_with(DOCUMENT_ITEM) => Some((|| {
-            let count = app.session.documents().len();
+            let count = app.session.visible_count();
             let next =
                 id.strip_prefix(DOCUMENT_ITEM).ok_or("no such document")?.parse::<usize>().ok().filter(|index| *index < count).ok_or("no such document")?;
             app.session.set_active(next);

@@ -250,7 +250,7 @@ fn build() -> Vec<CommandSpec> {
             "New…",
             ["File"],
             Some("Cmd+N"),
-            r##"{"width":1..300000=1920,"height":1..300000=1080 (pixel counts are rounded),"mode":"rgb|gray|grayscale|cmyk|lab"="rgb","depth":8|16|32=8,"background":"white|black|backgroundColor|transparent|#rrggbb"="white","backgroundColor":[r,g,b]? (0..1; defaults to toolbox colour),"resolution":1..30000=72 (ppi),"name":str,"artboard":bool=false (one artboard over the canvas, its background the chosen one, holding an empty Layer 1; no Background layer),"profile":"working"|built-in id|path to an .icc file="working" (the colour profile it is tagged with; it must suit the mode)}"##,
+            r##"{"width":1..300000=1920,"height":1..300000=1080 (pixel counts are rounded),"mode":"rgb|gray|grayscale|cmyk|lab"="rgb","depth":8|16|32=8,"background":"white|black|backgroundColor|transparent|#rrggbb"="white","backgroundColor":[r,g,b]? (0..1; defaults to toolbox colour),"resolution":1..30000=72 (ppi),"name":str,"artboard":bool=false (one artboard over the canvas, its background the chosen one, holding an empty Layer 1; no Background layer),"profile":"working"|built-in id|path to an .icc file="working" (the colour profile it is tagged with; it must suit the mode),"hidden":bool=false (a helper document for engine.execute {document}: never shown, listed as a tab or made active; the active document stays)} → {document: index, id}"##,
             always,
             |s, p| {
                 use crate::document_preset_cmds::{MAX_DIMENSION, MAX_RESOLUTION, background_color, color_mode, sample_type};
@@ -304,8 +304,10 @@ fn build() -> Vec<CommandSpec> {
                     }
                     doc.icc_profile = Some(prof.to_bytes());
                 }
-                let i = s.add_document(doc, None);
-                Ok(json!({ "document": i }))
+                // A host's helper document: never shown or made active (`DocState::hidden`).
+                let i = if p.get("hidden").and_then(Value::as_bool).unwrap_or(false) { s.add_hidden_document(doc, None) } else { s.add_document(doc, None) };
+                let id = s.documents().get(i).map(|st| st.doc.id.0);
+                Ok(json!({ "document": i, "id": id }))
             }
         ),
         cmd!("file.close", "Close", ["File"], Some("Cmd+W"), r##"{"document":index?}"##, has_doc, |s, p| {
@@ -1290,6 +1292,7 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::layer_copy_cmds::specs());
     v.extend(crate::layer_key_cmds::specs());
     v.extend(crate::live_cmds::specs());
+    v.extend(crate::session::batch::specs());
     v.extend(crate::type_layout_cmds::specs());
     v.extend(crate::prefs::specs());
     v.extend(crate::updates_cmds::specs());

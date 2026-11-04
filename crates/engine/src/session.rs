@@ -5,6 +5,7 @@ use super::{
     type_cmds,
 };
 
+pub mod batch;
 mod documents;
 mod execute;
 mod history;
@@ -12,5 +13,5 @@ mod layers;
 mod scoped;
 
 pub use documents::move_item;
-pub use scoped::{ExecScope, HistoryMode};
 pub(crate) use history::{carry_visibility, fix_selection, restore_target, visibility_changes};
+pub use scoped::{ExecScope, HistoryMode};

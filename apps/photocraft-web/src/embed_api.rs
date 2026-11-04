@@ -379,7 +379,7 @@ fn snapshot(app: &PhotocraftApp) -> Snapshot {
                         o
                     }
                 };
-                DocSnap { id, revision: st.revision, dirty: st.revision != st.saved_revision, selection, order }
+                DocSnap { id, revision: st.revision, dirty: st.revision != st.saved_revision, selection, order, hidden: st.hidden }
             })
             .collect::<Vec<_>>();
         cache.retain(|(d, ..)| snaps.iter().any(|s| s.id == *d));
@@ -557,12 +557,28 @@ pub fn on_event(listener: JsValue) {
 }
 
 /// Opens a PSD, PSB, `.pcraft`, PNG, JPEG, WebP… (a flat image becomes a one-layer document) as
-/// the active document → its `DocumentInfo` plus `warnings`.
+/// the active document → its `DocumentInfo` plus `warnings`. `options.hidden`: a hidden helper
+/// document instead, for `execute(…, {document})`: never shown, given a tab or made active, the
+/// active document, its view and the focus left as they are (feature `documents.hidden`).
 #[wasm_bindgen(js_name = openDocument)]
-pub fn open_document(data: JsValue, filename: Option<String>) -> js_sys::Promise {
+pub fn open_document(data: JsValue, filename: Option<String>, options: JsValue) -> js_sys::Promise {
     let name = filename.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| "document".into());
+    let hidden = match core::open_options(&from_js(&options)) {
+        Ok(h) => h,
+        Err(e) => return js_sys::Promise::reject(&error(&e)),
+    };
     wasm_bindgen_futures::future_to_promise(async move {
         let bytes = bytes_of(data).await.map_err(|e| error(&e))?;
+        if hidden {
+            return JsFuture::from(queue(move |app, _| {
+                let (index, warnings) = app.open_hidden(&name, &bytes)?;
+                let st = app.session.documents().get(index).ok_or("the document closed")?;
+                let mut info = core::doc_info(st, false);
+                info["warnings"] = json!(warnings);
+                Ok(to_js(&info))
+            }))
+            .await;
+        }
         JsFuture::from(queue(move |app, _| {
             let before: Vec<u64> = app.session.documents().iter().map(|st| st.doc.id.0).collect();
             let warnings = app.open_owned(&name, bytes).inspect_err(|e| app.open_failed(&name, e))?;
@@ -589,9 +605,11 @@ pub fn new_document(options: JsValue) -> js_sys::Promise {
         Err(e) => return js_sys::Promise::reject(&error(&e)),
     };
     queue(move |app, _| {
-        app.run("file.new", params)?;
+        let made = app.run("file.new", params)?;
         app.sync_views();
-        active_info(app).map(|v| to_js(&v))
+        // `hidden`: the new document isn't the active one.
+        let st = made.get("id").and_then(Value::as_u64).and_then(|id| app.session.documents().iter().find(|st| st.doc.id.0 == id)).ok_or("no new document")?;
+        Ok(to_js(&core::doc_info(st, app.session.active().is_some_and(|a| a.doc.id == st.doc.id))))
     })
 }
 
@@ -615,17 +633,14 @@ pub fn save_document(id: JsValue, format: String) -> js_sys::Promise {
             log::info!("embed: save {name}: {w}");
         }
         if photocraft_engine::file_cmds::saves_in_place(&name) {
-            // The session hands out the active document mutably only.
-            let shown = app.session.active_index();
-            if shown != Some(index) {
-                app.session.set_active(index);
-            }
+            // The session hands out the active document mutably only: a quiet scope (nothing
+            // sees a switch, a hidden document too).
+            let target = st.doc.id;
+            let scope = app.session.begin_scope(Some(target), photocraft_engine::HistoryMode::Step).map_err(|e| e.to_string())?;
             if let Some(st) = app.session.active_mut() {
                 st.saved_revision = st.revision;
             }
-            if let Some(shown) = shown.filter(|s| *s != index) {
-                app.session.set_active(shown);
-            }
+            app.session.end_scope(scope);
         }
         Ok(js_sys::Uint8Array::from(bytes.as_slice()).into())
     })
@@ -660,7 +675,9 @@ pub fn activate_document(id: JsValue) -> js_sys::Promise {
     };
     queue(move |app, _| {
         let index = index_of(app, Some(id))?;
-        app.session.set_active(index);
+        if !app.session.set_active(index) {
+            return Err(format!("document {id} is hidden: it can't be shown"));
+        }
         app.sync_views();
         active_info(app).map(|v| to_js(&v))
     })
@@ -693,12 +710,33 @@ pub fn get_state() -> js_sys::Promise {
 /// undo step, kept through the user's undo and redo (`docs/control-protocol.md` › Live sync).
 #[wasm_bindgen(js_name = execute)]
 pub fn execute(command: String, params: JsValue, options: JsValue) -> js_sys::Promise {
-    let params = from_js(&params);
+    // `layer.putPixels {src}`: a Blob, an ArrayBuffer or a URL is read first.
+    if command == "layer.putPixels" && crate::src_param::needs_reading(&params) {
+        return wasm_bindgen_futures::future_to_promise(async move {
+            let params = crate::src_param::read(params).await.map_err(|e| error(&e))?;
+            JsFuture::from(execute_now(command, params, &options)).await
+        });
+    }
+    execute_now(command, from_js(&params), &options)
+}
+
+fn execute_now(command: String, params: Value, options: &JsValue) -> js_sys::Promise {
     let params = if params.is_null() { json!({}) } else { params };
     if !params.is_object() {
         return js_sys::Promise::reject(&error(&format!("{command}: params must be an object")));
     }
-    match core::execute_request(&command, params, &from_js(&options)) {
+    match core::execute_request(&command, params, &from_js(options)) {
+        Ok(req) => control("engine.execute", req),
+        Err(e) => js_sys::Promise::reject(&error(&e)),
+    }
+}
+
+/// Runs `commands` (`[{command, params?}]`) as one transaction → `{results, inspect?}`; options
+/// `{document?, history?: "one" | "step" | "none", render?: "end", inspect?}`: one repaint at the
+/// end (none for a hidden document), all or nothing (feature `batch`).
+#[wasm_bindgen(js_name = batch)]
+pub fn batch(commands: JsValue, options: JsValue) -> js_sys::Promise {
+    match core::batch_request(from_js(&commands), &from_js(&options)) {
         Ok(req) => control("engine.execute", req),
         Err(e) => js_sys::Promise::reject(&error(&e)),
     }

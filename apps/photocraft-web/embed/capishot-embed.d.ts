@@ -151,6 +151,18 @@ export interface DocumentInfo {
   revision: number;
   dirty: boolean;
   active: boolean;
+  /** A hidden helper document (feature `documents.hidden`): never shown or made active. */
+  hidden: boolean;
+}
+
+/** `openDocument`'s third argument (feature `documents.hidden`). */
+export interface OpenOptions {
+  /**
+   * A hidden helper document: reachable with `execute(…, {document})`, never shown, given a tab,
+   * listed in `documents` events or made active; the active document, its view, the tool and the
+   * focus stay as they are. Decoded at once. Default `false`.
+   */
+  hidden?: boolean;
 }
 
 export interface OpenedDocument extends DocumentInfo {
@@ -168,6 +180,8 @@ export interface NewDocumentOptions {
   resolution?: number;
   mode?: 'rgb' | 'gray' | 'cmyk' | 'lab';
   depth?: 8 | 16 | 32;
+  /** A hidden helper document, as `OpenOptions.hidden` (feature `documents.hidden`). */
+  hidden?: boolean;
 }
 
 export interface ToolOptions {
@@ -260,7 +274,7 @@ export function destroy(): void;
 export function onEvent(listener: ((event: EmbedEvent) => void) | null): void;
 
 /** PSD/PSB/.pcraft/PNG/JPEG/WebP/… bytes → a new active document (a flat image becomes one layer). */
-export function openDocument(data: ArrayBuffer | ArrayBufferView | Blob, filename: string): Promise<OpenedDocument>;
+export function openDocument(data: ArrayBuffer | ArrayBufferView | Blob, filename: string, options?: OpenOptions | null): Promise<OpenedDocument>;
 export function newDocument(options: NewDocumentOptions): Promise<DocumentInfo>;
 /** `id` null = the active document. PSD keeps layers; a layered save marks the document clean.
  * PSD saves are incremental (unchanged layers aren't encoded again); the bytes are a full save's. */
@@ -281,8 +295,43 @@ export interface ExecuteOptions {
   history?: 'step' | 'none' | 'silent';
 }
 
+/** One command of a `batch`. */
+export interface BatchCommand {
+  command: string;
+  params?: { [key: string]: Json };
+}
+
+/** `batch`'s options (feature `batch`). */
+export interface BatchOptions {
+  /** Run on this open document (hidden ones too) without making it active. */
+  document?: DocumentId;
+  /** `one` (default): one undo step; `step`: one per command; `none` / `silent`: no undo step, kept through the user's undo and redo. */
+  history?: 'one' | 'step' | 'none' | 'silent';
+  /** `end` (the only way): drawn once, after the batch; a hidden document isn't drawn. */
+  render?: 'end';
+  /** `true` or `document.inspect`'s params: the document after the batch, as `inspect`. */
+  inspect?: boolean | { [key: string]: Json };
+}
+
+export interface BatchResult {
+  /** Each command's result, in order. */
+  results: Json[];
+  inspect?: Json;
+}
+
+/**
+ * Runs `commands` in order as one transaction (`document.batch`): all or nothing (a failing
+ * command undoes the batch and rejects with its error). Params are JSON: `layer.putPixels`' `src`
+ * here is base64 or a `data:` URL (a Blob or URL goes through `execute`).
+ */
+export function batch(commands: BatchCommand[], options?: BatchOptions | null): Promise<BatchResult>;
+
 /**
  * Runs a command by id (`engine.execute` of the control protocol); params: object or JSON string.
+ * `layer.putPixels {layer, src}` takes a `Blob`, an `ArrayBuffer`, a typed array or a URL as
+ * `src` too (feature `layer.putPixels.src`); `layer.copyToDocument {fromDocument, toDocument}`
+ * activates nothing (feature `layer.copyToDocument.ids`); `layer.setPropsMany {layers: [{layer,
+ * …}]}` is one batch of `layer.setProps` (feature `layer.setPropsMany`).
  * `edit.removeAi` and `paint.remove` with `ai: true` take `maxSide`: 0 (default) fills a hole larger
  * than 512 px at full resolution in overlapping, feathered tiles; 64..2048 downscales to it as
  * before (feature `removeAi.fullRes`).

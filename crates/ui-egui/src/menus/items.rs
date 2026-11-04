@@ -214,7 +214,7 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
     if let Some(last) = items.iter().rposition(|i| i.path.first().map(String::as_str) == Some("Window")) {
         let window = || vec!["Window".to_string()];
         let active = app.session.active_index();
-        let docs = app.session.documents().iter().enumerate().map(|(i, st)| MenuItem {
+        let docs = app.session.visible_documents().iter().enumerate().map(|(i, st)| MenuItem {
             id: format!("{DOCUMENT_ITEM}{i}"),
             label: st.doc.name.clone(),
             path: window(),

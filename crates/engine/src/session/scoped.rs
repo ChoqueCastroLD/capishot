@@ -109,10 +109,13 @@ impl Session {
         let back = scope.previous.and_then(|id| self.index_of_document(id));
         match back {
             Some(i) => self.active = Some(i),
-            // The previous document closed: whatever is active now is announced as usual.
+            // No document was active, or the previous one closed: whatever is active now is
+            // announced as usual.
             None => {
-                if self.active.is_some_and(|a| a >= self.docs.len()) {
-                    self.active = self.docs.len().checked_sub(1);
+                // Never a hidden document (the scope's target may be one).
+                let shown = self.visible_count();
+                if self.active.is_some_and(|a| a >= shown) {
+                    self.active = shown.checked_sub(1);
                 }
                 self.note_active_change();
             }
@@ -307,6 +310,43 @@ mod tests {
         assert_eq!(s.active().unwrap().doc.id, b);
         assert!(s.execute_scoped("layer.new.layer", json!({}), Some(DocId(u64::MAX)), HistoryMode::Step).is_err(), "no such document");
         assert_eq!(s.active().unwrap().doc.id, b);
+    }
+
+    #[test]
+    fn hidden_documents_are_never_shown_or_made_active() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 8, "height": 8})).unwrap();
+        let shown = s.active().unwrap().doc.id;
+        let generation = s.active_generation();
+        let r = s.execute("file.new", json!({"width": 4, "height": 4, "hidden": true})).unwrap();
+        let hidden = DocId(r["id"].as_u64().unwrap());
+        assert!(s.execute("file.new", json!({"hidden": 1})).is_err());
+        assert_eq!((s.active().unwrap().doc.id, s.active_generation()), (shown, generation));
+        assert_eq!((s.visible_count(), s.documents().len()), (1, 2));
+        // A shown document opens before the hidden ones, and is made active as always.
+        s.execute("file.new", json!({"width": 8, "height": 8})).unwrap();
+        let second = s.active().unwrap().doc.id;
+        assert_eq!(s.visible_count(), 2);
+        assert_eq!(s.documents().last().unwrap().doc.id, hidden, "hidden documents stay last");
+        assert!(!s.set_active(2), "a hidden document isn't activated");
+        assert_eq!(s.move_document(2, 0), None, "nor moved among the tabs");
+        assert_eq!(s.move_document(0, 5), Some(1), "a tab stays before the hidden ones");
+        assert_eq!(s.documents().last().unwrap().doc.id, hidden);
+        // Copying layers between documents by id activates nothing.
+        let layer = s.execute_scoped("layer.new.layer", json!({}), Some(hidden), HistoryMode::None).unwrap()["layer"].as_u64().unwrap();
+        let generation = s.active_generation();
+        let r = s.execute("layer.copyToDocument", json!({"fromDocument": hidden.0, "toDocument": shown.0, "layers": [layer]})).unwrap();
+        assert_eq!(r["id"], json!(shown.0));
+        assert_eq!((s.active().unwrap().doc.id, s.active_generation()), (second, generation));
+        assert!(s.execute("layer.copyToDocument", json!({"fromDocument": 123_456_789, "toDocument": shown.0})).is_err());
+        assert_eq!(s.active().unwrap().doc.id, second);
+        // Closing the shown documents never activates a hidden one; Close All leaves it open.
+        s.execute("file.closeAll", json!({})).unwrap();
+        assert_eq!((s.active_index(), s.documents().len()), (None, 1));
+        // Commands still reach it, and leave no document active.
+        s.execute_scoped("layer.new.layer", json!({}), Some(hidden), HistoryMode::None).unwrap();
+        assert_eq!(s.active_index(), None);
+        assert!(s.close(0).is_some());
     }
 
     #[test]
