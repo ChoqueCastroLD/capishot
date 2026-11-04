@@ -166,7 +166,7 @@ fn wasm_set() -> Result<Vec<String>, String> {
     Ok(crates
         .into_iter()
         .filter(|c| match layers::classify(&c.name) {
-            Some(layers::Class::Layer(l)) => l <= 5 || matches!(layers::short_name(&c.name), "ui-egui" | "fontfetch"),
+            Some(layers::Class::Layer(l)) => l <= 5 || matches!(layers::short_name(&c.name), "ui-egui" | "fontfetch" | "capishot-host"),
             Some(layers::Class::Standalone) => true,
             _ => false,
         })

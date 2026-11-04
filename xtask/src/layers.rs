@@ -77,6 +77,9 @@ pub const TABLE: &[(&str, Class)] = &[
     ("platform", Class::Layer(6)),
     // Google Fonts download services (HTTPS fetcher + app-private store) for the app and the CLI.
     ("fontfetch", Class::Layer(6)),
+    // Capishot as a library for host apps (the in-process engine API, then the egui widget): above
+    // the egui shell, below the apps.
+    ("capishot-host", Class::Layer(7)),
     ("testkit", Class::Testkit),
     // L7 apps and tooling
     ("photocraft", Class::Exempt),
