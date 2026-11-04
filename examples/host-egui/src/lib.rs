@@ -10,6 +10,8 @@
 
 pub mod app;
 pub mod script;
+#[cfg(not(target_arch = "wasm32"))]
+mod selftest;
 mod view;
 
 pub use app::HostApp;

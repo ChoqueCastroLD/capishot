@@ -11,16 +11,19 @@ use crate::view::Canvas;
 
 /// The example app.
 pub struct HostApp {
-    host: Host,
+    pub(crate) host: Host,
     canvas: Option<Canvas>,
-    doc: Option<DocumentId>,
+    pub(crate) doc: Option<DocumentId>,
     layers: Vec<LayerRow>,
     /// Remove with AI's running job.
-    job: Option<JobHandle>,
+    pub(crate) job: Option<JobHandle>,
     /// Events gathered by the subscription (whoever polls the host: the widget or us).
     events: Rc<RefCell<Vec<Event>>>,
     /// The last few events, for the event log.
     log: Vec<String>,
+    /// `--selftest <dir>`: the contract run frame by frame, then the app exits.
+    #[cfg(not(target_arch = "wasm32"))]
+    selftest: Option<crate::selftest::SelfTest>,
     status: String,
     saved: Option<usize>,
     /// The layer list needs reading again.
@@ -32,28 +35,47 @@ const LOG_LINES: usize = 12;
 impl HostApp {
     /// The app, its canvas on eframe's wgpu device, with the sample page open.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        // The host's own look: the canvas widget must leave it as it is.
+        cc.egui_ctx.set_visuals(egui::Visuals::light());
         let mut host = Host::new();
+        let ai = host.install_ai(&ai_config());
         let events = Rc::new(RefCell::new(Vec::new()));
         let sink = events.clone();
         host.subscribe(move |e| sink.borrow_mut().push(e.clone()));
-        let (canvas, status) = match Canvas::new(cc, &mut host) {
-            Ok(c) => (Some(c), String::new()),
-            Err(e) => (None, format!("No canvas: {e}")),
+        // The canvas needs eframe's wgpu renderer (it draws on the host's device).
+        let canvas = cc.wgpu_render_state.is_some().then(|| Canvas::new(cc));
+        let status = match &ai.reason {
+            Some(why) => format!("No AI: {why}"),
+            None => String::new(),
         };
-        let mut app = HostApp { host, canvas, doc: None, layers: Vec::new(), job: None, events, log: Vec::new(), status, saved: None, stale: true };
+        let mut app = HostApp {
+            host,
+            canvas,
+            doc: None,
+            layers: Vec::new(),
+            job: None,
+            events,
+            log: Vec::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            selftest: crate::selftest::SelfTest::from_args(),
+            status,
+            saved: None,
+            stale: true,
+        };
         app.open_sample();
         app
     }
 
-    /// Step 1 with the generated page (a real host gets the bytes from its server).
+    /// Step 1 with the generated page (a real host gets the bytes from its server; natively,
+    /// `CAPISHOT_HOST_PSD=<file>` opens that file's bytes instead).
     fn open_sample(&mut self) {
-        let r = script::sample_psd(&mut self.host).and_then(|bytes| script::open(&mut self.host, "page.psd", bytes));
+        let r = sample_bytes(&mut self.host).and_then(|(name, bytes)| script::open(&mut self.host, &name, bytes).map(|r| (name, r)));
         match r {
-            Ok((doc, warnings)) => {
+            Ok((name, (doc, warnings))) => {
                 self.doc = Some(doc);
-                self.status = if warnings.is_empty() { "Opened page.psd".into() } else { format!("Opened page.psd: {}", warnings.join("; ")) };
+                self.status = if warnings.is_empty() { format!("Opened {name}") } else { format!("Opened {name}: {}", warnings.join("; ")) };
                 if let Some(c) = self.canvas.as_mut() {
-                    c.fit();
+                    c.fit(doc);
                 }
             }
             Err(e) => self.status = format!("Open failed: {e}"),
@@ -72,9 +94,16 @@ impl HostApp {
 
     /// Events since the last frame: the job's end, a refreshed layer list, the log.
     fn take_events(&mut self) {
-        // Polling twice in a frame is harmless; this applies a finished job when no widget does.
-        self.host.poll();
+        // The canvas widget polls the host every frame (and finishes jobs on the canvas); without
+        // it, the host polls itself.
+        if self.canvas.is_none() {
+            self.host.poll();
+        }
         let events = std::mem::take(&mut *self.events.borrow_mut());
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(t) = self.selftest.as_mut() {
+            t.events(&events);
+        }
         if events.is_empty() {
             return;
         }
@@ -210,22 +239,67 @@ impl HostApp {
 
 impl eframe::App for HostApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        self.take_events();
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(t) = self.selftest.as_mut() {
+            t.before_frame(ui.ctx());
+        }
         egui::Panel::left("host").resizable(true).default_size(280.0).show(ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| self.side_panel(ui));
         });
         let highlight = self.highlight();
+        let mut drawn = None;
         egui::CentralPanel::default().show(ui, |ui| match self.canvas.as_mut() {
-            Some(c) => {
-                c.ui(ui, &mut self.host, highlight);
-            }
+            Some(c) => drawn = c.ui(ui, &mut self.host, highlight).document,
             None => {
                 ui.centered_and_justified(|ui| ui.label("The canvas needs the wgpu renderer."));
             }
         });
-        if self.job.is_some() {
+        // The events the view's poll just gave (job ends, the person's tool…).
+        self.take_events();
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(mut t) = self.selftest.take() {
+            let gpu = self.canvas.as_ref().is_some_and(Canvas::gpu_active);
+            t.after_frame(ui.ctx(), self, drawn, gpu);
+            self.selftest = Some(t);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let scripted = self.selftest.is_some();
+        #[cfg(target_arch = "wasm32")]
+        let scripted = false;
+        if self.job.is_some() || scripted {
             // Keep polling while Remove with AI runs.
             ui.ctx().request_repaint();
         }
     }
+}
+
+/// The page to open: natively `CAPISHOT_HOST_PSD=<file>` if set, else the generated sample.
+fn sample_bytes(host: &mut Host) -> capishot_host::Result<(String, Vec<u8>)> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(path) = std::env::var_os("CAPISHOT_HOST_PSD") {
+        let path = std::path::PathBuf::from(path);
+        let name = path.file_name().map_or_else(|| "page.psd".into(), |n| n.to_string_lossy().into_owned());
+        let bytes = std::fs::read(&path).map_err(|e| capishot_host::Error::File(format!("{}: {e}", path.display())))?;
+        return Ok((name, bytes));
+    }
+    Ok(("page.psd".into(), script::sample_psd(host)?))
+}
+
+/// Where AI models live and which device runs them. Natively: `CAPISHOT_MODELS_DIR` (no AI
+/// without it), `CAPISHOT_MODELS_URL` (`""`: no downloads) and `CAPISHOT_AI_DEVICE`
+/// (`cpu`/`gpu`/`auto`). In the browser a host would set `worker_url` to its AI worker.
+fn ai_config() -> capishot_host::ai::AiConfig {
+    #[allow(unused_mut)]
+    let mut config = capishot_host::ai::AiConfig::default();
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        config.models_dir = std::env::var_os("CAPISHOT_MODELS_DIR").map(Into::into);
+        config.models_url = std::env::var("CAPISHOT_MODELS_URL").ok();
+        config.device = match std::env::var("CAPISHOT_AI_DEVICE").as_deref() {
+            Ok("cpu") => capishot_host::ai::AiDevice::Cpu,
+            Ok("gpu") => capishot_host::ai::AiDevice::Gpu,
+            _ => capishot_host::ai::AiDevice::Auto,
+        };
+    }
+    config
 }

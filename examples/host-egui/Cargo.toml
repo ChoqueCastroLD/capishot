@@ -30,7 +30,9 @@ path = "src/main.rs"
 default = []
 # In-process AI (Manga LaMa for Remove with AI, the upscales): adds burn and its GPU stack, tens
 # of MB. Without it `edit.removeAi` is disabled and the example falls back to the plain Remove.
-ai = ["capishot-host/ai"]
+# Native builds enable `ai-native`, browser builds `ai-web` (never `ai-native` on wasm32).
+ai-native = ["capishot-host/ai-native"]
+ai-web = ["capishot-host/ai-web"]
 # Sandboxed WebAssembly filter plug-ins (the `plugin.*` commands, a wasmi interpreter): a host
 # rarely needs them.
 plugins = ["capishot-host/plugins"]
@@ -50,7 +52,7 @@ log = "0.4"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # `wgpu`: the canvas draws on eframe's wgpu device (no glow). `default_fonts`: the host's own UI
 # font; Capishot's canvas brings what it needs and changes no global fonts.
-eframe = { version = "0.37", default-features = false, features = ["wgpu", "accesskit", "default_fonts", "wayland", "x11", "winit/default"] }
+eframe = { version = "0.37", default-features = false, features = ["wgpu", "accesskit", "default_fonts", "wayland", "x11", "clipboard"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 eframe = { version = "0.37", default-features = false, features = ["wgpu", "accesskit", "default_fonts"] }

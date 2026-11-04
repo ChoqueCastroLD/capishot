@@ -36,9 +36,9 @@ pub fn sample_psd(host: &mut Host) -> Result<Vec<u8>> {
 /// Step 1: open a PSD from bytes and show it (`name` only names the document; PSD bytes are
 /// recognised by their signature). Returns the document and the import warnings.
 pub fn open(host: &mut Host, name: &str, bytes: Vec<u8>) -> Result<(DocumentId, Vec<String>)> {
-    let (doc, warnings) = host.open_psd(bytes, OpenOptions { name: Some(name.to_string()), hidden: false })?;
-    host.show(doc, false)?;
-    Ok((doc, warnings))
+    let opened = host.open(bytes, OpenOptions::named(name))?;
+    host.show(opened.document, false)?;
+    Ok((opened.document, opened.warnings))
 }
 
 /// Step 2: the host picks the editor's tool (the embed API's tool ids: `removeAi`, `brush`,
@@ -118,7 +118,7 @@ pub struct LayerRow {
     pub id: LayerId,
     /// Name.
     pub name: String,
-    /// `pixel`, `type`, `group`…
+    /// `pixel`, `type`, `group`, `smart object`… (lower case)
     pub kind: String,
     /// Shown.
     pub visible: bool,
@@ -153,7 +153,8 @@ fn flatten(list: &[Value], depth: usize, out: &mut Vec<LayerRow>) {
         out.push(LayerRow {
             id: LayerId(id),
             name: l.get("name").and_then(Value::as_str).unwrap_or_default().to_string(),
-            kind: l.get("kind").and_then(Value::as_str).unwrap_or_default().to_string(),
+            // `document.inspect` says `Pixel`, `Type`, `Group`, `Smart Object`…
+            kind: l.get("kind").and_then(Value::as_str).unwrap_or_default().to_ascii_lowercase(),
             visible: l.get("visible").and_then(Value::as_bool).unwrap_or(true),
             selected: l.get("selected").and_then(Value::as_bool).unwrap_or(false),
             bounds,
@@ -195,7 +196,7 @@ mod tests {
         let v = json!([
             {"id": 3, "name": "G", "kind": "group", "children": [{"id": 2, "name": "T", "kind": "type", "bounds": [1, 2, 3, 4]}]},
             {"name": "no id"},
-            {"id": 1, "name": "Background", "kind": "pixel", "visible": false, "bounds": [0, 0]}
+            {"id": 1, "name": "Background", "kind": "Pixel", "visible": false, "bounds": [0, 0]}
         ]);
         let mut out = Vec::new();
         flatten(v.as_array().unwrap(), 0, &mut out);
@@ -203,6 +204,7 @@ mod tests {
         assert_eq!(out[1].bounds, Some([1.0, 2.0, 3.0, 4.0]));
         assert_eq!(out[2].bounds, None);
         assert!(!out[2].visible);
+        assert_eq!(out[2].kind, "pixel", "kinds in lower case");
     }
 
     #[test]

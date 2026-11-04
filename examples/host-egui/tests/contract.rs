@@ -59,7 +59,7 @@ fn open_tool_remove_undo_text_save() {
     // 6. Saved as PSD bytes, which open again with both layers.
     let saved = script::save(&mut host, doc).unwrap();
     assert_eq!(&saved[..4], b"8BPS");
-    let (again, _) = host.open_psd(saved, OpenOptions { name: Some("again.psd".into()), hidden: true }).unwrap();
+    let again = host.open(saved, OpenOptions { name: Some("again.psd".into()), hidden: true }).unwrap().document;
     assert_eq!(host.active_document(), Some(doc), "a hidden document leaves the shown one active");
     let kinds: Vec<String> = script::layers(&host, again).unwrap().into_iter().map(|r| r.kind).collect();
     assert!(kinds.iter().any(|k| k == "type") && kinds.iter().any(|k| k == "pixel"), "{kinds:?}");
