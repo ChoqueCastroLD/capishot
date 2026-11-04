@@ -22,7 +22,9 @@ thread_local! {
     static HIGH: Cell<u64> = const { Cell::new(0) };
     static STARTED: Cell<f64> = const { Cell::new(0.0) };
     /// Unclean exits found at start, for the statistics.
-    static FOUND: RefCell<Vec<Value>> = const { RefCell::new(Vec::new()) };
+    static FOUND: RefCell<Vec<(String, Value)>> = const { RefCell::new(Vec::new()) };
+    /// Breadcrumbs taken into a statistics batch, removed once it is sent ([`reported`]).
+    static TAKEN: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
 fn storage() -> Option<web_sys::Storage> {
@@ -54,10 +56,15 @@ pub fn start() {
         if now - beat < DEAD_MS {
             continue; // another tab, alive
         }
-        let _ = st.remove_item(&k);
-        if let Some(v) = v {
-            log::warn!("photocraft-web: the previous page didn't close cleanly: {v}");
-            FOUND.with(|f| f.borrow_mut().push(v));
+        // Kept until the statistics have sent it ([`reported`]): this page may die before then.
+        match v {
+            Some(v) => {
+                log::warn!("photocraft-web: the previous page didn't close cleanly: {v}");
+                FOUND.with(|f| f.borrow_mut().push((k, v)));
+            }
+            None => {
+                let _ = st.remove_item(&k);
+            }
         }
     }
     let key = format!("{PREFIX}{:x}{:x}", now as u64, (js_sys::Math::random() * 1e9) as u64);
@@ -84,6 +91,11 @@ pub fn tick(app: &PhotocraftApp) {
         return;
     }
     LAST.with(|l| l.set(now));
+    // A minute in, statistics that would report the dead pages have (they start on the first
+    // frames); otherwise they are off, and the breadcrumbs go.
+    if now - STARTED.with(Cell::get) > 60_000.0 && FOUND.with(|f| !f.borrow().is_empty()) {
+        forget_found();
+    }
     let (Some(st), Some(k)) = (storage(), KEY.with(|k| k.borrow().clone())) else { return };
     let crumb = json!({
         "t": now,
@@ -96,12 +108,14 @@ pub fn tick(app: &PhotocraftApp) {
     let _ = st.set_item(&k, &crumb.to_string());
 }
 
-/// The unclean exits found at start, as statistics events (taken once).
+/// The unclean exits found at start, as statistics events (taken once). Their breadcrumbs stay
+/// until [`reported`].
 pub fn take_events() -> Vec<Value> {
     FOUND
         .with(|f| std::mem::take(&mut *f.borrow_mut()))
         .into_iter()
-        .map(|v| {
+        .map(|(k, v)| {
+            TAKEN.with(|t| t.borrow_mut().push(k));
             json!({
                 "e": "unclean_exit",
                 "cmd": v.get("cmd").cloned().unwrap_or(Value::Null),
@@ -112,4 +126,24 @@ pub fn take_events() -> Vec<Value> {
             })
         })
         .collect()
+}
+
+/// The batch with the events of [`take_events`] was handed to the browser: their breadcrumbs go.
+pub fn reported() {
+    let taken = TAKEN.with(|t| std::mem::take(&mut *t.borrow_mut()));
+    if let Some(st) = storage() {
+        for k in taken {
+            let _ = st.remove_item(&k);
+        }
+    }
+}
+
+/// Statistics are off: the breadcrumbs of dead pages found at start are only logged, then go.
+pub fn forget_found() {
+    let found = FOUND.with(|f| std::mem::take(&mut *f.borrow_mut()));
+    if let Some(st) = storage() {
+        for (k, _) in found {
+            let _ = st.remove_item(&k);
+        }
+    }
 }

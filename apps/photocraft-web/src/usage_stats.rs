@@ -4,7 +4,8 @@
 //! Only on Capishot's own hosts, and only while Preferences › General › Send anonymous usage
 //! statistics is on and the browser sends neither Do Not Track nor Global Privacy Control.
 //! Batches go to the page's own origin (`/capishot/api/t`, so the cross-origin isolated page needs
-//! nothing third-party) every 30 s and when the page hides, with `navigator.sendBeacon` (falling
+//! nothing third-party) when the session starts (with the previous page's unclean exit), every 30 s
+//! and when the page hides, with `navigator.sendBeacon` (falling
 //! back to a `keepalive` fetch). A failed send is dropped, never retried. Errors are silent.
 
 use std::cell::RefCell;
@@ -96,6 +97,11 @@ fn start_session(mut env: Environment) {
         recorder.event(e);
     }
     telemetry::start(recorder);
+    // Sent at once, not at the first 30 s tick: a phone that drops the tab again within seconds
+    // (out of memory while reopening a big page) otherwise reported neither this session nor the
+    // crash before it.
+    flush();
+    crate::breadcrumb::reported();
 }
 
 /// A document was opened (`file` is only used for its extension).
