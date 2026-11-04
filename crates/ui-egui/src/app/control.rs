@@ -46,7 +46,7 @@ impl PhotocraftApp {
         self.control_rx = Some(rx);
     }
 
-    fn dispatch_control(&mut self, ctx: &egui::Context, req: ControlRequest) {
+    pub(crate) fn dispatch_control(&mut self, ctx: &egui::Context, req: ControlRequest) {
         let reply = req.reply.clone();
         match crate::control::handle(self, ctx, &req) {
             crate::control::Outcome::Done(v) => {

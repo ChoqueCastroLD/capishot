@@ -34,9 +34,25 @@ pub(crate) use thumbs::layer_thumb_frame;
 pub use thumbs::{THUMBS_PER_FRAME, surface_fingerprint};
 
 impl PhotocraftApp {
-    pub fn new(mut session: Session, mut services: Services) -> Self {
+    pub fn new(session: Session, services: Services) -> Self {
+        let mut app = Self::bare(session, services);
+        // Saved preferences are in place before the first frame; recovery starts in upkeep.
+        prefs_ui::load(&mut app);
+        layers_panel_ui::restore_options(&mut app);
+        histogram_panel::restore_options(&mut app);
+        // After the saved preferences, which say whether the set was already offered.
+        kys_import::offer_import(&mut app);
+        notices::wayland_file_drop_guidance(&mut app);
+        // File › Scripts › Script Events Manager: "Start Application".
+        photocraft_engine::automate_cmds::fire_event(&mut app.session, "startApplication");
+        app
+    }
+
+    /// The app's state with nothing read from disk and no startup work: what [`Self::new`]
+    /// builds on, and the embedded canvas (`embed.rs`) uses as it is.
+    pub(crate) fn bare(mut session: Session, mut services: Services) -> Self {
         session.updates.check = services.check_updates.take();
-        let mut app = Self {
+        Self {
             session,
             ui: UiState::default(),
             services,
@@ -238,17 +254,7 @@ impl PhotocraftApp {
             jobs: Default::default(),
             #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
             live_tokens: theme::live::LiveTokens::from_env(),
-        };
-        // Saved preferences are in place before the first frame; recovery starts in upkeep.
-        prefs_ui::load(&mut app);
-        layers_panel_ui::restore_options(&mut app);
-        histogram_panel::restore_options(&mut app);
-        // After the saved preferences, which say whether the set was already offered.
-        kys_import::offer_import(&mut app);
-        notices::wayland_file_drop_guidance(&mut app);
-        // File › Scripts › Script Events Manager: "Start Application".
-        photocraft_engine::automate_cmds::fire_event(&mut app.session, "startApplication");
-        app
+        }
     }
 }
 

@@ -104,6 +104,7 @@ pub(crate) use strokes::{
 use strokes::{HOLD_REPEAT_MS, draw_clone_preview, feed_live_stroke, pointer_button_modifiers, pointer_moves, stroke_wants_time, tap_at_peak_pressure};
 #[cfg(test)]
 pub(crate) use strokes::{SPOT_HEALING_TRAIL, live_retouch_points};
+pub(crate) use tabs::embedded_area;
 pub(crate) use tabs::arranged_cells;
 pub(crate) use tabs::tab_title_at;
 #[cfg(test)]
