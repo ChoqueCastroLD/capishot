@@ -178,3 +178,8 @@ Chromium in `CHROME`):
   toDocument}`, while every screenshot of the shown page must stay identical (no blank, partial or
   flickering frame) and no switch or view event goes out; prints each call's time and the longest
   animation frame. Serves the build itself: `CHROME=<chromium> node e2e/embed-hidden-batch.mjs <dist dir>`.
+- `e2e/embed-doc-switch.mjs`: one visible document (`editor.setLayout {single}`) switched between
+  views (`document.views.apply`) and pages (`prewarmDocument`, `showDocument {viewport: keep}`, a
+  cold page, a page whose textures `editor.setMemoryBudget` evicted); every animation frame the page
+  reads the canvas back and counts blank or partial frames, and times the call to the final frame.
+  `CHROME=<chromium> node e2e/embed-doc-switch.mjs <dist dir>`.
