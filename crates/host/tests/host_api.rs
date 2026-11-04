@@ -472,6 +472,31 @@ fn raw_rgba_needs_no_png() {
     assert!(host.add_rgba(DocumentId(987_654), &image, AddRgba::default()).is_err());
 }
 
+#[test]
+fn a_document_from_raw_rgba_opens_hidden_in_the_host_session() {
+    use capishot_host::RgbaImage;
+    let mut host = Host::new();
+    host.execute("file.new", json!({"width": 16, "height": 16})).unwrap();
+    let shown = host.active_document().unwrap();
+    // Padded rows (stride 12 for 2 pixels): the padding never reaches the document.
+    let mut data = vec![9u8; 12 * 3];
+    for y in 0..3 {
+        data[y * 12..y * 12 + 8].copy_from_slice(&[255, 0, 0, 255, 0, 0, 255, 128]);
+    }
+    let image = RgbaImage { width: 2, height: 3, stride: 12, data: &data };
+    let o = host.open_rgba(&image, OpenOptions { name: Some("raw".into()), hidden: true }).unwrap();
+    assert_eq!(host.active_document(), Some(shown), "hidden: the active document stays");
+    let info = host.documents().into_iter().find(|d| d.id == o.document).unwrap();
+    assert_eq!((info.width, info.height), (2, 3));
+    let layer = host.inspect(o.document, InspectOptions::default()).unwrap()["layers"][0]["id"].as_u64().map(LayerId).unwrap();
+    let px = host.get_pixels(o.document, layer, GetPixels { rect: Some([0, 2, 2, 1]), mask: false, raw: true }).unwrap();
+    assert_eq!(px.data, [255, 0, 0, 255, 0, 0, 255, 128]);
+    let bad = RgbaImage { width: 2, height: 3, stride: 4, data: &data };
+    assert!(host.open_rgba(&bad, OpenOptions::default()).is_err());
+    let empty = RgbaImage { width: 0, height: 3, stride: 0, data: &[] };
+    assert!(host.open_rgba(&empty, OpenOptions::default()).is_err());
+}
+
 fn host_png() -> Vec<u8> {
     let mut maker = Host::new();
     maker.execute("file.new", json!({"width": 8, "height": 8})).unwrap();

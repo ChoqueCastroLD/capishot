@@ -291,6 +291,8 @@ fn the_host_chooses_the_keys_in_both_modes() {
         let (mut editor, doc) = editor_with_doc();
         let layer = editor.host.execute("layer.new.layer", json!({"name": "Ink"})).expect("a layer")["layer"].as_u64().expect("its id");
         editor.set_mode(mode);
+        // The Move tool: the digits set the layer's opacity (a painting tool's are its own).
+        editor.host.set_tool("move").expect("the move tool");
         editor.view.options_mut().keys = Keys::deny(Shortcut::opacity_digits()).routing(KeyRouting::Always);
         for _ in 0..3 {
             let _ = frame(&ctx, &mut editor);
@@ -299,16 +301,32 @@ fn the_host_chooses_the_keys_in_both_modes() {
             let tree = editor.host.inspect(doc, crate::InspectOptions::default()).expect("inspect");
             tree["layers"].as_array().expect("layers").iter().find(|l| l["id"] == json!(layer)).expect("the layer")["opacity"].as_f64().expect("opacity")
         };
+        // Taps: each press is released in the next frame, or egui reads the next press as a repeat.
+        let release = |k: egui::Key| egui::Event::Key { key: k, physical_key: None, pressed: false, repeat: false, modifiers: egui::Modifiers::NONE };
         let press = key(egui::Key::Num5, egui::Modifiers::NONE);
         let before = opacity(&editor);
         let (_, left) = frame_with(&ctx, &mut editor, vec![press.clone()]);
+        let _ = frame_with(&ctx, &mut editor, vec![release(egui::Key::Num5)]);
         assert_eq!(opacity(&editor), before, "{mode:?}: denied");
         assert!(left.contains(&press), "{mode:?}: the host still has its key: {left:?}");
-        // Without the filter the same key is the editor's.
+        // Without the filter the same key is the editor's: Photoshop's 5 = 50% layer opacity.
         editor.view.options_mut().keys = Keys::default().routing(KeyRouting::Always);
-        let _ = frame_with(&ctx, &mut editor, vec![press.clone()]);
+        let (out, left) = frame_with(&ctx, &mut editor, vec![press.clone()]);
+        let _ = frame_with(&ctx, &mut editor, vec![release(egui::Key::Num5)]);
+        assert!(out.took_keys && !left.contains(&press), "{mode:?}: let through: {left:?}");
+        assert!((opacity(&editor) - 0.5).abs() < 0.01, "{mode:?}: 50%: {}", opacity(&editor));
+        // A tool letter: denied it stays the host's, let through it picks the tool.
+        let b = key(egui::Key::B, egui::Modifiers::NONE);
+        editor.view.options_mut().keys = Keys::deny([Shortcut::key(egui::Key::B)]).routing(KeyRouting::Always);
+        let (_, left) = frame_with(&ctx, &mut editor, vec![b.clone()]);
+        let _ = frame_with(&ctx, &mut editor, vec![release(egui::Key::B)]);
+        assert!(left.contains(&b), "{mode:?}");
+        assert_eq!(editor.host.tool(), "move", "{mode:?}: denied B");
+        editor.view.options_mut().keys = Keys::default().routing(KeyRouting::Always);
+        let _ = frame_with(&ctx, &mut editor, vec![b]);
+        let _ = frame_with(&ctx, &mut editor, vec![release(egui::Key::B)]);
         let _ = frame(&ctx, &mut editor);
-        assert_ne!(opacity(&editor), before, "{mode:?}: let through");
+        assert_eq!(editor.host.tool(), "brush", "{mode:?}: B let through");
         // Never: no key at all.
         editor.view.options_mut().keys = Keys::default().routing(KeyRouting::Never);
         let (out, _) = frame_with(&ctx, &mut editor, vec![key(egui::Key::B, egui::Modifiers::NONE)]);
@@ -335,26 +353,23 @@ fn a_shown_document_reports_ready_each_time() {
     let mut editor = CapishotEditor::new(None);
     let a = editor.host.open(psd(32, 32), OpenOptions::named("a.psd")).expect("opened").document;
     let b = editor.host.open(psd(32, 32), OpenOptions { name: Some("b.psd".into()), hidden: true }).expect("opened").document;
-    let ready = |events: &[ViewEvent], doc: DocumentId| {
-        events.iter().any(|e| matches!(e, ViewEvent::DocumentReady { document, first_frame_ms, final_frame_ms } if *document == doc && *final_frame_ms >= *first_frame_ms))
+    // The canvas renders on worker threads: give a loaded machine time, frame by frame.
+    let until_ready = |editor: &mut CapishotEditor, doc: DocumentId| {
+        let start = std::time::Instant::now();
+        while start.elapsed() < std::time::Duration::from_secs(20) {
+            let events = frame(&ctx, editor).view_events;
+            if events.iter().any(|e| matches!(e, ViewEvent::DocumentReady { document, first_frame_ms, final_frame_ms } if *document == doc && *final_frame_ms >= *first_frame_ms)) {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        false
     };
-    let mut seen = false;
-    for _ in 0..10 {
-        seen |= ready(&frame(&ctx, &mut editor).view_events, a);
-    }
-    assert!(seen, "a is drawn");
+    assert!(until_ready(&mut editor, a), "a is drawn");
     editor.host.show(b, false).expect("shown");
-    let mut seen = false;
-    for _ in 0..10 {
-        seen |= ready(&frame(&ctx, &mut editor).view_events, b);
-    }
-    assert!(seen, "b is drawn");
+    assert!(until_ready(&mut editor, b), "b is drawn");
     editor.host.show(a, false).expect("shown");
-    let mut seen = false;
-    for _ in 0..10 {
-        seen |= ready(&frame(&ctx, &mut editor).view_events, a);
-    }
-    assert!(seen, "a again: new each time it is shown");
+    assert!(until_ready(&mut editor, a), "a again: new each time it is shown");
 }
 
 #[cfg(feature = "full")]

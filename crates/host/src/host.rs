@@ -504,6 +504,17 @@ impl Host {
         Ok(files::add_decoded(&mut self.session, decoded, opts.hidden))
     }
 
+    /// A new document from raw 8-bit straight RGBA rows (sRGB, any stride), with no PNG or base64
+    /// on the way: one layer, as [`Self::open`] makes one from a PNG (a locked "Background" when
+    /// opaque). Named [`OpenOptions::name`] (default "Untitled"); hidden as [`Self::open`].
+    pub fn open_rgba(&mut self, image: &RgbaImage<'_>, opts: OpenOptions) -> Result<Opened> {
+        let rows = image.packed("open")?;
+        let image = photocraft_codecs::Image::from_u8(image.width, image.height, photocraft_codecs::ChannelLayout::Rgba, rows).map_err(|e| Error::File(e.to_string()))?;
+        let name = opts.name.clone().unwrap_or_else(|| "Untitled".into());
+        let r = photocraft_io::import_image(&name, &image)?;
+        Ok(files::add_decoded(&mut self.session, files::Decoded::new(r.document, r.warnings), opts.hidden))
+    }
+
     /// [`Self::open`] in the background: decoded on a worker (natively, and in the browser
     /// threads build), with progress and cancel. The job's result is `{document, warnings,
     /// damaged, missingFonts}` (`document` the new id). Runs inline (returns [`Started::Done`])

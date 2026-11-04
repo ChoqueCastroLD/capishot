@@ -539,7 +539,10 @@ impl CapishotView {
                 None => events.push(ViewEvent::Failed { message: format!("unknown tool `{host_tool}`") }),
             }
         }
+        // The host's requests run hosted too: what they ask of the window is the host's.
+        let hosted = photocraft_ui_egui::hosted::Hosted::enter();
         self.run_requests(&ctx, &mut events);
+        let asked = hosted.finish();
         let f = match self.options.mode {
             Mode::Embedded => {
                 let opts = EmbedOptions { keys: self.options.keys.clone(), dialogs: self.options.dialogs };
@@ -560,7 +563,8 @@ impl CapishotView {
                 Drawn { jobs: f.jobs, took_keys: f.took_keys, window: f.window, xform: f.xform }
             }
         };
-        events.extend(f.window.into_iter().map(|c| ViewEvent::Window(c.into())));
+        let window = asked.into_iter().filter(|c| !matches!(c, egui::ViewportCommand::RequestPaintWhileHidden)).chain(f.window);
+        events.extend(window.map(|c| ViewEvent::Window(c.into())));
         events.extend(self.shell.take());
         // Replies that arrived (a document switch replies in the frame it swaps).
         self.pending.retain(|(token, awaited, rx)| match rx.try_recv() {

@@ -15,7 +15,7 @@ may change in any commit; their changes are listed under **Experimental**. A cha
   FileDialog, FileRequest}`. `ViewOptions` gained fields: build it with `..Default::default()`.
 - `Keys::{deny, allow_only, filter, routing}` and `Shortcut` (with `Shortcut::opacity_digits`).
 - `CameraChange::ZoomBy`; `CapishotView::raw_input_hook` (optional, pinch and touch).
-- `Host::{put_rgba, add_rgba}`, `RgbaImage`, `PutRgba`, `AddRgba`: raw pixels, no PNG or base64.
+- `Host::{open_rgba, put_rgba, add_rgba}`, `RgbaImage`, `PutRgba`, `AddRgba`: raw pixels, no PNG or base64.
 - `Host::add_document_fonts`, `Event::FontsReady`.
 - Features `full`, `camera-raw`, `exr`, `heif`, `all-catalogs`.
 - `ViewOptions::rulers` applies when it changes, no longer every frame: the person's View ›

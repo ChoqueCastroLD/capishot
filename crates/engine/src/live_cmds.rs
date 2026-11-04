@@ -185,8 +185,8 @@ pub struct RgbaImage<'a> {
 const MAX_RAW_PIXELS: u64 = 100_000_000;
 
 impl RgbaImage<'_> {
-    /// The rows packed (no padding), checked against the size.
-    fn packed(&self, cmd: &str) -> Result<Vec<u8>> {
+    /// The rows packed (no padding), checked against the size; `cmd` names the caller in errors.
+    pub fn packed(&self, cmd: &str) -> Result<Vec<u8>> {
         let (w, h) = (u64::from(self.width), u64::from(self.height));
         if w == 0 || h == 0 || w.saturating_mul(h) > MAX_RAW_PIXELS {
             return Err(bad(cmd, format!("a {}×{} image (at most {MAX_RAW_PIXELS} pixels, none empty)", self.width, self.height)));

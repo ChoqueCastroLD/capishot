@@ -174,6 +174,7 @@ editor.set_mode(Mode::Full); // any frame: same documents, nothing reopened
 
 `Host::open(bytes, OpenOptions { hidden: true, .. })` opens a hidden document in the host's own
 session (`start_open` does it on a worker), so nothing has to be built elsewhere and moved.
+`Host::open_rgba(&RgbaImage { .. }, OpenOptions { hidden, .. })` makes a document from raw rows.
 `Host::put_rgba(doc, layer, &RgbaImage { width, height, stride, data }, PutRgba { .. })` and
 `Host::add_rgba(doc, &image, AddRgba { .. })` take raw 8-bit straight RGBA rows (sRGB, any stride),
 with no PNG or base64.
@@ -205,7 +206,7 @@ with no PNG or base64.
   `ai_availability()`, `prepare_remove_ai()`, `ai_model_status(model)`, `download_ai_model(model)`;
   typed params (`ai::RemoveAi`, `InpaintAi`, `RemoveBubbleText`, `UpscaleAi`) and replies
   (`ai::AiReply`: device, cpu, fellBack, notices, ms). Remove with AI is one undo step.
-- **Other helpers**: `get_pixels`, `put_pixels`, `put_rgba`, `add_rgba`, `batch`, `undo`/`redo`,
+- **Other helpers**: `get_pixels`, `put_pixels`, `open_rgba`, `put_rgba`, `add_rgba`, `batch`, `undo`/`redo`,
   `begin_group`/`end_group`/`group`, `views`/`define_view`/`apply_view`, `show`, `prewarm`,
   `close`, `tool`/`set_tool`.
 - **Events**: `poll()` returns them (the widget polls for you); `subscribe(callback)` and

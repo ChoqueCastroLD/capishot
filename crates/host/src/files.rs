@@ -183,6 +183,13 @@ pub(crate) struct Decoded {
     source_read_only: bool,
 }
 
+impl Decoded {
+    /// A document made here, not read from a file.
+    pub(crate) fn new(document: Document, warnings: Vec<String>) -> Self {
+        Decoded { document, warnings, damaged: false, source_read_only: false }
+    }
+}
+
 /// The person's import settings (Preferences › File Handling, Camera Raw), taken from a session
 /// so [`decode`] can run on any thread.
 pub(crate) fn decode_settings(session: &Session) -> photocraft_io::ImportOptions {

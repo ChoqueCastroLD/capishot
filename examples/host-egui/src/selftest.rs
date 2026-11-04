@@ -57,6 +57,22 @@ pub struct SelfTest {
     asked: usize,
     /// `DocumentReady` reports.
     ready: Vec<DocumentId>,
+    /// The host's styles and theme preference before Capishot's full interface first drew.
+    host_look: Option<HostLook>,
+}
+
+/// What of the host's look the full interface must leave as it is.
+#[derive(PartialEq)]
+struct HostLook {
+    light: egui::Style,
+    dark: egui::Style,
+    theme: egui::ThemePreference,
+}
+
+impl HostLook {
+    fn of(ctx: &egui::Context) -> Self {
+        HostLook { light: (*ctx.style_of(egui::Theme::Light)).clone(), dark: (*ctx.style_of(egui::Theme::Dark)).clone(), theme: ctx.options(|o| o.theme_preference) }
+    }
 }
 
 impl SelfTest {
@@ -87,6 +103,7 @@ impl SelfTest {
             shots: Arc::default(),
             asked: 0,
             ready: Vec::new(),
+            host_look: None,
         })
     }
 
@@ -261,13 +278,18 @@ impl SelfTest {
                     Err(e) => self.check(false, &format!("saved: {e}")),
                 }
                 self.check(self.ready.contains(&doc), "DocumentReady reported for the shown page");
+                self.host_look = Some(HostLook::of(ctx));
+                // The whole interface in the same rect, then back (a canvas-only build skips it).
+                #[cfg(feature = "full")]
                 if let Some(c) = app.canvas.as_mut() {
                     c.set_mode(capishot_host::view::Mode::Full);
                 }
-                self.next(Step::Full);
+                self.next(if cfg!(feature = "full") { Step::Full } else { Step::Done });
             }
             Step::Full if self.frames == 3 * SETTLE => {
                 self.check(drawn == Some(doc) && app.host.documents().iter().filter(|d| d.id == doc).count() == 1, "the full interface draws the same document");
+                let same = self.host_look.as_ref().is_some_and(|l| *l == HostLook::of(ctx));
+                self.check(same, "the host's style and theme are unchanged with the full interface");
                 self.screenshot(ctx, "5-full");
             }
             Step::Full if self.frames >= 4 * SETTLE => {
@@ -278,6 +300,8 @@ impl SelfTest {
             }
             Step::Back if self.frames == SETTLE => {
                 self.check(drawn == Some(doc), "back on the canvas, same document");
+                let same = self.host_look.as_ref().is_some_and(|l| *l == HostLook::of(ctx));
+                self.check(same, "the host's style and theme are unchanged after the full interface");
                 self.screenshot(ctx, "6-back");
                 self.next(Step::Done);
             }

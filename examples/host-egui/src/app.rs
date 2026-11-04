@@ -144,6 +144,7 @@ impl HostApp {
             let mut mode = c.mode();
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut mode, Mode::Embedded, "Canvas");
+                #[cfg(feature = "full")]
                 ui.selectable_value(&mut mode, Mode::Full, "Full Capishot");
             });
             if mode != c.mode() {
