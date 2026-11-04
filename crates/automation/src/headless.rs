@@ -282,11 +282,14 @@ impl Headless {
             }
         };
         let target_text = target.to_str().ok_or_else(|| AutomationError::BadRequest("automation paths must be valid UTF-8".into()))?;
-        let mut warnings = match &self.filesystem {
+        let started = std::time::Instant::now();
+        let (mut warnings, written) = match &self.filesystem {
             Filesystem::Denied => return Err(AutomationError::BadRequest("automation filesystem access is not granted: write authority is absent".into())),
             Filesystem::TrustedLocal => {
                 let writer = self.writers.entry(doc.id.0).or_default();
-                files::save(&doc, &target, format, opts, Some(writer))?
+                let warnings = files::save(&doc, &target, format, opts, Some(writer))?;
+                // A `.pcraft` directory bundle has no one size.
+                (warnings, std::fs::metadata(&target).ok().filter(std::fs::Metadata::is_file).map(|m| m.len()))
             }
             Filesystem::Workspace(workspace) => {
                 // Only the target is granted: a linked smart object's stored path is document
@@ -294,9 +297,10 @@ impl Headless {
                 let opts = ExportOptions { read_linked_files: false, ..opts.clone() };
                 let (bytes, warnings) = files::save_bytes(&doc, target_text, format, &opts)?;
                 workspace.write(target_text, &bytes)?;
-                warnings
+                (warnings, Some(bytes.len() as u64))
             }
         };
+        let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
         warnings.extend(photocraft_engine::type_extra_cmds::missing_font_warnings(&doc));
         // A layered document save (PSD, PSB, OpenRaster or .pcraft) that holds the whole document is a
         // full write, not a flattened copy: record the current revision as saved so the session
@@ -314,7 +318,7 @@ impl Headless {
                 Ok(())
             })?;
         }
-        Ok(json!({ "path": target.to_string_lossy(), "warnings": warnings }))
+        Ok(json!({ "path": target.to_string_lossy(), "warnings": warnings, "bytes": written, "ms": ms }))
     }
 
     /// Write rendered bytes through the configured write authority.

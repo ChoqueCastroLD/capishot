@@ -171,6 +171,17 @@ impl Headless {
                     photocraft_io::ExportOptions { tiff_layers: p.get("tiffLayers").and_then(Value::as_bool).unwrap_or(false), tga_bits, ..Default::default() };
                 opts.encode.dpx_bits = photocraft_engine::file_cmds::dpx_bits_param(&p, "doc.save").map_err(|e| bad(e.to_string()))?;
                 opts.encode.dds = photocraft_engine::file_cmds::dds_param(&p, "doc.save").map_err(|e| bad(e.to_string()))?.unwrap_or_default();
+                // PSD/PSB merged image: `exact` (default) renders it with psd-compiler, as
+                // Photoshop draws it; `fast` takes photocraft-compose's composite (several times
+                // faster after an edit; the layers are the same either way).
+                match p.get("mergedImage") {
+                    None | Some(Value::Null) => {}
+                    Some(v) => match v.as_str() {
+                        Some("exact") => {}
+                        Some("fast") => opts.psdc_composite = false,
+                        _ => return Err(bad(format!("`mergedImage` must be \"exact\" or \"fast\", got {v}"))),
+                    },
+                }
                 match p.get("quality") {
                     None | Some(Value::Null) => {}
                     Some(v) => {

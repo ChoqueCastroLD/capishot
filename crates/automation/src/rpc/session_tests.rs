@@ -161,3 +161,32 @@ fn accepted_streams_set_tcp_nodelay() {
     configure_stream_idle(&a, None).unwrap();
     assert_eq!(a.read_timeout().unwrap(), None);
 }
+
+#[test]
+fn save_reports_bytes_and_time_and_takes_a_fast_merged_image() {
+    let dir = temp_dir("save-stats");
+    let mut h = Headless::trusted_local();
+    h.handle("doc.new", json!({"width": 64, "height": 48, "background": "white"})).unwrap();
+    h.handle("engine.execute", json!({"command": "layer.new.layer", "params": {"name": "ink"}})).unwrap();
+    h.handle("engine.execute", json!({"command": "edit.fill", "params": {"color": "#204080"}})).unwrap();
+    let (exact, fast) = (dir.join("exact.psd"), dir.join("fast.psd"));
+    let r = h.handle("doc.save", json!({"path": exact.to_string_lossy()})).unwrap();
+    assert_eq!(r["bytes"].as_u64(), Some(std::fs::metadata(&exact).unwrap().len()), "{r}");
+    assert!(r["ms"].is_u64(), "{r}");
+    let r = h.handle("doc.save", json!({"path": fast.to_string_lossy(), "mergedImage": "fast"})).unwrap();
+    assert_eq!(r["bytes"].as_u64(), Some(std::fs::metadata(&fast).unwrap().len()), "{r}");
+    // Both reopen to the same layers and composite.
+    let render = |h: &mut Headless, p: &std::path::Path| {
+        h.handle("doc.open", json!({"path": p.to_string_lossy()})).unwrap();
+        let r = h.handle("doc.render", json!({"maxSide": 0})).unwrap()["base64"].clone();
+        h.handle("doc.close", json!({})).unwrap();
+        r
+    };
+    assert_eq!(render(&mut h, &exact), render(&mut h, &fast));
+    for bad in [json!("quick"), json!(true)] {
+        assert!(h.handle("doc.save", json!({"path": exact.to_string_lossy(), "mergedImage": bad})).is_err());
+    }
+    let r = h.handle("doc.save", json!({"path": dir.join("page.pcraft").to_string_lossy()})).unwrap();
+    assert!(r["bytes"].is_u64() && r["ms"].is_u64(), "{r}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
