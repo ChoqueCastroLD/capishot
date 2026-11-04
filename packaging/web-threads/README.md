@@ -134,8 +134,7 @@ both ways, 3 interleaved runs each, medians): a one-line `ui-egui` change rebuil
 gzip +20%), but on the phone tour (`e2e/no-freeze.mjs`, CPU 4x) the time to interactive went
 1514 → 1798 ms (+19%), opening a JPEG +11%, a PSD +8.5%, a PNG export +10-14%; on the desktop
 frame times went up 5-8% at the median (brush, eraser, marquee) and filters 7-12% (Add Noise,
-Image Size, Flatten). Preview deploys (`deploy-preview.sh` outside the repository, served at
-`/capishot/preview/`) use it: they carry the PREVIEW badge and send no usage statistics.
+Image Size, Flatten). `--preview` is only for local test builds.
 
 ## Release checklist
 
