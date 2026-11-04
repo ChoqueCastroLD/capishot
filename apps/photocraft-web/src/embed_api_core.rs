@@ -71,6 +71,7 @@ pub const FEATURES: &[&str] = &[
     "open.cache.sharedPixels",
     "open.quiet",
     "open.quiet.prewarm",
+    "open.prewarm",
     "fonts.noFallbackFlash",
     "window.events",
     "document.views",

@@ -458,7 +458,7 @@ For hosts that keep one document in step between collaborators (the embed API an
   `open.hidden.background`). `{quiet: true}`: while a PSD/PSB decodes, its merged image shows
   alone at the view the page will have, a thin progress bar along the canvas's top, no opening
   card over it (feature `open.quiet`); once it lands the preview stays until the canvas has
-  drawn the view offscreen, at most 1 s, so no half-composited frame shows (`open.quiet.prewarm`). `{cacheKey, version}` keeps the decoded document in the session's
+  drawn the view offscreen, at most 1 s, so no half-composited frame shows (`open.quiet.prewarm`); other shown opens keep the opening card, or after a cached reopen the page shown before, the same way (`open.prewarm`). `{cacheKey, version}` keeps the decoded document in the session's
   decoded-document cache (`photocraft_engine::doc_cache`, least recently used first, 512 MB by
   default) and opens it from there at once while it holds that key at that version (`data`
   `null`: from the cache only, else an error); a different version decodes the bytes again. A

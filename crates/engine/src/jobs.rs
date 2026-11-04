@@ -582,36 +582,82 @@ pub fn run_async<T: Send + 'static>(
 /// thread: the browser threads build, where `run_async`'s work runs on the page's thread.
 const HAND_OFF: bool = cfg!(all(target_arch = "wasm32", target_feature = "atomics"));
 
+/// Whether [`run_async_prepared`] reads its input a part at a time between frames: the
+/// single-threaded browser build, which has no pool to read it on.
+const STEPPED_PREP: bool = cfg!(all(target_arch = "wasm32", not(target_feature = "atomics")));
+
 #[cfg(test)]
 thread_local! {
     /// Tests take the browser threads build's hand-off path natively.
     pub(crate) static TEST_HAND_OFF: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Tests take the single-threaded browser build's stepped path natively.
+    pub(crate) static TEST_STEPPED_PREP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The rest of a [`run_async_prepared`] job's input reading: a part of it, which returns the next
+/// one, or the input. The single-threaded browser build runs one part per step between frames
+/// (each part well under a frame budget on a phone); elsewhere the parts run one after the other.
+pub enum Prep<P> {
+    /// The next part.
+    Then(PrepPart<P>),
+    /// Read.
+    Done(P),
+}
+
+/// A part of a [`Prep`].
+pub type PrepPart<P> = Box<dyn FnOnce(&JobCtx) -> Result<Prep<P>> + Send>;
+
+impl<P> Prep<P> {
+    /// A part that runs `f` next.
+    pub fn then(f: impl FnOnce(&JobCtx) -> Result<Prep<P>> + Send + 'static) -> Self {
+        Self::Then(Box::new(f))
+    }
+
+    /// Every remaining part, at once.
+    pub fn finish(self, ctx: &JobCtx) -> Result<P> {
+        let mut p = self;
+        loop {
+            match p {
+                Self::Done(v) => return Ok(v),
+                Self::Then(f) => {
+                    ctx.check()?;
+                    p = f(ctx)?;
+                }
+            }
+        }
+    }
 }
 
 /// [`run_async`] whose input is read first by `prep` (the window's pixels, the hole: seconds
-/// for a big stroke on a phone): on the rayon pool in the browser threads build, which then
-/// hands `prep`'s output to `work` on the page's thread (`work` talks to the AI Web Worker,
-/// which only the page's thread may), between frames ([`Session::step_jobs`]). Elsewhere `prep`
-/// runs where `work` does (a worker thread natively, inline in the single-threaded browser
-/// build). An error from `prep` fails the job.
+/// for a big stroke on a phone), as parts ([`Prep`]): on the rayon pool in the browser threads
+/// build, which then hands `prep`'s output to `work` on the page's thread (`work` talks to the AI
+/// Web Worker, which only the page's thread may), between frames ([`Session::step_jobs`]); in the
+/// single-threaded browser build one part per step, between frames, so no part holds the page
+/// for long. Elsewhere `prep` runs where `work` does (a worker thread natively, inline when run
+/// inline). An error from `prep` fails the job.
 pub fn run_async_prepared<P: Send + 'static, T: Send + 'static>(
     s: &mut Session,
     label: &str,
     lock_document: bool,
-    prep: impl FnOnce(&JobCtx) -> Result<P> + Send + 'static,
+    prep: impl FnOnce(&JobCtx) -> Result<Prep<P>> + Send + 'static,
     work: impl FnOnce(&JobCtx, P, Completion<T>) + Send + 'static,
     apply: impl FnOnce(&mut Session, T) -> Result<Value> + Send + 'static,
 ) -> Result<Value> {
     #[cfg(test)]
-    let hand_off = HAND_OFF || TEST_HAND_OFF.with(std::cell::Cell::get);
+    let (hand_off, stepped) = (HAND_OFF || TEST_HAND_OFF.with(std::cell::Cell::get), STEPPED_PREP || TEST_STEPPED_PREP.with(std::cell::Cell::get));
     #[cfg(not(test))]
-    let hand_off = HAND_OFF;
+    let (hand_off, stepped) = (HAND_OFF, STEPPED_PREP);
+    // In the browser `run_async` is always a background job; natively only when started.
+    let background = cfg!(target_arch = "wasm32") || s.jobs.spawn;
+    if stepped && background {
+        return run_async_stepped(s, label, lock_document, prep, work, apply);
+    }
     if !(hand_off && s.jobs.spawn) {
         return run_async(
             s,
             label,
             lock_document,
-            move |ctx, done| match prep(ctx) {
+            move |ctx, done| match prep(ctx).and_then(|p| p.finish(ctx)) {
                 Ok(p) => work(ctx, p, done),
                 Err(e) => done.finish(Err(e)),
             },
@@ -631,7 +677,7 @@ pub fn run_async_prepared<P: Send + 'static, T: Send + 'static>(
             *put_held.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((ctx.clone(), done));
             let ctx = ctx.clone();
             on_pool(move || {
-                let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| prep(&ctx)))
+                let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| prep(&ctx).and_then(|p| p.finish(&ctx))))
                     .unwrap_or_else(|_| Err(EngineError::Other(format!("`{label_w}` failed with an internal error (logged); the document is unchanged"))));
                 *put_ready.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(r);
             });
@@ -659,13 +705,108 @@ pub fn run_async_prepared<P: Send + 'static, T: Send + 'static>(
     Ok(v)
 }
 
-/// Runs `f` on the rayon pool in the browser threads build, else here (tests: the hand-off still
-/// waits for the next step). `f` must not touch the browser's APIs.
+/// [`run_async_prepared`] in the single-threaded browser build: `prep`'s parts run on this
+/// thread, one per step between frames while the step has time (at least one), then `work`.
+fn run_async_stepped<P: Send + 'static, T: Send + 'static>(
+    s: &mut Session,
+    label: &str,
+    lock_document: bool,
+    prep: impl FnOnce(&JobCtx) -> Result<Prep<P>> + Send + 'static,
+    work: impl FnOnce(&JobCtx, P, Completion<T>) + Send + 'static,
+    apply: impl FnOnce(&mut Session, T) -> Result<Value> + Send + 'static,
+) -> Result<Value> {
+    type Slot<X> = Arc<wasm_sync::Mutex<Option<X>>>;
+    let held: Slot<(JobCtx, Completion<T>)> = Arc::default();
+    let put_held = Arc::clone(&held);
+    let v = run_async(
+        s,
+        label,
+        lock_document,
+        move |ctx, done| *put_held.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((ctx.clone(), done)),
+        apply,
+    )?;
+    let Some(id) = s.jobs.pending.as_ref().map(|r| r.id) else { return Ok(v) };
+    let mut next = Some(Prep::then(prep));
+    let mut work = Some(work);
+    let failed = format!("`{label}` failed with an internal error (logged); the document is unchanged");
+    let stepper: Stepper = Box::new(move |more| {
+        let mut h = held.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Not handed over yet (the work starts on a thread natively): try again next time.
+        let Some((ctx, _)) = h.as_ref() else { return false };
+        if ctx.cancelled() {
+            return true;
+        }
+        let ctx = ctx.clone();
+        loop {
+            match next.take() {
+                Some(Prep::Then(f)) => match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&ctx))) {
+                    Ok(Ok(p)) => next = Some(p),
+                    Ok(Err(e)) => {
+                        if let Some((_, done)) = h.take() {
+                            done.finish(Err(e));
+                        }
+                        return true;
+                    }
+                    Err(_) => {
+                        if let Some((_, done)) = h.take() {
+                            done.finish(Err(EngineError::Other(failed.clone())));
+                        }
+                        return true;
+                    }
+                },
+                Some(Prep::Done(p)) => {
+                    if let (Some((ctx, done)), Some(work)) = (h.take(), work.take()) {
+                        work(&ctx, p, done);
+                    }
+                    return true;
+                }
+                None => return true,
+            }
+            if !more() {
+                return false;
+            }
+        }
+    });
+    s.jobs.steppers.push((id, stepper));
+    Ok(v)
+}
+
+/// Runs `f` on the rayon pool in the browser threads build; in the single-threaded one later, by
+/// itself between frames ([`Session::step_jobs`]), not in the task that asked (an AI worker's
+/// reply); else here (tests: the hand-off still waits for the next step). `f` must not touch the
+/// browser's APIs.
 pub(crate) fn on_pool(f: impl FnOnce() + Send + 'static) {
     #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
     rayon::spawn(f);
     #[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
-    f();
+    {
+        #[cfg(test)]
+        let defer = STEPPED_PREP || TEST_STEPPED_PREP.with(std::cell::Cell::get);
+        #[cfg(not(test))]
+        let defer = STEPPED_PREP;
+        if defer {
+            DEFERRED.with(|d| d.borrow_mut().push_back(Box::new(f)));
+        } else {
+            f();
+        }
+    }
+}
+
+thread_local! {
+    /// Work [`on_pool`] put off until the next step between frames (single-threaded browser build).
+    static DEFERRED: std::cell::RefCell<std::collections::VecDeque<Box<dyn FnOnce()>>> = std::cell::RefCell::default();
+}
+
+/// Runs the work [`on_pool`] put off, one at a time while `more` (at least one). True if any is
+/// left.
+fn run_deferred(more: &dyn Fn() -> bool) -> bool {
+    loop {
+        let Some(f) = DEFERRED.with(|d| d.borrow_mut().pop_front()) else { return false };
+        f();
+        if !more() {
+            return DEFERRED.with(|d| !d.borrow().is_empty());
+        }
+    }
 }
 
 /// A document edit whose body is the job: like [`Session::edit`] (one undo step named `label`),
@@ -1190,13 +1331,17 @@ impl Session {
     /// there is time (each does at least a step). Their results are applied by
     /// [`Self::poll_jobs`].
     pub fn step_jobs(&mut self, more: &dyn Fn() -> bool) {
+        // Work put off by a job (an AI fill's encode, see `on_pool`) first, then a step of each.
+        if run_deferred(more) {
+            return;
+        }
         let running: Vec<JobId> = self.jobs.running.iter().map(|r| r.id).collect();
         self.jobs.steppers.retain_mut(|(id, step)| running.contains(id) && !step(more));
     }
 
     /// Whether any job is done a step at a time by [`Self::step_jobs`].
     pub fn has_stepped_jobs(&self) -> bool {
-        !self.jobs.steppers.is_empty()
+        !self.jobs.steppers.is_empty() || DEFERRED.with(|d| !d.borrow().is_empty())
     }
 
     /// [`Self::start_job`] that runs `work` off the page's thread in the browser threads build

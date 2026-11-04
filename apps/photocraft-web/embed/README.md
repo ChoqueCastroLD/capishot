@@ -154,6 +154,10 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
     tab strip over or above the page (feature `open.quiet`). Once the layers land, the preview
     stays until the page's canvas has drawn its view offscreen (as `editor.showDocument` does), so
     no frame shows a half-composited page (feature `open.quiet.prewarm`, at most 1 s).
+  - Every other shown open lands the same way (feature `open.prewarm`, at most 1 s): the opening
+    card (and the preview under it) stays until the canvas has drawn the page, and a page reopened
+    from the cache keeps the page shown before on screen until it is drawn (the card when there
+    was none).
   - `openDocument(url)`: fetched as the page fetches, read from the response stream as it arrives
     into one buffer (the page keeps drawing); the name defaults to the URL's last segment
     (feature `open.url`).

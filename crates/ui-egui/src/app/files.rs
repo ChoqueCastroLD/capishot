@@ -117,15 +117,18 @@ impl PhotocraftApp {
     /// Open `doc`, already decoded and through the Color Settings policy (a copy from the
     /// session's [`DocCache`](photocraft_engine::doc_cache::DocCache)), as `name`: hidden, or
     /// shown and made active as a finished open is (no warnings notice: they were shown when the
-    /// file was decoded). Returns its index.
-    pub fn open_decoded(&mut self, doc: photocraft_doc::Document, hidden: bool) -> Result<usize, String> {
+    /// file was decoded); the page shown before (else the opening card, unless `quiet`) stays
+    /// until its canvas is drawn. Returns its index.
+    pub fn open_decoded(&mut self, doc: photocraft_doc::Document, hidden: bool, quiet: bool) -> Result<usize, String> {
         let name = doc.name.clone();
+        let previous = self.session.active().map(|st| st.doc.id);
         let index = if hidden { self.session.add_hidden_document(doc, None) } else { self.session.add_document(doc, None) };
         let id = self.session.documents().get(index).map(|st| st.doc.id).ok_or("the document is missing")?;
         if hidden {
             self.hidden_opened(id);
         } else {
             jobs_ui::after_open(self, id, &name, None, &[], None)?;
+            jobs_ui::land(self, id, &name, quiet, previous);
         }
         self.session.documents().iter().position(|st| st.doc.id == id).ok_or_else(|| "the document closed".into())
     }

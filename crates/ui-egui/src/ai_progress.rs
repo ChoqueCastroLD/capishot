@@ -319,13 +319,15 @@ fn card(app: &mut PhotocraftApp, now: f64) -> Option<Card> {
     }
     if crate::remove_ai_ui::is_open(app) {
         let (fraction, speed, failed) = crate::remove_ai_ui::download_progress(app);
-        let bytes = photocraft_ai::catalog::model(photocraft_ai::catalog::LAMA_ID).map_or(0, |m| m.bytes);
+        let model = crate::remove_ai_ui::model(app);
+        let bytes = model.map_or(0, |m| m.bytes);
+        let size = format!("{} MB", (bytes as f64 / 1e6).round());
         let note = match &failed {
             Some(why) => crate::i18n::fmt(tl!("The download failed: {reason}"), &[("reason", why)]),
-            None => crate::i18n::fmt(
-                tl!("Remove with AI needs to download the Manga LaMa model ({size}). Only once."),
-                &[("size", &format!("{} MB", (bytes as f64 / 1e6).round()))],
-            ),
+            None if model.is_some_and(|m| m.id == photocraft_ai::catalog::MIGAN_ID) => {
+                crate::i18n::fmt(tl!("Remove with AI needs to download the MI-GAN model ({size}), lighter for this device. Only once."), &[("size", &size)])
+            }
+            None => crate::i18n::fmt(tl!("Remove with AI needs to download the Manga LaMa model ({size}). Only once."), &[("size", &size)]),
         };
         return Some(Card {
             title: tl!("Remove with AI").to_string(),

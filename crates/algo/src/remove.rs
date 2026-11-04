@@ -17,47 +17,94 @@ use photocraft_raster::{Cancelled, Interrupt};
 /// `mask` plus everything it encloses: the cells from which no path of unmasked cells (4-connected)
 /// reaches the grid's border. A mask of the wrong length is returned unchanged.
 pub fn close_loops(w: usize, h: usize, mask: &[bool]) -> Vec<bool> {
-    if w == 0 || h == 0 || mask.len() != w.saturating_mul(h) {
-        return mask.to_vec();
+    let mut c = CloseLoops::new(w, h, mask);
+    c.advance(mask, usize::MAX);
+    c.finish(mask)
+}
+
+/// [`close_loops`] a share at a time: [`CloseLoops::advance`] until it says it is done, then
+/// [`CloseLoops::finish`], always with the same `mask`.
+#[derive(Debug)]
+pub struct CloseLoops {
+    w: usize,
+    h: usize,
+    outside: Vec<bool>,
+    stack: Vec<usize>,
+    /// The mask doesn't fit `w×h`: it is returned as it is.
+    bad: bool,
+}
+
+impl CloseLoops {
+    /// Starts from the border of a `w×h` `mask`.
+    pub fn new(w: usize, h: usize, mask: &[bool]) -> Self {
+        let bad = w == 0 || h == 0 || mask.len() != w.saturating_mul(h);
+        let mut c = Self { w, h, outside: vec![false; if bad { 0 } else { mask.len() }], stack: Vec::new(), bad };
+        if bad {
+            return c;
+        }
+        for x in 0..w {
+            c.visit(mask, x);
+            c.visit(mask, (h - 1) * w + x);
+        }
+        for y in 0..h {
+            c.visit(mask, y * w);
+            c.visit(mask, y * w + w - 1);
+        }
+        c
     }
-    let mut outside = vec![false; mask.len()];
-    let mut stack: Vec<usize> = Vec::new();
-    let visit = |i: usize, outside: &mut Vec<bool>, stack: &mut Vec<usize>| {
-        if !mask[i] && !outside[i] {
-            outside[i] = true;
-            stack.push(i);
-        }
-    };
-    for x in 0..w {
-        visit(x, &mut outside, &mut stack);
-        visit((h - 1) * w + x, &mut outside, &mut stack);
-    }
-    for y in 0..h {
-        visit(y * w, &mut outside, &mut stack);
-        visit(y * w + w - 1, &mut outside, &mut stack);
-    }
-    while let Some(i) = stack.pop() {
-        let (x, y) = (i % w, i / w);
-        if x > 0 {
-            visit(i - 1, &mut outside, &mut stack);
-        }
-        if x + 1 < w {
-            visit(i + 1, &mut outside, &mut stack);
-        }
-        if y > 0 {
-            visit(i - w, &mut outside, &mut stack);
-        }
-        if y + 1 < h {
-            visit(i + w, &mut outside, &mut stack);
+
+    fn visit(&mut self, mask: &[bool], i: usize) {
+        if mask.get(i) == Some(&false) && self.outside.get(i) == Some(&false) {
+            self.outside[i] = true;
+            self.stack.push(i);
         }
     }
-    outside.iter().map(|o| !*o).collect()
+
+    /// Floods at most `budget` more cells; true once done.
+    pub fn advance(&mut self, mask: &[bool], budget: usize) -> bool {
+        let (w, h) = (self.w, self.h);
+        if self.bad || mask.len() != self.outside.len() {
+            self.stack.clear();
+            return true;
+        }
+        for _ in 0..budget {
+            let Some(i) = self.stack.pop() else { return true };
+            let (x, y) = (i % w, i / w);
+            if x > 0 {
+                self.visit(mask, i - 1);
+            }
+            if x + 1 < w {
+                self.visit(mask, i + 1);
+            }
+            if y > 0 {
+                self.visit(mask, i - w);
+            }
+            if y + 1 < h {
+                self.visit(mask, i + w);
+            }
+        }
+        self.stack.is_empty()
+    }
+
+    /// The mask with what it encloses (call once [`Self::advance`] is done).
+    pub fn finish(self, mask: &[bool]) -> Vec<bool> {
+        if self.bad || mask.len() != self.outside.len() {
+            return mask.to_vec();
+        }
+        self.outside.iter().map(|o| !*o).collect()
+    }
 }
 
 /// `mask` grown by `r` cells (a square structuring element), in two separable passes. Each pass
 /// sets a cell when any cell within `r` along one axis is set (a running count); the vertical one
 /// keeps one count per column and walks whole rows, so it reads memory in order.
 pub fn dilate(w: usize, h: usize, mask: &[bool], r: usize) -> Vec<bool> {
+    let rows = dilate_rows(w, h, mask, r);
+    dilate_cols(w, h, &rows, r)
+}
+
+/// [`dilate`]'s horizontal pass.
+pub fn dilate_rows(w: usize, h: usize, mask: &[bool], r: usize) -> Vec<bool> {
     if r == 0 || w == 0 || mask.len() != w.saturating_mul(h) {
         return mask.to_vec();
     }
@@ -74,8 +121,16 @@ pub fn dilate(w: usize, h: usize, mask: &[bool], r: usize) -> Vec<bool> {
             *o = count > 0;
         }
     }
+    rows
+}
+
+/// [`dilate`]'s vertical pass, over the horizontal one's `rows`.
+pub fn dilate_cols(w: usize, h: usize, rows: &[bool], r: usize) -> Vec<bool> {
+    if r == 0 || w == 0 || rows.len() != w.saturating_mul(h) {
+        return rows.to_vec();
+    }
     let row = |k: usize| &rows[k * w..(k + 1) * w];
-    let mut out = vec![false; mask.len()];
+    let mut out = vec![false; rows.len()];
     let mut count = vec![0usize; w];
     for k in 0..h.min(r) {
         for (c, v) in count.iter_mut().zip(row(k)) {

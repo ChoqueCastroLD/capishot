@@ -133,3 +133,41 @@ fn the_ai_cleaning_options_do_not_change_the_tool() {
     assert!(!red(&app), "removed");
     assert_eq!(fake.last.lock().unwrap().map(|l| l.0), Some(LAMA_ID), "Manga LaMa, not the dialog's model");
 }
+
+/// 2 GB or less: MI-GAN, downloaded and run instead of Manga LaMa, said once (a notice).
+#[test]
+fn a_device_with_little_memory_uses_mi_gan_and_says_so_once() {
+    use photocraft_ai::catalog::MIGAN_ID;
+    use photocraft_ai::profile::{DeviceProfile, GpuClass};
+    let (mut app, store) = app(false);
+    let profile = DeviceProfile { gpu: GpuClass::Integrated, mobile: true, memory_gb: Some(2.0), cores: Some(8), ..Default::default() };
+    app.session.set_ai_upscaler(Some(Arc::new(photocraft_ai::service::FakeUpscaler { profile: std::sync::Mutex::new(profile), ..Default::default() })));
+    assert_eq!(crate::remove_ai_ui::model(&app).map(|m| m.id), Some(MIGAN_ID));
+    crate::remove_ai_ui::finish_stroke(&mut app, &[[29.0, 22.0, 1.0], [35.0, 22.0, 1.0]]);
+    assert!(crate::remove_ai_ui::is_open(&app), "waiting for MI-GAN");
+    assert!(matches!(store.status(model(MIGAN_ID).unwrap()), Status::Downloading { .. } | Status::Queued), "MI-GAN downloads");
+    assert!(matches!(store.status(model(LAMA_ID).unwrap()), Status::NotDownloaded), "Manga LaMa doesn't");
+    let told = |app: &PhotocraftApp| app.ui.notices.iter().filter(|n| n.title.contains("lighter model")).count();
+    assert_eq!(told(&app), 1, "the lighter model is announced");
+    // The download ends: the stroke is applied, with MI-GAN.
+    while store.step() {}
+    crate::remove_ai_ui::show(&mut app, &egui::Context::default());
+    assert!(!red(&app) && !crate::remove_ai_ui::is_open(&app), "applied once MI-GAN is here");
+    app.session.undo();
+    app.ui.notices.clear();
+    crate::remove_ai_ui::finish_stroke(&mut app, &[[29.0, 22.0, 1.0], [35.0, 22.0, 1.0]]);
+    assert!(!red(&app), "removed with MI-GAN: {:?} {}", store.status(model(MIGAN_ID).unwrap()), app.ui.status);
+    assert_eq!(told(&app), 0, "only once");
+}
+
+/// More than 2 GB: always Manga LaMa, nothing said.
+#[test]
+fn a_device_with_4_gb_keeps_manga_lama() {
+    use photocraft_ai::profile::{DeviceProfile, GpuClass};
+    let (mut app, _) = app(true);
+    let profile = DeviceProfile { gpu: GpuClass::Integrated, mobile: true, memory_gb: Some(4.0), cores: Some(8), ..Default::default() };
+    app.session.set_ai_upscaler(Some(Arc::new(photocraft_ai::service::FakeUpscaler { profile: std::sync::Mutex::new(profile), ..Default::default() })));
+    assert_eq!(crate::remove_ai_ui::model(&app).map(|m| m.id), Some(LAMA_ID));
+    crate::remove_ai_ui::finish_stroke(&mut app, &[[29.0, 22.0, 1.0], [35.0, 22.0, 1.0]]);
+    assert!(!red(&app) && app.ui.notices.is_empty());
+}
