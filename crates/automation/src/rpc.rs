@@ -8,8 +8,9 @@
 //! - `engine.execute {command, params?, wait?}` / `engine.commands {filter?}`
 //! - `jobs.list` / `jobs.cancel {job?}`: background jobs (#210)
 //! - `session.list`, `doc.open {path}`, `doc.new {…file.new params}`,
-//!   `doc.place {path, scale?, fit?, center?, index?}` (#2810: the read root is the scope,
-//!   the counterpart of the refused ambient `file.placeEmbedded`),
+//!   `doc.place {path | base64, name?, scale?, fit?, center?, x?, y?, width?, height?,
+//!   rasterize?, index?}` (#2810: the read root is the scope, the counterpart of the refused
+//!   ambient `file.placeEmbedded`; `base64` needs no root),
 //!   `doc.replaceSmartObject {path, layer?, index?}` (#8061: the same scope for
 //!   `layer.smartObjects.replaceContents`),
 //!   `doc.exportLayers {dir, format?, prefix?, visibleOnly?, quality?, index?}`,
@@ -151,8 +152,17 @@ impl Headless {
                 let path = str_of(&p, "path").ok_or_else(|| bad("doc.open needs `path`"))?;
                 self.open(&PathBuf::from(path))
             }
+            "doc.place" if p.get("path").is_none() && (p.get("base64").is_some() || p.get("data").is_some()) => {
+                // The image in the request: no read root needed (Place Embedded's `data`).
+                let mut opts = p.as_object().cloned().unwrap_or_default();
+                if let Some(b) = opts.remove("base64") {
+                    opts.insert("data".into(), b);
+                }
+                opts.remove("index");
+                self.on_doc_run(index_of(&p)?, "file.placeEmbedded", Value::Object(opts))
+            }
             "doc.place" => {
-                let path = str_of(&p, "path").ok_or_else(|| bad("doc.place needs `path`"))?;
+                let path = str_of(&p, "path").ok_or_else(|| bad("doc.place needs `path` (or `base64`)"))?;
                 let mut opts = p.as_object().cloned().unwrap_or_default();
                 opts.remove("path");
                 opts.remove("index");

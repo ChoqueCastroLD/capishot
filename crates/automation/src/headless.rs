@@ -152,6 +152,12 @@ impl Headless {
         })
     }
 
+    /// Run engine command `id` on document `index` (the active one when `None`), which stays
+    /// active only if it was.
+    pub fn on_doc_run(&mut self, index: Option<usize>, id: &str, params: Value) -> Result<Value, AutomationError> {
+        self.on_doc(index, |this| this.command_run(id, params))
+    }
+
     /// Replace a smart object's contents with a file from the read root: the capability-scoped
     /// `layer.smartObjects.replaceContents`, which takes an ambient `path` and is refused in
     /// automation (#8061). `params` is the command's own (`layer`).

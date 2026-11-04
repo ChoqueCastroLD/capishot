@@ -259,7 +259,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Place Embedded…",
             &["File"],
             None,
-            r##"{"path":str,"scale":%? (default: fit when larger than the canvas),"fit":bool? (default: Preferences > General > Resize Image During Place),"smartObject":bool? (default: Preferences > General > Always Create Smart Objects When Placing),"center":[x,y]?}"##,
+            r##"{"path":str | "data":base64 image (a data: URL works; with "name":str? telling its format, default "Placed.png"; nothing is read from disk),"scale":%? (default: fit when larger than the canvas),"fit":bool? (default: Preferences > General > Resize Image During Place),"smartObject":bool? (default: Preferences > General > Always Create Smart Objects When Placing),"rasterize":bool? (= smartObject false),"center":[x,y]?,"x","y","width","height":px? (the top-left corner and size it takes; one of width/height keeps the aspect, neither the size; instead of scale/fit/center)} → {layer, scale, scaleY?, bounds, smartObject}"##,
             native_doc,
             |s, p| place(s, p, false)
         ),

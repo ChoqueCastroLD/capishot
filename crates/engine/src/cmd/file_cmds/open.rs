@@ -191,7 +191,52 @@ struct PlacePlan {
     fit: bool,
     scale: Option<f64>,
     center: Option<(f64, f64)>,
+    /// `x`, `y`, `width`, `height`: the top-left corner and the size (either or both; a missing
+    /// one keeps the aspect, neither keeps the size) the placed image takes, in document pixels.
+    rect: Option<PlaceRect>,
     smart_object: bool,
+}
+
+/// `file.placeEmbedded`'s `x`/`y`/`width`/`height`.
+#[derive(Clone, Copy, Debug)]
+struct PlaceRect {
+    x: f64,
+    y: f64,
+    width: Option<f64>,
+    height: Option<f64>,
+}
+
+impl PlaceRect {
+    /// The rect of `p`, `None` without any of its keys; out-of-range values are errors.
+    fn parse(p: &Value) -> Result<Option<Self>> {
+        const KEYS: [&str; 4] = ["x", "y", "width", "height"];
+        if KEYS.iter().all(|k| p.get(*k).is_none_or(Value::is_null)) {
+            return Ok(None);
+        }
+        let num = |k: &str, min: f64| -> Result<Option<f64>> {
+            match p.get(k) {
+                None | Some(Value::Null) => Ok(None),
+                Some(v) => v
+                    .as_f64()
+                    .filter(|v| v.is_finite() && *v >= min && v.abs() <= 1e7)
+                    .map(Some)
+                    .ok_or_else(|| EngineError::BadParams { cmd: "file.placeEmbedded".into(), msg: format!("`{k}` must be a number of pixels{}", if min > 0.0 { " above 0" } else { "" }) }),
+            }
+        };
+        let (width, height) = (num("width", f64::MIN_POSITIVE)?, num("height", f64::MIN_POSITIVE)?);
+        Ok(Some(Self { x: num("x", -1e7)?.unwrap_or(0.0), y: num("y", -1e7)?.unwrap_or(0.0), width, height }))
+    }
+
+    /// The horizontal and vertical scale of a `w`×`h` image placed in this rect.
+    fn scales(&self, w: f64, h: f64) -> (f64, f64) {
+        let (w, h) = (w.max(1.0), h.max(1.0));
+        match (self.width, self.height) {
+            (Some(rw), Some(rh)) => (rw / w, rh / h),
+            (Some(rw), None) => (rw / w, rw / w),
+            (None, Some(rh)) => (rh / h, rh / h),
+            (None, None) => (1.0, 1.0),
+        }
+    }
 }
 
 /// A decoded place, ready to land as a layer ([`Placed::apply`]).
@@ -201,6 +246,8 @@ struct Placed {
     source: SmartSource,
     vector: bool,
     scale: f64,
+    /// The vertical scale, when it differs from `scale` (a `width` and `height` of another aspect).
+    scale_y: f64,
     offset: (f64, f64),
     size: (f64, f64),
     smart: bool,
@@ -219,8 +266,13 @@ impl PlacePlan {
         };
         // Preferences ▸ General ▸ Always Create Smart Objects When Placing (on by default): off, an
         // embedded place lands as a plain pixel layer. A linked place is always a smart object.
-        let smart_object =
-            linked.is_some() || p.get("smartObject").and_then(Value::as_bool).unwrap_or(s.prefs().general.always_create_smart_objects_when_placing);
+        // `rasterize: true` is `smartObject: false` (the automation's name for it).
+        let smart_object = linked.is_some()
+            || p.get("smartObject")
+                .and_then(Value::as_bool)
+                .or_else(|| p.get("rasterize").and_then(Value::as_bool).map(|r| !r))
+                .unwrap_or(s.prefs().general.always_create_smart_objects_when_placing);
+        let rect = PlaceRect::parse(p)?;
         Ok(PlacePlan {
             name: name.to_string(),
             linked,
@@ -230,13 +282,14 @@ impl PlacePlan {
             fit,
             scale: f64_param(p, "scale"),
             center,
+            rect,
             smart_object,
         })
     }
 
     /// Decodes `bytes` and scales the pixels into place.
     fn decode(self, bytes: Vec<u8>) -> Result<Placed> {
-        let PlacePlan { name, linked, canvas: (cw, ch), fmt, opts, fit, scale, center, smart_object } = self;
+        let PlacePlan { name, linked, canvas: (cw, ch), fmt, opts, fit, scale, center, rect, smart_object } = self;
         let vector = photocraft_io::svg::is_svg(&bytes);
         // Before decoding anything: on the web a placed file that doesn't fit would trap (#10024).
         crate::memory_gate::ensure(&format!("place \u{201c}{}\u{201d}", file_name(&name)), crate::memory_gate::place_need(&bytes, fmt.bytes_per_pixel()))?;
@@ -254,17 +307,27 @@ impl PlacePlan {
             None => 1.0,
         };
         let center = center.unwrap_or((cw / 2.0, ch / 2.0));
-        let (dx, dy) = ((center.0 - w * scale / 2.0).round(), (center.1 - h * scale / 2.0).round());
+        let (mut dx, mut dy) = ((center.0 - w * scale / 2.0).round(), (center.1 - h * scale / 2.0).round());
+        let (mut scale, mut scale_y) = (scale, scale);
+        if let Some(r) = rect {
+            (scale, scale_y) = r.scales(w, h);
+            (dx, dy) = (r.x.round(), r.y.round());
+            // The scaled image is allocated: refuse one that can't be (as an over-large canvas).
+            let px = (w * scale).ceil() * (h * scale_y).ceil();
+            if px.is_nan() || px > MAX_PLACED_PIXELS {
+                return Err(EngineError::BadParams { cmd: "file.placeEmbedded".into(), msg: format!("the placed image would be too large ({px} pixels)") });
+            }
+        }
         let mut px = flattened_checked(&src, fmt, "file.place")?;
-        if (scale - 1.0).abs() > 1e-9 {
-            px = resize_surface(&px, scale, scale, Resample::Bicubic);
+        if (scale - 1.0).abs() > 1e-9 || (scale_y - 1.0).abs() > 1e-9 {
+            px = resize_surface(&px, scale, scale_y, Resample::Bicubic);
         }
         let px = translate_surface(&px, dx as i32, dy as i32);
         let source = match linked {
             Some(path) => SmartSource::Linked { path },
             None => SmartSource::Embedded { file_name: file_name(&name), bytes: Arc::new(bytes) },
         };
-        Ok(Placed { name, px, source, vector, scale, offset: (dx, dy), size: (w, h), smart: smart_object })
+        Ok(Placed { name, px, source, vector, scale, scale_y, offset: (dx, dy), size: (w, h), smart: smart_object })
     }
 }
 
@@ -272,12 +335,12 @@ impl Placed {
     /// Lands the placed pixels as a layer above the active one (a smart object unless turned
     /// off), as one history step.
     fn apply(self, s: &mut Session) -> Result<Value> {
-        let Placed { name, px, source, vector, scale, offset: (dx, dy), size: (w, h), smart } = self;
+        let Placed { name, px, source, vector, scale, scale_y, offset: (dx, dy), size: (w, h), smart } = self;
         let layer_name = stem(&name);
         let label = if matches!(&source, SmartSource::Linked { .. }) { "Place Linked" } else { PLACE_EMBEDDED };
         let id = s.edit(label, |doc, active| {
             let layer = if smart {
-                let mut so = SmartObject::new(source, Affine { m: [scale, 0.0, 0.0, scale, dx, dy] }, Some(px));
+                let mut so = SmartObject::new(source, Affine { m: [scale, 0.0, 0.0, scale_y, dx, dy] }, Some(px));
                 // A vector source (SVG) renders at its placement scale instead of as a resampled raster.
                 if vector && let Some(sharp) = crate::smart_cmds::render(doc, &so)? {
                     so.cache = Some(sharp);
@@ -290,12 +353,26 @@ impl Placed {
             *active = Some(id);
             Ok(id)
         })?;
-        Ok(json!({"layer": id.0, "scale": scale * 100.0, "bounds": [dx, dy, dx + w * scale, dy + h * scale], "smartObject": smart}))
+        let mut r = json!({"layer": id.0, "scale": scale * 100.0, "bounds": [dx, dy, dx + w * scale, dy + h * scale_y], "smartObject": smart});
+        if (scale_y - scale).abs() > 1e-12 {
+            r["scaleY"] = json!(scale_y * 100.0);
+        }
+        Ok(r)
     }
 }
 
+/// Most pixels a placed image may be scaled to (`x`/`y`/`width`/`height`): 2^30, as a canvas.
+const MAX_PLACED_PIXELS: f64 = (1u64 << 30) as f64;
+
 pub(super) fn place(s: &mut Session, p: &Value, linked: bool) -> Result<Value> {
     let cmd = if linked { "file.placeLinked" } else { "file.placeEmbedded" };
+    // The image itself (`data`: base64 or a data: URL, `name` telling its format): nothing is
+    // read from disk, so automation allows it.
+    if !linked && p.get("path").is_none() && p.get("data").is_some() {
+        let bytes = crate::live_cmds::image_bytes(cmd, p)?;
+        let name = p.get("name").and_then(Value::as_str).filter(|n| !n.is_empty()).unwrap_or("Placed.png").to_string();
+        return place_bytes(s, &name, bytes, None, p);
+    }
     let path = str_param(p, "path", cmd)?.to_string();
     let bytes = read_file(&path)?;
     // The link is stored absolute: a relative one would later be taken from the document's

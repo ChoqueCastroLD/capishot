@@ -218,6 +218,51 @@ fn accepted_streams_set_tcp_nodelay() {
     assert_eq!(a.read_timeout().unwrap(), None);
 }
 
+fn png_b64(w: u32, h: u32, rgb: [u8; 3]) -> String {
+    let px: Vec<u8> = (0..w * h).flat_map(|_| rgb).collect();
+    let img = photocraft_codecs::Image::from_u8(w, h, photocraft_codecs::ChannelLayout::Rgb, px).unwrap();
+    base64::engine::general_purpose::STANDARD.encode(photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &Default::default()).unwrap())
+}
+
+/// `file.placeEmbedded` was refused in automation (it reads an ambient `path`); with the image in
+/// the params it reads nothing and runs, with a box (`x`, `y`, `width`, `height`) and `rasterize`.
+#[test]
+fn place_embedded_takes_the_image_and_a_box_without_any_file_access() {
+    let mut h = Headless::new();
+    h.handle("doc.new", json!({"width": 64, "height": 48, "background": "white"})).unwrap();
+    let b64 = png_b64(8, 4, [0, 0, 255]);
+    let r = h.handle("doc.place", json!({"base64": b64, "x": 10, "y": 6, "width": 32, "height": 8})).unwrap();
+    assert_eq!(r["bounds"], json!([10.0, 6.0, 42.0, 14.0]), "{r}");
+    assert_eq!((r["scale"].clone(), r["scaleY"].clone(), r["smartObject"].clone()), (json!(400.0), json!(200.0), json!(true)), "{r}");
+    // Only a width keeps the aspect; rasterize makes a pixel layer.
+    let r = h
+        .handle("engine.execute", json!({"command": "file.placeEmbedded", "params": {"data": format!("data:image/png;base64,{b64}"), "x": 0, "y": 30, "width": 16, "rasterize": true}}))
+        .unwrap();
+    assert_eq!((r["bounds"].clone(), r["smartObject"].clone()), (json!([0.0, 30.0, 16.0, 38.0]), json!(false)), "{r}");
+    assert!(r.get("scaleY").is_none(), "{r}");
+    let top = layers(&mut h).into_iter().find(|l| l["id"] == r["layer"]).unwrap();
+    assert_eq!(top["kind"], "Pixel", "{top}");
+    let img = h.handle("doc.render", json!({"rect": [0, 30, 16, 8]})).unwrap();
+    let png = base64::engine::general_purpose::STANDARD.decode(img["base64"].as_str().unwrap()).unwrap();
+    let px = photocraft_codecs::decode(&png).unwrap().to_rgba8();
+    assert_eq!(&px[(3 * 16 + 8) * 4..(3 * 16 + 8) * 4 + 4], [0, 0, 255, 255], "blue where it was placed");
+    // A path is still refused, and bad boxes or data are errors.
+    assert!(h.handle("engine.execute", json!({"command": "file.placeEmbedded", "params": {"path": "/etc/hosts"}})).is_err());
+    assert!(h.handle("engine.execute", json!({"command": "file.placeEmbedded", "params": {"path": "/etc/hosts", "data": b64}})).is_err());
+    for bad in [
+        json!({"base64": b64, "width": 0}),
+        json!({"base64": b64, "width": -3}),
+        json!({"base64": b64, "x": "left"}),
+        json!({"base64": b64, "width": 1e7, "height": 1e7}),
+        json!({"base64": "not base64!"}),
+        json!({"base64": ""}),
+        json!({"base64": 7}),
+    ] {
+        assert!(h.handle("doc.place", bad.clone()).is_err(), "{bad}");
+    }
+    assert_eq!(layers(&mut h).len(), 3, "nothing else was placed");
+}
+
 #[test]
 fn save_reports_bytes_and_time_and_takes_a_fast_merged_image() {
     let dir = temp_dir("save-stats");
