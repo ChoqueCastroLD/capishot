@@ -95,8 +95,11 @@ pub fn write_reply(out: &mut impl Write, reply: &Value) -> io::Result<()> {
             }
         }
     };
-    out.write_all(&encoded)?;
-    out.write_all(b"\n")
+    // One write: a reply split into two small segments waits out the peer's delayed ACK
+    // (about 40 ms per request) on a socket with Nagle's algorithm.
+    let mut encoded = encoded;
+    encoded.push(b'\n');
+    out.write_all(&encoded)
 }
 
 /// Reserve envelope/ID space and bound retained batch results incrementally, so

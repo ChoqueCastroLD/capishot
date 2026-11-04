@@ -133,3 +133,31 @@ fn the_idle_timeout_is_configurable_and_can_be_off() {
     let line = ask(&mut s, &mut r, r#"{"id":1,"method":"methods"}"#).unwrap();
     assert!(line.contains("\"ok\":true"), "kept without an idle timeout: {line}");
 }
+
+/// Before: a reply went out in two writes (the JSON, then its newline) on a socket with Nagle's
+/// algorithm, so each request waited out the client's delayed ACK (about 40 ms on Linux).
+#[test]
+fn replies_go_out_at_once_without_the_client_setting_tcp_nodelay() {
+    let (mut s, mut r) = tcp_client(ServeOptions::default());
+    assert!(!s.nodelay().unwrap(), "the client leaves Nagle on");
+    let n = 40;
+    let t = std::time::Instant::now();
+    for i in 0..n {
+        let line = ask(&mut s, &mut r, &format!(r#"{{"id":{i},"method":"session.list"}}"#)).unwrap();
+        assert!(line.contains("\"ok\":true"), "{line}");
+    }
+    let per = t.elapsed() / n;
+    assert!(per < Duration::from_millis(15), "{per:?} per request");
+}
+
+#[test]
+fn accepted_streams_set_tcp_nodelay() {
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let _c = std::net::TcpStream::connect(l.local_addr().unwrap()).unwrap();
+    let (a, _) = l.accept().unwrap();
+    configure_stream(&a).unwrap();
+    assert!(a.nodelay().unwrap());
+    assert_eq!(a.read_timeout().unwrap(), Some(IO_TIMEOUT));
+    configure_stream_idle(&a, None).unwrap();
+    assert_eq!(a.read_timeout().unwrap(), None);
+}

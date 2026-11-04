@@ -272,6 +272,8 @@ pub fn configure_stream(stream: &std::net::TcpStream) -> std::io::Result<()> {
 /// [`configure_stream`] with the idle timeout `idle` (`None`: an idle connection is never
 /// dropped). Writes keep [`IO_TIMEOUT`].
 pub fn configure_stream_idle(stream: &std::net::TcpStream, idle: Option<Duration>) -> std::io::Result<()> {
+    // Low latency: replies go out at once (TCP_NODELAY), not held back for the peer's ACK.
+    stream.set_nodelay(true)?;
     stream.set_read_timeout(idle.filter(|d| !d.is_zero()))?;
     stream.set_write_timeout(Some(IO_TIMEOUT))
 }

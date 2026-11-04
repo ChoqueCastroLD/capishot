@@ -501,6 +501,19 @@ its listening port so a later session can reuse it (#3682). An active connection
 idle shutdown, including during a long command. Clients should reconnect by restarting
 `photocraft-cli serve` if they need a server after the idle deadline.
 
+**Timeouts.** A TCP connection that sends no request for 30 s is closed; `serve --idle-timeout
+<seconds>` changes it (`0`: never), `--server-idle-timeout <seconds>` the 30 minutes above (`0`:
+never). `serve` has no reply deadline (the desktop app's 60 s one doesn't apply): a long command
+answers when it ends, and the idle timer doesn't run while a request is being answered. To keep a
+request short anyway, start the command as a job (`engine.execute {…, wait: false}` → `{job,
+pending}`) and poll `jobs.status {job}` or block in steps with `jobs.wait {job, timeoutMs}`.
+
+**Latency.** The server sets `TCP_NODELAY` on every accepted connection and writes each reply
+(and progress line) in one write, so a request costs about the command's own time (well under a
+millisecond for `session.list` on loopback) without the client tuning its socket; before, each
+reply waited out the client's delayed ACK (about 40 ms on Linux). Clients should still send each
+request line in one write (or set `TCP_NODELAY` themselves).
+
 `photocraft-cli serve` keeps one headless engine session (no window, no GPU) and answers the same
 JSON-lines envelope on stdio, or on `127.0.0.1:<port>` with `--port <port>` or, without the flag,
 `PHOTOCRAFT_CONTROL_PORT` (loopback only; each
