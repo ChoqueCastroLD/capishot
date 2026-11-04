@@ -64,6 +64,13 @@ pub const FEATURES: &[&str] = &[
     "events.layerChanged",
     "events.fontsReady",
     "document.fontsReady",
+    "open.whenOpen",
+    "open.hidden.background",
+    "open.url",
+    "open.cache",
+    "open.cache.sharedPixels",
+    "open.quiet",
+    "open.quiet.prewarm",
     "fonts.noFallbackFlash",
     "window.events",
     "document.views",
@@ -300,22 +307,48 @@ pub fn doc_info(st: &DocState, active: bool) -> Value {
     })
 }
 
-/// `openDocument`'s and `window.photocraft.open`'s options: `{hidden?: bool}` → hidden.
-pub fn open_options(options: &Value) -> Result<bool, String> {
-    match options {
-        Value::Null => Ok(false),
-        Value::Object(o) => {
-            if let Some(k) = o.keys().find(|k| k.as_str() != "hidden") {
-                return Err(format!("unknown openDocument option `{k}` (hidden)"));
-            }
-            match o.get("hidden") {
-                None | Some(Value::Null) => Ok(false),
-                Some(Value::Bool(b)) => Ok(*b),
-                Some(_) => Err("hidden must be true or false".into()),
-            }
-        }
-        _ => Err("openDocument options must be an object ({hidden})".into()),
+/// `openDocument`'s and `window.photocraft.open`'s options.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OpenOptions {
+    /// A hidden helper document (feature `documents.hidden`).
+    pub hidden: bool,
+    /// `{cacheKey, version}`: reopened from the decoded-document cache when it holds `cacheKey` at
+    /// `version`, kept there once decoded (feature `open.cache`).
+    pub cache: Option<(String, String)>,
+    /// While a PSD/PSB decodes, its merged image shows alone, no opening card (feature
+    /// `open.quiet`).
+    pub quiet: bool,
+}
+
+/// [`OpenOptions`] from `{hidden?: bool, quiet?: bool, cacheKey?: string, version?: string | number}`.
+pub fn open_options(options: &Value) -> Result<OpenOptions, String> {
+    let o = match options {
+        Value::Null => return Ok(OpenOptions::default()),
+        Value::Object(o) => o,
+        _ => return Err("openDocument options must be an object ({hidden, quiet, cacheKey, version})".into()),
+    };
+    if let Some(k) = o.keys().find(|k| !matches!(k.as_str(), "hidden" | "quiet" | "cacheKey" | "version")) {
+        return Err(format!("unknown openDocument option `{k}` (hidden, quiet, cacheKey, version)"));
     }
+    let flag = |key: &str| match o.get(key) {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(b)) => Ok(*b),
+        Some(_) => Err(format!("{key} must be true or false")),
+    };
+    let (hidden, quiet) = (flag("hidden")?, flag("quiet")?);
+    let version = match o.get("version") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(v)) => Some(v.clone()),
+        Some(Value::Number(n)) => Some(n.to_string()),
+        Some(_) => return Err("version must be a string or a number".into()),
+    };
+    let cache = match o.get("cacheKey") {
+        None | Some(Value::Null) if version.is_some() => return Err("version needs a cacheKey".into()),
+        None | Some(Value::Null) => None,
+        Some(Value::String(k)) if !k.is_empty() => Some((k.clone(), version.unwrap_or_default())),
+        Some(_) => return Err("cacheKey must be a non-empty string".into()),
+    };
+    Ok(OpenOptions { hidden, cache, quiet })
 }
 
 /// `showDocument(id, options)` / `prewarmDocument(id, options)` → the control request's params:
@@ -941,9 +974,18 @@ mod tests {
 
     #[test]
     fn hidden_opens_and_src_urls() {
-        assert_eq!(open_options(&Value::Null), Ok(false));
-        assert_eq!(open_options(&json!({"hidden": true})), Ok(true));
+        assert_eq!(open_options(&Value::Null), Ok(OpenOptions::default()));
+        assert_eq!(open_options(&json!({"hidden": true})), Ok(OpenOptions { hidden: true, ..OpenOptions::default() }));
+        assert_eq!(open_options(&json!({"quiet": true})), Ok(OpenOptions { quiet: true, ..OpenOptions::default() }));
+        assert!(open_options(&json!({"quiet": "yes"})).is_err());
         assert!(open_options(&json!({"hidden": 1})).is_err() && open_options(&json!({"x": 1})).is_err() && open_options(&json!("x")).is_err());
+        let cached = |k: &str, v: &str| Ok(OpenOptions { cache: Some((k.into(), v.into())), ..OpenOptions::default() });
+        assert_eq!(open_options(&json!({"cacheKey": "p13", "version": "a1"})), cached("p13", "a1"));
+        assert_eq!(open_options(&json!({"cacheKey": "p13", "version": 7})), cached("p13", "7"));
+        assert_eq!(open_options(&json!({"cacheKey": "p13"})), cached("p13", ""));
+        for bad in [json!({"version": 1}), json!({"cacheKey": ""}), json!({"cacheKey": 3}), json!({"cacheKey": "k", "version": [1]})] {
+            assert!(open_options(&bad).is_err(), "{bad}");
+        }
         assert!(new_document_params(&json!({"width": 8, "height": 8, "hidden": true})).is_ok());
         assert!(new_document_params(&json!({"width": 8, "height": 8, "hidden": "yes"})).is_err());
         assert!(src_is_url("https://cdn.example/p/1.jpg") && src_is_url("blob:https://a/b") && src_is_url("/pages/12.png") && src_is_url("p.png?v=2"));

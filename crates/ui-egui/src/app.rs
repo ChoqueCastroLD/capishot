@@ -13,6 +13,7 @@ mod clipboard;
 mod commands;
 mod control;
 mod files;
+pub use files::Opening;
 pub(crate) use files::ensure_memory_to_save;
 mod frame;
 mod gpu;

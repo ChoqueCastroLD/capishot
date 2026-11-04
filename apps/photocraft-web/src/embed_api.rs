@@ -197,6 +197,7 @@ pub fn process(app: &mut PhotocraftApp, ctx: &egui::Context) {
             Err(e) => reject.call1(&JsValue::NULL, &error(&e)).ok(),
         };
     }
+    crate::embed_open::poll(app);
     WAITING.with(|w| {
         w.borrow_mut().retain(|(rx, (resolve, reject))| match rx.try_recv() {
             Ok(v) => {
@@ -323,7 +324,7 @@ async fn bytes_of(data: JsValue) -> Result<Vec<u8>, String> {
     if data.is_instance_of::<js_sys::ArrayBuffer>() || js_sys::ArrayBuffer::is_view(&data) {
         return Ok(js_sys::Uint8Array::new(&data).to_vec());
     }
-    Err("openDocument takes an ArrayBuffer, a typed array or a Blob".into())
+    Err("openDocument takes an ArrayBuffer, a typed array, a Blob or a URL".into())
 }
 
 fn opt_str(o: &JsValue, key: &str) -> Option<String> {
@@ -433,6 +434,7 @@ pub fn destroy() {
     for (_, (_, reject)) in JOBS.with(|j| std::mem::take(&mut *j.borrow_mut())) {
         reject.call1(&JsValue::NULL, &gone()).ok();
     }
+    crate::embed_open::abandon("Capishot was destroyed");
     for (_, (_, reject)) in WAITING.with(|w| std::mem::take(&mut *w.borrow_mut())) {
         reject.call1(&JsValue::NULL, &gone()).ok();
     }
@@ -459,48 +461,65 @@ pub fn on_event(listener: JsValue) {
 }
 
 /// Opens a PSD, PSB, `.pcraft`, PNG, JPEG, WebP… (a flat image becomes a one-layer document) as
-/// the active document → its `DocumentInfo` plus `warnings`. `options.hidden`: a hidden helper
-/// document instead, for `execute(…, {document})`: never shown, given a tab or made active, the
-/// active document, its view and the focus left as they are (feature `documents.hidden`).
+/// the active document → its `DocumentInfo` plus `warnings` and `cached`, once it is in place (a
+/// PSD/PSB decodes in the background, its merged image shown meanwhile; feature `open.whenOpen`).
+/// `data`: an ArrayBuffer, a typed array, a Blob, a URL (fetched and streamed in; feature
+/// `open.url`) or `null` with `options.cacheKey` (from the document cache only). Options:
+/// `hidden` a hidden helper document instead, for `execute(…, {document})`: never shown, given a
+/// tab or made active, the active document, its view and the focus left as they are (feature
+/// `documents.hidden`; a PSD/PSB decodes off the frame, `open.hidden.background`); `cacheKey` and
+/// `version`: a document decoded under that key and version before opens again at once, sharing
+/// its pixels (features `open.cache`, `open.cache.sharedPixels`).
 #[wasm_bindgen(js_name = openDocument)]
 pub fn open_document(data: JsValue, filename: Option<String>, options: JsValue) -> js_sys::Promise {
-    let name = filename.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| "document".into());
-    let hidden = match core::open_options(&from_js(&options)) {
-        Ok(h) => h,
+    let options = match core::open_options(&from_js(&options)) {
+        Ok(o) => o,
         Err(e) => return js_sys::Promise::reject(&error(&e)),
     };
-    wasm_bindgen_futures::future_to_promise(async move {
-        let bytes = bytes_of(data).await.map_err(|e| error(&e))?;
-        if hidden {
-            return JsFuture::from(queue(move |app, _| {
-                let (index, warnings) = app.open_hidden(&name, &bytes)?;
-                let st = app.session.documents().get(index).ok_or("the document closed")?;
-                let mut info = core::doc_info(st, false);
-                info["warnings"] = json!(warnings);
-                Ok(to_js(&info))
-            }))
-            .await;
-        }
-        JsFuture::from(queue(move |app, _| {
-            let before: Vec<u64> = app.session.documents().iter().map(|st| st.doc.id.0).collect();
+    let url = data.as_string();
+    let name = filename.filter(|n| !n.trim().is_empty()).or_else(|| url.as_deref().map(crate::embed_open::name_of_url)).unwrap_or_else(|| "document".into());
+    if let Some(why) = unavailable() {
+        return js_sys::Promise::reject(&error(&why));
+    }
+    let mut settle = None;
+    let p = promise(|s| settle = Some(s));
+    let Some((resolve, reject)) = settle else { return p };
+    wasm_bindgen_futures::spawn_local(async move {
+        let cached = options.cache.is_some() && (data.is_null() || data.is_undefined());
+        let bytes = match url {
+            _ if cached => Ok(None),
+            Some(url) => crate::embed_open::fetch_streamed(&url).await.map(Some),
+            None => bytes_of(data).await.map(Some),
+        };
+        let bytes = match bytes {
+            Ok(b) => b,
+            Err(e) => {
+                reject.call1(&JsValue::NULL, &error(&e)).ok();
+                return;
+            }
+        };
+        // Runs at the start of a frame; settles now or once the document's background open ends.
+        let start = queue(move |app, _| {
             events(|e| e.note_open());
-            let warnings = app.open_owned(&name, bytes).inspect_err(|e| {
-                events(|e| e.open_failed());
-                app.open_failed(&name, e);
-            })?;
-            app.sync_views();
-            let opened = app.session.documents().iter().find(|st| !before.contains(&st.doc.id.0)).map(|st| st.doc.id.0);
-            let Some(id) = opened else {
-                return Err(format!("{name} didn't open as a document (brush, gradient and swatch files go to the preset libraries)"));
+            let done = move |r: Result<crate::embed_open::Opened, String>| match r {
+                Ok(o) => {
+                    let mut info = o.info;
+                    info["warnings"] = json!(o.warnings);
+                    info["cached"] = json!(o.cached);
+                    resolve.call1(&JsValue::NULL, &to_js(&info)).ok();
+                }
+                Err(e) => {
+                    events(|e| e.open_failed());
+                    reject.call1(&JsValue::NULL, &error(&e)).ok();
+                }
             };
-            let index = index_of(app, Some(id))?;
-            let st = app.session.documents().get(index).ok_or("the document closed")?;
-            let mut info = core::doc_info(st, app.session.active_index() == Some(index));
-            info["warnings"] = json!(warnings);
-            Ok(to_js(&info))
-        }))
-        .await
-    })
+            crate::embed_open::start(app, &name, bytes, &options, Box::new(done));
+            Ok(JsValue::UNDEFINED)
+        });
+        // Only fails when the app went away before the frame (then nothing else settles it).
+        let _ = JsFuture::from(start).await;
+    });
+    p
 }
 
 /// Creates a document: `{width, height, name?, background?, resolution?, mode?, depth?}`.
