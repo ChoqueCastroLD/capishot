@@ -17,7 +17,8 @@
 //!   `doc.importDataSets {path, delimiter?, index?}` (#3216: the same treatment for the export
 //!   and CSV half of #2810), `doc.save {path?, format?, quality?, index?}`, `doc.inspect {index?, textStyle?}`,
 //!   `doc.render {index?, maxSide?, path?}` (writes a PNG to `path`, else
-//!   returns it base64-encoded), `doc.select {index}`, `doc.close {index?}`
+//!   returns it base64-encoded; with `rect`, `scale`, `layers` or `uids`, a region at a scale of
+//!   some layers only), `doc.select {index}`, `doc.close {index?}`
 //! - `batch {steps: [{command, params?, wait?} | {method, params?}], stopOnError?}`
 //! - `methods`: this list.
 
@@ -218,6 +219,9 @@ impl Headless {
                 let opts = photocraft_engine::inspect::Options::parse(&p).map_err(bad)?;
                 self.inspect_with(index_of(&p)?, opts)
             }
+            "doc.render" if p.get("rect").is_some() || p.get("layers").is_some() || p.get("uids").is_some() || p.get("scale").is_some() => {
+                self.render_region(&p)
+            }
             "doc.render" => {
                 let max = match p.get("maxSide") {
                     None => 1024,
@@ -246,6 +250,62 @@ impl Headless {
             "methods" => Ok(json!(METHODS)),
             other => Err(bad(format!("unknown method `{other}` (try `methods`)"))),
         }
+    }
+
+    /// `doc.render` with `rect`, `scale`, `layers` or `uids`: a region of the composite, at a
+    /// scale, of some layers only. Without `rect` the whole canvas.
+    fn render_region(&mut self, p: &Value) -> Result<Value, AutomationError> {
+        let started = Instant::now();
+        let index = index_of(p)?;
+        let rect = match p.get("rect") {
+            None | Some(Value::Null) => {
+                let i = self.session.active_index();
+                let doc = index.or(i).and_then(|i| self.session.documents().get(i)).ok_or_else(|| bad("no document open"))?;
+                doc.doc.bounds()
+            }
+            Some(v) => {
+                let n: Vec<i64> = v.as_array().filter(|a| a.len() == 4).map(|a| a.iter().filter_map(Value::as_i64).collect()).unwrap_or_default();
+                let [x, y, w, h] = n[..] else { return Err(bad("`rect` must be [x, y, width, height] in whole document pixels")) };
+                let fit = |v: i64| i32::try_from(v).ok().filter(|v| v.unsigned_abs() <= 1 << 20);
+                let (Some(x), Some(y), Some(w), Some(h)) = (fit(x), fit(y), fit(w), fit(h)) else { return Err(bad("`rect` is out of range")) };
+                if w <= 0 || h <= 0 {
+                    return Err(bad("`rect` needs a positive width and height"));
+                }
+                photocraft_geom::Rect::new(x, y, x + w, y + h)
+            }
+        };
+        let scale = match p.get("scale") {
+            None | Some(Value::Null) => 1.0,
+            Some(v) => v.as_f64().filter(|s| s.is_finite() && *s > 0.0 && *s <= 1.0).ok_or_else(|| bad("`scale` must be a number in (0, 1]"))?,
+        };
+        let ids = |k: &str| -> Result<Option<Vec<u64>>, AutomationError> {
+            match p.get(k) {
+                None | Some(Value::Null) => Ok(None),
+                Some(Value::Array(a)) => a.iter().map(|v| v.as_u64().ok_or_else(|| bad(format!("`{k}` must be an array of layer ids")))).collect::<Result<_, _>>().map(Some),
+                Some(_) => Err(bad(format!("`{k}` must be an array of layer ids"))),
+            }
+        };
+        let mut layers: Option<Vec<photocraft_doc::LayerId>> = ids("layers")?.map(|v| v.into_iter().map(photocraft_doc::LayerId).collect());
+        if let Some(uids) = ids("uids")? {
+            let uids: Vec<u32> = uids.into_iter().map(|u| u32::try_from(u).map_err(|_| bad(format!("no layer with uid {u}")))).collect::<Result<_, _>>()?;
+            layers.get_or_insert_with(Vec::new).extend(self.layers_by_uid(index, &uids)?);
+        }
+        let (png, w, h, rect) = self.render_region_png(index, rect, scale, layers.as_deref())?;
+        let region = [rect.x0, rect.y0, rect.width() as i32, rect.height() as i32];
+        let mut v = match str_of(p, "path") {
+            Some(path) => {
+                self.write_render(&PathBuf::from(path), &png)?;
+                json!({"path": path, "bytes": png.len()})
+            }
+            None => json!({"mime": "image/png", "base64": base64::engine::general_purpose::STANDARD.encode(&png)}),
+        };
+        if let Some(o) = v.as_object_mut() {
+            o.insert("rect".into(), json!(region));
+            o.insert("width".into(), json!(w));
+            o.insert("height".into(), json!(h));
+            o.insert("ms".into(), json!(u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)));
+        }
+        Ok(v)
     }
 
     /// Run `steps` in order. Each step is `{command, params?, wait?}` (an engine command) or

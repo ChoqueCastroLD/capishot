@@ -53,6 +53,62 @@ fn layer_uids_survive_save_and_reopen_and_a_duplicate_gets_a_new_one() {
 }
 
 #[test]
+fn render_a_region_at_a_scale_of_some_layers() {
+    let mut h = Headless::trusted_local();
+    h.handle("doc.new", json!({"width": 64, "height": 48, "background": "white"})).unwrap();
+    h.handle("engine.execute", json!({"command": "layer.new.layer", "params": {"name": "red"}})).unwrap();
+    h.handle("engine.execute", json!({"command": "select.rect", "params": {"x": 10, "y": 10, "width": 20, "height": 10}})).unwrap();
+    h.handle("engine.execute", json!({"command": "edit.fill", "params": {"color": "#ff0000"}})).unwrap();
+    h.handle("engine.execute", json!({"command": "select.deselect"})).unwrap();
+    let decode = |r: &Value| {
+        let png = base64::engine::general_purpose::STANDARD.decode(r["base64"].as_str().unwrap()).unwrap();
+        let img = photocraft_codecs::decode(&png).unwrap();
+        (img.dimensions(), img.to_rgba8())
+    };
+    let r = h.handle("doc.render", json!({"rect": [8, 8, 20, 10]})).unwrap();
+    assert_eq!((r["width"].clone(), r["height"].clone(), r["rect"].clone()), (json!(20), json!(10), json!([8, 8, 20, 10])), "{r}");
+    assert!(r["ms"].is_u64());
+    let img = decode(&r);
+    assert_eq!(img.0, (20, 10));
+    let px = |img: &((u32, u32), Vec<u8>), x: u32, y: u32| -> [u8; 4] {
+        let i = ((y * img.0.0 + x) * 4) as usize;
+        img.1[i..i + 4].try_into().unwrap()
+    };
+    assert_eq!(px(&img, 0, 0), [255, 255, 255, 255], "white outside the fill");
+    assert_eq!(px(&img, 5, 5), [255, 0, 0, 255], "red inside");
+    // Half scale, and a rect past the canvas is clipped to it.
+    let r = h.handle("doc.render", json!({"rect": [40, 40, 100, 100], "scale": 0.5})).unwrap();
+    assert_eq!((r["rect"].clone(), r["width"].clone(), r["height"].clone()), (json!([40, 40, 24, 8]), json!(12), json!(4)), "{r}");
+    // Only the red layer (by session id, then by uid): transparent outside its pixels.
+    let red = layers(&mut h).into_iter().find(|l| l["name"] == "red").unwrap();
+    for sel in [json!({"layers": [red["id"]]}), json!({"uids": [red["uid"]]})] {
+        let mut p = json!({"rect": [8, 8, 20, 10]});
+        p.as_object_mut().unwrap().extend(sel.as_object().unwrap().clone());
+        let img = decode(&h.handle("doc.render", p).unwrap());
+        assert_eq!(px(&img, 0, 0)[3], 0, "the background is not drawn");
+        assert_eq!(px(&img, 5, 5), [255, 0, 0, 255]);
+    }
+    // Bad params are errors, never panics.
+    for bad in [
+        json!({"rect": [0, 0, 0, 5]}),
+        json!({"rect": [0, 0, 5]}),
+        json!({"rect": "all"}),
+        json!({"rect": [1000, 1000, 5, 5]}),
+        json!({"rect": [0, 0, 5, 5], "scale": 0}),
+        json!({"rect": [0, 0, 5, 5], "scale": 2}),
+        json!({"rect": [0, 0, i64::MAX, 5]}),
+        json!({"layers": [999_999]}),
+        json!({"uids": [999_999]}),
+        json!({"layers": "red"}),
+    ] {
+        assert!(h.handle("doc.render", bad.clone()).is_err(), "{bad}");
+    }
+    // Without the new params the reply is as before.
+    let r = h.handle("doc.render", json!({"maxSide": 16})).unwrap();
+    assert!(r.get("rect").is_none() && r["base64"].is_string());
+}
+
+#[test]
 fn jobs_status_and_wait_follow_a_background_job() {
     let h = session_mutex();
     {

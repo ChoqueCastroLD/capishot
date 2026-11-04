@@ -110,6 +110,77 @@ pub fn save_bytes(doc: &Document, name: &str, format_override: Option<&str>, opt
     Ok((result.bytes, result.warnings))
 }
 
+/// A part of the composite: `rect` (document pixels, clipped to the canvas) scaled by `scale`
+/// (0 < scale <= 1), with only `layers` drawn when given (see [`only_layers`]). Returns the PNG
+/// and its size.
+pub fn render_region_png(doc: &Document, rect: photocraft_geom::Rect, scale: f64, layers: Option<&[photocraft_doc::LayerId]>) -> Result<(Vec<u8>, u32, u32), AutomationError> {
+    let filtered;
+    let doc = match layers {
+        Some(ids) => {
+            filtered = only_layers(doc, ids)?;
+            &filtered
+        }
+        None => doc,
+    };
+    let (w, h) = region_size(rect, scale);
+    let img = photocraft_compose::render_reduced_rect(doc, rect, w, h).to_rgba8();
+    let image = photocraft_codecs::Image::from_u8(img.width, img.height, photocraft_codecs::ChannelLayout::Rgba, img.pixels)
+        .map_err(|e| AutomationError::Other(e.to_string()))?;
+    let png = photocraft_codecs::encode(&image, photocraft_codecs::Format::Png, &Default::default()).map_err(|e| AutomationError::Other(e.to_string()))?;
+    Ok((png, img.width, img.height))
+}
+
+/// The output size of `rect` at `scale`, at least 1×1.
+pub fn region_size(rect: photocraft_geom::Rect, scale: f64) -> (u32, u32) {
+    let side = |n: u32| ((f64::from(n) * scale).round() as u32).clamp(1, n.max(1));
+    (side(rect.width()), side(rect.height()))
+}
+
+/// `doc` with only `ids` drawn: each listed layer is shown (with what a listed group holds, as
+/// it is), and so is every group around one; every other layer is hidden. An id not in the
+/// document is an error.
+pub fn only_layers(doc: &Document, ids: &[photocraft_doc::LayerId]) -> Result<Document, AutomationError> {
+    use std::collections::HashSet;
+    let mut keep: HashSet<photocraft_doc::LayerId> = HashSet::new();
+    let mut inside: HashSet<photocraft_doc::LayerId> = HashSet::new();
+    for id in ids {
+        let path = doc.path_of(*id).ok_or_else(|| AutomationError::BadRequest(format!("no layer {} in the document", id.0)))?;
+        for n in 1..=path.len() {
+            if let Some(l) = path.get(..n).and_then(|p| doc.layer_at(p)) {
+                keep.insert(l.id);
+            }
+        }
+        if let Some(l) = doc.layer(*id) {
+            inside.extend(walk_ids(l));
+        }
+    }
+    let mut out = doc.clone();
+    let all: Vec<photocraft_doc::LayerId> = doc.walk().into_iter().map(|(_, _, l)| l.id).collect();
+    for id in all {
+        if let Some(l) = out.layer_mut(id) {
+            if ids.contains(&id) {
+                l.visible = true;
+            } else if !keep.contains(&id) && !inside.contains(&id) {
+                l.visible = false;
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// The ids of the layers inside `l` (a group), at any depth.
+fn walk_ids(l: &photocraft_doc::Layer) -> Vec<photocraft_doc::LayerId> {
+    let mut out = Vec::new();
+    let mut stack: Vec<&photocraft_doc::Layer> = l.children().map(|c| c.iter().collect()).unwrap_or_default();
+    while let Some(c) = stack.pop() {
+        out.push(c.id);
+        if let Some(ch) = c.children() {
+            stack.extend(ch.iter());
+        }
+    }
+    out
+}
+
 /// Flattened document as PNG, scaled to fit `max_side` (0 = full size).
 pub fn render_png(doc: &Document, max_side: u32) -> Result<Vec<u8>, AutomationError> {
     let side = if max_side == 0 { doc.size.width.max(doc.size.height) } else { max_side };

@@ -355,6 +355,46 @@ impl Headless {
         Ok(png)
     }
 
+    /// `doc.render` of a region ([`files::render_region_png`]): `rect` in document pixels
+    /// (clipped to the canvas), `scale` in (0, 1], only `layers` drawn when given. Returns the PNG,
+    /// its size and the canvas rect rendered.
+    pub fn render_region_png(
+        &self,
+        index: Option<usize>,
+        rect: photocraft_geom::Rect,
+        scale: f64,
+        layers: Option<&[photocraft_doc::LayerId]>,
+    ) -> Result<(Vec<u8>, u32, u32, photocraft_geom::Rect), AutomationError> {
+        let i = self.doc_index(index)?;
+        let doc = &self.session.documents()[i].doc;
+        let rect = rect.intersect(&doc.bounds());
+        if rect.is_empty() {
+            return Err(AutomationError::BadRequest("`rect` is outside the canvas".into()));
+        }
+        if !matches!(&self.filesystem, Filesystem::TrustedLocal) {
+            let (w, h) = files::region_size(rect, scale);
+            crate::budgets::check_preview(rect.width(), rect.height(), w.max(h))?;
+        }
+        let (png, w, h) = files::render_region_png(doc, rect, scale, layers)?;
+        if !matches!(&self.filesystem, Filesystem::TrustedLocal) {
+            crate::budgets::check_png(png.len())?;
+        }
+        Ok((png, w, h, rect))
+    }
+
+    /// The session ids of the layers whose stable id (`uid`, the PSD layer id) is in `uids`, in
+    /// that order; an unknown uid is an error.
+    pub fn layers_by_uid(&self, index: Option<usize>, uids: &[u32]) -> Result<Vec<photocraft_doc::LayerId>, AutomationError> {
+        let i = self.doc_index(index)?;
+        let doc = &self.session.documents()[i].doc;
+        let walk = doc.walk();
+        uids.iter()
+            .map(|u| {
+                walk.iter().find(|(_, _, l)| l.psd_id == Some(*u)).map(|(_, _, l)| l.id).ok_or_else(|| AutomationError::BadRequest(format!("no layer with uid {u}")))
+            })
+            .collect()
+    }
+
     pub fn session_list(&self) -> Value {
         photocraft_engine::inspect::session(&self.session)
     }
