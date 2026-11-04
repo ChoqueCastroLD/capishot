@@ -35,7 +35,7 @@ mod indexed_fonts;
 mod indexed_presets;
 
 #[cfg(target_arch = "wasm32")]
-mod ai_bridge;
+use photocraft_ai_web as ai_bridge;
 #[cfg(target_arch = "wasm32")]
 mod breadcrumb;
 #[cfg(target_arch = "wasm32")]

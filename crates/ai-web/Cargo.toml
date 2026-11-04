@@ -1,0 +1,24 @@
+[package]
+name = "photocraft-ai-web"
+description = "Capishot's AI services in the browser: upscaler, Manga LaMa inpainter, Generative Fill and model downloads through the AI Web Worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# The service seams the worker bridge implements (no inference here: it runs in the worker).
+photocraft-ai = { workspace = true }
+photocraft-ai-lama = { workspace = true }
+photocraft-ai-sd = { workspace = true }
+log = { workspace = true }
+serde_json = { workspace = true }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+# The web app's feature set (src/bridge.rs moved from apps/photocraft-web; trim when convenient).
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "DomRect", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "Url", "Location", "CssStyleDeclaration", "Storage", "Event", "EventTarget", "MouseEvent", "PointerEvent", "BeforeUnloadEvent", "AbortController", "AbortSignal", "DomException", "Response", "IdbFactory", "IdbOpenDbRequest", "IdbDatabase", "IdbRequest", "IdbTransaction", "IdbTransactionMode", "IdbObjectStore", "IdbCursor", "IdbCursorWithValue", "RequestInit", "RequestMode", "Navigator", "AddEventListenerOptions", "KeyboardEvent", "WheelEvent", "TouchEvent", "TouchList", "Touch", "CustomEvent", "CustomEventInit", "MessageEvent", "RequestCredentials", "Performance", "ClipboardEvent", "DataTransfer", "DataTransferItemList", "DataTransferItem", "File", "HtmlInputElement", "FileList", "DomStringList", "Worker", "WorkerOptions", "WorkerType", "ErrorEvent", "CacheStorage", "Cache", "Headers"] }
