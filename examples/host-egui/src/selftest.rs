@@ -151,8 +151,7 @@ impl SelfTest {
             Step::Open if drawn == Some(doc) && self.frames >= SETTLE => {
                 self.check(true, "the page opened and the canvas draws it");
                 self.results.insert("gpu canvas".into(), json!(gpu));
-                let rows = script::layers(&app.host, doc).unwrap_or_default();
-                self.page = rows.iter().find(|r| r.kind == "pixel").map(|r| r.id);
+                self.page = script::paint_target(&app.host, doc).ok().flatten().map(|r| r.id);
                 self.check(self.page.is_some(), "the page has a pixel layer");
                 if let Some(page) = self.page {
                     self.before = script::blob_pixels(&mut app.host, doc, page).unwrap_or_default();
