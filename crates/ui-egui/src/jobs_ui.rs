@@ -225,21 +225,43 @@ pub struct JobsUi {
     /// those that ended ([`JobsUi::take_open_outcomes`]).
     tracked: Vec<JobId>,
     outcomes: Vec<(JobId, OpenOutcome)>,
-    /// A quiet open whose document is in place but not drawn yet ([`landing`]).
+    /// An open whose document is in place but not drawn yet ([`landing`]).
     pub(crate) landing: Option<Landing>,
 }
 
-/// How long a quiet open's preview may stand in for its landed document's canvas (ms).
+/// How long an open's preview or card may stand in for its landed document's canvas (ms).
 const LANDING_TIMEOUT_MS: f64 = 1000.0;
 
-/// A quiet open's document has landed: its preview stays in the canvas area, as during the
-/// decode, until the canvas has drawn the view it shows ([`crate::canvas::prewarm`]), so no frame
-/// shows a half-composited page.
+/// An open's document has landed: what stood in for it (its preview, the opening card, or both)
+/// stays in the canvas area, as during the decode, until the canvas has drawn the view it shows
+/// ([`crate::canvas::prewarm`]), so no frame shows a half-composited page and the card never
+/// leaves before the page is there.
 #[derive(Clone, Debug)]
 pub(crate) struct Landing {
     doc: DocId,
-    texture: PreviewTexture,
+    texture: Option<PreviewTexture>,
+    /// The opening card's file name, and the open's job (the card keeps its height).
+    card: Option<(String, Option<JobId>)>,
+    /// The document shown before, which stays until this one is drawn (a cached reopen).
+    previous: Option<DocId>,
     started_ms: f64,
+}
+
+impl Landing {
+    fn new(doc: DocId, texture: Option<PreviewTexture>, card: Option<(String, Option<JobId>)>) -> Self {
+        Self { doc, texture, card, previous: None, started_ms: crate::gpu_canvas::now_ms() }
+    }
+}
+
+/// What the canvas area shows while an open lands ([`landing`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StandIn {
+    /// Nothing landing: the document's canvas.
+    Canvas,
+    /// Its preview or the opening card was drawn.
+    Drawn,
+    /// The document at this index, shown before, is drawn instead.
+    Previous(usize),
 }
 
 /// How a tracked open ended: the document and its import warnings, or why it didn't open.
@@ -908,8 +930,13 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
             JobOutcome::Done(v) => match finish_open_tab(app, &tab, &v) {
                 Ok(()) => {
                     let opened = opened_of(&v);
-                    if let (true, Some(texture), Ok((doc, _))) = (tab.quiet, tab.texture.clone(), &opened) {
-                        app.jobs.landing = Some(Landing { doc: *doc, texture, started_ms: crate::gpu_canvas::now_ms() });
+                    // The card (or a quiet open's preview) stays until the canvas is drawn. The
+                    // single-document layout showed the card only with no page before it (else that
+                    // page stayed).
+                    if let Ok((doc, _)) = &opened {
+                        let shown = !app.ui.view.single_document || app.session.visible_count() <= 1;
+                        let card = (!tab.quiet && shown).then(|| (tab.name.clone(), Some(tab.job)));
+                        app.jobs.landing = (card.is_some() || tab.texture.is_some()).then(|| Landing::new(*doc, tab.texture.clone(), card));
                     }
                     opened
                 }
@@ -1338,9 +1365,33 @@ pub fn open_card(app: &mut PhotocraftApp, ui: &mut egui::Ui, job: JobId) {
         ui.painter().rect_filled(done, 0.0, t.accent);
         return;
     }
+    let row = CardRow { name: &tab.name, message: open_message(&j.message), fraction: shown_fraction(&j), percent: percent(&j), cancel: true };
+    if card(ui, area, card_height_id(job), shown, &row) {
+        cancel(app, job);
+    }
+}
+
+/// What the opening card shows.
+struct CardRow<'a> {
+    name: &'a str,
+    message: String,
+    fraction: Option<f32>,
+    percent: String,
+    /// Cancel can stop the open (not once the document is in place).
+    cancel: bool,
+}
+
+/// Where the card of open `job` keeps its height from frame to frame.
+fn card_height_id(job: JobId) -> egui::Id {
+    egui::Id::unique(("open-card-height", job))
+}
+
+/// Draws the opening card in `area` (at its bottom when a preview `shown` above it), as tall as
+/// its content needed last frame (`height_id`). True when Cancel was clicked.
+fn card(ui: &mut egui::Ui, area: Rect, height_id: egui::Id, shown: bool, row: &CardRow<'_>) -> bool {
+    let t = Tokens::get(ui.ctx());
     // Centre the card at the height its content needed last frame; the background is painted
     // once the rows are laid out, so a taller content (a long translation) still gets a card.
-    let height_id = egui::Id::unique(("open-card-height", job));
     let height = ui.ctx().data(|d| d.get_temp::<f32>(height_id)).unwrap_or(OPEN_CARD_MIN_HEIGHT);
     let centre = if shown { egui::pos2(area.center().x, area.bottom() - height / 2.0 - OPEN_CARD_PAD) } else { area.center() };
     let card = Rect::from_center_size(centre, vec2(OPEN_CARD_WIDTH, height));
@@ -1348,23 +1399,24 @@ pub fn open_card(app: &mut PhotocraftApp, ui: &mut egui::Ui, job: JobId) {
     let border = ui.painter().add(egui::Shape::Noop);
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(card.shrink(OPEN_CARD_PAD)));
     let title = child
-        .add(egui::Label::new(RichText::new(crate::i18n::fmt(tl!("Opening {name}"), &[("name", &tab.name)])).font(crate::theme::semibold(14.0))).truncate())
+        .add(egui::Label::new(RichText::new(crate::i18n::fmt(tl!("Opening {name}"), &[("name", row.name)])).font(crate::theme::semibold(14.0))).truncate())
         .rect;
     child.add_space(4.0);
-    let msg = open_message(&j.message);
-    child.add(egui::Label::new(RichText::new(msg).color(t.text_dim).size(12.0)).truncate());
+    child.add(egui::Label::new(RichText::new(&row.message).color(t.text_dim).size(12.0)).truncate());
     child.add_space(10.0);
     let (br, _) = child.allocate_exact_size(vec2(child.available_width(), 8.0), Sense::hover());
-    bar(&child, br, shown_fraction(&j), &t);
+    bar(&child, br, row.fraction, &t);
     child.add_space(10.0);
     let mut cancel_it = false;
     let mut cancel_rect = Rect::NOTHING;
     child.horizontal(|ui| {
-        ui.label(RichText::new(percent(&j)).color(t.text_faint).size(11.5));
+        ui.label(RichText::new(&row.percent).color(t.text_faint).size(11.5));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let r = crate::widgets::secondary_button(ui, tl!("Cancel"), 76.0);
-            cancel_it = r.clicked();
-            cancel_rect = r.rect;
+            ui.add_enabled_ui(row.cancel, |ui| {
+                let r = crate::widgets::secondary_button(ui, tl!("Cancel"), 76.0);
+                cancel_it = r.clicked();
+                cancel_rect = r.rect;
+            });
         });
     });
     let content = child.min_rect();
@@ -1377,9 +1429,7 @@ pub fn open_card(app: &mut PhotocraftApp, ui: &mut egui::Ui, job: JobId) {
         ui.ctx().request_repaint();
     }
     ui.ctx().data_mut(|d| d.insert_temp(open_card_rects_id(), OpenCardRects { card, title, cancel: cancel_rect }));
-    if cancel_it {
-        cancel(app, job);
-    }
+    cancel_it && row.cancel
 }
 
 /// Where a document of `size` pixels shows in a canvas `area` at fit on screen, as the canvas
@@ -1390,27 +1440,46 @@ fn fit_rect(area: Rect, size: egui::Vec2, ppp: f32) -> Rect {
     Rect::from_center_size(area.center(), size * k)
 }
 
-/// While a quiet open's document `idx` (the active one) lands: draw its canvas offscreen and,
-/// until that is current, its preview in `area` as during the decode. True when the preview was
-/// drawn (the canvas isn't, this frame).
-pub(crate) fn landing(app: &mut PhotocraftApp, ui: &egui::Ui, idx: usize, area: Rect) -> bool {
-    let Some(l) = app.jobs.landing.clone() else { return false };
+/// While an open's document `idx` (the active one) lands: draw its canvas offscreen and, until
+/// that is current, what stood in for it in `area` (its preview or the opening card, as during
+/// the decode, else the document shown before).
+pub(crate) fn landing(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, area: Rect) -> StandIn {
+    let Some(l) = app.jobs.landing.clone() else { return StandIn::Canvas };
     if app.session.documents().get(idx).map(|st| st.doc.id) != Some(l.doc) {
         app.jobs.landing = None;
-        return false;
+        return StandIn::Canvas;
     }
     let ready = crate::canvas::prewarm(app, ui.ctx(), idx, false);
     if ready || crate::gpu_canvas::now_ms() - l.started_ms > LANDING_TIMEOUT_MS {
         app.jobs.landing = None;
-        return false;
+        return StandIn::Canvas;
+    }
+    ui.ctx().request_repaint();
+    if let Some(prev) = l.previous.and_then(|d| app.session.documents().iter().position(|st| st.doc.id == d)) {
+        return StandIn::Previous(prev);
     }
     let t = Tokens::get(ui.ctx());
     ui.painter().rect_filled(area, 0.0, t.canvas);
-    let PreviewTexture(tex, size) = &l.texture;
-    let r = fit_rect(area, *size, ui.ctx().pixels_per_point());
-    ui.painter().image(tex.id(), r, Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
-    ui.ctx().request_repaint();
-    true
+    if let Some(PreviewTexture(tex, size)) = &l.texture {
+        let r = fit_rect(area, *size, ui.ctx().pixels_per_point());
+        ui.painter().image(tex.id(), r, Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+    }
+    if let Some((name, job)) = &l.card {
+        // Decoded: the bar full while the page is drawn, nothing left to cancel.
+        let row = CardRow { name, message: tl!("Rendering…").to_string(), fraction: Some(1.0), percent: whole_percent(1.0), cancel: false };
+        let height_id = job.map_or_else(|| egui::Id::unique(("open-card-height-landing", l.doc)), card_height_id);
+        card(ui, area, height_id, l.texture.is_some(), &row);
+    }
+    StandIn::Drawn
+}
+
+/// A document put in place at once (from the decoded-document cache): until its canvas is drawn
+/// ([`landing`]) the document shown before stays (`previous`), else the opening card shows
+/// (none when `quiet`).
+pub(crate) fn land(app: &mut PhotocraftApp, doc: DocId, name: &str, quiet: bool, previous: Option<DocId>) {
+    let previous = previous.filter(|p| *p != doc);
+    let card = (previous.is_none() && !quiet).then(|| (name.to_string(), None));
+    app.jobs.landing = (previous.is_some() || card.is_some()).then(|| Landing { previous, ..Landing::new(doc, None, card) });
 }
 
 /// Draws an opening PSD's preview at fit in `area` (true once there is one), uploading it once

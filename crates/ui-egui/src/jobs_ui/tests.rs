@@ -485,7 +485,7 @@ fn a_quiet_open_keeps_its_preview_until_the_canvas_is_drawn() {
     // A landing whose canvas isn't drawn yet and has run out of time also gives way.
     let tex = h.ctx.load_texture("t", egui::ColorImage::new([1, 1], vec![egui::Color32::WHITE]), egui::TextureOptions::LINEAR);
     let preview = super::PreviewTexture(tex, egui::vec2(1.0, 1.0));
-    h.state_mut().jobs.landing = Some(super::Landing { doc: id, texture: preview.clone(), started_ms: -1e9 });
+    h.state_mut().jobs.landing = Some(super::Landing { started_ms: -1e9, ..super::Landing::new(id, Some(preview.clone()), None) });
     h.run_steps(1);
     assert!(h.state().jobs.landing.is_none(), "timed out");
     assert_eq!(h.state().session.active().map(|st| st.doc.size.width), Some(64));
@@ -494,10 +494,60 @@ fn a_quiet_open_keeps_its_preview_until_the_canvas_is_drawn() {
     let other = h.state().session.documents()[0].doc.id;
     let active = h.state().session.active().map(|st| st.doc.id);
     if Some(other) != active {
-        h.state_mut().jobs.landing = Some(super::Landing { doc: other, texture: preview, started_ms: crate::gpu_canvas::now_ms() });
+        h.state_mut().jobs.landing = Some(super::Landing::new(other, Some(preview), None));
         h.run_steps(1);
         assert!(h.state().jobs.landing.is_none());
     }
+}
+
+/// A landed open that showed its card keeps the card, now without Cancel, until its canvas is
+/// drawn (never a frame without card or page), and gives way to the canvas within the cap. A
+/// cached reopen keeps the page shown before instead; with nothing shown before, the card.
+#[test]
+fn an_open_keeps_its_card_or_the_page_before_until_the_canvas_is_drawn() {
+    let mut h = app_harness();
+    h.run_steps(2);
+    let page = |w: u32| {
+        let mut s = photocraft_engine::Session::new();
+        s.execute("file.new", json!({"width": w, "height": 48})).unwrap();
+        (*s.active().unwrap().doc).clone()
+    };
+    let before = h.state().session.active().map(|st| st.doc.id);
+    let idx = h.state_mut().open_decoded(page(64), false, false).unwrap();
+    let id = h.state().session.documents()[idx].doc.id;
+    let l = h.state().jobs.landing.clone();
+    match before {
+        Some(b) => assert!(l.as_ref().is_some_and(|l| l.doc == id && l.previous == Some(b) && l.card.is_none()), "the page before stays: {l:?}"),
+        None => assert!(l.as_ref().is_some_and(|l| l.doc == id && l.card.is_some()), "nothing before: the card: {l:?}"),
+    }
+    // Not drawn yet (as on a slow phone): the card stands in, with nothing to cancel.
+    h.state_mut().jobs.landing = Some(super::Landing { started_ms: crate::gpu_canvas::now_ms() + 1e9, ..super::Landing::new(id, None, Some(("p.psd".into(), None))) });
+    h.run_steps(1);
+    if h.state().jobs.landing.is_some() {
+        assert!(super::open_card_rects(&h.ctx).is_some_and(|r| r.card.width() > 0.0), "the card is drawn");
+        h.get_by_label_contains("Opening p.psd");
+    }
+    // Drawn offscreen meanwhile: once current, the canvas takes over.
+    if let Some(l) = h.state_mut().jobs.landing.as_mut() {
+        l.started_ms = crate::gpu_canvas::now_ms();
+    }
+    for _ in 0..20 {
+        if h.state().jobs.landing.is_none() {
+            break;
+        }
+        h.step();
+    }
+    assert!(h.state().jobs.landing.is_none(), "the canvas took over");
+    // Out of time: gives way too.
+    h.state_mut().jobs.landing = Some(super::Landing { started_ms: -1e9, ..super::Landing::new(id, None, Some(("p.psd".into(), None))) });
+    h.run_steps(1);
+    assert!(h.state().jobs.landing.is_none(), "timed out");
+    // Quiet: never a card; with a page before, that page stays (also in the single layout).
+    h.state_mut().open_decoded(page(32), false, true).unwrap();
+    assert!(h.state().jobs.landing.as_ref().is_none_or(|l| l.card.is_none()), "quiet: no card");
+    h.state_mut().ui.view.single_document = true;
+    h.state_mut().open_decoded(page(16), false, false).unwrap();
+    assert!(h.state().jobs.landing.as_ref().is_some_and(|l| l.card.is_none() && l.previous.is_some()), "single layout: the page before stays");
 }
 
 /// The single-threaded browser build (no background jobs, opens a step at a time): a PSD handed
@@ -607,11 +657,11 @@ fn cached_documents_reopen_sharing_their_pixels() {
     h.state_mut().session.doc_cache.put("p13", "v1", Arc::clone(&doc), vec!["note".into()]);
     let (raw, warnings) = h.state_mut().session.doc_cache.get("p13", "v1").unwrap();
     assert_eq!(warnings, ["note"]);
-    let i = h.state_mut().open_decoded(raw, true).unwrap();
+    let i = h.state_mut().open_decoded(raw, true, false).unwrap();
     let raw_id = h.state().session.documents()[i].doc.id;
     assert_eq!(h.state().session.active().map(|st| st.doc.id), Some(first), "a hidden copy leaves the active document");
     let (page, _) = h.state_mut().session.doc_cache.get("p13", "v1").unwrap();
-    let shown = h.state_mut().open_decoded(page, false).unwrap();
+    let shown = h.state_mut().open_decoded(page, false, false).unwrap();
     assert_eq!(h.state().session.active_index(), Some(shown), "a shown copy is made active");
     let hidden = h.state().session.documents().iter().position(|st| st.doc.id == raw_id).unwrap();
     let tiles = |i: usize| -> Vec<usize> {

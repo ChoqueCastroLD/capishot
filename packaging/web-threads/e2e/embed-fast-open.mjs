@@ -6,7 +6,9 @@
 //     (`{quiet: true}`, the merged preview alone): the first usable frame (≤ 500 ms for the
 //     quiet one), the final frame, no blank or partial frame while the preview stands in, and the
 //     frames that differ from the final while the new document's canvas composites (reported;
-//     none for the quiet one: its preview stays until the canvas is drawn, `open.quiet.prewarm`);
+//     none for the quiet one: its preview stays until the canvas is drawn, `open.quiet.prewarm`;
+//     none half composited for the others: the card, the preview or the page shown before stays
+//     until the canvas is drawn, `open.prewarm`);
 //     the promise settles with the document's id once it is in place (`open.whenOpen`);
 //   - `openDocument(…, {cacheKey, version})` again: from the decoded-document cache (`cached`),
 //     at least 3× faster than the cold open; the same key opened hidden (a raw helper) shares the
@@ -268,11 +270,15 @@ const timedOpen = (src, name, options) =>
       // How much of a frame looks like the final one: the share of its cells within a small
       // tolerance (a reduced preview of the page matches; the workspace, a card over the page
       // or a page half drawn doesn't).
-      const like = (x) => {
+      // `rows`: the share of the sample's rows from the top that count (the opening card sits
+      // at the bottom of the canvas).
+      const likeTo = (x, y, rows = 1) => {
         let n = 0;
-        for (let i = 0; i < x.d.length; i += 4) if (Math.abs(x.d[i] - final.d[i]) + Math.abs(x.d[i + 1] - final.d[i + 1]) + Math.abs(x.d[i + 2] - final.d[i + 2]) <= 60) n++;
-        return n / (x.d.length / 4);
+        const end = Math.round((x.d.length / 4) * rows) * 4;
+        for (let i = 0; i < end; i += 4) if (Math.abs(x.d[i] - y.d[i]) + Math.abs(x.d[i + 1] - y.d[i + 1]) + Math.abs(x.d[i + 2] - y.d[i + 2]) <= 60) n++;
+        return n / (end / 4);
       };
+      const like = (x) => likeTo(x, final);
       // Usable: the page shows as it will (≥ 90 % of the cells); the final frame: identical.
       const first = s.find((x) => like(x) >= 0.9);
       const firstFinal = s.find((x) => x.digest === final.digest);
@@ -285,6 +291,12 @@ const timedOpen = (src, name, options) =>
       const blankAfterFirst = after.filter((x) => x.t < docAt && like(x) < 0.9).length;
       const unlikeAfterFirst = after.filter((x) => like(x) < 0.9).length;
       const partialAtSwap = s.filter((x) => x.t >= docAt && x.t < firstFinal.t && like(x) < 0.9).length;
+      // Of those, the frames like neither the final one (above the opening card, which stays
+      // over the preview until the canvas is drawn) nor what stood in for the page just before the
+      // document landed (its preview, the opening card, the page shown before): a page half
+      // composited, or a gap where the card left before the canvas was drawn.
+      const standIn = s.filter((x) => x.t < docAt).pop();
+      const halfAtSwap = s.filter((x) => x.t >= docAt && x.t < firstFinal.t && like(x) < 0.9 && likeTo(x, final, 0.65) < 0.9 && !(standIn && likeTo(x, standIn) >= 0.9)).length;
       const timeline = s.map((x) => `${(x.t - t0).toFixed(0)}:${like(x).toFixed(2)}/${x.cover.toFixed(2)}`).join(' ');
       for (const x of window.samples) delete x.d;
       return {
@@ -293,6 +305,7 @@ const timedOpen = (src, name, options) =>
         finalMs: firstFinal ? firstFinal.t - t0 : null,
         blankAfterFirst,
         partialAtSwap,
+        halfAtSwap,
         unlikeAfterFirst,
         timeline,
         longestFrame: Math.max(0, ...gaps),
@@ -307,7 +320,7 @@ const timedOpen = (src, name, options) =>
   );
 const fmt = (r) =>
   `settled ${r.settledMs.toFixed(0)} ms, first usable frame ${r.firstMs?.toFixed(0)} ms, final frame ${r.finalMs?.toFixed(0)} ms, longest frame ${r.longestFrame.toFixed(0)} ms, ` +
-  `frames not like the final while the new document's canvas composites: ${r.partialAtSwap}, documentReady ${JSON.stringify(r.ready && { first: r.ready.firstFrameMs, final: r.ready.finalFrameMs })}`;
+  `frames not like the final while the new document's canvas composites: ${r.partialAtSwap} (half-composited: ${r.halfAtSwap}), documentReady ${JSON.stringify(r.ready && { first: r.ready.firstFrameMs, final: r.ready.finalFrameMs })}`;
 const closeAll = () => p.evaluate(async () => { for (const d of await window.cs.listDocuments()) await window.cs.closeDocument(d.id, true); });
 const memory = () => p.evaluate(() => window.cs.request('perf.memory', {}).then((m) => m.pixelsMB));
 
@@ -317,6 +330,7 @@ check(!cold.error && cold.result && typeof cold.result.id === 'number' && cold.r
 check(cold.result && cold.result.cached === false, 'decoded, not from the cache');
 report(`${build} cold open (2480×3508, 8 layers; opening card over the preview): ${fmt(cold)}`);
 check(cold.blankAfterFirst === 0, `no blank or partial frame once the page shows, before the document lands (${cold.blankAfterFirst})`);
+check(cold.halfAtSwap === 0, `the card and preview stay until the canvas is drawn: no half-composited frame (${cold.halfAtSwap})`);
 
 // 2. From the cache: at once, sharing the pixels.
 const info0 = await p.evaluate(() => window.cs.request('document.cache', {}));
@@ -324,6 +338,7 @@ const memBefore = await memory();
 const warm = await timedOpen(null, 'page.psd', { cacheKey: 'p13', version: 'a1' });
 check(!warm.error && warm.result?.cached === true && warm.result.id !== cold.result?.id, `reopened from the cache with a fresh id: ${JSON.stringify(warm.result || warm.error).slice(0, 120)}`);
 report(`${build} cached reopen: ${fmt(warm)}`);
+check(warm.halfAtSwap === 0, `the page shown before stays until the reopened one is drawn: no half-composited frame (${warm.halfAtSwap})`);
 if (process.env.DEBUG) console.log(JSON.stringify((await p.evaluate(() => window.cs.request('ui.inspect', {}))).perf?.slowFrames?.slice(-3)));
 // Nothing is decoded: what is left is the new document's first composite (a page already open
 // switches in a frame or two: measured below).
@@ -351,6 +366,7 @@ await closeAll();
 const url = await timedOpen(`${base}/page.psd`, null, {});
 check(!url.error && url.result?.name === 'page.psd' && url.result.width === 2480, `opened from a URL, named after it: ${JSON.stringify(url.result || url.error).slice(0, 120)}`);
 report(`${build} URL open (16 chunks over ~320 ms): ${fmt(url)}`);
+check(url.halfAtSwap === 0, `no half-composited frame once the URL's page lands (${url.halfAtSwap})`);
 check(url.longestFrame < 250, `the page keeps drawing while it downloads and opens (longest frame ${url.longestFrame.toFixed(0)} ms)`);
 await closeAll();
 

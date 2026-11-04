@@ -3502,3 +3502,6 @@ fontWeight	Italic	Itálico
 	This page is large for this device	Esta página é grande para este dispositivo
 	The page has {mp} MP and this device {gb} GB of memory: save often, and keep few documents open.	A página tem {mp} MP e este dispositivo {gb} GB de memória: guarde com frequência e mantenha poucos documentos abertos.
 	Image › Image Size makes it lighter if the browser runs short of memory.	Imagem › Tamanho da imagem torna-a mais leve se faltar memória ao navegador.
+	Remove with AI uses a lighter model on this device	Remover com IA usa um modelo mais leve neste dispositivo
+	This device has little memory, so Remove with AI uses MI-GAN instead of Manga LaMa.	Este dispositivo tem pouca memória, por isso Remover com IA usa o MI-GAN em vez do Manga LaMa.
+	Remove with AI needs to download the MI-GAN model ({size}), lighter for this device. Only once.	Remover com IA precisa de transferir o modelo MI-GAN ({size}), mais leve para este dispositivo. Só uma vez.
