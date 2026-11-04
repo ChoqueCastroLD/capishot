@@ -79,6 +79,12 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
   await capishot.execute('selection.set', {id: sel.id}, {document: doc});
   ```
 
+- `execute('type.layoutDigest', {layer?, fontHashes?})` fingerprints how type lays out: the same
+  digest from the browser and from a `photocraft-cli serve` session means every glyph sits at the
+  same place (layout is deterministic given the same font files; `docs/control-protocol.md` ›
+  Same type layout in the browser and the CLI lists what can still differ). Feature
+  `type.layoutDigest`.
+
 - Type layers through `execute` (`docs/control-protocol.md`): `type.frame {layer}` gives a layer's
   frame without its layout (`shape` point/box/path/inPath with its geometry, `transform`, `bounds`),
   and `type.edit {layer, path | inPath, vertical?, inset?}` gives type in a path a new path (document

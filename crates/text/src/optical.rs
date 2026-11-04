@@ -168,7 +168,7 @@ pub fn size_adjust(size_pt: f32) -> f32 {
     if !size_pt.is_finite() || size_pt <= 0.0 {
         return 0.0;
     }
-    11.0 * (95.0 / size_pt.clamp(15.0, 95.0)).ln()
+    11.0 * libm::logf(95.0 / size_pt.clamp(15.0, 95.0))
 }
 
 /// Optical kerning (1/1000 em) of a pair with features `f`, for a font whose "oo" pair has

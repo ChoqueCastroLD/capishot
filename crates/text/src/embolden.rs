@@ -132,7 +132,7 @@ fn shifts(pts: &[(f64, f64)], r: f64, sign: f64) -> Vec<(f64, f64)> {
     // last point of the run before and the first of the run after. Found in one pass, so a
     // contour of many repeated points (a hostile font) costs O(n), not O(n²).
     let apart = |p: (f64, f64), q: (f64, f64)| {
-        let len = (q.0 - p.0).hypot(q.1 - p.1);
+        let len = libm::hypot(q.0 - p.0, q.1 - p.1);
         len > 1e-9 && len.is_finite()
     };
     let mut runs: Vec<(usize, usize)> = Vec::new();
@@ -163,7 +163,7 @@ fn shifts(pts: &[(f64, f64)], r: f64, sign: f64) -> Vec<(f64, f64)> {
     let edge = |i: usize, j: usize, into: bool| -> Option<(f64, f64, f64)> {
         let (p, q) = (pts[i], pts[j]);
         let (dx, dy) = if into { (p.0 - q.0, p.1 - q.1) } else { (q.0 - p.0, q.1 - p.1) };
-        let len = dx.hypot(dy);
+        let len = libm::hypot(dx, dy);
         (len > 1e-9 && len.is_finite()).then(|| (dx / len, dy / len, len))
     };
     let cap = MAX_SHIFT * r;
@@ -175,7 +175,7 @@ fn shifts(pts: &[(f64, f64)], r: f64, sign: f64) -> Vec<(f64, f64)> {
         let dot = ix * ox + iy * oy;
         let d = 1.0 + dot;
         let (sx, sy) = (sign * (iy + oy), -sign * (ix + ox));
-        let len = sx.hypot(sy);
+        let len = libm::hypot(sx, sy);
         // An exact reversal has no bisector, and no side to call outward: leave it.
         if !(len > 1e-9 && len.is_finite()) {
             continue;

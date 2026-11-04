@@ -113,7 +113,7 @@ impl Area {
                 let (dx, dy) = (x1 - x0, y1 - y0);
                 let len = dx * dx + dy * dy;
                 let t = if len > 0.0 { (((x - x0) * dx + (y - y0) * dy) / len).clamp(0.0, 1.0) } else { 0.0 };
-                (x - (x0 + t * dx)).hypot(y - (y0 + t * dy))
+                libm::hypotf(x - (x0 + t * dx), y - (y0 + t * dy))
             })
             .fold(f32::INFINITY, f32::min)
     }
