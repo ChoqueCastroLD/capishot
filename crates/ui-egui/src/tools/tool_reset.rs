@@ -186,7 +186,7 @@ pub fn option_keys(tool: Tool) -> &'static [&'static str] {
         Tool::Pencil => reset!(pencil_auto_erase, pencil_clear),
         Tool::Eraser => reset!(eraser_mode, erase_to_history),
         Tool::Remove => reset!(remove_new_layer, remove_after_each_stroke, remove_ai),
-        Tool::RemoveAi => &[],
+        Tool::RemoveAi => reset!(remove_ai_paint_mask),
         Tool::BubbleTextRemover => reset!(bubble_text_new_layer, bubble_text_tolerance),
         Tool::BackgroundEraser => reset!(bg_sampling, bg_limits, bg_tolerance, bg_protect_fg),
         Tool::ColorReplacement => reset!(cr_mode, cr_sampling, cr_limits, cr_tolerance, cr_anti_alias),

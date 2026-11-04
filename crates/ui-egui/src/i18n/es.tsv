@@ -3388,6 +3388,17 @@ curves	Smooth	Suavizar
 	Remove after each stroke	Eliminar después de cada trazo
 	Apply the removal ({key})	Aplicar la eliminación ({key})
 	Strokes to remove: {n} (Enter applies, Esc cancels)	Trazos por eliminar: {n} (Intro aplica, Esc cancela)
+	Paint mask, then run	Pintar máscara y luego ejecutar
+	Strokes collect into a mask (tinted red) instead of running when released. Run fills the whole mask at once, as one undo step. Photoshop: Remove after each stroke, off.	Los trazos se acumulan en una máscara (teñida de rojo) en vez de ejecutarse al soltar. Ejecutar rellena toda la máscara de una vez, en un solo paso de deshacer. Photoshop: Eliminar después de cada trazo, desactivado.
+	Erase from mask	Borrar de la máscara
+	Strokes take away from the mask (hold Alt for one stroke)	Los trazos quitan de la máscara (mantén Alt para un solo trazo)
+	Strokes take away from the mask (hold Option for one stroke)	Los trazos quitan de la máscara (mantén Opción para un solo trazo)
+	Run	Ejecutar
+	Fill the whole mask at once ({key})	Rellenar toda la máscara de una vez ({key})
+	Clear mask	Limpiar máscara
+	Drop the mask (Esc)	Descartar la máscara (Esc)
+	Mask: {n} strokes (Enter runs, Esc clears)	Máscara: {n} trazos (Intro ejecuta, Esc limpia)
+	The mask is empty: paint over what to remove	La máscara está vacía: pinta sobre lo que quieres quitar
 	Load Contours…	Cargar contornos…
 	Replace Contours…	Reemplazar contornos…
 	Save Contours…	Guardar contornos…

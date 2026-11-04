@@ -175,6 +175,8 @@ fn shell_methods(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequ
     let p = &req.params;
     Some(match req.method.as_str() {
         "ui.set" => ui_set(app, ctx, p),
+        // Paint mask, then run (Remove Tool, Remove with AI): read, run or clear the waiting mask.
+        "ui.removeMask" => wrap(crate::remove_mask_ui::control(app, p)),
         "ui.window.open" => {
             if let Some(d) = u64_param(p, "document")
                 && !app.session.set_active(d as usize)

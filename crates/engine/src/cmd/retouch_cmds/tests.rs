@@ -2275,6 +2275,31 @@ fn remove_strokes_each_keep_their_own_brush() {
     }
 }
 
+/// A whole mask at once (Paint mask, then run): `erase` entries take their footprint back out of
+/// what the strokes before them painted, a later stroke paints over an erasure, one undo step.
+#[test]
+fn remove_strokes_that_erase_take_their_footprint_out_of_the_hole() {
+    let paint = json!({"points": [[38, 30], [54, 30]], "size": 16});
+    let erase = json!({"points": [[50, 22], [50, 38]], "size": 6, "erase": true});
+    let mut s = square_session(8, "rgb");
+    let (bg, square) = (rgba(&s, 10, 10), rgba(&s, 46, 30));
+    let past = s.active().unwrap().history.past_len();
+    s.execute("paint.remove", json!({"strokes": [paint.clone(), erase.clone()], "size": 16})).unwrap();
+    assert!(near(rgba(&s, 42, 30), bg, 0.03), "painted: removed");
+    assert!(near(rgba(&s, 50, 30), square, 0.03), "erased: kept, {:?}", rgba(&s, 50, 30));
+    assert_eq!(s.active().unwrap().history.past_len(), past + 1, "one undo step for the whole mask");
+    // Painted again after the erasure: removed.
+    let mut s = square_session(8, "rgb");
+    s.execute("paint.remove", json!({"strokes": [paint.clone(), erase.clone(), {"points": [[50, 28], [50, 32]], "size": 8}], "size": 16})).unwrap();
+    assert!(near(rgba(&s, 50, 30), bg, 0.03), "a later stroke wins, {:?}", rgba(&s, 50, 30));
+    // Nothing painted, or a bad `erase`: an error, nothing changes.
+    let mut s = square_session(8, "rgb");
+    for strokes in [json!([erase]), json!([{"points": [[40, 30]], "erase": "yes"}])] {
+        assert!(s.execute("paint.remove", json!({"strokes": strokes, "size": 16})).is_err(), "{strokes}");
+    }
+    assert!(near(rgba(&s, 46, 30), square, 0.03));
+}
+
 #[test]
 fn remove_to_a_new_layer_leaves_the_target_untouched() {
     let mut s = square_session(8, "rgb");
