@@ -16,8 +16,8 @@
 //
 //   CHROME=<chromium> node embed-push-events.mjs <dist dir> [port = 8798]
 import { chromium } from 'playwright-core';
-import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -63,7 +63,24 @@ self.capishot = capishot;
 </script>`,
 );
 
-const server = spawn('python3', [path.join(here, '../serve.py'), site, String(port)], { stdio: 'ignore' });
+// The site with the threads build's headers; the served font arrives 1.5 s late, so the
+// type waits for it over many frames.
+const types = { '.js': 'text/javascript', '.wasm': 'application/wasm', '.html': 'text/html', '.json': 'application/json', '.txt': 'text/plain' };
+const server = http.createServer((req, res) => {
+  const url = decodeURIComponent((req.url || '/').split('?')[0]);
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+  let file = path.join(site, path.normalize(url).replace(/^(\.\.[/\\])+/, ''));
+  if (fs.existsSync(file) && fs.statSync(file).isDirectory()) file = path.join(file, 'index.html');
+  if (!file.startsWith(site) || !fs.existsSync(file)) {
+    res.statusCode = 404;
+    return res.end();
+  }
+  res.setHeader('Content-Type', types[path.extname(file)] || 'application/octet-stream');
+  setTimeout(() => fs.createReadStream(file).pipe(res), url.startsWith('/fonts/lib/') ? 1500 : 0);
+});
+await new Promise((r) => server.listen(port, '127.0.0.1', r));
 const url = `http://127.0.0.1:${port}/`;
 const b = await chromium.launch({ executablePath: process.env.CHROME, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 let failed = 0;
@@ -103,7 +120,8 @@ try {
   check(await waitEv('documentShown', `(e) => e.id === ${bDoc}`), `documentShown for B: ${J(await evs('documentShown'))}`);
   check(await waitEv('layerChanged', `(e) => e.document === ${bDoc} && e.layer === ${lb} && e.what.includes('added')`), 'layerChanged added');
   check(await waitEv('documentReady', `(e) => e.id === ${bDoc}`), `documentReady for a new document: ${J((await evs('documentReady')).slice(-1))}`);
-  await ex('document.activate', { document: a });
+  await ex('document.activate', { document: 0 }); // A is the first tab
+  check((await docId()) === a, 'A active again');
   check(await waitEv('documentShown', `(e) => e.id === ${a} && e.previous === ${bDoc}`), 'documentShown back to A');
   await ex('layer.renameLayer', { layer: la, name: 'ink' });
   check(await waitEv('layerChanged', `(e) => e.layer === ${la} && e.what.includes('name')`), 'layerChanged name');
@@ -137,6 +155,14 @@ try {
     if (put.err) check(false, `putPixels: ${put.err}`);
   }
   const full = (doc, layer) => ex('layer.getPixels', { layer, rect: [0, 0, 512, 512], format: 'rgba' }, { document: doc });
+  const tg = await p.evaluate(async ([a, la]) => {
+    const t = performance.now();
+    await self.photocraft.getPixels({ layer: la, rect: [0, 0, 512, 512], format: 'rgba' }, { document: a });
+    const t1 = performance.now();
+    await self.photocraft.getPixels({ layer: la, rect: [0, 0, 512, 512] }, { document: a });
+    return [t1 - t, performance.now() - t1];
+  }, [a, la]);
+  console.log(`  getPixels 512×512 (call → bytes): rgba ${tg[0].toFixed(1)} ms, png ${tg[1].toFixed(1)} ms`);
   const [pa, pb] = [await full(a, la), await full(bDoc, lb)];
   check(pa.data && pa.data.length > 1000 && pa.data === pb.data, `B's layer equals A's pixel for pixel (${pa.data?.length} base64 chars)`);
   const dirty = await ex('layer.dirtySince', { layer: la, rev: rev0 }, { document: a });
@@ -197,31 +223,36 @@ try {
   check(/[^A]/.test(samples.final), 'drawn once the font is in');
   await ctx.close();
 
-  // 6. The module: the same events through onEvent, getPixels as bytes.
-  const hctx = await b.newContext({ viewport: { width: 1280, height: 860 } });
-  const h = await hctx.newPage();
-  h.on('pageerror', (e) => console.log('PAGEERROR', e.message.slice(0, 300)));
-  await h.goto(url + 'host.html');
-  await h.waitForFunction(() => self.capishot, null, { timeout: 300000 });
-  const m = await h.evaluate(async () => {
-    const cs = self.capishot;
-    const d1 = await cs.newDocument({ width: 256, height: 256 });
-    const l = await cs.execute('layer.new.layer', {});
-    await cs.execute('select.rect', { x: 10, y: 10, width: 20, height: 20 });
-    await cs.execute('edit.fill', { contents: 'black' });
-    const d2 = await cs.newDocument({ width: 64, height: 64 });
-    const px = await cs.getPixels({ layer: l.layer, format: 'rgba' }, { document: d1.id });
-    await new Promise((r) => setTimeout(r, 400));
-    const types = [...new Set(self.events.map((e) => e.type))];
-    return { isBytes: px.data instanceof Uint8Array, len: px.data.length, rect: px.rect, types, d2: d2.id, features: cs.version().features };
-  });
-  check(m.isBytes && m.len === 20 * 20 * 4 && J(m.rect) === J([10, 10, 20, 20]), `module getPixels: ${J({ ...m, types: undefined, features: undefined })}`);
-  check(['documentShown', 'documentReady', 'layerChanged', 'layerPixelsChanged', 'viewportChanged'].every((t) => m.types.includes(t)), `module events: ${J(m.types)}`);
-  check(['layer.getPixels', 'layer.dirtySince', 'events.documentReady', 'document.fontsReady', 'window.events', 'fonts.noFallbackFlash'].every((f) => m.features.includes(f)), 'features listed');
-  await hctx.close();
+  // 6. The module (the single-threaded build is the one published as the embedding module): the
+  // same events through onEvent, getPixels as bytes.
+  if (!fs.readdirSync(dist).some((f) => /^photocraft-web-.*\.js$/.test(f))) {
+    console.log('  (no embedding module in this build: its onEvent checks run on the single-threaded build)');
+  } else {
+    const hctx = await b.newContext({ viewport: { width: 1280, height: 860 } });
+    const h = await hctx.newPage();
+    h.on('pageerror', (e) => console.log('PAGEERROR', e.message.slice(0, 300)));
+    await h.goto(url + 'host.html');
+    await h.waitForFunction(() => self.capishot, null, { timeout: 300000 });
+    const m = await h.evaluate(async () => {
+      const cs = self.capishot;
+      const d1 = await cs.newDocument({ width: 256, height: 256 });
+      const l = await cs.execute('layer.new.layer', {});
+      await cs.execute('select.rect', { x: 10, y: 10, width: 20, height: 20 });
+      await cs.execute('edit.fill', { contents: 'black' });
+      const d2 = await cs.newDocument({ width: 64, height: 64 });
+      const px = await cs.getPixels({ layer: l.layer, format: 'rgba' }, { document: d1.id });
+      await new Promise((r) => setTimeout(r, 400));
+      const types = [...new Set(self.events.map((e) => e.type))];
+      return { isBytes: px.data instanceof Uint8Array, len: px.data.length, rect: px.rect, types, d2: d2.id, features: cs.version().features };
+    });
+    check(m.isBytes && m.len === 20 * 20 * 4 && J(m.rect) === J([10, 10, 20, 20]), `module getPixels: ${J({ ...m, types: undefined, features: undefined })}`);
+    check(['documentShown', 'documentReady', 'layerChanged', 'layerPixelsChanged', 'viewportChanged'].every((t) => m.types.includes(t)), `module events: ${J(m.types)}`);
+    check(['layer.getPixels', 'layer.dirtySince', 'events.documentReady', 'document.fontsReady', 'window.events', 'fonts.noFallbackFlash'].every((f) => m.features.includes(f)), 'features listed');
+    await hctx.close();
+  }
 } finally {
   await b.close();
-  server.kill();
+  server.close();
   fs.rmSync(site, { recursive: true, force: true });
 }
 console.log(failed ? `${failed} check(s) failed` : 'events push, a stroke mirrors pixel for pixel, reads touch nothing, type never flashes a fallback');
