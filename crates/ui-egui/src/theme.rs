@@ -16,12 +16,19 @@
 //! - **Pro (Light Gray)** and **Pro (Light)**: Photoshop's third and fourth interface brightness
 //!   levels (#B8B8B8 and #F0F0F0 panels) with the Pro layout (#2661).
 //!
-//! Widgets read [`Tokens::get`] instead of hard-coding colours, so every theme applies everywhere.
+//! Each theme is a `theme.css` stylesheet ([`css`]): the built-in ones are compiled in from
+//! `theme/builtin/<id>.theme.css` ([`builtin_css`]), the user's own live in the preferences
+//! (Preferences › Profile & Themes). Widgets read [`Tokens::get`] instead of hard-coding colours,
+//! so every theme applies everywhere.
 
 use egui::{Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Stroke, TextStyle, Visuals};
 use photocraft_engine::prefs::UiFontSize;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+pub mod css;
+mod style;
+pub use style::{ShadowTokens, StyleTokens, WidgetStates, WidgetTokens};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ThemeKind {
@@ -155,6 +162,26 @@ impl ThemeKind {
     }
 }
 
+/// A built-in theme's own `theme.css` (`theme/builtin/<id>.theme.css`).
+pub fn builtin_css(kind: ThemeKind) -> &'static str {
+    match kind {
+        ThemeKind::Pro => include_str!("theme/builtin/pro.theme.css"),
+        ThemeKind::ProMedium => include_str!("theme/builtin/proMedium.theme.css"),
+        ThemeKind::ProLightGray => include_str!("theme/builtin/proLightGray.theme.css"),
+        ThemeKind::ProLight => include_str!("theme/builtin/proLight.theme.css"),
+        ThemeKind::Studio => include_str!("theme/builtin/studio.theme.css"),
+        ThemeKind::StudioLight => include_str!("theme/builtin/studioLight.theme.css"),
+        ThemeKind::Classic => include_str!("theme/builtin/classic.theme.css"),
+        ThemeKind::Adwaita => include_str!("theme/builtin/adwaita.theme.css"),
+        ThemeKind::AdwaitaDark => include_str!("theme/builtin/adwaitaDark.theme.css"),
+        ThemeKind::SolarizedDark => include_str!("theme/builtin/solarizedDark.theme.css"),
+        ThemeKind::BreezeLight => include_str!("theme/builtin/breezeLight.theme.css"),
+        ThemeKind::BreezeDark => include_str!("theme/builtin/breezeDark.theme.css"),
+        ThemeKind::SoftDark => include_str!("theme/builtin/softDark.theme.css"),
+        ThemeKind::SoftLight => include_str!("theme/builtin/softLight.theme.css"),
+    }
+}
+
 /// Colour and shape tokens.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tokens {
@@ -211,6 +238,10 @@ pub struct Tokens {
     pub caption_close_text: Color32,
     /// Dims the main window behind a modal that takes all input (Camera Raw).
     pub scrim: Color32,
+    /// Whether this is a dark theme (egui's dark or light base style, and the dark-only tweaks).
+    pub dark: bool,
+    /// Text sizes, spacing, shadows and widget states.
+    pub style: StyleTokens,
 }
 
 impl Tokens {
@@ -219,547 +250,59 @@ impl Tokens {
         [Color32::from_black_alpha(160), Color32::from_white_alpha(235)]
     }
 
-    pub fn for_kind(kind: ThemeKind) -> Self {
-        match kind {
-            // Sampled from Photoshop 2026's default brightness (raw display values).
-            ThemeKind::ProMedium => Tokens {
-                kind,
-                chrome: Color32::from_rgb(83, 83, 83),
-                dock: Color32::from_rgb(66, 66, 66),
-                card: Color32::from_rgb(83, 83, 83),
-                card_border: Color32::from_rgb(66, 66, 66),
-                field: Color32::from_rgb(69, 69, 69),
-                field_border: Color32::from_rgb(104, 104, 104),
-                hover: Color32::from_rgb(98, 98, 98),
-                pressed: Color32::from_rgb(112, 112, 112),
-                text: Color32::from_rgb(238, 238, 238),
-                text_dim: Color32::from_rgb(212, 212, 212),
-                text_faint: Color32::from_rgb(160, 160, 160),
-                icon: Color32::from_rgb(226, 226, 226),
-                accent_soft: Color32::from_rgb(110, 110, 110),
-                separator: Color32::from_rgb(62, 62, 62),
-                tab_strip: Color32::from_rgb(74, 74, 74),
-                row_selected: Color32::from_rgb(107, 107, 107),
-                ..Tokens::for_kind(ThemeKind::Pro)
-            },
-            // Photoshop's medium-light brightness: #B8B8B8 panels, dark text, a mid-grey canvas.
-            ThemeKind::ProLightGray => Tokens {
-                kind,
-                chrome: Color32::from_rgb(184, 184, 184),
-                canvas: Color32::from_rgb(160, 160, 160),
-                canvas_dot: Color32::from_rgb(160, 160, 160),
-                dock: Color32::from_rgb(168, 168, 168),
-                card: Color32::from_rgb(184, 184, 184),
-                card_border: Color32::from_rgb(160, 160, 160),
-                field: Color32::from_rgb(214, 214, 214),
-                field_border: Color32::from_rgb(140, 140, 140),
-                hover: Color32::from_rgb(198, 198, 198),
-                pressed: Color32::from_rgb(170, 170, 170),
-                text: Color32::from_rgb(20, 20, 20),
-                text_dim: Color32::from_rgb(52, 52, 52),
-                text_faint: Color32::from_rgb(96, 96, 96),
-                icon: Color32::from_rgb(38, 38, 38),
-                accent_soft: Color32::from_rgb(208, 208, 208),
-                accent_text: Color32::from_rgb(0, 66, 150),
-                separator: Color32::from_rgb(158, 158, 158),
-                shadow: Color32::from_black_alpha(70),
-                tab_strip: Color32::from_rgb(170, 170, 170),
-                row_selected: Color32::from_rgb(212, 212, 212),
-                ..Tokens::for_kind(ThemeKind::Pro)
-            },
-            // Photoshop's lightest brightness: #F0F0F0 panels, dark text, a light-grey canvas.
-            ThemeKind::ProLight => Tokens {
-                kind,
-                chrome: Color32::from_rgb(240, 240, 240),
-                canvas: Color32::from_rgb(214, 214, 214),
-                canvas_dot: Color32::from_rgb(214, 214, 214),
-                dock: Color32::from_rgb(226, 226, 226),
-                card: Color32::from_rgb(240, 240, 240),
-                card_border: Color32::from_rgb(214, 214, 214),
-                field: Color32::WHITE,
-                field_border: Color32::from_rgb(186, 186, 186),
-                hover: Color32::from_rgb(226, 226, 226),
-                pressed: Color32::from_rgb(206, 206, 206),
-                text: Color32::from_rgb(20, 20, 20),
-                text_dim: Color32::from_rgb(64, 64, 64),
-                text_faint: Color32::from_rgb(120, 120, 120),
-                icon: Color32::from_rgb(46, 46, 46),
-                accent_soft: Color32::from_rgb(214, 214, 214),
-                accent_text: Color32::from_rgb(16, 98, 196),
-                separator: Color32::from_rgb(214, 214, 214),
-                shadow: Color32::from_black_alpha(50),
-                tab_strip: Color32::from_rgb(226, 226, 226),
-                row_selected: Color32::from_rgb(204, 204, 204),
-                ..Tokens::for_kind(ThemeKind::Pro)
-            },
-            ThemeKind::Pro => Tokens {
-                kind,
-                chrome: Color32::from_rgb(50, 50, 50),
-                canvas: Color32::from_rgb(40, 40, 40),
-                canvas_dot: Color32::from_rgb(40, 40, 40),
-                dock: Color32::from_rgb(30, 30, 30),
-                card: Color32::from_rgb(50, 50, 50),
-                card_border: Color32::from_rgb(30, 30, 30),
-                field: Color32::from_rgb(36, 36, 36),
-                field_border: Color32::from_rgb(74, 74, 74),
-                hover: Color32::from_rgb(66, 66, 66),
-                pressed: Color32::from_rgb(78, 78, 78),
-                text: Color32::from_rgb(222, 222, 222),
-                text_dim: Color32::from_rgb(178, 178, 178),
-                text_faint: Color32::from_rgb(128, 128, 128),
-                icon: Color32::from_rgb(200, 200, 200),
-                accent: Color32::from_rgb(55, 142, 240),
-                accent_soft: Color32::from_rgb(78, 78, 78),
-                accent_border: Color32::from_rgb(55, 142, 240),
-                accent_text: Color32::WHITE,
-                separator: Color32::from_rgb(30, 30, 30),
-                shadow: Color32::from_black_alpha(150),
-                primary_bg: Color32::from_rgb(55, 142, 240),
-                primary_text: Color32::WHITE,
-                danger: Color32::from_rgb(236, 91, 98),
-                warning: Color32::from_rgb(232, 176, 70),
-                radius_sm: 3.0,
-                radius: 4.0,
-                radius_lg: 6.0,
-                bevel: false,
-                pro: true,
-                round_chips: false,
-                tab_strip: Color32::from_rgb(38, 38, 38),
-                row_selected: Color32::from_rgb(82, 82, 82),
-                histogram_bg: Color32::from_rgb(40, 40, 40),
-                histogram_level: 225,
-                caption_close: Color32::from_rgb(196, 43, 28),
-                caption_close_text: Color32::WHITE,
-                scrim: Color32::from_black_alpha(110),
-            },
-            ThemeKind::Studio => Tokens {
-                kind,
-                chrome: Color32::from_rgb(20, 20, 21),
-                canvas: Color32::from_rgb(14, 14, 15),
-                canvas_dot: Color32::from_rgb(46, 46, 50),
-                dock: Color32::from_rgb(17, 17, 18),
-                card: Color32::from_rgb(26, 26, 28),
-                card_border: Color32::from_rgb(40, 40, 44),
-                field: Color32::from_rgb(35, 35, 38),
-                field_border: Color32::from_rgb(52, 52, 57),
-                hover: Color32::from_rgb(44, 44, 48),
-                pressed: Color32::from_rgb(56, 56, 62),
-                text: Color32::from_rgb(236, 236, 240),
-                text_dim: Color32::from_rgb(150, 150, 158),
-                text_faint: Color32::from_rgb(96, 96, 104),
-                icon: Color32::from_rgb(196, 196, 204),
-                accent: Color32::from_rgb(139, 124, 246),
-                accent_soft: Color32::from_rgba_unmultiplied(139, 124, 246, 46),
-                accent_border: Color32::from_rgba_unmultiplied(160, 148, 255, 110),
-                accent_text: Color32::from_rgb(214, 208, 255),
-                separator: Color32::from_rgb(38, 38, 42),
-                shadow: Color32::from_black_alpha(140),
-                primary_bg: Color32::from_rgb(246, 246, 248),
-                primary_text: Color32::from_rgb(12, 12, 14),
-                danger: Color32::from_rgb(240, 96, 96),
-                warning: Color32::from_rgb(240, 190, 90),
-                radius_sm: 6.0,
-                radius: 8.0,
-                radius_lg: 12.0,
-                bevel: false,
-                pro: false,
-                round_chips: true,
-                tab_strip: Color32::TRANSPARENT,
-                row_selected: Color32::TRANSPARENT,
-                histogram_bg: Color32::from_rgb(14, 14, 15),
-                histogram_level: 225,
-                caption_close: Color32::from_rgb(196, 43, 28),
-                caption_close_text: Color32::WHITE,
-                scrim: Color32::from_black_alpha(110),
-            },
-            ThemeKind::StudioLight => Tokens {
-                kind,
-                chrome: Color32::from_rgb(246, 246, 248),
-                canvas: Color32::from_rgb(226, 226, 230),
-                canvas_dot: Color32::from_rgb(200, 200, 206),
-                dock: Color32::from_rgb(240, 240, 243),
-                card: Color32::from_rgb(252, 252, 253),
-                card_border: Color32::from_rgb(222, 222, 228),
-                field: Color32::from_rgb(242, 242, 245),
-                field_border: Color32::from_rgb(214, 214, 220),
-                hover: Color32::from_rgb(232, 232, 237),
-                pressed: Color32::from_rgb(220, 220, 226),
-                text: Color32::from_rgb(24, 24, 28),
-                text_dim: Color32::from_rgb(96, 96, 106),
-                text_faint: Color32::from_rgb(150, 150, 160),
-                icon: Color32::from_rgb(60, 60, 68),
-                accent: Color32::from_rgb(108, 92, 231),
-                accent_soft: Color32::from_rgba_unmultiplied(108, 92, 231, 36),
-                accent_border: Color32::from_rgba_unmultiplied(108, 92, 231, 120),
-                accent_text: Color32::from_rgb(80, 64, 200),
-                separator: Color32::from_rgb(226, 226, 232),
-                shadow: Color32::from_black_alpha(50),
-                primary_bg: Color32::from_rgb(20, 20, 24),
-                primary_text: Color32::from_rgb(250, 250, 252),
-                danger: Color32::from_rgb(210, 60, 60),
-                warning: Color32::from_rgb(190, 130, 20),
-                radius_sm: 6.0,
-                radius: 8.0,
-                radius_lg: 12.0,
-                bevel: false,
-                pro: false,
-                round_chips: true,
-                tab_strip: Color32::TRANSPARENT,
-                row_selected: Color32::TRANSPARENT,
-                histogram_bg: Color32::from_gray(40),
-                histogram_level: 240,
-                caption_close: Color32::from_rgb(196, 43, 28),
-                caption_close_text: Color32::WHITE,
-                scrim: Color32::from_black_alpha(110),
-            },
-            ThemeKind::Classic => Tokens {
-                kind,
-                chrome: Color32::from_rgb(212, 208, 200),
-                canvas: Color32::from_rgb(128, 128, 128),
-                canvas_dot: Color32::from_rgb(128, 128, 128),
-                dock: Color32::from_rgb(212, 208, 200),
-                card: Color32::from_rgb(212, 208, 200),
-                card_border: Color32::from_rgb(128, 128, 128),
-                field: Color32::WHITE,
-                field_border: Color32::from_rgb(128, 128, 128),
-                hover: Color32::from_rgb(226, 222, 214),
-                pressed: Color32::from_rgb(190, 186, 178),
-                text: Color32::BLACK,
-                text_dim: Color32::from_rgb(64, 64, 64),
-                text_faint: Color32::from_rgb(128, 128, 128),
-                icon: Color32::BLACK,
-                accent: Color32::from_rgb(10, 36, 106),
-                accent_soft: Color32::from_rgb(10, 36, 106),
-                accent_border: Color32::from_rgb(10, 36, 106),
-                accent_text: Color32::WHITE,
-                separator: Color32::from_rgb(128, 128, 128),
-                shadow: Color32::from_black_alpha(0),
-                primary_bg: Color32::from_rgb(212, 208, 200),
-                primary_text: Color32::BLACK,
-                danger: Color32::from_rgb(160, 0, 0),
-                warning: Color32::from_rgb(128, 96, 0),
-                radius_sm: 0.0,
-                radius: 0.0,
-                radius_lg: 0.0,
-                bevel: true,
-                pro: false,
-                round_chips: false,
-                tab_strip: Color32::from_rgb(212, 208, 200),
-                row_selected: Color32::from_rgb(10, 36, 106),
-                histogram_bg: Color32::from_gray(40),
-                histogram_level: 240,
-                caption_close: Color32::from_rgb(196, 43, 28),
-                caption_close_text: Color32::WHITE,
-                scrim: Color32::from_black_alpha(110),
-            },
-            // libadwaita's named colours (window, sidebar, card, view, accent, destructive) and
-            // radii (6 px buttons, 12 px cards), mapped onto the Studio layout. GNOME's close
-            // button is a neutral circle, not a red one, so the caption colours stay grey.
-            ThemeKind::Adwaita => Tokens {
-                kind,
-                chrome: Color32::WHITE,
-                canvas: Color32::from_rgb(222, 222, 223),
-                canvas_dot: Color32::from_rgb(222, 222, 223),
-                dock: Color32::from_rgb(235, 235, 237),
-                card: Color32::WHITE,
-                card_border: Color32::from_rgb(218, 218, 221),
-                field: Color32::from_rgb(235, 235, 237),
-                field_border: Color32::from_rgb(218, 218, 221),
-                hover: Color32::from_rgb(226, 226, 229),
-                pressed: Color32::from_rgb(212, 212, 216),
-                text: Color32::from_rgb(50, 50, 54),
-                text_dim: Color32::from_rgb(100, 100, 104),
-                text_faint: Color32::from_rgb(155, 155, 160),
-                icon: Color32::from_rgb(56, 56, 60),
-                accent: Color32::from_rgb(53, 132, 228),
-                accent_soft: Color32::from_rgba_unmultiplied(53, 132, 228, 40),
-                accent_border: Color32::from_rgba_unmultiplied(53, 132, 228, 130),
-                accent_text: Color32::from_rgb(28, 113, 216),
-                separator: Color32::from_rgb(222, 222, 225),
-                shadow: Color32::from_black_alpha(45),
-                primary_bg: Color32::from_rgb(53, 132, 228),
-                primary_text: Color32::WHITE,
-                danger: Color32::from_rgb(192, 28, 40),
-                warning: Color32::from_rgb(156, 110, 3),
-                radius_sm: 6.0,
-                radius: 9.0,
-                radius_lg: 12.0,
-                bevel: false,
-                pro: false,
-                round_chips: true,
-                tab_strip: Color32::TRANSPARENT,
-                row_selected: Color32::TRANSPARENT,
-                histogram_bg: Color32::from_gray(40),
-                histogram_level: 240,
-                caption_close: Color32::from_rgb(212, 212, 216),
-                caption_close_text: Color32::from_rgb(50, 50, 54),
-                scrim: Color32::from_black_alpha(110),
-            },
-            ThemeKind::AdwaitaDark => Tokens {
-                kind,
-                chrome: Color32::from_rgb(46, 46, 50),
-                canvas: Color32::from_rgb(29, 29, 32),
-                canvas_dot: Color32::from_rgb(29, 29, 32),
-                dock: Color32::from_rgb(34, 34, 38),
-                card: Color32::from_rgb(54, 54, 58),
-                card_border: Color32::from_rgb(64, 64, 68),
-                field: Color32::from_rgb(64, 64, 68),
-                field_border: Color32::from_rgb(76, 76, 80),
-                hover: Color32::from_rgb(72, 72, 76),
-                pressed: Color32::from_rgb(86, 86, 90),
-                text: Color32::WHITE,
-                text_dim: Color32::from_rgb(192, 192, 194),
-                text_faint: Color32::from_rgb(145, 145, 148),
-                icon: Color32::from_rgb(235, 235, 237),
-                accent: Color32::from_rgb(53, 132, 228),
-                accent_soft: Color32::from_rgba_unmultiplied(53, 132, 228, 60),
-                accent_border: Color32::from_rgba_unmultiplied(120, 174, 237, 140),
-                accent_text: Color32::from_rgb(120, 174, 237),
-                separator: Color32::from_rgb(24, 24, 27),
-                shadow: Color32::from_black_alpha(140),
-                primary_bg: Color32::from_rgb(53, 132, 228),
-                primary_text: Color32::WHITE,
-                danger: Color32::from_rgb(255, 123, 99),
-                warning: Color32::from_rgb(248, 228, 92),
-                radius_sm: 6.0,
-                radius: 9.0,
-                radius_lg: 12.0,
-                bevel: false,
-                pro: false,
-                round_chips: true,
-                tab_strip: Color32::TRANSPARENT,
-                row_selected: Color32::TRANSPARENT,
-                histogram_bg: Color32::from_rgb(29, 29, 32),
-                histogram_level: 225,
-                caption_close: Color32::from_rgb(72, 72, 76),
-                caption_close_text: Color32::WHITE,
-                scrim: Color32::from_black_alpha(110),
-            },
-            // The light counterpart, adapted the same way: our own values, chosen a few levels
-            // from Breeze Light's surfaces so the app blends into a Plasma desktop without being a
-            // copy. Breeze's own inactive text and link blue are only about 2.8:1 on such
-            // surfaces, so the secondary and faint text, the accent and danger text and the status
-            // hues are darker to hold 4.5:1 (checked by the tests), and the primary button is a
-            // deeper blue that takes white text.
-            ThemeKind::BreezeLight => Tokens {
-                kind,
-                chrome: Color32::from_rgb(219, 222, 226),
-                canvas: Color32::from_rgb(219, 222, 226),
-                canvas_dot: Color32::from_rgb(219, 222, 226),
-                dock: Color32::from_rgb(224, 227, 231),
-                card: Color32::from_rgb(236, 238, 241),
-                card_border: Color32::from_rgb(203, 208, 213),
-                field: Color32::from_rgb(249, 250, 252),
-                field_border: Color32::from_rgb(184, 191, 198),
-                hover: Color32::from_rgb(226, 230, 235),
-                pressed: Color32::from_rgb(208, 214, 221),
-                text: Color32::from_rgb(33, 37, 42),
-                text_dim: Color32::from_rgb(54, 63, 72),
-                text_faint: Color32::from_rgb(81, 90, 100),
-                icon: Color32::from_rgb(52, 58, 64),
-                accent: Color32::from_rgb(58, 172, 232),
-                accent_soft: Color32::from_rgba_unmultiplied(58, 172, 232, 48),
-                accent_border: Color32::from_rgba_unmultiplied(58, 172, 232, 170),
-                accent_text: Color32::from_rgb(30, 94, 136),
-                separator: Color32::from_rgb(214, 218, 222),
-                shadow: Color32::from_black_alpha(45),
-                primary_bg: Color32::from_rgb(35, 122, 180),
-                primary_text: Color32::WHITE,
-                danger: Color32::from_rgb(170, 50, 64),
-                warning: Color32::from_rgb(153, 72, 0),
-                radius_sm: 5.0,
-                radius: 5.0,
-                radius_lg: 6.0,
-                bevel: false,
-                pro: false,
-                round_chips: true,
-                tab_strip: Color32::TRANSPARENT,
-                row_selected: Color32::TRANSPARENT,
-                histogram_bg: Color32::from_rgb(33, 37, 42),
-                histogram_level: 240,
-                caption_close: Color32::from_rgb(213, 51, 60),
-                caption_close_text: Color32::WHITE,
-                scrim: Color32::from_black_alpha(110),
-            },
-            // An adaptation of KDE Plasma's Breeze Dark look on the Studio layout, not a copy: our
-            // own values, chosen a few levels from Breeze Dark's surfaces (the darkest canvas, then
-            // the dock, the cards, and the chrome and controls) so the app blends into a Plasma
-            // desktop. Near-white text, the blue accent and the orange warning hue sit close to
-            // Breeze's, with its 5 px frame radius.
-            // Readability wins over fidelity: every text colour holds 4.5:1 on every surface and on
-            // the hover, pressed and selected states (checked by the tests), so the secondary and
-            // faint text, the accent and danger text and the status hues are lighter than Breeze's,
-            // hover and pressed are small steps, and the primary button is a deeper blue that takes
-            // white text. Outlines and those steps are our own tints.
-            ThemeKind::BreezeDark => Tokens {
-                kind,
-                chrome: Color32::from_rgb(38, 42, 48),
-                canvas: Color32::from_rgb(17, 20, 24),
-                canvas_dot: Color32::from_rgb(17, 20, 24),
-                dock: Color32::from_rgb(26, 29, 34),
-                card: Color32::from_rgb(29, 33, 38),
-                card_border: Color32::from_rgb(52, 56, 61),
-                field: Color32::from_rgb(38, 42, 48),
-                field_border: Color32::from_rgb(68, 73, 79),
-                hover: Color32::from_rgb(50, 54, 59),
-                pressed: Color32::from_rgb(58, 63, 69),
-                text: Color32::from_rgb(250, 251, 253),
-                text_dim: Color32::from_rgb(200, 206, 213),
-                text_faint: Color32::from_rgb(164, 170, 177),
-                icon: Color32::from_rgb(236, 238, 240),
-                accent: Color32::from_rgb(58, 172, 232),
-                accent_soft: Color32::from_rgba_unmultiplied(58, 172, 232, 40),
-                accent_border: Color32::from_rgba_unmultiplied(58, 172, 232, 160),
-                accent_text: Color32::from_rgb(80, 184, 238),
-                separator: Color32::from_rgb(46, 50, 54),
-                shadow: Color32::from_black_alpha(150),
-                primary_bg: Color32::from_rgb(30, 118, 176),
-                primary_text: Color32::WHITE,
-                danger: Color32::from_rgb(227, 111, 123),
-                warning: Color32::from_rgb(244, 120, 6),
-                radius_sm: 5.0,
-                radius: 5.0,
-                radius_lg: 6.0,
-                bevel: false,
-                pro: false,
-                round_chips: true,
-                tab_strip: Color32::TRANSPARENT,
-                row_selected: Color32::TRANSPARENT,
-                histogram_bg: Color32::from_rgb(17, 20, 24),
-                histogram_level: 225,
-                caption_close: Color32::from_rgb(213, 51, 60),
-                caption_close_text: Color32::WHITE,
-                scrim: Color32::from_black_alpha(110),
-            },
-            // Soft Dark: our own low-contrast palette on the Studio layout. Muted violet-grey
-            // surfaces (never near-black), softened off-white text and a periwinkle accent; the
-            // text colours still hold 4.5:1 on every surface (checked by the tests).
-            ThemeKind::SoftDark => Tokens {
-                kind,
-                chrome: Color32::from_rgb(58, 58, 68),
-                canvas: Color32::from_rgb(40, 40, 48),
-                canvas_dot: Color32::from_rgb(40, 40, 48),
-                dock: Color32::from_rgb(47, 47, 56),
-                card: Color32::from_rgb(54, 54, 64),
-                card_border: Color32::from_rgb(70, 70, 82),
-                field: Color32::from_rgb(64, 64, 75),
-                field_border: Color32::from_rgb(84, 84, 98),
-                hover: Color32::from_rgb(68, 68, 80),
-                pressed: Color32::from_rgb(74, 74, 88),
-                text: Color32::from_rgb(238, 238, 246),
-                text_dim: Color32::from_rgb(212, 212, 224),
-                text_faint: Color32::from_rgb(190, 190, 206),
-                icon: Color32::from_rgb(214, 214, 226),
-                accent: Color32::from_rgb(138, 154, 232),
-                accent_soft: Color32::from_rgba_unmultiplied(138, 154, 232, 48),
-                accent_border: Color32::from_rgba_unmultiplied(138, 154, 232, 150),
-                accent_text: Color32::from_rgb(190, 200, 252),
-                separator: Color32::from_rgb(36, 36, 44),
-                shadow: Color32::from_black_alpha(110),
-                primary_bg: Color32::from_rgb(86, 104, 196),
-                primary_text: Color32::WHITE,
-                danger: Color32::from_rgb(250, 160, 172),
-                warning: Color32::from_rgb(240, 200, 130),
-                radius_sm: 7.0,
-                radius: 10.0,
-                radius_lg: 14.0,
-                bevel: false,
-                pro: false,
-                round_chips: true,
-                tab_strip: Color32::TRANSPARENT,
-                row_selected: Color32::TRANSPARENT,
-                histogram_bg: Color32::from_rgb(40, 40, 48),
-                histogram_level: 220,
-                caption_close: Color32::from_rgb(200, 72, 86),
-                caption_close_text: Color32::WHITE,
-                scrim: Color32::from_black_alpha(100),
-            },
-            // Soft Light: pale violet-grey surfaces, softened dark-violet text (not black) and a
-            // periwinkle accent, with the same generous radii as Soft Dark.
-            ThemeKind::SoftLight => Tokens {
-                kind,
-                chrome: Color32::from_rgb(232, 230, 236),
-                canvas: Color32::from_rgb(218, 216, 224),
-                canvas_dot: Color32::from_rgb(218, 216, 224),
-                dock: Color32::from_rgb(226, 224, 231),
-                card: Color32::from_rgb(240, 238, 243),
-                card_border: Color32::from_rgb(208, 205, 215),
-                field: Color32::from_rgb(250, 249, 252),
-                field_border: Color32::from_rgb(190, 187, 201),
-                hover: Color32::from_rgb(228, 226, 234),
-                pressed: Color32::from_rgb(212, 209, 221),
-                text: Color32::from_rgb(44, 42, 56),
-                text_dim: Color32::from_rgb(62, 60, 76),
-                text_faint: Color32::from_rgb(80, 78, 96),
-                icon: Color32::from_rgb(64, 62, 80),
-                accent: Color32::from_rgb(110, 128, 216),
-                accent_soft: Color32::from_rgba_unmultiplied(110, 128, 216, 44),
-                accent_border: Color32::from_rgba_unmultiplied(110, 128, 216, 170),
-                accent_text: Color32::from_rgb(46, 58, 146),
-                separator: Color32::from_rgb(210, 207, 218),
-                shadow: Color32::from_black_alpha(40),
-                primary_bg: Color32::from_rgb(80, 98, 190),
-                primary_text: Color32::WHITE,
-                danger: Color32::from_rgb(166, 44, 62),
-                warning: Color32::from_rgb(140, 72, 0),
-                radius_sm: 7.0,
-                radius: 10.0,
-                radius_lg: 14.0,
-                bevel: false,
-                pro: false,
-                round_chips: true,
-                tab_strip: Color32::TRANSPARENT,
-                row_selected: Color32::TRANSPARENT,
-                histogram_bg: Color32::from_rgb(44, 42, 56),
-                histogram_level: 240,
-                caption_close: Color32::from_rgb(200, 60, 72),
-                caption_close_text: Color32::WHITE,
-                scrim: Color32::from_black_alpha(90),
-            },
-            // Ethan Schoonover's Solarized Dark palette: base03 canvas, base02 surfaces, base0
-            // body text and the Solarized blue accent. https://ethanschoonover.com/solarized/
-            // (MIT; see LICENSE-solarized.txt)
-            ThemeKind::SolarizedDark => Tokens {
-                kind,
-                chrome: Color32::from_rgb(7, 54, 66),
-                canvas: Color32::from_rgb(0, 43, 54),
-                canvas_dot: Color32::from_rgb(10, 61, 74),
-                dock: Color32::from_rgb(0, 37, 47),
-                card: Color32::from_rgb(7, 54, 66),
-                card_border: Color32::from_rgb(0, 37, 47),
-                field: Color32::from_rgb(0, 37, 47),
-                field_border: Color32::from_rgb(21, 80, 95),
-                hover: Color32::from_rgb(14, 74, 90),
-                pressed: Color32::from_rgb(18, 89, 107),
-                text: Color32::from_rgb(131, 148, 150),
-                text_dim: Color32::from_rgb(101, 123, 131),
-                text_faint: Color32::from_rgb(88, 110, 117),
-                icon: Color32::from_rgb(147, 161, 161),
-                accent: Color32::from_rgb(38, 139, 210),
-                accent_soft: Color32::from_rgba_unmultiplied(38, 139, 210, 46),
-                accent_border: Color32::from_rgba_unmultiplied(38, 139, 210, 120),
-                accent_text: Color32::from_rgb(253, 246, 227),
-                separator: Color32::from_rgb(0, 37, 47),
-                shadow: Color32::from_black_alpha(150),
-                primary_bg: Color32::from_rgb(38, 139, 210),
-                primary_text: Color32::from_rgb(253, 246, 227),
-                danger: Color32::from_rgb(220, 50, 47),
-                warning: Color32::from_rgb(181, 137, 0),
-                radius_sm: 6.0,
-                radius: 8.0,
-                radius_lg: 12.0,
-                bevel: false,
-                pro: false,
-                round_chips: true,
-                tab_strip: Color32::TRANSPARENT,
-                row_selected: Color32::TRANSPARENT,
-                histogram_bg: Color32::from_rgb(0, 43, 54),
-                histogram_level: 225,
-                caption_close: Color32::from_rgb(220, 50, 47),
-                caption_close_text: Color32::from_rgb(253, 246, 227),
-                scrim: Color32::from_black_alpha(110),
-            },
+    /// Every token zero or transparent: what a built-in theme's stylesheet fills in.
+    pub(crate) fn blank(kind: ThemeKind) -> Self {
+        let c = Color32::TRANSPARENT;
+        Tokens {
+            kind,
+            chrome: c,
+            canvas: c,
+            canvas_dot: c,
+            dock: c,
+            card: c,
+            card_border: c,
+            field: c,
+            field_border: c,
+            hover: c,
+            pressed: c,
+            text: c,
+            text_dim: c,
+            text_faint: c,
+            icon: c,
+            accent: c,
+            accent_soft: c,
+            accent_border: c,
+            accent_text: c,
+            separator: c,
+            shadow: c,
+            primary_bg: c,
+            primary_text: c,
+            danger: c,
+            warning: c,
+            radius_sm: 0.0,
+            radius: 0.0,
+            radius_lg: 0.0,
+            bevel: false,
+            pro: false,
+            round_chips: false,
+            tab_strip: c,
+            row_selected: c,
+            histogram_bg: c,
+            histogram_level: 0,
+            caption_close: c,
+            caption_close_text: c,
+            scrim: c,
+            dark: false,
+            style: StyleTokens::BLANK,
         }
+    }
+
+    /// A built-in theme's tokens, read from its embedded `theme.css` (once).
+    pub fn for_kind(kind: ThemeKind) -> Self {
+        static BUILT_IN: std::sync::LazyLock<Vec<Tokens>> =
+            std::sync::LazyLock::new(|| ThemeKind::ALL.iter().map(|k| css::parse_builtin(builtin_css(*k), *k).tokens).collect());
+        let i = ThemeKind::ALL.iter().position(|k| *k == kind).unwrap_or(0);
+        BUILT_IN.get(i).copied().unwrap_or_else(|| Tokens::blank(kind))
     }
 
     /// Tokens for the active theme (stored in egui's context data by [`apply`]).
@@ -839,7 +382,7 @@ impl Tokens {
     }
 
     pub fn dark(&self) -> bool {
-        self.kind.is_dark()
+        self.dark
     }
 }
 
@@ -1045,13 +588,23 @@ pub fn mono(size: f32) -> FontId {
     FontId::monospace(size)
 }
 
-/// Apply a theme to egui's global style and publish its tokens.
+/// Apply a built-in theme to egui's global style and publish its tokens.
 pub fn apply(ctx: &egui::Context, kind: ThemeKind) {
+    apply_tokens(ctx, Tokens::for_kind(kind));
+}
+
+/// Apply tokens (a built-in theme's or one read from a `theme.css`) to egui's global style and
+/// publish them. Unset widget colours follow the theme's: fields' colours for controls at rest,
+/// `--hover` and `--pressed` (with the accent border) when hovered and pressed, the panels' for
+/// labels.
+pub fn apply_tokens(ctx: &egui::Context, t: Tokens) {
     // Keep native windows at SystemDefault so macOS continues reporting OS appearance changes,
     // including when an integration or restored egui state pinned its own theme preference.
     ctx.set_theme(egui::ThemePreference::System);
-    let t = Tokens::for_kind(kind);
     ctx.data_mut(|d| d.insert_temp(egui::Id::unique("photocraft-theme"), t));
+    let st = t.style;
+    let shadow = |s: ShadowTokens| egui::Shadow { offset: s.offset, blur: s.blur, spread: s.spread, color: s.color.unwrap_or(t.shadow) };
+    let radius = |r: f32| CornerRadius::same(r.clamp(0.0, 255.0) as u8);
     let mut v = if t.dark() { Visuals::dark() } else { Visuals::light() };
     v.panel_fill = t.chrome;
     v.window_fill = t.card;
@@ -1063,53 +616,50 @@ pub fn apply(ctx: &egui::Context, kind: ThemeKind) {
     v.hyperlink_color = t.accent;
     v.warn_fg_color = t.warning;
     v.error_fg_color = t.danger;
-    v.window_corner_radius = CornerRadius::same(t.radius_lg as u8);
-    v.menu_corner_radius = CornerRadius::same(t.radius as u8);
-    v.window_shadow = egui::Shadow { offset: [0, 10], blur: 32, spread: 0, color: t.shadow };
-    v.popup_shadow = egui::Shadow { offset: [0, 6], blur: 20, spread: 0, color: t.shadow };
-    v.selection.bg_fill = if t.bevel || t.pro { t.accent } else { t.accent_soft };
-    v.selection.stroke = Stroke::new(1.0, t.accent_text);
+    v.window_corner_radius = radius(t.radius_lg);
+    v.menu_corner_radius = radius(t.radius);
+    v.window_shadow = shadow(st.window_shadow);
+    v.popup_shadow = shadow(st.popup_shadow);
+    v.selection.bg_fill = st.selection_bg.unwrap_or(if t.bevel || t.pro { t.accent } else { t.accent_soft });
+    v.selection.stroke = Stroke::new(1.0, st.selection_stroke.unwrap_or(t.accent_text));
     v.slider_trailing_fill = true;
     v.handle_shape = egui::style::HandleShape::Circle;
     v.striped = false;
-    let r = CornerRadius::same(t.radius_sm as u8);
     let w = &mut v.widgets;
-    w.noninteractive.bg_fill = t.card;
-    w.noninteractive.weak_bg_fill = t.card;
-    w.noninteractive.bg_stroke = Stroke::new(1.0, t.separator);
-    w.noninteractive.fg_stroke = Stroke::new(1.0, t.text_dim);
-    w.noninteractive.corner_radius = r;
-    for (wv, bg, stroke) in [
-        (&mut w.inactive, t.field, t.field_border),
-        (&mut w.hovered, t.hover, t.field_border),
-        (&mut w.active, t.pressed, t.accent_border),
-        (&mut w.open, t.hover, t.field_border),
+    for (wv, tok, bg, border, fg) in [
+        (&mut w.noninteractive, st.widgets.label, t.card, t.separator, t.text_dim),
+        (&mut w.inactive, st.widgets.normal, t.field, t.field_border, t.text),
+        (&mut w.hovered, st.widgets.hover, t.hover, t.field_border, t.text),
+        (&mut w.active, st.widgets.active, t.pressed, t.accent_border, t.text),
+        (&mut w.open, st.widgets.open, t.hover, t.field_border, t.text),
     ] {
+        let (bg, border, fg) = tok.colors(bg, border, fg);
         wv.bg_fill = bg;
         wv.weak_bg_fill = bg;
-        wv.bg_stroke = if t.bevel { Stroke::new(1.0, Color32::from_gray(64)) } else { Stroke::new(1.0, stroke) };
-        wv.fg_stroke = Stroke::new(1.0, t.text);
-        wv.corner_radius = r;
-        wv.expansion = 0.0;
+        wv.bg_stroke = Stroke::new(tok.border_width, border);
+        wv.fg_stroke = Stroke::new(tok.fg_width, fg);
+        wv.corner_radius = radius(tok.radius.unwrap_or(t.radius_sm));
+        wv.expansion = tok.expansion;
     }
     ctx.set_visuals(v);
+    let margin = |m: f32| egui::Margin::same(m.clamp(0.0, 127.0) as i8);
     ctx.global_style_mut(|s| {
         s.text_styles = [
-            (TextStyle::Small, FontId::proportional(10.5)),
-            (TextStyle::Body, FontId::proportional(if t.pro { 12.0 } else { 12.5 })),
-            (TextStyle::Button, FontId::proportional(if t.pro { 12.0 } else { 12.5 })),
-            (TextStyle::Heading, semibold(15.0)),
-            (TextStyle::Monospace, FontId::monospace(12.0)),
+            (TextStyle::Small, FontId::proportional(st.font_small)),
+            (TextStyle::Body, FontId::proportional(st.font_body)),
+            (TextStyle::Button, FontId::proportional(st.font_button)),
+            (TextStyle::Heading, semibold(st.font_heading)),
+            (TextStyle::Monospace, FontId::monospace(st.font_mono)),
         ]
         .into();
-        s.spacing.item_spacing = egui::vec2(8.0, 6.0);
-        s.spacing.button_padding = egui::vec2(10.0, 4.0);
-        s.spacing.interact_size = egui::vec2(24.0, 24.0);
-        s.spacing.slider_width = 150.0;
-        s.spacing.combo_width = 120.0;
-        s.spacing.menu_margin = egui::Margin::same(6);
-        s.spacing.window_margin = egui::Margin::same(16);
-        s.spacing.icon_width = 14.0;
+        s.spacing.item_spacing = st.item_spacing;
+        s.spacing.button_padding = st.button_padding;
+        s.spacing.interact_size = st.interact_size;
+        s.spacing.slider_width = st.slider_width;
+        s.spacing.combo_width = st.combo_width;
+        s.spacing.menu_margin = margin(st.menu_margin);
+        s.spacing.window_margin = margin(st.window_margin);
+        s.spacing.icon_width = st.icon_width;
         s.visuals.indent_has_left_vline = false;
         s.interaction.tooltip_delay = TOOLTIP_DELAY;
         // Thin overlay scrollbars that appear on hover (Photoshop/macOS style).
@@ -1119,10 +669,10 @@ pub fn apply(ctx: &egui::Context, kind: ThemeKind) {
         if scroll.floating {
             scroll.interact_handle_opacity = 1.0;
             scroll.interact_background_opacity = 0.4;
-            scroll.floating_width = 4.0;
+            scroll.floating_width = st.scroll_width;
         }
         s.spacing.scroll = scroll;
-        s.spacing.tooltip_width = 280.0;
+        s.spacing.tooltip_width = st.tooltip_width;
     });
     // egui selects its style branch using OS appearance, independently of Capishot's fixed
     // Dark/Light mode or platform appearance service. Both branches need the selected palette.
@@ -1145,15 +695,13 @@ pub fn canvas_bg(t: &Tokens) -> Color32 {
 #[cfg(test)]
 mod tests;
 
-/// Development feature: live design-token overrides.
+/// Development feature: a `theme.css` reloaded live.
 ///
-/// Set `PHOTOCRAFT_THEME_FILE=/path/tokens.json` in a debug build; the file is polled and applied
-/// on change, so colours, radii and sizes can be tuned without recompiling. Keys are `Tokens` field
-/// names; values are `"#rrggbb"`, `"#rrggbbaa"` or numbers. Compiled out of release builds.
+/// Set `PHOTOCRAFT_THEME_FILE=/path/theme.css` in a debug build; the file is polled and applied
+/// on change ([`css::parse`]), so a theme can be tuned without recompiling. Compiled out of
+/// release builds; Preferences › Profile & Themes edits themes in any build.
 #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
 pub mod live {
-    use super::Tokens;
-    use egui::Color32;
     use std::time::SystemTime;
 
     #[derive(Default)]
@@ -1168,259 +716,27 @@ pub mod live {
             Self { path: std::env::var_os("PHOTOCRAFT_THEME_FILE").map(Into::into), ..Default::default() }
         }
 
-        /// Re-apply overrides if the file changed. Returns true when tokens were updated.
-        pub fn poll(&mut self, ctx: &egui::Context, kind: super::ThemeKind) -> bool {
+        /// Re-apply the stylesheet if the file changed. Returns true when tokens were updated.
+        pub fn poll(&mut self, ctx: &egui::Context) -> bool {
             let Some(path) = &self.path else { return false };
             let now = ctx.input(|i| i.time);
+            ctx.request_repaint_after(std::time::Duration::from_millis(400));
             if now - self.last_check < 0.4 {
-                ctx.request_repaint_after(std::time::Duration::from_millis(400));
                 return false;
             }
             self.last_check = now;
-            ctx.request_repaint_after(std::time::Duration::from_millis(400));
-            let Ok(meta) = std::fs::metadata(path) else { return false };
-            let stamp = meta.modified().ok();
-            if stamp == self.stamp {
+            let stamp = std::fs::metadata(path).ok().and_then(|m| m.modified().ok());
+            if stamp.is_none() || stamp == self.stamp {
                 return false;
             }
             self.stamp = stamp;
             let Ok(text) = std::fs::read_to_string(path) else { return false };
-            match serde_json::from_str::<serde_json::Value>(&text) {
-                Ok(v) => {
-                    super::apply(ctx, kind);
-                    let mut t = Tokens::get(ctx);
-                    let unknown = apply_overrides(&mut t, &v);
-                    ctx.data_mut(|d| d.insert_temp(egui::Id::unique("photocraft-theme"), t));
-                    if !unknown.is_empty() {
-                        log::warn!("unknown token keys: {unknown:?}");
-                    }
-                    true
-                }
-                Err(e) => {
-                    log::warn!("theme file: {e}");
-                    false
-                }
+            let parsed = super::css::parse(&text);
+            for w in &parsed.warnings {
+                log::warn!("theme file: {w}");
             }
-        }
-    }
-
-    fn color(v: &serde_json::Value) -> Option<Color32> {
-        let s = v.as_str()?.trim_start_matches('#');
-        let b = |i: usize| u8::from_str_radix(s.get(i..i + 2)?, 16).ok();
-        match s.len() {
-            6 => Some(Color32::from_rgb(b(0)?, b(2)?, b(4)?)),
-            8 => Some(Color32::from_rgba_unmultiplied(b(0)?, b(2)?, b(4)?, b(6)?)),
-            _ => None,
-        }
-    }
-
-    /// Apply JSON overrides onto tokens; returns unknown keys.
-    pub fn apply_overrides(t: &mut Tokens, v: &serde_json::Value) -> Vec<String> {
-        let mut unknown = Vec::new();
-        let Some(obj) = v.as_object() else { return unknown };
-        for (k, val) in obj {
-            if override_chrome_color(t, k, val) || override_text_color(t, k, val) || override_accent_color(t, k, val) {
-                continue;
-            }
-            match k.as_str() {
-                "radius_sm" => {
-                    if let Some(x) = val.as_f64() {
-                        t.radius_sm = x as f32;
-                    }
-                }
-                "radius" => {
-                    if let Some(x) = val.as_f64() {
-                        t.radius = x as f32;
-                    }
-                }
-                "radius_lg" => {
-                    if let Some(x) = val.as_f64() {
-                        t.radius_lg = x as f32;
-                    }
-                }
-                _ => unknown.push(k.clone()),
-            }
-        }
-        unknown
-    }
-
-    fn override_chrome_color(t: &mut Tokens, key: &str, value: &serde_json::Value) -> bool {
-        match key {
-            "caption_close" => {
-                if let Some(c) = color(value) {
-                    t.caption_close = c;
-                }
-            }
-            "caption_close_text" => {
-                if let Some(c) = color(value) {
-                    t.caption_close_text = c;
-                }
-            }
-            "chrome" => {
-                if let Some(c) = color(value) {
-                    t.chrome = c;
-                }
-            }
-            "canvas" => {
-                if let Some(c) = color(value) {
-                    t.canvas = c;
-                }
-            }
-            "canvas_dot" => {
-                if let Some(c) = color(value) {
-                    t.canvas_dot = c;
-                }
-            }
-            "dock" => {
-                if let Some(c) = color(value) {
-                    t.dock = c;
-                }
-            }
-            "card" => {
-                if let Some(c) = color(value) {
-                    t.card = c;
-                }
-            }
-            "card_border" => {
-                if let Some(c) = color(value) {
-                    t.card_border = c;
-                }
-            }
-            "field" => {
-                if let Some(c) = color(value) {
-                    t.field = c;
-                }
-            }
-            "field_border" => {
-                if let Some(c) = color(value) {
-                    t.field_border = c;
-                }
-            }
-            _ => return false,
-        }
-        true
-    }
-
-    fn override_text_color(t: &mut Tokens, key: &str, value: &serde_json::Value) -> bool {
-        match key {
-            "hover" => {
-                if let Some(c) = color(value) {
-                    t.hover = c;
-                }
-            }
-            "pressed" => {
-                if let Some(c) = color(value) {
-                    t.pressed = c;
-                }
-            }
-            "text" => {
-                if let Some(c) = color(value) {
-                    t.text = c;
-                }
-            }
-            "text_dim" => {
-                if let Some(c) = color(value) {
-                    t.text_dim = c;
-                }
-            }
-            "text_faint" => {
-                if let Some(c) = color(value) {
-                    t.text_faint = c;
-                }
-            }
-            "icon" => {
-                if let Some(c) = color(value) {
-                    t.icon = c;
-                }
-            }
-            "separator" => {
-                if let Some(c) = color(value) {
-                    t.separator = c;
-                }
-            }
-            "shadow" => {
-                if let Some(c) = color(value) {
-                    t.shadow = c;
-                }
-            }
-            "primary_bg" => {
-                if let Some(c) = color(value) {
-                    t.primary_bg = c;
-                }
-            }
-            "primary_text" => {
-                if let Some(c) = color(value) {
-                    t.primary_text = c;
-                }
-            }
-            _ => return false,
-        }
-        true
-    }
-
-    fn override_accent_color(t: &mut Tokens, key: &str, value: &serde_json::Value) -> bool {
-        match key {
-            "accent" => {
-                if let Some(c) = color(value) {
-                    t.accent = c;
-                }
-            }
-            "accent_soft" => {
-                if let Some(c) = color(value) {
-                    t.accent_soft = c;
-                }
-            }
-            "accent_border" => {
-                if let Some(c) = color(value) {
-                    t.accent_border = c;
-                }
-            }
-            "accent_text" => {
-                if let Some(c) = color(value) {
-                    t.accent_text = c;
-                }
-            }
-            "danger" => {
-                if let Some(c) = color(value) {
-                    t.danger = c;
-                }
-            }
-            "warning" => {
-                if let Some(c) = color(value) {
-                    t.warning = c;
-                }
-            }
-            "tab_strip" => {
-                if let Some(c) = color(value) {
-                    t.tab_strip = c;
-                }
-            }
-            "row_selected" => {
-                if let Some(c) = color(value) {
-                    t.row_selected = c;
-                }
-            }
-            "scrim" => {
-                if let Some(c) = color(value) {
-                    t.scrim = c;
-                }
-            }
-            _ => return false,
-        }
-        true
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        #[test]
-        fn overrides_apply_and_report_unknown() {
-            let mut t = Tokens::for_kind(super::super::ThemeKind::Pro);
-            let unknown = apply_overrides(&mut t, &serde_json::json!({"card": "#102030", "radius": 9, "nope": 1}));
-            assert_eq!(t.card, Color32::from_rgb(16, 32, 48));
-            assert_eq!(t.radius, 9.0);
-            assert_eq!(unknown, vec!["nope".to_string()]);
+            super::apply_tokens(ctx, parsed.tokens);
+            true
         }
     }
 }

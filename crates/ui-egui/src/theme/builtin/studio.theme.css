@@ -1,0 +1,104 @@
+:root {
+  /* Base */
+  --base: studio;
+  --dark: true;
+  /* Surfaces */
+  --chrome: #141415;
+  --dock: #111112;
+  --card: #1a1a1c;
+  --card-border: #28282c;
+  --field: #232326;
+  --field-border: #343439;
+  --separator: #26262a;
+  --tab-strip: #00000000;
+  /* Text and icons */
+  --text: #ececf0;
+  --text-dim: #96969e;
+  --text-faint: #606068;
+  --icon: #c4c4cc;
+  /* Accent */
+  --accent: #8b7cf6;
+  --accent-soft: #8b7af42e;
+  --accent-border: #a094ff6e;
+  --accent-text: #d6d0ff;
+  --primary-bg: #f6f6f8;
+  --primary-text: #0c0c0e;
+  /* Hover and selection */
+  --hover: #2c2c30;
+  --pressed: #38383e;
+  --row-selected: #00000000;
+  /* Status colours */
+  --danger: #f06060;
+  --warning: #f0be5a;
+  --caption-close: #c42b1c;
+  --caption-close-text: #ffffff;
+  /* Canvas and scopes */
+  --canvas: #0e0e0f;
+  --canvas-dot: #2e2e32;
+  --histogram-bg: #0e0e0f;
+  --histogram-level: 225;
+  --scrim: #0000006e;
+  /* Corners and layout */
+  --radius-sm: 6;
+  --radius: 8;
+  --radius-lg: 12;
+  --bevel: false;
+  --pro: false;
+  --round-chips: true;
+  /* Text sizes */
+  --font-small: 10.5;
+  --font-body: 12.5;
+  --font-button: 12.5;
+  --font-heading: 15;
+  --font-mono: 12;
+  /* Spacing */
+  --item-spacing: 8 6;
+  --button-padding: 10 4;
+  --interact-size: 24 24;
+  --slider-width: 150;
+  --combo-width: 120;
+  --menu-margin: 6;
+  --window-margin: 16;
+  --icon-width: 14;
+  --tooltip-width: 280;
+  --scroll-width: 4;
+  /* Shadows */
+  --shadow: #0000008c;
+  --window-shadow: 0 10 32 0;
+  --popup-shadow: 0 6 20 0;
+}
+
+label {
+  /* Labels */
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button {
+  /* Controls */
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button:hover {
+  /* Controls: hover */
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button:active {
+  /* Controls: pressed */
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button:open {
+  /* Controls: open */
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}

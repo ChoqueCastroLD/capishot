@@ -1575,7 +1575,7 @@ impl eframe::App for WebShell {
             && let Some(error) = self.presets.error()
         {
             egui::Panel::top("browser_preset_storage").show(ui, |ui| {
-                let tokens = photocraft_ui_egui::theme::Tokens::for_kind(self.app.ui.theme);
+                let tokens = photocraft_ui_egui::theme::Tokens::get(ui.ctx());
                 // Put retry first so floating brush windows cannot cover the control.
                 ui.horizontal_wrapped(|ui| {
                     if self.database.is_some() && ui.button(i18n::t("Retry saving presets")).clicked() {

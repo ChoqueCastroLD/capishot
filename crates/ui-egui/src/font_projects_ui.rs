@@ -3,7 +3,7 @@
 //! role's settings with a live preview; Bubble Type's and TypeR's mappings; the pages that open
 //! with the project; the fonts it needs that aren't here; import and export), the font menus'
 //! sections (the project's fonts with their roles, then the recent ones; a font's context menu
-//! adds it to the project), Bubble Type's role fonts, and `.capiproj` files opened or exported.
+//! adds it to the project), Bubble Type's role fonts, and `.proj.capishot` files (`.capiproj` before) opened or exported.
 
 use egui::{Color32, RichText};
 use photocraft_engine::font_projects::{self as fp, Project, Projects, RoleSettings, RoleStroke};
@@ -33,11 +33,18 @@ pub struct State {
     pub(crate) keep_settings: bool,
     /// The projects window's last import report (shown on top until closed).
     report: Option<String>,
+    /// A profile opened and waiting for the person to choose what to apply (`profile_ui`).
+    pub(crate) profile_import: Option<(String, fp::Imported)>,
 }
 
 impl State {
     pub fn new() -> Self {
         State { keep_settings: true, ..Default::default() }
+    }
+
+    /// Shows project `id` in the window.
+    pub(crate) fn select(&mut self, id: String) {
+        self.selected = Some(id);
     }
 }
 
@@ -271,48 +278,74 @@ pub fn picked(app: &mut PhotocraftApp, family: &str, role: Option<&str>) {
     }
 }
 
-// ------------------------------------------------------------------ .capiproj
+// ------------------------------------------------------------------ .proj.capishot
 
-/// A `.capiproj` opened (File › Open, a drop, a link): the project is added and made active, its
-/// fonts installed among the user's fonts (each file once), and Bubble Type's styles it carries
-/// taken. A notice says what came and what to install separately.
+/// A `.proj.capishot` (or an older `.capiproj`) opened (File › Open, a drop, a link). A font
+/// project (version 1, or 2 with no
+/// profile sections but the styles) is taken at once: the project is added and made active, its
+/// fonts installed among the user's fonts (each file once), and the TypeR and Bubble Type styles
+/// it carries taken. A profile shows what it carries first (`profile_ui`). A notice says what
+/// came and what to install separately.
 pub fn import_bytes(app: &mut PhotocraftApp, name: &str, bytes: &[u8]) -> Result<(), String> {
     let imp = fp::import(bytes).map_err(|e| e.to_string())?;
-    let sink = app.font_sink(None);
-    let installed = imp.fonts.len();
-    for (file, data) in imp.fonts {
-        sink.file(file, data);
-    }
-    if let Some(b) = imp.bubble.as_ref().and_then(|b| serde_json::from_value::<crate::state::BubbleStyles>(b.clone()).ok()) {
-        app.ui.tool_options.bubble_styles = b;
-    }
-    if let Some(t) = imp.typer.clone() {
-        let _ = app.run("typer.library.import", json!({"json": t, "kind": "library"}));
-    }
-    // The names its fonts were given, unless the user named them already.
-    for (family, alias) in &imp.aliases {
-        if photocraft_engine::font_library_cmds::alias_of(&app.session, family).is_none() {
-            let _ = app.run("type.font.alias", json!({"family": family, "alias": alias}));
-        }
-    }
-    let project_name = imp.project.name.clone();
-    let id = fp::add_imported(&mut app.session, imp.project, true);
-    app.font_projects.selected = Some(id);
-    let mut lines = vec![crate::i18n::fmt(tl!("{n} font files installed"), &[("n", &installed.to_string())])];
-    if !imp.referenced.is_empty() {
-        lines.push(crate::i18n::fmt(tl!("Install these separately: {fonts}"), &[("fonts", &imp.referenced.join(", "))]));
-    }
+    let Some(project_name) = imp.project.as_ref().map(|p| p.name.clone()).filter(|_| imp.profile.keys().all(|k| k == "typer" || k == "bubble")) else {
+        crate::profile_ui::preview(app, name, imp);
+        return Ok(());
+    };
+    let sections = crate::profile_ui::sections_of(&imp);
+    let lines = crate::profile_ui::apply_import(app, imp, &sections, true)?;
     let title = crate::i18n::fmt(tl!("Font project {name} imported"), &[("name", &project_name)]);
     crate::notices::post(app, title.clone(), lines.clone(), false, None);
     app.font_projects.report = Some(format!("{title}. {}", lines.join(". ")));
-    let _ = name;
     Ok(())
+}
+
+/// `name` as a `.proj.capishot` file name.
+pub(crate) fn package_file(name: &str) -> String {
+    let stem: String = name.chars().map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { '_' }).collect();
+    let stem = stem.trim();
+    format!("{}{}", if stem.is_empty() { "profile" } else { stem }, fp::EXTENSION)
+}
+
+/// Saves packed bytes as `file` (the save dialog, or the browser's download).
+pub(crate) fn save_bytes(app: &mut PhotocraftApp, file: &str, bytes: Vec<u8>) {
+    if let Err(e) = app.pick_save(file, move |app, path| {
+        let write = app.services.write.as_mut().ok_or("no writer configured")?;
+        write(&path, &bytes)?;
+        app.ui.status = crate::i18n::fmt(tl!("Saved {file}"), &[("file", &crate::file_open::display_name(&path))]);
+        app.ui.status_error = false;
+        Ok(json!({"path": path}))
+    }) {
+        app.ui.status = e;
+        app.ui.status_error = true;
+    }
+}
+
+/// The notice lines of an export: fonts left out or only named, and a large archive.
+pub(crate) fn export_lines(out: &fp::Exported) -> Vec<String> {
+    let mut lines = Vec::new();
+    if !out.restricted.is_empty() {
+        lines.push(crate::i18n::fmt(
+            tl!("Not included, its licence doesn't allow sharing it: {fonts}. Team members will need to install it separately."),
+            &[("fonts", &out.restricted.join(", "))],
+        ));
+    }
+    if !out.referenced.is_empty() {
+        lines.push(crate::i18n::fmt(tl!("Named only (system or missing fonts): {fonts}"), &[("fonts", &out.referenced.join(", "))]));
+    }
+    if out.large {
+        lines.push(crate::i18n::fmt(
+            tl!("The project is large ({mb} MB): untick fonts to make it smaller."),
+            &[("mb", &format!("{:.0}", out.bytes.len() as f64 / 1e6))],
+        ));
+    }
+    lines
 }
 
 /// The font files of `family` that a project can carry (the user's fonts and the served or
 /// downloaded ones), named as the user's font store has them. `None`: one of the user's fonts
 /// that isn't read back from storage yet (asked for now; try again).
-fn files_for(family: &str) -> Option<Vec<fp::FontFile>> {
+pub(crate) fn files_for(family: &str) -> Option<Vec<fp::FontFile>> {
     let stored: Vec<(String, String)> = {
         let store = photocraft_text::user_fonts::store();
         store.entries().iter().filter(|e| e.families().iter().any(|f| f.eq_ignore_ascii_case(family))).map(|e| (e.id.clone(), e.name.clone())).collect()
@@ -351,44 +384,26 @@ fn export_now(app: &mut PhotocraftApp, form: &ExportForm) -> bool {
             None => return false,
         }
     }
-    let bubble = form.with_styles.then(|| serde_json::to_value(&app.ui.tool_options.bubble_styles).ok()).flatten();
-    let typer = if form.with_styles { app.run("typer.library.export", json!({})).ok() } else { None };
-    let out = match fp::export(&project, &files, &form.skip, form.include_restricted, typer.as_ref(), bubble.as_ref(), &app.session.prefs().type_.font_aliases) {
+    let mut profile = serde_json::Map::new();
+    if form.with_styles {
+        if let Ok(b) = serde_json::to_value(&app.ui.tool_options.bubble_styles) {
+            profile.insert("bubble".into(), b);
+        }
+        if let Ok(t) = app.run("typer.library.export", json!({})) {
+            profile.insert("typer".into(), t);
+        }
+    }
+    let aliases = app.session.prefs().type_.font_aliases.clone();
+    let pack = fp::Pack { name: project.name.clone(), project: Some(&project), files: &files, skip: &form.skip, include_restricted: form.include_restricted, aliases: Some(&aliases), profile, ..Default::default() };
+    let out = match fp::export(&pack) {
         Ok(o) => o,
         Err(e) => {
             crate::notices::error(app, e.to_string());
             return true;
         }
     };
-    let mut lines = Vec::new();
-    if !out.restricted.is_empty() {
-        lines.push(crate::i18n::fmt(
-            tl!("Not included, its licence doesn't allow sharing it: {fonts}. Team members will need to install it separately."),
-            &[("fonts", &out.restricted.join(", "))],
-        ));
-    }
-    if !out.referenced.is_empty() {
-        lines.push(crate::i18n::fmt(tl!("Named only (system or missing fonts): {fonts}"), &[("fonts", &out.referenced.join(", "))]));
-    }
-    if out.large {
-        lines.push(crate::i18n::fmt(
-            tl!("The project is large ({mb} MB): untick fonts to make it smaller."),
-            &[("mb", &format!("{:.0}", out.bytes.len() as f64 / 1e6))],
-        ));
-    }
-    let file =
-        format!("{}.capiproj", project.name.chars().map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { '_' }).collect::<String>().trim());
-    let bytes = out.bytes;
-    if let Err(e) = app.pick_save(&file, move |app, path| {
-        let write = app.services.write.as_mut().ok_or("no writer configured")?;
-        write(&path, &bytes)?;
-        app.ui.status = crate::i18n::fmt(tl!("Saved {file}"), &[("file", &crate::file_open::display_name(&path))]);
-        app.ui.status_error = false;
-        Ok(json!({"path": path}))
-    }) {
-        app.ui.status = e;
-        app.ui.status_error = true;
-    }
+    let lines = export_lines(&out);
+    save_bytes(app, &package_file(&project.name), out.bytes);
     if !lines.is_empty() {
         crate::notices::post(app, tl!("Font project exported").to_string(), lines, false, None);
     }
@@ -879,7 +894,7 @@ fn export_dialog(app: &mut PhotocraftApp, ctx: &egui::Context) {
         let t = Tokens::get(ui.ctx());
         ui.set_width(ctx.content_rect().width().min(460.0) - 40.0);
         ui.label(RichText::new(crate::i18n::fmt(tl!("Export {name}"), &[("name", &project.name)])).font(crate::theme::semibold(15.0)));
-        ui.label(RichText::new(tl!("A .capiproj carries the project's settings and its font files, never pages or images.")).color(t.text_dim).size(12.0));
+        ui.label(RichText::new(tl!("A .proj.capishot carries the project's settings and its font files, never pages or images.")).color(t.text_dim).size(12.0));
         ui.add_space(6.0);
         for f in &project.fonts {
             let files = photocraft_text::shared().lock().unwrap_or_else(std::sync::PoisonError::into_inner).fonts.files_for_family(&f.family);

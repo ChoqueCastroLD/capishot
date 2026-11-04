@@ -4626,7 +4626,7 @@ curves	Smooth	Εξομάλυνση
 	Bend	Κάμψη
 	Horizontal Distortion	Οριζόντια παραμόρφωση
 	Vertical Distortion	Κατακόρυφη παραμόρφωση
-	A .capiproj carries the project's settings and its font files, never pages or images.	Ένα .capiproj περιέχει τις ρυθμίσεις του έργου και τα αρχεία γραμματοσειρών του, ποτέ σελίδες ή εικόνες.
+	A .proj.capishot carries the project's settings and its font files, never pages or images.	Ένα .proj.capishot περιέχει τις ρυθμίσεις του έργου και τα αρχεία γραμματοσειρών του, ποτέ σελίδες ή εικόνες.
 	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Ένα έργο γραμματοσειρών κρατά τις γραμματοσειρές μιας σειράς ανά ρόλο (διάλογος, κραυγή, αφήγηση…) και τις ρυθμίσεις τους. Δημιουργήστε ένα για να ξεκινήσετε.
 	Add role	Προσθήκη ρόλου
 	Add tag	Προσθήκη ετικέτας

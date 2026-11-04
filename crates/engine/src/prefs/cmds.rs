@@ -30,6 +30,9 @@ fn prefs_set(s: &mut Session, p: &Value) -> Result<Value> {
     if changes.is_empty() {
         return Err(bad(cmd, "give `path` and `value`, or `values: {path: value, …}`"));
     }
+    // A custom theme chosen with its base theme in one change stays: choosing a built-in theme
+    // leaves the custom one, so it is set last.
+    changes.sort_by_key(|(k, _)| k == "interface.customTheme");
     // All or nothing: validate against a scratch copy first.
     let (saved_prefs, saved_color) = (s.prefs().clone(), s.color.settings.clone());
     let mut color_changed = false;

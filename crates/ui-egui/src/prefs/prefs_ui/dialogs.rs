@@ -10,6 +10,9 @@ pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &V
     if !empty {
         return None;
     }
+    if id == "edit.preferences.profile" {
+        return Some(Ok(json!({"dialog": crate::profile_ui::open(app)})));
+    }
     if let Some(section) = id.strip_prefix("edit.preferences.") {
         return Some(Ok(json!({"dialog": open_preferences(app, section)})));
     }
@@ -129,8 +132,14 @@ pub(super) fn rows_grid<R>(
     }
 }
 
+/// The dialog's working copy: every section, without the custom themes (Preferences › Profile &
+/// Themes edits them, live; leaving them out of the copy keeps OK from bringing back older ones).
 pub(super) fn preference_values(p: &prefs::Preferences) -> Map<String, Value> {
-    let values = p.to_json();
+    let mut values = p.to_json();
+    if let Some(interface) = values.get_mut("interface").and_then(Value::as_object_mut) {
+        interface.remove("customThemes");
+        interface.remove("customTheme");
+    }
     SECTIONS.iter().filter_map(|(id, _)| Some((id.to_string(), values.get(id)?.clone()))).collect()
 }
 
@@ -173,6 +182,7 @@ pub fn width(fields: &Map<String, Value>, available: f32) -> Option<f32> {
         "prefs" => Some(available.max(380.0)),
         "shortcuts" => Some(720.0),
         "fontsManage" | "fontsMissing" => Some(520.0),
+        crate::profile_ui::KIND => Some(available.min(640.0)),
         _ => Some(460.0),
     }
 }
@@ -465,6 +475,7 @@ pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value,
             }
         }
         "fontsManage" | "fontsMissing" => crate::fonts_ui::confirm(app, f),
+        crate::profile_ui::KIND => crate::profile_ui::confirm(app),
         "userFonts" => Ok(Value::Null),
         // The file it asks about opens with this answer (`open_prompt`).
         "mismatch" => {

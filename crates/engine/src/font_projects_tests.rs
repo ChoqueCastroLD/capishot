@@ -82,7 +82,7 @@ fn a_capiproj_round_trips_without_pages_and_without_restricted_fonts() {
     ];
     let typer = json!({"styles": []});
     let aliases: BTreeMap<String, String> = [("Inter".to_string(), "Globos".to_string()), ("Unused".to_string(), "X".to_string())].into();
-    let out = export(&p, &files, &[], false, Some(&typer), None, &aliases).unwrap();
+    let out = export(&Pack { name: "Serie".into(), project: Some(&p), files: &files, aliases: Some(&aliases), profile: [("typer".to_string(), typer.clone())].into_iter().collect(), ..Default::default() }).unwrap();
     assert_eq!(out.restricted, ["Comic Pro"], "the restricted font is left out");
     assert_eq!(out.referenced, ["Arial"], "a system font is only named");
     assert!(!out.large);
@@ -90,24 +90,64 @@ fn a_capiproj_round_trips_without_pages_and_without_restricted_fonts() {
     let zip = photocraft_format::zip::ZipReader::new(&out.bytes).unwrap();
     let names: Vec<&str> = zip.entries.iter().map(|e| e.name.as_str()).collect();
     assert!(
-        names.iter().all(|n| *n == "manifest.json" || *n == "typer.json" || (n.starts_with("fonts/") && (n.ends_with(".ttf") || n.ends_with(".otf")))),
+        names.iter().all(|n| *n == "manifest.json" || *n == "profile.json" || (n.starts_with("fonts/") && (n.ends_with(".ttf") || n.ends_with(".otf")))),
         "{names:?}"
     );
     assert_eq!(names.iter().filter(|n| n.starts_with("fonts/")).count(), 2, "Inter once, Mono once: {names:?}");
     assert!(!names.iter().any(|n| [".png", ".jpg", ".psd", ".webp"].iter().any(|e| n.ends_with(e))));
     let back = import(&out.bytes).unwrap();
-    assert_eq!(back.project.name, "Serie");
-    assert_eq!(back.project.roles[1].settings.size_pt, Some(40.0));
+    let project = back.project.as_ref().unwrap();
+    assert_eq!(project.name, "Serie");
+    assert_eq!(project.roles[1].settings.size_pt, Some(40.0));
     assert_eq!(back.fonts.len(), 2);
     assert!(back.fonts.iter().any(|(n, b)| n == "Inter-Regular.ttf" && b == INTER));
     assert_eq!(back.referenced, ["Comic Pro", "Arial"]);
-    assert_eq!(back.typer, Some(typer));
+    assert_eq!(back.profile.get("typer"), Some(&typer));
     assert_eq!(back.aliases, [("Inter".to_string(), "Globos".to_string())].into(), "the project's fonts' aliases go with them");
-    assert!(back.project.fonts.iter().find(|f| f.family == "Inter").unwrap().sha256.is_some());
+    assert!(project.fonts.iter().find(|f| f.family == "Inter").unwrap().sha256.is_some());
     // Asked for, the restricted font goes in too.
-    assert!(export(&p, &files, &[], true, None, None, &Default::default()).unwrap().restricted.is_empty());
+    assert!(export(&Pack { project: Some(&p), files: &files, include_restricted: true, ..Default::default() }).unwrap().restricted.is_empty());
     // Unticked fonts stay out.
-    assert_eq!(export(&p, &files, &["JetBrains Mono".into()], false, None, None, &Default::default()).unwrap().referenced, ["JetBrains Mono", "Arial"]);
+    let skip = ["JetBrains Mono".to_string()];
+    assert_eq!(export(&Pack { project: Some(&p), files: &files, skip: &skip, ..Default::default() }).unwrap().referenced, ["JetBrains Mono", "Arial"]);
+}
+
+/// A version 1 file (a project, `typer.json`, `bubbleStyles.json`) still opens, its styles as
+/// profile sections.
+#[test]
+fn a_version_1_capiproj_still_opens() {
+    let mut z = photocraft_format::zip::ZipWriter::new();
+    let manifest = json!({"format": "capiproj", "version": 1, "name": "Vieja", "project": Project::new("vieja", ""),
+        "fonts": [{"family": "Arial", "role": "notes", "referenced": "notHere"}], "typer": true, "bubbleStyles": true});
+    z.add("manifest.json", manifest.to_string().as_bytes()).unwrap();
+    z.add("typer.json", br#"{"styles":[]}"#).unwrap();
+    z.add("bubbleStyles.json", br#"{"bubble":{}}"#).unwrap();
+    let back = import(&z.finish().unwrap()).unwrap();
+    assert_eq!(back.project.unwrap().name, "Vieja", "an empty name takes the archive's");
+    assert_eq!(back.referenced, ["Arial"]);
+    assert_eq!(back.profile.get("typer"), Some(&json!({"styles": []})));
+    assert_eq!(back.profile.get("bubble"), Some(&json!({"bubble": {}})));
+}
+
+/// A profile without a project, with font files that aren't any project's.
+#[test]
+fn a_profile_capiproj_round_trips() {
+    let mut s = Session::new();
+    s.execute("prefs.set", json!({"path": "shortcuts.file.open", "value": "F2"})).unwrap();
+    let profile = crate::prefs::profile::capture(&mut s, &["shortcuts", "theme"]);
+    let files = [file("Inter.ttf", "Inter", INTER.to_vec())];
+    let out = export(&Pack { name: "Mi perfil".into(), families: vec!["Inter".into()], files: &files, profile: profile.clone(), ..Default::default() }).unwrap();
+    let back = import(&out.bytes).unwrap();
+    assert!(back.project.is_none());
+    assert_eq!(back.name, "Mi perfil");
+    assert_eq!(back.fonts.len(), 1);
+    assert_eq!(back.profile, profile);
+    let newer = {
+        let mut z = photocraft_format::zip::ZipWriter::new();
+        z.add("manifest.json", br#"{"format":"capiproj","version":99}"#).unwrap();
+        z.finish().unwrap()
+    };
+    assert!(import(&newer).is_err(), "a newer version is refused");
 }
 
 #[test]
@@ -117,17 +157,8 @@ fn a_damaged_or_foreign_archive_is_refused() {
     z.add("manifest.json", br#"{"format":"other"}"#).unwrap();
     assert!(import(&z.finish().unwrap()).is_err());
     let p = Project::new("a", "A");
-    let mut out = export(
-        &Project { fonts: vec![ProjectFont { family: "Inter".into(), role: "dialogue".into(), sha256: None }], ..p },
-        &[file("Inter.ttf", "Inter", INTER.to_vec())],
-        &[],
-        false,
-        None,
-        None,
-        &Default::default(),
-    )
-    .unwrap()
-    .bytes;
+    let p = Project { fonts: vec![ProjectFont { family: "Inter".into(), role: "dialogue".into(), sha256: None }], ..p };
+    let mut out = export(&Pack { project: Some(&p), files: &[file("Inter.ttf", "Inter", INTER.to_vec())], ..Default::default() }).unwrap().bytes;
     // Flip a byte of the font: its checksum no longer matches.
     let at = out.windows(4).position(|w| w == &INTER[..4]).unwrap() + 200;
     out[at] ^= 0xff;

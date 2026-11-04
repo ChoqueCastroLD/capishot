@@ -3578,7 +3578,7 @@ curves	Smooth	平滑
 	Bend	彎曲
 	Horizontal Distortion	水平扭曲
 	Vertical Distortion	垂直扭曲
-	A .capiproj carries the project's settings and its font files, never pages or images.	.capiproj 包含專案的設定與字型檔案，絕不包含頁面或影像。
+	A .proj.capishot carries the project's settings and its font files, never pages or images.	.proj.capishot 包含專案的設定與字型檔案，絕不包含頁面或影像。
 	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	字型專案依角色（對白、喊叫、旁白…）保存系列的字型及其設定。先建立一個吧。
 	Add role	新增角色
 	Add tag	新增標籤

@@ -31,6 +31,7 @@ pub fn pasteboard_color(app: &PhotocraftApp) -> Option<Color32> {
     })
 }
 
+/// The built-in theme the appearance mode picks.
 pub(super) fn selected_theme(interface: &prefs::Interface, system: Option<egui::Theme>) -> ThemeKind {
     let light = match interface.appearance_mode {
         AppearanceMode::Light => true,
@@ -208,8 +209,30 @@ pub(crate) fn sync_appearance(app: &mut PhotocraftApp, ctx: &egui::Context) {
     // A restored or embedding-supplied pin must not suppress native appearance events.
     ctx.set_theme(egui::ThemePreference::System);
     // The native service also covers Wayland sessions where winit has no system theme.
-    let selected = selected_theme(&app.session.prefs().interface, system_theme(app, ctx));
-    if app.ui.theme != selected {
+    // The Theme editor's live preview, while it's open.
+    if app.prefs_rt.theme_preview.is_some() && !crate::profile_ui::is_open(app) {
+        app.prefs_rt.theme_preview = None;
+        app.prefs_rt.custom_theme = None;
+    }
+    if let Some(preview) = app.prefs_rt.theme_preview {
+        if Tokens::get(ctx) != preview {
+            app.apply_tokens(ctx, preview);
+        }
+        return;
+    }
+    let interface = &app.session.prefs().interface;
+    // The custom theme in use (Preferences › Profile & Themes), read when it changes.
+    if let Some(custom) = interface.active_custom_theme() {
+        if app.prefs_rt.custom_theme.as_ref() != Some(custom) {
+            let custom = custom.clone();
+            let tokens = crate::theme::css::parse(&custom.css).tokens;
+            app.apply_tokens(ctx, tokens);
+            app.prefs_rt.custom_theme = Some(custom);
+        }
+        return;
+    }
+    let selected = selected_theme(interface, system_theme(app, ctx));
+    if app.ui.theme != selected || app.prefs_rt.custom_theme.is_some() {
         app.apply_theme(ctx, selected);
     }
 }

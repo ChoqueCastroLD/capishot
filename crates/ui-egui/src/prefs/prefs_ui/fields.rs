@@ -16,11 +16,18 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
             f.insert("__fonts".into(), json!(crate::fonts_ui::available(app)));
             let system = system_theme(app, ui.ctx());
             prefs_body(ui, f, system);
-            if f.remove("__manageFonts").is_some() {
-                crate::fonts_ui::open_manage(app);
+            match f.remove("__then").as_ref().and_then(Value::as_str) {
+                Some("manageFonts") => {
+                    crate::fonts_ui::open_manage(app);
+                }
+                Some("profile") => {
+                    crate::profile_ui::open(app);
+                }
+                _ => {}
             }
         }
         "fontsManage" | "fontsMissing" => crate::fonts_ui::body(app, ui, f),
+        "profile" => crate::profile_ui::body(app, ui, f),
         "userFonts" => crate::user_fonts_ui::body(app, ui, f),
         "shortcuts" => shortcuts_body(app, ui, f),
         "presets" => presets_body(app, ui, f),
@@ -201,7 +208,7 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
         section = (*first).to_string();
     }
     ui.add_space(6.0);
-    let mut manage_fonts = false;
+    let mut then = None;
     let content_height = settings_height(ui.available_height(), ui.spacing().item_spacing.y, crate::widgets::button_height(ui.ctx()));
     if sheet && !open {
         // The section list, finger-sized rows across the sheet.
@@ -246,7 +253,7 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
         if back {
             open = false;
         }
-        settings_column(ui, f, &mut values, &section, &search, lang, system, content_height - 46.0, &mut manage_fonts);
+        settings_column(ui, f, &mut values, &section, &search, lang, system, content_height - 46.0, &mut then);
     } else {
         ui.horizontal_top(|ui| {
             // Section list.
@@ -291,7 +298,7 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
             crate::widgets::vline(ui, content_height);
             ui.vertical(|ui| {
                 ui.set_width((ui.available_width() - 12.0).max(340.0));
-                settings_column(ui, f, &mut values, &section, &search, lang, system, content_height, &mut manage_fonts);
+                settings_column(ui, f, &mut values, &section, &search, lang, system, content_height, &mut then);
             });
         });
     }
@@ -303,12 +310,13 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
     if let Some((path, name)) = ctx_take_pick(ui) {
         crate::color_picker_ui::request_field(f, &format!("/values/{}", path.replace('.', "/")), &crate::color_picker_ui::title_for(&name));
     }
-    if manage_fonts {
-        f.insert("__manageFonts".into(), json!(true));
+    if let Some(then) = then {
+        f.insert("__then".into(), json!(then));
     }
 }
 
-/// A section's title and settings, scrolling within `content_height`.
+/// A section's title and settings, scrolling within `content_height`. A button that opens
+/// another window sets `then` to it (`manageFonts`, `profile`).
 #[allow(clippy::too_many_arguments)]
 fn settings_column(
     ui: &mut egui::Ui,
@@ -319,7 +327,7 @@ fn settings_column(
     lang: crate::i18n::Lang,
     system: Option<egui::Theme>,
     content_height: f32,
-    manage_fonts: &mut bool,
+    then: &mut Option<&'static str>,
 ) {
     let t = Tokens::get(ui.ctx());
     let title = SECTIONS.iter().find(|(id, _)| *id == section).map_or("General", |(_, t)| *t);
@@ -354,7 +362,15 @@ fn settings_column(
             }
             if section == "type" && f.get("__fonts").and_then(Value::as_bool) == Some(true) {
                 ui.add_space(8.0);
-                *manage_fonts = crate::widgets::secondary_button(ui, tl!("Manage downloaded fonts…"), 220.0).clicked();
+                if crate::widgets::secondary_button(ui, tl!("Manage downloaded fonts…"), 220.0).clicked() {
+                    *then = Some("manageFonts");
+                }
+            }
+            if section == "interface" {
+                ui.add_space(8.0);
+                if crate::widgets::secondary_button(ui, tl!("Profile & Themes…"), 220.0).clicked() {
+                    *then = Some("profile");
+                }
             }
             ui.add_space(8.0);
         }
