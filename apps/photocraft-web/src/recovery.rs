@@ -5,13 +5,15 @@
 //! origin-private file system, or IndexedDB where the browser can't write files there
 //! (`recovery_store.js`). A checkpoint after a small edit stores only the tiles it changed.
 //!
-//! * **Autosave** (`Services::autosave`, every Preferences › File Handling › Autosave minutes,
-//!   3 by default): a document with unsaved changes is encoded on the worker pool (threads build;
+//! * **Autosave** (`Services::autosave`): a couple of seconds after each edit (at most 15 s after
+//!   the first one not stored yet), as soon as a background job (Remove with AI, a filter) starts
+//!   on the document, and every Preferences › File Handling › Autosave minutes: a document with unsaved changes is encoded on the worker pool (threads build;
 //!   on the page's thread in the single-threaded build), then written by the browser
 //!   asynchronously, so the page never waits on storage. Saving or closing a document removes its
 //!   checkpoint (`Services::discard_autosave`).
 //! * **Rescue**: each page holds a Web Lock for its session and marks it closed cleanly on
-//!   `pagehide`. On load, checkpoints of a session that is neither alive nor closed cleanly are
+//!   `pagehide` when nothing is unsaved ([`Recovery::set_unsaved`]; a phone runs `pagehide` when
+//!   it closes a frozen tab too). On load, checkpoints of a session that is neither alive nor closed cleanly are
 //!   offered in the "Recover N documents" dialog (`photocraft_ui_egui::recovery_ui`); File ›
 //!   Recover Documents… offers every checkpoint no open tab owns.
 //! * **Emergency**: a GPU device loss checkpoints at once (`gpu_status`); a panic hands any
@@ -53,6 +55,7 @@ extern "C" {
     async fn rcv_persist() -> JsValue;
     fn rcv_session_start(id: &str);
     fn rcv_mark_crashed(id: &str);
+    fn rcv_set_unsaved(on: bool);
     fn rcv_clean_sessions() -> js_sys::Array;
     fn rcv_set_clean_sessions(list: js_sys::Array);
     #[wasm_bindgen(catch)]
@@ -105,6 +108,8 @@ struct Inner {
     /// Open what is offered without asking (the page reloaded after its graphics context was
     /// lost: gpu_lost.rs).
     auto_accept: bool,
+    /// The unsaved flag as last handed to the page (`set_unsaved`).
+    unsaved: Option<bool>,
 }
 
 /// The browser's recovery manager, shared by the services and the shell.
@@ -180,6 +185,16 @@ impl Recovery {
         rcv_mark_crashed(&self.0.borrow().session);
     }
 
+    /// Whether the page holds unsaved work (every frame): a page leaving with unsaved work didn't
+    /// close cleanly, so the next load offers its checkpoints.
+    pub fn set_unsaved(&self, on: bool) {
+        let mut inner = self.0.borrow_mut();
+        if inner.unsaved != Some(on) {
+            inner.unsaved = Some(on);
+            rcv_set_unsaved(on);
+        }
+    }
+
     /// Open the documents the next offer lists without asking.
     pub fn auto_accept(&self) {
         self.0.borrow_mut().auto_accept = true;
@@ -193,6 +208,7 @@ impl Recovery {
             discard_autosave: Some(Box::new(move |id, key| discard.discard(id, key))),
             poll_autosave: Some(Box::new(move || poll.poll())),
             autosave_unsaved_only: true,
+            autosave_after_edit: true,
             recovery_menu: true,
             ..Default::default()
         }
