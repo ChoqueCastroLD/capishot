@@ -34,7 +34,7 @@ use serde_json::{Value, json};
 use crate::budgets::{BatchReplyBudget, write_reply};
 use crate::security::{
     AUTH_DEADLINE, AuthDeadlineStream, ConnectionLimiter, LineRead, MAX_BATCH_STEPS, MAX_CONNECTIONS, MAX_REQUEST_BYTES, authentication_reply,
-    configure_stream, discard_rest_of_line, read_bounded_line, repeat_auth_reply,
+    IO_TIMEOUT, configure_stream, configure_stream_idle, discard_rest_of_line, read_bounded_line, repeat_auth_reply,
 };
 use crate::{AutomationError, Headless};
 
@@ -43,6 +43,10 @@ pub const METHODS: &[&str] = &[
     "engine.execute",
     "jobs.list",
     "jobs.cancel",
+    "jobs.status",
+    "jobs.wait",
+    "job.status",
+    "job.wait",
     "engine.commands",
     "session.list",
     "doc.open",
@@ -71,6 +75,25 @@ fn index_of(p: &Value) -> Result<Option<usize>, AutomationError> {
     match p.get("index") {
         None | Some(Value::Null) => Ok(None),
         Some(v) => v.as_u64().and_then(|i| usize::try_from(i).ok()).map(Some).ok_or_else(|| bad("`index` must be a non-negative integer")),
+    }
+}
+
+/// `jobs.status` / `jobs.wait`'s `job`.
+fn job_of(p: &Value) -> Result<u64, AutomationError> {
+    p.get("job").and_then(Value::as_u64).ok_or_else(|| bad("`job` must be a job id (from `engine.execute` with `wait: false`)"))
+}
+
+/// The longest `jobs.wait` waits by default, and at most.
+const JOB_WAIT_DEFAULT: Duration = Duration::from_secs(30);
+const JOB_WAIT_MAX: Duration = Duration::from_secs(3600);
+/// How often `jobs.wait` looks at its job.
+const JOB_WAIT_POLL: Duration = Duration::from_millis(20);
+
+/// `jobs.wait`'s `timeoutMs` (default 30 s, at most an hour; 0 answers at once).
+fn wait_timeout(p: &Value) -> Result<Duration, AutomationError> {
+    match p.get("timeoutMs") {
+        None | Some(Value::Null) => Ok(JOB_WAIT_DEFAULT),
+        Some(v) => v.as_u64().map(|ms| Duration::from_millis(ms).min(JOB_WAIT_MAX)).ok_or_else(|| bad("`timeoutMs` must be a whole number of milliseconds")),
     }
 }
 
@@ -103,6 +126,16 @@ impl Headless {
             // Background jobs (#210): list (applying any that finished) and cancel.
             "jobs.list" => self.command_start("jobs.list", json!({}), true),
             "jobs.cancel" => self.command_start("jobs.cancel", p, true),
+            // One job's state, and waiting for it with a timeout (`job.*`: the same).
+            "jobs.status" | "job.status" => self.job_status(job_of(&p)?),
+            "jobs.wait" | "job.wait" => {
+                let (job, timeout) = (job_of(&p)?, wait_timeout(&p)?);
+                let started = Instant::now();
+                while self.job_progress(job).is_some() && started.elapsed() < timeout {
+                    std::thread::sleep(JOB_WAIT_POLL);
+                }
+                self.job_status(job)
+            }
             "engine.commands" => {
                 let all = self.command_list();
                 Ok(match str_of(&p, "filter").map(str::to_lowercase) {
@@ -284,6 +317,13 @@ pub fn respond_with_progress(h: &Mutex<Headless>, line: &str, emit: &mut dyn FnM
     if progress && let Some(p) = params.as_object_mut() {
         p.insert("wait".into(), Value::Bool(false));
     }
+    if matches!(method, "jobs.wait" | "job.wait") {
+        let r = guarded(method, || wait_unlocked(h, &params));
+        return Ok(match r {
+            Ok(v) => json!({"id": id, "ok": true, "result": v}),
+            Err(e) => json!({"id": id, "ok": false, "error": e.to_string()}),
+        });
+    }
     let mut r = guarded(method, || h.lock().unwrap_or_else(PoisonError::into_inner).handle(method, params));
     let job = r
         .as_ref()
@@ -298,6 +338,18 @@ pub fn respond_with_progress(h: &Mutex<Headless>, line: &str, emit: &mut dyn FnM
         Ok(v) => json!({"id": id, "ok": true, "result": v}),
         Err(e) => json!({"id": id, "ok": false, "error": e.to_string()}),
     })
+}
+
+/// `jobs.wait` on a shared session: looks at the job every [`JOB_WAIT_POLL`] with the session
+/// unlocked between looks, so other connections (and other requests' jobs) keep being served.
+fn wait_unlocked(h: &Mutex<Headless>, p: &Value) -> Result<Value, AutomationError> {
+    let lock = || h.lock().unwrap_or_else(PoisonError::into_inner);
+    let (job, timeout) = (job_of(p)?, wait_timeout(p)?);
+    let started = Instant::now();
+    while lock().job_progress(job).is_some() && started.elapsed() < timeout {
+        std::thread::sleep(JOB_WAIT_POLL);
+    }
+    lock().job_status(job)
 }
 
 /// Last-resort guard (AGENTS.md, Never crash): a command that panics answers its request with
@@ -363,10 +415,16 @@ pub fn serve_lines(h: &Mutex<Headless>, mut r: impl BufRead, mut w: impl Write) 
 
 /// Serve one connection. It must complete `auth` within `auth_deadline` of connecting, however
 /// much it sends meanwhile (#4965); after that only the idle timeout applies.
-fn serve_tcp_connection(h: &Mutex<Headless>, stream: std::net::TcpStream, token: &str, auth_deadline: std::time::Duration) -> std::io::Result<()> {
-    configure_stream(&stream)?;
+fn serve_tcp_connection(
+    h: &Mutex<Headless>,
+    stream: std::net::TcpStream,
+    token: &str,
+    auth_deadline: std::time::Duration,
+    idle: Option<Duration>,
+) -> std::io::Result<()> {
+    configure_stream_idle(&stream, idle)?;
     let read = stream.try_clone()?;
-    let mut reader = std::io::BufReader::new(AuthDeadlineStream::new(read, auth_deadline));
+    let mut reader = std::io::BufReader::new(AuthDeadlineStream::new(read, auth_deadline).with_idle(idle));
     let mut out = stream;
     let mut line = String::new();
     let mut authenticated = false;
@@ -416,11 +474,38 @@ fn serve_tcp_connection(h: &Mutex<Headless>, stream: std::net::TcpStream, token:
 /// Headless TCP daemons with no clients should eventually release their listening port (#3682).
 const TCP_IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
+/// Timeouts of [`serve_tcp_with`].
+#[derive(Clone, Copy, Debug)]
+pub struct ServeOptions {
+    /// A connection that sends no request for this long is closed (`None`: never). Default
+    /// [`IO_TIMEOUT`] (30 s). There is no reply deadline: a long command answers when it ends.
+    pub connection_idle: Option<Duration>,
+    /// The server exits after this long without any connection (`None`: never). Default 30 min.
+    pub server_idle: Option<Duration>,
+}
+
+impl Default for ServeOptions {
+    fn default() -> Self {
+        Self { connection_idle: Some(IO_TIMEOUT), server_idle: Some(TCP_IDLE_TIMEOUT) }
+    }
+}
+
 /// Serve authenticated JSON lines on a loopback TCP address with one shared session.
 /// Refuses non-loopback addresses, caps connections and request bytes, and closes the listener
 /// after an idle period with no connections. Active clients are never evicted by this timer.
 pub fn serve_tcp(addr: &str, h: Arc<Mutex<Headless>>, token: String, ready: impl FnOnce(std::net::SocketAddr)) -> Result<(), AutomationError> {
-    serve_tcp_until_idle(addr, h, token, ready, TCP_IDLE_TIMEOUT)
+    serve_tcp_with(addr, h, token, ServeOptions::default(), ready)
+}
+
+/// [`serve_tcp`] with the given timeouts.
+pub fn serve_tcp_with(
+    addr: &str,
+    h: Arc<Mutex<Headless>>,
+    token: String,
+    opts: ServeOptions,
+    ready: impl FnOnce(std::net::SocketAddr),
+) -> Result<(), AutomationError> {
+    serve_tcp_until_idle(addr, h, token, ready, opts)
 }
 
 fn serve_tcp_until_idle(
@@ -428,7 +513,7 @@ fn serve_tcp_until_idle(
     h: Arc<Mutex<Headless>>,
     token: String,
     ready: impl FnOnce(std::net::SocketAddr),
-    idle: Duration,
+    opts: ServeOptions,
 ) -> Result<(), AutomationError> {
     let listener = TcpListener::bind(addr).map_err(|e| AutomationError::Io(format!("bind {addr}: {e}")))?;
     let local = listener.local_addr().map_err(|e| AutomationError::Io(e.to_string()))?;
@@ -458,14 +543,14 @@ fn serve_tcp_until_idle(
                 active.fetch_add(1, Ordering::AcqRel);
                 std::thread::spawn(move || {
                     let _permit = permit;
-                    let _ = serve_tcp_connection(&h, stream, &token, AUTH_DEADLINE);
+                    let _ = serve_tcp_connection(&h, stream, &token, AUTH_DEADLINE, opts.connection_idle);
                     active.fetch_sub(1, Ordering::AcqRel);
                 });
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 if active.load(Ordering::Acquire) != 0 {
                     last_active = Instant::now();
-                } else if last_active.elapsed() >= idle {
+                } else if opts.server_idle.is_some_and(|idle| last_active.elapsed() >= idle) {
                     return Ok(());
                 }
                 std::thread::sleep(Duration::from_millis(100));

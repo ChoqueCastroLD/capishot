@@ -50,7 +50,9 @@ pub(crate) fn serve(a: &ServeArgs, err: &mut dyn Write) -> Result {
             } else if supplied.is_none() {
                 let _ = writeln!(err, "capishot-cli control token: {token}");
             }
-            photocraft_automation::rpc::serve_tcp(&addr, h, token, |local| {
+            let secs = |s: u64| (s > 0).then(|| std::time::Duration::from_secs(s));
+            let opts = photocraft_automation::rpc::ServeOptions { connection_idle: secs(a.idle_timeout), server_idle: secs(a.server_idle_timeout) };
+            photocraft_automation::rpc::serve_tcp_with(&addr, h, token, opts, |local| {
                 let _ = writeln!(err, "capishot-cli serving on {local}");
             })?;
             Ok(())

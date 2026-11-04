@@ -447,6 +447,17 @@ impl Headless {
         Ok(self.session.wait_job(photocraft_engine::jobs::JobId(job))?)
     }
 
+    /// Job `job`'s state, as a `jobs.list` row (`state`: running, done, failed or cancelled; a
+    /// done job carries its `result`, a failed one its `error`). Finished jobs are applied first;
+    /// one that ended long ago (more than the last few) is an error.
+    pub fn job_status(&mut self, job: u64) -> Result<Value, AutomationError> {
+        self.sync_jobs();
+        let id = photocraft_engine::jobs::JobId(job);
+        let info = self.session.jobs_with_recent().into_iter().rev().find(|j| j.id == id);
+        let info = info.ok_or_else(|| AutomationError::BadRequest(format!("no job {job} (unknown, or it ended before the last few)")))?;
+        serde_json::to_value(info).map_err(|e| AutomationError::Other(e.to_string()))
+    }
+
     /// Cancel job `job` (false if it isn't running).
     pub fn cancel_job(&mut self, job: u64) -> bool {
         self.session.cancel_job(photocraft_engine::jobs::JobId(job))

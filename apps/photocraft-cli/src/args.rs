@@ -285,6 +285,13 @@ pub(crate) struct ServeArgs {
     /// nothing is saved, and MCP or control clients cannot change it
     #[arg(long)]
     pub(crate) allow_online_fonts: bool,
+    /// TCP: close a connection after this many seconds without a request (0: never). There is no
+    /// reply deadline; long commands can also run as jobs (`wait: false`, then `jobs.wait`)
+    #[arg(long, value_name = "SECONDS", default_value_t = 30)]
+    pub(crate) idle_timeout: u64,
+    /// TCP: exit after this many seconds without any connection (0: never)
+    #[arg(long, value_name = "SECONDS", default_value_t = 1800)]
+    pub(crate) server_idle_timeout: u64,
 }
 
 /// Why a value was refused: clap prints it after the flag and its value (exit 2).

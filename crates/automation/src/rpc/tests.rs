@@ -838,7 +838,7 @@ fn idle_tcp_daemon_releases_its_port_but_keeps_active_clients() {
     let (ready_tx, ready_rx) = std::sync::mpsc::channel();
     let (done_tx, done_rx) = std::sync::mpsc::channel();
     let server = std::thread::spawn(move || {
-        let result = serve_tcp_until_idle("127.0.0.1:0", h, TOKEN.to_owned(), move |addr| ready_tx.send(addr).unwrap(), Duration::from_millis(200));
+        let result = serve_tcp_until_idle("127.0.0.1:0", h, TOKEN.to_owned(), move |addr| ready_tx.send(addr).unwrap(), ServeOptions { server_idle: Some(Duration::from_millis(200)), ..Default::default() });
         done_tx.send(result).unwrap();
     });
     let addr = ready_rx.recv_timeout(Duration::from_secs(2)).unwrap();
@@ -899,7 +899,7 @@ fn tcp_connections_must_authenticate_before_the_deadline_whatever_they_send() {
         for _ in 0..2 {
             let (stream, _) = listener.accept().unwrap();
             let started = Instant::now();
-            let r = serve_tcp_connection(&h, stream, TOKEN, Duration::from_millis(300));
+            let r = serve_tcp_connection(&h, stream, TOKEN, Duration::from_millis(300), Some(IO_TIMEOUT));
             results.push((r.map_err(|e| e.kind()), started.elapsed()));
         }
         results
