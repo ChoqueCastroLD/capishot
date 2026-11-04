@@ -1,8 +1,10 @@
 //! `edit.removeAi`: the Remove with AI tool. What the user painted (`strokes`, as the Remove
 //! tool's) or, without strokes, the selection, is erased and filled as Clean Selected Area with AI
 //! (`edit.inpaintAi`) fills a selection, with fixed options: Manga LaMa (never the lite model) at
-//! best quality, f32, the default working side and context margin. The AI Cleaning Options dialog
-//! doesn't apply. The GPU runs it when there is one, the CPU otherwise or when the GPU fails
+//! best quality, f32, the default working side and context margin, at full resolution: a hole
+//! larger than the working side is split into overlapping tiles feathered at their seams, never
+//! downscaled (`maxSide` > 0 caps and downscales as `edit.inpaintAi` does). The AI Cleaning
+//! Options dialog doesn't apply. The GPU runs it when there is one, the CPU otherwise or when the GPU fails
 //! mid-run (still Manga LaMa). A stroke's hole grows first so nothing of what it touched is left for the
 //! model to rebuild from (`retouch_cmds::ink_mask`). One undo step, "Remove with AI", on the
 //! target layer. A background job, cancellable.
@@ -17,11 +19,13 @@ pub const ID: &str = "edit.removeAi";
 pub const LABEL: &str = "Remove with AI";
 /// What the AI Cleaning Options dialog would set, overridden on every run: Remove with AI is
 /// fixed (Manga LaMa at its best, the GPU when there is one, the working side and context
-/// margin `edit.inpaintAi` uses by default) and never follows that dialog.
-const FIXED: [&str; 7] = ["model", "quality", "device", "maxSide", "margin", "threads", "keepLoaded"];
+/// margin `edit.inpaintAi` uses by default) and never follows that dialog. `maxSide` is the
+/// caller's (the dialog never sends it here): default 0, full resolution.
+const FIXED: [&str; 6] = ["model", "quality", "device", "margin", "threads", "keepLoaded"];
 
 /// The inpainting params of a run: Clean Selected Area with AI's (`edit.inpaintAi`) with Manga LaMa
-/// pinned at best quality and every other option at its default, whatever the caller sent.
+/// pinned at best quality, full resolution unless `maxSide` caps it, and every other option at
+/// its default, whatever the caller sent.
 pub fn lama_params(p: &Value) -> Result<serde_json::Map<String, Value>> {
     let mut q = match p {
         Value::Object(m) => m.clone(),
@@ -33,6 +37,7 @@ pub fn lama_params(p: &Value) -> Result<serde_json::Map<String, Value>> {
     }
     q.insert("model".into(), json!(photocraft_ai::catalog::LAMA_ID));
     q.insert("quality".into(), json!("best"));
+    q.entry("maxSide").or_insert(json!(0));
     Ok(q)
 }
 
@@ -67,7 +72,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: LABEL,
         menu: &[],
         shortcut: None,
-        params: r#"{"strokes"?: [[[x,y,pressure?],…],…] or "points"?: [[x,y],…] (what was painted, with "size": px, as paint.remove; a stroke around an object removes what it encloses), else the selection, "sampleAllLayers"?: bool, "layer"?: id, "allowDownload"?: bool (fetch Manga LaMa, about 100 MB, when it isn't on this device)} -> {"damage"|"region", "device", "model", "lite", "cpu", "fellBack", "ms", …}. Erases it and fills it as edit.inpaintAi fills a selection, with fixed options (Manga LaMa at best quality, its default working side and margin; model, quality, device, maxSide, margin, threads and keepLoaded params are ignored), on the target layer, as one undo step ("Remove with AI"). A background job; the GPU's failure retries on the CPU."#,
+        params: r#"{"strokes"?: [[[x,y,pressure?],…],…] or "points"?: [[x,y],…] (what was painted, with "size": px, as paint.remove; a stroke around an object removes what it encloses), else the selection, "sampleAllLayers"?: bool, "layer"?: id, "maxSide"?: 0 (default: full resolution, a hole larger than 512 px split into overlapping tiles feathered at their seams) or 64..2048, multiple of 8 (larger crops downscaled to it, as before), "allowDownload"?: bool (fetch Manga LaMa, about 100 MB, when it isn't on this device)} -> {"damage"|"region", "device", "model", "lite", "cpu", "fellBack", "ms", …}. Erases it and fills it as edit.inpaintAi fills a selection, with fixed options (Manga LaMa at best quality, its default working side and margin, at full resolution; model, quality, device, margin, threads and keepLoaded params are ignored), on the target layer, as one undo step ("Remove with AI"). A background job; the GPU's failure retries on the CPU."#,
         enabled,
         run: remove_ai,
         journal: true,
@@ -81,12 +86,15 @@ mod tests {
     #[test]
     fn every_run_is_manga_lama_at_best_whatever_the_options_say() {
         let dialog = json!({"model": "migan-512", "quality": "fast", "device": "cpu", "maxSide": 64, "margin": 8, "threads": 2, "keepLoaded": false, "strokes": [[[1, 2]]], "ai": false});
-        let q = lama_params(&dialog).unwrap();
+        let mut q = lama_params(&dialog).unwrap();
         assert_eq!((q["model"].as_str(), q["quality"].as_str()), (Some("manga-lama"), Some("best")));
-        for k in ["device", "maxSide", "margin", "threads", "keepLoaded", "ai"] {
+        for k in ["device", "margin", "threads", "keepLoaded", "ai"] {
             assert!(!q.contains_key(k), "{k} is fixed");
         }
+        assert_eq!(q["maxSide"], 64, "the caller's maxSide goes through");
+        assert_eq!(lama_params(&json!({})).unwrap()["maxSide"], 0, "full resolution by default");
         assert!(q.contains_key("strokes"), "the painted strokes go through");
+        q.insert("maxSide".into(), json!(0));
         assert_eq!(lama_params(&json!({})).unwrap(), q.into_iter().filter(|(k, _)| k != "strokes").collect());
         assert!(lama_params(&json!([1])).is_err());
     }
@@ -293,5 +301,51 @@ mod tests {
         assert!(e.contains(crate::ai_models_cmds::NOT_DOWNLOADED), "{e}");
         assert_eq!(s.active().unwrap().history.past_len(), past);
         assert!(s.execute(ID, json!({"strokes": [[[29, 22], [35, 22]]], "size": 14, "allowDownload": true})).is_ok());
+    }
+
+    /// #21: a hole larger than the 512 px working side is filled at full resolution, in
+    /// overlapping tiles of at most 512 a side, by Remove with AI (strokes and selection) and
+    /// `paint.remove` with `ai`; `maxSide` > 0 downscales as before, and `edit.inpaintAi` keeps
+    /// downscaling unless asked for `maxSide: 0`.
+    #[test]
+    fn a_large_hole_is_filled_at_full_resolution_in_overlapping_tiles() {
+        let runs = |cmd: &str, p: Value, select: bool| {
+            let fake = Arc::new(FakeInpainter::default());
+            let mut s = page(fake.clone(), true);
+            s.execute("file.new", json!({"width": 1400, "height": 1000, "background": "white"})).unwrap();
+            s.edit("tone", |doc, active| {
+                let surf = doc.layer_mut(active.unwrap()).unwrap().surface_mut().unwrap();
+                for x in (0..1400).step_by(8) {
+                    surf.fill_rect(Rect::new(x, 0, x + 3, 1000), &[0.2, 0.2, 0.2, 1.0]);
+                }
+                Ok(())
+            })
+            .unwrap();
+            if select {
+                s.execute("select.rect", json!({"x": 200, "y": 150, "width": 1000, "height": 700})).unwrap();
+            }
+            let r = s.execute(cmd, p).unwrap();
+            assert_eq!(r["model"], "manga-lama", "{cmd}: {r}");
+            let sizes = fake.sizes.lock().unwrap().clone();
+            assert!(grey_at(&s, 700, 500) > 0.2 && grey_at(&s, 700, 500) < 1.0, "{cmd}: filled");
+            sizes
+        };
+        let full = |sizes: &[(usize, usize)]| sizes.len() > 4 && sizes.iter().all(|(w, h)| *w <= 512 && *h <= 512);
+        let stroke = json!({"strokes": [[[300, 500], [1100, 500]]], "size": 300});
+        let mut capped = stroke.clone();
+        capped["maxSide"] = json!(512);
+        let mut ai = stroke.clone();
+        ai["ai"] = json!(true);
+        assert!(full(&runs(ID, stroke, false)), "strokes");
+        assert!(full(&runs(ID, json!({}), true)), "the selection");
+        assert!(full(&runs("paint.remove", ai, false)), "paint.remove with ai");
+        assert_eq!(runs(ID, capped, false).len(), 1, "maxSide 512: one downscaled tile");
+        assert_eq!(runs(ID, json!({"maxSide": 256}), true), vec![(256, 184)], "downscaled to maxSide");
+        assert_eq!(runs(crate::ai_inpaint_cmds::ID, json!({"output": "current"}), true).len(), 1, "Clean Selected Area with AI: unchanged");
+        assert!(full(&runs(crate::ai_inpaint_cmds::ID, json!({"output": "current", "maxSide": 0}), true)), "unless maxSide 0");
+        let mut s = page(Arc::new(FakeInpainter::default()), true);
+        for bad in [json!(32), json!(-1), json!(100), json!("full")] {
+            assert!(s.execute(ID, json!({"strokes": [[[29, 22], [35, 22]]], "size": 14, "maxSide": bad})).is_err(), "{bad}");
+        }
     }
 }

@@ -89,6 +89,18 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
   Bubble Type tool does: in the speech bubble or narration box there, else floating text
   (`style` in the result: `bubble`, `narration` or `floating`).
 
+- Remove with AI at full resolution: `execute('edit.removeAi', {strokes, size})` (and
+  `paint.remove` with `ai: true`) fills a hole larger than the 512 px working side in overlapping
+  512 px tiles at full resolution, feathered at their seams, instead of downscaling it (screentone
+  and window grids stay sharp). `maxSide: 0` (the default) is that; `maxSide: 64..2048` (multiple
+  of 8) downscales larger crops to it as before. Holes up to 512 px are filled as before.
+  `edit.inpaintAi` keeps downscaling unless it gets `maxSide: 0` (feature `removeAi.fullRes`).
+
+  ```js
+  await capishot.execute('edit.removeAi', {strokes: [[[300, 500], [1100, 500]]], size: 300});
+  await capishot.execute('edit.removeAi', {maxSide: 512}); // the selection, downscaled as before
+  ```
+
 - Fonts the host serves (`fonts/manifest.txt` next to the page, craft-fonts' format
   `family | style | file | …`; file paths may have spaces and other characters, they are
   URL-encoded for the request). A family the manifest lists is never reported missing: a document

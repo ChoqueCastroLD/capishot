@@ -208,7 +208,12 @@ export interface ExecuteOptions {
   history?: 'step' | 'none' | 'silent';
 }
 
-/** Runs a command by id (`engine.execute` of the control protocol); params: object or JSON string. */
+/**
+ * Runs a command by id (`engine.execute` of the control protocol); params: object or JSON string.
+ * `edit.removeAi` and `paint.remove` with `ai: true` take `maxSide`: 0 (default) fills a hole larger
+ * than 512 px at full resolution in overlapping, feathered tiles; 64..2048 downscales to it as
+ * before (feature `removeAi.fullRes`).
+ */
 export function execute(command: string, params?: { [key: string]: Json } | string | null, options?: ExecuteOptions | null): Promise<Json>;
 /** Any control-protocol method (`ui.inspect`, `ui.pointer`, …). */
 export function request(method: 'fonts.preload', params: FontsPreloadParams): Promise<FontsPreloadResult>;

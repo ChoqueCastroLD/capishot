@@ -131,6 +131,7 @@ fn bad_params_are_errors() {
         json!({"output": "elsewhere"}),
         json!({"output": 3}),
         json!({"maxSide": 100}),
+        json!({"maxSide": 32}),
         json!({"maxSide": 4096}),
         json!({"maxSide": -8}),
         json!({"margin": 5000}),

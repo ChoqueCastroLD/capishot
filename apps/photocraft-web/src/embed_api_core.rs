@@ -46,6 +46,7 @@ pub const FEATURES: &[&str] = &[
     "execute.history",
     "events.layersReordered",
     "inspect.uid",
+    "removeAi.fullRes",
 ];
 
 /// The build stamp: the Capishot commit and the build id, set by `scripts/build-embed.sh`
