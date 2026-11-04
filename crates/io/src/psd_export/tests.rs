@@ -593,6 +593,7 @@ fn writer(doc: &Document) -> Ex {
         smart: SmartOut::new(doc, 8),
         patterns: Vec::new(),
         background: None,
+        cache: None,
     }
 }
 
@@ -619,12 +620,12 @@ fn a_layer_past_the_psd_size_limit_is_saved_without_its_pixels() {
     let mut wide = Surface::new(fmt);
     wide.write_region(Rect::new(0, 0, 1, 1), &one);
     wide.write_region(Rect::new(300_000, 0, 300_001, 1), &one);
-    let (rect, _, warnings) = ex.pixel_channels(&wide, "Wide");
+    let (rect, _, warnings) = ex.pixel_channels(photocraft_doc::LayerId(1), &wide, "Wide");
     assert_eq!(rect, PsdRect::default());
     assert!(warnings.iter().any(|w| w.contains("\"Wide\"") && w.contains("saved without its pixels")), "{warnings:?}");
     let mut small = Surface::new(fmt);
     small.write_region(Rect::new(0, 0, 2, 1), &[one.clone(), one].concat());
-    let (rect, channels, warnings) = ex.pixel_channels(&small, "Small");
+    let (rect, channels, warnings) = ex.pixel_channels(photocraft_doc::LayerId(1), &small, "Small");
     assert_eq!((rect.width(), rect.height(), channels.len(), warnings.len()), (2, 1, 4, 0));
     assert!(within_psd_limit(Rect::new(0, 0, 300_000, 300_000)) && !within_psd_limit(Rect::new(0, 0, 1, 300_001)));
 }
@@ -660,9 +661,9 @@ fn a_mask_past_the_size_limits_is_an_error() {
         }
         m
     };
-    assert!(ex.mask(&mask(&[(0, 0), (300_000, 0)]), None).is_err(), "past 300000 px");
-    assert!(ex.mask(&mask(&[(0, 0), (299_998, 299_998)]), None).is_err(), "a sparse box too large to gather");
-    let (_, channel) = ex.mask(&mask(&[(0, 0), (1, 1)]), None).unwrap();
+    assert!(ex.mask(photocraft_doc::LayerId(1), &mask(&[(0, 0), (300_000, 0)]), None).is_err(), "past 300000 px");
+    assert!(ex.mask(photocraft_doc::LayerId(1), &mask(&[(0, 0), (299_998, 299_998)]), None).is_err(), "a sparse box too large to gather");
+    let (_, channel) = ex.mask(photocraft_doc::LayerId(1), &mask(&[(0, 0), (1, 1)]), None).unwrap();
     assert!(channel.is_some());
 }
 

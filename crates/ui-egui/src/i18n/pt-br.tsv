@@ -4431,6 +4431,8 @@ layerLabel	No Color	Sem cor
 	Describe what to add (optional)	Descreva o que adicionar (opcional)
 	English, Spanish or Portuguese; empty fills with background. It runs on this device, and generating means you accept the Terms of Use.	Inglês, espanhol ou português; vazio preenche com o fundo. Roda neste dispositivo, e ao gerar você aceita os Termos de uso.
 	GPU couldn't run this model; used the CPU instead	A GPU não conseguiu executar este modelo; a CPU foi usada no lugar
+	DirectML couldn't run this model; used wgpu instead	O DirectML não conseguiu executar este modelo; o wgpu foi usado no lugar
+	No usable GPU for this model; ran on the CPU instead	Nenhuma GPU utilizável para este modelo; a CPU foi usada no lugar
 	Menu	Menu
 	Max pixel density	Densidade máxima de pixels
 	Display's own	A da tela

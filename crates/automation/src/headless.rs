@@ -263,10 +263,12 @@ impl Headless {
     /// saves to the document's own path.
     pub fn save(&mut self, index: Option<usize>, path: Option<&Path>, format: Option<&str>, opts: &ExportOptions) -> Result<Value, AutomationError> {
         let i = self.doc_index(index)?;
-        let (stored_path, doc) = {
+        let (stored_path, doc, psd_cache) = {
             let state = &self.session.documents()[i];
-            (state.path.clone(), state.doc.clone())
+            (state.path.clone(), state.doc.clone(), state.psd_cache.clone())
         };
+        // PSD saves of an open document are incremental: unchanged layers aren't encoded again.
+        let opts = &ExportOptions { psd_cache: opts.psd_cache.clone().or(Some(psd_cache)), ..opts.clone() };
         let target: PathBuf = match (path, stored_path.as_deref()) {
             (Some(p), _) => p.to_path_buf(),
             // Like the desktop's File › Save: without a new path, only a layered file is written

@@ -174,7 +174,10 @@ pub(crate) fn renders_merged(doc: &Document) -> bool {
 /// * the encoded merged image of the last few saves is kept by the file's own bytes (the layers,
 ///   resources and alpha channels it was rendered from), so saving an unchanged document again
 ///   (Save after a download, Save As another name) skips the render.
-pub(crate) fn recomposite(file: &mut PsdFile, bytes: &[u8], doc: &Document, plain: bool) -> Result<Option<Vec<u8>>, IoError> {
+///
+/// With `cache` (an incremental save, `ExportOptions::psd_cache`), the plain composite renders
+/// only the area whose layer pixels changed since the last save through it.
+pub(crate) fn recomposite(file: &mut PsdFile, bytes: &[u8], doc: &Document, plain: bool, cache: Option<&crate::PsdExportCache>) -> Result<Option<Vec<u8>>, IoError> {
     let h = &file.header;
     if h.depth != 8 || h.color_mode != ColorMode::Rgb || file.layer_info.as_ref().is_none_or(|l| l.layers.is_empty()) || file.merged_has_alpha() {
         return Ok(None);
@@ -184,7 +187,7 @@ pub(crate) fn recomposite(file: &mut PsdFile, bytes: &[u8], doc: &Document, plai
     let merged = match cache::get(&key) {
         Some(m) => m,
         None => {
-            let Some(m) = merged_image(file, bytes, doc, plain)? else { return Ok(None) };
+            let Some(m) = merged_image(file, bytes, doc, plain, cache)? else { return Ok(None) };
             let m = std::sync::Arc::new(m);
             cache::put(key, m.clone());
             m
@@ -227,6 +230,12 @@ pub(crate) fn recomposite(file: &mut PsdFile, bytes: &[u8], doc: &Document, plai
     Ok(Some(out))
 }
 
+/// A composite: rendered for this save, or the incremental cache's.
+enum Rgba {
+    Owned(Vec<u8>),
+    Shared(std::sync::Arc<Vec<u8>>),
+}
+
 /// A merged image ready to go into a file: its encoded planes (colour, the transparency when
 /// `has_alpha`, then the file's alpha channels).
 pub(crate) struct Merged {
@@ -235,18 +244,28 @@ pub(crate) struct Merged {
 }
 
 /// Renders and encodes the merged image of `file` (see [`recomposite`]); `None` when it can't.
-fn merged_image(file: &PsdFile, bytes: &[u8], doc: &Document, plain: bool) -> Result<Option<Merged>, IoError> {
+fn merged_image(file: &PsdFile, bytes: &[u8], doc: &Document, plain: bool, cache: Option<&crate::PsdExportCache>) -> Result<Option<Merged>, IoError> {
     let h = &file.header;
     let n = (h.width as usize).saturating_mul(h.height as usize);
-    let rgba = if plain {
+    let canvas = doc.bounds();
+    let buf = if plain && (canvas.width() != h.width || canvas.height() != h.height) {
+        return Ok(None);
+    } else if let Some(cache) = cache.filter(|_| plain) {
+        let Some(rgba) = cache.merged_rgba8(doc, compose_rgba8_into) else { return Ok(None) };
+        Rgba::Shared(rgba)
+    } else if plain {
         let Some(rgba) = compose_rgba8(doc, h.width, h.height) else { return Ok(None) };
-        rgba
+        Rgba::Owned(rgba)
     } else {
         let compiled = compile(bytes, &CompileOptions::default())?;
         if compiled.width != h.width || compiled.height != h.height {
             return Ok(None);
         }
-        compiled.rgba
+        Rgba::Owned(compiled.rgba)
+    };
+    let rgba: &[u8] = match &buf {
+        Rgba::Owned(v) => v,
+        Rgba::Shared(v) => v,
     };
     if rgba.len() < n.saturating_mul(4) {
         return Ok(None);
@@ -281,7 +300,7 @@ fn merged_image(file: &PsdFile, bytes: &[u8], doc: &Document, plain: bool) -> Re
             };
         }
     });
-    drop(rgba);
+    drop(buf);
     let mut header = file.header.clone();
     if has_alpha {
         header.channels += 1;
@@ -297,22 +316,50 @@ fn compose_rgba8(doc: &Document, width: u32, height: u32) -> Option<Vec<u8>> {
     if canvas.width() != width || canvas.height() != height {
         return None;
     }
-    let w = width as usize;
-    let mut out = vec![0u8; w.checked_mul(height as usize)?.checked_mul(4)?];
+    let mut out = vec![0u8; (width as usize).checked_mul(height as usize)?.checked_mul(4)?];
+    compose_rgba8_into(doc, canvas, &mut out)?;
+    Some(out)
+}
+
+/// Renders `rect` of `doc`'s composite into `out`, the whole canvas as straight 8-bit RGBA.
+fn compose_rgba8_into(doc: &Document, rect: photocraft_geom::Rect, out: &mut [u8]) -> Option<()> {
+    let canvas = doc.bounds();
+    let rect = rect.intersect(&canvas);
+    let w = canvas.width() as usize;
+    let rw = rect.width() as usize;
+    if out.len() < w.checked_mul(canvas.height() as usize)?.checked_mul(4)? {
+        return None;
+    }
     let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-    photocraft_compose::render_bands(doc, canvas, 0, |band| -> Result<(), ()> {
-        let at = (band.rect.y0 - canvas.y0) as usize * w * 4;
-        let dst = out.get_mut(at..at + band.px.len() * 4).ok_or(())?;
-        let jobs: Vec<(&mut [u8], &[[f32; 4]])> = dst.chunks_mut(4 * w.max(1) * 16).zip(band.px.chunks(w.max(1) * 16)).collect();
-        crate::pixels::par_map(jobs, |(d, s)| {
-            for (o, p) in d.as_chunks_mut::<4>().0.iter_mut().zip(s) {
-                *o = p.map(q);
+    photocraft_compose::render_bands(doc, rect, 0, |band| -> Result<(), ()> {
+        let first = (band.rect.y0 - canvas.y0) as usize;
+        let x0 = (rect.x0 - canvas.x0) as usize;
+        if rw == w {
+            let at = first * w * 4;
+            let dst = out.get_mut(at..at + band.px.len() * 4).ok_or(())?;
+            let jobs: Vec<(&mut [u8], &[[f32; 4]])> = dst.chunks_mut(4 * w.max(1) * 16).zip(band.px.chunks(w.max(1) * 16)).collect();
+            crate::pixels::par_map(jobs, |(d, s)| {
+                for (o, p) in d.as_chunks_mut::<4>().0.iter_mut().zip(s) {
+                    *o = p.map(q);
+                }
+            });
+            return Ok(());
+        }
+        // Part of each row: one row at a time, the rows on all cores.
+        let rows = band.px.len() / rw.max(1);
+        let at = first * w * 4;
+        let dst = out.get_mut(at..at + rows * w * 4).ok_or(())?;
+        let jobs: Vec<(&mut [u8], &[[f32; 4]])> = dst.chunks_mut(4 * w.max(1)).zip(band.px.chunks(rw.max(1))).collect();
+        crate::pixels::par_map(jobs, |(row, s)| {
+            if let Some(d) = row.get_mut(x0 * 4..(x0 + rw) * 4) {
+                for (o, p) in d.as_chunks_mut::<4>().0.iter_mut().zip(s) {
+                    *o = p.map(q);
+                }
             }
         });
         Ok(())
     })
-    .ok()?;
-    Some(out)
+    .ok()
 }
 
 /// Whether photocraft-compose draws `doc` as psd-compiler does (within one level): 8-bit RGB with
@@ -555,7 +602,7 @@ mod tests {
             let (mut file, _) = crate::document_to_psd_with(&doc, &o);
             assert!(!file.merged_has_alpha());
             let bytes = file.to_bytes().unwrap();
-            let out = recomposite(&mut file, &bytes, &doc, false).unwrap().expect("8-bit RGB with layers");
+            let out = recomposite(&mut file, &bytes, &doc, false, None).unwrap().expect("8-bit RGB with layers");
             assert_eq!(out, file.to_bytes().unwrap(), "{name}");
         }
     }

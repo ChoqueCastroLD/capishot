@@ -3062,6 +3062,8 @@ curves	Smooth	平滑
 	Describe what to add (optional)	描述要加入的內容（選填）
 	English, Spanish or Portuguese; empty fills with background. It runs on this device, and generating means you accept the Terms of Use.	支援英文、西班牙文或葡萄牙文；留空則以背景填色。在本裝置上執行，產生即表示你接受使用條款。
 	GPU couldn't run this model; used the CPU instead	GPU 無法執行此模型，已改用 CPU
+	DirectML couldn't run this model; used wgpu instead	DirectML 無法執行此模型；已改用 wgpu
+	No usable GPU for this model; ran on the CPU instead	沒有可用於此模型的 GPU；已改用 CPU
 	Menu	選單
 	Max pixel density	最大像素密度
 	Display's own	跟隨顯示器

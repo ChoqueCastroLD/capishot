@@ -895,6 +895,8 @@ fn job_notices(app: &mut PhotocraftApp, command: &str, v: &Value) {
         let field = |k: &str| n.get(k).and_then(Value::as_str).unwrap_or_default();
         let text = match field("class") {
             photocraft_engine::ai_cmds::GPU_FALLBACK_CLASS => tl!("GPU couldn't run this model; used the CPU instead").to_string(),
+            photocraft_engine::ai_cmds::DIRECTML_FALLBACK_CLASS => tl!("DirectML couldn't run this model; used wgpu instead").to_string(),
+            photocraft_engine::ai_cmds::CPU_FALLBACK_CLASS => tl!("No usable GPU for this model; ran on the CPU instead").to_string(),
             _ => crate::i18n::t(field("text")).to_string(),
         };
         if text.is_empty() {

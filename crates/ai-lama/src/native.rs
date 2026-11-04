@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use burn::tensor::Device;
 
-use crate::service::{Done, GpuBackend, Hooks, Inpainter, LAMA, MIGAN, ModelState, Request};
+use crate::service::{Done, Fallback, GpuBackend, Hooks, Inpainter, LAMA, MIGAN, ModelState, Request};
 use crate::{Generator, LamaError, Result};
 
 /// The weights' file name in the models folder.
@@ -34,14 +34,38 @@ type Dml = crate::directml::DmlLama;
 #[cfg(not(all(feature = "directml", any(windows, target_os = "linux"))))]
 type Dml = ();
 
+/// Failures to inject (tests): each makes that backend fail as a real one would.
+#[doc(hidden)]
+#[derive(Clone, Debug, Default)]
+pub struct Faults {
+    /// DirectML can't load Manga LaMa (as without ONNX Runtime's library, or an old driver).
+    pub directml_load: Option<String>,
+    /// DirectML loads it, but the run fails.
+    pub directml_run: Option<String>,
+    /// wgpu can't start (no adapter, a broken driver).
+    pub wgpu: Option<String>,
+}
+
+/// The model loaded on burn.
+struct Burn {
+    id: &'static str,
+    /// Loaded for a CPU request.
+    cpu: bool,
+    generator: Arc<Generator>,
+    /// The device's name ([`Inpainter::device`]).
+    device: String,
+    /// It may use the GPU, but runs on the CPU (or a software adapter): why.
+    cpu_why: Option<String>,
+}
+
 /// See the module docs.
 pub struct NativeInpainter {
     path: PathBuf,
     migan: Option<PathBuf>,
     /// The AI Model Manager's downloads folder, searched first.
     downloads: Option<PathBuf>,
-    /// The loaded model: its id, whether it is on the CPU, the generator.
-    model: Mutex<Option<(&'static str, bool, Arc<Generator>)>>,
+    /// The loaded model.
+    model: Mutex<Option<Burn>>,
     /// Manga LaMa on DirectML, once loaded.
     #[cfg_attr(not(all(feature = "directml", windows)), allow(dead_code))]
     dml: Mutex<Option<Arc<Dml>>>,
@@ -55,6 +79,7 @@ pub struct NativeInpainter {
     #[cfg_attr(not(all(feature = "directml", windows)), allow(dead_code))]
     ort_cpu_failed: Mutex<bool>,
     device_name: Mutex<String>,
+    faults: Faults,
 }
 
 impl NativeInpainter {
@@ -70,12 +95,20 @@ impl NativeInpainter {
             ort_cpu: Mutex::new(None),
             ort_cpu_failed: Mutex::new(false),
             device_name: Mutex::new(String::new()),
+            faults: Faults::default(),
         }
     }
 
     /// Also offers MI-GAN, loaded from `path`.
     pub fn with_migan(mut self, path: PathBuf) -> Self {
         self.migan = Some(path);
+        self
+    }
+
+    /// Makes the backends fail as `faults` says (tests).
+    #[doc(hidden)]
+    pub fn with_faults(mut self, faults: Faults) -> Self {
+        self.faults = faults;
         self
     }
 
@@ -129,31 +162,45 @@ impl NativeInpainter {
     }
 
     /// GPU through wgpu unless it is a software adapter (lavapipe/llvmpipe are far slower than
-    /// the CPU backend) or `CAPISHOT_AI_DEVICE=cpu`; else the CPU backend.
-    fn pick_device(cpu: bool) -> Result<(Device, String)> {
-        let force_cpu = cpu || std::env::var("CAPISHOT_AI_DEVICE").is_ok_and(|v| v.eq_ignore_ascii_case("cpu"));
-        #[cfg(feature = "wgpu")]
-        if !force_cpu {
-            // The wgpu runtime may panic deep inside on a broken driver; keep that a fallback.
-            let gpu = std::panic::catch_unwind(|| burn::tensor::Device::wgpu_options().init_with_setup());
-            if let Ok(Ok((device, setup))) = gpu {
-                let info = setup.adapter.get_info();
-                let software = info.device_type == burn::tensor::wgpu::wgpu::DeviceType::Cpu;
-                if !software || cfg!(not(feature = "flex")) {
-                    return Ok((device, format!("{:?}: {}", setup.backend, info.name)));
+    /// the CPU backend) or `CAPISHOT_AI_DEVICE=cpu`; else the CPU backend. With the device's name
+    /// and, when the request may use the GPU but this device is the CPU (or a software adapter),
+    /// why.
+    fn pick_device(cpu: bool, faults: &Faults) -> Result<(Device, String, Option<String>)> {
+        let force_cpu = cpu_forced(cpu);
+        let mut why = (!force_cpu).then(|| "this build has no GPU backend".to_string());
+        if let Some(f) = faults.wgpu.as_ref().filter(|_| !force_cpu) {
+            why = Some(format!("wgpu couldn't start: {f}"));
+        } else if !force_cpu {
+            #[cfg(feature = "wgpu")]
+            {
+                // The wgpu runtime may panic deep inside on a broken driver; keep that a fallback.
+                let gpu = std::panic::catch_unwind(|| burn::tensor::Device::wgpu_options().init_with_setup());
+                match gpu {
+                    Ok(Ok((device, setup))) => {
+                        let info = setup.adapter.get_info();
+                        let name = format!("{:?}: {}", setup.backend, info.name);
+                        if info.device_type != burn::tensor::wgpu::wgpu::DeviceType::Cpu {
+                            return Ok((device, name, None));
+                        }
+                        let software = format!("{} is a software adapter (no GPU behind it)", info.name);
+                        if cfg!(not(feature = "flex")) {
+                            return Ok((device, name, Some(software)));
+                        }
+                        why = Some(software);
+                    }
+                    Ok(Err(e)) => why = Some(format!("wgpu couldn't start: {e}")),
+                    Err(_) => why = Some("wgpu failed while starting".into()),
                 }
             }
         }
         #[cfg(feature = "flex")]
         {
-            let _ = force_cpu;
-            Ok((Device::flex(), "CPU".into()))
+            Ok((Device::flex(), "CPU".into(), why))
         }
         #[cfg(not(feature = "flex"))]
-        Err(LamaError::Unavailable(if force_cpu {
-            "CAPISHOT_AI_DEVICE=cpu but this build has no CPU backend".into()
-        } else {
-            "no GPU found and this build has no CPU backend".into()
+        Err(LamaError::Unavailable(match why {
+            None => "CAPISHOT_AI_DEVICE=cpu but this build has no CPU backend".into(),
+            Some(w) => format!("no usable GPU ({w}) and this build has no CPU backend"),
         }))
     }
 
@@ -171,9 +218,8 @@ impl NativeInpainter {
     /// Whether `req` goes to DirectML: Manga LaMa on the GPU, not asked for wgpu, and (when
     /// automatic) DirectML hasn't failed to load it before.
     fn wants_directml(&self, req: &Request) -> bool {
-        let cpu = req.cpu || std::env::var("CAPISHOT_AI_DEVICE").is_ok_and(|v| v.eq_ignore_ascii_case("cpu"));
         req.model == LAMA
-            && !cpu
+            && !cpu_forced(req.cpu)
             && match req.backend {
                 GpuBackend::Wgpu => false,
                 GpuBackend::DirectMl => true,
@@ -182,9 +228,13 @@ impl NativeInpainter {
     }
 
     /// Runs `req` on DirectML when [`Self::wants_directml`]; `None` runs it on burn instead (an
-    /// automatic run where DirectML can't: no ONNX Runtime library, a failed session or run).
+    /// automatic run where DirectML can't: no ONNX Runtime library, a failed session or run; then
+    /// `left` says why).
     #[cfg(all(feature = "directml", windows))]
-    fn run_directml(&self, req: &Request) -> Option<Result<Vec<f32>>> {
+    fn run_directml(&self, req: &Request, left: &mut Option<String>) -> Option<Result<Vec<f32>>> {
+        if let Some(r) = self.injected_directml(req, left) {
+            return r;
+        }
         if !self.wants_directml(req) {
             return None;
         }
@@ -201,7 +251,7 @@ impl NativeInpainter {
                     Ok(d) => {
                         // The burn copy on the GPU isn't needed while DirectML runs the model.
                         let mut m = self.model.lock().unwrap_or_else(PoisonError::into_inner);
-                        if m.as_ref().is_some_and(|(id, cpu, _)| *id == LAMA && !*cpu) {
+                        if m.as_ref().is_some_and(|b| b.id == LAMA && !b.cpu) {
                             *m = None;
                         }
                         let d = Arc::new(d);
@@ -210,6 +260,7 @@ impl NativeInpainter {
                     }
                     Err(e) if auto => {
                         *self.dml_failed.lock().unwrap_or_else(PoisonError::into_inner) = Some(e.to_string());
+                        *left = Some(format!("DirectML couldn't load the model: {e}"));
                         return None;
                     }
                     Err(e) => return Some(Err(e)),
@@ -227,7 +278,10 @@ impl NativeInpainter {
                 *self.device_name.lock().unwrap_or_else(PoisonError::into_inner) = "DirectML".into();
                 Some(Ok(o))
             }
-            Err(_) if auto => None,
+            Err(e) if auto => {
+                *left = Some(format!("DirectML couldn't run the model: {e}"));
+                None
+            }
             Err(e) => Some(Err(e)),
         }
     }
@@ -237,8 +291,7 @@ impl NativeInpainter {
     /// path never gets worse than burn's).
     #[cfg(all(feature = "directml", any(windows, target_os = "linux")))]
     fn run_ort_cpu(&self, req: &Request) -> Option<Result<Vec<f32>>> {
-        let cpu = req.cpu || std::env::var("CAPISHOT_AI_DEVICE").is_ok_and(|v| v.eq_ignore_ascii_case("cpu"));
-        if req.model != LAMA || !cpu || *self.ort_cpu_failed.lock().unwrap_or_else(PoisonError::into_inner) {
+        if req.model != LAMA || !cpu_forced(req.cpu) || *self.ort_cpu_failed.lock().unwrap_or_else(PoisonError::into_inner) {
             return None;
         }
         let fail = || {
@@ -254,7 +307,7 @@ impl NativeInpainter {
                 let Ok(d) = crate::directml::DmlLama::cpu_from_safetensors(&bytes, req.threads) else { return fail() };
                 // burn's CPU copy isn't needed while ONNX Runtime runs the model.
                 let mut m = self.model.lock().unwrap_or_else(PoisonError::into_inner);
-                if m.as_ref().is_some_and(|(id, cpu, _)| *id == LAMA && *cpu) {
+                if m.as_ref().is_some_and(|b| b.id == LAMA && b.cpu) {
                     *m = None;
                 }
                 let d = Arc::new(d);
@@ -282,27 +335,73 @@ impl NativeInpainter {
     }
 
     #[cfg(not(all(feature = "directml", windows)))]
-    fn run_directml(&self, req: &Request) -> Option<Result<Vec<f32>>> {
+    fn run_directml(&self, req: &Request, left: &mut Option<String>) -> Option<Result<Vec<f32>>> {
+        if let Some(r) = self.injected_directml(req, left) {
+            return r;
+        }
         (req.backend == GpuBackend::DirectMl && self.wants_directml(req))
             .then(|| Err(LamaError::Unavailable("DirectML runs only in Windows builds with the `directml` feature".into())))
     }
 
-    fn model(&self, id: &'static str, cpu: bool) -> Result<Arc<Generator>> {
+    /// An injected DirectML failure ([`Faults`]), as [`Self::run_directml`] answers it; `None`
+    /// when there is none for `req`.
+    fn injected_directml(&self, req: &Request, left: &mut Option<String>) -> Option<Option<Result<Vec<f32>>>> {
+        let f = &self.faults;
+        if (f.directml_load.is_none() && f.directml_run.is_none()) || !self.wants_directml(req) {
+            return None;
+        }
+        let auto = req.backend == GpuBackend::Auto;
+        Some(match (&f.directml_load, &f.directml_run) {
+            (Some(e), _) if auto => {
+                *self.dml_failed.lock().unwrap_or_else(PoisonError::into_inner) = Some(e.clone());
+                *left = Some(format!("DirectML couldn't load the model: {e}"));
+                None
+            }
+            (Some(e), _) => Some(Err(LamaError::Unavailable(e.clone()))),
+            (None, Some(e)) if auto => {
+                *left = Some(format!("DirectML couldn't run the model: {e}"));
+                None
+            }
+            (None, Some(e)) => Some(Err(LamaError::Gpu(e.clone()))),
+            (None, None) => return None,
+        })
+    }
+
+    /// The model on burn: the generator, the device's name, and why it is on the CPU though
+    /// the request may use the GPU.
+    fn model(&self, id: &'static str, cpu: bool) -> Result<(Arc<Generator>, String, Option<String>)> {
         let mut slot = self.model.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some((i, c, m)) = slot.as_ref()
-            && *i == id
-            && *c == cpu
+        if let Some(b) = slot.as_ref()
+            && b.id == id
+            && b.cpu == cpu
         {
-            return Ok(m.clone());
+            return Ok((b.generator.clone(), b.device.clone(), b.cpu_why.clone()));
         }
         *slot = None;
         let bytes = self.weights(id)?;
-        let (device, name) = Self::pick_device(cpu)?;
-        let m = Arc::new(Generator::from_safetensors(&bytes, &device)?);
-        *self.device_name.lock().unwrap_or_else(PoisonError::into_inner) = name;
-        *slot = Some((id, cpu, m.clone()));
-        Ok(m)
+        let (device, name, cpu_why) = Self::pick_device(cpu, &self.faults)?;
+        let generator = Arc::new(Generator::from_safetensors(&bytes, &device)?);
+        *slot = Some(Burn { id, cpu, generator: generator.clone(), device: name.clone(), cpu_why: cpu_why.clone() });
+        Ok((generator, name, cpu_why))
     }
+}
+
+/// The request is for the CPU, or `CAPISHOT_AI_DEVICE=cpu` says every request is.
+fn cpu_forced(cpu: bool) -> bool {
+    cpu || std::env::var("CAPISHOT_AI_DEVICE").is_ok_and(|v| v.eq_ignore_ascii_case("cpu"))
+}
+
+/// What an automatic request that may use the GPU left on its way to `to`: DirectML (`left`)
+/// and/or the GPU (`cpu_why`, `to` is the CPU or a software adapter). `None`: nothing.
+fn fallback(left: Option<String>, to: &str, cpu_why: Option<String>) -> Option<Fallback> {
+    let cpu = cpu_why.is_some();
+    let from = match (&left, cpu) {
+        (Some(_), _) => "DirectML",
+        (None, true) => "GPU",
+        (None, false) => return None,
+    };
+    let why = [left, cpu_why].into_iter().flatten().collect::<Vec<_>>().join("; ");
+    Some(Fallback { from: from.into(), to: to.into(), cpu, why })
 }
 
 impl Inpainter for NativeInpainter {
@@ -311,7 +410,7 @@ impl Inpainter for NativeInpainter {
     }
 
     fn model_state_of(&self, model: &str) -> ModelState {
-        let loaded = self.model.lock().unwrap_or_else(PoisonError::into_inner).as_ref().is_some_and(|(i, _, _)| *i == model);
+        let loaded = self.model.lock().unwrap_or_else(PoisonError::into_inner).as_ref().is_some_and(|b| b.id == model);
         match self.path_of(model) {
             _ if loaded => ModelState::Ready,
             Some(p) if p.is_file() => ModelState::Ready,
@@ -335,10 +434,19 @@ impl Inpainter for NativeInpainter {
         // burn panics on device failures (out of memory, a lost GPU): report it as an error and
         // drop the model so the next request loads it again.
         let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            if let Some(r) = self.run_directml(&req).or_else(|| self.run_ort_cpu(&req)) {
+            // An automatic run DirectML couldn't load the model for earlier: it leaves DirectML too.
+            let mut left = (req.backend == GpuBackend::Auto && req.model == LAMA && !cpu_forced(req.cpu))
+                .then(|| self.dml_failed.lock().unwrap_or_else(PoisonError::into_inner).clone())
+                .flatten()
+                .map(|e| format!("DirectML couldn't load the model: {e}"));
+            if let Some(r) = self.run_directml(&req, &mut left).or_else(|| self.run_ort_cpu(&req)) {
                 return r;
             }
-            self.model(req.model, req.cpu).and_then(|m| {
+            self.model(req.model, req.cpu).and_then(|(m, name, cpu_why)| {
+                if let Some(f) = fallback(left, &name, cpu_why) {
+                    hooks.fell_back(&f);
+                }
+                *self.device_name.lock().unwrap_or_else(PoisonError::into_inner) = name;
                 if hooks.cancelled() {
                     return Err(LamaError::Cancelled);
                 }
@@ -351,7 +459,7 @@ impl Inpainter for NativeInpainter {
             })
         }));
         // On the GPU, a failure is the GPU's: the caller runs the request again on the CPU.
-        let on_gpu = !req.cpu && self.model.lock().unwrap_or_else(PoisonError::into_inner).as_ref().is_none_or(|(_, cpu, _)| !*cpu) && self.device() != "CPU";
+        let on_gpu = !req.cpu && self.model.lock().unwrap_or_else(PoisonError::into_inner).as_ref().is_none_or(|b| !b.cpu) && self.device() != "CPU";
         let result = match run {
             Ok(Err(LamaError::Device(e))) if on_gpu => Err(LamaError::Gpu(e)),
             Ok(r) => r,

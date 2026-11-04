@@ -407,6 +407,7 @@ impl PhotocraftApp {
             settings.webp_quality = e.webp_quality.map(|q| q.min(100));
             settings.document_path = st.path.as_deref().map(std::path::PathBuf::from);
             settings.pcraft_cache = Some(st.pcraft_cache.clone());
+            settings.psd_cache = Some(st.psd_cache.clone());
         }
         settings
     }

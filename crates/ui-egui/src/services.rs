@@ -103,6 +103,8 @@ pub struct ExportSettings {
     pub document_path: Option<std::path::PathBuf>,
     /// Native save cache owned by the open document; exports without one remain one-shot.
     pub pcraft_cache: Option<photocraft_io::PcraftExportCache>,
+    /// PSD/PSB incremental save cache owned by the open document.
+    pub psd_cache: Option<photocraft_io::PsdExportCache>,
     /// Read and embed the files linked smart objects name ([`photocraft_io::ExportOptions::read_linked_files`]).
     /// Off for automation saves, which are granted only their target.
     pub read_linked_files: bool,
@@ -125,6 +127,7 @@ impl Default for ExportSettings {
             embed_metadata: true,
             document_path: None,
             pcraft_cache: None,
+            psd_cache: None,
             read_linked_files: true,
         }
     }
@@ -153,6 +156,7 @@ impl ExportSettings {
         opts.psd_maximize_compatibility = self.psd_maximize_compatibility;
         opts.document_path = self.document_path.clone();
         opts.pcraft_cache = self.pcraft_cache.clone();
+        opts.psd_cache = self.psd_cache.clone();
         opts.read_linked_files = self.read_linked_files;
         opts
     }

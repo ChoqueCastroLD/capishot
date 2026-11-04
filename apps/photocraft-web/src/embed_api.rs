@@ -608,7 +608,9 @@ pub fn save_document(id: JsValue, format: String) -> js_sys::Promise {
         let st = app.session.documents().get(index).ok_or("no such document")?;
         let name = crate::embed_protocol::export_name(&st.doc.name, &format)?;
         let export = app.services.export.as_ref().ok_or("no exporter")?;
-        let (bytes, warnings) = export(&st.doc, &name, &ExportSettings::default())?;
+        // PSD saves are incremental: layers unchanged since the last save aren't encoded again.
+        let settings = ExportSettings { psd_cache: Some(st.psd_cache.clone()), ..ExportSettings::default() };
+        let (bytes, warnings) = export(&st.doc, &name, &settings)?;
         for w in warnings {
             log::info!("embed: save {name}: {w}");
         }

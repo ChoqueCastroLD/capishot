@@ -48,6 +48,14 @@ pub(super) fn document_to_psd_sized(doc: &Document, opts: &PsdExportOptions, dep
     export_supported_document(wrapped.as_ref().unwrap_or(doc), opts, depth, ctl, fmt, size_limit)
 }
 
+/// This save's cache entries become the cache's; a cancelled save's model is discarded, so the
+/// last complete save's entries stay.
+fn finish_cache(ex: &mut Ex, ctl: &Interrupt) {
+    if let Some(c) = ex.cache.take().filter(|_| !ctl.cancelled()) {
+        c.finish();
+    }
+}
+
 fn export_supported_document(
     doc: &Document,
     opts: &PsdExportOptions,
@@ -90,6 +98,8 @@ fn export_supported_document(
         smart: SmartOut::new(doc, depth),
         patterns: doc.patterns.clone(),
         background: psd_background(doc),
+        // Nested documents (smart objects) have their own layer ids: never through the cache.
+        cache: opts.cache.as_ref().filter(|_| depth == 0).map(crate::psd_cache::Session::new),
     };
     add_format_warnings(doc, opts, fmt, big, duotone_inks.is_some(), &mut ex.warnings);
     index_layer_ids_and_text(doc, &mut ex);
@@ -107,6 +117,7 @@ fn export_supported_document(
     photocraft_color::convert::with_cmyk_space(space.as_ref(), || ex.emit(&doc.layers, &mut tick));
     drop(tick);
     ctl.progress(layers_share);
+    finish_cache(&mut ex, ctl);
 
     let merged = prepare_merged_planes(doc, &mut ex, opts, ctl, fmt, duotone_inks.is_some(), layers_share);
     let MergedExport { header, image_data, extra, has_alpha, quick_mask_id, real_merged } = merged;

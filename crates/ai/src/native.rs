@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use crate::cache::DiskCache;
 use crate::catalog::{Arch, ModelInfo};
 use crate::runtime::{Runtime, block_on};
-use crate::service::{Done, GpuBackend, Hooks, ModelState, Request, Upscaler};
+use crate::service::{Done, Fallback, GpuBackend, Hooks, ModelState, Request, Upscaler};
 use crate::tile::TileOptions;
 use crate::upscale::{Loaded, default_tiles, upscale};
 use crate::{AiError, Progress, Result};
@@ -35,18 +35,35 @@ impl DeviceChoice {
     }
 }
 
+/// Failures to inject (tests): each makes that backend fail as a real one would.
+#[doc(hidden)]
+#[derive(Clone, Debug, Default)]
+pub struct Faults {
+    /// DirectML can't load the model (as without ONNX Runtime's library, or an old driver).
+    pub directml_load: Option<String>,
+    /// DirectML loads it, but the run fails (a GPU failure: the caller retries on the CPU).
+    pub directml_run: Option<String>,
+    /// wgpu can't start (no adapter, a broken driver).
+    pub wgpu: Option<String>,
+}
+
 /// See the module docs.
 pub struct NativeUpscaler {
     cache: DiskCache,
     base_url: Option<String>,
     choice: DeviceChoice,
     inner: Mutex<Inner>,
+    faults: Faults,
 }
 
 #[derive(Default)]
 struct Inner {
     rt: Option<Runtime>,
     device: String,
+    /// `rt` is the CPU (or a software adapter) though GPU runs were asked for: why.
+    rt_cpu_why: Option<String>,
+    /// Where the last request ran ([`Upscaler::device`]).
+    last_device: String,
     loaded: Option<Loaded>,
     /// `loaded` lives on the CPU runtime (a CPU request), not `rt`.
     loaded_cpu: bool,
@@ -61,7 +78,14 @@ struct Inner {
 impl NativeUpscaler {
     /// `base_url`: where weight files are downloaded from (`None`: only cached files run).
     pub fn new(cache: DiskCache, base_url: Option<String>, choice: DeviceChoice) -> Self {
-        Self { cache, base_url, choice, inner: Mutex::new(Inner::default()) }
+        Self { cache, base_url, choice, inner: Mutex::new(Inner::default()), faults: Faults::default() }
+    }
+
+    /// Makes the backends fail as `faults` says (tests).
+    #[doc(hidden)]
+    pub fn with_faults(mut self, faults: Faults) -> Self {
+        self.faults = faults;
+        self
     }
 
     /// The shells' default: the cache in `models_dir` ([`crate::cache::models_dir`], plus
@@ -75,8 +99,9 @@ impl NativeUpscaler {
         if let Some(rt) = &inner.rt {
             return Ok(rt.clone());
         }
-        let (rt, name) = pick_runtime(self.choice)?;
+        let (rt, name, why) = pick_runtime_why(self.choice, &self.faults)?;
         inner.device = name;
+        inner.rt_cpu_why = why;
         inner.rt = Some(rt.clone());
         Ok(rt)
     }
@@ -103,19 +128,43 @@ impl NativeUpscaler {
         }
         let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         let cpu = req.opts.cpu || self.choice == DeviceChoice::Cpu;
-        if !cpu && backend::directml_wanted(&req, &inner)? {
+        let auto = req.opts.backend == GpuBackend::Auto && !cpu && Loaded::directml_supports(req.model);
+        // DirectML couldn't load a model before: this automatic run leaves it too.
+        let mut left = inner.directml_failed.clone().filter(|_| auto).map(|e| format!("DirectML couldn't load the model: {e}"));
+        let injected = !cpu && req.opts.backend != GpuBackend::Wgpu && Loaded::directml_supports(req.model) && inner.directml_failed.is_none();
+        if injected && let Some(e) = &self.faults.directml_load {
+            if req.opts.backend == GpuBackend::DirectMl {
+                return Err(AiError::Device(e.clone()));
+            }
+            inner.directml_failed = Some(e.clone());
+            left = Some(format!("DirectML couldn't load the model: {e}"));
+        } else if injected && let Some(e) = &self.faults.directml_run {
+            return Err(AiError::Gpu(e.clone()));
+        } else if !cpu && backend::directml_wanted(&req, &inner)? {
             match self.run_directml(&req, &bytes, &mut inner, hooks) {
                 // Auto: DirectML couldn't load the model (an old driver, a broken install); the
                 // wgpu path runs it, now and from now on.
-                Err(AiError::Device(e)) if req.opts.backend == GpuBackend::Auto => inner.directml_failed = Some(e),
-                r => return r,
+                Err(AiError::Device(e)) if req.opts.backend == GpuBackend::Auto => {
+                    left = Some(format!("DirectML couldn't load the model: {e}"));
+                    inner.directml_failed = Some(e);
+                }
+                r => {
+                    inner.last_device = "DirectML".into();
+                    return r;
+                }
             }
         }
         if cpu && let Some(r) = self.run_onnx_cpu(&req, &bytes, &mut inner, hooks) {
+            inner.last_device = "CPU".into();
             return r;
         }
         let rt = if req.opts.cpu { cpu_runtime()? } else { self.runtime(&mut inner)? };
         let device = if req.opts.cpu { "CPU".to_string() } else { inner.device.clone() };
+        inner.last_device.clone_from(&device);
+        let cpu_why = inner.rt_cpu_why.clone().filter(|_| !req.opts.cpu);
+        if let Some(f) = fallback(left, &device, cpu_why) {
+            hooks.fell_back(&f);
+        }
         let gray = Loaded::runs_gray(req.model, req.grayscale);
         let reuse = inner.loaded.as_ref().is_some_and(|l| l.id == req.model.id && l.grayscale == gray && l.is_burn()) && inner.loaded_cpu == req.opts.cpu;
         if !reuse {
@@ -267,35 +316,66 @@ fn with_threads<T: Send>(_: usize, f: impl FnOnce() -> T + Send) -> T {
 
 /// Picks the device for `choice`, with a name for the UI.
 pub fn pick_runtime(choice: DeviceChoice) -> Result<(Runtime, String)> {
-    #[cfg(feature = "gpu")]
-    {
-        use burn::tensor::DeviceKind;
-        let kinds: &[DeviceKind] = match choice {
-            DeviceChoice::Auto => &[DeviceKind::DiscreteGpu(0), DeviceKind::IntegratedGpu(0)],
-            DeviceChoice::Gpu => &[DeviceKind::DefaultDevice],
-            DeviceChoice::Cpu => &[],
-        };
-        for k in kinds {
-            let kind = k.clone();
-            // A driver that fails inside wgpu must not take the app down.
-            if let Ok(Ok(rt)) = std::panic::catch_unwind(move || Runtime::gpu_kind_blocking(kind)) {
-                return Ok((rt, format!("GPU, {k:?}")));
-            }
-        }
+    pick_runtime_why(choice, &Faults::default()).map(|(rt, name, _)| (rt, name))
+}
+
+/// [`pick_runtime`], with why the runtime is the CPU (or a software adapter) when `choice`
+/// allows the GPU.
+fn pick_runtime_why(choice: DeviceChoice, faults: &Faults) -> Result<(Runtime, String, Option<String>)> {
+    let mut why = (choice != DeviceChoice::Cpu).then(|| "this build has no GPU backend".to_string());
+    if let Some(f) = faults.wgpu.as_ref().filter(|_| choice != DeviceChoice::Cpu) {
         if choice == DeviceChoice::Gpu {
-            return Err(AiError::Device("no wgpu adapter".into()));
+            return Err(AiError::Device(f.clone()));
+        }
+        why = Some(format!("wgpu couldn't start: {f}"));
+    } else {
+        #[cfg(feature = "gpu")]
+        {
+            use burn::tensor::DeviceKind;
+            let kinds: &[DeviceKind] = match choice {
+                DeviceChoice::Auto => &[DeviceKind::DiscreteGpu(0), DeviceKind::IntegratedGpu(0)],
+                DeviceChoice::Gpu => &[DeviceKind::DefaultDevice],
+                DeviceChoice::Cpu => &[],
+            };
+            for k in kinds {
+                let kind = k.clone();
+                // A driver that fails inside wgpu must not take the app down.
+                match std::panic::catch_unwind(move || Runtime::gpu_kind_blocking(kind)) {
+                    Ok(Ok(rt)) => {
+                        let software = rt.info().filter(|i| i.software).map(|i| format!("{} is a software adapter (no GPU behind it)", i.name));
+                        return Ok((rt, format!("GPU, {k:?}"), software));
+                    }
+                    Ok(Err(e)) => why = Some(format!("no {k:?} adapter: {e}")),
+                    Err(_) => why = Some("wgpu failed while starting".into()),
+                }
+            }
+            if choice == DeviceChoice::Gpu {
+                return Err(AiError::Device("no wgpu adapter".into()));
+            }
         }
     }
     #[cfg(feature = "cpu")]
     {
-        let _ = choice;
-        Ok((Runtime::cpu(), "CPU".into()))
+        Ok((Runtime::cpu(), "CPU".into(), why))
     }
     #[cfg(not(feature = "cpu"))]
     {
-        let _ = choice;
+        let _ = why;
         Err(AiError::Device("no GPU, and this build has no CPU fallback".into()))
     }
+}
+
+/// What an automatic request that may use the GPU left on its way to `to`: DirectML (`left`)
+/// and/or the GPU (`cpu_why`). `None`: nothing.
+fn fallback(left: Option<String>, to: &str, cpu_why: Option<String>) -> Option<Fallback> {
+    let cpu = cpu_why.is_some();
+    let from = match (&left, cpu) {
+        (Some(_), _) => "DirectML",
+        (None, true) => "GPU",
+        (None, false) => return None,
+    };
+    let why = [left, cpu_why].into_iter().flatten().collect::<Vec<_>>().join("; ");
+    Some(Fallback { from: from.into(), to: to.into(), cpu, why })
 }
 
 /// The tiling on a native GPU (wgpu): the model's default, but 192 input pixels for 4x FDAT
@@ -341,7 +421,8 @@ impl Upscaler for NativeUpscaler {
     }
 
     fn device(&self) -> String {
-        self.inner.lock().unwrap_or_else(PoisonError::into_inner).device.clone()
+        let inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        if inner.last_device.is_empty() { inner.device.clone() } else { inner.last_device.clone() }
     }
 
     fn profile(&self) -> crate::profile::DeviceProfile {
@@ -442,4 +523,36 @@ fn download(url: &str, model: &ModelInfo, hooks: &dyn Hooks) -> Result<Vec<u8>> 
 #[cfg(not(feature = "download"))]
 fn download(url: &str, _: &ModelInfo, _: &dyn Hooks) -> Result<Vec<u8>> {
     Err(AiError::Download(format!("{url}: this build can't download models")))
+}
+
+#[cfg(all(test, feature = "cpu"))]
+mod tests {
+    use super::*;
+
+    /// #22: wgpu can't start on an automatic run: the CPU runtime, and why; asked for the GPU:
+    /// an error; asked for the CPU: nothing to say.
+    #[test]
+    fn a_runtime_fallback_says_why() {
+        let faults = Faults { wgpu: Some("no adapter (injected)".into()), ..Default::default() };
+        let (rt, name, why) = pick_runtime_why(DeviceChoice::Auto, &faults).unwrap();
+        assert_eq!((rt.accel(), name.as_str()), (crate::runtime::Accel::Cpu, "CPU"));
+        assert!(why.as_deref().is_some_and(|w| w.contains("injected")), "{why:?}");
+        assert!(pick_runtime_why(DeviceChoice::Gpu, &faults).is_err());
+        assert_eq!(pick_runtime_why(DeviceChoice::Cpu, &faults).unwrap().2, None);
+        let up = NativeUpscaler::new(DiskCache::in_dir(&std::env::temp_dir()), None, DeviceChoice::Auto).with_faults(faults);
+        let mut inner = Inner::default();
+        up.runtime(&mut inner).unwrap();
+        assert!(inner.rt_cpu_why.is_some());
+    }
+
+    #[test]
+    fn fallback_names_what_was_left() {
+        assert_eq!(fallback(None, "GPU, DiscreteGpu(0)", None), None);
+        let f = fallback(Some("DirectML couldn't load the model: x".into()), "GPU, DiscreteGpu(0)", None).unwrap();
+        assert_eq!((f.from.as_str(), f.cpu), ("DirectML", false));
+        let f = fallback(Some("a".into()), "CPU", Some("b".into())).unwrap();
+        assert_eq!((f.from.as_str(), f.to.as_str(), f.cpu, f.why.as_str()), ("DirectML", "CPU", true, "a; b"));
+        let f = fallback(None, "CPU", Some("b".into())).unwrap();
+        assert_eq!((f.from.as_str(), f.cpu), ("GPU", true));
+    }
 }

@@ -242,3 +242,28 @@ fn a_gpu_failure_runs_again_on_the_cpu() {
     s.set_ai_upscaler(Some(Arc::new(FakeUpscaler { fail: Some("out of memory".into()), ..Default::default() })));
     assert!(s.execute(COMMAND, json!({"device": "cpu"})).is_err());
 }
+
+/// #22: an automatic run that left DirectML, or found no usable GPU, says so (a notice, once per
+/// job) and the reply's `device`, `cpu` and `fellBack` say where it really ran.
+#[test]
+fn a_silent_device_fallback_is_reported() {
+    use photocraft_ai::service::Fallback;
+    let run = |from: &str, to: &str, cpu: bool| {
+        let fallback = Some(Fallback { from: from.into(), to: to.into(), cpu, why: "injected".into() });
+        let mut s = session(4, 4, gray);
+        s.set_ai_upscaler(Some(Arc::new(FakeUpscaler { fallback, ..Default::default() })));
+        s.execute(COMMAND, json!({"output": "replace", "model": "mangajanai-v1-2x-1200p"})).unwrap()
+    };
+    let r = run("GPU", "CPU", true);
+    assert_eq!((r["cpu"].clone(), r["fellBack"].clone(), r["device"].clone()), (json!(true), json!(true), json!("test")), "{r}");
+    let n = r["notices"].as_array().unwrap();
+    assert_eq!(n.len(), 1, "{r}");
+    assert_eq!((n[0]["class"].as_str(), n[0]["text"].as_str(), n[0]["cause"].as_str()), (Some(CPU_FALLBACK_CLASS), Some(CPU_FALLBACK_NOTICE), Some("injected")));
+    let r = run("DirectML", "GPU, DiscreteGpu(0)", false);
+    assert_eq!((r["cpu"].clone(), r["fellBack"].clone()), (json!(false), json!(true)), "{r}");
+    assert_eq!(r["notices"][0]["class"].as_str(), Some(DIRECTML_FALLBACK_CLASS));
+    // Nothing left: no notice, the fields as before.
+    let (mut s, _) = with_fake(session(4, 4, gray));
+    let r = s.execute(COMMAND, json!({"output": "replace"})).unwrap();
+    assert_eq!((r["cpu"].clone(), r["fellBack"].clone(), r.get("notices")), (json!(false), json!(false), None), "{r}");
+}

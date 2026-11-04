@@ -22,6 +22,9 @@ pub struct DocState {
     pub saved_revision: u64,
     /// Native save cache shared with this document's workers, released with the editing state.
     pub pcraft_cache: photocraft_io::PcraftExportCache,
+    /// PSD/PSB incremental save cache: layers unchanged since the last PSD save aren't encoded
+    /// again (`photocraft_io::ExportOptions::psd_cache`).
+    pub psd_cache: photocraft_io::PsdExportCache,
     /// How much of `revision` came from view-only changes (channel eyes, targeting): pixel caches can ignore those.
     pub view_revision: u64,
     /// Area changed by the latest revision (None = assume everything changed).
@@ -103,6 +106,7 @@ impl DocState {
             revision: 1,
             saved_revision: 1,
             pcraft_cache: Default::default(),
+            psd_cache: Default::default(),
             view_revision: 0,
             last_damage: None,
             coalesce: None,

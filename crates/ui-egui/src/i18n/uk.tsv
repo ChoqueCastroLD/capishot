@@ -4145,6 +4145,8 @@ curves	Smooth	Згладити
 	Describe what to add (optional)	Опишіть, що додати (необов’язково)
 	English, Spanish or Portuguese; empty fills with background. It runs on this device, and generating means you accept the Terms of Use.	Англійська, іспанська або португальська; порожній запит заповнює фоном. Працює на цьому пристрої; генеруючи, ви приймаєте Умови використання.
 	GPU couldn't run this model; used the CPU instead	GPU не зміг запустити цю модель; натомість використано CPU
+	DirectML couldn't run this model; used wgpu instead	DirectML не зміг запустити цю модель; натомість використано wgpu
+	No usable GPU for this model; ran on the CPU instead	Немає придатного GPU для цієї моделі; натомість використано CPU
 	Menu	Меню
 	Max pixel density	Максимальна щільність пікселів
 	Display's own	Як у екрана

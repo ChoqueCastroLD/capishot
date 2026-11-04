@@ -15,6 +15,11 @@ await capishot.setMode('full');                   // Capishot's whole UI, same d
 const psd = await capishot.saveDocument(doc.id, 'psd');
 ```
 
+- `saveDocument(id, 'psd')` is incremental (#16): layers whose pixels and mask didn't change since
+  the document's last PSD save keep their encoded channels, and a plain page (pixel and type layers,
+  no effects) renders only the changed area of its merged image; the bytes are a full save's. A
+  3000×4300 page with 18 layers, one layer edited: about 4× faster natively (920 → 250 ms median);
+  `cargo run --release -p photocraft-io --example bench_psd_incremental` measures it.
 - Loading the module runs nothing on a page without `<canvas id="photocraft_canvas">` (the app's own
   `index.html` has one and starts as before). `init` starts the app on the host's canvas.
 - Hosted, the app doesn't install `window.photocraft`, the Photopea hash mode or the
@@ -31,6 +36,10 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
   document tabs and scroll bars, every frame (so Tab / ⇧Tab / F can't bring half of them back);
   zoom, pan, the tool cursor and floating windows the user opens still work. `setMode('full')`
   restores the chrome as it was. Both are live on the same session.
+- AI commands run through `execute` (`edit.inpaintAi`, `edit.removeAi`, `paint.remove` with `ai`,
+  `image.upscaleAi`) reply with `device`, `cpu` and `fellBack`: where the run really ended. A run that
+  left DirectML, found no usable GPU (the CPU, or a software adapter) or lost the GPU mid-run sets
+  `fellBack` and lists why in `notices` (`ai.directmlFallback`, `ai.cpuFallback`, `ai.gpuFallback`).
 - Events (`onEvent`): `ready`, `documents`, `documentChanged`, `dirty`, `selectionChanged`,
   `toolChanged`, `modeChanged`, `zoom`, `viewChanged`, `layerPixelsChanged`, `layersReordered`,
   `fontsMissing`, `error`. Derived once per frame, after the
