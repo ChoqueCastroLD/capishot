@@ -165,13 +165,13 @@ fn directml_matches_pytorch() {
     ort_matches_pytorch(false);
 }
 
-#[cfg(all(feature = "directml", windows))]
+#[cfg(all(feature = "directml", any(windows, target_os = "linux")))]
 #[test]
 fn onnx_runtime_cpu_matches_pytorch() {
     ort_matches_pytorch(true);
 }
 
-#[cfg(all(feature = "directml", windows))]
+#[cfg(all(feature = "directml", any(windows, target_os = "linux")))]
 fn ort_matches_pytorch(cpu: bool) {
     use photocraft_ai_lama::directml::{DmlLama, available};
     if let Err(why) = available() {

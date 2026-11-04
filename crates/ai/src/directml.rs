@@ -553,7 +553,9 @@ pub(crate) mod tests {
         if let Err(e) = available() {
             return eprintln!("ONNX Runtime with DirectML not available ({e}): skipped");
         }
-        for (shuffle, cpu) in [(1, None), (2, None), (1, Some(0)), (2, Some(2))] {
+        // Linux has no DirectML: only the CPU provider.
+        let cases: &[(usize, Option<usize>)] = if cfg!(windows) { &[(1, None), (2, None), (1, Some(0)), (2, Some(2))] } else { &[(1, Some(0)), (2, Some(2))] };
+        for &(shuffle, cpu) in cases {
             let w = tiny_fdat(shuffle);
             let dml = DmlUpscaler::fdat(w.clone(), cpu).unwrap();
             assert_eq!((dml.scale(), dml.in_channels(), dml.out_channels()), (4 / shuffle, 3, 3));
@@ -600,7 +602,8 @@ pub(crate) mod tests {
         let rgb = crate::esrgan::tests::tiny(3, "1");
         let compact = crate::compact::tests::tiny();
         let opts = TileOptions { tile: 24, overlap: 4 };
-        for cpu in [None, Some(0), Some(3)] {
+        let modes: &[Option<usize>] = if cfg!(windows) { &[None, Some(0), Some(3)] } else { &[Some(0), Some(3)] };
+        for &cpu in modes {
             let nets: Vec<(&str, Box<dyn Network>, DmlUpscaler, Planar)> = vec![
                 (
                     "esrgan gray",
