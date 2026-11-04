@@ -148,6 +148,31 @@ pub fn stroke_coverage_within(stroke: &Stroke, max_pixels: u64) -> Option<(Rect,
     Some(r.dense_coverage())
 }
 
+/// [`stroke_coverage_within`] a few points at a time: [`StrokeCoverage::push`] the stroke's
+/// points in order, then [`StrokeCoverage::finish`].
+pub struct StrokeCoverage(crate::StrokeRenderer);
+
+impl StrokeCoverage {
+    pub fn new(stroke: &Stroke) -> Self {
+        Self(crate::StrokeRenderer::new(&stroke.brush, None, 1.0))
+    }
+
+    /// Renders the dabs of the next `points` of the stroke.
+    pub fn push(&mut self, points: &[crate::StrokePoint]) {
+        self.0.push(points);
+    }
+
+    /// The stroke's coverage over its bounds, `None` when they hold more than `max_pixels`.
+    pub fn finish(mut self, max_pixels: u64) -> Option<(Rect, Vec<f32>)> {
+        self.0.finish();
+        let b = self.0.bounds();
+        if u64::from(b.width()).saturating_mul(u64::from(b.height())) > max_pixels {
+            return None;
+        }
+        Some(self.0.dense_coverage())
+    }
+}
+
 /// Index of the alpha channel, if the format has one.
 #[inline]
 pub fn alpha_index(fmt: &PixelFormat) -> Option<usize> {

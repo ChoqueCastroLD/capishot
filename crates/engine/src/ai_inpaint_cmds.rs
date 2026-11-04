@@ -468,8 +468,9 @@ struct Head {
 
 impl Head {
     /// The region's layer pixels, their RGB and the selection's coverage (on the browser threads
-    /// build's pool: a large selection takes a while on a phone).
-    fn read(self) -> Result<Plan> {
+    /// build's pool, in two parts between frames in the single-threaded one: a large selection
+    /// takes a while on a phone).
+    fn read(self) -> Result<crate::jobs::Prep<Plan>> {
         let Head { layer: id, region, new_layer, opts, doc } = self;
         let (w, h) = (region.width() as usize, region.height() as usize);
         let surf = doc.layer(id).and_then(|l| l.surface()).ok_or(EngineError::NoLayer(id))?;
@@ -485,8 +486,10 @@ impl Head {
         if !cover.iter().any(|c| *c > 0.0) {
             return Err(bad("the selection doesn't cover any pixel"));
         }
-        let rgb = to_rgb(&fmt, &layer_px);
-        Ok(Plan { layer: id, fmt, region, layer_px, rgb, cover, new_layer, opts })
+        Ok(crate::jobs::Prep::then(move |_| {
+            let rgb = to_rgb(&fmt, &layer_px);
+            Ok(crate::jobs::Prep::Done(Plan { layer: id, fmt, region, layer_px, rgb, cover, new_layer, opts }))
+        }))
     }
 }
 
