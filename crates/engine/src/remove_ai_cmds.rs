@@ -521,6 +521,47 @@ mod tests {
         assert!(red_at(&s, 31, 22), "cancelled: unchanged");
     }
 
+    /// Paint mask, then run: a mask with an erasing stroke keeps what it erased out of the hole
+    /// when read a part per step, with Manga LaMa and with MI-GAN on 2 GB: the same fill as in
+    /// one go, one undo step.
+    #[test]
+    fn a_mask_with_an_eraser_is_read_in_parts_on_every_model() {
+        use crate::jobs::{JobOutcome, Started};
+        let mask = json!({"strokes": [
+            {"points": [[29, 22], [35, 22]], "size": 14},
+            {"points": [[34, 12], [34, 32]], "size": 2, "erase": true},
+        ]});
+        for (gb, name) in [(8.0, "manga-lama"), (2.0, "migan-512")] {
+            let on = |gb: f32| {
+                let mut s = page(Arc::new(FakeInpainter::default()), true);
+                let profile = DeviceProfile { gpu: GpuClass::Integrated, mobile: true, memory_gb: Some(gb), cores: Some(8), ..Default::default() };
+                s.set_ai_upscaler(Some(Arc::new(FakeUpscaler { profile: std::sync::Mutex::new(profile), ..Default::default() })));
+                s
+            };
+            let mut one_go = on(gb);
+            assert_eq!(one_go.execute(ID, mask.clone()).unwrap()["model"], name);
+            assert!(red_at(&one_go, 34, 22) && !red_at(&one_go, 29, 22), "{name}: erased stays, painted goes");
+            crate::jobs::TEST_STEPPED_PREP.with(|h| h.set(true));
+            let mut s = on(gb);
+            let past = s.active().unwrap().history.past_len();
+            let Started::Job(job) = s.start(ID, mask.clone()).unwrap() else { panic!("a background job") };
+            let mut done = None;
+            for _ in 0..2000 {
+                s.step_jobs(&|| false);
+                if let Some(e) = s.poll_jobs().into_iter().find(|e| e.id == job) {
+                    done = Some(e);
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            crate::jobs::TEST_STEPPED_PREP.with(|h| h.set(false));
+            let e = done.unwrap_or_else(|| panic!("{name}: the job ended"));
+            assert!(matches!(e.outcome, JobOutcome::Done(_)), "{name}: {:?}", e.outcome);
+            assert_eq!(s.active().unwrap().history.past_len(), past + 1, "{name}: one undo step");
+            assert!(pixels(&s) == pixels(&one_go), "{name}: the same fill as in one go");
+        }
+    }
+
     #[test]
     fn a_missing_model_is_an_error_unless_downloads_are_allowed() {
         let fake = Arc::new(FakeInpainter { state: Some(photocraft_ai_lama::service::ModelState::NeedsDownload { bytes: 100 << 20 }), ..Default::default() });
