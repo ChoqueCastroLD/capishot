@@ -298,6 +298,7 @@ impl eframe::App for HostApp {
                 ui.centered_and_justified(|ui| ui.label("The canvas needs the wgpu renderer."));
             }
         });
+        #[cfg(not(target_arch = "wasm32"))]
         let drawn = out.as_ref().and_then(|o| o.document);
         if let Some(out) = &out {
             self.view_events(ui.ctx(), out);
