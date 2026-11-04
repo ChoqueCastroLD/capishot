@@ -136,7 +136,7 @@ impl Events {
             let (id, rev) = (st.doc.id.0, st.revision);
             // Measuring a selection walks its tiles: once per revision, not per frame.
             let selection = cached(&mut self.selections, id, rev, || {
-                st.doc.selection.as_ref().map(|s| s.content_bounds()).filter(|r| !r.is_empty()).map(|r| [r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0])
+                photocraft_engine::doc_events::selection_bounds(&st.doc)
             });
             let order = cached(&mut self.orders, id, rev, || Arc::new(core::layer_order(&st.doc)));
             let props = cached(&mut self.props, id, rev, || Arc::new(core::layer_props(&st.doc)));

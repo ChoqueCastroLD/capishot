@@ -1,0 +1,29 @@
+[package]
+name = "capishot-host"
+description = "Capishot as a library: the in-process engine API for host apps (native and wasm32)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["plugins"]
+# Sandboxed WebAssembly filter plug-ins (the engine's `plugin.*` commands).
+plugins = ["photocraft-engine/plugins"]
+
+[dependencies]
+photocraft-engine = { workspace = true }
+photocraft-doc = { workspace = true }
+photocraft-io = { workspace = true }
+photocraft-format = { workspace = true }
+photocraft-paint = { workspace = true }
+photocraft-raster = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+wasm_sync = "0.1"
+
+[dev-dependencies]
+photocraft-codecs = { workspace = true }

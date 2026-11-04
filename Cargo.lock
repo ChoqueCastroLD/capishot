@@ -1737,6 +1737,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "capishot-host"
+version = "0.13.6"
+dependencies = [
+ "photocraft-codecs",
+ "photocraft-doc",
+ "photocraft-engine",
+ "photocraft-format",
+ "photocraft-io",
+ "photocraft-paint",
+ "photocraft-raster",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "wasm_sync",
+]
+
+[[package]]
 name = "cast"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
