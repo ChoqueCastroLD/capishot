@@ -69,6 +69,9 @@ pub struct Runtime {
     /// When each document's last checkpoint was confirmed stored (`now_ms`), for the status
     /// bar's "Autosaved N min ago".
     autosaved_at: HashMap<DocId, f64>,
+    /// Edits not checkpointed yet ([`crate::Services::autosave_after_edit`]): per document, the
+    /// revision last seen, when the first such edit and the last one were seen (`now_ms`).
+    edits: HashMap<DocId, EditSeen>,
     log_len: usize,
     /// Snapping state of the drag in progress (see `snap_ui`).
     pub(crate) snap: Option<crate::snap_ui::ActiveSnap>,
@@ -161,6 +164,15 @@ use graphics::{gpu_status_rows, rendering_mode_value};
 use save::SaveRetry;
 #[cfg(test)]
 use save::{SAVE_RETRY_MAX_S, SAVE_RETRY_S, merge_changes, persist};
+/// See [`Runtime::edits`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct EditSeen {
+    revision: u64,
+    first_ms: f64,
+    last_ms: f64,
+}
+
+pub use save::{EDIT_MAX_WAIT_MS, EDIT_QUIET_MS};
 pub(crate) use save::{autosave_hint, document_written, recovery_pending, recovery_pending_all, retire_all, save_preferences};
 pub use save::{autosave_now, flush_prefs, prefs_pending, tick};
 #[cfg(test)]

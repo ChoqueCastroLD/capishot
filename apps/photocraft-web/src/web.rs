@@ -318,7 +318,7 @@ impl Boot {
         let mut services = services(inbox.clone(), photopea.clone(), outbox.clone());
         let r = recovery.services();
         (services.autosave, services.discard_autosave, services.poll_autosave) = (r.autosave, r.discard_autosave, r.poll_autosave);
-        (services.autosave_unsaved_only, services.recovery_menu) = (r.autosave_unsaved_only, r.recovery_menu);
+        (services.autosave_unsaved_only, services.autosave_after_edit, services.recovery_menu) = (r.autosave_unsaved_only, r.autosave_after_edit, r.recovery_menu);
         let mut app = PhotocraftApp::new(session, services).with_control(control);
         // The threads build runs commands that can be jobs (filters, adjustments, Image Size,
         // opening and saving files…) on its worker pool, with progress and Esc to cancel, as the
@@ -1293,7 +1293,9 @@ impl WebShell {
                 wake.request_repaint();
             });
         }
-        self.unsaved.store(self.app.has_unsaved_work() || self.presets.unsaved() || crate::embed::upload_unconfirmed(), Ordering::Relaxed);
+        let documents = self.app.has_unsaved_work();
+        self.recovery.set_unsaved(documents);
+        self.unsaved.store(documents || self.presets.unsaved() || crate::embed::upload_unconfirmed(), Ordering::Relaxed);
     }
 
     /// Fetches the served families asked for (picked in a font menu, or needed by a layout) and
