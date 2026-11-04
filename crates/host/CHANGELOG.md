@@ -29,7 +29,7 @@ may change in any commit; their changes are listed under **Experimental**. A cha
   `start_save`, `take_saved`, `inspect`); pixels (`get_pixels`, `put_pixels`); `batch`, `undo`,
   `redo`, `begin_group`, `end_group`, `group`, `in_group`; views (`views`, `define_view`,
   `apply_view`); tools (`tool`, `set_tool`); `set_view_hooks` / `ViewHooks`.
-- Files: `OpenOptions`, `Opened`, `SaveFormat`, `SaveOptions`, `Saved`, `files::MAX_FILE_BYTES`.
+- Files: `OpenOptions`, `Opened`, `SaveFormat`, `SaveOptions`, `Saved`, `files::MAX_FILE_BYTES` (`u64`).
 - Rendering: `Host::render`, `Host::snapshot`, `render::{RenderOptions, Rgba, Snapshot}`.
 - Fonts: `Host::{add_fonts, fonts_ready, request_missing_fonts, pending_font_layers,
   refresh_fonts, layout_digest}`; `fonts::{register, unregister, check, families,

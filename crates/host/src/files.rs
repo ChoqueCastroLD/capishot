@@ -18,8 +18,11 @@ use crate::error::bad;
 use crate::{DocumentId, Error, Result};
 
 /// Encoded bytes of one document at most (PSB can be larger, but a host holding more than this
-/// in one buffer is a bug on one side or the other): 4 GB.
-pub const MAX_FILE_BYTES: usize = 4 << 30;
+/// in one buffer is a bug on one side or the other): 4 GB. A `u64`: `4 << 30` as a `usize` is 0 on
+/// `wasm32`, which refused every file there.
+pub const MAX_FILE_BYTES: u64 = 4 << 30;
+// Fails to compile on a target where the limit wraps (the `usize` form did on wasm32).
+const _: () = assert!(MAX_FILE_BYTES >= 1 << 30);
 
 /// [`crate::Host::open`]'s options.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -203,7 +206,7 @@ pub(crate) fn decode(bytes: &Arc<Vec<u8>>, name: &str, settings: &photocraft_io:
     if bytes.is_empty() {
         return Err(Error::File("the file is empty".into()));
     }
-    if bytes.len() > MAX_FILE_BYTES {
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_FILE_BYTES {
         return Err(Error::File(format!("the file is larger than {} GB", MAX_FILE_BYTES >> 30)));
     }
     let (r, damaged) = photocraft_io::import_shared_for_open_with(name, bytes, settings, ctl)?;
