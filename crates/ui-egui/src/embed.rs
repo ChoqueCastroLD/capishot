@@ -89,7 +89,7 @@ pub struct EmbedFrame {
 
 /// The ctx data key marking [`install`] done.
 fn installed_id() -> egui::Id {
-    egui::Id::new("capishot-embed-installed")
+    egui::Id::unique("capishot-embed-installed")
 }
 
 impl PhotocraftApp {
@@ -145,22 +145,6 @@ pub fn control(app: &mut PhotocraftApp, ctx: &egui::Context, method: &str, param
     let (req, rx) = ControlRequest::new(method, params);
     app.dispatch_control(ctx, req);
     rx
-}
-
-/// A tool's id for hosts: its name in lowerCamelCase (`brush`, `eraser`, `cloneStamp`,
-/// `removeAi`), as the web embed's `listTools`.
-pub fn tool_id(t: Tool) -> String {
-    let name = format!("{t:?}");
-    let mut chars = name.chars();
-    match chars.next() {
-        Some(first) => first.to_ascii_lowercase().to_string() + chars.as_str(),
-        None => String::new(),
-    }
-}
-
-/// A tool from its id (or any name `ui.set` accepts).
-pub fn parse_tool(id: &str) -> Option<Tool> {
-    Tool::from_name(id)
 }
 
 /// The editor's tool now.

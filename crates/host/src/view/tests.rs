@@ -40,6 +40,12 @@ fn editor_with_doc() -> (CapishotEditor, DocumentId) {
 fn the_canvas_draws_in_the_host_context_and_leaves_its_look_alone() {
     let ctx = Context::default();
     ctx.set_visuals(egui::Visuals::light());
+    // The host's own first frame (fonts exist from then on), then its look as it set it.
+    ctx.run_ui(input(), |ui| {
+        ui.label("host list");
+    })
+    .textures_delta
+    .clear();
     let style = ctx.global_style();
     let fonts = ctx.fonts(|f| f.definitions().clone());
     let (mut editor, doc) = editor_with_doc();
@@ -60,7 +66,7 @@ fn a_document_opened_between_frames_gets_its_view() {
     let mut editor = CapishotEditor::new(None);
     let out = frame(&ctx, &mut editor);
     assert_eq!(out.document, None);
-    let (doc, _) = editor.host.open(psd(40, 30), OpenOptions { name: Some("page.psd".into()), hidden: false }).expect("opened");
+    let doc = editor.host.open(psd(40, 30), OpenOptions::named("page.psd")).expect("opened").document;
     let out = frame(&ctx, &mut editor);
     assert_eq!(out.document, Some(doc));
     let t = out.transform.expect("a mapping");
@@ -117,14 +123,16 @@ fn the_host_moves_the_camera_and_hears_about_it() {
 fn a_hidden_document_is_shown_in_one_switch() {
     let ctx = Context::default();
     let (mut editor, first) = editor_with_doc();
-    let (second, _) = editor.host.open(psd(32, 32), OpenOptions { name: Some("next.psd".into()), hidden: true }).expect("opened");
+    let second = editor.host.open(psd(32, 32), OpenOptions { name: Some("next.psd".into()), hidden: true }).expect("opened").document;
     let out = frame(&ctx, &mut editor);
     assert_eq!(out.document, Some(first), "a hidden document doesn't take the canvas");
     editor.view.prewarm(second, false, DocumentCamera::Own);
     editor.view.show_document(second, true, DocumentCamera::Keep);
     let mut shown = None;
     let mut prewarmed = false;
-    for _ in 0..20 {
+    // The switch waits for the prewarm's background work: frames until it replies (bounded).
+    let start = std::time::Instant::now();
+    while start.elapsed() < std::time::Duration::from_secs(20) {
         let out = frame(&ctx, &mut editor);
         for e in out.view_events {
             match e {
@@ -136,6 +144,7 @@ fn a_hidden_document_is_shown_in_one_switch() {
         if shown.is_some() {
             break;
         }
+        std::thread::sleep(std::time::Duration::from_millis(5));
     }
     let (document, result) = shown.expect("the switch replied");
     assert_eq!(document, second);
@@ -150,16 +159,18 @@ fn a_hidden_document_is_shown_in_one_switch() {
 fn host_prewarm_reaches_the_view() {
     let ctx = Context::default();
     let (mut editor, _) = editor_with_doc();
-    let (hidden, _) = editor.host.open(psd(16, 16), OpenOptions { name: Some("h.psd".into()), hidden: true }).expect("opened");
+    let hidden = editor.host.open(psd(16, 16), OpenOptions { name: Some("h.psd".into()), hidden: true }).expect("opened").document;
     assert!(editor.host.prewarm(hidden, &json!({})).expect("queued"), "the view takes the prewarm");
     assert!(editor.host.prewarm(hidden, &json!(3)).is_err(), "bad options are an error");
     let mut done = false;
-    for _ in 0..20 {
+    let start = std::time::Instant::now();
+    while start.elapsed() < std::time::Duration::from_secs(20) {
         let out = frame(&ctx, &mut editor);
         done |= out.view_events.iter().any(|e| matches!(e, ViewEvent::Prewarmed { document, result: Ok(_) } if *document == hidden));
         if done {
             break;
         }
+        std::thread::sleep(std::time::Duration::from_millis(5));
     }
     assert!(done);
 }
@@ -169,7 +180,7 @@ fn control_replies_carry_their_token() {
     let ctx = Context::default();
     let (mut editor, _) = editor_with_doc();
     let ok = editor.view.control("ui.set", json!({"tool": "brush"}));
-    let bad = editor.view.control("ui.set", json!({"tool": 3}));
+    let bad = editor.view.control("ui.noSuchMethod", json!({}));
     let out = frame(&ctx, &mut editor);
     let reply = |t: u64| out.view_events.iter().find_map(|e| match e {
         ViewEvent::Reply { token, result } if *token == t => Some(result.clone()),

@@ -152,7 +152,7 @@ impl Events {
             let v = app.ui.views.get(i).filter(|v| !v.fit_pending && !v.fill_pending)?;
             Some(ViewSnap { doc, zoom: v.zoom, center: v.center, rotation: v.rotation, canvas: [canvas.x, canvas.y] })
         });
-        Snapshot { active, docs: snaps, tool: core::tool_id(app.ui.tool), error: app.ui.status_error.then(|| app.ui.status.clone()), view }
+        Snapshot { active, docs: snaps, tool: app.ui.tool.id(), error: app.ui.status_error.then(|| app.ui.status.clone()), view }
     }
 }
 

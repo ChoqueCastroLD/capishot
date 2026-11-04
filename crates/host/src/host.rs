@@ -10,6 +10,7 @@ use serde_json::{Value, json};
 
 use crate::error::{Error, Result, bad};
 use crate::events::{Event, Origin, Tracker, job_event};
+use crate::files::{self, OpenOptions, Opened, SaveOptions, Saved};
 use crate::live::LiveState;
 use crate::{DocumentId, JobHandle, LayerId};
 
@@ -104,16 +105,6 @@ pub struct DocumentInfo {
     pub revision: u64,
 }
 
-/// [`Host::open`]'s options.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct OpenOptions {
-    /// The document's name (a file name; its extension also tells the decoder the format when
-    /// the bytes don't). Default `"document.psd"`.
-    pub name: Option<String>,
-    /// Open as a hidden helper document: reached by id only, the active document left as it is.
-    pub hidden: bool,
-}
-
 /// [`Host::inspect`]'s options (`document.inspect`'s params).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct InspectOptions {
@@ -188,8 +179,8 @@ pub trait ViewHooks {
 /// How [`Host::start_save`] ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SaveStarted {
-    /// Saved inline: the bytes.
-    Done(Vec<u8>),
+    /// Saved inline.
+    Done(Saved),
     /// Saving in the background: [`Host::take_saved`] once it finished.
     Job(JobHandle),
 }
@@ -204,7 +195,7 @@ struct OpenGroup {
 }
 
 type Callback = Box<dyn FnMut(&Event)>;
-type Slot = Arc<wasm_sync::Mutex<Option<Vec<u8>>>>;
+type Slot = Arc<wasm_sync::Mutex<Option<Saved>>>;
 
 /// Capishot's engine in the host's process: open documents, commands, history, jobs, events and
 /// live sync. One per editor; not `Send` (keep it on the thread that draws, like the UI).
@@ -374,11 +365,19 @@ impl Host {
     /// the events are returned, passed to every [`Self::subscribe`] callback and sent to every
     /// [`Self::events`] channel. Call it once per frame (the widget does); cheap when nothing
     /// changed. Never blocks.
+    ///
+    /// With a `view::CapishotView` attached, don't call it: the view's `ui` polls
+    /// (its canvas finishes the jobs it started, then hands their ends here).
     pub fn poll(&mut self) -> Vec<Event> {
         self.session.step_jobs(&|| false);
-        for e in self.session.poll_jobs() {
-            self.queue.push(job_event(e));
-        }
+        let jobs = self.session.poll_jobs();
+        self.poll_from_view(jobs)
+    }
+
+    /// [`Self::poll`] for the widget: the job ends its own tick already took from the session,
+    /// then the usual events.
+    pub(crate) fn poll_from_view(&mut self, jobs: Vec<jobs::JobEvent>) -> Vec<Event> {
+        self.queue.extend(jobs.into_iter().map(job_event));
         self.collect(Origin::Local);
         let events = std::mem::take(&mut self.queue);
         for e in &events {
@@ -465,28 +464,19 @@ impl Host {
 
     /// Open a PSD, PSB, `.pcraft`, PNG, JPEG, WebP… from `bytes` (a flat image becomes a
     /// one-layer document), decoded now. A shown document becomes the active one; a hidden one
-    /// leaves the active document as it is. Returns its id and the import warnings.
-    pub fn open(&mut self, bytes: Vec<u8>, opts: OpenOptions) -> Result<(DocumentId, Vec<String>)> {
-        let name = open_name(&opts);
-        let import = jobs::import_options(self.session.prefs());
-        let shared = Arc::new(bytes);
-        let (r, _) = photocraft_io::import_shared_for_open_with(&name, &shared, &import, &photocraft_raster::Interrupt::NONE)?;
-        let (doc, warnings) = (r.document, r.warnings);
-        Ok((self.admit(doc, opts.hidden), warnings))
-    }
-
-    /// [`Self::open`] for PSD/PSB bytes (any format the decoder knows is accepted).
-    pub fn open_psd(&mut self, bytes: Vec<u8>, opts: OpenOptions) -> Result<(DocumentId, Vec<String>)> {
-        self.open(bytes, opts)
+    /// leaves the active document as it is.
+    pub fn open(&mut self, bytes: Vec<u8>, opts: OpenOptions) -> Result<Opened> {
+        let decoded = files::decode(&Arc::new(bytes), &opts.name(), &files::decode_settings(&self.session), &photocraft_raster::Interrupt::NONE)?;
+        Ok(files::add_decoded(&mut self.session, decoded, opts.hidden))
     }
 
     /// [`Self::open`] in the background: decoded on a worker (natively, and in the browser
-    /// threads build), with progress and cancel. The job's result is `{document, warnings}`
-    /// (`document` the new id). Runs inline (returns [`Started::Done`]) in the single-threaded
-    /// browser build.
+    /// threads build), with progress and cancel. The job's result is `{document, warnings,
+    /// damaged, missingFonts}` (`document` the new id). Runs inline (returns [`Started::Done`])
+    /// in the single-threaded browser build.
     pub fn start_open(&mut self, bytes: Vec<u8>, opts: OpenOptions) -> Result<Started> {
-        let name = open_name(&opts);
-        let import = jobs::import_options(self.session.prefs());
+        let name = opts.name();
+        let settings = files::decode_settings(&self.session);
         let shared = Arc::new(bytes);
         let hidden = opts.hidden;
         let label = format!("Opening {name}");
@@ -496,26 +486,20 @@ impl Host {
             &label,
             false,
             move |ctx| {
-                ctx.stage(0.0, 1.0, "Decoding", |ctl| photocraft_io::import_shared_for_open_with(&name, &shared, &import, ctl))
-                    .map(|(r, _)| (r.document, r.warnings))
-                    .map_err(|e| match e {
-                        photocraft_io::IoError::Cancelled => photocraft_engine::EngineError::Cancelled,
-                        e => photocraft_engine::EngineError::Other(e.to_string()),
-                    })
+                ctx.stage(0.0, 1.0, "Decoding", |ctl| files::decode(&shared, &name, &settings, ctl)).map_err(|e| match e {
+                    Error::Cancelled => photocraft_engine::EngineError::Cancelled,
+                    e => photocraft_engine::EngineError::Other(e.to_string()),
+                })
             },
-            move |s, (doc, warnings)| {
-                let id = admit(s, doc, hidden);
-                Ok(json!({"document": id.0, "warnings": warnings}))
+            move |s, decoded| {
+                let o = files::add_decoded(s, decoded, hidden);
+                Ok(json!({"document": o.document.0, "warnings": o.warnings, "damaged": o.damaged, "missingFonts": o.missing_fonts}))
             },
         )?;
         Ok(match started {
             jobs::Started::Done(v) => Started::Done(v),
             jobs::Started::Job(id) => Started::Job(id.into()),
         })
-    }
-
-    fn admit(&mut self, doc: photocraft_engine::doc::Document, hidden: bool) -> DocumentId {
-        admit(&mut self.session, doc, hidden)
     }
 
     /// Make `document` the shown, active one in one step (a hidden one becomes shown; with
@@ -553,82 +537,73 @@ impl Host {
         Ok(())
     }
 
-    /// `document` as PSD bytes (PSB when it is too large for PSD). Incremental: layers unchanged
-    /// since the last save of this document aren't encoded again (the bytes are a full save's).
-    /// Marks the document saved. Linked smart objects are not read from disk.
+    /// `document` as PSD bytes (PSB when it is too large for PSD), marking it saved: [`Self::save`]
+    /// with the defaults. Incremental: layers unchanged since the last save of this document
+    /// aren't encoded again (the bytes are a full save's). Linked smart objects are not read from
+    /// disk.
     pub fn save_psd(&mut self, document: DocumentId) -> Result<Vec<u8>> {
-        self.save(document, "psd")
+        Ok(self.save(document, &SaveOptions::default())?.bytes)
     }
 
-    /// `document` as `format` bytes: `psd`, `psb`, `pcraft`, `png`, `jpg`, `webp`, `tiff`…
-    /// A layered save (PSD, PSB, `.pcraft`) marks the document saved.
-    pub fn save(&mut self, document: DocumentId, format: &str) -> Result<Vec<u8>> {
-        let (doc, opts, revision) = self.export_args(document, format)?;
-        let bytes = photocraft_io::export(&doc, &export_name(&doc.name, format)?, &opts)?.bytes;
-        self.mark_saved(document, format, revision);
-        Ok(bytes)
+    /// `document` as bytes in `opts.format`. A layered save (PSD, PSB, `.pcraft`) marks the
+    /// document saved unless [`SaveOptions::mark_saved`] is off.
+    pub fn save(&mut self, document: DocumentId, opts: &SaveOptions) -> Result<Saved> {
+        let pending = files::begin_save(&self.session, document, opts)?;
+        let saved = pending.encode(&photocraft_raster::Interrupt::NONE)?;
+        files::finish_save(&mut self.session, &pending);
+        Ok(saved)
     }
 
     /// [`Self::save`] in the background: encoded on a worker (natively, and in the browser
-    /// threads build), with progress and cancel. Take the bytes with [`Self::take_saved`] once
-    /// [`Event::JobFinished`] says it is done (its result is `{bytes: length, document}`). In
-    /// the single-threaded browser build it finishes inline: [`SaveStarted::Done`].
-    pub fn start_save(&mut self, document: DocumentId, format: &str) -> Result<SaveStarted> {
-        let (doc, opts, revision) = self.export_args(document, format)?;
-        let name = export_name(&doc.name, format)?;
+    /// threads build), with progress and cancel, from a snapshot (edits made meanwhile keep the
+    /// document dirty). Take the result with [`Self::take_saved`] once [`Event::JobFinished`]
+    /// says it is done (the job's result is `{bytes: length, document}`). In the
+    /// single-threaded browser build it finishes inline: [`SaveStarted::Done`].
+    pub fn start_save(&mut self, document: DocumentId, opts: &SaveOptions) -> Result<SaveStarted> {
+        let pending = files::begin_save(&self.session, document, opts)?;
         let slot = Slot::default();
         let put = slot.clone();
-        let layered = photocraft_engine::file_cmds::saves_in_place(&name);
+        let encode = pending.clone();
         let started = self.session.start_job_in_worker(
             "file.save",
-            json!({"document": document.0, "format": format}),
-            &format!("Saving {name}"),
+            json!({"document": document.0, "format": opts.format.extension()}),
+            &format!("Saving {}", self.state(document)?.doc.name),
             false,
             move |ctx| {
-                ctx.stage(0.0, 1.0, "Encoding", |ctl| photocraft_io::export_with(&doc, &name, &opts, ctl)).map(|r| r.bytes).map_err(|e| match e {
-                    photocraft_io::IoError::Cancelled => photocraft_engine::EngineError::Cancelled,
+                ctx.stage(0.0, 1.0, "Encoding", |ctl| encode.encode(ctl)).map_err(|e| match e {
+                    Error::Cancelled => photocraft_engine::EngineError::Cancelled,
                     e => photocraft_engine::EngineError::Other(e.to_string()),
                 })
             },
-            move |s, bytes: Vec<u8>| {
-                if layered {
-                    mark_saved(s, document, revision);
-                }
-                let len = bytes.len();
-                *put.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(bytes);
+            move |s, saved: Saved| {
+                files::finish_save(s, &pending);
+                let len = saved.bytes.len();
+                *put.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(saved);
                 Ok(json!({"bytes": len, "document": document.0}))
             },
         )?;
-        Ok(match started {
-            jobs::Started::Done(_) => SaveStarted::Done(slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take().unwrap_or_default()),
+        match started {
+            jobs::Started::Done(_) => slot
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take()
+                .map(SaveStarted::Done)
+                .ok_or_else(|| Error::Engine("the save finished without bytes".into())),
             jobs::Started::Job(id) => {
                 self.saved.insert(id.0, slot);
-                SaveStarted::Job(id.into())
+                Ok(SaveStarted::Job(id.into()))
             }
-        })
+        }
     }
 
-    /// The bytes of a finished [`Self::start_save`]; `None` while it runs, if it failed or was
+    /// The result of a finished [`Self::start_save`]; `None` while it runs, if it failed or was
     /// cancelled, or once taken.
-    pub fn take_saved(&mut self, job: JobHandle) -> Option<Vec<u8>> {
-        let bytes = self.saved.get(&job.0)?.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
-        if bytes.is_some() || self.session.job(job.into()).is_none() {
+    pub fn take_saved(&mut self, job: JobHandle) -> Option<Saved> {
+        let saved = self.saved.get(&job.0)?.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+        if saved.is_some() || self.session.job(job.into()).is_none() {
             self.saved.remove(&job.0);
         }
-        bytes
-    }
-
-    fn export_args(&self, document: DocumentId, format: &str) -> Result<(Arc<photocraft_engine::doc::Document>, photocraft_io::ExportOptions, u64)> {
-        let st = self.state(document)?;
-        export_name(&st.doc.name, format)?;
-        let opts = photocraft_io::ExportOptions { psd_cache: Some(st.psd_cache.clone()), read_linked_files: false, ..Default::default() };
-        Ok((st.doc.clone(), opts, st.revision))
-    }
-
-    fn mark_saved(&mut self, document: DocumentId, format: &str, revision: u64) {
-        if photocraft_engine::file_cmds::saves_in_place(&format!("x.{format}")) {
-            mark_saved(&mut self.session, document, revision);
-        }
+        saved
     }
 
     /// `document.inspect`: the document and its layer tree (ids, `uid`, `pixelRev`, names,
@@ -798,35 +773,6 @@ impl Host {
         self.execute_with("document.views.apply", json!({"name": name}), ExecOptions::on(document))
     }
 
-}
-
-fn open_name(opts: &OpenOptions) -> String {
-    opts.name.as_deref().map(str::trim).filter(|n| !n.is_empty()).unwrap_or("document.psd").to_string()
-}
-
-fn export_name(doc_name: &str, format: &str) -> Result<String> {
-    let f = format.trim().trim_start_matches('.').to_ascii_lowercase();
-    if f.is_empty() || !f.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return Err(bad("save", format!("not a format: {format:?}")));
-    }
-    let stem = doc_name.rsplit_once('.').map_or(doc_name, |(s, _)| s);
-    let stem = if stem.trim().is_empty() { "document" } else { stem };
-    Ok(format!("{stem}.{f}"))
-}
-
-fn admit(s: &mut Session, mut doc: photocraft_engine::doc::Document, hidden: bool) -> DocumentId {
-    photocraft_engine::file_cmds::raw_defaults(s, &[], &mut doc);
-    let (index, _) = if hidden { s.open_hidden_document(doc, None) } else { s.open_document(doc, None) };
-    s.documents().get(index).map(|st| st.doc.id.into()).unwrap_or(DocumentId(0))
-}
-
-fn mark_saved(s: &mut Session, document: DocumentId, revision: u64) {
-    // The session hands out the active document mutably only: a quiet scope.
-    let Ok(scope) = s.begin_scope(Some(document.into()), HistoryMode::Step) else { return };
-    if let Some(st) = s.active_mut() {
-        st.saved_revision = revision;
-    }
-    s.end_scope(scope);
 }
 
 fn info(st: &DocState, active: bool) -> DocumentInfo {

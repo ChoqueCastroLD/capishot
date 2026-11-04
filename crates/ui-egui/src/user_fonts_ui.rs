@@ -14,7 +14,7 @@
 use std::sync::{Arc, Mutex, PoisonError};
 
 use egui::RichText;
-use photocraft_doc::{DocId, LayerContent, LayerId, TextLayer};
+use photocraft_doc::{DocId, LayerContent, LayerId};
 pub use photocraft_text::user_fonts;
 use photocraft_text::user_fonts::{Added, Persistence, WriteError};
 use serde_json::{Map, Value, json};
@@ -369,39 +369,7 @@ fn install(app: &mut PhotocraftApp, ready: Vec<user_fonts::Prepared>) {
 /// Type layers (in every open document) that use one of `names` (families or PostScript names)
 /// and show the engine's own layout, so they are redrawn when those fonts change.
 fn layers_using(app: &PhotocraftApp, names: &[String]) -> Vec<(DocId, LayerId)> {
-    let mut out = Vec::new();
-    if names.is_empty() {
-        return out;
-    }
-    for st in app.session.documents() {
-        for (_, _, l) in st.doc.walk() {
-            if let LayerContent::Text(t) = &l.content
-                && uses(t, names)
-                && crate::type_tool::shows_own_layout(&st.doc, t)
-            {
-                out.push((st.doc.id, l.id));
-            }
-        }
-    }
-    out
-}
-
-/// A name compared loosely: lower case, without spaces, hyphens and underscores (a PSD written
-/// without the font names it "DejaVuSerif-Regular", its family guessed as "Deja Vu Serif").
-fn loose(name: &str) -> String {
-    name.chars().filter(|c| !matches!(c, ' ' | '-' | '_')).flat_map(char::to_lowercase).collect()
-}
-
-fn uses(t: &TextLayer, names: &[String]) -> bool {
-    let names: Vec<String> = names.iter().map(|n| loose(n)).collect();
-    t.char_runs().iter().any(|r| {
-        let family = loose(&r.style.font_family);
-        names.contains(&family)
-            || r.style.postscript_name.as_deref().is_some_and(|ps| {
-                let ps = loose(ps);
-                names.iter().any(|n| ps == *n || ps.strip_prefix(n.as_str()).is_some_and(|rest| !rest.is_empty() && family.starts_with(n.as_str())))
-            })
-    })
+    photocraft_engine::type_extra_cmds::layers_using_fonts(&app.session, names, true)
 }
 
 /// Fonts arrived: in every open document, the missing families an installed one now matches by

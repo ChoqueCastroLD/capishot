@@ -3,15 +3,16 @@
 //! save's), `.pcraft`, and the flat formats. No file system: the host owns where bytes come
 //! from and go (its server, a cache, a download), the same on native and wasm.
 //!
-//! Saving is split so a big PSD can be encoded off the editor's thread: [`begin_save`] takes a
-//! snapshot (cheap), [`PendingSave::encode`] does the work anywhere, [`finish_save`] marks the
-//! document saved at the snapshot's revision (later edits keep it dirty). [`save_bytes`] does
-//! all three in a row.
+//! [`crate::Host::open`] / [`crate::Host::save`] work inline; [`crate::Host::start_open`] /
+//! [`crate::Host::start_save`] decode or encode on a worker. A save takes a snapshot first and
+//! marks the document saved at the snapshot's revision, so edits made while it encodes keep the
+//! document dirty.
 
 use std::sync::Arc;
 
 use photocraft_doc::Document;
 use photocraft_engine::{HistoryMode, Session};
+use photocraft_raster::Interrupt;
 
 use crate::error::bad;
 use crate::{DocumentId, Error, Result};
@@ -20,20 +21,25 @@ use crate::{DocumentId, Error, Result};
 /// in one buffer is a bug on one side or the other): 4 GB.
 pub const MAX_FILE_BYTES: usize = 4 << 30;
 
-/// How to open bytes.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct OpenBytesOptions {
-    /// The document's name; its extension picks the decoder when the bytes don't tell
-    /// (`page.psd`). Empty: `document`.
-    pub name: String,
-    /// Open as a hidden document (never active, not shown; [`crate`]'s view switches to it in
-    /// one frame later). Otherwise it becomes the active document.
+/// [`crate::Host::open`]'s options.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OpenOptions {
+    /// The document's name (a file name; its extension also tells the decoder the format when
+    /// the bytes don't). Default `"document.psd"`.
+    pub name: Option<String>,
+    /// Open as a hidden helper document: reached by id only, the active document left as it is
+    /// (the view switches to it in one frame later).
     pub hidden: bool,
 }
 
-impl Default for OpenBytesOptions {
-    fn default() -> Self {
-        OpenBytesOptions { name: "document.psd".into(), hidden: false }
+impl OpenOptions {
+    /// Named `name`, shown.
+    pub fn named(name: impl Into<String>) -> Self {
+        OpenOptions { name: Some(name.into()), hidden: false }
+    }
+
+    pub(crate) fn name(&self) -> String {
+        self.name.as_deref().map(str::trim).filter(|n| !n.is_empty()).unwrap_or("document.psd").to_string()
     }
 }
 
@@ -118,7 +124,7 @@ impl SaveFormat {
 
 /// How to save.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SaveBytesOptions {
+pub struct SaveOptions {
     /// The format.
     pub format: SaveFormat,
     /// PSD/PSB: write the real merged image (Photoshop's Maximize Compatibility). Off saves
@@ -131,16 +137,16 @@ pub struct SaveBytesOptions {
     pub mark_saved: bool,
 }
 
-impl Default for SaveBytesOptions {
+impl Default for SaveOptions {
     fn default() -> Self {
-        SaveBytesOptions { format: SaveFormat::Psd, maximize_compatibility: true, image_previews: true, mark_saved: true }
+        SaveOptions { format: SaveFormat::Psd, maximize_compatibility: true, image_previews: true, mark_saved: true }
     }
 }
 
-impl SaveBytesOptions {
+impl SaveOptions {
     /// Defaults for `format`.
     pub fn new(format: SaveFormat) -> Self {
-        SaveBytesOptions { format, ..SaveBytesOptions::default() }
+        SaveOptions { format, ..SaveOptions::default() }
     }
 }
 
@@ -169,70 +175,31 @@ impl std::fmt::Debug for Saved {
     }
 }
 
-/// Opens `bytes` (PSD, PSB, `.pcraft`, PNG, JPEG, WebP, TIFF, … whatever File › Open reads) as
-/// a new document. PSD bytes are decoded in place from the shared buffer (not copied first).
-pub fn open_bytes(session: &mut Session, bytes: Arc<Vec<u8>>, opts: &OpenBytesOptions) -> Result<Opened> {
-    open_bytes_with(session, bytes, opts, &|| false, &|_| {})
-}
-
-/// [`open_bytes`] with a cancel check (polled while decoding: `true` stops with
-/// [`Error::Cancelled`], nothing opened) and a progress sink (`0.0..=1.0`). Decoding is the long
-/// part; call [`decode`] on a worker and [`add_decoded`] on the editor's thread to keep the
-/// editor drawing.
-pub fn open_bytes_with(
-    session: &mut Session,
-    bytes: Arc<Vec<u8>>,
-    opts: &OpenBytesOptions,
-    cancelled: &(dyn Fn() -> bool + Sync),
-    progress: &(dyn Fn(f32) + Sync),
-) -> Result<Opened> {
-    let decoded = decode(bytes, &opts.name, &DecodeSettings::of(session), cancelled, progress)?;
-    Ok(add_decoded(session, decoded, opts.hidden))
-}
-
 /// Decoded bytes, not open yet ([`decode`] → [`add_decoded`]).
-pub struct Decoded {
+pub(crate) struct Decoded {
     document: Document,
     warnings: Vec<String>,
     damaged: bool,
     source_read_only: bool,
 }
 
-impl std::fmt::Debug for Decoded {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Decoded").field("name", &self.document.name).field("warnings", &self.warnings).field("damaged", &self.damaged).finish()
-    }
-}
-
 /// The person's import settings (Preferences › File Handling, Camera Raw), taken from a session
 /// so [`decode`] can run on any thread.
-#[derive(Clone, Debug, Default)]
-pub struct DecodeSettings(photocraft_io::ImportOptions);
-
-impl DecodeSettings {
-    /// `session`'s import settings.
-    pub fn of(session: &Session) -> Self {
-        DecodeSettings(photocraft_engine::jobs::import_options(session.prefs()))
-    }
+pub(crate) fn decode_settings(session: &Session) -> photocraft_io::ImportOptions {
+    photocraft_engine::jobs::import_options(session.prefs())
 }
 
-/// Decodes `bytes` named `name` into a document (no session needed: any thread).
-pub fn decode(
-    bytes: Arc<Vec<u8>>,
-    name: &str,
-    settings: &DecodeSettings,
-    cancelled: &(dyn Fn() -> bool + Sync),
-    progress: &(dyn Fn(f32) + Sync),
-) -> Result<Decoded> {
+/// Decodes `bytes` (PSD, PSB, `.pcraft`, PNG, JPEG, WebP, TIFF, … whatever File › Open reads)
+/// named `name` into a document; no session needed, so any thread. PSD bytes are decoded in
+/// place from the shared buffer (not copied first).
+pub(crate) fn decode(bytes: &Arc<Vec<u8>>, name: &str, settings: &photocraft_io::ImportOptions, ctl: &Interrupt) -> Result<Decoded> {
     if bytes.is_empty() {
         return Err(Error::File("the file is empty".into()));
     }
     if bytes.len() > MAX_FILE_BYTES {
         return Err(Error::File(format!("the file is larger than {} GB", MAX_FILE_BYTES >> 30)));
     }
-    let name = if name.trim().is_empty() { "document" } else { name };
-    let ctl = photocraft_raster::Interrupt::new(cancelled, progress);
-    let (r, damaged) = photocraft_io::import_shared_for_open_with(name, &bytes, &settings.0, &ctl)?;
+    let (r, damaged) = photocraft_io::import_shared_for_open_with(name, bytes, settings, ctl)?;
     if r.preview_only {
         // A stand-in picture (an Affinity file whose data couldn't be read): opening it as the
         // document would lose the original on save.
@@ -245,22 +212,22 @@ pub fn decode(
     Ok(Decoded { document, warnings: r.warnings, damaged, source_read_only: r.source_read_only })
 }
 
-/// Adds a [`decode`]d document to the session (active, or `hidden`).
-pub fn add_decoded(session: &mut Session, decoded: Decoded, hidden: bool) -> Opened {
+/// Adds a [`decode`]d document to the session (active, or `hidden`), as File › Open does: Raw
+/// Defaults' resolution and the Color Settings policy applied.
+pub(crate) fn add_decoded(session: &mut Session, decoded: Decoded, hidden: bool) -> Opened {
     let Decoded { mut document, mut warnings, damaged, source_read_only } = decoded;
-    // Preferences › Raw Defaults › Resolution, as File › Open applies it.
     photocraft_engine::file_cmds::raw_defaults(session, &warnings, &mut document);
-    let index = if hidden { session.add_hidden_document(document, None) } else { session.add_document(document, None) };
+    let (index, _) = if hidden { session.open_hidden_document(document, None) } else { session.open_document(document, None) };
     let (id, missing_fonts) = match session.documents().get(index) {
-        Some(st) => (st.doc.id, photocraft_engine::type_extra_cmds::missing_fonts(&st.doc)),
-        // `add_*document` returns the index it put it at.
+        Some(st) => {
+            warnings.extend(photocraft_engine::type_extra_cmds::missing_font_warnings(&st.doc));
+            (st.doc.id, photocraft_engine::type_extra_cmds::missing_fonts(&st.doc))
+        }
+        // `open_*document` returns the index it put it at.
         None => (photocraft_doc::DocId(0), Vec::new()),
     };
     if source_read_only {
         mark(session, id, |st| st.source_read_only = true);
-    }
-    if let Some(st) = session.documents().get(index) {
-        warnings.extend(photocraft_engine::type_extra_cmds::missing_font_warnings(&st.doc));
     }
     Opened { document: id.into(), warnings, damaged, missing_fonts }
 }
@@ -268,13 +235,13 @@ pub fn add_decoded(session: &mut Session, decoded: Decoded, hidden: bool) -> Ope
 /// A save in progress: a snapshot of the document and its incremental-save cache. `Send`, so it
 /// can be encoded on a worker ([`PendingSave::encode`]).
 #[derive(Clone)]
-pub struct PendingSave {
+pub(crate) struct PendingSave {
     document: DocumentId,
     doc: Arc<Document>,
     revision: u64,
     psd_cache: photocraft_io::PsdExportCache,
     pcraft_cache: photocraft_io::PcraftExportCache,
-    opts: SaveBytesOptions,
+    opts: SaveOptions,
 }
 
 impl std::fmt::Debug for PendingSave {
@@ -284,18 +251,8 @@ impl std::fmt::Debug for PendingSave {
 }
 
 impl PendingSave {
-    /// The document being saved.
-    pub fn document(&self) -> DocumentId {
-        self.document
-    }
-
-    /// Encodes the snapshot (the long part; any thread).
-    pub fn encode(&self) -> Result<Saved> {
-        self.encode_with(&|| false, &|_| {})
-    }
-
-    /// [`Self::encode`] with a cancel check and a progress sink (`0.0..=1.0`).
-    pub fn encode_with(&self, cancelled: &(dyn Fn() -> bool + Sync), progress: &(dyn Fn(f32) + Sync)) -> Result<Saved> {
+    /// Encodes the snapshot (the long part; any thread), with `ctl`'s cancel check and progress.
+    pub(crate) fn encode(&self, ctl: &Interrupt) -> Result<Saved> {
         let format = self.opts.format;
         let mut eo = photocraft_io::ExportOptions {
             force_psb: format == SaveFormat::Psb,
@@ -321,8 +278,7 @@ impl PendingSave {
         }
         let name = export_name(&self.doc.name, format.extension());
         let doc = photocraft_io::named_for_file(&self.doc, &name);
-        let ctl = photocraft_raster::Interrupt::new(cancelled, progress);
-        let r = photocraft_io::export_with(&doc, &name, &eo, &ctl)?;
+        let r = photocraft_io::export_with(&doc, &name, &eo, ctl)?;
         let (reused_layers, encoded_layers) = if matches!(format, SaveFormat::Psd | SaveFormat::Psb) {
             let st = self.psd_cache.stats();
             (st.reused, st.encoded)
@@ -341,7 +297,7 @@ fn export_name(doc_name: &str, ext: &str) -> String {
 }
 
 /// Starts saving open document `doc` (a snapshot; nothing is encoded yet).
-pub fn begin_save(session: &Session, doc: DocumentId, opts: &SaveBytesOptions) -> Result<PendingSave> {
+pub(crate) fn begin_save(session: &Session, doc: DocumentId, opts: &SaveOptions) -> Result<PendingSave> {
     if let SaveFormat::Jpeg { quality } | SaveFormat::WebpLossy { quality } = opts.format
         && !(1..=100).contains(&quality)
     {
@@ -362,7 +318,7 @@ pub fn begin_save(session: &Session, doc: DocumentId, opts: &SaveBytesOptions) -
 /// Ends a save whose bytes the host has stored: a layered save (with `mark_saved`) marks the
 /// document saved at the snapshot's revision, so edits made while it encoded keep it dirty. A
 /// document closed meanwhile is no error (nothing to mark).
-pub fn finish_save(session: &mut Session, pending: &PendingSave) {
+pub(crate) fn finish_save(session: &mut Session, pending: &PendingSave) {
     if !(pending.opts.mark_saved && pending.opts.format.is_layered()) {
         return;
     }
@@ -375,30 +331,6 @@ pub fn finish_save(session: &mut Session, pending: &PendingSave) {
     });
 }
 
-/// [`begin_save`], [`PendingSave::encode`] and [`finish_save`] in a row, on this thread.
-pub fn save_bytes(session: &mut Session, doc: DocumentId, opts: &SaveBytesOptions) -> Result<Saved> {
-    let pending = begin_save(session, doc, opts)?;
-    let saved = pending.encode()?;
-    finish_save(session, &pending);
-    Ok(saved)
-}
-
-/// Is open document `doc` changed since it was opened or last saved (layered)?
-pub fn is_dirty(session: &Session, doc: DocumentId) -> Result<bool> {
-    let id: photocraft_doc::DocId = doc.into();
-    session.documents().iter().find(|st| st.doc.id == id).map(photocraft_engine::DocState::is_dirty).ok_or(Error::NoDocument(doc))
-}
-
-/// Closes open document `doc`. Unsaved changes refuse unless `force`.
-pub fn close(session: &mut Session, doc: DocumentId, force: bool) -> Result<()> {
-    let id: photocraft_doc::DocId = doc.into();
-    let index = session.index_of_document(id).ok_or(Error::NoDocument(doc))?;
-    if !force && session.documents().get(index).is_some_and(photocraft_engine::DocState::is_dirty) {
-        return Err(Error::Disabled { command: "close".into(), reason: "the document has unsaved changes (force closes it anyway)".into() });
-    }
-    session.close(index).map(|_| ()).ok_or(Error::NoDocument(doc))
-}
-
 /// Runs `f` on document `id`'s state without a switch anyone sees (the session hands out the
 /// active document mutably only: a quiet scope, a hidden document too).
 fn mark(session: &mut Session, id: photocraft_doc::DocId, f: impl FnOnce(&mut photocraft_engine::DocState)) {
@@ -409,76 +341,3 @@ fn mark(session: &mut Session, id: photocraft_doc::DocId, f: impl FnOnce(&mut ph
     session.end_scope(scope);
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn png(w: u32, h: u32) -> Arc<Vec<u8>> {
-        let px = vec![200u8; (w * h * 4) as usize];
-        let image = photocraft_codecs::Image::from_u8(w, h, photocraft_codecs::ChannelLayout::Rgba, px).unwrap();
-        Arc::new(photocraft_codecs::encode(&image, photocraft_codecs::Format::Png, &Default::default()).unwrap())
-    }
-
-    #[test]
-    fn open_save_psd_and_reopen() {
-        let mut s = Session::new();
-        let o = open_bytes(&mut s, png(16, 8), &OpenBytesOptions { name: "page.png".into(), hidden: false }).unwrap();
-        assert!(!o.damaged);
-        let first = save_bytes(&mut s, o.document, &SaveBytesOptions::default()).unwrap();
-        assert!(first.bytes.starts_with(b"8BPS"));
-        assert!(!is_dirty(&s, o.document).unwrap());
-        // Nothing changed: the second save reuses every layer.
-        let second = save_bytes(&mut s, o.document, &SaveBytesOptions::default()).unwrap();
-        assert_eq!(second.encoded_layers, 0);
-        assert_eq!(first.bytes.len(), second.bytes.len());
-        let again = open_bytes(&mut s, Arc::new(second.bytes), &OpenBytesOptions { name: "page.psd".into(), hidden: true }).unwrap();
-        assert_ne!(again.document, o.document);
-        let st = s.documents().iter().find(|st| DocumentId::from(st.doc.id) == again.document).unwrap();
-        assert_eq!((st.doc.size.width, st.doc.size.height), (16, 8));
-        assert!(st.hidden);
-    }
-
-    #[test]
-    fn flat_and_native_formats() {
-        let mut s = Session::new();
-        let o = open_bytes(&mut s, png(4, 4), &OpenBytesOptions::default()).unwrap();
-        for f in ["png", "jpg", "webp", "tiff", "pcraft", "psb"] {
-            let saved = save_bytes(&mut s, o.document, &SaveBytesOptions::new(SaveFormat::parse(f).unwrap())).unwrap();
-            assert!(!saved.bytes.is_empty(), "{f}");
-        }
-    }
-
-    #[test]
-    fn bad_input_is_an_error() {
-        let mut s = Session::new();
-        assert!(open_bytes(&mut s, Arc::new(Vec::new()), &OpenBytesOptions::default()).is_err());
-        assert!(open_bytes(&mut s, Arc::new(b"8BPS garbage".to_vec()), &OpenBytesOptions::default()).is_err());
-        assert!(open_bytes(&mut s, Arc::new(vec![0xff; 64]), &OpenBytesOptions { name: String::new(), hidden: false }).is_err());
-        assert!(SaveFormat::parse("exe").is_err());
-        assert!(save_bytes(&mut s, DocumentId(u64::MAX), &SaveBytesOptions::default()).is_err());
-        let o = open_bytes(&mut s, png(4, 4), &OpenBytesOptions::default()).unwrap();
-        assert!(save_bytes(&mut s, o.document, &SaveBytesOptions::new(SaveFormat::Jpeg { quality: 0 })).is_err());
-        assert!(close(&mut s, DocumentId(u64::MAX), true).is_err());
-        close(&mut s, o.document, false).unwrap();
-    }
-
-    #[test]
-    fn a_cancelled_open_opens_nothing() {
-        let mut s = Session::new();
-        let r = open_bytes_with(&mut s, png(4, 4), &OpenBytesOptions::default(), &|| true, &|_| {});
-        assert_eq!(r, Err(Error::Cancelled));
-        assert!(s.documents().is_empty());
-    }
-
-    #[test]
-    fn edits_during_a_background_save_keep_the_document_dirty() {
-        let mut s = Session::new();
-        let o = open_bytes(&mut s, png(4, 4), &OpenBytesOptions::default()).unwrap();
-        let pending = begin_save(&s, o.document, &SaveBytesOptions::default()).unwrap();
-        // An edit lands while the save encodes.
-        mark(&mut s, o.document.into(), |st| st.revision += 1);
-        pending.encode().unwrap();
-        finish_save(&mut s, &pending);
-        assert!(is_dirty(&s, o.document).unwrap());
-    }
-}

@@ -705,6 +705,52 @@ pub fn auto_matches(doc: &Document) -> serde_json::Map<String, Value> {
     out
 }
 
+/// Does `t` use one of `names` (families or PostScript names, compared loosely)? A PostScript
+/// name counts when it is the name itself or the name plus a style suffix of the run's family.
+pub fn uses_fonts(t: &TextLayer, names: &[String]) -> bool {
+    let names: Vec<String> = names.iter().map(|n| loose(n)).collect();
+    t.char_runs().iter().any(|r| {
+        let family = loose(&r.style.font_family);
+        names.contains(&family)
+            || r.style.postscript_name.as_deref().is_some_and(|ps| {
+                let ps = loose(ps);
+                names.iter().any(|n| ps == *n || ps.strip_prefix(n.as_str()).is_some_and(|rest| !rest.is_empty() && family.starts_with(n.as_str())))
+            })
+    })
+}
+
+/// True when the layer's pixels are what our engine draws for it (within a pixel). A PSD's type
+/// layer keeps Photoshop's pixels until it is edited, and with substituted fonts or a different
+/// line layout they sit somewhere else than our glyphs.
+pub fn shows_own_layout(doc: &Document, t: &TextLayer) -> bool {
+    let Some(cache) = &t.cache else { return false };
+    let mut eng = photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner());
+    let ours = eng.render(t, doc.resolution_dpi, doc.pixel_format()).1.surface.content_bounds();
+    let have = cache.content_bounds();
+    [(ours.x0, have.x0), (ours.y0, have.y0), (ours.x1, have.x1), (ours.y1, have.y1)].iter().all(|(a, b)| (a - b).abs() <= 1)
+}
+
+/// Type layers (in every open document) that use one of `names` ([`uses_fonts`]); with
+/// `own_only`, only those showing our own layout ([`shows_own_layout`]), the ones to redraw when
+/// those fonts arrive or change.
+pub fn layers_using_fonts(s: &Session, names: &[String], own_only: bool) -> Vec<(photocraft_doc::DocId, LayerId)> {
+    let mut out = Vec::new();
+    if names.is_empty() {
+        return out;
+    }
+    for st in s.documents() {
+        for (_, _, l) in st.doc.walk() {
+            if let LayerContent::Text(t) = &l.content
+                && uses_fonts(t, names)
+                && (!own_only || shows_own_layout(&st.doc, t))
+            {
+                out.push((st.doc.id, l.id));
+            }
+        }
+    }
+    out
+}
+
 /// Font families used by a type layer that the font database cannot supply.
 pub fn missing_fonts_in_layer(t: &TextLayer) -> Vec<String> {
     let mut engine = photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner());

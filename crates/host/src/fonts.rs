@@ -7,11 +7,14 @@
 //! (before anything lays out type) so the native build doesn't also see the computer's
 //! installed fonts, which the browser never does.
 //!
-//! The flow per document: [`crate::files::Opened::missing_fonts`] (or [`fonts_ready`]) says
-//! which families are missing; the host fetches them (a [`FontProvider`] can be asked through
-//! [`request_missing`]), [`register`]s each file, then calls [`refresh`] once for the batch
-//! (redraws what waited and maps loosely spelled names, as Photoshop's automatic Resolve Missing
-//! Fonts does); [`fonts_ready`] then has an empty `missing` list.
+//! The flow per document: [`crate::Opened::missing_fonts`] (or [`crate::Host::fonts_ready`])
+//! says which families are missing; the host fetches them (a [`FontProvider`] can be asked
+//! through [`crate::Host::request_missing_fonts`]) and gives them to
+//! [`crate::Host::add_fonts`], which registers them and redraws what waited (and maps loosely
+//! spelled names, as Photoshop's automatic Resolve Missing Fonts does); `fonts_ready` then has an
+//! empty `missing` list. A host that reads font files on a worker thread calls [`register`]
+//! there, then [`crate::Host::pending_font_layers`] (before) and
+//! [`crate::Host::refresh_fonts`] (after) on the editor's thread.
 
 use std::sync::{Arc, PoisonError};
 
@@ -97,7 +100,7 @@ pub enum FamilyStatus {
 
 /// The host's font library, asked for the families documents need. Implementations start a
 /// fetch and return at once; when a file arrives the host calls [`register`] (from any thread)
-/// and then [`refresh`] on the editor's thread.
+/// and then [`crate::Host::refresh_fonts`] on the editor's thread.
 pub trait FontProvider {
     /// Fetch the font for `family` (and these PostScript names, which pick the exact faces).
     fn request(&self, family: &str, postscript: &[String]);
@@ -116,9 +119,16 @@ pub fn use_system_fonts(on: bool) -> bool {
 
 /// Registers a font file (TTF, OTF, TTC or WOFF; `name` is its file name, for messages and the
 /// format when the bytes don't tell). From now on type in every document can use its families.
-/// Type layers already drawn without it are redrawn by [`refresh`]. Any thread.
+/// Type layers already drawn without it are redrawn by [`crate::Host::refresh_fonts`]. Any thread.
 pub fn register(name: &str, bytes: Vec<u8>) -> Result<RegisteredFont> {
-    let p = photocraft_text::user_fonts::prepare(name, bytes).map_err(|why| Error::File(format!("{}: {why}", photocraft_text::user_fonts::file_name(name))))?;
+    register_prepared(prepare(name, bytes)?)
+}
+
+fn prepare(name: &str, bytes: Vec<u8>) -> Result<photocraft_text::user_fonts::Prepared> {
+    photocraft_text::user_fonts::prepare(name, bytes).map_err(|why| Error::File(format!("{}: {why}", photocraft_text::user_fonts::file_name(name))))
+}
+
+fn register_prepared(p: photocraft_text::user_fonts::Prepared) -> Result<RegisteredFont> {
     let faces: Vec<FontFace> = p
         .entry
         .faces
@@ -143,7 +153,7 @@ pub fn register(name: &str, bytes: Vec<u8>) -> Result<RegisteredFont> {
 
 /// Removes a font [`register`] added (by its id). Returns the families that went with it. Type
 /// using them falls back on its next layout; nothing is redrawn until the host edits it or
-/// calls [`refresh`].
+/// calls [`crate::Host::refresh_fonts`].
 pub fn unregister(id: &str) -> Vec<String> {
     photocraft_text::shared().lock().unwrap_or_else(PoisonError::into_inner).fonts.unregister_user_font(id)
 }
@@ -163,7 +173,7 @@ pub fn families() -> Vec<String> {
 }
 
 /// Which families open document `doc`'s type uses, and which are missing.
-pub fn fonts_ready(session: &Session, doc: DocumentId) -> Result<FontsReady> {
+fn fonts_ready(session: &Session, doc: DocumentId) -> Result<FontsReady> {
     let d = document(session, doc)?;
     let missing: Vec<MissingFamily> = photocraft_engine::type_extra_cmds::missing_font_names(d)
         .into_iter()
@@ -182,7 +192,7 @@ pub fn fonts_ready(session: &Session, doc: DocumentId) -> Result<FontsReady> {
 }
 
 /// Asks `provider` for every family open document `doc` is missing; returns them.
-pub fn request_missing(session: &Session, doc: DocumentId, provider: &dyn FontProvider) -> Result<Vec<MissingFamily>> {
+fn request_missing(session: &Session, doc: DocumentId, provider: &dyn FontProvider) -> Result<Vec<MissingFamily>> {
     let r = fonts_ready(session, doc)?;
     for m in &r.missing {
         provider.request(&m.family, &m.postscript);
@@ -190,13 +200,13 @@ pub fn request_missing(session: &Session, doc: DocumentId, provider: &dyn FontPr
     Ok(r.missing)
 }
 
-/// What [`refresh`] did.
+/// What [`crate::Host::refresh_fonts`] did.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Refreshed {
     /// Type layers redrawn with the fonts that arrived.
     pub redrawn: Vec<(DocumentId, HostLayerId)>,
-    /// Layers of documents a background job holds: call [`refresh`] again after it ends.
+    /// Layers of documents a background job holds: call [`crate::Host::refresh_fonts`] again after it ends.
     pub busy: Vec<(DocumentId, HostLayerId)>,
     /// Documents whose missing names were mapped to a registered family spelled differently
     /// (`CCWildWords-Roman` → "CC Wild Words"); one undo step each, a clean document stays clean.
@@ -209,9 +219,9 @@ pub struct Refreshed {
 /// another app (a PSD's own rendering, which matches no layout of ours) are left as they are,
 /// as the editor does: their pixels change only when the person edits the text.
 ///
-/// `waiting` is what [`pending_layers`] returned before the fonts were registered (the layers
+/// `waiting` is what [`crate::Host::pending_font_layers`] returned before the fonts were registered (the layers
 /// drawn by our fallback then); `None` redraws every type layer that uses `families`.
-pub fn refresh(session: &mut Session, families: &[String], waiting: Option<&[(DocumentId, HostLayerId)]>, auto_resolve: bool) -> Refreshed {
+fn refresh(session: &mut Session, families: &[String], waiting: Option<&[(DocumentId, HostLayerId)]>, auto_resolve: bool) -> Refreshed {
     let mut out = Refreshed::default();
     if auto_resolve {
         let docs: Vec<DocId> =
@@ -232,7 +242,7 @@ pub fn refresh(session: &mut Session, families: &[String], waiting: Option<&[(Do
     }
     let layers: Vec<(DocId, LayerId)> = match waiting {
         Some(w) => w.iter().map(|(d, l)| ((*d).into(), (*l).into())).collect(),
-        None => layers_using(session, families, false),
+        None => photocraft_engine::type_extra_cmds::layers_using_fonts(session, families, false),
     };
     let busy = session.refresh_type_layers(&layers);
     out.busy = busy.iter().map(|(d, l)| ((*d).into(), (*l).into())).collect();
@@ -242,19 +252,75 @@ pub fn refresh(session: &mut Session, families: &[String], waiting: Option<&[(Do
 
 /// The type layers (in every open document) that use one of `families` (or PostScript names)
 /// and show our own layout now: call it *before* [`register`]ing them and pass the result to
-/// [`refresh`], so only layers drawn by our fallback are redrawn (a PSD's own pixels are kept).
-pub fn pending_layers(session: &Session, families: &[String]) -> Vec<(DocumentId, HostLayerId)> {
-    layers_using(session, families, true).into_iter().map(|(d, l)| (d.into(), l.into())).collect()
+/// [`crate::Host::refresh_fonts`], so only layers drawn by our fallback are redrawn (a PSD's own pixels are kept).
+fn pending_layers(session: &Session, families: &[String]) -> Vec<(DocumentId, HostLayerId)> {
+    photocraft_engine::type_extra_cmds::layers_using_fonts(session, families, true).into_iter().map(|(d, l)| (d.into(), l.into())).collect()
 }
 
 /// `type.layoutDigest` of open document `doc` (one layer, or every type layer): equal digests
 /// mean every glyph is placed alike, bit for bit (the same on native and wasm with the same fonts).
-pub fn layout_digest(session: &mut Session, doc: DocumentId, layer: Option<HostLayerId>, font_hashes: bool) -> Result<Value> {
+fn layout_digest(session: &mut Session, doc: DocumentId, layer: Option<HostLayerId>, font_hashes: bool) -> Result<Value> {
     let mut p = json!({ "fontHashes": font_hashes });
     if let Some(l) = layer {
         p["layer"] = json!(l.0);
     }
     Ok(session.execute_scoped("type.layoutDigest", p, Some(doc.into()), HistoryMode::None)?)
+}
+
+impl crate::Host {
+    /// Which families open document `document`'s type uses, and which are missing.
+    pub fn fonts_ready(&self, document: DocumentId) -> Result<FontsReady> {
+        fonts_ready(self.session(), document)
+    }
+
+    /// Asks `provider` for every family open document `document` is missing; returns them.
+    pub fn request_missing_fonts(&self, document: DocumentId, provider: &dyn FontProvider) -> Result<Vec<MissingFamily>> {
+        request_missing(self.session(), document, provider)
+    }
+
+    /// Registers font files (`(file name, bytes)`) and redraws the type that waited for them,
+    /// mapping loosely spelled missing names to them (one undo step per document; a clean
+    /// document stays clean). Returns each file's outcome, in order, and what was redrawn.
+    pub fn add_fonts(&mut self, files: Vec<(String, Vec<u8>)>) -> (Vec<Result<RegisteredFont>>, Refreshed) {
+        let prepared: Vec<Result<photocraft_text::user_fonts::Prepared>> = files.into_iter().map(|(name, bytes)| prepare(&name, bytes)).collect();
+        // The faces' families and PostScript names, to find the layers drawn by our fallback
+        // before the new fonts change what "our layout" is.
+        let mut names: Vec<String> = Vec::new();
+        for f in prepared.iter().flatten().flat_map(|p| &p.entry.faces) {
+            names.push(f.family.clone());
+            names.extend(f.postscript.clone());
+        }
+        let waiting = self.pending_font_layers(&names);
+        let out: Vec<Result<RegisteredFont>> = prepared.into_iter().map(|p| p.and_then(register_prepared)).collect();
+        let families: Vec<String> = out.iter().flatten().flat_map(|f| f.families.iter().cloned()).collect();
+        let refreshed = self.refresh_fonts(&families, Some(&waiting), true);
+        (out, refreshed)
+    }
+
+    /// The type layers (in every open document) that use one of `families` (or PostScript
+    /// names) and show our own layout now: call it *before* [`register`]ing them and pass the
+    /// result to [`Self::refresh_fonts`], so only layers drawn by our fallback are redrawn (a
+    /// PSD's own pixels are kept).
+    pub fn pending_font_layers(&self, families: &[String]) -> Vec<(DocumentId, HostLayerId)> {
+        pending_layers(self.session(), families)
+    }
+
+    /// After [`register`]ing a batch: in every open document, missing names a registered family
+    /// now matches loosely are mapped to it (`auto_resolve`), and type layers drawn without their
+    /// fonts are redrawn (no history step; a clean document stays clean). Layers showing pixels
+    /// from another app (a PSD's own rendering) are left as they are, as the editor does.
+    /// `waiting` is what [`Self::pending_font_layers`] returned before the fonts were
+    /// registered; `None` redraws every type layer that uses `families`.
+    pub fn refresh_fonts(&mut self, families: &[String], waiting: Option<&[(DocumentId, HostLayerId)]>, auto_resolve: bool) -> Refreshed {
+        refresh(self.session_mut(), families, waiting, auto_resolve)
+    }
+
+    /// `type.layoutDigest` of open document `document` (one layer, or every type layer): equal
+    /// digests mean every glyph is placed alike, bit for bit (the same on native and wasm with
+    /// the same fonts and [`use_system_fonts`]`(false)`).
+    pub fn layout_digest(&mut self, document: DocumentId, layer: Option<HostLayerId>, font_hashes: bool) -> Result<Value> {
+        layout_digest(self.session_mut(), document, layer, font_hashes)
+    }
 }
 
 fn document(session: &Session, doc: DocumentId) -> Result<&Document> {
@@ -270,52 +336,6 @@ fn type_layers(doc: &Document) -> Vec<&TextLayer> {
             _ => None,
         })
         .collect()
-}
-
-/// Type layers using one of `names`; with `own_only`, only those whose pixels are our own layout.
-fn layers_using(session: &Session, names: &[String], own_only: bool) -> Vec<(DocId, LayerId)> {
-    let mut out = Vec::new();
-    if names.is_empty() {
-        return out;
-    }
-    let names: Vec<String> = names.iter().map(|n| loose(n)).collect();
-    for st in session.documents() {
-        for (_, _, l) in st.doc.walk() {
-            if let LayerContent::Text(t) = &l.content
-                && uses(t, &names)
-                && (!own_only || shows_own_layout(&st.doc, t))
-            {
-                out.push((st.doc.id, l.id));
-            }
-        }
-    }
-    out
-}
-
-/// A name compared loosely: lower case, without spaces, hyphens and underscores.
-fn loose(name: &str) -> String {
-    name.chars().filter(|c| !matches!(c, ' ' | '-' | '_')).flat_map(char::to_lowercase).collect()
-}
-
-/// Does `t` use one of `names` (already [`loose`])?
-fn uses(t: &TextLayer, names: &[String]) -> bool {
-    t.char_runs().iter().any(|r| {
-        let family = loose(&r.style.font_family);
-        names.contains(&family)
-            || r.style.postscript_name.as_deref().is_some_and(|ps| {
-                let ps = loose(ps);
-                names.iter().any(|n| ps == *n || ps.strip_prefix(n.as_str()).is_some_and(|rest| !rest.is_empty() && family.starts_with(n.as_str())))
-            })
-    })
-}
-
-/// Are `t`'s pixels what our engine draws now (within a pixel), not another app's?
-fn shows_own_layout(doc: &Document, t: &TextLayer) -> bool {
-    let Some(cache) = &t.cache else { return false };
-    let mut eng = photocraft_text::shared().lock().unwrap_or_else(PoisonError::into_inner);
-    let ours = eng.render(t, doc.resolution_dpi, doc.pixel_format()).1.surface.content_bounds();
-    let have = cache.content_bounds();
-    [(ours.x0, have.x0), (ours.y0, have.y0), (ours.x1, have.x1), (ours.y1, have.y1)].iter().all(|(a, b)| (a - b).abs() <= 1)
 }
 
 /// Checks a font file without registering it (what [`register`] would refuse, and why).
@@ -369,10 +389,5 @@ mod tests {
         let none = refresh(&mut s, &["Nope".into()], None, true);
         assert!(none.redrawn.is_empty() && none.resolved.is_empty());
         assert!(pending_layers(&s, &[]).is_empty());
-    }
-
-    #[test]
-    fn loose_names_match_postscript_spellings() {
-        assert_eq!(loose("CC Wild-Words_Roman"), "ccwildwordsroman");
     }
 }

@@ -3,7 +3,7 @@
 
 use capishot_host::live::{Applied, Envelope, Op};
 use capishot_host::{
-    BatchSteps, DocumentId, Error, Event, ExecOptions, GetPixels, Host, InspectOptions, JobEnd, LayerId, OpenOptions, Origin, PutPixels, SaveStarted, Started,
+    BatchSteps, DocumentId, Error, Event, ExecOptions, GetPixels, Host, InspectOptions, JobEnd, LayerId, OpenOptions, Origin, PutPixels, SaveFormat, SaveOptions, SaveStarted, Started,
 };
 use serde_json::{Value, json};
 
@@ -101,7 +101,7 @@ fn psd_round_trips_through_bytes_and_hidden_documents_stay_hidden() {
     // Incremental: a second save gives the same bytes.
     assert_eq!(h.save_psd(doc).unwrap(), psd);
 
-    let (copy, _) = h.open_psd(psd, OpenOptions { name: Some("page.psd".into()), hidden: true }).unwrap();
+    let copy = h.open(psd, OpenOptions { name: Some("page.psd".into()), hidden: true }).unwrap().document;
     assert_eq!(h.active_document(), Some(doc), "a hidden open leaves the active document");
     let info = h.documents().into_iter().find(|d| d.id == copy).unwrap();
     assert!(info.hidden && !info.active);
@@ -135,14 +135,14 @@ fn background_open_and_save_jobs_finish_at_poll() {
     let events = h.poll();
     assert!(events.iter().any(|e| matches!(e, Event::JobFinished { end: JobEnd::Done { .. }, .. })), "{events:?}");
 
-    let bytes = match h.start_save(doc, "psd").unwrap() {
-        SaveStarted::Done(b) => b,
+    let bytes = match h.start_save(doc, &SaveOptions::default()).unwrap() {
+        SaveStarted::Done(b) => b.bytes,
         SaveStarted::Job(job) => {
             let mut tries = 0;
             loop {
                 h.poll();
                 if let Some(b) = h.take_saved(job) {
-                    break b;
+                    break b.bytes;
                 }
                 tries += 1;
                 assert!(tries < 10_000, "the save never finished");
@@ -281,7 +281,9 @@ fn bad_input_is_an_error_not_a_panic() {
     let (mut h, doc) = host_with_doc();
     assert!(h.get_pixels(doc, LayerId(999_999), GetPixels::default()).is_err());
     assert!(h.put_pixels(doc, LayerId(999_999), b"junk", PutPixels::default()).is_err());
-    assert!(h.save(doc, "../x").is_err());
+    assert!(SaveFormat::parse("../x").is_err());
+    assert!(h.save(doc, &SaveOptions::new(SaveFormat::Jpeg { quality: 0 })).is_err());
+    assert!(h.save(DocumentId(u64::MAX), &SaveOptions::default()).is_err());
     assert!(h.execute("layer.setProps", json!({"opacity": "loud"})).is_err());
     assert!(h.live_apply(doc, &Envelope { op: Op::Removed { layer: capishot_host::LayerUid(1) }, stamp: 1, origin: "x".into() }).is_err(), "not live");
 }
@@ -296,9 +298,9 @@ fn two_peers() -> (Host, DocumentId, Host, DocumentId) {
     new_layer(&mut a, "Top");
     let psd = a.save_psd(da).unwrap();
     let mut b = Host::new();
-    let (db, _) = b.open_psd(psd.clone(), OpenOptions { name: Some("page.psd".into()), hidden: false }).unwrap();
+    let db = b.open(psd.clone(), OpenOptions::named("page.psd")).unwrap().document;
     // Peer A works on its own copy of the same file too.
-    let (da, _) = a.open_psd(psd, OpenOptions { name: Some("page.psd".into()), hidden: false }).unwrap();
+    let da = a.open(psd, OpenOptions::named("page.psd")).unwrap().document;
     a.poll();
     b.poll();
     a.live_start(da, "alice").unwrap();
@@ -406,4 +408,35 @@ fn live_last_writer_wins_per_layer() {
     let cmd = Envelope { op: Op::Command { command: "layer.new.layer".into(), params: json!({"name": "Agent"}) }, stamp: 301, origin: "agent".into() };
     assert_eq!(b.live_apply(db, &cmd).unwrap(), Applied::Applied);
     assert!(layers(&b, db).iter().any(|l| l["name"] == "Agent"));
+}
+
+#[test]
+fn saves_are_incremental_flat_formats_work_and_edits_during_a_save_keep_it_dirty() {
+    let (mut h, doc) = host_with_doc();
+    new_layer(&mut h, "Ink");
+    let first = h.save(doc, &SaveOptions::default()).unwrap();
+    assert!(first.bytes.starts_with(b"8BPS"));
+    assert!(!h.documents()[0].dirty);
+    // Nothing changed: the second save encodes no layer again.
+    let second = h.save(doc, &SaveOptions::default()).unwrap();
+    assert_eq!(second.encoded_layers, 0, "{second:?}");
+    assert_eq!(first.bytes.len(), second.bytes.len());
+    for f in ["png", "jpg", "webp", "tiff", "pcraft", "psb"] {
+        let saved = h.save(doc, &SaveOptions::new(SaveFormat::parse(f).unwrap())).unwrap();
+        assert!(!saved.bytes.is_empty(), "{f}");
+    }
+    // A copy that doesn't mark the document saved.
+    new_layer(&mut h, "More");
+    h.save(doc, &SaveOptions { mark_saved: false, ..SaveOptions::default() }).unwrap();
+    assert!(h.documents()[0].dirty);
+
+    // An edit lands while a background save encodes: still dirty after it ends.
+    let started = h.start_save(doc, &SaveOptions::default()).unwrap();
+    new_layer(&mut h, "During");
+    if let SaveStarted::Job(job) = started {
+        h.wait(job).unwrap();
+        h.poll();
+        assert!(h.take_saved(job).is_some());
+    }
+    assert!(h.documents()[0].dirty);
 }

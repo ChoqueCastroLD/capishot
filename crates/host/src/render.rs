@@ -1,12 +1,11 @@
 //! Rendering a document (or a part of it) to RGBA for thumbnails, compare views and previews:
-//! the in-process `doc.render`. Pure functions of a [`Document`] snapshot, so a host can take one
-//! ([`snapshot`]) and render on a worker thread while the editor keeps going.
+//! the in-process `doc.render`. [`crate::Host::render`] renders now; [`crate::Host::snapshot`]
+//! takes a cheap [`Snapshot`] (`Send`) to render on a worker thread while the editor keeps going.
 
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use photocraft_doc::{Document, Layer};
-use photocraft_engine::Session;
 use photocraft_geom::Rect;
 
 use crate::{DocumentId, Error, LayerId, LayerUid, Result};
@@ -62,29 +61,47 @@ impl Rgba {
     }
 }
 
-/// The document `doc` as it is now: a cheap shared snapshot to render (or save) off the editor's
-/// thread. Later edits don't change it.
-pub fn snapshot(session: &Session, doc: DocumentId) -> Result<Arc<Document>> {
-    let id: photocraft_doc::DocId = doc.into();
-    session.documents().iter().find(|st| st.doc.id == id).map(|st| st.doc.clone()).ok_or(Error::NoDocument(doc))
-}
+/// An open document as it was when taken ([`crate::Host::snapshot`]): later edits don't change
+/// it. Cheap (shared), `Send`: render it on any thread.
+#[derive(Clone)]
+pub struct Snapshot(Arc<Document>);
 
-/// [`render`] of open document `doc`.
-pub fn render_document(session: &Session, doc: DocumentId, opts: &RenderOptions) -> Result<Rgba> {
-    render(&snapshot(session, doc)?, opts)
-}
-
-/// The whole canvas fitted into `max_side` pixels (a thumbnail; never enlarged).
-pub fn thumbnail(doc: &Document, max_side: u32) -> Result<Rgba> {
-    if max_side == 0 {
-        return Err(bad("`max_side` must be at least 1"));
+impl std::fmt::Debug for Snapshot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Snapshot").field("name", &self.0.name).finish_non_exhaustive()
     }
-    render(doc, &RenderOptions { max_side: Some(max_side), ..RenderOptions::default() })
 }
 
-/// Renders `doc` as `opts` asks (see [`RenderOptions`]). Errors (never panics) on a rect off the
-/// canvas, a bad scale, an unknown layer or an output over [`MAX_OUTPUT_PIXELS`].
-pub fn render(doc: &Document, opts: &RenderOptions) -> Result<Rgba> {
+impl Snapshot {
+    /// Renders it as `opts` asks (see [`RenderOptions`]). Errors (never panics) on a rect off the
+    /// canvas, a bad scale, an unknown layer or an output over [`MAX_OUTPUT_PIXELS`].
+    pub fn render(&self, opts: &RenderOptions) -> Result<Rgba> {
+        render(&self.0, opts)
+    }
+
+    /// The whole canvas fitted into `max_side` pixels (a thumbnail; never enlarged).
+    pub fn thumbnail(&self, max_side: u32) -> Result<Rgba> {
+        if max_side == 0 {
+            return Err(bad("`max_side` must be at least 1"));
+        }
+        render(&self.0, &RenderOptions { max_side: Some(max_side), ..RenderOptions::default() })
+    }
+}
+
+impl crate::Host {
+    /// Open document `document` as it is now, to render elsewhere ([`Snapshot::render`]).
+    pub fn snapshot(&self, document: DocumentId) -> Result<Snapshot> {
+        let id: photocraft_doc::DocId = document.into();
+        self.session().documents().iter().find(|st| st.doc.id == id).map(|st| Snapshot(st.doc.clone())).ok_or(Error::NoDocument(document))
+    }
+
+    /// Renders open document `document` as `opts` asks, now (the in-process `doc.render`).
+    pub fn render(&self, document: DocumentId, opts: &RenderOptions) -> Result<Rgba> {
+        self.snapshot(document)?.render(opts)
+    }
+}
+
+fn render(doc: &Document, opts: &RenderOptions) -> Result<Rgba> {
     let rect = region(doc, opts.rect)?;
     let scale = output_scale(rect, opts.scale, opts.max_side)?;
     let (w, h) = output_size(rect, scale);
@@ -163,7 +180,7 @@ fn output_size(rect: Rect, scale: f64) -> (u32, u32) {
 }
 
 /// The session ids of the layers with stable ids `uids`, in that order.
-pub fn layers_by_uid(doc: &Document, uids: &[LayerUid]) -> Result<Vec<photocraft_doc::LayerId>> {
+fn layers_by_uid(doc: &Document, uids: &[LayerUid]) -> Result<Vec<photocraft_doc::LayerId>> {
     let walk = doc.walk();
     uids.iter()
         .map(|u| walk.iter().find(|(_, _, l)| l.psd_id == Some(u.0)).map(|(_, _, l)| l.id).ok_or_else(|| Error::NoLayer(format!("uid {}", u.0))))
@@ -230,7 +247,7 @@ mod tests {
         assert_eq!(full.pixels.len(), 40 * 20 * 4);
         let half = render(&d, &RenderOptions { scale: Some(0.5), ..Default::default() }).unwrap();
         assert_eq!((half.width, half.height), (20, 10));
-        let thumb = thumbnail(&d, 10).unwrap();
+        let thumb = Snapshot(Arc::new(d.clone())).thumbnail(10).unwrap();
         assert_eq!((thumb.width, thumb.height), (10, 5));
         assert!(thumb.to_png().unwrap().starts_with(b"\x89PNG"));
     }
@@ -258,6 +275,6 @@ mod tests {
         ] {
             assert!(render(&d, &o).is_err(), "{o:?}");
         }
-        assert!(thumbnail(&d, 0).is_err());
+        assert!(Snapshot(Arc::new(d)).thumbnail(0).is_err());
     }
 }

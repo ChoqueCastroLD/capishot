@@ -174,19 +174,9 @@ pub fn show_chrome(saved: Option<&Chrome>, panels: &mut Panels, view: &mut ViewO
     }
 }
 
-/// A tool's id for hosts: its name in lowerCamelCase (`brush`, `eraser`, `cloneStamp`).
-pub fn tool_id(t: Tool) -> String {
-    let name = format!("{t:?}");
-    let mut chars = name.chars();
-    match chars.next() {
-        Some(first) => first.to_ascii_lowercase().to_string() + chars.as_str(),
-        None => String::new(),
-    }
-}
-
 /// Every tool id, in toolbar order.
 pub fn tools() -> Vec<String> {
-    Tool::ALL.iter().map(|t| tool_id(*t)).collect()
+    Tool::ALL.iter().map(|t| t.id()).collect()
 }
 
 /// A tool from its id (or any name `ui.set` accepts).
@@ -209,7 +199,7 @@ pub fn set_tool_requests(tool: &str, options: &Value) -> Result<Vec<(&'static st
     if let Some(k) = opts.keys().find(|k| !KEYS.contains(&k.as_str())) {
         return Err(format!("unknown setTool option `{k}` ({})", KEYS.join(", ")));
     }
-    let mut ui = json!({ "tool": tool_id(tool) });
+    let mut ui = json!({ "tool": tool.id() });
     if let Some(size) = opts.get("size") {
         let size = size.as_f64().filter(|s| s.is_finite() && (1.0..=5000.0).contains(s)).ok_or("size must be a number of pixels, 1..5000")?;
         ui["brushSize"] = json!(size);
@@ -676,10 +666,10 @@ mod tests {
 
     #[test]
     fn tool_ids_are_camel_case_and_parse_back() {
-        assert_eq!(tool_id(Tool::CloneStamp), "cloneStamp");
-        assert_eq!(tool_id(Tool::Brush), "brush");
+        assert_eq!(Tool::CloneStamp.id(), "cloneStamp");
+        assert_eq!(Tool::Brush.id(), "brush");
         for id in tools() {
-            assert_eq!(tool_id(parse_tool(&id).expect("a tool")), id);
+            assert_eq!(parse_tool(&id).expect("a tool").id(), id);
         }
         assert!(parse_tool("flamethrower").is_err());
     }

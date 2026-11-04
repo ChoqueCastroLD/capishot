@@ -1,4 +1,4 @@
-use super::{Affine, Arc, Document, LayerContent, LayerId, PhotocraftApp, Point, PoisonError, TextLayer, TextLayout, text_layer};
+use super::{Affine, Arc, LayerContent, LayerId, PhotocraftApp, Point, TextLayout, text_layer};
 
 /// Layout of a type layer (cached per document revision) and its text → document transform.
 pub fn layout(app: &mut PhotocraftApp, id: LayerId) -> Option<(Arc<TextLayout>, Affine, String)> {
@@ -90,16 +90,7 @@ pub(crate) fn hit_layer(app: &mut PhotocraftApp, x: f64, y: f64) -> Option<Layer
     })
 }
 
-/// True when the layer's pixels are what our engine draws for it. A PSD's type layer keeps
-/// Photoshop's pixels until it is edited, and with substituted fonts or a different line layout
-/// they sit somewhere else than the glyphs the caret and selection are placed on.
-pub(crate) fn shows_own_layout(doc: &Document, t: &TextLayer) -> bool {
-    let Some(cache) = &t.cache else { return false };
-    let mut eng = photocraft_text::shared().lock().unwrap_or_else(PoisonError::into_inner);
-    let ours = eng.render(t, doc.resolution_dpi, doc.pixel_format()).1.surface.content_bounds();
-    let have = cache.content_bounds();
-    [(ours.x0, have.x0), (ours.y0, have.y0), (ours.x1, have.x1), (ours.y1, have.y1)].iter().all(|(a, b)| (a - b).abs() <= 1)
-}
+pub(crate) use photocraft_engine::type_extra_cmds::shows_own_layout;
 
 pub(super) fn hit_offset(app: &mut PhotocraftApp, id: LayerId, x: f64, y: f64) -> usize {
     offset_at(app, id, x, y)

@@ -20,8 +20,8 @@
 //!     println!("{}", event.to_json());
 //! }
 //! let psd = host.save_psd(doc).unwrap();
-//! let (copy, _warnings) = host.open_psd(psd, OpenOptions { name: Some("copy.psd".into()), hidden: true }).unwrap();
-//! assert_ne!(copy, doc);
+//! let copy = host.open(psd, OpenOptions { name: Some("copy.psd".into()), hidden: true }).unwrap();
+//! assert_ne!(copy.document, doc);
 //! ```
 //!
 //! ## Stability
@@ -44,6 +44,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![warn(missing_docs)]
 
+pub mod ai;
 mod error;
 mod events;
 pub mod files;
@@ -52,12 +53,15 @@ mod host;
 mod ids;
 pub mod live;
 pub mod render;
+#[cfg(feature = "view")]
+pub mod view;
 
 pub use error::{Error, Result};
 pub use events::{Event, JobEnd, Origin};
+pub use files::{OpenOptions, Opened, SaveFormat, SaveOptions, Saved};
 pub use host::{
-    BatchSteps, DocumentInfo, ExecOptions, GetPixels, History, Host, InspectOptions, JobStatus, OpenOptions, Pixels, PutPixels, SaveStarted, Started,
-    Subscription, ViewHooks,
+    BatchSteps, DocumentInfo, ExecOptions, GetPixels, History, Host, InspectOptions, JobStatus, Pixels, PutPixels, SaveStarted, Started, Subscription,
+    ViewHooks,
 };
 pub use ids::{DocumentId, JobHandle, LayerId, LayerUid};
 pub use serde_json::{self, Value};

@@ -101,10 +101,10 @@ fn the_default_filter_keeps_the_app_shells_shortcuts_out() {
 #[test]
 fn tool_ids_round_trip() {
     for t in [Tool::Brush, Tool::Eraser, Tool::CloneStamp, Tool::Move] {
-        assert_eq!(parse_tool(&tool_id(t)), Some(t), "{t:?}");
+        assert_eq!(Tool::from_name(&t.id()), Some(t), "{t:?}");
     }
-    assert_eq!(tool_id(Tool::CloneStamp), "cloneStamp");
-    assert_eq!(parse_tool("noSuchTool"), None);
+    assert_eq!(Tool::CloneStamp.id(), "cloneStamp");
+    assert_eq!(Tool::from_name("noSuchTool"), None);
 }
 
 #[test]

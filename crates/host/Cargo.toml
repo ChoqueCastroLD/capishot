@@ -1,6 +1,6 @@
 [package]
 name = "capishot-host"
-description = "Capishot as a library: the in-process engine API for host apps (native and wasm32)"
+description = "Capishot as a library: the in-process engine API and canvas widget for host apps (native and wasm32)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,9 +9,22 @@ license.workspace = true
 workspace = true
 
 [features]
-default = ["plugins"]
-# Sandboxed WebAssembly filter plug-ins (the engine's `plugin.*` commands).
-plugins = ["photocraft-engine/plugins"]
+default = ["view"]
+# The canvas widget (`view::CapishotView`): draws in the host's egui context on its wgpu device.
+view = ["dep:photocraft-ui-egui", "dep:egui"]
+# Sandboxed WebAssembly filter plug-ins (the engine's `plugin.*` commands). Off for hosts unless
+# they need them: it adds the wasmi interpreter.
+plugins = ["photocraft-engine/plugins", "photocraft-ui-egui?/plugins"]
+# AI natively (desktop): burn on wgpu/CPU, DirectML on Windows (ONNX Runtime loaded at run time).
+# Enable it for native targets only (see `ai`'s docs): never in a wasm build.
+ai-native = [
+    "photocraft-ai/gpu", "photocraft-ai/cpu", "photocraft-ai/download", "photocraft-ai/directml",
+    "photocraft-ai-lama/flex", "photocraft-ai-lama/wgpu", "photocraft-ai-lama/rayon", "photocraft-ai-lama/directml",
+    "photocraft-ai-sd/flex", "photocraft-ai-sd/wgpu", "photocraft-ai-sd/rayon", "photocraft-ai-sd/native",
+]
+# AI in the browser: the AI Web Worker bridge (the host serves the worker that
+# packaging/web-ai/build.sh builds). Empty on native targets.
+ai-web = ["dep:photocraft-ai-web"]
 
 [dependencies]
 photocraft-engine = { workspace = true }
@@ -24,6 +37,12 @@ photocraft-codecs = { workspace = true }
 photocraft-compose = { workspace = true }
 photocraft-geom = { workspace = true }
 photocraft-text = { workspace = true }
+photocraft-ai = { workspace = true }
+photocraft-ai-lama = { workspace = true }
+photocraft-ai-sd = { workspace = true }
+photocraft-ai-web = { workspace = true, optional = true }
+photocraft-ui-egui = { workspace = true, optional = true }
+egui = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

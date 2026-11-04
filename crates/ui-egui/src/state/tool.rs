@@ -331,6 +331,14 @@ impl Tool {
             _ => "•",
         }
     }
+    /// The tool's id for hosts and presets: its name in lowerCamelCase (`brush`, `cloneStamp`).
+    /// [`Self::from_name`] reads it back.
+    pub fn id(self) -> String {
+        let name = format!("{self:?}");
+        let mut chars = name.chars();
+        chars.next().map(|first| first.to_ascii_lowercase().to_string() + chars.as_str()).unwrap_or_default()
+    }
+
     pub fn from_name(s: &str) -> Option<Tool> {
         let n = s.to_ascii_lowercase().replace([' ', '_', '-'], "");
         Tool::ALL.into_iter().find(|t| {

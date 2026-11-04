@@ -5,7 +5,7 @@
 //!
 //! # Setting it up
 //!
-//! [`install`] gives a session its AI services once, with the host's [`AiConfig`]: where models
+//! [`crate::Host::install_ai`] gives the editor its AI services once, with the host's [`AiConfig`]: where models
 //! are downloaded and cached, where they are downloaded from, and which device runs them.
 //!
 //! - **Native** (feature `ai-native`): burn on the GPU through wgpu (Vulkan, Metal, DX12), Manga
@@ -26,7 +26,7 @@
 //! capishot-host = { git = "…", rev = "…", features = ["ai-web"] }
 //! ```
 //!
-//! Without the feature for the target being built, [`install`] says AI isn't available and the AI
+//! Without the feature for the target being built, `install_ai` says AI isn't available and the AI
 //! commands fail with an error saying so (never a panic).
 //!
 //! # Running
@@ -47,15 +47,16 @@
 //! # Models
 //!
 //! Runs only use downloaded models unless their params allow the download (`allowDownload` /
-//! `download`). [`model_status`], [`download_model`] and the `ai.models.*` commands manage them;
-//! [`prepare_remove_ai`] starts Manga LaMa's download (about 100 MB) the first time, as the
+//! `download`). [`crate::Host::ai_model_status`], [`crate::Host::download_ai_model`] and the
+//! `ai.models.*` commands manage them; [`crate::Host::prepare_remove_ai`] starts Manga LaMa's download (about 100 MB) the first time, as the
 //! editor's Remove with AI tool does.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use photocraft_ai::catalog::{self, ModelInfo};
-use photocraft_ai::models::Status;
+use photocraft_ai::catalog;
+pub use photocraft_ai::catalog::ModelInfo;
+pub use photocraft_ai::models::Status;
 use photocraft_engine::Session;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -91,7 +92,7 @@ pub enum AiDevice {
     Cpu,
 }
 
-/// What the host decides about AI ([`install`]). The same fields on every target; each target
+/// What the host decides about AI ([`crate::Host::install_ai`]). The same fields on every target; each target
 /// reads its own.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AiConfig {
@@ -115,7 +116,7 @@ pub struct AiConfig {
     pub generative_fill: bool,
 }
 
-/// What [`install`] set up.
+/// What [`crate::Host::install_ai`] set up.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiAvailability {
@@ -141,12 +142,12 @@ impl AiAvailability {
 /// Gives `session` its AI services as `config` says, replacing any it had. Never fails: what
 /// can't be set up is left out and [`AiAvailability::reason`] says why; the AI commands then fail
 /// with an "unavailable" error. The Bubble Text Remover needs no AI and always works.
-pub fn install(session: &mut Session, config: &AiConfig) -> AiAvailability {
+fn install(session: &mut Session, config: &AiConfig) -> AiAvailability {
     install_impl(session, config)
 }
 
 /// Removes the AI services (the models already loaded are freed when no job holds them).
-pub fn uninstall(session: &mut Session) {
+fn uninstall(session: &mut Session) {
     session.set_inpainter(None);
     session.set_ai_upscaler(None);
     session.set_genfill(None);
@@ -154,6 +155,7 @@ pub fn uninstall(session: &mut Session) {
 }
 
 /// The download base `config` asks for (`None`: no downloads).
+#[cfg_attr(not(any(feature = "ai-native", feature = "ai-web")), allow(dead_code))]
 fn models_base(config: &AiConfig) -> Option<String> {
     match config.models_url.as_deref().map(str::trim) {
         None => Some(DEFAULT_MODELS_URL.to_string()),
@@ -221,7 +223,7 @@ fn install_impl(_session: &mut Session, _config: &AiConfig) -> AiAvailability {
 }
 
 /// What is installed now (also what a host that injected its own services has).
-pub fn availability(session: &Session) -> AiAvailability {
+fn availability(session: &Session) -> AiAvailability {
     let a = AiAvailability {
         inpaint: session.inpainter().is_some(),
         upscale: session.ai_upscaler().is_some(),
@@ -229,7 +231,7 @@ pub fn availability(session: &Session) -> AiAvailability {
         models: session.ai_models().is_some(),
         reason: None,
     };
-    if a.inpaint || a.upscale || a.models { a } else { AiAvailability { reason: Some("AI isn't installed (capishot_host::ai::install)".into()), ..a } }
+    if a.inpaint || a.upscale || a.models { a } else { AiAvailability { reason: Some("AI isn't installed (Host::install_ai)".into()), ..a } }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -330,13 +332,13 @@ pub fn lama() -> Option<&'static ModelInfo> {
 }
 
 /// A model's state on this device (`None`: no model service installed).
-pub fn model_status(session: &Session, model: &ModelInfo) -> Option<Status> {
+fn model_status(session: &Session, model: &ModelInfo) -> Option<Status> {
     Some(session.ai_models()?.status(model))
 }
 
-/// Queues a model's download (it resumes a paused one). Progress: [`model_status`] (or
+/// Queues a model's download (it resumes a paused one). Progress: [`crate::Host::ai_model_status`] (or
 /// `ai.models.status`), polled.
-pub fn download_model(session: &Session, model: &'static ModelInfo) -> Result<()> {
+fn download_model(session: &Session, model: &'static ModelInfo) -> Result<()> {
     let store = session.ai_models().ok_or_else(|| Error::Engine(photocraft_engine::ai_models_cmds::UNAVAILABLE.into()))?;
     store.download(model).map_err(|e| Error::Engine(e.to_string()))
 }
@@ -364,7 +366,7 @@ pub enum Readiness {
 
 /// Gets Remove with AI ready: Manga LaMa's download starts (or resumes) the first time, as the
 /// editor's tool does before its first stroke.
-pub fn prepare_remove_ai(session: &Session) -> Readiness {
+fn prepare_remove_ai(session: &Session) -> Readiness {
     let Some(m) = lama() else { return Readiness::Unavailable { reason: "Manga LaMa isn't in the model catalog".into() } };
     if session.inpainter().is_none() {
         return Readiness::Unavailable { reason: photocraft_engine::ai_inpaint_cmds::UNAVAILABLE.into() };
@@ -384,6 +386,42 @@ pub fn prepare_remove_ai(session: &Session) -> Readiness {
             Ok(()) => Readiness::Downloading { done: 0, total: m.bytes },
             Err(e) => Readiness::Unavailable { reason: e.to_string() },
         },
+    }
+}
+
+impl crate::Host {
+    /// Gives the editor its AI services as `config` says, replacing any it had. Never fails: what
+    /// can't be set up is left out and [`AiAvailability::reason`] says why; the AI commands then
+    /// fail with an "unavailable" error. The Bubble Text Remover needs no AI and always works.
+    pub fn install_ai(&mut self, config: &AiConfig) -> AiAvailability {
+        install(self.session_mut(), config)
+    }
+
+    /// Removes the AI services (the models already loaded are freed when no job holds them).
+    pub fn uninstall_ai(&mut self) {
+        uninstall(self.session_mut());
+    }
+
+    /// What AI is installed now.
+    pub fn ai_availability(&self) -> AiAvailability {
+        availability(self.session())
+    }
+
+    /// A model's state on this device (`None`: no model service installed).
+    pub fn ai_model_status(&self, model: &ModelInfo) -> Option<Status> {
+        model_status(self.session(), model)
+    }
+
+    /// Queues a model's download (it resumes a paused one); progress through
+    /// [`Self::ai_model_status`] (or `ai.models.status`), polled.
+    pub fn download_ai_model(&self, model: &'static ModelInfo) -> Result<()> {
+        download_model(self.session(), model)
+    }
+
+    /// Gets Remove with AI ready: Manga LaMa's download starts (or resumes) the first time, as
+    /// the editor's tool does before its first stroke.
+    pub fn prepare_remove_ai(&self) -> Readiness {
+        prepare_remove_ai(self.session())
     }
 }
 

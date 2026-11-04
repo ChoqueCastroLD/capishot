@@ -1740,13 +1740,22 @@ dependencies = [
 name = "capishot-host"
 version = "0.13.6"
 dependencies = [
+ "egui",
+ "photocraft-ai",
+ "photocraft-ai-lama",
+ "photocraft-ai-sd",
+ "photocraft-ai-web",
  "photocraft-codecs",
+ "photocraft-compose",
  "photocraft-doc",
  "photocraft-engine",
  "photocraft-format",
+ "photocraft-geom",
  "photocraft-io",
  "photocraft-paint",
  "photocraft-raster",
+ "photocraft-text",
+ "photocraft-ui-egui",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -7718,6 +7727,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "photocraft-ai-web"
+version = "0.13.6"
+dependencies = [
+ "js-sys",
+ "log",
+ "photocraft-ai",
+ "photocraft-ai-lama",
+ "photocraft-ai-sd",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
 name = "photocraft-ai-worker"
 version = "0.13.6"
 dependencies = [
@@ -8231,6 +8255,7 @@ dependencies = [
  "photocraft-ai",
  "photocraft-ai-lama",
  "photocraft-ai-sd",
+ "photocraft-ai-web",
  "photocraft-codecs",
  "photocraft-compose",
  "photocraft-doc",

@@ -351,7 +351,7 @@ impl CapishotView {
             view_events.push(ViewEvent::Failed { message: e.to_string() });
         }
         let events = host.poll_from_view(frame.jobs);
-        let response = ui.interact(rect, ui.id().with("capishot-view"), Sense::hover());
+        let response = ui.interact(rect, ui.scope_id().with("capishot-view"), Sense::hover());
         let hover = frame.transform.and_then(|t| response.hover_pos().and_then(|p| t.doc_at(p)));
         let overlay = frame.transform.map(|t| Overlay::new(ui.painter_at(t.canvas_rect()), t));
         ViewOutput {
@@ -377,7 +377,7 @@ impl CapishotView {
         // The host's tool, when the host changed it since the last frame.
         if self.synced_tool.as_deref() != Some(host_tool) {
             self.synced_tool = Some(host_tool.to_string());
-            match embed::parse_tool(host_tool) {
+            match photocraft_ui_egui::Tool::from_name(host_tool) {
                 Some(t) if t == embed::tool(&self.app) => {}
                 Some(_) => {
                     let reply = embed::control(&mut self.app, &ctx, "ui.set", json!({"tool": host_tool}));
@@ -423,7 +423,7 @@ impl CapishotView {
             _ => None,
         };
         // The person's tool, when it changed on the canvas.
-        let now = embed::tool_id(embed::tool(&self.app));
+        let now = embed::tool(&self.app).id();
         let tool = (self.synced_tool.as_deref() != Some(now.as_str())).then(|| {
             self.synced_tool = Some(now.clone());
             now
