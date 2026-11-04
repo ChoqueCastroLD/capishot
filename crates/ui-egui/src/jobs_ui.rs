@@ -418,8 +418,14 @@ fn run_inner(app: &mut PhotocraftApp, id: &str, params: Value) -> Result<Value, 
 /// The browser threads build runs these as background jobs on its Web Worker pool even without
 /// [`PhotocraftApp::background_jobs`] (the browser's default): the seconds-long fills and graph
 /// cuts at pen-up would otherwise hold the page's main thread. Their results are the same.
-const POOL_COMMANDS: [&str; 5] =
-    ["paint.spotHealing", "select.quick", "paint.remove", photocraft_engine::ai_inpaint_cmds::ID, photocraft_engine::bubble_text_cmds::ID];
+const POOL_COMMANDS: [&str; 6] = [
+    "paint.spotHealing",
+    "select.quick",
+    "paint.remove",
+    photocraft_engine::ai_inpaint_cmds::ID,
+    photocraft_engine::remove_ai_cmds::ID,
+    photocraft_engine::bubble_text_cmds::ID,
+];
 /// Runs `f` on the browser threads build's worker pool (callers check [`POOL_THREADS`]); here
 /// in the other builds.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
@@ -994,6 +1000,8 @@ pub(crate) fn after_open(
         let _s = crate::perf_span::span("open.user_fonts");
         crate::user_fonts_ui::after_open(app);
     }
+    // A page too large for a phone says so (and how to make it lighter).
+    crate::memory_warning::after_open(app, document);
     // Script events bound to "Open Document".
     photocraft_engine::automate_cmds::document_opened(&mut app.session);
     app.sync_views();

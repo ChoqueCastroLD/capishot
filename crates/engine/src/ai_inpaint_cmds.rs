@@ -365,7 +365,7 @@ fn enabled(s: &Session) -> std::result::Result<(), String> {
     Ok(())
 }
 
-fn plan(s: &Session, p: &Value) -> Result<Plan> {
+fn plan(s: &Session, p: &Value) -> Result<Head> {
     if !p.is_object() && !p.is_null() {
         return Err(bad("params must be a JSON object"));
     }
@@ -400,21 +400,41 @@ fn plan(s: &Session, p: &Value) -> Result<Plan> {
     if pixels > MAX_PIXELS {
         return Err(bad(format!("the area is too large to clean at once ({pixels} pixels, at most {MAX_PIXELS}); select less")));
     }
-    let (w, h) = (region.width() as usize, region.height() as usize);
-    let surf = doc.layer(id).and_then(|l| l.surface()).ok_or(EngineError::NoLayer(id))?;
-    let fmt = surf.format();
-    let layer_px = surf.read_region(region);
-    if layer_px.len() != w * h * fmt.channels() {
-        return Err(EngineError::Other("could not read the layer's pixels".into()));
+    doc.layer(id).and_then(|l| l.surface()).ok_or(EngineError::NoLayer(id))?;
+    Ok(Head { layer: id, region, new_layer, opts, doc: doc.clone() })
+}
+
+/// What [`plan`] checked on the page's thread; [`Head::read`] reads the pixels.
+struct Head {
+    layer: LayerId,
+    region: Rect,
+    new_layer: bool,
+    opts: AiOptions,
+    doc: std::sync::Arc<photocraft_doc::Document>,
+}
+
+impl Head {
+    /// The region's layer pixels, their RGB and the selection's coverage (on the browser threads
+    /// build's pool: a large selection takes a while on a phone).
+    fn read(self) -> Result<Plan> {
+        let Head { layer: id, region, new_layer, opts, doc } = self;
+        let (w, h) = (region.width() as usize, region.height() as usize);
+        let surf = doc.layer(id).and_then(|l| l.surface()).ok_or(EngineError::NoLayer(id))?;
+        let sel = doc.selection.as_ref().ok_or_else(|| bad("make a selection around what to clean"))?;
+        let fmt = surf.format();
+        let layer_px = surf.read_region(region);
+        if layer_px.len() != w * h * fmt.channels() {
+            return Err(EngineError::Other("could not read the layer's pixels".into()));
+        }
+        let sc = sel.channels().max(1);
+        let mut cover: Vec<f32> = sel.read_region(region).chunks_exact(sc).map(|p| if p[0].is_finite() { p[0].clamp(0.0, 1.0) } else { 0.0 }).collect();
+        cover.resize(w * h, 0.0);
+        if !cover.iter().any(|c| *c > 0.0) {
+            return Err(bad("the selection doesn't cover any pixel"));
+        }
+        let rgb = to_rgb(&fmt, &layer_px);
+        Ok(Plan { layer: id, fmt, region, layer_px, rgb, cover, new_layer, opts })
     }
-    let sc = sel.channels().max(1);
-    let mut cover: Vec<f32> = sel.read_region(region).chunks_exact(sc).map(|p| if p[0].is_finite() { p[0].clamp(0.0, 1.0) } else { 0.0 }).collect();
-    cover.resize(w * h, 0.0);
-    if !cover.iter().any(|c| *c > 0.0) {
-        return Err(bad("the selection doesn't cover any pixel"));
-    }
-    let rgb = to_rgb(&fmt, &layer_px);
-    Ok(Plan { layer: id, fmt, region, layer_px, rgb, cover, new_layer, opts })
 }
 
 /// What a fill of a hole within `sb` reads on `canvas`: every blob's tile can reach that far
@@ -431,15 +451,15 @@ fn inpaint_ai(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// [`inpaint_ai`] as one undo step named `label` (Remove with AI on a selection).
 pub(crate) fn inpaint_ai_labelled(s: &mut Session, p: &Value, label: &'static str) -> Result<Value> {
-    let plan = plan(s, p)?;
-    let svc = ready_inpainter(s, &plan.opts)?;
+    let head = plan(s, p)?;
+    let svc = ready_inpainter(s, &head.opts)?;
     let device = svc.device();
-    crate::jobs::run_async(
+    crate::jobs::run_async_prepared(
         s,
         label,
         true,
-        move |ctx, done| {
-            let mut plan = plan;
+        move |_ctx| head.read(),
+        move |ctx, mut plan: Plan, done| {
             ctx.progress(0.0, label);
             let (w, h) = (plan.region.width() as usize, plan.region.height() as usize);
             let (rgb, cover, opts) = (std::mem::take(&mut plan.rgb), plan.cover.clone(), plan.opts.clone());
