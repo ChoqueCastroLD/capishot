@@ -17,8 +17,7 @@ fn open_tool_remove_undo_text_save() {
     let (doc, warnings) = script::open(&mut host, "page.psd", bytes).unwrap();
     assert!(warnings.is_empty(), "{warnings:?}");
     assert_eq!(host.active_document(), Some(doc));
-    let rows = script::layers(&host, doc).unwrap();
-    let page = rows.iter().find(|r| r.kind == "pixel").expect("the page's pixel layer").id;
+    let page = script::paint_target(&host, doc).unwrap().expect("the page's pixel layer").id;
     let before = script::blob_pixels(&mut host, doc, page).unwrap();
 
     // 2. The host sets the tool; the editor reports it.

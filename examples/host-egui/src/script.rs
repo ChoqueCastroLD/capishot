@@ -66,10 +66,24 @@ pub enum Removal {
     Plain(Value),
 }
 
-/// Step 3: Remove with AI over the blob, as one undo step. Starts a job; without AI here, falls
-/// back to the non-AI Remove so undo has something to undo. `allow_download` lets the engine fetch
-/// Manga LaMa (about 100 MB) when it isn't cached.
+/// The layer Remove paints on: the selected layer when it holds pixels, else the first pixel
+/// layer (a real page often opens with a type layer selected, where Remove is disabled).
+pub fn paint_target(host: &Host, doc: DocumentId) -> Result<Option<LayerRow>> {
+    let rows = layers(host, doc)?;
+    let selected = rows.iter().find(|r| r.selected && r.kind == "pixel");
+    Ok(selected.or_else(|| rows.iter().find(|r| r.kind == "pixel")).cloned())
+}
+
+/// Step 3: Remove with AI over the blob, as one undo step, on [`paint_target`] (selected first
+/// when it isn't). Starts a job; without AI here, falls back to the non-AI Remove so undo has
+/// something to undo. `allow_download` lets the engine fetch Manga LaMa (about 100 MB) when it
+/// isn't cached.
 pub fn remove_ai(host: &mut Host, doc: DocumentId, allow_download: bool) -> Result<Removal> {
+    if let Some(target) = paint_target(host, doc)?
+        && !target.selected
+    {
+        select(host, doc, target.id)?;
+    }
     let mut p = blob_stroke();
     p["allowDownload"] = json!(allow_download);
     match host.start("edit.removeAi", p, Some(doc)) {
