@@ -5031,7 +5031,7 @@ shape	Appearance	Aspetto
 	Outline width	Spessore del contorno
 	Color Picker (Outline)	Selettore colore (contorno)
 	Edit text	Modifica testo
-	A .capiproj carries the project's settings and its font files, never pages or images.	Un .capiproj contiene le impostazioni del progetto e i suoi file di font, mai pagine o immagini.
+	A .proj.capishot carries the project's settings and its font files, never pages or images.	Un .proj.capishot contiene le impostazioni del progetto e i suoi file di font, mai pagine o immagini.
 	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Un progetto di font conserva i font di una serie per ruolo (dialogo, urlo, narrazione…) e le loro impostazioni. Creane uno per iniziare.
 	Add role	Aggiungi ruolo
 	Add tag	Aggiungi tag

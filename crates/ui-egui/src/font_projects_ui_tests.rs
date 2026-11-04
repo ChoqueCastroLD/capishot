@@ -175,23 +175,16 @@ fn bubble_type_uses_the_projects_roles() {
     assert_eq!(t.font_family, "JetBrains Mono");
 }
 
-/// A `.capiproj` opened installs its fonts among the user's (once, however often it's opened)
+/// A project file opened installs its fonts among the user's (once, however often it's opened)
 /// and adds the project.
 #[test]
 fn opening_a_capiproj_installs_its_fonts_once() {
     let font = sans("Prjqz");
     let mut p = fp::Project::new("prj", "Proyecto compartido");
     p.fonts = vec![fp::ProjectFont { family: "Prjqz".into(), role: "dialogue".into(), sha256: None }];
-    let out = fp::export(
-        &p,
-        &[fp::FontFile { name: "Prjqz-Regular.ttf".into(), families: vec!["Prjqz".into()], bytes: Arc::new(font.clone()) }],
-        &[],
-        false,
-        None,
-        None,
-        &[("Prjqz".to_string(), "Diálogos".to_string())].into(),
-    )
-    .unwrap();
+    let files = [fp::FontFile { name: "Prjqz-Regular.ttf".into(), families: vec!["Prjqz".into()], bytes: Arc::new(font.clone()) }];
+    let aliases = [("Prjqz".to_string(), "Diálogos".to_string())].into();
+    let out = fp::export(&fp::Pack { name: p.name.clone(), project: Some(&p), files: &files, aliases: Some(&aliases), ..Default::default() }).unwrap();
     let mut app = new_app();
     for _ in 0..2 {
         app.open_bytes("Proyecto.capiproj", &out.bytes).unwrap();

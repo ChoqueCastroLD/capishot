@@ -1,0 +1,104 @@
+:root {
+  /* Base */
+  --base: solarizedDark;
+  --dark: true;
+  /* Surfaces */
+  --chrome: #073642;
+  --dock: #00252f;
+  --card: #073642;
+  --card-border: #00252f;
+  --field: #00252f;
+  --field-border: #15505f;
+  --separator: #00252f;
+  --tab-strip: #00000000;
+  /* Text and icons */
+  --text: #839496;
+  --text-dim: #657b83;
+  --text-faint: #586e75;
+  --icon: #93a1a1;
+  /* Accent */
+  --accent: #268bd2;
+  --accent-soft: #278bd32e;
+  --accent-border: #268ad278;
+  --accent-text: #fdf6e3;
+  --primary-bg: #268bd2;
+  --primary-text: #fdf6e3;
+  /* Hover and selection */
+  --hover: #0e4a5a;
+  --pressed: #12596b;
+  --row-selected: #00000000;
+  /* Status colours */
+  --danger: #dc322f;
+  --warning: #b58900;
+  --caption-close: #dc322f;
+  --caption-close-text: #fdf6e3;
+  /* Canvas and scopes */
+  --canvas: #002b36;
+  --canvas-dot: #0a3d4a;
+  --histogram-bg: #002b36;
+  --histogram-level: 225;
+  --scrim: #0000006e;
+  /* Corners and layout */
+  --radius-sm: 6;
+  --radius: 8;
+  --radius-lg: 12;
+  --bevel: false;
+  --pro: false;
+  --round-chips: true;
+  /* Text sizes */
+  --font-small: 10.5;
+  --font-body: 12.5;
+  --font-button: 12.5;
+  --font-heading: 15;
+  --font-mono: 12;
+  /* Spacing */
+  --item-spacing: 8 6;
+  --button-padding: 10 4;
+  --interact-size: 24 24;
+  --slider-width: 150;
+  --combo-width: 120;
+  --menu-margin: 6;
+  --window-margin: 16;
+  --icon-width: 14;
+  --tooltip-width: 280;
+  --scroll-width: 4;
+  /* Shadows */
+  --shadow: #00000096;
+  --window-shadow: 0 10 32 0;
+  --popup-shadow: 0 6 20 0;
+}
+
+label {
+  /* Labels */
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button {
+  /* Controls */
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button:hover {
+  /* Controls: hover */
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button:active {
+  /* Controls: pressed */
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button:open {
+  /* Controls: open */
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}

@@ -3953,7 +3953,7 @@ curves	Smooth	Glätten
 	Outline width	Konturstärke
 	Color Picker (Outline)	Farbwähler (Kontur)
 	Edit text	Text bearbeiten
-	A .capiproj carries the project's settings and its font files, never pages or images.	Eine .capiproj enthält die Einstellungen des Projekts und seine Schriftdateien, nie Seiten oder Bilder.
+	A .proj.capishot carries the project's settings and its font files, never pages or images.	Eine .proj.capishot enthält die Einstellungen des Projekts und seine Schriftdateien, nie Seiten oder Bilder.
 	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Ein Schriftprojekt hält die Schriften einer Serie nach Rolle (Dialog, Schrei, Erzählung…) und ihre Einstellungen fest. Lege eines an, um zu beginnen.
 	Add role	Rolle hinzufügen
 	Add tag	Tag hinzufügen

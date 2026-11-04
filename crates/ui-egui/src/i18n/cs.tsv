@@ -4666,7 +4666,7 @@ cameraRaw	Dehaze	Odstranění oparu
 	Color Picker (Outline)	Výběr barvy (obrys)
 	Edit text	Upravit text
 	Bend	Ohyb
-	A .capiproj carries the project's settings and its font files, never pages or images.	Soubor .capiproj nese nastavení projektu a jeho soubory písem, nikdy stránky ani obrázky.
+	A .proj.capishot carries the project's settings and its font files, never pages or images.	Soubor .proj.capishot nese nastavení projektu a jeho soubory písem, nikdy stránky ani obrázky.
 	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Projekt písem uchovává písma série podle role (dialog, výkřik, vyprávění…) a jejich nastavení. Pro začátek jeden vytvořte.
 	Add role	Přidat roli
 	Add tag	Přidat značku

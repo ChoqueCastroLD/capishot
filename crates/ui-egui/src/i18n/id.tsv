@@ -3954,7 +3954,7 @@ curves	Smooth	Haluskan
 	Bend	Lengkungan
 	Horizontal Distortion	Distorsi horizontal
 	Vertical Distortion	Distorsi vertikal
-	A .capiproj carries the project's settings and its font files, never pages or images.	File .capiproj membawa pengaturan proyek dan file fontnya, tidak pernah halaman atau gambar.
+	A .proj.capishot carries the project's settings and its font files, never pages or images.	File .proj.capishot membawa pengaturan proyek dan file fontnya, tidak pernah halaman atau gambar.
 	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Proyek font menyimpan font sebuah seri menurut peran (dialog, teriakan, narasi…) beserta pengaturannya. Buat satu untuk memulai.
 	Add role	Tambah peran
 	Add tag	Tambah tag

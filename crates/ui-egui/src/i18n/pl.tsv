@@ -4552,7 +4552,7 @@ curves	Smooth	Wygładź
 	Bend	Wygięcie
 	Horizontal Distortion	Zniekształcenie poziome
 	Vertical Distortion	Zniekształcenie pionowe
-	A .capiproj carries the project's settings and its font files, never pages or images.	Plik .capiproj zawiera ustawienia projektu i jego pliki czcionek, nigdy strony ani obrazy.
+	A .proj.capishot carries the project's settings and its font files, never pages or images.	Plik .proj.capishot zawiera ustawienia projektu i jego pliki czcionek, nigdy strony ani obrazy.
 	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Projekt czcionek przechowuje czcionki serii według roli (dialog, krzyk, narracja…) i ich ustawienia. Utwórz go, aby zacząć.
 	Add role	Dodaj rolę
 	Add tag	Dodaj tag

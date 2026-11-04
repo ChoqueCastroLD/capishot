@@ -5117,7 +5117,7 @@ shape	Appearance	Оформление
 	Outline width	Толщина обводки
 	Color Picker (Outline)	Палитра цветов (обводка)
 	Edit text	Изменить текст
-	A .capiproj carries the project's settings and its font files, never pages or images.	Файл .capiproj содержит настройки проекта и его файлы шрифтов, но никогда не страницы и не изображения.
+	A .proj.capishot carries the project's settings and its font files, never pages or images.	Файл .proj.capishot содержит настройки проекта и его файлы шрифтов, но никогда не страницы и не изображения.
 	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Проект шрифтов хранит шрифты серии по ролям (диалог, крик, повествование…) и их настройки. Создайте проект, чтобы начать.
 	Add role	Добавить роль
 	Add tag	Добавить тег

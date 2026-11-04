@@ -4645,7 +4645,7 @@ curves	Smooth	Згладити
 	Bend	Вигин
 	Horizontal Distortion	Спотворення по горизонталі
 	Vertical Distortion	Спотворення по вертикалі
-	A .capiproj carries the project's settings and its font files, never pages or images.	Файл .capiproj містить налаштування проєкту та його файли шрифтів, але ніколи не сторінки чи зображення.
+	A .proj.capishot carries the project's settings and its font files, never pages or images.	Файл .proj.capishot містить налаштування проєкту та його файли шрифтів, але ніколи не сторінки чи зображення.
 	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Проєкт шрифтів зберігає шрифти серії за ролями (діалог, крик, оповідь…) та їхні налаштування. Створіть проєкт, щоб почати.
 	Add role	Додати роль
 	Add tag	Додати тег

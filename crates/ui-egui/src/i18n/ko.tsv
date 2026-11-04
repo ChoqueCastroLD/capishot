@@ -4150,7 +4150,7 @@ curves	Smooth	매끄럽게
 	Bend	구부리기
 	Horizontal Distortion	가로 왜곡
 	Vertical Distortion	세로 왜곡
-	A .capiproj carries the project's settings and its font files, never pages or images.	.capiproj에는 프로젝트 설정과 글꼴 파일이 들어 있으며 페이지나 이미지는 들어 있지 않습니다.
+	A .proj.capishot carries the project's settings and its font files, never pages or images.	.proj.capishot에는 프로젝트 설정과 글꼴 파일이 들어 있으며 페이지나 이미지는 들어 있지 않습니다.
 	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	글꼴 프로젝트는 시리즈의 글꼴을 역할(대사, 외침, 내레이션…)별로 설정과 함께 보관합니다. 시작하려면 하나 만드세요.
 	Add role	역할 추가
 	Add tag	태그 추가

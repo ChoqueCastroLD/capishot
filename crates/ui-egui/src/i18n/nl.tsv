@@ -4680,7 +4680,7 @@ curves	Smooth	Vloeiend maken
 	Bend	Buiging
 	Horizontal Distortion	Horizontale vervorming
 	Vertical Distortion	Verticale vervorming
-	A .capiproj carries the project's settings and its font files, never pages or images.	Een .capiproj bevat de instellingen van het project en zijn lettertypebestanden, nooit pagina's of afbeeldingen.
+	A .proj.capishot carries the project's settings and its font files, never pages or images.	Een .proj.capishot bevat de instellingen van het project en zijn lettertypebestanden, nooit pagina's of afbeeldingen.
 	A font project keeps a series' fonts by role (dialogue, shout, narration…) and their settings. Create one to start.	Een lettertypeproject bewaart de lettertypen van een serie per rol (dialoog, schreeuw, vertelling…) en hun instellingen. Maak er een om te beginnen.
 	Add role	Rol toevoegen
 	Add tag	Tag toevoegen

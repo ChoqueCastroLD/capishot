@@ -16,7 +16,7 @@ use crate::PhotocraftApp;
 /// the Swatches panel through [`crate::swatches_ui::import_bytes`]).
 /// `.psp` is Photoshop's live `Keyboard Shortcuts.psp` (the same XML as a `.kys`); other `.psp`
 /// settings files are refused with a clear message.
-pub const PRESET_EXTS: &[&str] = &["abr", "grd", "asl", "pat", "aco", "act", "ase", "kys", "psp", "capiproj"];
+pub const PRESET_EXTS: &[&str] = &["abr", "grd", "asl", "pat", "aco", "act", "ase", "kys", "psp", "capiproj", "capishot"];
 
 fn ext(name: &str) -> String {
     std::path::Path::new(name).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default()
@@ -93,8 +93,10 @@ pub fn open(app: &mut PhotocraftApp, name: &str, bytes: &[u8]) -> Option<Result<
         "pat" => ("pattern.import", "patterns"),
         "aco" | "act" | "ase" => return Some(crate::swatches_ui::import_bytes(app, name, bytes, false).map(|_| ())),
         "kys" | "psp" => return Some(crate::kys_import::open_bytes(app, name, bytes).map(|_| ())),
-        // A font project (Window › Font Projects): its fonts and settings, never pages.
-        "capiproj" => return Some(crate::font_projects_ui::import_bytes(app, name, bytes)),
+        // A colour theme (Preferences › Profile & Themes).
+        "capishot" if name.to_ascii_lowercase().ends_with(photocraft_engine::theme_cmds::EXTENSION) => return Some(crate::profile_ui::import_theme(app, name, bytes)),
+        // A profile or font project (Window › Font Projects): settings and fonts, never pages.
+        "capiproj" | "capishot" => return Some(crate::font_projects_ui::import_bytes(app, name, bytes)),
         _ => return None,
     };
     let stem = std::path::Path::new(name).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| tl!("Imported").into());
