@@ -1,7 +1,8 @@
 //! `edit.removeAi`: the Remove with AI tool. What the user painted (`strokes`, as the Remove
 //! tool's) or, without strokes, the selection, is erased and filled as Clean Selected Area with AI
 //! (`edit.inpaintAi`) fills a selection, with fixed options: Manga LaMa (never the lite model) at
-//! best quality, f32, the default working side and context margin, at full resolution: a hole
+//! best quality (on a device with 2 GB of memory or less, where Manga LaMa's ~500 MB doesn't fit
+//! beside the page, MI-GAN, the lite model: [`model`]), f32, the default working side and context margin, at full resolution: a hole
 //! larger than the working side is split into overlapping tiles feathered at their seams, never
 //! downscaled (`maxSide` > 0 caps and downscales as `edit.inpaintAi` does). The AI Cleaning
 //! Options dialog doesn't apply. The GPU runs it when there is one, the CPU otherwise or when the GPU fails
@@ -23,10 +24,22 @@ pub const LABEL: &str = "Remove with AI";
 /// caller's (the dialog never sends it here): default 0, full resolution.
 const FIXED: [&str; 6] = ["model", "quality", "device", "margin", "threads", "keepLoaded"];
 
-/// The inpainting params of a run: Clean Selected Area with AI's (`edit.inpaintAi`) with Manga LaMa
-/// pinned at best quality, full resolution unless `maxSide` caps it, and every other option at
-/// its default, whatever the caller sent.
-pub fn lama_params(p: &Value) -> Result<serde_json::Map<String, Value>> {
+/// The model Remove with AI runs on this device: Manga LaMa, or MI-GAN where memory is short
+/// (2 GB or less: Manga LaMa adds about 500 MB in the AI worker, and the tab is killed).
+pub fn model(s: &Session) -> Option<&'static photocraft_ai::catalog::ModelInfo> {
+    use photocraft_ai::catalog;
+    catalog::model(if lite(s) { catalog::MIGAN_ID } else { catalog::LAMA_ID })
+}
+
+/// Remove with AI uses the lite model on this device ([`model`]).
+pub fn lite(s: &Session) -> bool {
+    s.ai_profile().low_memory()
+}
+
+/// The inpainting params of a run: Clean Selected Area with AI's (`edit.inpaintAi`) with this
+/// device's [`model`] pinned (Manga LaMa at best quality, MI-GAN at fast), full resolution unless
+/// `maxSide` caps it, and every other option at its default, whatever the caller sent.
+pub fn run_params(s: &Session, p: &Value) -> Result<serde_json::Map<String, Value>> {
     let mut q = match p {
         Value::Object(m) => m.clone(),
         Value::Null => serde_json::Map::new(),
@@ -35,20 +48,21 @@ pub fn lama_params(p: &Value) -> Result<serde_json::Map<String, Value>> {
     for k in FIXED.iter().chain(&["ai", "output", "newLayer"]) {
         q.remove(*k);
     }
-    q.insert("model".into(), json!(photocraft_ai::catalog::LAMA_ID));
-    q.insert("quality".into(), json!("best"));
+    let lite = lite(s);
+    q.insert("model".into(), json!(if lite { photocraft_ai::catalog::MIGAN_ID } else { photocraft_ai::catalog::LAMA_ID }));
+    q.insert("quality".into(), json!(if lite { "fast" } else { "best" }));
     q.entry("maxSide").or_insert(json!(0));
     Ok(q)
 }
 
-/// The model state the run needs (the UI's first-use download).
-pub fn lama_state(s: &Session) -> Option<photocraft_ai_lama::service::ModelState> {
-    let p = Value::Object(lama_params(&json!({})).ok()?);
+/// Whether this device's [`model`] can run now (the tool's download prompt).
+pub fn model_state(s: &Session) -> Option<photocraft_ai_lama::service::ModelState> {
+    let p = Value::Object(run_params(s, &json!({})).ok()?);
     crate::ai_inpaint_cmds::model_state(s, &p).map(|(_, st)| st)
 }
 
 fn remove_ai(s: &mut Session, p: &Value) -> Result<Value> {
-    let mut q = lama_params(p)?;
+    let mut q = run_params(s, p)?;
     if q.contains_key("strokes") || q.contains_key("points") {
         q.insert("ai".into(), json!(true));
         q.insert("newLayer".into(), json!(false));
@@ -72,7 +86,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: LABEL,
         menu: &[],
         shortcut: None,
-        params: r#"{"strokes"?: [[[x,y,pressure?],…],…] or "points"?: [[x,y],…] (what was painted, with "size": px, as paint.remove; a stroke around an object removes what it encloses), else the selection, "sampleAllLayers"?: bool, "layer"?: id, "maxSide"?: 0 (default: full resolution, a hole larger than 512 px split into overlapping tiles feathered at their seams) or 64..2048, multiple of 8 (larger crops downscaled to it, as before), "allowDownload"?: bool (fetch Manga LaMa, about 100 MB, when it isn't on this device)} -> {"damage"|"region", "device", "model", "lite", "cpu", "fellBack", "ms", …}. Erases it and fills it as edit.inpaintAi fills a selection, with fixed options (Manga LaMa at best quality, its default working side and margin, at full resolution; model, quality, device, margin, threads and keepLoaded params are ignored), on the target layer, as one undo step ("Remove with AI"). A background job; the GPU's failure retries on the CPU."#,
+        params: r#"{"strokes"?: [[[x,y,pressure?],…],…] or "points"?: [[x,y],…] (what was painted, with "size": px, as paint.remove; a stroke around an object removes what it encloses), else the selection, "sampleAllLayers"?: bool, "layer"?: id, "maxSide"?: 0 (default: full resolution, a hole larger than 512 px split into overlapping tiles feathered at their seams) or 64..2048, multiple of 8 (larger crops downscaled to it, as before), "allowDownload"?: bool (fetch Manga LaMa, about 100 MB, when it isn't on this device)} -> {"damage"|"region", "device", "model", "lite", "cpu", "fellBack", "ms", …}. Erases it and fills it as edit.inpaintAi fills a selection, with fixed options (Manga LaMa at best quality, or MI-GAN on a device with 2 GB of memory or less, its default working side and margin, at full resolution; model, quality, device, margin, threads and keepLoaded params are ignored), on the target layer, as one undo step ("Remove with AI"). A background job; the GPU's failure retries on the CPU."#,
         enabled,
         run: remove_ai,
         journal: true,
@@ -86,17 +100,17 @@ mod tests {
     #[test]
     fn every_run_is_manga_lama_at_best_whatever_the_options_say() {
         let dialog = json!({"model": "migan-512", "quality": "fast", "device": "cpu", "maxSide": 64, "margin": 8, "threads": 2, "keepLoaded": false, "strokes": [[[1, 2]]], "ai": false});
-        let mut q = lama_params(&dialog).unwrap();
+        let mut q = run_params(&Session::new(), &dialog).unwrap();
         assert_eq!((q["model"].as_str(), q["quality"].as_str()), (Some("manga-lama"), Some("best")));
         for k in ["device", "margin", "threads", "keepLoaded", "ai"] {
             assert!(!q.contains_key(k), "{k} is fixed");
         }
         assert_eq!(q["maxSide"], 64, "the caller's maxSide goes through");
-        assert_eq!(lama_params(&json!({})).unwrap()["maxSide"], 0, "full resolution by default");
+        assert_eq!(run_params(&Session::new(), &json!({})).unwrap()["maxSide"], 0, "full resolution by default");
         assert!(q.contains_key("strokes"), "the painted strokes go through");
         q.insert("maxSide".into(), json!(0));
-        assert_eq!(lama_params(&json!({})).unwrap(), q.into_iter().filter(|(k, _)| k != "strokes").collect());
-        assert!(lama_params(&json!([1])).is_err());
+        assert_eq!(run_params(&Session::new(), &json!({})).unwrap(), q.into_iter().filter(|(k, _)| k != "strokes").collect());
+        assert!(run_params(&Session::new(), &json!([1])).is_err());
     }
 
     use std::sync::Arc;
@@ -267,6 +281,30 @@ mod tests {
     /// Visoria C.18: Remove with AI (strokes, `paint.remove` with `ai`, and the selection) says
     /// where it ran, with which model and how long it took, as `edit.inpaintAi` does.
     #[test]
+    fn a_device_with_2_gb_or_less_removes_with_mi_gan() {
+        let low = |gb: f32| {
+            let mut s = page(Arc::new(FakeInpainter::default()), true);
+            let profile = DeviceProfile { gpu: GpuClass::Integrated, mobile: true, memory_gb: Some(gb), cores: Some(8), ..Default::default() };
+            s.set_ai_upscaler(Some(Arc::new(FakeUpscaler { profile: std::sync::Mutex::new(profile), ..Default::default() })));
+            s
+        };
+        let mut s = low(2.0);
+        assert!(lite(&s) && model(&s).map(|m| m.id) == Some("migan-512"));
+        let q = run_params(&s, &json!({"model": "manga-lama", "quality": "best"})).unwrap();
+        assert_eq!((q["model"].as_str(), q["quality"].as_str()), (Some("migan-512"), Some("fast")), "the caller can't pin Manga LaMa here");
+        let r = s.execute(ID, json!({"strokes": [[[29, 22], [35, 22]]], "size": 14})).unwrap();
+        assert!(!red_at(&s, 31, 22), "removed");
+        assert_eq!((r["model"].clone(), r["lite"].clone()), (json!("migan-512"), json!(true)), "{r}");
+        for gb in [4.0, 8.0] {
+            let mut s = low(gb);
+            assert!(!lite(&s), "{gb} GB");
+            let r = s.execute(ID, json!({"strokes": [[[29, 22], [35, 22]]], "size": 14})).unwrap();
+            assert_eq!(r["model"], "manga-lama", "{gb} GB keeps Manga LaMa: {r}");
+        }
+        assert_eq!(model(&Session::new()).map(|m| m.id), Some("manga-lama"), "unknown memory: Manga LaMa");
+    }
+
+    #[test]
     fn every_ai_removal_reports_device_model_and_time() {
         let strokes = json!({"strokes": [[[29, 22], [35, 22]]], "size": 14});
         let mut ai = strokes.clone();
@@ -341,6 +379,71 @@ mod tests {
         }
         crate::jobs::TEST_HAND_OFF.with(|h| h.set(false));
         assert!(failed, "the prep's error fails the job");
+    }
+
+    /// The single-threaded browser build reads the stroke's window and hole a part per step
+    /// between frames (one go froze the page 4-5 s on a phone): with no time left, each step
+    /// does one part, and the result is the same as in one go.
+    #[test]
+    fn the_window_is_read_a_part_per_step_between_frames() {
+        use crate::jobs::{JobOutcome, Started};
+        let stroke = json!({"strokes": [[[29, 22], [35, 22]]], "size": 14});
+        let mut one_go = page(Arc::new(FakeInpainter::default()), true);
+        one_go.execute(ID, stroke.clone()).unwrap();
+        crate::jobs::TEST_STEPPED_PREP.with(|h| h.set(true));
+        for (cmd, p) in [(ID, stroke), (crate::ai_inpaint_cmds::ID, json!({"output": "current"}))] {
+            let mut s = page(Arc::new(FakeInpainter::default()), true);
+            if cmd != ID {
+                s.execute("select.rect", json!({"x": 26, "y": 16, "width": 12, "height": 14})).unwrap();
+            }
+            let past = s.active().unwrap().history.past_len();
+            let Started::Job(job) = s.start(cmd, p).unwrap() else { panic!("{cmd}: a background job") };
+            assert!(s.has_stepped_jobs(), "{cmd}: stepped");
+            assert!(red_at(&s, 31, 22), "{cmd}: nothing read in the command");
+            let (mut steps, mut done) = (0, None);
+            for _ in 0..2000 {
+                s.step_jobs(&|| false);
+                steps += 1;
+                if let Some(e) = s.poll_jobs().into_iter().find(|e| e.id == job) {
+                    done = Some(e);
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            let e = done.unwrap_or_else(|| panic!("{cmd}: the job ended"));
+            assert!(matches!(e.outcome, JobOutcome::Done(_)), "{cmd}: {:?}", e.outcome);
+            assert!(steps >= 2, "{cmd}: in parts ({steps} steps)");
+            assert!(!red_at(&s, 31, 22), "{cmd}: the blob is gone");
+            assert_eq!(s.active().unwrap().history.past_len(), past + 1, "{cmd}: one undo step");
+            if cmd == ID {
+                assert!(pixels(&s) == pixels(&one_go), "the same fill as in one go");
+            }
+        }
+        // An error in a part fails the job; Esc stops it between parts.
+        let mut s = page(Arc::new(FakeInpainter::default()), true);
+        s.execute("select.rect", json!({"x": 0, "y": 0, "width": 4, "height": 4})).unwrap();
+        let Started::Job(job) = s.start(ID, json!({"strokes": [[[40, 40], [44, 40]]], "size": 4})).unwrap() else { panic!("a job") };
+        let mut failed = false;
+        for _ in 0..2000 {
+            s.step_jobs(&|| false);
+            if let Some(e) = s.poll_jobs().into_iter().find(|e| e.id == job) {
+                failed = matches!(e.outcome, JobOutcome::Failed(_));
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(failed, "the part's error fails the job");
+        let mut s = page(Arc::new(FakeInpainter::default()), true);
+        let Started::Job(job) = s.start(ID, json!({"strokes": [[[29, 22], [35, 22]]], "size": 14})).unwrap() else { panic!("a job") };
+        s.step_jobs(&|| false);
+        s.cancel_job(job);
+        for _ in 0..50 {
+            s.step_jobs(&|| false);
+            let _ = s.poll_jobs();
+        }
+        crate::jobs::TEST_STEPPED_PREP.with(|h| h.set(false));
+        assert!(!s.has_stepped_jobs(), "cancelled: no step left");
+        assert!(red_at(&s, 31, 22), "cancelled: unchanged");
     }
 
     #[test]

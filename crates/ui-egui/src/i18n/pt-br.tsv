@@ -5374,3 +5374,6 @@ fontTab	Find More	Encontrar mais
 	{n} font files	{n} arquivos de fontes
 	{n} lines ignored:	{n} linhas ignoradas:
 	Discard changes	Descartar alterações
+	Remove with AI uses a lighter model on this device	Remover com IA usa um modelo mais leve neste dispositivo
+	This device has little memory, so Remove with AI uses MI-GAN instead of Manga LaMa.	Este dispositivo tem pouca memória, então Remover com IA usa o MI-GAN em vez do Manga LaMa.
+	Remove with AI needs to download the MI-GAN model ({size}), lighter for this device. Only once.	Remover com IA precisa baixar o modelo MI-GAN ({size}), mais leve para este dispositivo. Só uma vez.

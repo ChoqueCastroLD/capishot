@@ -1,6 +1,7 @@
 //! The Remove with AI tool ("Quitar con IA"): paint over what to remove and Manga LaMa fills it
 //! (`edit.removeAi`); with a selection, a tap fills the selection. Nothing to choose: always
-//! Manga LaMa at its best, on the GPU or the CPU. The first use downloads the model: a modal says
+//! Manga LaMa at its best, on the GPU or the CPU (on a device with 2 GB of memory or less, the
+//! lighter MI-GAN, said once: `remove_ai_cmds::model`). The first use downloads the model: a modal says
 //! so, the download starts by itself (the AI Model Manager's queue, so it resumes), and when it is
 //! done the stroke that asked for it is applied. The existing Remove tool is a separate tool.
 
@@ -19,13 +20,28 @@ pub struct Pending {
     pub params: Option<Value>,
 }
 
-fn lama() -> Option<&'static catalog::ModelInfo> {
-    catalog::model(catalog::LAMA_ID)
+/// The model the tool runs on this device: Manga LaMa, or MI-GAN with little memory.
+pub(crate) fn model(app: &PhotocraftApp) -> Option<&'static catalog::ModelInfo> {
+    photocraft_engine::remove_ai_cmds::model(&app.session)
 }
 
 /// The model's state on this device (`None`: no model store, a build without downloads).
 fn status(app: &PhotocraftApp) -> Option<Status> {
-    Some(app.session.ai_models()?.status(lama()?))
+    Some(app.session.ai_models()?.status(model(app)?))
+}
+
+/// The preference that records the lighter model was announced on this device.
+const LITE_TOLD: &str = "removeAi.liteModelTold";
+
+/// The first run on a device with little memory says, once, that a lighter model is used.
+fn tell_lite_once(app: &mut PhotocraftApp) {
+    if !photocraft_engine::remove_ai_cmds::lite(&app.session) || app.session.prefs().dialogs.get(LITE_TOLD).and_then(Value::as_bool) == Some(true) {
+        return;
+    }
+    crate::notices::post(app, "Remove with AI uses a lighter model on this device", vec!["This device has little memory, so Remove with AI uses MI-GAN instead of Manga LaMa.".to_owned()], false, None);
+    app.session.prefs.edit(|prefs| {
+        prefs.dialogs.insert(LITE_TOLD.into(), Value::Bool(true));
+    });
 }
 
 /// A finished stroke of the tool (document px; pressure in [2]).
@@ -47,6 +63,7 @@ pub fn finish_stroke(app: &mut PhotocraftApp, points: &[[f64; 3]]) {
 
 /// Runs `params`, or, the first time, downloads the model first (the modal) and runs them then.
 pub fn request(app: &mut PhotocraftApp, params: Value) {
+    tell_lite_once(app);
     match status(app) {
         Some(Status::Downloaded) | None => run(app, params),
         Some(Status::Unavailable(why)) => {
@@ -69,7 +86,7 @@ fn run(app: &mut PhotocraftApp, params: Value) {
 }
 
 fn start_download(app: &mut PhotocraftApp) {
-    let (Some(store), Some(m)) = (app.session.ai_models(), lama()) else { return };
+    let (Some(store), Some(m)) = (app.session.ai_models(), model(app)) else { return };
     if matches!(store.status(m), Status::NotDownloaded | Status::Paused { .. } | Status::Failed(_) | Status::UpdateAvailable)
         && let Err(e) = store.download(m)
     {
@@ -86,7 +103,7 @@ pub fn is_open(app: &PhotocraftApp) -> bool {
 /// Stops waiting: the run is dropped and the download pauses (the progress card's Cancel).
 pub(crate) fn cancel(app: &mut PhotocraftApp) {
     app.remove_ai.params = None;
-    if let (Some(store), Some(m)) = (app.session.ai_models(), lama()) {
+    if let (Some(store), Some(m)) = (app.session.ai_models(), model(app)) {
         store.pause(Some(m));
     }
 }
