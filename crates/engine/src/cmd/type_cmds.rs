@@ -651,37 +651,80 @@ pub fn refresh(doc: &Document, t: &mut TextLayer) {
 /// [`refresh`] given only the two things it reads from the document: its resolution and its
 /// pixel format. A caller holding the layer mutably reads them first instead of cloning the whole
 /// document to pass it, once per keystroke and pointer move while typing (#7092).
+///
+/// A font the layer uses that the host serves and that is still on its way is never drawn as a
+/// fallback first: the layer keeps the pixels it shows (none for a new layer) until the font
+/// arrives or fails, and the shell redraws it then ([`awaits_redraw`]). Its text and `TySh` are
+/// up to date meanwhile.
 pub fn refresh_at(dpi: f32, format: PixelFormat, t: &mut TextLayer) {
     let mut eng = photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner());
+    if !eng.awaited_fonts(t).is_empty() {
+        let layout = eng.layout(t, dpi);
+        photocraft_text::fit_perspective(&layout, t);
+        if let Some(c) = &t.cache {
+            rendered::mark_stale(c);
+        }
+        t.psd_raw = Some(Arc::new(photocraft_text::psd::build_tysh(t, dpi, layout.bounds())));
+        return;
+    }
     let (layout, r) = eng.render_fitted(t, dpi, format);
     rendered::mark(&r.surface);
     t.cache = Some(r.surface);
     t.psd_raw = Some(Arc::new(photocraft_text::psd::build_tysh(t, dpi, layout.bounds())));
 }
 
+/// Does the type layer wait to be drawn with a font that was on its way ([`refresh_at`]): it
+/// shows no pixels yet, or pixels kept from before its last change. The shell redraws such layers
+/// when served fonts arrive or fail.
+pub fn awaits_redraw(t: &TextLayer) -> bool {
+    t.cache.as_ref().is_none_or(|c| c.tiles().next().is_none() || rendered::stale(c))
+}
+
 /// Type layer pixels this engine rendered (and so can render again), by their first tile: a
-/// cache read from a file (Photoshop's own rendering) is never dropped from history.
+/// cache read from a file (Photoshop's own rendering) is never dropped from history. Also the
+/// pixels kept while a layer's font is on its way (stale).
 mod rendered {
     use std::sync::{Arc, Mutex, Weak};
 
-    static TILES: Mutex<Vec<Weak<photocraft_raster::Tile>>> = Mutex::new(Vec::new());
+    type Marks = Mutex<Vec<Weak<photocraft_raster::Tile>>>;
+
+    static TILES: Marks = Mutex::new(Vec::new());
+    static STALE: Marks = Mutex::new(Vec::new());
 
     fn first(s: &photocraft_raster::Surface) -> Option<&Arc<photocraft_raster::Tile>> {
         s.tiles().next().map(|(_, t)| t)
     }
 
-    pub(super) fn mark(s: &photocraft_raster::Surface) {
+    fn push(marks: &Marks, s: &photocraft_raster::Surface) {
         let Some(t) = first(s) else { return };
-        let mut v = TILES.lock().unwrap_or_else(|e| e.into_inner());
+        let mut v = marks.lock().unwrap_or_else(|e| e.into_inner());
         if v.len() >= 512 {
             v.retain(|w| w.strong_count() > 0);
         }
         v.push(Arc::downgrade(t));
     }
 
-    pub(super) fn ours(s: &photocraft_raster::Surface) -> bool {
+    fn has(marks: &Marks, s: &photocraft_raster::Surface) -> bool {
         let Some(t) = first(s) else { return false };
-        TILES.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|w| std::ptr::eq(w.as_ptr(), Arc::as_ptr(t)))
+        marks.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|w| std::ptr::eq(w.as_ptr(), Arc::as_ptr(t)))
+    }
+
+    pub(super) fn mark(s: &photocraft_raster::Surface) {
+        push(&TILES, s);
+    }
+
+    pub(super) fn ours(s: &photocraft_raster::Surface) -> bool {
+        has(&TILES, s)
+    }
+
+    pub(super) fn mark_stale(s: &photocraft_raster::Surface) {
+        if !has(&STALE, s) {
+            push(&STALE, s);
+        }
+    }
+
+    pub(super) fn stale(s: &photocraft_raster::Surface) -> bool {
+        has(&STALE, s)
     }
 
     pub(super) fn same(a: &photocraft_raster::Surface, b: &photocraft_raster::Surface) -> bool {

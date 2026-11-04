@@ -157,7 +157,8 @@ fn doc_with_text(app: &mut PhotocraftApp, family: &str) -> photocraft_doc::Layer
 }
 
 fn ink(app: &PhotocraftApp, id: photocraft_doc::LayerId) -> photocraft_geom::Rect {
-    app.session.active().unwrap().doc.layer(id).unwrap().surface().unwrap().content_bounds()
+    // Type whose font is on its way has no pixels yet.
+    app.session.active().unwrap().doc.layer(id).unwrap().surface().map_or(photocraft_geom::Rect::EMPTY, |s| s.content_bounds())
 }
 
 #[test]
@@ -463,6 +464,45 @@ fn served_fonts_on_their_way_are_never_reported_missing() {
     assert!(notice(&app, "Missing fonts").is_none(), "arrived: nothing missing");
     assert!(app.font_checks.events.is_empty(), "no fontsMissing event");
     assert!(ink(&app, layer).width() > before.width(), "drawn in its font");
+}
+
+/// Type set in a served font that is still downloading is never drawn with a fallback first: a
+/// new layer shows nothing and an edited one keeps its pixels until the font arrives; a failed
+/// download draws with the fallback. `document.fontsReady` replies once the fonts are in.
+#[test]
+fn type_waits_for_its_served_font_instead_of_flashing_a_fallback() {
+    let (family, next, broken) = ("Served Mono NF", "SrvNG", "Served Mono NH");
+    for f in [family, next, broken] {
+        serve(f);
+    }
+    let mut app = PhotocraftApp::new(Session::new(), Services::default());
+    let layer = doc_with_text(&mut app, family);
+    assert!(ink(&app, layer).is_empty(), "no fallback drawn while the font downloads");
+    let ctx = egui::Context::default();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let doc = app.session.active().unwrap().doc.id;
+    crate::user_fonts_ui::wait_fonts(&mut app, crate::user_fonts_ui::DocWait::new(doc, 10.0, tx));
+    tick_checks(&mut app, Some(0.0));
+    assert!(rx.try_recv().is_err(), "document.fontsReady waits");
+    arrive(&mut app, &served_file(family), mono(family));
+    let drawn = ink(&app, layer);
+    assert!(!drawn.is_empty(), "drawn once, in its font");
+    assert_eq!(rx.try_recv().unwrap()["result"]["ready"], json!([family]));
+    // Another font on its way: the layer keeps what it shows until that one is in.
+    let cache = |app: &PhotocraftApp| app.session.active().unwrap().doc.layer(layer).unwrap().surface().cloned();
+    let before = cache(&app);
+    app.run("type.edit", json!({"layer": layer.0, "runs": [{"start": 0, "end": 11, "font": next}]})).unwrap();
+    assert_eq!(cache(&app), before, "the old pixels stay");
+    crate::served_fonts::install(&mut app, &ctx, vec![(served_file(next), sans(next))]);
+    assert_ne!(cache(&app), before, "redrawn with the new font");
+    // A font that never comes: drawn with the fallback once its download fails.
+    let other = app.run("type.create", json!({"x": 10, "y": 70, "text": "late", "size": 12, "font": broken})).unwrap()["layer"].as_u64().unwrap();
+    let other = photocraft_doc::LayerId(other);
+    assert!(ink(&app, other).is_empty());
+    photocraft_text::served::fetch_started(&served_file(broken));
+    photocraft_text::served::fetch_failed(&served_file(broken), "HTTP 404");
+    crate::served_fonts::install(&mut app, &ctx, Vec::new());
+    assert!(!ink(&app, other).is_empty(), "the fallback, now that the font isn't coming");
 }
 
 /// A font nobody serves is reported, alone, once the served ones have arrived; a served font

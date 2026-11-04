@@ -14,7 +14,19 @@
 //! window.addEventListener("photocraft-fontsPreloadProgress", e => e.detail)  // {id?, family, status, done, total}
 //! await photocraft.request("fonts.status", {families: ["Patrick Hand"]})     // {loaded, loading, failed, available, missing, manifest}
 //! await photocraft.request("ui.set", {fontsNotice: false})                   // no missing-fonts notice
+//! await photocraft.request("engine.execute", {command: "layer.getPixels", params: {layer: 7}, document: 2})
+//! await photocraft.getPixels({layer: 7, rect: [0, 0, 64, 64], format: "rgba"}, {document: 2})  // data: Uint8Array
+//! await photocraft.request("document.fontsReady", {document: 2})            // {document, ready, missing, failed}
+//! window.addEventListener("photocraft-layerPixelsChanged", e => e.detail)   // {document, layer, rect, pixelRev}
 //! ```
+//!
+//! Every event of the embedding module's `onEvent` (`embed/README.md`) but its per-document `dirty`
+//! (`photocraft-dirty` stays the app-wide flag) and `ready` comes as a `photocraft-<type>` window
+//! event (`detail`: the event) and, with `?embed=`, as `{photocraft: "<type>", …}` over
+//! `postMessage`: `documents`, `documentShown`, `documentReady`, `documentChanged`,
+//! `selectionChanged`, `toolChanged`, `zoom`, `viewChanged`, `viewportChanged`,
+//! `layerPixelsChanged`, `layerChanged`, `layersReordered`, `fontsMissing`, `fontsReady`,
+//! `fontsPreloadProgress`, `error`.
 //!
 //! Over `postMessage` (only from the `?embed=` origin, replies only to it): send
 //! `{photocraft: id, method: "open" | "save" | "isDirty" | "info", …}` (`open`: `data` an
@@ -52,6 +64,52 @@ thread_local! {
     static DIRTY: Cell<bool> = const { Cell::new(false) };
     /// The `?embed=` origin, when the `postMessage` bridge is on.
     static ORIGIN: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The frame-to-frame state of the events (`embed_events.rs`).
+    static EVENTS: RefCell<Option<crate::embed_events::Events>> = const { RefCell::new(None) };
+}
+
+fn events(f: impl FnOnce(&mut crate::embed_events::Events)) {
+    EVENTS.with(|e| {
+        if let Ok(mut e) = e.try_borrow_mut() {
+            f(e.get_or_insert_with(|| crate::embed_events::Events::new(dispatch)));
+        }
+    });
+}
+
+/// An event to the page: the `photocraft-<type>` window event (`detail`: the event) and, with an
+/// `?embed=` origin, `{photocraft: "<type>", …}` to the embedding page.
+fn dispatch(event: &Value) {
+    let Some(kind) = event.get("type").and_then(Value::as_str) else { return };
+    // `photocraft-dirty` is the app-wide flag (a boolean): the per-document one stays out.
+    if kind == "dirty" {
+        return;
+    }
+    if let Some(window) = web_sys::window() {
+        let init = web_sys::CustomEventInit::new();
+        init.set_detail(&to_js(event));
+        if let Ok(e) = web_sys::CustomEvent::new_with_event_init_dict(&format!("photocraft-{kind}"), &init) {
+            window.dispatch_event(&e).ok();
+        }
+    }
+    let mut message = event.clone();
+    if let Some(o) = message.as_object_mut() {
+        o.remove("type");
+        o.insert("photocraft".into(), json!(kind));
+    }
+    post(&message, None);
+}
+
+/// The events of this frame, after its UI.
+pub fn report(app: &mut PhotocraftApp, ppp: f32) {
+    events(|e| e.report(app, ppp));
+}
+
+/// `layer.getPixels`' result with `data` as a Uint8Array instead of base64.
+pub(crate) fn with_bytes(result: JsValue) -> Result<JsValue, JsValue> {
+    let text = js_sys::Reflect::get(&result, &"data".into())?.as_string().unwrap_or_default();
+    let bytes = photocraft_engine::paint::tile::b64_decode(&text).ok_or_else(|| error("layer.getPixels: the pixels aren't base64"))?;
+    js_sys::Reflect::set(&result, &"data".into(), &js_sys::Uint8Array::from(bytes.as_slice()))?;
+    Ok(result)
 }
 
 fn repaint() {
@@ -90,9 +148,11 @@ pub fn process(app: &mut PhotocraftApp) {
     let ready = photocraft_ui_egui::code_gate::files_ready(app) && names.iter().all(|n| photocraft_ui_egui::code_gate::open_ready(app, n));
     let opens = if ready && photocraft_ui_egui::code_gate::files_ready(app) { OPENS.with(|o| std::mem::take(&mut *o.borrow_mut())) } else { Vec::new() };
     for (name, bytes, (resolve, reject)) in opens {
+        events(|e| e.note_open());
         match app.open_owned(&name, bytes) {
             Ok(warnings) => resolve.call1(&JsValue::NULL, &to_js(&json!({ "warnings": warnings }))).ok(),
             Err(e) => {
+                events(|e| e.open_failed());
                 app.open_failed(&name, &e);
                 reject.call1(&JsValue::NULL, &js_sys::Error::new(&e)).ok()
             }
@@ -127,27 +187,12 @@ pub fn process(app: &mut PhotocraftApp) {
     }
     // Fonts nobody serves (or whose download failed): `photocraft-fontsMissing` with the families.
     for families in std::mem::take(&mut app.font_checks.events) {
-        if let Some(window) = web_sys::window() {
-            let init = web_sys::CustomEventInit::new();
-            init.set_detail(&to_js(&json!({ "families": families })));
-            if let Ok(event) = web_sys::CustomEvent::new_with_event_init_dict("photocraft-fontsMissing", &init) {
-                window.dispatch_event(&event).ok();
-            }
-        }
-        post(&json!({ "photocraft": "fontsMissing", "families": families }), None);
+        dispatch(&json!({ "type": "fontsMissing", "families": families }));
     }
     // `fonts.preload` progress: `photocraft-fontsPreloadProgress`, one per family as it settles.
-    for progress in std::mem::take(&mut app.font_checks.progress) {
-        if let Some(window) = web_sys::window() {
-            let init = web_sys::CustomEventInit::new();
-            init.set_detail(&to_js(&progress));
-            if let Ok(event) = web_sys::CustomEvent::new_with_event_init_dict("photocraft-fontsPreloadProgress", &init) {
-                window.dispatch_event(&event).ok();
-            }
-        }
-        let mut message = progress;
-        message["photocraft"] = json!("fontsPreloadProgress");
-        post(&message, None);
+    for mut progress in std::mem::take(&mut app.font_checks.progress) {
+        progress["type"] = json!("fontsPreloadProgress");
+        dispatch(&progress);
     }
     let dirty = app.has_unsaved_work();
     if DIRTY.with(|d| d.replace(dirty)) != dirty {
@@ -228,6 +273,17 @@ fn request(method: String, params: Value) -> js_sys::Promise {
     promise(|settle| WAITING.with(|w| w.borrow_mut().push((rx, settle))))
 }
 
+/// `getPixels(params, {document?})`: `layer.getPixels` on that document (default the active one,
+/// never activated), `data` as a Uint8Array.
+fn get_pixels(params: JsValue, options: JsValue) -> js_sys::Promise {
+    let mut req = json!({ "command": "layer.getPixels", "params": from_js(&params) });
+    if let Some(doc) = from_js(&options).get("document").filter(|d| !d.is_null()) {
+        req["document"] = doc.clone();
+    }
+    let pending = request("engine.execute".into(), req);
+    wasm_bindgen_futures::future_to_promise(async move { with_bytes(JsFuture::from(pending).await?) })
+}
+
 /// The bytes of an ArrayBuffer, a typed array or a Blob.
 async fn bytes_of(data: JsValue) -> Result<Vec<u8>, String> {
     // A slice at a time: a big file copied in one go held the page (see `web::read_blob`).
@@ -266,6 +322,7 @@ fn api_object() -> JsValue {
         "request",
         Closure::<dyn Fn(String, JsValue) -> js_sys::Promise>::new(|method: String, params: JsValue| request(method, from_js(&params))).into_js_value(),
     );
+    set("getPixels", Closure::<dyn Fn(JsValue, JsValue) -> js_sys::Promise>::new(get_pixels).into_js_value());
     obj.into()
 }
 

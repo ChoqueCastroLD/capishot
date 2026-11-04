@@ -38,6 +38,9 @@
 //!   `id` is the request's optional `id` param)
 //! - `fonts.status {families?}`: where families stand, asking for nothing: `{loaded, loading,
 //!   failed, available, missing, manifest}` (without `families`, every family the host serves)
+//! - `document.fontsReady {document?, timeoutMs?}`: reply once every font the document's type uses
+//!   has arrived or failed (what is still on its way after `timeoutMs`, default 10000, counts as
+//!   failed), its type drawn with them: `{document, ready, missing, failed}`
 //! - `jobs.list` / `jobs.cancel {job?}`: background jobs (#210) with progress; cancel one (or all).
 //!   `engine.execute`, `ui.menu.invoke` and `ui.dialog.confirm` wait for a command that runs as a
 //!   job unless `wait: false` (then the reply is `{job, pending: true}`)
@@ -153,6 +156,8 @@ pub enum Outcome {
         /// The caller's tag for its `fontsPreloadProgress` events.
         id: Option<String>,
     },
+    /// `document.fontsReady`: reply once the document's fonts have arrived or failed.
+    AfterDocumentFonts { doc: photocraft_doc::DocId, timeout_s: f64 },
 }
 
 fn wrap(r: Result<Value, String>) -> Outcome {

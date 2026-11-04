@@ -1586,9 +1586,15 @@ impl eframe::App for WebShell {
         }
         self.app.ui_frame(ui, frame);
         self.app.finish_type_reset_pass(ui.ctx());
-        if self.hosted {
+        {
             // After the frame's UI: a pan, zoom or rotation made this frame is reported now.
-            crate::embed_api::report(&self.app);
+            let _s = photocraft_ui_egui::perf_span::span("embed.report");
+            let ppp = ui.ctx().pixels_per_point();
+            if self.hosted {
+                crate::embed_api::report(&mut self.app, ppp);
+            } else {
+                crate::embed::report(&mut self.app, ppp);
+            }
         }
         {
             let _s = photocraft_ui_egui::perf_span::span("presets.save");
