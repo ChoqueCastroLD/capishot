@@ -21,11 +21,15 @@ if (!dist || !process.env.CHROME) {
   console.error('usage: CHROME=<chromium> node embed-hidden-batch.mjs <dist dir>');
   process.exit(2);
 }
+// The single-threaded build (Trunk's dist/web) or the threads build (dist/web-threads: the module
+// gzipped in v/<hash>/, started after its Web Worker pool).
 const files = fs.readdirSync(dist);
-const js = files.find((f) => /^photocraft-web-.*\.js$/.test(f));
-const wasm = files.find((f) => /^photocraft-web-.*_bg\.wasm$/.test(f));
+const version = fs.existsSync(path.join(dist, 'v')) ? fs.readdirSync(path.join(dist, 'v'))[0] : null;
+const threads = !!version;
+const js = threads ? `v/${version}/photocraft.js` : files.find((f) => /^photocraft-web-.*\.js$/.test(f));
+const wasm = threads ? `v/${version}/photocraft_bg.wasm.gz` : files.find((f) => /^photocraft-web-.*_bg\.wasm$/.test(f));
 if (!js || !wasm) {
-  console.error(`no photocraft-web-*.js / *_bg.wasm in ${dist}`);
+  console.error(`no photocraft-web-*.js / *_bg.wasm (or v/<hash>/photocraft.js) in ${dist}`);
   process.exit(2);
 }
 
@@ -66,7 +70,12 @@ const host = `<!doctype html><meta charset="utf-8"><body style="margin:0">
 <div id="c" style="width:800px;height:600px"></div>
 <script type="module">
 import load, * as cs from './${js}';
-await load({ module_or_path: './${wasm}' });
+${threads
+    ? `const raw = await fetch('./${wasm}');
+await load({ module_or_path: new Response(raw.body.pipeThrough(new DecompressionStream('gzip')), { headers: { 'Content-Type': 'application/wasm' } }) });
+await cs.initThreadPool(Math.max(1, Math.min((navigator.hardwareConcurrency || 4) - 1, 8)));
+cs.threadPoolReady();`
+    : `await load({ module_or_path: './${wasm}' });`}
 window.cs = cs;
 window.events = [];
 cs.onEvent((e) => window.events.push(e));
@@ -78,11 +87,12 @@ const tick = (t) => { if (window.watching) window.frameTimes.push(t); requestAni
 requestAnimationFrame(tick);
 window.started = true;
 </script>`;
-const types = { '.js': 'text/javascript', '.wasm': 'application/wasm', '.html': 'text/html', '.json': 'application/json', '.png': 'image/png' };
+const types = { '.js': 'text/javascript', '.wasm': 'application/wasm', '.gz': 'application/octet-stream', '.html': 'text/html', '.json': 'application/json', '.png': 'image/png' };
 const server = http.createServer((req, res) => {
   const url = decodeURIComponent((req.url || '/').split('?')[0]);
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
   res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
   if (url === '/host.html') {
     res.setHeader('Content-Type', 'text/html');
     return res.end(host);
@@ -187,7 +197,7 @@ shots.push(await shot());
 const ft = await p.evaluate(() => { window.watching = false; return window.frameTimes; });
 const gaps = ft.slice(1).map((t, i) => t - ft[i]);
 const longest = gaps.length ? Math.max(...gaps) : 0;
-console.log(`  hidden work: ${elapsed} ms, ${JSON.stringify(r.timing)}, ${shots.length} screenshots, ${gaps.length} frames, longest ${longest.toFixed(1)} ms`);
+console.log(`  ${threads ? 'threads' : 'st'} build, hidden work: ${elapsed} ms, ${JSON.stringify(r.timing)}, ${shots.length} screenshots, ${gaps.length} frames, longest ${longest.toFixed(1)} ms`);
 check(shots.every((s) => s.equals(baseline)), `the shown page never changed on screen (${shots.filter((s) => !s.equals(baseline)).length} of ${shots.length} differ)`);
 check(r.h1.hidden === true && r.h1.active === false && r.h2.hidden === true, 'hidden documents');
 const st = (await call('getState')).value;
