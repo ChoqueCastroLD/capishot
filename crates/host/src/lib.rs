@@ -46,9 +46,12 @@
 
 mod error;
 mod events;
+pub mod files;
+pub mod fonts;
 mod host;
 mod ids;
 pub mod live;
+pub mod render;
 
 pub use error::{Error, Result};
 pub use events::{Event, JobEnd, Origin};

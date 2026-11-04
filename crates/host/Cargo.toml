@@ -20,10 +20,11 @@ photocraft-io = { workspace = true }
 photocraft-format = { workspace = true }
 photocraft-paint = { workspace = true }
 photocraft-raster = { workspace = true }
+photocraft-codecs = { workspace = true }
+photocraft-compose = { workspace = true }
+photocraft-geom = { workspace = true }
+photocraft-text = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 wasm_sync = "0.1"
-
-[dev-dependencies]
-photocraft-codecs = { workspace = true }
