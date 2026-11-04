@@ -477,4 +477,6 @@ fn serve_tcp_until_idle(
 }
 
 #[cfg(test)]
+mod session_tests;
+#[cfg(test)]
 mod tests;

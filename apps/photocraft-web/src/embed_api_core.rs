@@ -45,6 +45,7 @@ pub const FEATURES: &[&str] = &[
     "execute.document",
     "execute.history",
     "events.layersReordered",
+    "inspect.uid",
 ];
 
 /// The build stamp: the Capishot commit and the build id, set by `scripts/build-embed.sh`

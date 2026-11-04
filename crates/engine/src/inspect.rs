@@ -144,6 +144,7 @@ fn layer_sel(l: &Layer, ctx: &LayerCtx) -> Value {
     });
     let mut v = json!({
         "id": l.id.0,
+        "uid": l.psd_id,
         "name": l.name,
         "kind": l.content.kind_name(),
         "visible": l.visible,

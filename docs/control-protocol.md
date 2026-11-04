@@ -260,6 +260,14 @@ For hosts that keep one document in step between collaborators (the embed API an
   sends `layerPixelsChanged {document, layer, rect: [x, y, width, height], pixelRev}` once per frame
   per changed layer (`rect` in document pixels, tile-aligned, the union of what changed since the
   last event; it may reach past the canvas).
+- **Stable layer ids.** Every layer in `document.inspect` (and `doc.inspect`) has `uid`, an id
+  kept in the file: the PSD layer id (`lyid`), also saved in `.pcraft`. `id` is the session's and
+  is renumbered on every open; `uid` is the same after save and reopen. A new layer gets one at
+  once (above every uid the document has held this session, so a deleted layer's uid is not
+  reused); a duplicate gets a new one and the original keeps its own; undo and redo keep them.
+  A layer read from a file without layer ids (a flat image, an old PSD) gets one when opened.
+  `doc.render {uids}` takes them (CLI); otherwise map `uid` to `id` with `inspect`
+  (embed feature `inspect.uid`).
 - **Text style.** `document.inspect {textStyle: true}` (CLI: `doc.inspect {index?, textStyle: true}`)
   adds `text.style` to every type layer: `runs` and `paragraphs` exactly as `type.info` gives them
   (char offsets and the full character/paragraph style: font, size, colour, tracking, leading,

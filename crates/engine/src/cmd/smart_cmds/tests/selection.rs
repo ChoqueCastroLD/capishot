@@ -49,6 +49,8 @@ fn selected_pixels_become_one_editable_smart_object_in_every_mode_and_depth() {
             let mut selection = Surface::new(PixelFormat::GRAY8);
             selection.fill_rect(Rect::new(0, 0, 12, 12), &[0.5]);
             doc.selection = Some(selection);
+            // Opening a document gives its layers stable ids (`layer_uids`): compare with them.
+            crate::layer_uids::assign(&mut doc, &mut 0);
             let original = doc.clone();
             // Selection order must not change stacking order.
             let mut s = selected_session(doc, &[ids[2], ids[1], ids[0]]);
@@ -117,10 +119,12 @@ fn mixed_parent_selection_keeps_unselected_siblings_and_uses_the_top_selected_pa
     let keep_a = pixel(&doc, "Keep lower", Rect::new(0, 8, 8, 16), [0.0, 1.0, 0.0, 1.0]);
     let keep_b = pixel(&doc, "Keep upper", Rect::new(8, 8, 16, 16), [1.0, 1.0, 0.0, 1.0]);
     let (a_id, b_id, keep_a_id, keep_b_id) = (a.id, b.id, keep_a.id, keep_b.id);
-    let lower = Layer::group("Lower parent", vec![a, keep_a.clone()]);
-    let upper = Layer::group("Upper parent", vec![b, keep_b.clone()]);
+    let lower = Layer::group("Lower parent", vec![a, keep_a]);
+    let upper = Layer::group("Upper parent", vec![b, keep_b]);
     let (lower_id, upper_id) = (lower.id, upper.id);
     doc.layers = vec![lower, upper];
+    // Opening a document gives its layers stable ids (`layer_uids`): compare with them.
+    crate::layer_uids::assign(&mut doc, &mut 0);
     let original = doc.clone();
     let mut s = selected_session(doc, &[b_id, a_id]);
     let before = flat(&s);
@@ -129,8 +133,8 @@ fn mixed_parent_selection_keeps_unselected_siblings_and_uses_the_top_selected_pa
     assert_eq!(doc.layers.iter().map(|l| l.id).collect::<Vec<_>>(), vec![lower_id, upper_id]);
     assert_eq!(doc.layer(lower_id).unwrap().children().unwrap().iter().map(|l| l.id).collect::<Vec<_>>(), vec![keep_a_id]);
     assert_eq!(doc.layer(upper_id).unwrap().children().unwrap().iter().map(|l| l.id).collect::<Vec<_>>(), vec![so, keep_b_id]);
-    assert_eq!(doc.layer(keep_a_id).unwrap(), &keep_a);
-    assert_eq!(doc.layer(keep_b_id).unwrap(), &keep_b);
+    assert_eq!(doc.layer(keep_a_id).unwrap(), original.layer(keep_a_id).unwrap());
+    assert_eq!(doc.layer(keep_b_id).unwrap(), original.layer(keep_b_id).unwrap());
     assert_eq!(flat(&s), before);
     let inner = contents(&s);
     assert!(inner.layer(a_id).is_some() && inner.layer(b_id).is_some());
@@ -144,7 +148,9 @@ fn explicit_layer_converts_only_that_layer_despite_multi_selection() {
     let a = pixel(&doc, "A", Rect::new(0, 0, 8, 8), [1.0, 0.0, 0.0, 1.0]);
     let b = pixel(&doc, "B", Rect::new(8, 0, 16, 8), [0.0, 0.0, 1.0, 1.0]);
     let (a_id, b_id) = (a.id, b.id);
-    doc.layers = vec![a, b.clone()];
+    doc.layers = vec![a, b];
+    crate::layer_uids::assign(&mut doc, &mut 0);
+    let b = doc.layers[1].clone();
     let mut s = selected_session(doc, &[a_id, b_id]);
     s.execute("layer.smartObjects.convertToSmartObject", json!({"layer": a_id.0})).unwrap();
     assert_eq!(s.active().unwrap().doc.layers.len(), 2);
@@ -211,6 +217,8 @@ fn an_all_hidden_selection_is_rejected_without_changing_document_selection_or_hi
     b.visible = false;
     let ids = [a.id, b.id];
     doc.layers = vec![a, b];
+    // Opening a document gives its layers stable ids (`layer_uids`): compare with them.
+    crate::layer_uids::assign(&mut doc, &mut 0);
     let original = doc.clone();
     let mut s = selected_session(doc, &ids);
     let err = s.execute("layer.smartObjects.convertToSmartObject", json!({})).unwrap_err();

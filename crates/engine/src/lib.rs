@@ -26,6 +26,7 @@ pub mod installed_profiles;
 pub mod jobs;
 pub mod kys;
 pub mod layer_place;
+pub mod layer_uids;
 pub mod layer_style;
 pub mod link_watch;
 pub mod memory_gate;
