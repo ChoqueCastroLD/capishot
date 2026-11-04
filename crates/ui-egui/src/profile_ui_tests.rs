@@ -96,11 +96,7 @@ fn an_opened_profile_applies_after_a_preview_and_undoes() {
     src.run("prefs.set", json!({"path": "shortcuts.file.open", "value": "F2"})).unwrap();
     src.run("theme.custom.save", json!({"name": "Tinta", "css": CSS})).unwrap();
     src.ui.tool_options.bubble_styles.bubble.size = 31.0;
-    let profile = match src.run("profile.capture", json!({"sections": ["shortcuts", "theme"]})).unwrap() {
-        serde_json::Value::Object(m) => m,
-        _ => unreachable!(),
-    };
-    let mut profile = profile;
+    let mut profile = src.run("profile.capture", json!({"sections": ["shortcuts", "theme"]})).unwrap().as_object().cloned().unwrap();
     profile.insert("bubble".into(), serde_json::to_value(&src.ui.tool_options.bubble_styles).unwrap());
     let out = fp::export(&fp::Pack { name: "Equipo".into(), profile, ..Default::default() }).unwrap();
 
@@ -119,7 +115,7 @@ fn an_opened_profile_applies_after_a_preview_and_undoes() {
     assert!(app.session.prefs().interface.custom_themes.is_empty(), "the theme section wasn't chosen");
     assert_eq!(app.ui.tool_options.bubble_styles.bubble.size, 31.0);
     super::undo_import(&mut app).unwrap();
-    assert!(app.session.prefs().shortcuts.get("file.open").is_none());
+    assert!(!app.session.prefs().shortcuts.contains_key("file.open"));
     assert_eq!(app.ui.tool_options.bubble_styles, before);
     assert!(super::undo_import(&mut app).is_err(), "one undo");
 }
