@@ -168,6 +168,73 @@ pub fn tool(app: &PhotocraftApp) -> Tool {
     app.ui.tool
 }
 
+/// A document view's camera: zoom (device pixels per document pixel, `1.0` is 100%), the
+/// document point at the canvas centre and the rotation in degrees.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Camera {
+    pub zoom: f32,
+    pub center: [f32; 2],
+    pub rotation: f32,
+}
+
+/// How a host moves a document's camera.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum CameraChange {
+    /// Fit the document in the canvas (never past 100%).
+    Fit,
+    /// Fill the canvas with the document (may crop an edge).
+    Fill,
+    /// Any of zoom, centre and rotation; `None` keeps that part.
+    Set { zoom: Option<f32>, center: Option<[f32; 2]>, rotation: Option<f32> },
+}
+
+/// The camera of the view of session document `index` (after [`frame`] made its view).
+pub fn camera(app: &PhotocraftApp, index: usize) -> Option<Camera> {
+    app.ui.views.get(index).map(|v| Camera { zoom: v.zoom, center: v.center, rotation: v.rotation })
+}
+
+/// Move the camera of session document `index` (no animation). Views are made for documents the
+/// host opened since the last frame first. `Err` for a document without a view or a value that
+/// isn't finite (zoom must be > 0); nothing changes then.
+pub fn set_camera(app: &mut PhotocraftApp, index: usize, change: CameraChange) -> Result<(), String> {
+    if app.ui.views.len() <= index {
+        app.sync_views();
+    }
+    if let CameraChange::Set { zoom, center, rotation } = change {
+        if zoom.is_some_and(|z| !z.is_finite() || z <= 0.0) {
+            return Err("zoom must be a finite number above 0".into());
+        }
+        if center.is_some_and(|c| !c[0].is_finite() || !c[1].is_finite()) || rotation.is_some_and(|r| !r.is_finite()) {
+            return Err("center and rotation must be finite".into());
+        }
+    }
+    let Some(view) = app.ui.views.get_mut(index) else { return Err(format!("no view for document {index}")) };
+    view.zoom_animating = false;
+    view.zoom_anchor = None;
+    view.display_camera = None;
+    view.zoom_transition = None;
+    match change {
+        CameraChange::Fit => view.fit_pending = true,
+        CameraChange::Fill => view.fill_pending = true,
+        CameraChange::Set { zoom, center, rotation } => {
+            if let Some(z) = zoom {
+                view.zoom = z;
+                view.fit_pending = false;
+                view.fill_pending = false;
+            }
+            if let Some(c) = center {
+                view.center = c;
+            }
+            if let Some(r) = rotation {
+                // (−180, 180], as the Rotate View tool keeps it.
+                let r = r.rem_euclid(360.0);
+                view.rotation = if r > 180.0 { r - 360.0 } else { r };
+            }
+        }
+    }
+    Ok(())
+}
+
 /// One embedded frame: the editor's logic, then the active document's canvas in `rect` (egui
 /// points, inside `ui`), then the editor's dialogs when [`EmbedOptions::dialogs`]. `app.session`
 /// must hold the host's session for the call. Never changes the context's style, fonts or options.

@@ -132,3 +132,18 @@ fn control_methods_run_against_the_lent_session() {
     let rx = control(&mut app, &ctx, "ui.set", json!({"tool": 3}));
     assert_eq!(rx.try_recv().expect("a reply")["ok"], json!(false));
 }
+
+#[test]
+fn the_host_moves_the_camera() {
+    let ctx = Context::default();
+    let mut app = PhotocraftApp::new_embedded(Services::default());
+    app.session = session_with_doc();
+    let _ = run(&ctx, &mut app, Vec::new(), &EmbedOptions::default());
+    set_camera(&mut app, 0, CameraChange::Set { zoom: Some(2.0), center: Some([10.0, 12.0]), rotation: Some(270.0) }).expect("a camera");
+    let c = camera(&app, 0).expect("a view");
+    assert_eq!((c.zoom, c.center, c.rotation), (2.0, [10.0, 12.0], -90.0));
+    assert!(set_camera(&mut app, 0, CameraChange::Set { zoom: Some(f32::NAN), center: None, rotation: None }).is_err());
+    assert!(set_camera(&mut app, 0, CameraChange::Set { zoom: Some(0.0), center: None, rotation: None }).is_err());
+    assert!(set_camera(&mut app, 7, CameraChange::Fit).is_err(), "no such document: an error, not a panic");
+    assert_eq!(camera(&app, 0).map(|c| c.zoom), Some(2.0), "a rejected change changes nothing");
+}
