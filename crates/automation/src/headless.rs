@@ -152,6 +152,12 @@ impl Headless {
         })
     }
 
+    /// Run engine command `id` on document `index` (the active one when `None`), which stays
+    /// active only if it was.
+    pub fn on_doc_run(&mut self, index: Option<usize>, id: &str, params: Value) -> Result<Value, AutomationError> {
+        self.on_doc(index, |this| this.command_run(id, params))
+    }
+
     /// Replace a smart object's contents with a file from the read root: the capability-scoped
     /// `layer.smartObjects.replaceContents`, which takes an ambient `path` and is refused in
     /// automation (#8061). `params` is the command's own (`layer`).
@@ -282,11 +288,14 @@ impl Headless {
             }
         };
         let target_text = target.to_str().ok_or_else(|| AutomationError::BadRequest("automation paths must be valid UTF-8".into()))?;
-        let mut warnings = match &self.filesystem {
+        let started = std::time::Instant::now();
+        let (mut warnings, written) = match &self.filesystem {
             Filesystem::Denied => return Err(AutomationError::BadRequest("automation filesystem access is not granted: write authority is absent".into())),
             Filesystem::TrustedLocal => {
                 let writer = self.writers.entry(doc.id.0).or_default();
-                files::save(&doc, &target, format, opts, Some(writer))?
+                let warnings = files::save(&doc, &target, format, opts, Some(writer))?;
+                // A `.pcraft` directory bundle has no one size.
+                (warnings, std::fs::metadata(&target).ok().filter(std::fs::Metadata::is_file).map(|m| m.len()))
             }
             Filesystem::Workspace(workspace) => {
                 // Only the target is granted: a linked smart object's stored path is document
@@ -294,9 +303,10 @@ impl Headless {
                 let opts = ExportOptions { read_linked_files: false, ..opts.clone() };
                 let (bytes, warnings) = files::save_bytes(&doc, target_text, format, &opts)?;
                 workspace.write(target_text, &bytes)?;
-                warnings
+                (warnings, Some(bytes.len() as u64))
             }
         };
+        let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
         warnings.extend(photocraft_engine::type_extra_cmds::missing_font_warnings(&doc));
         // A layered document save (PSD, PSB, OpenRaster or .pcraft) that holds the whole document is a
         // full write, not a flattened copy: record the current revision as saved so the session
@@ -314,7 +324,7 @@ impl Headless {
                 Ok(())
             })?;
         }
-        Ok(json!({ "path": target.to_string_lossy(), "warnings": warnings }))
+        Ok(json!({ "path": target.to_string_lossy(), "warnings": warnings, "bytes": written, "ms": ms }))
     }
 
     /// Write rendered bytes through the configured write authority.
@@ -349,6 +359,46 @@ impl Headless {
             crate::budgets::check_png(png.len())?;
         }
         Ok(png)
+    }
+
+    /// `doc.render` of a region ([`files::render_region_png`]): `rect` in document pixels
+    /// (clipped to the canvas), `scale` in (0, 1], only `layers` drawn when given. Returns the PNG,
+    /// its size and the canvas rect rendered.
+    pub fn render_region_png(
+        &self,
+        index: Option<usize>,
+        rect: photocraft_geom::Rect,
+        scale: f64,
+        layers: Option<&[photocraft_doc::LayerId]>,
+    ) -> Result<(Vec<u8>, u32, u32, photocraft_geom::Rect), AutomationError> {
+        let i = self.doc_index(index)?;
+        let doc = &self.session.documents()[i].doc;
+        let rect = rect.intersect(&doc.bounds());
+        if rect.is_empty() {
+            return Err(AutomationError::BadRequest("`rect` is outside the canvas".into()));
+        }
+        if !matches!(&self.filesystem, Filesystem::TrustedLocal) {
+            let (w, h) = files::region_size(rect, scale);
+            crate::budgets::check_preview(rect.width(), rect.height(), w.max(h))?;
+        }
+        let (png, w, h) = files::render_region_png(doc, rect, scale, layers)?;
+        if !matches!(&self.filesystem, Filesystem::TrustedLocal) {
+            crate::budgets::check_png(png.len())?;
+        }
+        Ok((png, w, h, rect))
+    }
+
+    /// The session ids of the layers whose stable id (`uid`, the PSD layer id) is in `uids`, in
+    /// that order; an unknown uid is an error.
+    pub fn layers_by_uid(&self, index: Option<usize>, uids: &[u32]) -> Result<Vec<photocraft_doc::LayerId>, AutomationError> {
+        let i = self.doc_index(index)?;
+        let doc = &self.session.documents()[i].doc;
+        let walk = doc.walk();
+        uids.iter()
+            .map(|u| {
+                walk.iter().find(|(_, _, l)| l.psd_id == Some(*u)).map(|(_, _, l)| l.id).ok_or_else(|| AutomationError::BadRequest(format!("no layer with uid {u}")))
+            })
+            .collect()
     }
 
     pub fn session_list(&self) -> Value {
@@ -445,6 +495,17 @@ impl Headless {
     /// Block until job `job` ends and return its result, as a waited `engine.execute` does.
     pub fn wait_job(&mut self, job: u64) -> Result<Value, AutomationError> {
         Ok(self.session.wait_job(photocraft_engine::jobs::JobId(job))?)
+    }
+
+    /// Job `job`'s state, as a `jobs.list` row (`state`: running, done, failed or cancelled; a
+    /// done job carries its `result`, a failed one its `error`). Finished jobs are applied first;
+    /// one that ended long ago (more than the last few) is an error.
+    pub fn job_status(&mut self, job: u64) -> Result<Value, AutomationError> {
+        self.sync_jobs();
+        let id = photocraft_engine::jobs::JobId(job);
+        let info = self.session.jobs_with_recent().into_iter().rev().find(|j| j.id == id);
+        let info = info.ok_or_else(|| AutomationError::BadRequest(format!("no job {job} (unknown, or it ended before the last few)")))?;
+        serde_json::to_value(info).map_err(|e| AutomationError::Other(e.to_string()))
     }
 
     /// Cancel job `job` (false if it isn't running).

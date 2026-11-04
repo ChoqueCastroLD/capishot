@@ -8,8 +8,9 @@
 //! - `engine.execute {command, params?, wait?}` / `engine.commands {filter?}`
 //! - `jobs.list` / `jobs.cancel {job?}`: background jobs (#210)
 //! - `session.list`, `doc.open {path}`, `doc.new {…file.new params}`,
-//!   `doc.place {path, scale?, fit?, center?, index?}` (#2810: the read root is the scope,
-//!   the counterpart of the refused ambient `file.placeEmbedded`),
+//!   `doc.place {path | base64, name?, scale?, fit?, center?, x?, y?, width?, height?,
+//!   rasterize?, index?}` (#2810: the read root is the scope, the counterpart of the refused
+//!   ambient `file.placeEmbedded`; `base64` needs no root),
 //!   `doc.replaceSmartObject {path, layer?, index?}` (#8061: the same scope for
 //!   `layer.smartObjects.replaceContents`),
 //!   `doc.exportLayers {dir, format?, prefix?, visibleOnly?, quality?, index?}`,
@@ -17,7 +18,8 @@
 //!   `doc.importDataSets {path, delimiter?, index?}` (#3216: the same treatment for the export
 //!   and CSV half of #2810), `doc.save {path?, format?, quality?, index?}`, `doc.inspect {index?, textStyle?}`,
 //!   `doc.render {index?, maxSide?, path?}` (writes a PNG to `path`, else
-//!   returns it base64-encoded), `doc.select {index}`, `doc.close {index?}`
+//!   returns it base64-encoded; with `rect`, `scale`, `layers` or `uids`, a region at a scale of
+//!   some layers only), `doc.select {index}`, `doc.close {index?}`
 //! - `batch {steps: [{command, params?, wait?} | {method, params?}], stopOnError?}`
 //! - `methods`: this list.
 
@@ -34,7 +36,7 @@ use serde_json::{Value, json};
 use crate::budgets::{BatchReplyBudget, write_reply};
 use crate::security::{
     AUTH_DEADLINE, AuthDeadlineStream, ConnectionLimiter, LineRead, MAX_BATCH_STEPS, MAX_CONNECTIONS, MAX_REQUEST_BYTES, authentication_reply,
-    configure_stream, discard_rest_of_line, read_bounded_line, repeat_auth_reply,
+    IO_TIMEOUT, configure_stream, configure_stream_idle, discard_rest_of_line, read_bounded_line, repeat_auth_reply,
 };
 use crate::{AutomationError, Headless};
 
@@ -43,6 +45,10 @@ pub const METHODS: &[&str] = &[
     "engine.execute",
     "jobs.list",
     "jobs.cancel",
+    "jobs.status",
+    "jobs.wait",
+    "job.status",
+    "job.wait",
     "engine.commands",
     "session.list",
     "doc.open",
@@ -71,6 +77,25 @@ fn index_of(p: &Value) -> Result<Option<usize>, AutomationError> {
     match p.get("index") {
         None | Some(Value::Null) => Ok(None),
         Some(v) => v.as_u64().and_then(|i| usize::try_from(i).ok()).map(Some).ok_or_else(|| bad("`index` must be a non-negative integer")),
+    }
+}
+
+/// `jobs.status` / `jobs.wait`'s `job`.
+fn job_of(p: &Value) -> Result<u64, AutomationError> {
+    p.get("job").and_then(Value::as_u64).ok_or_else(|| bad("`job` must be a job id (from `engine.execute` with `wait: false`)"))
+}
+
+/// The longest `jobs.wait` waits by default, and at most.
+const JOB_WAIT_DEFAULT: Duration = Duration::from_secs(30);
+const JOB_WAIT_MAX: Duration = Duration::from_secs(3600);
+/// How often `jobs.wait` looks at its job.
+const JOB_WAIT_POLL: Duration = Duration::from_millis(20);
+
+/// `jobs.wait`'s `timeoutMs` (default 30 s, at most an hour; 0 answers at once).
+fn wait_timeout(p: &Value) -> Result<Duration, AutomationError> {
+    match p.get("timeoutMs") {
+        None | Some(Value::Null) => Ok(JOB_WAIT_DEFAULT),
+        Some(v) => v.as_u64().map(|ms| Duration::from_millis(ms).min(JOB_WAIT_MAX)).ok_or_else(|| bad("`timeoutMs` must be a whole number of milliseconds")),
     }
 }
 
@@ -103,6 +128,16 @@ impl Headless {
             // Background jobs (#210): list (applying any that finished) and cancel.
             "jobs.list" => self.command_start("jobs.list", json!({}), true),
             "jobs.cancel" => self.command_start("jobs.cancel", p, true),
+            // One job's state, and waiting for it with a timeout (`job.*`: the same).
+            "jobs.status" | "job.status" => self.job_status(job_of(&p)?),
+            "jobs.wait" | "job.wait" => {
+                let (job, timeout) = (job_of(&p)?, wait_timeout(&p)?);
+                let started = Instant::now();
+                while self.job_progress(job).is_some() && started.elapsed() < timeout {
+                    std::thread::sleep(JOB_WAIT_POLL);
+                }
+                self.job_status(job)
+            }
             "engine.commands" => {
                 let all = self.command_list();
                 Ok(match str_of(&p, "filter").map(str::to_lowercase) {
@@ -117,8 +152,17 @@ impl Headless {
                 let path = str_of(&p, "path").ok_or_else(|| bad("doc.open needs `path`"))?;
                 self.open(&PathBuf::from(path))
             }
+            "doc.place" if p.get("path").is_none() && (p.get("base64").is_some() || p.get("data").is_some()) => {
+                // The image in the request: no read root needed (Place Embedded's `data`).
+                let mut opts = p.as_object().cloned().unwrap_or_default();
+                if let Some(b) = opts.remove("base64") {
+                    opts.insert("data".into(), b);
+                }
+                opts.remove("index");
+                self.on_doc_run(index_of(&p)?, "file.placeEmbedded", Value::Object(opts))
+            }
             "doc.place" => {
-                let path = str_of(&p, "path").ok_or_else(|| bad("doc.place needs `path`"))?;
+                let path = str_of(&p, "path").ok_or_else(|| bad("doc.place needs `path` (or `base64`)"))?;
                 let mut opts = p.as_object().cloned().unwrap_or_default();
                 opts.remove("path");
                 opts.remove("index");
@@ -138,6 +182,17 @@ impl Headless {
                     photocraft_io::ExportOptions { tiff_layers: p.get("tiffLayers").and_then(Value::as_bool).unwrap_or(false), tga_bits, ..Default::default() };
                 opts.encode.dpx_bits = photocraft_engine::file_cmds::dpx_bits_param(&p, "doc.save").map_err(|e| bad(e.to_string()))?;
                 opts.encode.dds = photocraft_engine::file_cmds::dds_param(&p, "doc.save").map_err(|e| bad(e.to_string()))?.unwrap_or_default();
+                // PSD/PSB merged image: `exact` (default) renders it with psd-compiler, as
+                // Photoshop draws it; `fast` takes photocraft-compose's composite (several times
+                // faster after an edit; the layers are the same either way).
+                match p.get("mergedImage") {
+                    None | Some(Value::Null) => {}
+                    Some(v) => match v.as_str() {
+                        Some("exact") => {}
+                        Some("fast") => opts.psdc_composite = false,
+                        _ => return Err(bad(format!("`mergedImage` must be \"exact\" or \"fast\", got {v}"))),
+                    },
+                }
                 match p.get("quality") {
                     None | Some(Value::Null) => {}
                     Some(v) => {
@@ -174,6 +229,9 @@ impl Headless {
                 let opts = photocraft_engine::inspect::Options::parse(&p).map_err(bad)?;
                 self.inspect_with(index_of(&p)?, opts)
             }
+            "doc.render" if p.get("rect").is_some() || p.get("layers").is_some() || p.get("uids").is_some() || p.get("scale").is_some() => {
+                self.render_region(&p)
+            }
             "doc.render" => {
                 let max = match p.get("maxSide") {
                     None => 1024,
@@ -202,6 +260,62 @@ impl Headless {
             "methods" => Ok(json!(METHODS)),
             other => Err(bad(format!("unknown method `{other}` (try `methods`)"))),
         }
+    }
+
+    /// `doc.render` with `rect`, `scale`, `layers` or `uids`: a region of the composite, at a
+    /// scale, of some layers only. Without `rect` the whole canvas.
+    fn render_region(&mut self, p: &Value) -> Result<Value, AutomationError> {
+        let started = Instant::now();
+        let index = index_of(p)?;
+        let rect = match p.get("rect") {
+            None | Some(Value::Null) => {
+                let i = self.session.active_index();
+                let doc = index.or(i).and_then(|i| self.session.documents().get(i)).ok_or_else(|| bad("no document open"))?;
+                doc.doc.bounds()
+            }
+            Some(v) => {
+                let n: Vec<i64> = v.as_array().filter(|a| a.len() == 4).map(|a| a.iter().filter_map(Value::as_i64).collect()).unwrap_or_default();
+                let [x, y, w, h] = n[..] else { return Err(bad("`rect` must be [x, y, width, height] in whole document pixels")) };
+                let fit = |v: i64| i32::try_from(v).ok().filter(|v| v.unsigned_abs() <= 1 << 20);
+                let (Some(x), Some(y), Some(w), Some(h)) = (fit(x), fit(y), fit(w), fit(h)) else { return Err(bad("`rect` is out of range")) };
+                if w <= 0 || h <= 0 {
+                    return Err(bad("`rect` needs a positive width and height"));
+                }
+                photocraft_geom::Rect::new(x, y, x + w, y + h)
+            }
+        };
+        let scale = match p.get("scale") {
+            None | Some(Value::Null) => 1.0,
+            Some(v) => v.as_f64().filter(|s| s.is_finite() && *s > 0.0 && *s <= 1.0).ok_or_else(|| bad("`scale` must be a number in (0, 1]"))?,
+        };
+        let ids = |k: &str| -> Result<Option<Vec<u64>>, AutomationError> {
+            match p.get(k) {
+                None | Some(Value::Null) => Ok(None),
+                Some(Value::Array(a)) => a.iter().map(|v| v.as_u64().ok_or_else(|| bad(format!("`{k}` must be an array of layer ids")))).collect::<Result<_, _>>().map(Some),
+                Some(_) => Err(bad(format!("`{k}` must be an array of layer ids"))),
+            }
+        };
+        let mut layers: Option<Vec<photocraft_doc::LayerId>> = ids("layers")?.map(|v| v.into_iter().map(photocraft_doc::LayerId).collect());
+        if let Some(uids) = ids("uids")? {
+            let uids: Vec<u32> = uids.into_iter().map(|u| u32::try_from(u).map_err(|_| bad(format!("no layer with uid {u}")))).collect::<Result<_, _>>()?;
+            layers.get_or_insert_with(Vec::new).extend(self.layers_by_uid(index, &uids)?);
+        }
+        let (png, w, h, rect) = self.render_region_png(index, rect, scale, layers.as_deref())?;
+        let region = [rect.x0, rect.y0, rect.width() as i32, rect.height() as i32];
+        let mut v = match str_of(p, "path") {
+            Some(path) => {
+                self.write_render(&PathBuf::from(path), &png)?;
+                json!({"path": path, "bytes": png.len()})
+            }
+            None => json!({"mime": "image/png", "base64": base64::engine::general_purpose::STANDARD.encode(&png)}),
+        };
+        if let Some(o) = v.as_object_mut() {
+            o.insert("rect".into(), json!(region));
+            o.insert("width".into(), json!(w));
+            o.insert("height".into(), json!(h));
+            o.insert("ms".into(), json!(u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)));
+        }
+        Ok(v)
     }
 
     /// Run `steps` in order. Each step is `{command, params?, wait?}` (an engine command) or
@@ -284,6 +398,13 @@ pub fn respond_with_progress(h: &Mutex<Headless>, line: &str, emit: &mut dyn FnM
     if progress && let Some(p) = params.as_object_mut() {
         p.insert("wait".into(), Value::Bool(false));
     }
+    if matches!(method, "jobs.wait" | "job.wait") {
+        let r = guarded(method, || wait_unlocked(h, &params));
+        return Ok(match r {
+            Ok(v) => json!({"id": id, "ok": true, "result": v}),
+            Err(e) => json!({"id": id, "ok": false, "error": e.to_string()}),
+        });
+    }
     let mut r = guarded(method, || h.lock().unwrap_or_else(PoisonError::into_inner).handle(method, params));
     let job = r
         .as_ref()
@@ -298,6 +419,18 @@ pub fn respond_with_progress(h: &Mutex<Headless>, line: &str, emit: &mut dyn FnM
         Ok(v) => json!({"id": id, "ok": true, "result": v}),
         Err(e) => json!({"id": id, "ok": false, "error": e.to_string()}),
     })
+}
+
+/// `jobs.wait` on a shared session: looks at the job every [`JOB_WAIT_POLL`] with the session
+/// unlocked between looks, so other connections (and other requests' jobs) keep being served.
+fn wait_unlocked(h: &Mutex<Headless>, p: &Value) -> Result<Value, AutomationError> {
+    let lock = || h.lock().unwrap_or_else(PoisonError::into_inner);
+    let (job, timeout) = (job_of(p)?, wait_timeout(p)?);
+    let started = Instant::now();
+    while lock().job_progress(job).is_some() && started.elapsed() < timeout {
+        std::thread::sleep(JOB_WAIT_POLL);
+    }
+    lock().job_status(job)
 }
 
 /// Last-resort guard (AGENTS.md, Never crash): a command that panics answers its request with
@@ -363,10 +496,16 @@ pub fn serve_lines(h: &Mutex<Headless>, mut r: impl BufRead, mut w: impl Write) 
 
 /// Serve one connection. It must complete `auth` within `auth_deadline` of connecting, however
 /// much it sends meanwhile (#4965); after that only the idle timeout applies.
-fn serve_tcp_connection(h: &Mutex<Headless>, stream: std::net::TcpStream, token: &str, auth_deadline: std::time::Duration) -> std::io::Result<()> {
-    configure_stream(&stream)?;
+fn serve_tcp_connection(
+    h: &Mutex<Headless>,
+    stream: std::net::TcpStream,
+    token: &str,
+    auth_deadline: std::time::Duration,
+    idle: Option<Duration>,
+) -> std::io::Result<()> {
+    configure_stream_idle(&stream, idle)?;
     let read = stream.try_clone()?;
-    let mut reader = std::io::BufReader::new(AuthDeadlineStream::new(read, auth_deadline));
+    let mut reader = std::io::BufReader::new(AuthDeadlineStream::new(read, auth_deadline).with_idle(idle));
     let mut out = stream;
     let mut line = String::new();
     let mut authenticated = false;
@@ -416,11 +555,38 @@ fn serve_tcp_connection(h: &Mutex<Headless>, stream: std::net::TcpStream, token:
 /// Headless TCP daemons with no clients should eventually release their listening port (#3682).
 const TCP_IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
+/// Timeouts of [`serve_tcp_with`].
+#[derive(Clone, Copy, Debug)]
+pub struct ServeOptions {
+    /// A connection that sends no request for this long is closed (`None`: never). Default
+    /// [`IO_TIMEOUT`] (30 s). There is no reply deadline: a long command answers when it ends.
+    pub connection_idle: Option<Duration>,
+    /// The server exits after this long without any connection (`None`: never). Default 30 min.
+    pub server_idle: Option<Duration>,
+}
+
+impl Default for ServeOptions {
+    fn default() -> Self {
+        Self { connection_idle: Some(IO_TIMEOUT), server_idle: Some(TCP_IDLE_TIMEOUT) }
+    }
+}
+
 /// Serve authenticated JSON lines on a loopback TCP address with one shared session.
 /// Refuses non-loopback addresses, caps connections and request bytes, and closes the listener
 /// after an idle period with no connections. Active clients are never evicted by this timer.
 pub fn serve_tcp(addr: &str, h: Arc<Mutex<Headless>>, token: String, ready: impl FnOnce(std::net::SocketAddr)) -> Result<(), AutomationError> {
-    serve_tcp_until_idle(addr, h, token, ready, TCP_IDLE_TIMEOUT)
+    serve_tcp_with(addr, h, token, ServeOptions::default(), ready)
+}
+
+/// [`serve_tcp`] with the given timeouts.
+pub fn serve_tcp_with(
+    addr: &str,
+    h: Arc<Mutex<Headless>>,
+    token: String,
+    opts: ServeOptions,
+    ready: impl FnOnce(std::net::SocketAddr),
+) -> Result<(), AutomationError> {
+    serve_tcp_until_idle(addr, h, token, ready, opts)
 }
 
 fn serve_tcp_until_idle(
@@ -428,7 +594,7 @@ fn serve_tcp_until_idle(
     h: Arc<Mutex<Headless>>,
     token: String,
     ready: impl FnOnce(std::net::SocketAddr),
-    idle: Duration,
+    opts: ServeOptions,
 ) -> Result<(), AutomationError> {
     let listener = TcpListener::bind(addr).map_err(|e| AutomationError::Io(format!("bind {addr}: {e}")))?;
     let local = listener.local_addr().map_err(|e| AutomationError::Io(e.to_string()))?;
@@ -458,14 +624,14 @@ fn serve_tcp_until_idle(
                 active.fetch_add(1, Ordering::AcqRel);
                 std::thread::spawn(move || {
                     let _permit = permit;
-                    let _ = serve_tcp_connection(&h, stream, &token, AUTH_DEADLINE);
+                    let _ = serve_tcp_connection(&h, stream, &token, AUTH_DEADLINE, opts.connection_idle);
                     active.fetch_sub(1, Ordering::AcqRel);
                 });
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 if active.load(Ordering::Acquire) != 0 {
                     last_active = Instant::now();
-                } else if last_active.elapsed() >= idle {
+                } else if opts.server_idle.is_some_and(|idle| last_active.elapsed() >= idle) {
                     return Ok(());
                 }
                 std::thread::sleep(Duration::from_millis(100));
@@ -476,5 +642,7 @@ fn serve_tcp_until_idle(
     }
 }
 
+#[cfg(test)]
+mod session_tests;
 #[cfg(test)]
 mod tests;

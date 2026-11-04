@@ -7745,6 +7745,7 @@ dependencies = [
  "photocraft-doc",
  "photocraft-engine",
  "photocraft-format",
+ "photocraft-geom",
  "photocraft-io",
  "photocraft-raster",
  "photocraft-raw",
@@ -7890,6 +7891,7 @@ dependencies = [
  "thiserror 2.0.21",
  "wasm_sync",
  "wat",
+ "web-time",
  "winsafe",
 ]
 

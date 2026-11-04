@@ -221,6 +221,9 @@ impl Session {
         let mut doc = (*before).clone();
         let mut active = st.active_layer;
         let r = f(&mut doc, &mut active)?;
+        // New and duplicated layers get their stable id (`uid`) in the same step, so undo and
+        // redo keep it.
+        crate::layer_uids::assign(&mut doc, &mut st.uid_high);
         if let (Some(k), Some(id)) = (restrict, active) {
             channel_cmds::restrict_to_color(&before, &mut doc, id, k);
         }

@@ -61,6 +61,9 @@ pub struct DocState {
     /// Selections kept by `selection.get` for `selection.set` (id, mask), newest last; in
     /// memory only, never a channel or saved (`live_cmds`).
     pub(crate) saved_selections: Vec<(u64, Option<photocraft_raster::Surface>)>,
+    /// The highest stable layer id (`psd_id`) this document has held this session
+    /// ([`crate::layer_uids`]).
+    pub(crate) uid_high: u32,
 }
 
 impl DocState {
@@ -78,7 +81,9 @@ impl DocState {
         self.history.pixel_bytes(&self.doc).saturating_add(self.history.extra_bytes(&self.doc, &snaps))
     }
 
-    pub fn new(doc: Document, path: Option<String>) -> Self {
+    pub fn new(mut doc: Document, path: Option<String>) -> Self {
+        let mut uid_high = 0;
+        crate::layer_uids::assign(&mut doc, &mut uid_high);
         let active_layer = doc.top_layer();
         let mut history = History::default();
         let target = LayerTarget { active: active_layer, selected: active_layer.into_iter().collect() };
@@ -113,6 +118,7 @@ impl DocState {
             source_snapshot: None,
             pixel_revs: Default::default(),
             saved_selections: Vec::new(),
+            uid_high,
         }
     }
     /// The selected layers in bottom-to-top document order, always including the active layer.

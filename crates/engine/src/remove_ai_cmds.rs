@@ -67,7 +67,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: LABEL,
         menu: &[],
         shortcut: None,
-        params: r#"{"strokes"?: [[[x,y,pressure?],…],…] or "points"?: [[x,y],…] (what was painted, with "size": px, as paint.remove; a stroke around an object removes what it encloses), else the selection, "sampleAllLayers"?: bool, "layer"?: id, "allowDownload"?: bool (fetch Manga LaMa, about 100 MB, when it isn't on this device)} -> {"damage"|"region", …}. Erases it and fills it as edit.inpaintAi fills a selection, with fixed options (Manga LaMa at best quality, its default working side and margin; model, quality, device, maxSide, margin, threads and keepLoaded params are ignored), on the target layer, as one undo step ("Remove with AI"). A background job; the GPU's failure retries on the CPU."#,
+        params: r#"{"strokes"?: [[[x,y,pressure?],…],…] or "points"?: [[x,y],…] (what was painted, with "size": px, as paint.remove; a stroke around an object removes what it encloses), else the selection, "sampleAllLayers"?: bool, "layer"?: id, "allowDownload"?: bool (fetch Manga LaMa, about 100 MB, when it isn't on this device)} -> {"damage"|"region", "device", "model", "lite", "cpu", "fellBack", "ms", …}. Erases it and fills it as edit.inpaintAi fills a selection, with fixed options (Manga LaMa at best quality, its default working side and margin; model, quality, device, maxSide, margin, threads and keepLoaded params are ignored), on the target layer, as one undo step ("Remove with AI"). A background job; the GPU's failure retries on the CPU."#,
         enabled,
         run: remove_ai,
         journal: true,
@@ -250,9 +250,38 @@ mod tests {
     fn a_gpu_failure_retries_manga_lama_on_the_cpu() {
         let fake = Arc::new(FakeInpainter { gpu_fail: Some("device lost".into()), ..Default::default() });
         let mut s = page(fake.clone(), true);
-        s.execute(ID, json!({"strokes": [[[29, 22], [35, 22]]], "size": 14})).unwrap();
+        let r = s.execute(ID, json!({"strokes": [[[29, 22], [35, 22]]], "size": 14})).unwrap();
         assert_eq!(*fake.last.lock().unwrap(), Some(("manga-lama", true)), "never the lite model");
         assert!(!red_at(&s, 31, 22));
+        assert_eq!((r["cpu"].clone(), r["fellBack"].clone(), r["model"].clone()), (json!(true), json!(true), json!("manga-lama")), "the reply says so: {r}");
+    }
+
+    /// Visoria C.18: Remove with AI (strokes, `paint.remove` with `ai`, and the selection) says
+    /// where it ran, with which model and how long it took, as `edit.inpaintAi` does.
+    #[test]
+    fn every_ai_removal_reports_device_model_and_time() {
+        let strokes = json!({"strokes": [[[29, 22], [35, 22]]], "size": 14});
+        let mut ai = strokes.clone();
+        ai["ai"] = json!(true);
+        for (gpu, cmd, p) in [(true, ID, strokes.clone()), (false, ID, strokes), (true, "paint.remove", ai)] {
+            let mut s = page(Arc::new(FakeInpainter::default()), gpu);
+            let r = s.execute(cmd, p).unwrap();
+            assert!(r["damage"].is_array() || r["damage"].is_object(), "{cmd}: {r}");
+            assert_eq!(r["device"], "test", "{cmd}: {r}");
+            assert_eq!((r["model"].clone(), r["lite"].clone()), (json!("manga-lama"), json!(false)), "{cmd}: {r}");
+            assert_eq!((r["cpu"].clone(), r["fellBack"].clone()), (json!(!gpu), json!(false)), "{cmd}: {r}");
+            assert!(r["ms"].is_u64(), "{cmd}: {r}");
+        }
+        let mut s = page(Arc::new(FakeInpainter::default()), true);
+        s.execute("select.rect", json!({"x": 26, "y": 16, "width": 12, "height": 14})).unwrap();
+        let r = s.execute(ID, json!({})).unwrap();
+        for k in ["device", "model", "lite", "cpu", "fellBack", "ms", "region"] {
+            assert!(r.get(k).is_some(), "selection: {k} in {r}");
+        }
+        // The patch-based Remove (no AI) is unchanged.
+        let mut s = page(Arc::new(FakeInpainter::default()), true);
+        let r = s.execute("paint.remove", json!({"points": [[29, 22], [35, 22]], "size": 14})).unwrap();
+        assert!(r.get("device").is_none() && r.get("damage").is_some(), "{r}");
     }
 
     #[test]

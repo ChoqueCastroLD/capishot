@@ -311,7 +311,9 @@ pub fn authorize_engine_command(id: &str, params: &Value) -> Result<(), Automati
             | "file.scripts.deleteAllEmptyLayers"
             | "file.export.exportPreferences"
     );
-    if id.starts_with("file.") && !safe_file_command {
+    // Place Embedded with the image in the params (`data`, no `path`) reads nothing from disk.
+    let in_memory_place = id == "file.placeEmbedded" && params.get("path").is_none() && params.get("data").is_some();
+    if id.starts_with("file.") && !safe_file_command && !in_memory_place {
         return Err(command_error(id));
     }
     // Contents commands re-check the resolved source in the engine before any disk read.

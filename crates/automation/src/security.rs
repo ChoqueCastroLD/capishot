@@ -266,7 +266,15 @@ impl Drop for ConnectionPermit {
 
 /// Apply idle and write timeouts before handing a socket to a connection worker.
 pub fn configure_stream(stream: &std::net::TcpStream) -> std::io::Result<()> {
-    stream.set_read_timeout(Some(IO_TIMEOUT))?;
+    configure_stream_idle(stream, Some(IO_TIMEOUT))
+}
+
+/// [`configure_stream`] with the idle timeout `idle` (`None`: an idle connection is never
+/// dropped). Writes keep [`IO_TIMEOUT`].
+pub fn configure_stream_idle(stream: &std::net::TcpStream, idle: Option<Duration>) -> std::io::Result<()> {
+    // Low latency: replies go out at once (TCP_NODELAY), not held back for the peer's ACK.
+    stream.set_nodelay(true)?;
+    stream.set_read_timeout(idle.filter(|d| !d.is_zero()))?;
     stream.set_write_timeout(Some(IO_TIMEOUT))
 }
 
@@ -277,6 +285,8 @@ pub struct AuthDeadlineStream {
     stream: std::net::TcpStream,
     /// `None` once authenticated.
     deadline: Option<Instant>,
+    /// The idle timeout once authenticated (`None`: none).
+    idle: Option<Duration>,
 }
 
 impl AuthDeadlineStream {
@@ -284,13 +294,20 @@ impl AuthDeadlineStream {
     pub fn new(stream: std::net::TcpStream, limit: Duration) -> Self {
         // A limit too large to represent expires at once rather than never.
         let now = Instant::now();
-        Self { stream, deadline: Some(now.checked_add(limit).unwrap_or(now)) }
+        Self { stream, deadline: Some(now.checked_add(limit).unwrap_or(now)), idle: Some(IO_TIMEOUT) }
+    }
+
+    /// Drop the connection after `idle` without a request once authenticated (`None` or zero:
+    /// never), instead of [`IO_TIMEOUT`].
+    pub fn with_idle(mut self, idle: Option<Duration>) -> Self {
+        self.idle = idle.filter(|d| !d.is_zero());
+        self
     }
 
     /// The connection authenticated: only the idle timeout applies from here on.
     pub fn authenticated(&mut self) -> std::io::Result<()> {
         self.deadline = None;
-        self.stream.set_read_timeout(Some(IO_TIMEOUT))
+        self.stream.set_read_timeout(self.idle)
     }
 }
 
@@ -302,7 +319,7 @@ impl Read for AuthDeadlineStream {
                 return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "not authenticated in time"));
             }
             // Wait no longer than what is left, so a silent client is dropped at the deadline too.
-            self.stream.set_read_timeout(Some(left.min(IO_TIMEOUT)))?;
+            self.stream.set_read_timeout(Some(self.idle.map_or(left, |idle| left.min(idle))))?;
         }
         self.stream.read(buf)
     }

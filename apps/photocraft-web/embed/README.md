@@ -57,6 +57,9 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
   `inspect.pixelRev`, `events.layerPixelsChanged`). `execute('document.inspect', {textStyle: true})`
   adds type layers' full run and paragraph styles (`text.style`) and every effect's settings
   (`effects.items[].fx`) (feature `inspect.textStyle`).
+  Every layer also has `uid`, a stable id kept in the PSD (its layer id) and `.pcraft`: the same
+  after save and reopen, a new one for a duplicate, never reused for another layer in the session;
+  `id` is renumbered on every open (feature `inspect.uid`).
   - `execute(command, params, {document, history})`: `document` runs an engine command on that
     open document without activating it (feature `execute.document`); `history: 'none'` (or
     `'silent'`) applies it with no undo step, kept through the user's undo and redo (feature

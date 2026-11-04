@@ -57,7 +57,7 @@ fn pixel_revision(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// The image of a `png` (or `data`) param: base64, with or without a `data:…;base64,` prefix.
-fn image_bytes(cmd: &str, p: &Value) -> Result<Vec<u8>> {
+pub(crate) fn image_bytes(cmd: &str, p: &Value) -> Result<Vec<u8>> {
     let text = p.get("png").or_else(|| p.get("data")).and_then(Value::as_str).ok_or_else(|| bad(cmd, "needs `png`: the image as base64 (PNG, JPEG, WebP…)"))?;
     let text = match text.split_once(";base64,") {
         Some((head, rest)) if head.starts_with("data:") => rest,
