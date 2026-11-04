@@ -71,8 +71,18 @@ p.on('pageerror', (e) => console.log('PAGEERROR', e.message.slice(0, 300)));
 const cdp = await ctx.newCDPSession(p);
 await p.goto(url);
 await p.waitForFunction(() => self.photocraft && self.photocraft.request, null, { timeout: 300000 });
-const req = (m, pr = {}) => p.evaluate(([m, pr]) => self.photocraft.request(m, pr).then((r) => r, (e) => ({ err: String(e) })), [m, pr]);
-for (let i = 0; i < 400; i++) { if (!(await req('engine.commands')).err) break; await p.waitForTimeout(250); }
+// A call that a reload cuts off (WEBGPU=1: the device-loss reload) is an error, not a crash.
+const req = (m, pr = {}) => p.evaluate(([m, pr]) => self.photocraft.request(m, pr).then((r) => r, (e) => ({ err: String(e) })), [m, pr]).catch((e) => ({ err: String(e) }));
+const booted = async () => {
+  for (let i = 0; i < 400; i++) {
+    if (!(await req('engine.commands')).err) return;
+    await p.waitForFunction(() => self.photocraft && self.photocraft.request, null, { timeout: 300000 }).catch(() => {});
+    await p.waitForTimeout(250);
+  }
+};
+let reloads = 0;
+p.on('framenavigated', (f) => { if (f === p.mainFrame()) reloads++; });
+await booted();
 const ex = async (command, params = {}, wait) => { const r = await req('engine.execute', wait === undefined ? { command, params } : { command, params, wait }); return (r && r.result) || r || {}; };
 const sleep = (ms) => p.waitForTimeout(ms);
 const busy = async () => { const r = await req('jobs.list'); const j = (r && r.result) || r || {}; return (j.jobs || []).some((x) => x.state === 'running'); };
@@ -151,7 +161,7 @@ const worst = long.filter((l) => l.step !== 'load' && l.step !== 'between' && l.
 const openWorst = long.filter((l) => l.step === 'open').reduce((m, l) => Math.max(m, l.ms), 0);
 clearInterval(sampler);
 const peak = Math.max(0, ...rows.map((r) => r.total), ...samples.map((m) => m.renderer + m.gpu));
-const summary = { page: file, size: [W, H], deviceMemory: gb, webgpu, crashed, failed, worstTask: worst, openWorstTask: openWorst, peakMB: peak, peakWasmMB: Math.max(0, ...rows.map((r) => r.wasm)) };
+const summary = { reloads: Math.max(0, reloads - 1), page: file, size: [W, H], deviceMemory: gb, webgpu, crashed, failed, worstTask: worst, openWorstTask: openWorst, peakMB: peak, peakWasmMB: Math.max(0, ...rows.map((r) => r.wasm)) };
 fs.writeFileSync(outFile, JSON.stringify({ summary, rows, long }, null, 1));
 console.log(JSON.stringify(summary));
 if (crashed || failed || worst > limit || openWorst > limit || peak > cap) process.exitCode = 1;

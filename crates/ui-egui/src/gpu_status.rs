@@ -76,7 +76,8 @@ pub fn check_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if first {
         app.window_lost = true;
         let reason = health.fault().map_or_else(|| "GPU device lost".to_string(), |f| f.to_string());
-        log::error!("{reason}: the window can't be drawn any more; saving unsaved documents for recovery and closing");
+        let then = if cfg!(target_arch = "wasm32") { "reloading on the CPU canvas" } else { "closing" };
+        log::error!("{reason}: the window can't be drawn any more; saving unsaved documents for recovery and {then}");
     }
     // In the browser the page reloads instead (the web shell, as for a lost WebGL context): its
     // documents reopen from crash recovery. Closing it lost the user's place, and a phone's tab

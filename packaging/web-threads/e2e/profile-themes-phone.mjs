@@ -22,6 +22,13 @@ const boot = async () => {
 };
 const req = (m, pr = {}) => p.evaluate(([m, pr]) => self.photocraft.request(m, pr).then((r) => r, (e) => ({ err: String(e) })), [m, pr]);
 const ex = async (c, pr = {}) => { const r = await req('engine.execute', { command: c, params: pr }); return r.result ?? r; };
+// ui.dialog.set takes one field at a time.
+const setFields = async (dialog, fields) => {
+  for (const [field, value] of Object.entries(fields)) {
+    const r = await req('ui.dialog.set', { dialog, field, value });
+    check(!r?.err, `ui.dialog.set ${field}${r?.err ? ': ' + r.err : ''}`);
+  }
+};
 
 await p.goto(url);
 await boot();
@@ -35,16 +42,16 @@ const dialog = opened.result?.dialog ?? opened.dialog;
 check(!!dialog, `Perfil y temas opens: ${JSON.stringify(opened).slice(0, 200)}`);
 await p.waitForTimeout(1500);
 await shot('01-temas');
-await req('ui.dialog.set', { dialog, fields: { edit: { id: saved.id, name: 'Tinta naranja', css, meta: { author: 'Equipo' }, icon: '', text: false } } });
+await setFields(dialog, { edit: { id: saved.id, name: 'Tinta naranja', css, meta: { author: 'Equipo' }, icon: '', text: false } });
 await p.waitForTimeout(1500);
 await shot('02-editor');
-await req('ui.dialog.set', { dialog, fields: { edit: { id: saved.id, name: 'Tinta naranja', css, meta: {}, icon: '', text: true } } });
+await setFields(dialog, { edit: { id: saved.id, name: 'Tinta naranja', css, meta: {}, icon: '', text: true } });
 await p.waitForTimeout(1200);
 await shot('03-editar-como-texto');
-await req('ui.dialog.set', { dialog, fields: { edit: null, tab: 'export' } });
+await setFields(dialog, { edit: null, tab: 'export' });
 await p.waitForTimeout(1200);
 await shot('04-exportar');
-await req('ui.dialog.set', { dialog, fields: { tab: 'import' } });
+await setFields(dialog, { tab: 'import' });
 await p.waitForTimeout(1200);
 await shot('05-importar');
 // The theme in use comes back after a reload (preferences persistence).
