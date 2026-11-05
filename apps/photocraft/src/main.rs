@@ -538,7 +538,11 @@ fn main() -> eframe::Result {
             }
             // Edit › Clean Selected Area with AI: Manga LaMa on this machine (feature `ai`).
             #[cfg(feature = "ai")]
-            if let Some(i) = photocraft_ai_lama::native::NativeInpainter::locate(models.as_deref()) {
+            if let Some(mut i) = photocraft_ai_lama::native::NativeInpainter::locate(models.as_deref()) {
+                if let Some(dir) = &models {
+                    let cache = photocraft_ai::cache::DiskCache::in_dir(dir);
+                    i = i.with_fetch(std::sync::Arc::new(photocraft_ai::native::model_fetcher(cache, Some(photocraft_ai::cache::models_url_from_env()))));
+                }
                 app.session.set_inpainter(Some(std::sync::Arc::new(i)));
             }
             app.prepare_first_frame(&cc.egui_ctx);
