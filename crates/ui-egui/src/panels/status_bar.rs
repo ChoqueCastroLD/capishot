@@ -10,9 +10,13 @@ pub fn status_bar_heights(t: &Tokens) -> (f32, f32) {
 
 pub fn status_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
+    // egui takes the separator line's width off the top of the bar: a thicker line (Manga's 1.5
+    // rounds to 2) gets the same off the bottom past the first point, or the controls sit low.
+    let line = ui.visuals().widgets.noninteractive.bg_stroke.width.round() as i8;
+    let margin = egui::Margin { bottom: line.saturating_sub(1).max(0), ..egui::Margin::symmetric(10, 0) };
     egui::Panel::bottom("status_bar")
         .exact_size(status_bar_heights(&t).0)
-        .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(10, 0)))
+        .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(margin))
         .show(ui, |ui| {
             crate::theme::pattern::paint_bar(ui);
             let control_h = status_bar_heights(&t).1;
