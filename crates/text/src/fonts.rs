@@ -246,6 +246,9 @@ struct Managed {
     /// The in-memory file of a user font ([`FontDb::register_user_font`]), dropped from
     /// [`FontDb::font_data`] when it is unregistered.
     data: Option<Arc<Vec<u8>>>,
+    /// The other names a user font answers to ([`FontDb::alias_user_font`]). Their faces are in
+    /// `faces`, so they go with it.
+    aliases: Vec<String>,
 }
 
 /// The [`FontDb::register_managed`] key of a user font.
@@ -597,7 +600,7 @@ impl FontDb {
             for n in &names {
                 self.retired.remove(&n.to_lowercase());
             }
-            self.managed.insert(key.to_string(), Managed { files: files.to_vec(), faces, data: None });
+            self.managed.insert(key.to_string(), Managed { files: files.to_vec(), faces, data: None, aliases: Vec::new() });
             self.ps_cache.clear();
             self.face_cache.clear();
             self.refresh_generics();
@@ -618,7 +621,70 @@ impl FontDb {
         if self.managed.contains_key(&key) {
             return self.managed_families(&key);
         }
-        let added = self.fcx.collection.register_fonts(Blob::new(bytes.clone()), None);
+        let (faces, names) = self.add_user_faces(&bytes, None);
+        if faces.is_empty() {
+            return Vec::new();
+        }
+        self.data.push(FontData::Shared(bytes.clone()));
+        self.managed.insert(key, Managed { files: Vec::new(), faces, data: Some(bytes), aliases: Vec::new() });
+        self.user_fonts_changed();
+        names
+    }
+
+    /// Makes the registered user font `id` answer to `aliases` too (a name a manifest or a document
+    /// calls it by that the file doesn't have). The data is shared, not copied, and each alias is
+    /// a family of its own until [`FontDb::unregister_user_font`] removes it with the file. An
+    /// alias another font already provides stays that font's; several files can share an alias
+    /// when their faces differ (a family's Regular and Bold). Returns every alias the font has now.
+    pub fn alias_user_font(&mut self, id: &str, aliases: &[String]) -> Vec<String> {
+        let key = user_key(id);
+        let Some(bytes) = self.managed.get(&key).and_then(|m| m.data.clone()) else { return Vec::new() };
+        let mut faces = Vec::new();
+        let mut names = Vec::new();
+        for alias in aliases.iter().map(|a| a.trim()) {
+            if alias.is_empty() || !self.alias_is_free(alias, &bytes) {
+                continue;
+            }
+            let (added, _) = self.add_user_faces(&bytes, Some(alias));
+            if !added.is_empty() {
+                faces.extend(added);
+                names.push(alias.to_string());
+            }
+        }
+        let changed = !faces.is_empty();
+        let Some(m) = self.managed.get_mut(&key) else { return Vec::new() };
+        m.faces.extend(faces);
+        m.aliases.extend(names);
+        let all = m.aliases.clone();
+        if changed {
+            self.user_fonts_changed();
+        }
+        all
+    }
+
+    /// Can a file take the name `alias`? Yes for a name nobody has, or one that is only an alias
+    /// of other files and has none of its faces: unregistering goes by weight and style, so two
+    /// alike faces in one family couldn't be removed apart.
+    fn alias_is_free(&mut self, alias: &str, bytes: &[u8]) -> bool {
+        if !self.has_family(alias) {
+            return true;
+        }
+        if !self.is_user_alias(alias) {
+            return false;
+        }
+        let have = self.faces(alias);
+        !crate::user_fonts::faces_of(bytes).iter().any(|f| have.iter().any(|h| h.weight.round() as u16 == f.weight && h.italic == f.italic))
+    }
+
+    /// Is `name` an alias of a user font ([`FontDb::alias_user_font`])?
+    fn is_user_alias(&self, name: &str) -> bool {
+        self.managed.values().any(|m| m.aliases.iter().any(|a| a.eq_ignore_ascii_case(name)))
+    }
+
+    /// Adds every face of a user font's data, under `family` when given. Returns the faces and
+    /// the families they went to.
+    fn add_user_faces(&mut self, bytes: &Arc<Vec<u8>>, family: Option<&str>) -> (Vec<FaceKey>, Vec<String>) {
+        let added = self.fcx.collection.register_fonts(Blob::new(bytes.clone()), family.map(|f| FontInfoOverride { family_name: Some(f), ..Default::default() }));
         let mut faces = Vec::new();
         let mut names: Vec<String> = Vec::new();
         for (id, infos) in added {
@@ -631,24 +697,23 @@ impl FontDb {
                 names.push(n.to_string());
             }
         }
-        if faces.is_empty() {
-            return Vec::new();
-        }
         names.sort_by_key(|n| (is_hidden_family(n), n.to_lowercase()));
         for n in &names {
             self.retired.remove(&n.to_lowercase());
             self.forget_aliases(n);
         }
-        self.data.push(FontData::Shared(bytes.clone()));
-        self.managed.insert(key, Managed { files: Vec::new(), faces, data: Some(bytes) });
+        (faces, names)
+    }
+
+    fn user_fonts_changed(&mut self) {
         self.ps_cache.clear();
         self.face_cache.clear();
+        self.traits_cache.clear();
         self.refresh_generics();
         GENERATION.fetch_add(1, Ordering::Relaxed);
         if self.shared {
             SHARED_GENERATION.fetch_add(1, Ordering::Relaxed);
         }
-        names
     }
 
     /// Unregisters a user font ([`FontDb::register_user_font`]). Returns the families that lost
@@ -969,6 +1034,11 @@ impl FontDb {
                     return Some(resolved);
                 }
             }
+        }
+        // An alias can be an old PostScript name of the font.
+        if self.is_user_alias(ps) && self.has_family(ps) {
+            let face = self.faces(ps).into_iter().next()?;
+            return Some(ResolvedFont { family: face.family, weight: face.weight.round() as u16, italic: face.italic, exact: true });
         }
         None
     }
@@ -1468,19 +1538,7 @@ mod tests {
     /// so each test registers a family nobody else uses.
     fn renamed_inter(name: &str) -> Vec<u8> {
         assert_eq!(name.chars().count(), 5);
-        let enc = |s: &str| s.encode_utf16().flat_map(u16::to_be_bytes).collect::<Vec<u8>>();
-        let (from, to) = (enc("Inter"), enc(name));
-        let mut b = super::INTER_REGULAR.to_vec();
-        let mut i = 0;
-        while i + from.len() <= b.len() {
-            if b[i..i + from.len()] == from[..] {
-                b[i..i + from.len()].copy_from_slice(&to);
-                i += from.len();
-            } else {
-                i += 1;
-            }
-        }
-        b
+        inter_as(&super::INTER_REGULAR, name)
     }
 
     fn temp_dir(tag: &str) -> std::path::PathBuf {
@@ -1507,6 +1565,82 @@ mod tests {
         assert_eq!(data.last().map(|d| d.as_ref() == zq.as_slice()), Some(true));
         // Shared with fontique, not copied.
         assert!(matches!(data.last(), Some(super::FontData::Shared(a)) if std::sync::Arc::strong_count(a) >= 3));
+    }
+
+    /// `source` with the five-letter family "Inter" renamed in memory; no font file is added.
+    fn inter_as(source: &[u8], name: &str) -> Vec<u8> {
+        let enc = |s: &str| s.encode_utf16().flat_map(u16::to_be_bytes).collect::<Vec<u8>>();
+        let (from, to) = (enc("Inter"), enc(name));
+        let mut b = source.to_vec();
+        let mut i = 0;
+        while i + from.len() <= b.len() {
+            if b[i..i + from.len()] == from[..] {
+                b[i..i + from.len()].copy_from_slice(&to);
+                i += from.len();
+            } else {
+                i += 1;
+            }
+        }
+        b
+    }
+
+    #[test]
+    fn a_user_font_alias_goes_with_the_file_and_never_takes_another_font() {
+        let mut db = super::FontDb::new();
+        let bytes = std::sync::Arc::new(inter_as(&super::INTER_REGULAR, "Zvqxa"));
+        assert!(db.alias_user_font("a", &["Not Registered".into()]).is_empty());
+        assert_eq!(db.register_user_font("a", bytes.clone()), vec!["Zvqxa".to_string()]);
+        let aliases = vec!["Old Name Zv".to_string(), " ".to_string(), "Zvqxa".to_string(), "Inter".to_string(), "Old Name Zv".to_string()];
+        assert_eq!(db.alias_user_font("a", &aliases), vec!["Old Name Zv".to_string()], "only the name nobody has");
+        assert_eq!(db.faces("Old Name Zv").len(), 1);
+        assert_eq!(db.alias_user_font("a", &["Second Zv".into()]), vec!["Old Name Zv".to_string(), "Second Zv".to_string()]);
+        let gone = db.unregister_user_font("a");
+        for name in ["Zvqxa", "Old Name Zv", "Second Zv"] {
+            assert!(gone.iter().any(|g| g == name), "{name} in {gone:?}");
+            assert!(!db.has_family(name), "{name} went");
+        }
+        assert!(db.has_family("Inter"), "another font's name stays");
+        // The same name again, after it was retired.
+        db.register_user_font("a", bytes);
+        db.alias_user_font("a", &["Old Name Zv".into()]);
+        assert!(db.has_family("Old Name Zv"));
+        assert!(db.families().iter().any(|f| f == "Old Name Zv"));
+    }
+
+    #[test]
+    fn files_share_an_alias_when_their_faces_differ() {
+        let mut db = super::FontDb::new();
+        let regular = std::sync::Arc::new(inter_as(&super::INTER_REGULAR, "Zvqxb"));
+        let semibold = std::sync::Arc::new(inter_as(&super::INTER_SEMIBOLD, "Zvqxb"));
+        let other = std::sync::Arc::new(inter_as(&super::INTER_REGULAR, "Zvqxc"));
+        db.register_user_font("r", regular);
+        db.register_user_font("s", semibold);
+        db.register_user_font("o", other);
+        let name = "Group Name Zv".to_string();
+        assert_eq!(db.alias_user_font("r", std::slice::from_ref(&name)), vec![name.clone()]);
+        assert_eq!(db.alias_user_font("s", std::slice::from_ref(&name)), vec![name.clone()]);
+        assert_eq!(db.faces(&name).len(), 2, "Regular and SemiBold");
+        assert!(db.alias_user_font("o", std::slice::from_ref(&name)).is_empty(), "a second Regular couldn't be removed apart");
+        db.unregister_user_font("r");
+        assert_eq!(db.faces(&name).len(), 1);
+        assert!(db.has_family(&name), "the other file still has it");
+        db.unregister_user_font("s");
+        assert!(!db.has_family(&name));
+    }
+
+    #[test]
+    fn a_postscript_name_given_as_an_alias_resolves_exactly() {
+        let mut db = super::FontDb::new();
+        db.register_user_font("a", std::sync::Arc::new(inter_as(&super::INTER_REGULAR, "Zvqxd")));
+        assert!(!db.resolve_postscript("OldZv-Regular").exact);
+        db.alias_user_font("a", &["OldZv-Regular".into()]);
+        let r = db.resolve_postscript("OldZv-Regular");
+        assert!(r.exact);
+        assert_eq!(r.family, "OldZv-Regular");
+        // A family's plain name isn't a PostScript name just because it exists.
+        assert!(!db.resolve_postscript("Inter").exact);
+        db.unregister_user_font("a");
+        assert!(!db.resolve_postscript("OldZv-Regular").exact);
     }
 
     #[test]
