@@ -64,7 +64,10 @@ impl Reason {
             Reason::ZoomKey => "A zoom key seems stuck, so the canvas zooms. Tap Space to release it.",
             Reason::MoveKey => "Ctrl or Command seems stuck, so the Move tool is active. Tap it to release it.",
             Reason::ToolKey => "A tool key seems stuck. Tap it to release it.",
-            Reason::NoClick | Reason::NoDown | Reason::NoEffect => "That click did nothing with this tool. If it keeps happening, reload the page.",
+            Reason::NoClick | Reason::NoDown | Reason::NoEffect if cfg!(target_arch = "wasm32") => {
+                "That click did nothing with this tool. If it keeps happening, reload the page."
+            }
+            Reason::NoClick | Reason::NoDown | Reason::NoEffect => "That click did nothing with this tool. If it keeps happening, restart the app.",
         }
     }
 

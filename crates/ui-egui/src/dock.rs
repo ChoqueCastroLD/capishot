@@ -1387,6 +1387,7 @@ pub fn apply(app: &mut PhotocraftApp, v: &Value) {
     if let Some(d) = v.get("dock").and_then(|d| serde_json::from_value(d.clone()).ok()) {
         app.ui.dock = d;
     }
+    crate::panel_docking::drop_theme_switch_layout(app);
     crate::panel_docking::sync_visibility(app);
     app.ui.timeline.open = v.get("timelineOpen").and_then(Value::as_bool).unwrap_or(false);
     if !app.ui.timeline.open {

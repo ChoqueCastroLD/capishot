@@ -106,13 +106,16 @@ fn may_reuse(app: &PhotocraftApp, ctx: &egui::Context, layer: LayerId) -> bool {
 }
 
 /// Shows the chrome with `draw`, or repaints it from the last frame's shapes while a canvas
-/// gesture runs (see the module docs). `chrome` is whether it is shown at all (screen modes).
+/// gesture runs (see the module docs). `chrome` is whether the frame may do that: false when the
+/// chrome is hidden (screen modes) or when `draw` draws the canvas itself (a custom docking
+/// workspace), whose tool would get no input on a repainted frame.
 /// Returns the area left for the canvas.
 pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui, chrome: bool, draw: impl FnOnce(&mut PhotocraftApp, &mut egui::Ui)) -> Rect {
     let ctx = ui.ctx().clone();
     let key = key(app, &ctx, ui, chrome);
     let layer = ui.layer_id();
-    if may_reuse(app, &ctx, layer)
+    if chrome
+        && may_reuse(app, &ctx, layer)
         && app.chrome_freeze.reused < REFRESH_FRAMES
         && let Some(s) = app.chrome_freeze.snap.as_ref().filter(|s| s.key == key && s.layer == layer)
     {
