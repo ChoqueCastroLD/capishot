@@ -35,6 +35,10 @@ fn the_custom_theme_in_use_is_shown_and_restored() {
     let ctx2 = egui::Context::default();
     crate::prefs_ui::tick(&mut app2, &ctx2);
     assert_eq!(Tokens::get(&ctx2).accent, egui::Color32::from_rgb(255, 136, 0));
+    // A page starting sets its first theme: the saved custom one stays in use.
+    app2.set_start_theme(&ctx2, ThemeKind::Pro);
+    crate::prefs_ui::tick(&mut app2, &ctx2);
+    assert_eq!(Tokens::get(&ctx2).accent, egui::Color32::from_rgb(255, 136, 0));
     app2.set_theme(&ctx2, ThemeKind::Classic);
     crate::prefs_ui::tick(&mut app2, &ctx2);
     assert_eq!(Tokens::get(&ctx2), Tokens::for_kind(ThemeKind::Classic));

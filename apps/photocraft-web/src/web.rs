@@ -361,7 +361,7 @@ impl Boot {
         track_active_touches();
         crate::clipboard::install(ctx);
         listen_drag_position();
-        app.set_theme(ctx, ThemeKind::Pro);
+        app.set_start_theme(ctx, ThemeKind::Pro);
         let mut gpu = ("cpu", "unknown");
         let mut gpu_names = (String::new(), String::new());
         // Preferences › Performance › Rendering: CPU (set by hand, or after the graphics context
