@@ -50,6 +50,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("tablet", Class::Standalone),
     // Local AI runtime (model catalog, tiling, weights, cache; burn inference behind features).
     ("ai", Class::Standalone),
+    // The process's one ONNX Runtime environment, shared by `ai` and `ai-lama`.
+    ("ai-ort", Class::Standalone),
     // Manga LaMa inpainting: crop/paste tiling (always) and the generator on burn (feature `model`).
     ("ai-lama", Class::Standalone),
     ("doc", Class::Layer(1)),
@@ -109,10 +111,12 @@ fn intra_layer_allowed(from: &str, to: &str) -> bool {
     })
 }
 
-/// The only workspace dependencies a standalone crate may have: (from, to), both standalone and
-/// both publishable. `codecs` uses the optional `heif` decoder crate behind its `heif` feature, so
-/// distributors can leave HEVC decoding out of a build; `heif` itself depends on no workspace crate.
-pub const STANDALONE_EXCEPTIONS: &[(&str, &str)] = &[("codecs", "heif")];
+/// The only workspace dependencies a standalone crate may have: (from, to), both standalone.
+/// `codecs` uses the optional `heif` decoder crate behind its `heif` feature, so distributors can
+/// leave HEVC decoding out of a build; `heif` itself depends on no workspace crate. `ai` and
+/// `ai-lama` share the process's one ONNX Runtime environment in `ai-ort`, whose test (its only use
+/// of them, a dev-dependency) runs both in one process.
+pub const STANDALONE_EXCEPTIONS: &[(&str, &str)] = &[("codecs", "heif"), ("ai", "ai-ort"), ("ai-lama", "ai-ort"), ("ai-ort", "ai"), ("ai-ort", "ai-lama")];
 
 fn standalone_exception(from: &str, to: &str) -> bool {
     let (from, to) = (short_name(from), short_name(to));
@@ -353,6 +357,19 @@ mod tests {
         }
         // The exception does not open codecs up to layered crates.
         let v = check(&[c("photocraft-codecs", &[("photocraft-geom", Normal, true)])]);
+        assert!(matches!(v[..], [Violation::StandaloneHasWorkspaceDep { .. }]));
+    }
+
+    #[test]
+    fn the_ai_crates_share_only_the_onnx_runtime_crate() {
+        for (from, to) in [("photocraft-ai", "photocraft-ai-ort"), ("photocraft-ai-lama", "photocraft-ai-ort")] {
+            assert!(check(&[c(from, &[(to, Normal, true)])]).is_empty(), "{from} -> {to}");
+        }
+        for to in ["photocraft-ai", "photocraft-ai-lama"] {
+            assert!(check(&[c("photocraft-ai-ort", &[(to, Dev, true)])]).is_empty(), "{to}");
+        }
+        // Not each other.
+        let v = check(&[c("photocraft-ai", &[("photocraft-ai-lama", Normal, true)])]);
         assert!(matches!(v[..], [Violation::StandaloneHasWorkspaceDep { .. }]));
     }
 

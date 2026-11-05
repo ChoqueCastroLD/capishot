@@ -65,6 +65,9 @@ impl Session {
 pub(crate) struct AiOptions {
     pub tiles: TileOptions,
     pub allow_download: bool,
+    /// The AI Model Manager's queue, for `allowDownload` when the inpainter only reads files.
+    #[cfg_attr(target_family = "wasm", allow(dead_code))]
+    pub store: Option<Arc<dyn photocraft_ai::models::ModelStore>>,
     pub model: &'static ModelInfo,
     pub run: crate::ai_cmds::RunChoice,
     pub threads: usize,
@@ -153,7 +156,7 @@ pub(crate) fn ai_options(s: &Session, p: &Value, cmd: &str, full_res_default: bo
     let threads = uint("threads", 0, 0, 64)? as usize;
     let unload = !crate::ai_cmds::keep_loaded(p, cmd)?;
     let pinned = !matches!(p.get("model").and_then(Value::as_str).unwrap_or("auto"), "auto" | "");
-    Ok(AiOptions { tiles: TileOptions { max_side: max_side as usize, margin: margin as usize, full_res }, allow_download, model, run, threads, unload, pinned })
+    Ok(AiOptions { tiles: TileOptions { max_side: max_side as usize, margin: margin as usize, full_res }, allow_download, store: s.ai_models(), model, run, threads, unload, pinned })
 }
 
 /// The service, if it can run `opts.model` now (else the reason, for the user).
@@ -240,6 +243,10 @@ pub(crate) fn ai_fill_rgb_async(
     opts: AiOptions,
     finish: FillDone,
 ) {
+    #[cfg(not(target_family = "wasm"))]
+    if let Err(e) = fetch_weights(svc.as_ref(), &ctx, &opts) {
+        return finish(Err(e));
+    }
     let plan = match tiles::plan(&cover, w, h, &opts.tiles) {
         Ok(p) if !p.is_empty() => p,
         Ok(_) => return finish(Err(bad("nothing to clean: the area is empty"))),
@@ -252,6 +259,34 @@ pub(crate) fn ai_fill_rgb_async(
     };
     let state = FillState { svc, ctx, rgb, cover, binary, w, h, opts, plan, split, next: 0, fell_back: false, trail: Arc::default(), finish };
     fill_step(state);
+}
+
+/// `allowDownload` with an inpainter that only reads files (native): fetches the model through
+/// the AI Model Manager's queue and waits for it, on the job's worker thread.
+#[cfg(not(target_family = "wasm"))]
+fn fetch_weights(svc: &dyn Inpainter, ctx: &JobCtx, opts: &AiOptions) -> Result<()> {
+    use photocraft_ai::models::Status;
+    let model = opts.model;
+    if !opts.allow_download || svc.fetches_weights() || !matches!(svc.model_state_of(model.id), ModelState::NeedsDownload { .. }) {
+        return Ok(());
+    }
+    let Some(store) = opts.store.as_ref() else { return Ok(()) };
+    let failed = |e: String| EngineError::Other(format!("{}: {e}", model.title));
+    store.download(model).map_err(|e| failed(e.to_string()))?;
+    loop {
+        if ctx.cancelled() {
+            store.cancel(Some(model));
+            return Err(EngineError::Cancelled);
+        }
+        match store.status(model) {
+            Status::Downloaded => return Ok(()),
+            Status::Failed(e) | Status::Unavailable(e) => return Err(failed(e)),
+            Status::Queued | Status::Checking => {}
+            Status::Downloading { done, total, .. } => ctx.progress(done as f32 / total.max(1) as f32, model.title),
+            Status::NotDownloaded | Status::Paused { .. } | Status::UpdateAvailable => return Err(failed("the download stopped".into())),
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
 }
 
 /// What the plan's split tiles share ([`tiles::Split`]), when it has any.
@@ -586,10 +621,11 @@ fn apply(s: &mut Session, label: &str, plan: Plan, generated: &[f32], device: St
         "layer": layer.0,
         "pixels": count,
         "region": [region.x0, region.y0, region.width(), region.height()],
-        "device": device,
         "model": model.id,
         "lite": model.lite,
-        "cpu": run.cpu,
+        // `device` too: `CAPISHOT_AI_DEVICE=cpu` forces the CPU without the request knowing.
+        "cpu": run.cpu || device == "CPU",
+        "device": device,
         "fellBack": run.fell_back,
         "ms": ms,
     }))
