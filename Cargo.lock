@@ -1740,7 +1740,9 @@ dependencies = [
 name = "capishot-host"
 version = "0.13.7"
 dependencies = [
+ "eframe",
  "egui",
+ "egui_kittest",
  "photocraft-ai",
  "photocraft-ai-lama",
  "photocraft-ai-sd",

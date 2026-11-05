@@ -14,6 +14,17 @@ may change in any commit; their changes are listed under **Experimental**. A cha
 - `CapishotView::control("ui.set", ..)` (experimental) takes `moveTarget` (`"layer"` or `"group"`)
   and `moveAutoSelect` (bool); `ui.inspect` reports them under `toolOptions`.
 
+## API_VERSION 1, fixes (panes on one device)
+
+- `CapishotView::set_camera` and `set_show_camera`'s `DocumentCamera::{At, Keep}` after `Host::show`
+  (or `Host::close`, `Host::open`) moved another document's view: the view now catches up with the
+  session as it is lent, before any queued request runs. A workaround that calls
+  `embed::set_camera` before `Host::show` keeps working and can go.
+- Several `CapishotView`s on one wgpu device no longer blank each other: each canvas has its own GPU
+  resources, freed when the view drops. See README › Several editors on one device.
+- **Experimental**: `PhotocraftApp::{gpu_canvas, sync_views_if_moved}`; `embed::camera` and
+  `embed::set_camera` read the index as the session's document even before the frame's sync.
+
 ## API_VERSION 1, additions (font aliases)
 
 - `fonts::FontFile {name, bytes, aliases}` (`new`, `with_aliases`, `From<(String, Vec<u8>)>`,

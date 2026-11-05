@@ -22,8 +22,8 @@ fn render(profile: &str, rgb: [f32; 3], reopen: bool) -> Option<([u8; 3], [u8; 3
             let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
             if let Some(rs) = cc.wgpu_render_state.as_ref() {
                 ft.store(photocraft_gpu::Compositor::preferred_acc_format(&rs.adapter) == eframe::wgpu::TextureFormat::Rgba32Float, Ordering::SeqCst);
-                *observer_out.lock().expect("GPU observer lock") = Some(photocraft_ui_egui::gpu_canvas::GpuCanvas::new(rs));
                 app.set_wgpu(rs.clone());
+                *observer_out.lock().expect("GPU observer lock") = app.gpu_canvas().cloned();
             }
             app
         })

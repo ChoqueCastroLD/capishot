@@ -9,7 +9,7 @@ use photocraft_geom::Rect;
 
 fn read_mips(gpu: &GpuCanvas, key: u64) -> Vec<Vec<[f32; 4]>> {
     let renderer = gpu.rs.renderer.read();
-    let doc = &renderer.callback_resources.get::<Resources>().unwrap().docs[&key];
+    let doc = &renderer.callback_resources.canvas(gpu.id).unwrap().docs[&key];
     assert_eq!(doc.tiles.len(), 1);
     let tile = &doc.tiles[0];
     let (device, queue) = (&gpu.rs.device, &gpu.rs.queue);
@@ -60,7 +60,7 @@ fn canvas_mips_preserve_opaque_pixels_and_partial_updates() {
     let gpu = GpuCanvas::new(&rs);
     // Both mip paths: straight into the level, and the DX12 scratch-texture workaround.
     for separate in [false, true] {
-        gpu.rs.renderer.write().callback_resources.get_mut::<Resources>().unwrap().separate_mip_targets = separate;
+        gpu.rs.renderer.write().callback_resources.canvas_mut(gpu.id).unwrap().separate_mip_targets = separate;
         check_mips(&gpu);
         check_refinement_pieces(&gpu);
     }

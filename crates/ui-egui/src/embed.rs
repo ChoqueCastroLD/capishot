@@ -260,15 +260,17 @@ pub enum CameraChange {
 
 /// The camera of the view of session document `index` (after [`frame`] made its view).
 pub fn camera(app: &PhotocraftApp, index: usize) -> Option<Camera> {
-    app.ui.views.get(index).map(|v| Camera { zoom: v.zoom, center: v.center, rotation: v.rotation })
+    app.view_slot(index).and_then(|slot| app.ui.views.get(slot)).map(|v| Camera { zoom: v.zoom, center: v.center, rotation: v.rotation })
 }
 
-/// Move the camera of session document `index` (no animation). Views are made for documents the
-/// host opened since the last frame first. `Err` for a document without a view or a value that
+/// Move the camera of session document `index` (no animation). Views are brought in step first
+/// with what the host opened, closed or reordered since the last frame, so `index` always means
+/// the session's document. `Err` for a document without a view or a value that
 /// isn't finite (zoom must be > 0); nothing changes then.
 pub fn set_camera(app: &mut PhotocraftApp, index: usize, change: CameraChange) -> Result<(), String> {
-    if app.ui.views.len() <= index {
-        app.sync_views();
+    // Between a host's frames the session is lent back and this one is empty: nothing to sync to.
+    if !app.session.documents().is_empty() {
+        app.sync_views_if_moved();
     }
     if let CameraChange::Set { zoom, center, rotation } = change {
         if zoom.is_some_and(|z| !z.is_finite() || z <= 0.0) {
