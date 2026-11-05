@@ -6,6 +6,14 @@ Every change to the stable API is listed here with the commit to pin. Breaking c
 may change in any commit; their changes are listed under **Experimental**. A change to the
 `[patch]` pins (README.md) is listed too: copy the blocks again when you move the pin.
 
+## API_VERSION 1, additions (Move tool Auto-Select)
+
+- `view::MoveTarget::{Layer, Group}` (`as_str`), `ViewOptions::{move_target, move_auto_select}`: the
+  Move tool's Auto-Select from the host, applied when they change; `None` (default) leaves them as
+  the editor has them. Build `ViewOptions` with `..Default::default()`.
+- `CapishotView::control("ui.set", ..)` (experimental) takes `moveTarget` (`"layer"` or `"group"`)
+  and `moveAutoSelect` (bool); `ui.inspect` reports them under `toolOptions`.
+
 ## API_VERSION 1, additions (font aliases)
 
 - `fonts::FontFile {name, bytes, aliases}` (`new`, `with_aliases`, `From<(String, Vec<u8>)>`,

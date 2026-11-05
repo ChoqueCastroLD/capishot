@@ -467,6 +467,8 @@ fn theme_param(p: &Value) -> std::result::Result<Option<crate::theme::ThemeKind>
 // -- tools: stroke, tool, gradient, eyedropper, Content-Aware Move, tile grid, layer filter --
 
 struct ToolSet {
+    move_target: Option<&'static str>,
+    move_auto_select: Option<bool>,
     gradient_blend: Option<photocraft_color::BlendMode>,
     shape_stroke: Option<Option<photocraft_doc::ShapeStroke>>,
     tool: Option<Tool>,
@@ -488,6 +490,9 @@ impl ToolSet {
             tool: tool_param(p)?,
             gradient_classic: bool_field(p, "gradientClassic")?,
             stroke_trace: stroke_trace_param(p)?,
+            // The Move tool's options bar: Auto-Select and its Layer/Group dropdown.
+            move_target: move_target_param(p)?,
+            move_auto_select: bool_field(p, "moveAutoSelect")?,
             // The Eyedropper's options bar (#1649): Sample Size, Sample, Show Sampling Ring.
             eyedropper_size: eyedropper_size_param(p)?,
             eyedropper_sample: eyedropper_sample_param(p)?,
@@ -516,6 +521,12 @@ impl ToolSet {
             crate::paint_mouse::sync_tool_brush(app);
         }
         self.apply_gradient_and_trace(app);
+        if let Some(target) = self.move_target {
+            app.ui.tool_options.move_target = target.to_string();
+        }
+        if let Some(on) = self.move_auto_select {
+            app.ui.tool_options.move_auto_select = on;
+        }
         if let Some(size) = self.eyedropper_size {
             app.ui.tool_options.eyedropper_size = size;
         }
@@ -675,6 +686,17 @@ fn crop_orientation_param(p: &Value) -> std::result::Result<Option<u8>, String> 
     match uint_field(p, "cropOverlayOrientation")? {
         Some(o) if o < 4 => Ok(Some(o as u8)),
         Some(_) => Err("cropOverlayOrientation must be 0, 1, 2 or 3".into()),
+        None => Ok(None),
+    }
+}
+
+fn move_target_param(p: &Value) -> std::result::Result<Option<&'static str>, String> {
+    match p.get("moveTarget") {
+        Some(v) => match v.as_str() {
+            Some("layer") => Ok(Some("layer")),
+            Some("group") => Ok(Some("group")),
+            _ => Err("moveTarget must be \"layer\" or \"group\"".into()),
+        },
         None => Ok(None),
     }
 }

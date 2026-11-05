@@ -144,6 +144,25 @@ impl From<egui::ViewportCommand> for WindowRequest {
     }
 }
 
+/// What the Move tool's Auto-Select picks under the pointer ([`ViewOptions::move_target`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MoveTarget {
+    /// The layer itself.
+    Layer,
+    /// Its outermost group, or the layer when it is in none.
+    Group,
+}
+
+impl MoveTarget {
+    /// The name `ui.set {moveTarget}` and `ui.inspect` use.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MoveTarget::Layer => "layer",
+            MoveTarget::Group => "group",
+        }
+    }
+}
+
 /// The widget's options; change them any time ([`CapishotView::options_mut`]).
 #[derive(Clone, Debug)]
 pub struct ViewOptions {
@@ -164,11 +183,27 @@ pub struct ViewOptions {
     /// Rulers along the canvas (View › Rulers), applied when it changes; `None` leaves them as
     /// the editor (and the person, through View › Rulers) has them.
     pub rulers: Option<bool>,
+    /// What the Move tool's Auto-Select picks, applied when it changes; `None` leaves it as the
+    /// editor (and the person, through the options bar) has it. The editor starts on
+    /// [`MoveTarget::Group`].
+    pub move_target: Option<MoveTarget>,
+    /// The Move tool's Auto-Select checkbox, applied when it changes; `None` leaves it as the
+    /// editor (and the person, through the options bar) has it. The editor starts with it on.
+    pub move_auto_select: Option<bool>,
 }
 
 impl Default for ViewOptions {
     fn default() -> Self {
-        ViewOptions { mode: Mode::Embedded, full_theme: FullTheme::Host, keys: Keys::default(), dialogs: true, theme: None, rulers: Some(false) }
+        ViewOptions {
+            mode: Mode::Embedded,
+            full_theme: FullTheme::Host,
+            keys: Keys::default(),
+            dialogs: true,
+            theme: None,
+            rulers: Some(false),
+            move_target: None,
+            move_auto_select: None,
+        }
     }
 }
 
@@ -292,6 +327,10 @@ pub struct CapishotView {
     applied_mode: Mode,
     /// The rulers setting last applied.
     applied_rulers: Option<bool>,
+    /// The Auto-Select target last applied.
+    applied_move_target: Option<MoveTarget>,
+    /// The Auto-Select setting last applied.
+    applied_move_auto_select: Option<bool>,
     /// [`Mode::Full`]'s keyboard focus.
     #[cfg(feature = "full")]
     full: photocraft_ui_egui::embed::FullState,
@@ -336,6 +375,8 @@ impl CapishotView {
             shell,
             applied_mode: Mode::Embedded,
             applied_rulers: None,
+            applied_move_target: None,
+            applied_move_auto_select: None,
             #[cfg(feature = "full")]
             full: Default::default(),
             ready: photocraft_ui_egui::doc_ready::ReadyTracker::without_baseline(),
@@ -525,6 +566,18 @@ impl CapishotView {
             self.applied_rulers = self.options.rulers;
             if let Some(rulers) = self.options.rulers {
                 self.app.ui.extras.rulers = rulers;
+            }
+        }
+        if self.options.move_target != self.applied_move_target {
+            self.applied_move_target = self.options.move_target;
+            if let Some(target) = self.options.move_target {
+                self.app.ui.tool_options.move_target = target.as_str().to_string();
+            }
+        }
+        if self.options.move_auto_select != self.applied_move_auto_select {
+            self.applied_move_auto_select = self.options.move_auto_select;
+            if let Some(on) = self.options.move_auto_select {
+                self.app.ui.tool_options.move_auto_select = on;
             }
         }
         // The host's tool, when the host changed it since the last frame.
