@@ -27,7 +27,7 @@ rayon = ["model", "burn/rayon"]
 # convolutions on wgpu, same results), loaded at run time: `onnxruntime.dll` (a DirectML build,
 # 1.24 or later) and `DirectML.dll` next to the executable or in PHOTOCRAFT_AI_ONNXRUNTIME.
 # Without them, and on every other platform, the burn path runs. Never in a wasm build.
-directml = ["model", "dep:ort"]
+directml = ["model", "dep:ort", "dep:photocraft-ai-ort"]
 
 [dependencies]
 burn = { version = "0.22.0", default-features = false, features = ["std"], optional = true }
@@ -38,6 +38,7 @@ thiserror = { workspace = true }
 [target.'cfg(any(windows, target_os = "linux"))'.dependencies]
 # Dynamically loaded (no download at build time, nothing linked): see the `directml` feature.
 ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic", "directml", "api-24"], optional = true }
+photocraft-ai-ort = { workspace = true, optional = true }
 
 [dev-dependencies]
 image = { workspace = true, features = ["png"] }

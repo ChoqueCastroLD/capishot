@@ -7691,6 +7691,7 @@ dependencies = [
  "image",
  "ort",
  "photocraft-ai",
+ "photocraft-ai-ort",
  "pollster 1.0.1",
  "rayon",
  "serde",
@@ -7708,9 +7709,19 @@ dependencies = [
  "half",
  "image",
  "ort",
+ "photocraft-ai-ort",
  "pollster 1.0.1",
  "safetensors 0.8.0",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "photocraft-ai-ort"
+version = "0.13.7"
+dependencies = [
+ "ort",
+ "photocraft-ai",
+ "photocraft-ai-lama",
 ]
 
 [[package]]

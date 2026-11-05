@@ -1,0 +1,24 @@
+[package]
+name = "photocraft-ai-ort"
+description = "The process's one ONNX Runtime environment, shared by the AI crates (the upscalers and Manga LaMa), loaded at run time"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "photocraft_ai_ort"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
+# Dynamically loaded (no download at build time, nothing linked).
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic", "directml", "api-24"] }
+
+[dev-dependencies]
+# Both users of the environment, in one process.
+photocraft-ai = { workspace = true, features = ["directml"] }
+photocraft-ai-lama = { workspace = true, features = ["directml"] }

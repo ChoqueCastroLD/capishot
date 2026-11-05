@@ -387,3 +387,91 @@ fn a_silent_device_fallback_is_reported_once_per_job() {
     let r = s.execute(ID, json!({})).unwrap();
     assert_eq!((r["cpu"].clone(), r["fellBack"].clone(), r.get("notices")), (json!(false), json!(false), None), "{r}");
 }
+
+/// An inpainter that only reads files, as the native one: Ready once the store has its model.
+struct FileInpainter {
+    fake: FakeInpainter,
+    store: Arc<photocraft_ai::models::FakeStore>,
+}
+
+impl Inpainter for FileInpainter {
+    fn model_state(&self) -> ModelState {
+        self.model_state_of(catalog::LAMA_ID)
+    }
+    fn model_state_of(&self, id: &str) -> ModelState {
+        use photocraft_ai::models::ModelStore;
+        match catalog::model(id) {
+            Some(m) if self.store.status(m).is_downloaded() => ModelState::Ready,
+            _ => ModelState::NeedsDownload { bytes: 1 },
+        }
+    }
+    fn fetches_weights(&self) -> bool {
+        false
+    }
+    fn run(&self, req: Request, hooks: Arc<dyn Hooks>, done: photocraft_ai_lama::service::Done) {
+        if self.model_state_of(req.model) != ModelState::Ready {
+            return done(Err(LamaError::Unavailable("weights not found".into())));
+        }
+        self.fake.run(req, hooks, done);
+    }
+}
+
+/// `allowDownload` with the native inpainter, which only reads files: it answered "weights not
+/// found" without fetching anything. The model comes through the Manager's queue, then runs.
+#[test]
+fn allow_download_fetches_the_weights_of_an_inpainter_that_only_reads_files() {
+    let store = Arc::new(photocraft_ai::models::FakeStore::default());
+    store.inner.lock().unwrap().instant = true;
+    let mut s = page(8);
+    s.set_ai_models(Some(store.clone()));
+    s.set_inpainter(Some(Arc::new(FileInpainter { fake: FakeInpainter::default(), store: store.clone() })));
+    let p = json!({"model": "manga-lama", "device": "cpu"});
+    assert!(s.execute(ID, p.clone()).unwrap_err().to_string().contains(crate::ai_models_cmds::NOT_DOWNLOADED));
+    let r = s.execute(ID, json!({"model": "manga-lama", "device": "cpu", "allowDownload": true})).unwrap();
+    assert_eq!(r["model"], "manga-lama", "{r}");
+    assert!(s.execute(ID, p).is_ok(), "the model stays");
+}
+
+/// A failed download is the job's error, not a wait forever.
+#[test]
+fn allow_download_reports_a_failed_download() {
+    let store = Arc::new(photocraft_ai::models::FakeStore::default());
+    {
+        let mut g = store.inner.lock().unwrap();
+        g.instant = true;
+        g.fail = Some("no network".into());
+    }
+    let mut s = page(8);
+    s.set_ai_models(Some(store.clone()));
+    s.set_inpainter(Some(Arc::new(FileInpainter { fake: FakeInpainter::default(), store })));
+    let e = s.execute(ID, json!({"model": "manga-lama", "device": "cpu", "allowDownload": true})).unwrap_err().to_string();
+    assert!(e.contains("no network"), "{e}");
+}
+
+/// The fake, on a device named `CPU` whatever the request asked for.
+struct ForcedCpu(FakeInpainter);
+
+impl Inpainter for ForcedCpu {
+    fn model_state(&self) -> ModelState {
+        self.0.model_state()
+    }
+    fn model_state_of(&self, id: &str) -> ModelState {
+        self.0.model_state_of(id)
+    }
+    fn device(&self) -> String {
+        "CPU".into()
+    }
+    fn run(&self, req: Request, hooks: Arc<dyn Hooks>, done: photocraft_ai_lama::service::Done) {
+        self.0.run(req, hooks, done);
+    }
+}
+
+/// `CAPISHOT_AI_DEVICE=cpu` forces the CPU inside the service: the reply said `"device": "CPU"`,
+/// `"cpu": false`.
+#[test]
+fn a_run_forced_onto_the_cpu_says_so() {
+    let mut s = page(8);
+    s.set_inpainter(Some(Arc::new(ForcedCpu(FakeInpainter::default()))));
+    let r = s.execute(ID, json!({"model": "manga-lama", "device": "gpu"})).unwrap();
+    assert_eq!((r["device"].clone(), r["cpu"].clone(), r["fellBack"].clone()), (json!("CPU"), json!(true), json!(false)), "{r}");
+}

@@ -112,6 +112,11 @@ pub trait Inpainter: Send + Sync {
     fn device(&self) -> String {
         String::new()
     }
+    /// A request with `allow_download` fetches missing weights itself (the browser's AI worker).
+    /// `false`: it only reads files, and the caller fetches them first.
+    fn fetches_weights(&self) -> bool {
+        true
+    }
     /// Inpaints one tile and calls `done` exactly once.
     fn run(&self, req: Request, hooks: Arc<dyn Hooks>, done: Done);
 }

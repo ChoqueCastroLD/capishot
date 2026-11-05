@@ -32,7 +32,7 @@ gpu-native = ["gpu", "burn/autotune", "burn/vulkan"]
 # time: `onnxruntime.dll` (a DirectML build, 1.24 or later) and `DirectML.dll` next to the
 # executable or in PHOTOCRAFT_AI_ONNXRUNTIME.
 # Without them, and on every other platform, the burn path runs. Never in a wasm build.
-directml = ["runtime", "dep:ort"]
+directml = ["runtime", "dep:ort", "dep:photocraft-ai-ort"]
 # Native model downloads (blocking HTTPS, rustls) for `native::NativeUpscaler`.
 download = ["dep:ureq"]
 
@@ -52,6 +52,7 @@ ureq = { version = "3", default-features = false, features = ["rustls"], optiona
 [target.'cfg(any(windows, target_os = "linux"))'.dependencies]
 # Dynamically loaded (no download at build time, nothing linked): see the `directml` feature.
 ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic", "directml", "api-24"], optional = true }
+photocraft-ai-ort = { workspace = true, optional = true }
 
 [dev-dependencies]
 photocraft-ai = { path = ".", features = ["cpu"] }

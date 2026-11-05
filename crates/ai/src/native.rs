@@ -273,7 +273,8 @@ mod backend {
         let supported = super::Loaded::directml_supports(req.model);
         match req.opts.backend {
             GpuBackend::Wgpu => Ok(false),
-            GpuBackend::Auto => Ok(supported && inner.directml_failed.is_none() && crate::directml::available().is_ok()),
+            // No usable ONNX Runtime fails the run with a device error: the caller leaves DirectML and says so.
+            GpuBackend::Auto => Ok(supported && inner.directml_failed.is_none()),
             GpuBackend::DirectMl if !supported => {
                 Err(AiError::Device(format!("{} doesn't run on DirectML (only the ESRGAN, FDAT and Compact models do)", req.model.title)))
             }
