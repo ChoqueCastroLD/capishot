@@ -142,3 +142,197 @@ fn an_icon_is_cropped_and_scaled_to_256() {
     assert_eq!(photocraft_engine::package::check_png(&icon, 256), Ok((256, 256)));
     assert!(super::icon_png(b"not an image").is_err());
 }
+
+/// The items of Window › Theme, as (id, path below it).
+fn theme_rows(app: &PhotocraftApp) -> Vec<(String, Vec<String>)> {
+    crate::menus::menu_items(app).into_iter().filter(|i| i.path.starts_with(&["Window".to_string(), "Theme".to_string()])).map(|i| (i.id, i.path[2..].to_vec())).collect()
+}
+
+fn invoke(app: &mut PhotocraftApp, id: &str) -> Result<serde_json::Value, String> {
+    crate::menus::invoke(app, &egui::Context::default(), id, json!({}))
+}
+
+fn opened_tab(app: &PhotocraftApp) -> Option<&str> {
+    app.ui.dialogs.iter().find(|d| d.fields.get("__prefsui").and_then(serde_json::Value::as_str) == Some(super::KIND))?.fields.get("tab")?.as_str()
+}
+
+fn editing(app: &PhotocraftApp) -> serde_json::Value {
+    app.ui.dialogs.iter().find_map(|d| d.fields.get("edit").cloned()).expect("the Theme editor is open")
+}
+
+/// My Themes shows only with themes, between the built-in ones and the actions; the actions end
+/// the submenu with a separator before them.
+#[test]
+fn my_themes_is_listed_only_when_there_are_themes() {
+    let mut app = new_app();
+    let none = theme_rows(&app);
+    assert!(!none.iter().any(|(_, path)| path.first().is_some_and(|p| p == "My Themes")));
+    let tail: Vec<&str> = none.iter().rev().take(5).rev().map(|(id, _)| id.as_str()).collect();
+    assert_eq!(tail, ["window.theme.system", "---", "window.theme.manage", "window.theme.create", "window.theme.load"]);
+    app.run("theme.custom.save", json!({"name": "Tinta", "css": CSS})).unwrap();
+    app.run("theme.custom.save", json!({"name": "Pro", "css": CSS})).unwrap();
+    let rows = theme_rows(&app);
+    let mine: Vec<&str> = rows.iter().filter(|(_, path)| path.first().is_some_and(|p| p == "My Themes")).map(|(id, _)| id.as_str()).collect();
+    assert_eq!(mine, ["window.theme.custom.tinta", "window.theme.custom.pro"]);
+    let at = |id: &str| rows.iter().position(|(i, _)| i == id).unwrap();
+    assert!(at("window.theme.softLight") < at(mine[0]) && at(mine[1]) < at("window.theme.system"));
+    assert_eq!(rows.iter().filter(|(id, _)| id == "window.theme.manage").count(), 1, "one row despite the catalogue and the shell listing it");
+    let lang = crate::i18n::Lang::all().find(|l| l.code() == "es").unwrap();
+    assert_eq!(crate::i18n::tr(lang, "My Themes"), "Mis temas");
+}
+
+/// Exactly one check mark: choosing a theme of the user's unchecks the built-in ones, and a
+/// built-in on the same base goes back to it.
+#[test]
+fn the_check_mark_follows_the_theme_in_use() {
+    let ctx = egui::Context::default();
+    let mut app = new_app();
+    app.run("theme.custom.save", json!({"name": "Tinta", "css": CSS, "use": false})).unwrap();
+    let marked = |app: &PhotocraftApp| -> Vec<String> { crate::menus::menu_items(app).into_iter().filter(|i| i.id.starts_with("window.theme.") && i.checked == Some(true)).map(|i| i.id).collect() };
+    let builtin = marked(&app);
+    assert_eq!(builtin.len(), 1, "{builtin:?}");
+    crate::menus::invoke(&mut app, &ctx, "window.theme.custom.tinta", json!({})).unwrap();
+    crate::prefs_ui::tick(&mut app, &ctx);
+    assert_eq!(Tokens::get(&ctx).accent, egui::Color32::from_rgb(255, 136, 0));
+    assert_eq!(marked(&app), ["window.theme.custom.tinta"]);
+    // The slot already holds this built-in, so `prefs.set` alone would change nothing.
+    crate::menus::invoke(&mut app, &ctx, &builtin[0], json!({})).unwrap();
+    crate::prefs_ui::tick(&mut app, &ctx);
+    assert_eq!(marked(&app), builtin);
+    assert_ne!(Tokens::get(&ctx).accent, egui::Color32::from_rgb(255, 136, 0));
+    // Sync with system leaves the custom theme too, already on automatic or not.
+    for _ in 0..2 {
+        crate::menus::invoke(&mut app, &ctx, "window.theme.custom.tinta", json!({})).unwrap();
+        crate::menus::invoke(&mut app, &ctx, "window.theme.system", json!({})).unwrap();
+        assert_eq!(marked(&app), ["window.theme.system"]);
+    }
+    assert!(crate::menus::invoke(&mut app, &ctx, "window.theme.custom.gone", json!({})).is_err());
+}
+
+/// A theme's id comes from the name the user gave it: usage statistics never see it.
+#[test]
+fn a_custom_themes_id_stays_out_of_the_statistics() {
+    assert_eq!(crate::telemetry::sanitize_command_id("window.theme.custom.tinta"), "window.other");
+    assert_eq!(crate::telemetry::sanitize_command_id("window.theme.manage"), "window.theme.manage");
+}
+
+/// A change to the themes reaches a menu kept open and the native menu bar.
+#[test]
+fn the_menu_state_hash_sees_the_themes() {
+    let mut app = new_app();
+    let before = crate::native_menu::state_hash(&app, None);
+    app.run("theme.custom.save", json!({"name": "Tinta", "css": CSS, "use": false})).unwrap();
+    let listed = crate::native_menu::state_hash(&app, None);
+    assert_ne!(before, listed);
+    app.run("theme.custom.use", json!({"id": "tinta"})).unwrap();
+    assert_ne!(listed, crate::native_menu::state_hash(&app, None));
+}
+
+#[test]
+fn manage_themes_opens_the_themes_tab() {
+    let mut app = new_app();
+    assert!(invoke(&mut app, "window.theme.manage").unwrap()["dialog"].is_u64());
+    assert_eq!(opened_tab(&app), Some("themes"));
+    // Already open on another tab: the same dialog comes back to it.
+    for d in &mut app.ui.dialogs {
+        d.fields.insert("tab".into(), json!("export"));
+    }
+    invoke(&mut app, "window.theme.manage").unwrap();
+    assert_eq!(opened_tab(&app), Some("themes"));
+    assert_eq!(app.ui.dialogs.len(), 1);
+}
+
+/// Create Theme… starts from what is on screen, as a new theme, and leaves an edit in progress.
+#[test]
+fn create_theme_starts_from_the_current_theme() {
+    let mut app = new_app();
+    app.run("prefs.set", json!({"path": "interface.theme", "value": "studio"})).unwrap();
+    let ctx = egui::Context::default();
+    crate::prefs_ui::tick(&mut app, &ctx);
+    invoke(&mut app, "window.theme.create").unwrap();
+    let e = editing(&app);
+    assert_eq!(e["id"], "");
+    assert_eq!(crate::theme::css::parse(e["css"].as_str().unwrap()).tokens, Tokens::for_kind(ThemeKind::Studio));
+    assert_eq!(opened_tab(&app), Some("themes"));
+
+    let mut app = new_app();
+    app.run("theme.custom.save", json!({"name": "Tinta", "css": CSS})).unwrap();
+    invoke(&mut app, "window.theme.create").unwrap();
+    let e = editing(&app);
+    assert_eq!((e["id"].as_str(), e["css"].as_str(), e["name"].as_str()), (Some(""), Some(CSS), Some("My Tinta")));
+    // Unsaved edits stay.
+    for d in &mut app.ui.dialogs {
+        if let Some(edit) = d.fields.get_mut("edit") {
+            edit["css"] = json!(":root { --accent: #000000; }");
+        }
+    }
+    invoke(&mut app, "window.theme.create").unwrap();
+    assert_eq!(editing(&app)["css"], ":root { --accent: #000000; }");
+    assert_eq!(app.ui.dialogs.len(), 1);
+}
+
+/// Load Theme… asks for a theme file, adds it, uses it and reports what it didn't read; anything
+/// else is refused with the theme in use kept.
+#[test]
+fn load_theme_imports_with_the_existing_validation() {
+    use crate::file_dialog::{FileDialogAnswer, FileDialogRequest};
+    let mut source = new_app();
+    source.run("theme.custom.save", json!({"name": "Tinta", "css": ":root { --base: studio; --accent: #ff8800; --nope: 1; }"})).unwrap();
+    let out = source.run("theme.package.export", json!({"id": "tinta"})).unwrap();
+    let bytes = photocraft_engine::paint::tile::b64_decode(out["data"].as_str().unwrap()).unwrap();
+
+    let ctx = egui::Context::default();
+    let mut app = new_app();
+    let answers = vec![Some(FileDialogAnswer::Contents("x.theme.capishot".into(), bytes)), Some(FileDialogAnswer::Contents("x.theme.capishot".into(), b"not a theme".to_vec()))];
+    let (show, asked) = crate::file_dialog::fake(answers);
+    app.services.file_dialog = Some(show);
+    assert!(crate::menus::invoke(&mut app, &ctx, "window.theme.load", json!({})).unwrap()["fileDialog"].is_string());
+    while app.file_dialog.is_some() {
+        app.poll_file_dialog(&ctx, None);
+    }
+    assert!(matches!(&asked.borrow()[0], FileDialogRequest::Open { extensions: Some(e), multiple: false, .. } if e == &["capishot"]));
+    assert_eq!(app.session.prefs().interface.active_custom_theme().map(|t| t.name.as_str()), Some("Tinta"));
+    crate::prefs_ui::tick(&mut app, &ctx);
+    assert_eq!(Tokens::get(&ctx).accent, egui::Color32::from_rgb(255, 136, 0));
+    assert!(app.ui.notices.iter().any(|n| n.lines.iter().any(|l| l.contains("nope"))), "the unknown property is reported");
+
+    crate::menus::invoke(&mut app, &ctx, "window.theme.load", json!({})).unwrap();
+    while app.file_dialog.is_some() {
+        app.poll_file_dialog(&ctx, None);
+    }
+    assert_eq!(app.session.prefs().interface.custom_themes.len(), 1);
+    assert_eq!(app.session.prefs().interface.active_custom_theme().map(|t| t.name.as_str()), Some("Tinta"));
+}
+
+/// The three actions are real commands: known to search, assignable a shortcut and labelled for
+/// the phone's favourites.
+#[test]
+fn the_theme_actions_are_searchable_and_can_take_a_shortcut() {
+    let mut app = new_app();
+    let items = crate::menus::menu_items(&app);
+    let lang = crate::i18n::Lang::all().find(|l| l.code() == "es").unwrap();
+    for (id, en, es) in [("window.theme.manage", "manage themes", "administrar temas"), ("window.theme.create", "create theme", "crear tema"), ("window.theme.load", "load theme", "cargar tema")] {
+        assert!(crate::menus::is_live(id));
+        assert!(crate::menu_catalog::CATALOG.iter().any(|c| c.3 == id), "{id}");
+        assert!(crate::menus::search_items(&items, en, crate::i18n::Lang::EN).iter().any(|i| i.id == id), "{id}");
+        assert!(crate::menus::search_items(&items, es, lang).iter().any(|i| i.id == id), "{id}");
+        assert!(crate::simple_ui::command_label(id).is_some(), "{id}");
+    }
+    app.session.prefs.edit(|p| p.shortcuts.insert("window.theme.create".into(), "Cmd+Alt+T".into()));
+    assert!(crate::shortcut_dispatch::bindings(&app).iter().any(|(id, _)| id == "window.theme.create"));
+    assert_eq!(crate::menus::menu_items(&app).iter().find(|i| i.id == "window.theme.create").unwrap().shortcut.as_deref(), Some("Cmd+Alt+T"));
+}
+
+/// On a phone the simple interface keeps Window under "⋯", with Window › Theme whole.
+#[test]
+fn the_simple_interface_has_the_theme_items() {
+    let mut app = new_app();
+    app.run("theme.custom.save", json!({"name": "Tinta", "css": CSS})).unwrap();
+    app.simple = true;
+    let rows = theme_rows(&app);
+    for id in ["window.theme.custom.tinta", "window.theme.manage", "window.theme.create", "window.theme.load"] {
+        assert!(rows.iter().any(|(i, _)| i == id), "{id}");
+    }
+    invoke(&mut app, "window.theme.create").unwrap();
+    assert!(editing(&app).is_object());
+}

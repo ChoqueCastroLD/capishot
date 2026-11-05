@@ -770,7 +770,7 @@ fn invoke_window_command(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str)
         "view.darkenInterface" | "view.lightenInterface" => {
             Some(crate::prefs_ui::step_brightness(app, ctx, id == "view.lightenInterface").map(|()| json!({"theme": app.ui.theme.id()})))
         }
-        "window.theme.system" => Some(app.run("prefs.set", json!({"path": "interface.appearanceMode", "value": "auto"})).map(|_| {
+        "window.theme.system" => Some(app.run("prefs.set", json!({"path": "interface.appearanceMode", "value": "auto"})).and_then(|_| app.run("theme.custom.use", json!({"id": ""}))).map(|_| {
             crate::prefs_ui::sync_appearance(app, ctx);
             Value::Null
         })),

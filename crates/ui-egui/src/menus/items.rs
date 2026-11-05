@@ -34,6 +34,7 @@ pub fn is_live(id: &str) -> bool {
         || crate::type_panels_ui::handles(id)
         || crate::timeline_ui::handles(id)
         || crate::typer::handles(id)
+        || id.starts_with(crate::profile_ui::CUSTOM)
 }
 
 /// Commands outside the catalogue that belong right after a catalogue item: `(id, after)`.
@@ -192,6 +193,27 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
         for (k, it) in std::iter::once(separator).chain(entries).enumerate() {
             items.insert(after + 1 + k, it);
         }
+    }
+    // Window › Theme: the user's themes after the built-in ones, then what manages them.
+    let actions: Vec<MenuItem> = crate::profile_ui::ACTIONS.iter().filter_map(|id| items.iter().position(|i| i.id == *id).map(|at| items.remove(at))).collect();
+    if let Some(at) = items.iter().position(|i| i.id == "window.theme.system") {
+        let tp = |rest: &[&str]| ["Window", "Theme"].iter().chain(rest).map(|s| s.to_string()).collect::<Vec<String>>();
+        let mine: Vec<MenuItem> = app
+            .session
+            .prefs()
+            .interface
+            .custom_themes
+            .iter()
+            .map(|t| {
+                let id = format!("{}{}", crate::profile_ui::CUSTOM, t.id);
+                let checked = checked(app, &id);
+                MenuItem { id, label: t.name.clone(), path: tp(&["My Themes"]), shortcut: None, enabled: true, checked, color: None }
+            })
+            .collect();
+        let after = at + mine.len() + 1;
+        items.splice(at..at, mine);
+        let separator = MenuItem { id: "---".into(), label: "---".into(), path: tp(&[]), shortcut: None, enabled: false, checked: None, color: None };
+        items.splice(after..after, std::iter::once(separator).chain(actions));
     }
     // Capishot has no release-check transport: without one the update command isn't listed.
     if !super::is_enabled(app, "help.checkForUpdates") && app.services.update_check.is_none() {

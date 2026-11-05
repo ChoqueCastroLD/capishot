@@ -577,8 +577,10 @@ fn translate(bar: &mut MenuBar, lang: Lang) {
     fn walk(nodes: &mut [Node], lang: Lang) {
         for n in nodes {
             match n {
-                // A document's name is shown as it is.
-                Node::Item(it) if it.role.is_none() && !it.id.starts_with(crate::menus::DOCUMENT_ITEM) => it.label = tr_id(lang, &it.id, &it.label).to_string(),
+                // A document's or custom theme's name is shown as it is.
+                Node::Item(it) if it.role.is_none() && !it.id.starts_with(crate::menus::DOCUMENT_ITEM) && !it.id.starts_with(crate::profile_ui::CUSTOM) => {
+                    it.label = tr_id(lang, &it.id, &it.label).to_string();
+                }
                 Node::Submenu { label, children, role } => {
                     if role.is_none() {
                         *label = tr(lang, label).to_string();
@@ -762,7 +764,13 @@ pub(crate) fn state_hash(app: &PhotocraftApp, input: Option<u64>) -> u64 {
     (&ui.recent_files, &ui.workspace, ui.palette_open, ui.transform.is_some(), ui.text_edit.is_some(), ui.dialogs.len()).hash(&mut h);
     (app.discard.is_some(), app.camera_raw.is_some(), crate::distort_ui::modal_workspace(app)).hash(&mut h);
     serde_json::to_string(&(&ui.panels, &ui.extras, &ui.view, ui.theme, ui.tool)).unwrap_or_default().hash(&mut h);
-    s.prefs().interface.language.hash(&mut h);
+    let interface = &s.prefs().interface;
+    interface.language.hash(&mut h);
+    // Window › Theme lists the custom themes and marks the one in use.
+    interface.custom_theme.hash(&mut h);
+    for t in &interface.custom_themes {
+        (&t.id, &t.name).hash(&mut h);
+    }
     h.finish()
 }
 

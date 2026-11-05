@@ -24,7 +24,9 @@ impl PhotocraftApp {
 
 impl PhotocraftApp {
     pub fn set_theme(&mut self, ctx: &egui::Context, kind: theme::ThemeKind) {
-        if let Err(e) = self.run("prefs.set", serde_json::json!({"path": "interface.theme", "value": kind.id()})) {
+        // A custom theme on the same base leaves no change for `prefs.set` to notice.
+        let chosen = self.run("prefs.set", serde_json::json!({"path": "interface.theme", "value": kind.id()}));
+        if let Err(e) = chosen.and_then(|_| self.run("theme.custom.use", serde_json::json!({"id": ""}))) {
             self.ui.status = e;
         } else {
             self.apply_theme(ctx, kind);
