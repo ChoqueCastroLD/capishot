@@ -44,7 +44,8 @@ How it fits together:
 - **Start-up order.** `index.html` checks `crossOriginIsolated`, instantiates the module, awaits
   `initThreadPool(n)` and only then calls `start()`. Started any earlier, rayon would build its
   one-thread fallback pool and the worker pool could no longer be installed.
-  `n` is one worker per core minus one (the UI thread), at most 16; `?threads=N` overrides it.
+  `n` is one worker per core minus one (the UI thread), at most 16, or at most 3 on a device with
+  4 GB or less (or a phone that doesn't report its memory); `?threads=N` overrides it.
 
 ## Hosting
 

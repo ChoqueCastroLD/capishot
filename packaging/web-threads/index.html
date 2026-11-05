@@ -92,10 +92,15 @@
         await pc.default({ module_or_path: response });
         const moduleReady = Math.round(performance.now());
         // One worker per core but one (the UI thread spins while it waits for them), at most 16.
-        // ?threads=N overrides it (1 runs every parallel step on one worker; useful to compare).
+        // 4 GB or less (or a phone that doesn't say, as Safari): at most 3. A worker holds 15-40 MB
+        // of its own (JavaScript heap, instances of the module and its chunks) that a phone's
+        // memory needs more than the extra cores help. ?threads=N overrides it (1 runs every
+        // parallel step on one worker; useful to compare).
         const asked = Number(new URLSearchParams(location.search).get('threads'));
         const cores = navigator.hardwareConcurrency || 4;
-        const threads = asked > 0 ? Math.min(Math.floor(asked), 64) : Math.max(1, Math.min(cores - 1, 16));
+        const gb = navigator.deviceMemory;
+        const small = gb ? gb <= 4 : /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+        const threads = asked > 0 ? Math.min(Math.floor(asked), 64) : Math.max(1, Math.min(cores - 1, small ? 3 : 16));
         // The pool and the app start together: the app gets its graphics device, fonts and presets
         // ready while the workers come up, and is built (the first thing to use rayon, which must
         // not run before the pool exists) once the page calls threadPoolReady().
