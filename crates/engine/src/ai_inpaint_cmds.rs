@@ -65,9 +65,6 @@ impl Session {
 pub(crate) struct AiOptions {
     pub tiles: TileOptions,
     pub allow_download: bool,
-    /// The AI Model Manager's queue, for `allowDownload` when the inpainter only reads files.
-    #[cfg_attr(target_family = "wasm", allow(dead_code))]
-    pub store: Option<Arc<dyn photocraft_ai::models::ModelStore>>,
     pub model: &'static ModelInfo,
     pub run: crate::ai_cmds::RunChoice,
     pub threads: usize,
@@ -156,7 +153,7 @@ pub(crate) fn ai_options(s: &Session, p: &Value, cmd: &str, full_res_default: bo
     let threads = uint("threads", 0, 0, 64)? as usize;
     let unload = !crate::ai_cmds::keep_loaded(p, cmd)?;
     let pinned = !matches!(p.get("model").and_then(Value::as_str).unwrap_or("auto"), "auto" | "");
-    Ok(AiOptions { tiles: TileOptions { max_side: max_side as usize, margin: margin as usize, full_res }, allow_download, store: s.ai_models(), model, run, threads, unload, pinned })
+    Ok(AiOptions { tiles: TileOptions { max_side: max_side as usize, margin: margin as usize, full_res }, allow_download, model, run, threads, unload, pinned })
 }
 
 /// The service, if it can run `opts.model` now (else the reason, for the user).
