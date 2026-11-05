@@ -33,9 +33,12 @@ impl PhotocraftApp {
         }
     }
 
-    /// The theme of a page starting, before its saved preferences arrive: not a person's choice,
-    /// so the custom theme they saved stays in use ([`Self::set_theme`] leaves it).
+    /// The theme of a page starting: not a person's choice, so a custom theme they saved stays in
+    /// use (any change of the built-in theme leaves it).
     pub fn set_start_theme(&mut self, ctx: &egui::Context, kind: theme::ThemeKind) {
+        if self.session.prefs().interface.active_custom_theme().is_some() {
+            return;
+        }
         match self.run("prefs.set", serde_json::json!({"path": "interface.theme", "value": kind.id()})) {
             Ok(_) => self.apply_theme(ctx, kind),
             Err(e) => self.ui.status = e,

@@ -35,10 +35,15 @@ fn the_custom_theme_in_use_is_shown_and_restored() {
     let ctx2 = egui::Context::default();
     crate::prefs_ui::tick(&mut app2, &ctx2);
     assert_eq!(Tokens::get(&ctx2).accent, egui::Color32::from_rgb(255, 136, 0));
-    // A page starting sets its first theme: the saved custom one stays in use.
-    app2.set_start_theme(&ctx2, ThemeKind::Pro);
-    crate::prefs_ui::tick(&mut app2, &ctx2);
-    assert_eq!(Tokens::get(&ctx2).accent, egui::Color32::from_rgb(255, 136, 0));
+    // A page starting sets its first theme: the custom one stays in use, on another base too.
+    let stored = saved.clone();
+    let services = crate::Services { load_prefs: Some(Box::new(move || Some(stored.clone()))), ..Default::default() };
+    let mut page = PhotocraftApp::new(Session::new(), services);
+    let page_ctx = egui::Context::default();
+    page.set_start_theme(&page_ctx, ThemeKind::Pro);
+    crate::prefs_ui::tick(&mut page, &page_ctx);
+    assert_eq!(Tokens::get(&page_ctx).accent, egui::Color32::from_rgb(255, 136, 0));
+    assert!(page.session.prefs().interface.active_custom_theme().is_some());
     app2.set_theme(&ctx2, ThemeKind::Classic);
     crate::prefs_ui::tick(&mut app2, &ctx2);
     assert_eq!(Tokens::get(&ctx2), Tokens::for_kind(ThemeKind::Classic));
