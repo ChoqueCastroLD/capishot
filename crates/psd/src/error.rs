@@ -31,6 +31,9 @@ pub enum PsdError {
     /// A dimension, count or allocation exceeded the configured safety limits.
     #[error("limit exceeded: {0}")]
     LimitExceeded(&'static str),
+    /// There isn't enough memory for what this operation has to hold: nothing in the data is wrong.
+    #[error("{0}")]
+    OutOfMemory(&'static str),
     /// Structurally invalid data.
     #[error("invalid data: {0}")]
     Invalid(String),

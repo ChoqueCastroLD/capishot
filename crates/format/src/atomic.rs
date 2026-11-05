@@ -303,10 +303,10 @@ impl Seek for Progress<'_, '_> {
 /// target, which is then renamed over it.
 fn replace_with(fs: &dyn AtomicFs, retry: RenameRetry, path: &Path, write_tmp: &mut dyn FnMut(&Path) -> io::Result<()>) -> io::Result<()> {
     let target = resolve_symlink(path).map_err(|e| context(e, format!("cannot save {}", path.display())))?;
-    atomic_write_at_path(fs, retry, path, target, bytes, progress)
+    atomic_write_at_path(fs, retry, path, target, write_tmp)
 }
 
-fn atomic_write_at_path(fs: &dyn AtomicFs, retry: RenameRetry, path: &Path, target: PathBuf, bytes: &[u8], progress: &dyn Fn(f32)) -> io::Result<()> {
+fn atomic_write_at_path(fs: &dyn AtomicFs, retry: RenameRetry, path: &Path, target: PathBuf, write_tmp: &mut dyn FnMut(&Path) -> io::Result<()>) -> io::Result<()> {
     let name = target.file_name().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, format!("{}: not a file path", path.display())))?;
     let dir = match target.parent() {
         Some(d) if !d.as_os_str().is_empty() => d.to_path_buf(),

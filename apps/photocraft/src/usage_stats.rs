@@ -21,7 +21,6 @@ use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use eframe::App as _;
 use eframe::egui;
 use photocraft_ui_egui::telemetry::{self, Environment, FrameProbe, Recorder};
 use photocraft_ui_egui::{PhotocraftApp, notices};

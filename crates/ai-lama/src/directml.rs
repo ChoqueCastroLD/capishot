@@ -18,7 +18,6 @@
 
 use std::sync::{Mutex, PoisonError};
 
-use ort::environment::Environment;
 use ort::ep;
 use ort::session::Session;
 use ort::session::builder::GraphOptimizationLevel;
