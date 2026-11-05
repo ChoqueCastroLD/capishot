@@ -194,8 +194,9 @@ pub(super) fn tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
         if app.session.prefs().interface.show_canvas_dots
             && let Some(tile) = surround_pattern(ui.ctx(), &t)
         {
-            // The strip continues the surround below it.
-            crate::theme::pattern::paint(ui.painter(), row.expand2(egui::vec2(8.0, 0.0)).with_min_y(row.top() - 6.0).with_max_y(row.bottom() + 4.0), &tile);
+            // The strip continues the surround below it, across the gap between the two.
+            let bottom = row.bottom() + 4.0 + ui.spacing().item_spacing.y;
+            crate::theme::pattern::paint(ui.painter(), row.expand2(egui::vec2(8.0, 0.0)).with_min_y(row.top() - 6.0).with_max_y(bottom), &tile);
         }
         let f = fit_doc_tabs(&natural, selected, row.width());
         let mut x = row.left();

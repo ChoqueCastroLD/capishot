@@ -33,7 +33,7 @@ for (const form of FORMS) {
   await p.waitForTimeout(3000);
   for (const theme of themes) {
     const set = await req('ui.menu.invoke', { id: `window.theme.${theme}` });
-    check(!set.err, `${form.name} ${theme}${set.err ? ': ' + set.err : ''}`);
+    check(!set?.err, `${form.name} ${theme}${set?.err ? ': ' + set.err : ''}`);
     await req('ui.set', { fit: true });
     await p.waitForTimeout(2500);
     const bare = `${shots}/${theme}-${form.name}.png`;
