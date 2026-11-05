@@ -346,6 +346,47 @@ fn paint_selection_outline(app: &mut PhotocraftApp, input: SelectionPaintInput<'
     }
 }
 
+/// What [`paint_pages_view`] draws.
+struct PagesView<'a> {
+    doc: &'a photocraft_doc::Document,
+    xf: &'a ViewXform,
+    view: &'a View,
+    point_zoom: f32,
+    output: Option<u32>,
+    drop_shadow: bool,
+    pixel_grid: bool,
+}
+
+/// A document's viewport pages on the GPU canvas. Out of line: [`paint_canvas`] runs deep in a
+/// frame's stack, and its locals count on every frame.
+#[inline(never)]
+fn paint_pages_view(app: &mut PhotocraftApp, ctx: &egui::Context, painter: &egui::Painter, rect: Rect, idx: usize, v: &PagesView<'_>, pattern: &[[i32; 2]]) {
+    let PagesView { doc, xf, view, point_zoom, output, drop_shadow, pixel_grid } = *v;
+    app.perf.gpu = true;
+    app.navigator_gpu.remove(&doc.id);
+    let key = viewport_pages::stream_key(doc.id.0);
+    let params = crate::gpu_canvas::ViewParams {
+        canvas: app.gpu.as_ref().map_or(0, crate::gpu_canvas::GpuCanvas::id),
+        doc: key,
+        doc_size: [doc.size.width, doc.size.height],
+        zoom: point_zoom,
+        center: xf.center,
+        rotation: if view.rotation.is_finite() { view.rotation.to_radians() } else { 0.0 },
+        shadow: {
+            let t = crate::theme::Tokens::get(ctx);
+            !t.bevel && !t.pro && drop_shadow
+        },
+        pixel_grid,
+        view_key: egui::Id::unique(("pc-canvas-pages", ctx.viewport_id(), idx)).value(),
+        display: sync_display_lut(app, doc, key, output),
+        output: output.unwrap_or(0),
+        hdr: hdr_preview(app, doc),
+        offset: [0.0, 0.0],
+        min_lod: 0.0,
+    };
+    paint_gpu_view(painter, rect, params, pattern);
+}
+
 #[expect(clippy::cognitive_complexity, reason = "one branch per way of drawing a document: preview, pages, textures, CPU")]
 fn paint_canvas(app: &mut PhotocraftApp, ui: &egui::Ui, view: &View, xf: ViewXform, input: &CanvasPaintInput<'_>) -> (bool, egui::layers::ShapeIdx, Rect) {
     let ctx = input.ctx;
@@ -440,29 +481,7 @@ fn paint_canvas(app: &mut PhotocraftApp, ui: &egui::Ui, view: &View, xf: ViewXfo
     } else if named.is_none() && gpu_ok && viewport_pages::show(app, ctx, idx, &xf, render_zoom) {
         // Too large for the document's texture set: the pages in view, rendered in the background.
         on_gpu = true;
-        app.perf.gpu = true;
-        app.navigator_gpu.remove(&doc.id);
-        let key = viewport_pages::stream_key(doc.id.0);
-        let params = crate::gpu_canvas::ViewParams {
-            canvas: app.gpu.as_ref().map_or(0, crate::gpu_canvas::GpuCanvas::id),
-            doc: key,
-            doc_size: [doc.size.width, doc.size.height],
-            zoom: point_zoom,
-            center: xf.center,
-            rotation: if view.rotation.is_finite() { view.rotation.to_radians() } else { 0.0 },
-            shadow: {
-                let t = crate::theme::Tokens::get(ctx);
-                !t.bevel && !t.pro && drop_shadow
-            },
-            pixel_grid,
-            view_key: egui::Id::unique(("pc-canvas-pages", ctx.viewport_id(), idx)).value(),
-            display: sync_display_lut(app, doc, key, output),
-            output: output.unwrap_or(0),
-            hdr: hdr_preview(app, doc),
-            offset: [0.0, 0.0],
-            min_lod: 0.0,
-        };
-        paint_gpu_view(painter, rect, params, &pattern);
+        paint_pages_view(app, ui.ctx(), painter, rect, idx, &PagesView { doc, xf: &xf, view, point_zoom, output, drop_shadow, pixel_grid }, &pattern);
     } else if named_key.is_some()
         || (named.is_none()
             && gpu_ok

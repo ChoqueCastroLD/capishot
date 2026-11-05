@@ -65,6 +65,11 @@ fn request(tx: &std::sync::mpsc::Sender<ControlRequest>, method: &str, params: V
 
 #[test]
 fn shown_pages_swap_in_one_frame_without_a_blank_one() {
+    // Frames through the whole canvas on the GPU go past a test thread's 2 MB in this profile.
+    std::thread::Builder::new().stack_size(8 << 20).spawn(shown_pages_swap).unwrap().join().unwrap();
+}
+
+fn shown_pages_swap() {
     let _gpu = photocraft_testkit::gpu_lock();
     let mut tx = None;
     let Some((mut h, [a, b, c])) = harness(&mut tx) else { return };
