@@ -31,7 +31,10 @@ use std::num::NonZeroU64;
 use eframe::egui_wgpu::{self, CallbackResources, CallbackTrait, RenderState, ScreenDescriptor};
 use eframe::wgpu;
 
+pub use pages::{MAX_PAGE_SIDE, PageUpload};
 pub use photocraft_gpu::{DeviceHealth, Fault};
+
+mod pages;
 
 /// Default tile side; documents up to this size (and the device limit) use a single texture.
 pub const DEFAULT_TILE: u32 = 8192;
@@ -45,7 +48,7 @@ const FORMAT_HIGH: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 pub const F16_BUDGET_PX: u64 = 100_000_000;
 const VIEW_UNIFORM_SIZE: u64 = 128;
 const VIEW_FLOATS: usize = 32;
-const TILE_UNIFORM_SIZE: u64 = 16;
+const TILE_UNIFORM_SIZE: u64 = 32;
 
 /// Whether this view can use the GPU canvas. Flip and non-square pixel aspect correction are
 /// still CPU blits (the shader's filtering assumes square pixels); rotation is a shader uniform.
@@ -2130,6 +2133,18 @@ pub fn canvas_budget(ram: Option<u64>) -> u64 {
     gpu_share(ram).max(min_gpu_budget(ram))
 }
 
+/// `PHOTOCRAFT_CANVAS_BUDGET_MB`: the canvas budget for testing and measuring big-page paths.
+fn canvas_budget_override() -> Option<u64> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::env::var("PHOTOCRAFT_CANVAS_BUDGET_MB").ok()?.parse::<u64>().ok().map(|mb| mb.saturating_mul(1 << 20))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        None
+    }
+}
+
 /// GPU bytes of a display texture set for a `size` canvas in `tile`-sided tiles of `bpp` bytes
 /// per texel, with every mip level (what [`GpuCanvas::texture_info`] reports once it exists).
 /// Closed form over the (at most four) distinct tile shapes, so any size is cheap to price.
@@ -2401,6 +2416,18 @@ struct Tile {
     levels: Vec<wgpu::TextureView>,
     bind_group: wgpu::BindGroup,
     _uniform: wgpu::Buffer,
+    /// A viewport page ([`GpuCanvas::upload_page`]): its id and reduction factor (document
+    /// pixels per texel); `None` for a tile of a whole-document texture set.
+    page: Option<(u64, u32)>,
+}
+
+/// A tile's uniform: its document rect (x, y, w, h) and the exclusive document bounds it draws
+/// (x0, y0, x1, y1). A whole-document tile draws all its quad covers (no bound, so rounding at a
+/// shared edge cannot open a seam); a viewport page only its core, so the one-texel apron around
+/// it filters its edge without being drawn twice.
+fn tile_uniform([x, y, w, h]: [u32; 4], core: Option<[i32; 4]>) -> [f32; 8] {
+    let [cx0, cy0, cx1, cy1] = core.map_or([-1e30, -1e30, 1e30, 1e30], |c| c.map(|v| v as f32));
+    [x as f32, y as f32, w as f32, h as f32, cx0, cy0, cx1, cy1]
 }
 
 fn uniform_entry(binding: u32, size: u64, vis: wgpu::ShaderStages) -> wgpu::BindGroupLayoutEntry {
@@ -2587,7 +2614,7 @@ impl Resources {
             compositor_cache_budget: None,
             compositor_focus: None,
             compositor_translated: Vec::new(),
-            canvas_budget: canvas_budget(physical_memory()),
+            canvas_budget: canvas_budget_override().unwrap_or_else(|| canvas_budget(physical_memory())),
             reduced_at: f64::NEG_INFINITY,
             last_passes: 1,
             encode_bgl,
@@ -2638,6 +2665,16 @@ impl Resources {
             self.docs.remove(&k);
         }
     }
+
+    /// The same for `bytes` of viewport pages of `key`, which keep their place: only the other
+    /// documents' textures give way.
+    fn make_room_beside(&mut self, key: u64, bytes: u64) {
+        let others = |res: &Self| res.docs.iter().filter(|(k, _)| **k != key).map(|(_, d)| d.bytes()).fold(0, u64::saturating_add);
+        while others(self).saturating_add(bytes) > self.canvas_budget {
+            let Some(k) = self.docs.iter().filter(|(k, _)| **k != key).max_by_key(|(_, d)| d.bytes()).map(|(k, _)| *k) else { return };
+            self.docs.remove(&k);
+        }
+    }
 }
 
 impl DocTextures {
@@ -2646,7 +2683,7 @@ impl DocTextures {
         let bpp = texel_bytes(self.format);
         self.tiles
             .iter()
-            .map(|t| (0..t.levels.len() as u32).map(|l| u64::from((t.rect[2] >> l).max(1)) * u64::from((t.rect[3] >> l).max(1)) * bpp).sum::<u64>())
+            .map(|t| (0..t.levels.len() as u32).map(|l| u64::from((t.texture.width() >> l).max(1)) * u64::from((t.texture.height() >> l).max(1)) * bpp).sum::<u64>())
             .fold(0, u64::saturating_add)
     }
 
@@ -2678,7 +2715,7 @@ impl DocTextures {
                     .map(|l| texture.create_view(&wgpu::TextureViewDescriptor { base_mip_level: l, mip_level_count: Some(1), ..Default::default() }))
                     .collect();
                 let full = texture.create_view(&wgpu::TextureViewDescriptor::default());
-                let uniform = init_buffer(device, "pc_canvas_tile", &f32_bytes(&[tx as f32, ty as f32, w as f32, h as f32]), wgpu::BufferUsages::UNIFORM);
+                let uniform = init_buffer(device, "pc_canvas_tile", &f32_bytes(&tile_uniform([tx, ty, w, h], None)), wgpu::BufferUsages::UNIFORM);
                 let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("pc_canvas_tile"),
                     layout: &res.tile_bgl,
@@ -2687,7 +2724,7 @@ impl DocTextures {
                         wgpu::BindGroupEntry { binding: 1, resource: uniform.as_entire_binding() },
                     ],
                 });
-                tiles.push(Tile { rect: [tx, ty, w, h], texture, levels, bind_group, _uniform: uniform });
+                tiles.push(Tile { rect: [tx, ty, w, h], texture, levels, bind_group, _uniform: uniform, page: None });
             }
         }
         let mut stale = Stale::default();
@@ -3070,7 +3107,7 @@ struct View {
     g: vec4<f32>, // gamut warning rgb, 32-bit preview 1 / gamma
     h: vec4<f32>, // cos, sin, center_doc_x, center_doc_y
 };
-struct Tile { r: vec4<f32> }; // x, y, w, h in doc px
+struct Tile { r: vec4<f32>, core: vec4<f32> }; // x, y, w, h in doc px; drawn x0, y0, x1, y1
 
 @group(0) @binding(0) var<uniform> view: View;
 @group(0) @binding(1) var samp: sampler;
@@ -3194,6 +3231,8 @@ fn fs_tile(in: VOut) -> @location(0) vec4<f32> {
     let p = in.pos.xy;
     let scale = view.a.z;
     let d = px_to_doc(p) - view.d.xy;      // document pixel coordinates (within this copy)
+    // A viewport page's apron is only sampled; its neighbour draws those pixels.
+    if (any(d < tile.core.xy) || any(d >= tile.core.zw)) { discard; }
     let size = tile.r.zw;
     let t = d - tile.r.xy;                 // texel coordinates within this tile
     let mode = view.c.x;
@@ -3336,10 +3375,11 @@ mod tests {
     /// same, so only the source can show it: every lookup goes through `CanvasLookup`.
     #[test]
     fn canvas_resources_are_looked_up_as_stored() {
-        let src = include_str!("gpu_canvas.rs");
-        let tests = src.find("#[cfg(test)]\n#[path").unwrap_or(src.len());
-        for bad in [concat!("get::<", "Resources>"), concat!("get_mut::<", "Resources>"), concat!("get::<", "StoredResources>"), concat!("get_mut::<", "StoredResources>")] {
-            assert!(!src[..tests].contains(bad), "callback_resources lookup by `Resources` instead of `CanvasLookup`: {bad}");
+        for src in [include_str!("gpu_canvas.rs"), include_str!("gpu_canvas/pages.rs")] {
+            let tests = src.find("#[cfg(test)]\n#[path").unwrap_or(src.len());
+            for bad in [concat!("get::<", "Resources>"), concat!("get_mut::<", "Resources>"), concat!("get::<", "StoredResources>"), concat!("get_mut::<", "StoredResources>")] {
+                assert!(!src[..tests].contains(bad), "callback_resources lookup by `Resources` instead of `CanvasLookup`: {bad}");
+            }
         }
     }
 

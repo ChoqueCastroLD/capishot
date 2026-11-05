@@ -57,6 +57,10 @@ fn engine_methods(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlReq
             if let Some(g) = app.gpu.as_ref() {
                 v["gpuTexturesMB"] = serde_json::json!((g.held_bytes() as f64 / 1e5).round() / 10.0);
             }
+            // The active document's viewport pages, when it is drawn from them.
+            if let Some(s) = app.session.active().and_then(|st| app.streams.get(&st.doc.id)) {
+                v["viewportPages"] = serde_json::to_value(&s.stats).unwrap_or_default();
+            }
             #[cfg(target_arch = "wasm32")]
             {
                 v["wasmMB"] = serde_json::json!((core::arch::wasm32::memory_size(0) as f64 * 65536.0 / 1e5).round() / 10.0);

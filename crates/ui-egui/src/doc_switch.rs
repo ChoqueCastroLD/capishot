@@ -258,7 +258,8 @@ pub(crate) fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
 
 /// The canvas textures document `id` holds: its GPU canvas texture set and its CPU canvas tiles.
 pub(crate) fn canvas_bytes(app: &PhotocraftApp, id: DocId) -> u64 {
-    let gpu = app.gpu.as_ref().and_then(|g| g.texture_info(id.0)).map_or(0, |(_, b)| b);
+    let pages = app.gpu.as_ref().map_or(0, |g| g.pages(crate::canvas::viewport_pages::stream_key(id.0)).1);
+    let gpu = app.gpu.as_ref().and_then(|g| g.texture_info(id.0)).map_or(0, |(_, b)| b) + pages;
     let tiles: usize = app.canvases.iter().filter(|((d, _), _)| *d == id).filter_map(|(_, c)| c.tiles.as_ref()).map(|t| t.texture_bytes()).sum();
     gpu.saturating_add(tiles as u64).saturating_add(crate::canvas::tile_views_bytes(app, id))
 }
@@ -298,7 +299,9 @@ fn enforce_budget(app: &mut PhotocraftApp) -> Vec<DocId> {
     for id in &evicted {
         if let Some(gpu) = app.gpu.as_ref() {
             gpu.evict(id.0);
+            gpu.evict(crate::canvas::viewport_pages::stream_key(id.0));
         }
+        app.streams.remove(id);
         app.canvases.retain(|(d, _), _| d != id);
         crate::canvas::free_document_tile_views(app, *id);
     }

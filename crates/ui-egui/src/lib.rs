@@ -389,6 +389,8 @@ pub struct PhotocraftApp {
     navigator_plain: std::collections::HashSet<DocId>,
     /// A host's tiles: named views' textures and extra cameras (`canvas::embedded_tiles`).
     tile_views: canvas::TileViews,
+    /// Viewport pages of documents too large for their GPU texture set (`canvas::viewport_pages`).
+    streams: HashMap<DocId, canvas::viewport_pages::Stream>,
     /// The Info panel's Color Sampler readouts for (document, revision) (`panels::sampler_readouts`).
     info_samplers: Option<panels::SamplerReadouts>,
     /// Display profile readings (#569).
@@ -985,6 +987,8 @@ mod guide_cursor_tests;
 
 #[cfg(test)]
 mod canvas_menu_tests;
+#[cfg(test)]
+mod viewport_pages_gpu_tests;
 
 #[cfg(test)]
 mod nudge_bundle_tests;

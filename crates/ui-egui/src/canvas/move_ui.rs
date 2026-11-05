@@ -211,6 +211,8 @@ pub fn set_move_in_place(on: bool) {
 fn in_place_ok(app: &PhotocraftApp, doc: &Document, moving: &[LayerId]) -> bool {
     app.gpu_active()
         && !app.move_in_place_off
+        // Viewport pages come from the CPU compositor, which draws the document as it is.
+        && !app.streams.contains_key(&doc.id)
         // Debugging and A/B: moved copies as before.
         && IN_PLACE.load(std::sync::atomic::Ordering::Relaxed)
         && std::env::var_os("PHOTOCRAFT_MOVE_COPY").is_none()
