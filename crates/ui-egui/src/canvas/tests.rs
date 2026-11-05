@@ -572,7 +572,9 @@ fn only_themes_with_a_dot_pattern_tile_the_canvas_surround() {
     for kind in ThemeKind::ALL {
         let ctx = egui::Context::default();
         let dotted = matches!(kind, ThemeKind::Studio | ThemeKind::StudioLight | ThemeKind::SolarizedDark);
-        assert_eq!(tiles(&ctx, kind), dotted, "{kind:?}");
+        // The themes with a pattern tile their own texture instead.
+        let patterned = crate::theme::Tokens::for_kind(kind).surface_pattern(crate::theme::pattern::Surface::Canvas).is_some();
+        assert_eq!(tiles(&ctx, kind), dotted || patterned, "{kind:?}");
         assert_eq!(uploaded(&ctx), usize::from(dotted), "{kind:?}");
     }
     // The reported switch: a dotted theme, then Pro.

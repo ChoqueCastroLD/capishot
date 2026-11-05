@@ -1,0 +1,112 @@
+:root {
+  /* Base */
+  --base: mangaDark;
+  --dark: true;
+  /* Surfaces */
+  --chrome: #121212;
+  --dock: #0a0a0a;
+  --card: #161616;
+  --card-border: #ececec;
+  --field: #1e1e1e;
+  --field-border: #ececec;
+  --separator: #ececec;
+  --tab-strip: #00000000;
+  /* Text and icons */
+  --text: #f7f7f7;
+  --text-dim: #dcdcdc;
+  --text-faint: #bdbdbd;
+  --icon: #f0f0f0;
+  /* Accent */
+  --accent: #ff4b55;
+  --accent-soft: #ff4b5533;
+  --accent-border: #ff4b55;
+  --accent-text: #ff8a91;
+  --primary-bg: #c8101c;
+  --primary-text: #ffffff;
+  /* Hover and selection */
+  --hover: #2c2c2c;
+  --pressed: #3a3a3a;
+  --row-selected: #ff4b5533;
+  /* Status colours */
+  --danger: #ff8a91;
+  --warning: #f2c14e;
+  --caption-close: #d3121f;
+  --caption-close-text: #ffffff;
+  /* Canvas and scopes */
+  --canvas: #262626;
+  --canvas-dot: #262626;
+  --histogram-bg: #0a0a0a;
+  --histogram-level: 220;
+  --scrim: #000000a0;
+  /* Surface pattern */
+  --pattern: dots;
+  --pattern-size: 6;
+  --pattern-opacity: 0.2;
+  --bar-pattern: dots;
+  --bar-pattern-size: 5;
+  --bar-pattern-opacity: 0.13;
+  --pattern-color: #ffffff;
+  /* Corners and layout */
+  --radius-sm: 0;
+  --radius: 0;
+  --radius-lg: 0;
+  --bevel: false;
+  --pro: false;
+  --round-chips: false;
+  /* Text sizes */
+  --font-small: 10.5;
+  --font-body: 12.5;
+  --font-button: 12.5;
+  --font-heading: 15;
+  --font-mono: 12;
+  /* Spacing */
+  --item-spacing: 8 6;
+  --button-padding: 10 4;
+  --interact-size: 24 24;
+  --slider-width: 150;
+  --combo-width: 120;
+  --menu-margin: 6;
+  --window-margin: 16;
+  --icon-width: 14;
+  --tooltip-width: 280;
+  --scroll-width: 4;
+  /* Shadows */
+  --shadow: #000000;
+  --window-shadow: 5 5 0 0;
+  --popup-shadow: 3 3 0 0;
+}
+
+label {
+  /* Labels */
+  --border-width: 1.5;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button {
+  /* Controls */
+  --border-width: 1.5;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button:hover {
+  /* Controls: hover */
+  --border-width: 1.5;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button:active {
+  /* Controls: pressed */
+  --border-width: 1.5;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button:open {
+  /* Controls: open */
+  --border-width: 1.5;
+  --fg-width: 1;
+  --expansion: 0;
+}

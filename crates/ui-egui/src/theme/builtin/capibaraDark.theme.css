@@ -1,0 +1,109 @@
+:root {
+  /* Base */
+  --base: capibaraDark;
+  --dark: true;
+  /* Surfaces */
+  --chrome: #3b2a1c;
+  --dock: #2e2015;
+  --card: #463325;
+  --card-border: #624a35;
+  --field: #513c2b;
+  --field-border: #826449;
+  --separator: #261a10;
+  --tab-strip: #00000000;
+  /* Text and icons */
+  --text: #f8eddc;
+  --text-dim: #e8d8bf;
+  --text-faint: #d4bfa1;
+  --icon: #efe0c8;
+  /* Accent */
+  --accent: #f0924a;
+  --accent-soft: #5faf8c33;
+  --accent-border: #5fb08c;
+  --accent-text: #ffbe8f;
+  --primary-bg: #b34f0d;
+  --primary-text: #ffffff;
+  /* Hover and selection */
+  --hover: #573f2d;
+  --pressed: #634934;
+  --row-selected: #5faf8c33;
+  /* Status colours */
+  --danger: #ffb0a0;
+  --warning: #ecc873;
+  --caption-close: #c0392b;
+  --caption-close-text: #ffffff;
+  /* Canvas and scopes */
+  --canvas: #2a2622;
+  --canvas-dot: #2a2622;
+  --histogram-bg: #2a2622;
+  --histogram-level: 220;
+  --scrim: #00000070;
+  /* Surface pattern */
+  --pattern: dots;
+  --pattern-size: 14;
+  --pattern-opacity: 0.14;
+  --pattern-color: #5fb08c;
+  /* Corners and layout */
+  --radius-sm: 12;
+  --radius: 16;
+  --radius-lg: 24;
+  --bevel: false;
+  --pro: false;
+  --round-chips: true;
+  /* Text sizes */
+  --font-small: 10.5;
+  --font-body: 12.5;
+  --font-button: 12.5;
+  --font-heading: 15;
+  --font-mono: 12;
+  /* Spacing */
+  --item-spacing: 8 6;
+  --button-padding: 10 4;
+  --interact-size: 24 24;
+  --slider-width: 150;
+  --combo-width: 120;
+  --menu-margin: 6;
+  --window-margin: 16;
+  --icon-width: 14;
+  --tooltip-width: 280;
+  --scroll-width: 4;
+  /* Shadows */
+  --shadow: #00000080;
+  --window-shadow: 0 10 32 0;
+  --popup-shadow: 0 6 20 0;
+}
+
+label {
+  /* Labels */
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button {
+  /* Controls */
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button:hover {
+  /* Controls: hover */
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button:active {
+  /* Controls: pressed */
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button:open {
+  /* Controls: open */
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}

@@ -1,0 +1,109 @@
+:root {
+  /* Base */
+  --base: capibaraLight;
+  --dark: false;
+  /* Surfaces */
+  --chrome: #f3e4ca;
+  --dock: #ead7b8;
+  --card: #fbf4e6;
+  --card-border: #d7bb94;
+  --field: #fffbf2;
+  --field-border: #b5926a;
+  --separator: #d7bb94;
+  --tab-strip: #00000000;
+  /* Text and icons */
+  --text: #38220f;
+  --text-dim: #553a22;
+  --text-faint: #6a4d32;
+  --icon: #4a2f19;
+  /* Accent */
+  --accent: #c85a12;
+  --accent-soft: #418c6933;
+  --accent-border: #3f8a6a;
+  --accent-text: #9a4208;
+  --primary-bg: #b34f0d;
+  --primary-text: #ffffff;
+  /* Hover and selection */
+  --hover: #e6d2b0;
+  --pressed: #dcc4a0;
+  --row-selected: #418c6933;
+  /* Status colours */
+  --danger: #a82a1a;
+  --warning: #7f5400;
+  --caption-close: #c0392b;
+  --caption-close-text: #ffffff;
+  /* Canvas and scopes */
+  --canvas: #cfc6b6;
+  --canvas-dot: #cfc6b6;
+  --histogram-bg: #fff8ec;
+  --histogram-level: 200;
+  --scrim: #37230f66;
+  /* Surface pattern */
+  --pattern: dots;
+  --pattern-size: 14;
+  --pattern-opacity: 0.16;
+  --pattern-color: #2f6e54;
+  /* Corners and layout */
+  --radius-sm: 12;
+  --radius: 16;
+  --radius-lg: 24;
+  --bevel: false;
+  --pro: false;
+  --round-chips: true;
+  /* Text sizes */
+  --font-small: 10.5;
+  --font-body: 12.5;
+  --font-button: 12.5;
+  --font-heading: 15;
+  --font-mono: 12;
+  /* Spacing */
+  --item-spacing: 8 6;
+  --button-padding: 10 4;
+  --interact-size: 24 24;
+  --slider-width: 150;
+  --combo-width: 120;
+  --menu-margin: 6;
+  --window-margin: 16;
+  --icon-width: 14;
+  --tooltip-width: 280;
+  --scroll-width: 4;
+  /* Shadows */
+  --shadow: #5a391b55;
+  --window-shadow: 0 10 32 0;
+  --popup-shadow: 0 6 20 0;
+}
+
+label {
+  /* Labels */
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button {
+  /* Controls */
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button:hover {
+  /* Controls: hover */
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button:active {
+  /* Controls: pressed */
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}
+
+button:open {
+  /* Controls: open */
+  --border-width: 1;
+  --fg-width: 1;
+  --expansion: 0;
+}

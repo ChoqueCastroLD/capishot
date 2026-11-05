@@ -179,6 +179,7 @@ pub fn top_bar(app: &mut PhotocraftApp, ui: &mut Ui) {
         .exact_size(TOP_BAR)
         .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin { left: 8, right: 6, top: 0, bottom: 0 }))
         .show(ui, |ui| {
+            crate::theme::pattern::paint_bar(ui);
             let full = ui.max_rect();
             ui.horizontal_centered(|ui| {
                 // File, Edit and Image by name; the other menus behind "⋯".
@@ -301,6 +302,7 @@ pub fn options_row(app: &mut PhotocraftApp, ui: &mut Ui) {
         .exact_size(TOP_BAR)
         .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin { left: 8, right: 8, top: 0, bottom: 0 }))
         .show(ui, |ui| {
+            crate::theme::pattern::paint_bar(ui);
             ui.horizontal_centered(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
                 let tool = app.ui.tool;

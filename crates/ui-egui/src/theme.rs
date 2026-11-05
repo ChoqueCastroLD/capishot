@@ -13,6 +13,10 @@
 //!   (blue-grey surfaces, Breeze blue accent, 5 px corners), so the app sits with the rest of a
 //!   Plasma desktop.
 //!
+//! - **Manga** (Light and Dark): black ink on white paper, square corners, a red SFX accent, and
+//!   screentone behind the bars and round the canvas ([`pattern`]).
+//! - **Capibara** (Light and Dark): cream, brown, orange and river green with very rounded corners.
+//!
 //! - **Pro (Light Gray)** and **Pro (Light)**: Photoshop's third and fourth interface brightness
 //!   levels (#B8B8B8 and #F0F0F0 panels) with the Pro layout (#2661).
 //!
@@ -27,7 +31,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 pub mod css;
+pub mod pattern;
 mod style;
+pub use pattern::PatternKind;
 pub use style::{ShadowTokens, StyleTokens, WidgetStates, WidgetTokens};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -59,10 +65,19 @@ pub enum ThemeKind {
     SoftDark,
     /// A low-contrast light theme: pale violet-grey surfaces, softened dark text and a periwinkle accent.
     SoftLight,
+    /// A manga page in black ink on white paper: square corners, ink borders, a red SFX accent and
+    /// screentone on the canvas surround and the bars.
+    MangaLight,
+    /// The manga page inverted: white ink on black, the same corners, accent and screentone.
+    MangaDark,
+    /// Warm and cosy on cream: brown ink, orange accent, river green, very rounded corners.
+    CapibaraLight,
+    /// The same warmth at night: dark brown surfaces with cream text.
+    CapibaraDark,
 }
 
 impl ThemeKind {
-    pub const ALL: [ThemeKind; 14] = [
+    pub const ALL: [ThemeKind; 18] = [
         ThemeKind::Pro,
         ThemeKind::ProMedium,
         ThemeKind::ProLightGray,
@@ -77,6 +92,10 @@ impl ThemeKind {
         ThemeKind::BreezeDark,
         ThemeKind::SoftDark,
         ThemeKind::SoftLight,
+        ThemeKind::MangaLight,
+        ThemeKind::MangaDark,
+        ThemeKind::CapibaraLight,
+        ThemeKind::CapibaraDark,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -94,6 +113,10 @@ impl ThemeKind {
             ThemeKind::BreezeDark => "Breeze Dark",
             ThemeKind::SoftDark => "Soft Dark",
             ThemeKind::SoftLight => "Soft Light",
+            ThemeKind::MangaLight => "Manga (Light)",
+            ThemeKind::MangaDark => "Manga (Dark)",
+            ThemeKind::CapibaraLight => "Capibara (Light)",
+            ThemeKind::CapibaraDark => "Capibara (Dark)",
         }
     }
     /// The canonical name: `ui.set {theme}` accepts it and the Window › Theme commands are
@@ -114,6 +137,10 @@ impl ThemeKind {
             ThemeKind::BreezeDark => "breezeDark",
             ThemeKind::SoftDark => "softDark",
             ThemeKind::SoftLight => "softLight",
+            ThemeKind::MangaLight => "mangaLight",
+            ThemeKind::MangaDark => "mangaDark",
+            ThemeKind::CapibaraLight => "capibaraLight",
+            ThemeKind::CapibaraDark => "capibaraDark",
         }
     }
     /// Photoshop-grammar layout (tab strips, flat panels): the four Pro brightness levels.
@@ -131,6 +158,8 @@ impl ThemeKind {
                 | ThemeKind::AdwaitaDark
                 | ThemeKind::BreezeDark
                 | ThemeKind::SoftDark
+                | ThemeKind::MangaDark
+                | ThemeKind::CapibaraDark
         )
     }
     /// Whether this theme belongs to the light appearance family.
@@ -157,6 +186,10 @@ impl ThemeKind {
             "breezedark" | "kdedark" | "plasmadark" => Some(ThemeKind::BreezeDark),
             "softdark" => Some(ThemeKind::SoftDark),
             "softlight" => Some(ThemeKind::SoftLight),
+            "manga" | "mangalight" => Some(ThemeKind::MangaLight),
+            "mangadark" => Some(ThemeKind::MangaDark),
+            "capibara" | "capibaralight" | "capybara" | "capybaralight" | "capivara" | "capivaralight" => Some(ThemeKind::CapibaraLight),
+            "capibaradark" | "capybaradark" | "capivaradark" => Some(ThemeKind::CapibaraDark),
             _ => None,
         }
     }
@@ -179,6 +212,10 @@ pub fn builtin_css(kind: ThemeKind) -> &'static str {
         ThemeKind::BreezeDark => include_str!("theme/builtin/breezeDark.theme.css"),
         ThemeKind::SoftDark => include_str!("theme/builtin/softDark.theme.css"),
         ThemeKind::SoftLight => include_str!("theme/builtin/softLight.theme.css"),
+        ThemeKind::MangaLight => include_str!("theme/builtin/mangaLight.theme.css"),
+        ThemeKind::MangaDark => include_str!("theme/builtin/mangaDark.theme.css"),
+        ThemeKind::CapibaraLight => include_str!("theme/builtin/capibaraLight.theme.css"),
+        ThemeKind::CapibaraDark => include_str!("theme/builtin/capibaraDark.theme.css"),
     }
 }
 
@@ -192,6 +229,17 @@ pub struct Tokens {
     pub canvas: Color32,
     /// Dot colour of the canvas grid pattern.
     pub canvas_dot: Color32,
+    /// The procedural pattern on the canvas surround (`--pattern`), its tile size in points
+    /// (`--pattern-size`) and its opacity (`--pattern-opacity`). Unset sizes follow [`pattern`].
+    pub pattern: PatternKind,
+    pub pattern_size: Option<f32>,
+    pub pattern_opacity: Option<f32>,
+    /// The same on the bars: title, options and status (`--bar-pattern`…).
+    pub bar_pattern: PatternKind,
+    pub bar_pattern_size: Option<f32>,
+    pub bar_pattern_opacity: Option<f32>,
+    /// The colour of both patterns (`--pattern-color`); unset, the theme's text colour.
+    pub pattern_color: Option<Color32>,
     /// Dock background (behind cards).
     pub dock: Color32,
     /// Cards / panels.
@@ -258,6 +306,13 @@ impl Tokens {
             chrome: c,
             canvas: c,
             canvas_dot: c,
+            pattern: PatternKind::None,
+            pattern_size: None,
+            pattern_opacity: None,
+            bar_pattern: PatternKind::None,
+            bar_pattern_size: None,
+            bar_pattern_opacity: None,
+            pattern_color: None,
             dock: c,
             card: c,
             card_border: c,

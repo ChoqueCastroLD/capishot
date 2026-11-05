@@ -191,6 +191,12 @@ pub(super) fn tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
         .map_or_else(|| app.session.active_index().unwrap_or(0), |p| tab_count + p);
     let frame = egui::Frame::NONE.fill(t.canvas).inner_margin(egui::Margin { left: 8, right: 8, top: 6, bottom: 4 }).show(ui, |ui| {
         let (row, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), tab_h), Sense::hover());
+        if app.session.prefs().interface.show_canvas_dots
+            && let Some(tile) = surround_pattern(ui.ctx(), &t)
+        {
+            // The strip continues the surround below it.
+            crate::theme::pattern::paint(ui.painter(), row.expand2(egui::vec2(8.0, 0.0)).with_min_y(row.top() - 6.0).with_max_y(row.bottom() + 4.0), &tile);
+        }
         let f = fit_doc_tabs(&natural, selected, row.width());
         let mut x = row.left();
         let mut placed: Vec<(usize, Rect)> = Vec::with_capacity(f.shown.len());
@@ -732,12 +738,20 @@ pub(super) fn dots(ctx: &egui::Context, t: &crate::theme::Tokens) -> Option<egui
     Some(id)
 }
 
+/// The theme's pattern for the canvas surround, if it has one (it replaces the dot grid).
+pub(super) fn surround_pattern(ctx: &egui::Context, t: &crate::theme::Tokens) -> Option<crate::theme::pattern::Tile> {
+    t.surface_pattern(crate::theme::pattern::Surface::Canvas).and_then(|p| crate::theme::pattern::tile(ctx, &p))
+}
+
+/// The canvas surround's dots or pattern. It is always painted before the document, which covers it.
 pub(super) fn paint_dots(ui: &egui::Ui, rect: Rect, enabled: bool) {
     if !enabled {
         return;
     }
     let t = crate::theme::Tokens::get(ui.ctx());
-    if let Some(id) = dots(ui.ctx(), &t) {
+    if let Some(tile) = surround_pattern(ui.ctx(), &t) {
+        crate::theme::pattern::paint(&ui.painter_at(rect), rect, &tile);
+    } else if let Some(id) = dots(ui.ctx(), &t) {
         let uv = Rect::from_min_max(Pos2::ZERO, pos2(rect.width() / 22.0, rect.height() / 22.0));
         ui.painter_at(rect).image(id, rect, uv, Color32::WHITE);
     }

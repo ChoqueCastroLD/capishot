@@ -345,3 +345,22 @@ fn the_simple_interface_has_the_theme_items() {
     invoke(&mut app, "window.theme.create").unwrap();
     assert!(editing(&app).is_object());
 }
+
+/// A theme with patterns goes through a `.theme.capishot` and comes back the same, warnings free.
+#[test]
+fn a_pattern_theme_survives_export_and_import() {
+    use crate::theme::css;
+    let tokens = css::parse("--base: mangaDark; --pattern: lines; --pattern-size: 9; --pattern-opacity: 0.3; --bar-pattern: none; --pattern-color: #ff0044;").tokens;
+    let text = css::write_changes(&tokens);
+    let mut app = new_app();
+    let id = app.run("theme.custom.save", json!({"name": "Trama", "css": text})).unwrap()["id"].as_str().unwrap().to_string();
+    let out = app.run("theme.package.export", json!({"id": id})).unwrap();
+    let mut other = new_app();
+    other.run("theme.package.import", json!({"data": out["data"]})).unwrap();
+    let theme = other.session.prefs().interface.active_custom_theme().cloned().unwrap();
+    let read = css::parse(&theme.css);
+    assert!(read.warnings.is_empty(), "{:?}", read.warnings);
+    assert_eq!(read.tokens, tokens);
+    assert_eq!(read.tokens.pattern, crate::theme::PatternKind::Lines);
+    assert_eq!(read.tokens.surface_pattern(crate::theme::pattern::Surface::Bar), None);
+}
