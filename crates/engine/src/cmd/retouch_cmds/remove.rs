@@ -697,7 +697,8 @@ impl AiRun {
         o.insert("device".into(), json!(self.device));
         o.insert("model".into(), json!(self.run.model.id));
         o.insert("lite".into(), json!(self.run.model.lite));
-        o.insert("cpu".into(), json!(self.run.cpu));
+        // `device` too: `CAPISHOT_AI_DEVICE=cpu` forces the CPU without the request knowing.
+        o.insert("cpu".into(), json!(self.run.cpu || self.device == "CPU"));
         o.insert("fellBack".into(), json!(self.run.fell_back));
         o.insert("ms".into(), json!(self.ms));
     }
