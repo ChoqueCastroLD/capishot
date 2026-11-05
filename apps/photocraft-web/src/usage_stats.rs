@@ -14,7 +14,6 @@ use js_sys::Reflect;
 use photocraft_doc::Document;
 use photocraft_ui_egui::PhotocraftApp;
 use photocraft_ui_egui::telemetry::{self, Environment, Recorder};
-use serde_json::json;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast as _, JsValue};
 

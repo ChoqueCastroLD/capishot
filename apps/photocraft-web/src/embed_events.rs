@@ -11,7 +11,8 @@ use photocraft_ui_egui::PhotocraftApp;
 use serde_json::{Value, json};
 use wasm_bindgen::JsCast as _;
 
-use crate::embed_api_core::{self as core, DocSnap, LayerOrder, LayerProps, ReadyTracker, Snapshot, ViewSnap};
+use photocraft_ui_egui::doc_ready::ReadyTracker;
+use crate::embed_api_core::{self as core, DocSnap, LayerOrder, LayerProps, Snapshot, ViewSnap};
 
 /// Where events go.
 pub type Sink = fn(&Value);

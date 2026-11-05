@@ -279,7 +279,7 @@ fn run_thread(url: String, config: Option<PathBuf>, shared: Arc<Shared>, rx: mps
             }
             Err(RecvTimeoutError::Timeout) => {
                 beats += 1;
-                beats % beats_per_flush == 0
+                beats.is_multiple_of(beats_per_flush)
             }
             Err(RecvTimeoutError::Disconnected) => return,
         };

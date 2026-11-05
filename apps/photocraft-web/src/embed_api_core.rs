@@ -586,9 +586,6 @@ pub fn view_events(prev: Option<&ViewSnap>, next: &ViewSnap) -> Vec<Value> {
     out
 }
 
-/// `documentReady` bookkeeping (shared with `capishot-host`'s `DocumentReady`).
-pub use photocraft_ui_egui::doc_ready::ReadyTracker;
-
 /// `documentReady {id, firstFrameMs, finalFrameMs}`: `id` is complete. Both times count from
 /// when it was asked for (`open` / `openDocument`, else the frame it appeared in) to the end of
 /// the first frame that showed it and of the first frame it was complete in.

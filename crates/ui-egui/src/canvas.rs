@@ -346,6 +346,7 @@ fn paint_selection_outline(app: &mut PhotocraftApp, input: SelectionPaintInput<'
     }
 }
 
+#[expect(clippy::cognitive_complexity, reason = "one branch per way of drawing a document: preview, pages, textures, CPU")]
 fn paint_canvas(app: &mut PhotocraftApp, ui: &egui::Ui, view: &View, xf: ViewXform, input: &CanvasPaintInput<'_>) -> (bool, egui::layers::ShapeIdx, Rect) {
     let ctx = input.ctx;
     let rect = input.rect;
@@ -1957,12 +1958,12 @@ fn polygon_edge_scroll(app: &PhotocraftApp, ctx: &egui::Context, idx: usize, rec
     view.center[1] += delta.y;
 }
 
-#[expect(clippy::cognitive_complexity, reason = "one view: the GPU or CPU canvas, then every overlay in order")]
 pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect: Rect, view: View, primary: bool) -> View {
     canvas_view_tile(app, ui, idx, rect, view, primary, None)
 }
 
 /// [`canvas_view`] as one of a host's tiles (`tiles.rs`), which may show a named view.
+#[expect(clippy::cognitive_complexity, reason = "one view: the GPU or CPU canvas, then every overlay in order")]
 fn canvas_view_tile(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect: Rect, mut view: View, primary: bool, tile: Option<&tiles::TileSource>) -> View {
     let ctx = ui.ctx().clone();
     let tile_salt = tile.map_or(0, |t| t.salt);
