@@ -64,6 +64,7 @@ fn canvas_mips_preserve_opaque_pixels_and_partial_updates() {
         check_mips(&gpu);
         check_refinement_pieces(&gpu);
     }
+    check_viewport_pages(&gpu);
 }
 
 /// A large edit seen zoomed out is composited at a reduced level, then brought to full size a
@@ -139,4 +140,57 @@ fn check_mips(gpu: &GpuCanvas) {
             }
         }
     }
+}
+
+/// #5332: a page's GPU bytes are its texture's, not its document area's; a refused page fails
+/// alone (its work inside error scopes, so it can't take the GPU down) and an accepted one is
+/// stored, updated in part and dropped.
+fn check_viewport_pages(gpu: &GpuCanvas) {
+    let device = &gpu.rs.device;
+    let max = device.limits().max_texture_dimension_2d;
+    let (texture, error) = pages::catch_gpu_errors(device, || {
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("too_wide_page"),
+            size: wgpu::Extent3d { width: max + 1, height: 1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: FORMAT,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        })
+    });
+    drop(texture);
+    assert!(error.is_some(), "the refusal is caught");
+    assert!(gpu.health.is_ok(), "{:?}", gpu.fault());
+    // What the checks before this one left is not this page's to count.
+    gpu.retain(&[]);
+    let before = gpu.held_bytes();
+    gpu.set_canvas_budget(1 << 20);
+    // Texels 64 x 64 at a reduction of 4: 16 KiB, though it draws 256 x 256 document pixels.
+    let buf = Buffer::filled(Rect::from_xywh(0, 0, 64, 64), [0.5, 0.5, 0.5, 1.0]);
+    let page = |page, buf| PageUpload { key: 9, page, size: [256, 256], depth: SampleType::U8, factor: 4, core: Rect::new(0, 0, 256, 256), buf };
+    assert!(gpu.upload_page(page(1, &buf)));
+    assert_eq!(gpu.pages(9), (vec![1], 64 * 64 * 4));
+    assert_eq!(gpu.held_bytes() - before, 64 * 64 * 4, "the display sets' sum counts the page's texture");
+    assert!(gpu.update_page(9, 1, &Buffer::filled(Rect::from_xywh(2, 2, 3, 3), [1.0, 0.0, 0.0, 1.0])));
+    assert!(!gpu.update_page(9, 1, &Buffer::filled(Rect::from_xywh(63, 0, 3, 3), [1.0, 0.0, 0.0, 1.0])), "outside the page");
+    assert!(!gpu.update_page(9, 2, &buf), "not held");
+    // Over the budget, a page is refused and nothing changes.
+    gpu.set_canvas_budget(64 * 64 * 4);
+    assert!(!gpu.upload_page(page(2, &buf)));
+    assert_eq!(gpu.pages(9).0, vec![1]);
+    // Another document's texture set gives way to a page; the page's own document doesn't.
+    gpu.set_canvas_budget(1 << 20);
+    gpu.upload_buffer_full(5, &Buffer::filled(Rect::from_xywh(0, 0, 400, 400), [0.0, 0.0, 0.0, 1.0]), SampleType::U8);
+    assert!(gpu.texture_info(5).is_some());
+    let big = Buffer::filled(Rect::from_xywh(0, 0, 500, 500), [0.0, 0.0, 0.0, 1.0]);
+    assert!(gpu.upload_page(page(3, &big)));
+    assert!(gpu.texture_info(5).is_none());
+    assert_eq!(gpu.pages(9).0.len(), 2);
+    gpu.retain_pages(9, &[3]);
+    assert_eq!(gpu.pages(9).0, vec![3]);
+    gpu.retain_pages(9, &[]);
+    assert_eq!(gpu.pages(9).1, 0);
+    assert!(gpu.health.is_ok(), "{:?}", gpu.fault());
 }

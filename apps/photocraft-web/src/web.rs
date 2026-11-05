@@ -164,6 +164,8 @@ pub async fn run(canvas: web_sys::HtmlCanvasElement, hosted: Option<crate::embed
     let embed_query = q.clone();
     let force_cpu = q.contains("cpu") || hosted.as_ref().is_some_and(|h| h.force_cpu);
     let force_webgl = q.contains("webgl") || hosted.as_ref().is_some_and(|h| h.force_webgl);
+    // `?pages=0`: documents over the GPU canvas budget draw on the CPU canvas, for comparing.
+    photocraft_ui_egui::canvas::viewport_pages::set_enabled(!q.split(['?', '&']).any(|kv| kv == "pages=0"));
     let perf_debug = q.split(['?', '&']).any(|kv| kv == "perf=1" || kv == "perf");
     if q.split(['?', '&']).any(|kv| kv == "gpuopt=0") {
         // Measurements: the GPU canvas as before pass fusion and level-of-detail refreshes.

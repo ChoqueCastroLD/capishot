@@ -52,6 +52,7 @@ pub mod tool_feedback;
 mod tool_input;
 mod transform_controls;
 mod view_xform;
+pub mod viewport_pages;
 pub mod wheel_nav;
 pub mod zoom_hold;
 pub mod zoom_levels;
@@ -64,7 +65,6 @@ pub(crate) use cursors::{
 };
 use cursors::{brush_tip_centre, eyedropper_ring, precise_other_cursor, visible_crosshair};
 pub(crate) use display::GPU_OUTPUT;
-#[cfg(test)]
 use display::texture_key;
 pub(crate) use display::{cache_key, canvas_display, display_doc, display_image};
 use display::{checker, hdr_preview, sync_display_lut};
@@ -417,6 +417,31 @@ fn paint_canvas(app: &mut PhotocraftApp, ui: &egui::Ui, view: &View, xf: ViewXfo
             pixel_grid: false,
             view_key: egui::Id::unique(("pc-canvas-proxy", ctx.viewport_id(), idx)).value(),
             display: sync_display_lut(app, &shown, key, output),
+            output: output.unwrap_or(0),
+            hdr: hdr_preview(app, doc),
+            offset: [0.0, 0.0],
+            min_lod: 0.0,
+        };
+        paint_gpu_view(painter, rect, params, &pattern);
+    } else if gpu_ok && viewport_pages::show(app, ctx, idx, &xf, render_zoom) {
+        // Too large for the document's texture set: the pages in view, rendered in the background.
+        on_gpu = true;
+        app.perf.gpu = true;
+        app.navigator_gpu.remove(&doc.id);
+        let key = viewport_pages::stream_key(doc.id.0);
+        let params = crate::gpu_canvas::ViewParams {
+            doc: key,
+            doc_size: [doc.size.width, doc.size.height],
+            zoom: point_zoom,
+            center: xf.center,
+            rotation: if view.rotation.is_finite() { view.rotation.to_radians() } else { 0.0 },
+            shadow: {
+                let t = crate::theme::Tokens::get(ctx);
+                !t.bevel && !t.pro && drop_shadow
+            },
+            pixel_grid,
+            view_key: egui::Id::unique(("pc-canvas-pages", ctx.viewport_id(), idx)).value(),
+            display: sync_display_lut(app, doc, key, output),
             output: output.unwrap_or(0),
             hdr: hdr_preview(app, doc),
             offset: [0.0, 0.0],
@@ -1816,6 +1841,10 @@ pub(crate) fn prewarm(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize, 
     let zoom = view.zoom;
     if let Some(stored) = app.ui.views.get_mut(idx) {
         *stored = view;
+    }
+    // Drawn from viewport pages: the view's pages, whatever `full` asks (they aren't the document).
+    if app.gpu.is_some() && crate::gpu_canvas::gpu_view_ok(flip, xf.rotation, aspect) && viewport_pages::show(app, ctx, idx, &xf, zoom) {
+        return app.streams.get(&doc.id).is_some_and(viewport_pages::Stream::settled);
     }
     if app.gpu.is_some() && crate::gpu_canvas::gpu_view_ok(flip, xf.rotation, aspect) && ensure_gpu(app, idx, visible, level, level, ctx) {
         let Some(gpu) = app.gpu.as_ref() else { return false };
