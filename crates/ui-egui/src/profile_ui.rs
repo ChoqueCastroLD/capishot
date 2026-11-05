@@ -327,6 +327,9 @@ fn editor(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>
         for group in Group::ALL.into_iter().filter(|g| *g != Group::Base) {
             let open = matches!(group, Group::Surfaces | Group::Text | Group::Accent);
             egui::CollapsingHeader::new(tl!(group.label())).id_salt(("theme-group", group.label())).default_open(open).show(ui, |ui| {
+                if group == Group::Pattern {
+                    ui.label(egui::RichText::new(tl!("Drawn behind the interface only, never over your page.")).color(t.text_dim).small());
+                }
                 egui::Grid::new(("theme-grid", group.label())).num_columns(2).spacing([12.0, 4.0]).show(ui, |ui| {
                     for tok in TOKENS.iter().filter(|tok| tok.group == group) {
                         ui.label(tl!(tok.label)).on_hover_text(format!("--{}", tok.name));
@@ -380,7 +383,11 @@ fn editor(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>
 
 /// One token's control; true when it changed.
 fn token_control(ui: &mut egui::Ui, slot: Slot<'_>, name: &str) -> bool {
-    let drag = |ui: &mut egui::Ui, x: &mut f32, min: f32, max: f32| ui.add(egui::DragValue::new(x).range(min..=max).speed(0.25).max_decimals(1)).changed();
+    let drag = |ui: &mut egui::Ui, x: &mut f32, min: f32, max: f32| {
+        // Opacities are fractions of 1.
+        let (speed, decimals) = if max <= 1.0 { (0.01, 2) } else { (0.25, 1) };
+        ui.add(egui::DragValue::new(x).range(min..=max).speed(speed).max_decimals(decimals)).changed()
+    };
     match slot {
         Slot::Color(c) => crate::widgets::color_edit_button_srgba(ui, c).changed(),
         Slot::Auto(c) => {
@@ -403,7 +410,7 @@ fn token_control(ui: &mut egui::Ui, slot: Slot<'_>, name: &str) -> bool {
                 let mut auto = x.is_none();
                 let mut ch = crate::widgets::checkbox(ui, &mut auto, tl!("Auto")).changed();
                 if ch {
-                    *x = if auto { None } else { Some(4.0) };
+                    *x = if auto { None } else { Some(4f32.clamp(min, max)) };
                 }
                 if let Some(v) = x {
                     ch |= drag(ui, v, min, max);
@@ -438,6 +445,19 @@ fn token_control(ui: &mut egui::Ui, slot: Slot<'_>, name: &str) -> bool {
         Slot::Base(_) => {
             let _ = name;
             false
+        }
+        Slot::Pattern(k) => {
+            ui.horizontal(|ui| {
+                let mut ch = false;
+                for kind in crate::theme::PatternKind::ALL {
+                    if ui.selectable_label(*k == kind, tl!(kind.label())).clicked() && *k != kind {
+                        *k = kind;
+                        ch = true;
+                    }
+                }
+                ch
+            })
+            .inner
         }
     }
 }

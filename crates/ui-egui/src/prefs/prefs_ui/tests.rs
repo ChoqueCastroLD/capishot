@@ -548,6 +548,34 @@ fn preferences_interface_shows_language_without_scrolling() {
     assert!(h.query_by_label("Breeze light").is_some() && h.query_by_label("Breeze dark").is_some());
 }
 
+/// The Manga and Capibara pairs in the two slots: the fixed modes and Sync with system pick the
+/// matching one, and they migrate and are saved like any other theme.
+#[test]
+fn new_theme_pairs_follow_the_appearance_mode_and_the_system() {
+    for (light, dark, light_kind, dark_kind) in [
+        (LightTheme::MangaLight, DarkTheme::MangaDark, ThemeKind::MangaLight, ThemeKind::MangaDark),
+        (LightTheme::CapibaraLight, DarkTheme::CapibaraDark, ThemeKind::CapibaraLight, ThemeKind::CapibaraDark),
+    ] {
+        let mut i = prefs::Interface { light_theme: light, dark_theme: dark, ..Default::default() };
+        for (mode, system, want) in [
+            (AppearanceMode::Light, None, light_kind),
+            (AppearanceMode::Dark, Some(egui::Theme::Light), dark_kind),
+            (AppearanceMode::Auto, Some(egui::Theme::Light), light_kind),
+            (AppearanceMode::Auto, Some(egui::Theme::Dark), dark_kind),
+            (AppearanceMode::Auto, None, dark_kind),
+        ] {
+            i.appearance_mode = mode;
+            assert_eq!(selected_theme(&i, system), want, "{mode:?} on {system:?}");
+        }
+        assert_eq!(SavedTheme::parse(light_kind.id()).map(|t| t.name()), Some(light_kind.id()));
+        assert_eq!(SavedTheme::parse(dark_kind.id()).map(|t| t.name()), Some(dark_kind.id()));
+    }
+    for kind in ThemeKind::ALL {
+        let options = if kind.is_dark() { DARK_THEME_OPTIONS } else { LIGHT_THEME_OPTIONS };
+        assert!(options.iter().any(|(id, k)| *k == kind && *id == kind.id()), "{kind:?} isn't in its list");
+    }
+}
+
 #[test]
 fn preferences_interface_search_hides_rows_and_skips_empty_groups() {
     use egui_kittest::{Harness, kittest::Queryable};

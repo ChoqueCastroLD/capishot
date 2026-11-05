@@ -10,7 +10,7 @@ fn built_in_themes_are_complete_stylesheets() {
         assert!(p.warnings.is_empty(), "{kind:?}: {:?}", p.warnings);
         let mut t = p.tokens;
         for tok in TOKENS.iter() {
-            let optional = matches!((tok.slot)(&mut t), Slot::Auto(_) | Slot::AutoNum(..));
+            let optional = matches!((tok.slot)(&mut t), Slot::Auto(_) | Slot::AutoNum(..) | Slot::Pattern(_));
             assert!(optional || p.set.contains(&tok.name), "{kind:?} doesn't set --{}", tok.name);
         }
         assert_eq!(p.tokens.kind, kind);
@@ -30,6 +30,13 @@ fn every_token_field_is_reachable_from_css() {
         chrome: _,
         canvas: _,
         canvas_dot: _,
+        pattern: _,
+        pattern_size: _,
+        pattern_opacity: _,
+        bar_pattern: _,
+        bar_pattern_size: _,
+        bar_pattern_opacity: _,
+        pattern_color: _,
         dock: _,
         card: _,
         card_border: _,
@@ -90,8 +97,8 @@ fn every_token_field_is_reachable_from_css() {
             },
     } = Tokens::for_kind(ThemeKind::Pro);
     let crate::theme::WidgetTokens { bg: _, border: _, fg: _, border_width: _, fg_width: _, radius: _, expansion: _ } = WidgetTokens::default();
-    // 38 plain fields + `dark` + 19 style values + 5 widget states × 7.
-    assert_eq!(TOKENS.len(), 39 + 19 + 5 * 7);
+    // 38 plain fields + `dark` + 7 pattern values + 19 style values + 5 widget states × 7.
+    assert_eq!(TOKENS.len(), 39 + 7 + 19 + 5 * 7);
     // Each property changes its own value and no other: no two share a field.
     let base = Tokens::for_kind(ThemeKind::Studio);
     let mut seen: Vec<Tokens> = Vec::new();
@@ -106,6 +113,7 @@ fn every_token_field_is_reachable_from_css() {
             Slot::Bool(b) => (!*b).to_string(),
             Slot::Shadow(_) => "3 4 5 6 #010203".into(),
             Slot::Base(_) => "classic".into(),
+            Slot::Pattern(_) => "lines".into(),
         };
         let changed = parse(&format!("--base: studio; --{}: {v};", tok.name)).tokens;
         assert_ne!(changed, base, "--{}: {v} changed nothing", tok.name);

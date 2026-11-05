@@ -18,13 +18,16 @@
 //! Values are colours (`#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `transparent`, or `auto` for a
 //! widget colour that follows the theme's colours), numbers (`12`, `12.5px`), pairs (`8 6`),
 //! shadows (`x y blur spread [colour]`, or `none`), `true`/`false` and theme names. Every design
-//! token is reachable ([`TOKENS`]). Nothing is fetched or run: anything else (other selectors,
+//! token is reachable ([`TOKENS`]). `--pattern` and `--bar-pattern` (`dots`, `lines` or `none`)
+//! with `--pattern-size`, `--pattern-opacity`, `--bar-pattern-size`, `--bar-pattern-opacity` and
+//! `--pattern-color` draw a procedural pattern behind the canvas surround and the bars
+//! ([`super::pattern`]), never over the document. Nothing is fetched or run: anything else (other selectors,
 //! `url()`, `@import`, unknown properties, bad values) is skipped and reported in the warnings,
 //! and out-of-range numbers are clamped.
 
 use egui::{Color32, Vec2};
 
-use super::{ShadowTokens, ThemeKind, Tokens, WidgetTokens};
+use super::{PatternKind, ShadowTokens, ThemeKind, Tokens, WidgetTokens};
 
 /// Where a token is shown in the Theme editor.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,6 +39,7 @@ pub enum Group {
     States,
     Status,
     Canvas,
+    Pattern,
     Shape,
     Typography,
     Spacing,
@@ -49,7 +53,7 @@ pub enum Group {
 }
 
 impl Group {
-    pub const ALL: [Group; 17] = [
+    pub const ALL: [Group; 18] = [
         Group::Base,
         Group::Surfaces,
         Group::Text,
@@ -57,6 +61,7 @@ impl Group {
         Group::States,
         Group::Status,
         Group::Canvas,
+        Group::Pattern,
         Group::Shape,
         Group::Typography,
         Group::Spacing,
@@ -79,6 +84,7 @@ impl Group {
             Group::States => "Hover and selection",
             Group::Status => "Status colours",
             Group::Canvas => "Canvas and scopes",
+            Group::Pattern => "Surface pattern",
             Group::Shape => "Corners and layout",
             Group::Typography => "Text sizes",
             Group::Spacing => "Spacing",
@@ -120,6 +126,8 @@ pub enum Slot<'a> {
     Pair(&'a mut Vec2, f32, f32),
     Shadow(&'a mut ShadowTokens),
     Base(&'a mut ThemeKind),
+    /// A surface's pattern (`none` is the unset value).
+    Pattern(&'a mut PatternKind),
 }
 
 /// One design token: its property name (without `--`; scoped ones as `button-hover-bg`), where
@@ -186,6 +194,13 @@ pub static TOKENS: std::sync::LazyLock<Vec<Token>> = std::sync::LazyLock::new(||
         token!(Canvas, "histogram-bg", "Scope background", |t| Slot::Color(&mut t.histogram_bg)),
         token!(Canvas, "histogram-level", "Scope brightness", |t| Slot::Byte(&mut t.histogram_level)),
         token!(Canvas, "scrim", "Dimming", |t| Slot::Color(&mut t.scrim)),
+        token!(Pattern, "pattern", "Canvas surround pattern", |t| Slot::Pattern(&mut t.pattern)),
+        token!(Pattern, "pattern-size", "Canvas surround pattern size", |t| Slot::AutoNum(&mut t.pattern_size, 2.0, 64.0)),
+        token!(Pattern, "pattern-opacity", "Canvas surround pattern opacity", |t| Slot::AutoNum(&mut t.pattern_opacity, 0.0, 1.0)),
+        token!(Pattern, "bar-pattern", "Bar pattern", |t| Slot::Pattern(&mut t.bar_pattern)),
+        token!(Pattern, "bar-pattern-size", "Bar pattern size", |t| Slot::AutoNum(&mut t.bar_pattern_size, 2.0, 64.0)),
+        token!(Pattern, "bar-pattern-opacity", "Bar pattern opacity", |t| Slot::AutoNum(&mut t.bar_pattern_opacity, 0.0, super::pattern::MAX_BAR_OPACITY)),
+        token!(Pattern, "pattern-color", "Pattern colour", |t| Slot::Auto(&mut t.pattern_color)),
         token!(Shape, "radius-sm", "Small corners", |t| Slot::Num(&mut t.radius_sm, 0.0, 64.0)),
         token!(Shape, "radius", "Corners", |t| Slot::Num(&mut t.radius, 0.0, 64.0)),
         token!(Shape, "radius-lg", "Large corners", |t| Slot::Num(&mut t.radius_lg, 0.0, 64.0)),
@@ -457,6 +472,7 @@ fn set(slot: Slot<'_>, name: &str, v: &str, line: usize, warnings: &mut Vec<Stri
             *s = ShadowTokens { offset: [x.min(127.0) as i8, y.min(127.0) as i8], blur: blur.max(0.0) as u8, spread: spread.max(0.0) as u8, color };
         }
         Slot::Base(k) => *k = ThemeKind::from_name(v).ok_or("not a built-in theme name")?,
+        Slot::Pattern(k) => *k = PatternKind::parse(v).ok_or("not dots, lines or none")?,
     }
     Ok(())
 }
@@ -479,7 +495,13 @@ pub fn value_text(slot: Slot<'_>) -> Option<String> {
             }
         }
         Slot::Base(k) => k.id().to_string(),
+        Slot::Pattern(k) => return k.name().map(str::to_string),
     })
+}
+
+/// What a stylesheet says for a token with no value.
+fn unset_text(slot: Slot<'_>) -> &'static str {
+    if matches!(slot, Slot::Pattern(_)) { "none" } else { "auto" }
 }
 
 /// A stylesheet read into tokens.
@@ -524,6 +546,7 @@ pub(super) fn parse_builtin(css: &str, kind: ThemeKind) -> Parsed {
 /// `tokens` as a complete `theme.css`: every token, grouped, the widget states in their blocks.
 pub fn write(tokens: &Tokens) -> String {
     let mut t = *tokens;
+    let mut base = Tokens::for_kind(tokens.kind);
     let mut out = String::new();
     let mut open: Option<&'static str> = None;
     let mut root_open = false;
@@ -532,7 +555,8 @@ pub fn write(tokens: &Tokens) -> String {
             .iter()
             .filter(|tok| tok.group == group)
             .filter_map(|tok| {
-                let v = value_text((tok.slot)(&mut t))?;
+                // Unset where the base sets it has to be said, or reading it back brings the base's.
+                let v = value_text((tok.slot)(&mut t)).or_else(|| value_text((tok.slot)(&mut base)).map(|_| unset_text((tok.slot)(&mut t)).to_string()))?;
                 let name = match group.selector() {
                     Some(sel) => tok.name.strip_prefix(&format!("{}-", sel.replace(':', "-"))).unwrap_or(tok.name).to_string(),
                     None => tok.name.to_string(),
@@ -541,7 +565,7 @@ pub fn write(tokens: &Tokens) -> String {
             })
             .collect();
         let sel = group.selector();
-        if sel.is_some() && lines.is_empty() {
+        if lines.is_empty() {
             continue;
         }
         match sel {
@@ -580,7 +604,8 @@ pub fn write_changes(tokens: &Tokens) -> String {
         if v == b {
             continue;
         }
-        let v = v.unwrap_or_else(|| "auto".into());
+        let unset = unset_text((tok.slot)(&mut t));
+        let v = v.unwrap_or_else(|| unset.into());
         match tok.group.selector() {
             None => root.push(format!("  --{}: {v};", tok.name)),
             Some(sel) => {

@@ -113,7 +113,7 @@ pub(crate) use tabs::tab_title_at;
 #[cfg(test)]
 use tabs::{TEAR_OFF, pro_tab_title, tab_context_items, tab_drop_index, tab_move_target, tabs, torn_off};
 pub use tabs::{TabStrip, document_area, extra_windows};
-use tabs::{dots, paint_dots};
+use tabs::{dots, paint_dots, surround_pattern};
 pub(crate) use textures::canvas_texture_options;
 #[cfg(test)]
 pub(crate) use textures::detail_plan;
@@ -615,7 +615,9 @@ fn paint_canvas(app: &mut PhotocraftApp, ui: &egui::Ui, view: &View, xf: ViewXfo
     if doc.has_artboards() {
         let t = crate::theme::Tokens::get(ctx);
         let pasteboard = crate::prefs_ui::pasteboard_color(app);
-        let dot_tex = dots(ctx, &t);
+        // The theme's pattern, tinted and in its own tile size, or the dot grid.
+        let pattern = surround_pattern(ctx, &t);
+        let dot_tex = pattern.as_ref().map(|p| (p.texture, p.cell, p.tint, true)).or_else(|| dots(ctx, &t).map(|id| (id, 22.0, Color32::WHITE, false)));
         // Cut around the layers as they are shown, so a loose layer dragged with the Move tool
         // (or otherwise previewed) is not covered where it now draws.
         let shown = display_doc(app, idx).0;
@@ -624,8 +626,12 @@ fn paint_canvas(app: &mut PhotocraftApp, ui: &egui::Ui, view: &View, xf: ViewXfo
         let fill = |q: &[Pos2; 4], tex: Option<egui::TextureId>, color: Color32| {
             let mut mesh = tex.map_or_else(egui::Mesh::default, egui::Mesh::with_texture);
             for &p in q {
-                // Same phase as the dots around the document.
-                let uv = if tex.is_some() { ((p - rect.min) / 22.0).to_pos2() } else { egui::epaint::WHITE_UV };
+                // Same phase as the dots or pattern around the document.
+                let uv = match dot_tex {
+                    Some((_, cell, _, true)) if tex.is_some() => (p.to_vec2() / cell).to_pos2(),
+                    Some((_, cell, _, false)) if tex.is_some() => ((p - rect.min) / cell).to_pos2(),
+                    _ => egui::epaint::WHITE_UV,
+                };
                 mesh.vertices.push(egui::epaint::Vertex { pos: p, uv, color });
             }
             mesh.add_triangle(0, 1, 2);
@@ -640,8 +646,8 @@ fn paint_canvas(app: &mut PhotocraftApp, ui: &egui::Ui, view: &View, xf: ViewXfo
                 Some(c) => fill(&q, None, c),
                 None => {
                     fill(&q, None, t.canvas);
-                    if let Some(id) = dot_tex {
-                        fill(&q, Some(id), Color32::WHITE);
+                    if let Some((id, _, tint, _)) = dot_tex {
+                        fill(&q, Some(id), tint);
                     }
                 }
             }
