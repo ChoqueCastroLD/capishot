@@ -99,6 +99,20 @@ fn remove_ai_strokes_collect_and_run_once_as_one_undo_step() {
     assert!(red(&app, 21) && red(&app, 70), "one Undo brings both back");
 }
 
+/// A Run that can't start (no inpainter here) says why and keeps what was painted.
+#[test]
+fn a_run_that_cannot_start_keeps_the_mask() {
+    let mut app = app(Tool::RemoveAi);
+    app.session.set_inpainter(None);
+    let before = past(&app);
+    stroke(&mut app, 19.0, Modifiers::NONE);
+    assert!(run(&mut app));
+    assert!(app.ui.status_error && !app.ui.status.is_empty());
+    assert_eq!(past(&app), before);
+    assert_eq!(app.remove_mask.remove_ai.strokes.len(), 1, "the mask still waits");
+    assert!(live(&mut app));
+}
+
 /// The Remove tool (content-aware): the eraser toggle takes a blob back out of the mask, so
 /// Run leaves it; Clear mask drops a mask without running.
 #[test]
