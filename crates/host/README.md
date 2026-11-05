@@ -170,6 +170,20 @@ editor.set_mode(Mode::Full); // any frame: same documents, nothing reopened
   (`Services` left empty: preferences last the session). `CapishotView::with_services` can set them
   (unstable).
 
+### Several editors on one device
+
+Any number of `CapishotView`s can share a window and its wgpu device: give each the same
+`cc.wgpu_render_state.clone()`. Each view's canvas keeps its own textures, pipelines and view
+buffers under its own key in the renderer's callback resources, so document ids can repeat between
+hosts, and a frame of one never frees or overwrites what another drew. Dropping a view frees its
+share. What they do share:
+
+- **Device faults.** A lost device or uncaptured error sends every view on that `RenderState` to
+  the CPU canvas together, since wgpu can't say which one caused it. Share one `RenderState` per
+  device: a second one, with its own renderer, replaces the first's fault handler.
+- **Memory.** `set_memory_budget` and the automatic texture budgets are per view and don't see each
+  other. Split a budget yourself if the views must fit in one.
+
 ### Raw pixels, hidden documents
 
 `Host::open(bytes, OpenOptions { hidden: true, .. })` opens a hidden document in the host's own

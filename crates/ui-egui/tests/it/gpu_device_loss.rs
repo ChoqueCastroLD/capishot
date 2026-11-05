@@ -224,3 +224,30 @@ fn canvas_over_the_texture_budget_builds_no_textures() {
     assert!(g.texture_info(key).is_none());
     g.release();
 }
+
+/// Two canvases on one renderer (two hosts in one window): same document key, separate textures.
+/// One's `retain` leaves the other's alone, a fault reaches both (wgpu keeps one handler per
+/// device), and the last clone of a canvas frees only its own resources.
+#[test]
+fn canvases_on_one_render_state_keep_their_own_documents() {
+    let _gpu = gpu_lock();
+    let Some(rs) = render_state() else { return };
+    let (a, b) = (GpuCanvas::new(&rs), GpuCanvas::new(&rs));
+    assert_ne!(a.id(), b.id());
+    let d = doc();
+    let (key, size) = (d.id.0, [d.size.width, d.size.height]);
+    a.refresh(key, &d, None, None);
+    b.refresh(key, &d, None, None);
+    assert!(a.has(key, size) && b.has(key, size));
+    b.retain(&[]);
+    assert!(a.has(key, size), "the other canvas's retain must not free this texture");
+    assert!(!b.has(key, size));
+    drop(b.clone());
+    b.refresh(key, &d, None, None);
+    assert!(b.has(key, size), "a clone's drop frees nothing");
+    let health = b.health().clone();
+    drop(b);
+    assert!(a.has(key, size), "dropping a canvas frees only its own resources");
+    health.mark(Fault::Lost("test".into()));
+    assert!(a.fault().is_some(), "both canvases hear about their device");
+}

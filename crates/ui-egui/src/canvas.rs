@@ -401,6 +401,7 @@ fn paint_canvas(app: &mut PhotocraftApp, ui: &egui::Ui, view: &View, xf: ViewXfo
         let original_size = [doc.size.width.div_ceil(k), doc.size.height.div_ceil(k)];
         let shown = filter_preview_display_doc(app, doc, key);
         let params = crate::gpu_canvas::ViewParams {
+            canvas: app.gpu.as_ref().map_or(0, crate::gpu_canvas::GpuCanvas::id),
             doc: key,
             doc_size: preview_size,
             zoom: view.zoom * k as f32 / ppp,
@@ -437,6 +438,7 @@ fn paint_canvas(app: &mut PhotocraftApp, ui: &egui::Ui, view: &View, xf: ViewXfo
         app.perf.gpu = true;
         // Shadow, checkerboard, document and pixel grid in one custom shader (gpu_canvas.rs).
         let params = crate::gpu_canvas::ViewParams {
+            canvas: app.gpu.as_ref().map_or(0, crate::gpu_canvas::GpuCanvas::id),
             doc: doc.id.0,
             doc_size: [doc.size.width, doc.size.height],
             zoom: point_zoom,

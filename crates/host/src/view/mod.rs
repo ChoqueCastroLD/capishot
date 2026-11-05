@@ -515,6 +515,9 @@ impl CapishotView {
     fn lent_frame(&mut self, ui: &mut egui::Ui, rect: Rect, host_tool: &str) -> (Lent, Vec<ViewEvent>, Option<String>) {
         let ctx = ui.ctx().clone();
         let mut events = Vec::new();
+        // The host owned the session since the last frame (`Host::show` reorders it at once): the
+        // views follow before anything here looks one up by a session index.
+        self.app.sync_views_if_moved();
         if self.options.mode != self.applied_mode {
             self.applied_mode = self.options.mode;
             // Full: the app's tabs, tiled and floating document windows; embedded: one document

@@ -466,3 +466,138 @@ fn file_pickers_and_writes_go_to_the_host() {
     assert_eq!(name, "out.psd");
     assert!(len > 0);
 }
+
+/// Two open documents with their first views settled, the second shown.
+fn editor_with_two_docs() -> (Context, CapishotEditor, DocumentId, DocumentId) {
+    let ctx = Context::default();
+    let mut editor = CapishotEditor::new(None);
+    editor.host.execute("file.new", json!({"width": 64, "height": 48})).expect("a document");
+    let a = editor.host.active_document().expect("active");
+    let b = editor.host.open(psd(32, 32), OpenOptions { hidden: true, ..OpenOptions::named("page.psd") }).expect("a hidden document").document;
+    let _ = frame(&ctx, &mut editor);
+    (ctx, editor, a, b)
+}
+
+fn zoom(editor: &CapishotEditor, doc: DocumentId) -> f32 {
+    editor.view.camera(doc).expect("a camera").zoom
+}
+
+/// Regression: `Host::show` reorders the session at once and the queued camera request looked its
+/// document up by session index before the views followed, so it moved the other document's view.
+#[test]
+fn a_camera_after_show_moves_only_that_document() {
+    let (ctx, mut editor, a, b) = editor_with_two_docs();
+    let zoom_a = zoom(&editor, a);
+    editor.host.show(b, true).expect("show");
+    let _ = frame(&ctx, &mut editor);
+    let zoom_b = zoom(&editor, b);
+    // Show first, camera second, and back: every swap reorders the two.
+    editor.host.show(a, true).expect("show");
+    editor.view.set_camera(a, CameraChange::Set { zoom: Some(5.0), center: None, rotation: None });
+    let _ = frame(&ctx, &mut editor);
+    assert_eq!(zoom(&editor, a), 5.0);
+    assert_eq!(zoom(&editor, b), zoom_b, "the document it swapped with keeps its camera");
+    editor.host.show(b, true).expect("show");
+    editor.view.set_camera(b, CameraChange::Set { zoom: Some(7.0), center: None, rotation: None });
+    let _ = frame(&ctx, &mut editor);
+    assert_eq!(zoom(&editor, b), 7.0);
+    assert_eq!(zoom(&editor, a), 5.0, "the document it swapped with keeps its camera");
+    // The other order: queued first, shown second, runs against the same reordered session.
+    editor.view.set_camera(a, CameraChange::Set { zoom: Some(2.0), center: None, rotation: None });
+    editor.host.show(a, true).expect("show");
+    let _ = frame(&ctx, &mut editor);
+    assert_eq!(zoom(&editor, a), 2.0);
+    assert_eq!(zoom(&editor, b), 7.0);
+    assert_ne!(zoom_a, 5.0, "the moves above were real");
+}
+
+/// [`DocumentCamera::At`] and `Keep` go through the same lookup when `Host::show` swaps.
+#[test]
+fn the_show_camera_lands_on_the_shown_document() {
+    let (ctx, mut editor, a, b) = editor_with_two_docs();
+    editor.view.set_camera(a, CameraChange::Set { zoom: Some(4.0), center: Some([1.0, 2.0]), rotation: None });
+    let _ = frame(&ctx, &mut editor);
+    editor.view.set_show_camera(DocumentCamera::Keep);
+    editor.host.show(b, true).expect("show");
+    let _ = frame(&ctx, &mut editor);
+    assert_eq!(zoom(&editor, b), 4.0, "Keep hands the shown document the last camera");
+    editor.view.set_show_camera(DocumentCamera::At { zoom: 6.0, center: [3.0, 4.0] });
+    editor.host.show(a, true).expect("show");
+    let _ = frame(&ctx, &mut editor);
+    assert_eq!(zoom(&editor, a), 6.0);
+    assert_eq!(zoom(&editor, b), 4.0, "the one hidden keeps its camera");
+}
+
+/// Two editors in panes of one window: one renderer, one device.
+struct TwoPanes {
+    left: CapishotEditor,
+    right: CapishotEditor,
+}
+
+impl TwoPanes {
+    fn draw(&mut self, ui: &mut egui::Ui) {
+        let w = ui.max_rect().width() / 2.0;
+        let h = ui.max_rect().height();
+        ui.push_id("left", |ui| {
+            let _ = self.left.ui_in_rect(ui, Rect::from_min_size(Pos2::ZERO, vec2(w, h)));
+        });
+        ui.push_id("right", |ui| {
+            let _ = self.right.ui_in_rect(ui, Rect::from_min_size(Pos2::new(w, 0.0), vec2(w, h)));
+        });
+    }
+}
+
+impl eframe::App for TwoPanes {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.draw(ui);
+    }
+}
+
+/// A view of `color` on `rs`. Each editor's first document gets the same id, as two sessions' do.
+fn pane(rs: &RenderState, color: &str) -> CapishotEditor {
+    let mut editor = CapishotEditor::new(Some(rs.clone()));
+    editor.host.execute("file.new", json!({"width": 64, "height": 48, "background": "white"})).expect("a document");
+    editor.host.execute("edit.fill", json!({"color": color})).expect("fill");
+    editor
+}
+
+/// Regression: every canvas on a device shared one set of resources, each one's
+/// `retain_gpu_documents` freed the others' textures, and a same-numbered document overwrote the
+/// other's. Each host keeps its own, and the frame shows both. Skips without a GPU adapter.
+#[test]
+fn two_views_on_one_device_keep_their_own_textures() {
+    let built = std::panic::catch_unwind(|| {
+        egui_kittest::Harness::builder().with_size(vec2(800.0, 400.0)).with_pixels_per_point(1.0).with_max_steps(64).wgpu().build_eframe(|cc| {
+            let rs = cc.wgpu_render_state.as_ref().expect("a render state");
+            TwoPanes { left: pane(rs, "#ff0000"), right: pane(rs, "#00ff00") }
+        })
+    });
+    let Ok(mut h) = built else {
+        eprintln!("skipping: no GPU adapter");
+        return;
+    };
+    h.run_steps(6);
+    let doc = |e: &CapishotEditor| e.host.active_document().expect("active").0;
+    let size = [64, 48];
+    {
+        let panes = h.state();
+        assert_eq!(doc(&panes.left), doc(&panes.right), "the case that collided: both sessions number their document alike");
+        let (left, right) = (panes.left.view.app().gpu_canvas().expect("on the GPU"), panes.right.view.app().gpu_canvas().expect("on the GPU"));
+        assert_ne!(left.id(), right.id());
+        assert!(left.has(doc(&panes.left), size), "the left texture survives a frame of the right");
+        assert!(right.has(doc(&panes.right), size), "the right texture survives a frame of the left");
+    }
+    let shot = h.render().expect("render");
+    let at = |x: u32| {
+        let p = shot.get_pixel(x, 200);
+        [p[0], p[1], p[2]]
+    };
+    let (left, right) = (at(200), at(600));
+    assert!(left[0] > 200 && left[1] < 60, "the left pane draws its own document: {left:?}");
+    assert!(right[1] > 200 && right[0] < 60, "the right pane draws its own document: {right:?}");
+    // A pane that closes frees its textures, not the other's.
+    let id = doc(&h.state().right);
+    h.state_mut().left.view = CapishotView::new(None);
+    h.run_steps(2);
+    assert!(h.state().right.view.app().gpu_canvas().expect("on the GPU").has(id, size));
+}

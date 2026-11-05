@@ -39,6 +39,11 @@ impl PhotocraftApp {
         self.gpu.is_some()
     }
 
+    /// The canvas drawing this app's documents on the GPU (`None` on the CPU path).
+    pub fn gpu_canvas(&self) -> Option<&gpu_canvas::GpuCanvas> {
+        self.gpu.as_ref()
+    }
+
     /// The GPU canvas's device health flag (tests inject faults through it).
     pub fn gpu_health(&self) -> Option<photocraft_gpu::DeviceHealth> {
         self.gpu.as_ref().map(|g| g.health().clone())

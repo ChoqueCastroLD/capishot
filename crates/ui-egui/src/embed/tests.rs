@@ -154,3 +154,36 @@ fn the_host_moves_the_camera() {
     assert!(set_camera(&mut app, 7, CameraChange::Fit).is_err(), "no such document: an error, not a panic");
     assert_eq!(camera(&app, 0).map(|c| c.zoom), Some(2.0), "a rejected change changes nothing");
 }
+
+/// Regression: a host reorders its session between frames; `set_camera` and `camera` by session
+/// index mean the session's document, not the view that happened to sit in that slot.
+#[test]
+fn camera_by_index_follows_a_reorder_before_any_frame() {
+    let mut session = session_with_doc();
+    session.execute("file.new", json!({"width": 32, "height": 32})).expect("a second document");
+    let mut app = PhotocraftApp::new(session, crate::Services::default());
+    app.sync_views();
+    let (first, second) = (app.session.documents()[0].doc.id, app.session.documents()[1].doc.id);
+    assert!(app.session.move_document(0, 1).is_some());
+    assert_eq!(app.session.documents()[0].doc.id, second);
+    let before = camera(&app, 1).expect("the first document's view, in its old slot");
+    assert_eq!(camera(&app, 0).map(|c| c.zoom), Some(1.0));
+    set_camera(&mut app, 0, CameraChange::Set { zoom: Some(4.0), center: None, rotation: None }).expect("a camera");
+    assert_eq!(camera(&app, 0).map(|c| c.zoom), Some(4.0), "the document now at 0 moved");
+    assert_eq!(camera(&app, 1).map(|c| c.zoom), Some(before.zoom), "the other one did not");
+    assert_eq!(app.session.documents()[1].doc.id, first);
+}
+
+/// Between a host's frames the app's session is an empty placeholder: a by-index call must not
+/// take that for "every document closed" and drop the views.
+#[test]
+fn set_camera_on_the_lent_out_session_keeps_the_views() {
+    let mut app = PhotocraftApp::new(session_with_doc(), crate::Services::default());
+    app.sync_views();
+    let lent = std::mem::replace(&mut app.session, Session::new());
+    set_camera(&mut app, 0, CameraChange::Set { zoom: Some(3.0), center: None, rotation: None }).expect("a camera");
+    assert!(set_camera(&mut app, 5, CameraChange::Fit).is_err());
+    assert_eq!(app.ui.views.len(), 1);
+    app.session = lent;
+    assert_eq!(camera(&app, 0).map(|c| c.zoom), Some(3.0));
+}

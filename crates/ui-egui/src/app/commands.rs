@@ -285,6 +285,25 @@ impl PhotocraftApp {
         held.then(|| self.active_tool())
     }
 
+    /// [`Self::sync_views`] if the session's documents aren't the ones `ui.views` is in step with:
+    /// a host holding the session opened, closed or reordered them since the last sync. Call it
+    /// before `ui.views` is indexed by a session index outside the frame's own order.
+    pub fn sync_views_if_moved(&mut self) {
+        if !self.session.documents().iter().map(|d| d.doc.id).eq(self.view_docs.iter().copied()) {
+            self.sync_views();
+        }
+    }
+
+    /// The slot in `ui.views` of session document `index`, wherever the document was at the last
+    /// [`Self::sync_views`]. `None` for a document without a view yet.
+    pub(crate) fn view_slot(&self, index: usize) -> Option<usize> {
+        match self.session.documents().get(index) {
+            Some(st) => self.view_docs.iter().position(|id| *id == st.doc.id),
+            // No such document: the session is lent out, and slots are all there is to go by.
+            None => (index < self.ui.views.len()).then_some(index),
+        }
+    }
+
     pub fn sync_views(&mut self) {
         type_transform::cancel_stale(self);
         crate::cam_transform::cancel_stale(self);

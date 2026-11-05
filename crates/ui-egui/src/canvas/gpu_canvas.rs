@@ -56,6 +56,8 @@ pub fn gpu_view_ok(flip: bool, _rotation: f32, aspect: f32) -> bool {
 /// Parameters for drawing one document view. Positions are in egui points.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ViewParams {
+    /// The [`GpuCanvas::id`] whose resources draw this view.
+    pub canvas: u64,
     /// Document key used with [`GpuCanvas::upload_full`].
     pub doc: u64,
     /// Document size in pixels.
@@ -110,6 +112,10 @@ enum HighPolicy {
 #[derive(Clone)]
 pub struct GpuCanvas {
     rs: RenderState,
+    /// This canvas's key in the renderer's [`CanvasStore`]; clones share it.
+    id: u64,
+    /// Held for its `Drop`: the last clone frees the resources.
+    _owner: std::sync::Arc<CanvasOwner>,
     tile: u32,
     high: HighPolicy,
     health: photocraft_gpu::DeviceHealth,
@@ -291,14 +297,25 @@ impl GpuCanvas {
             _ => HighPolicy::Budget,
         };
         // Device loss and uncaptured errors mark this flag instead of panicking (#243).
-        let health = photocraft_gpu::DeviceHealth::watch(&rs.device);
+        // wgpu keeps one handler per device: a second canvas on it shares the first one's flag, or
+        // the first would stop hearing about faults.
+        let watched = rs.renderer.read().callback_resources.get::<CanvasStore>().and_then(|store| store.health.clone()).filter(photocraft_gpu::DeviceHealth::is_ok);
+        let health = watched.unwrap_or_else(|| photocraft_gpu::DeviceHealth::watch(&rs.device));
         let mut res = Resources::new(&rs.device, &rs.queue, rs.target_format, high != HighPolicy::Off);
         res.health = health.clone();
         res.separate_mip_targets = rs.adapter.get_info().backend == wgpu::Backend::Dx12;
-        rs.renderer.write().callback_resources.insert(stored(res));
+        let id = NEXT_CANVAS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        {
+            let mut renderer = rs.renderer.write();
+            let store = renderer.callback_resources.entry::<CanvasStore>().or_insert_with(CanvasStore::default);
+            store.health = Some(health.clone());
+            store.canvases.insert(id, stored(res));
+        }
         log::info!("gpu canvas: target {:?}, max texture {max}, tile {tile}, 16F canvas {high:?}", rs.target_format);
         Self {
             rs: rs.clone(),
+            id,
+            _owner: std::sync::Arc::new(CanvasOwner { rs: rs.clone(), id }),
             tile,
             high,
             health,
@@ -307,6 +324,11 @@ impl GpuCanvas {
             camera_raw: Default::default(),
             camera_raw_started: Default::default(),
         }
+    }
+
+    /// What [`ViewParams::canvas`] names this canvas by.
+    pub fn id(&self) -> u64 {
+        self.id
     }
 
     /// Run `done` once the GPU has finished everything submitted so far. False once the device
@@ -333,7 +355,7 @@ impl GpuCanvas {
     /// a fault; the paint callback draws nothing from then on.
     pub fn release(&self) {
         let mut r = self.rs.renderer.write();
-        if let Some(res) = r.callback_resources.get_mut::<StoredResources>() {
+        if let Some(res) = r.callback_resources.canvas_mut(self.id) {
             res.compositor = None;
             res.compositor_failed = Some(photocraft_gpu::Unsupported(self.fault().map_or_else(|| "GPU canvas released".into(), |f| f.to_string())));
             res.docs.clear();
@@ -369,7 +391,7 @@ impl GpuCanvas {
     /// Format and GPU bytes (all tiles, all mip levels) of document `key`'s canvas texture.
     pub fn texture_info(&self, key: u64) -> Option<(wgpu::TextureFormat, u64)> {
         let r = self.rs.renderer.read();
-        let d = r.callback_resources.get::<StoredResources>()?.docs.get(&key)?;
+        let d = r.callback_resources.canvas(self.id)?.docs.get(&key)?;
         Some((d.format, d.bytes()))
     }
 
@@ -377,7 +399,7 @@ impl GpuCanvas {
     /// (`perf.memory`'s `gpuTexturesMB`).
     pub fn held_bytes(&self) -> u64 {
         let r = self.rs.renderer.read();
-        r.callback_resources.get::<StoredResources>().map_or(0, |res| {
+        r.callback_resources.canvas(self.id).map_or(0, |res| {
             res.canvas_bytes().saturating_add(res.compositor.as_ref().map_or(0, photocraft_gpu::Compositor::resident_bytes))
         })
     }
@@ -386,7 +408,7 @@ impl GpuCanvas {
     /// [`memory_budget`]); pages beyond it are evicted least recently used first.
     pub fn set_memory_budget(&self, bytes: u64) {
         let mut r = self.rs.renderer.write();
-        if let Some(res) = r.callback_resources.get_mut::<StoredResources>() {
+        if let Some(res) = r.callback_resources.canvas_mut(self.id) {
             res.compositor_budget = Some(bytes);
         }
     }
@@ -394,13 +416,13 @@ impl GpuCanvas {
     /// The compositor's memory budget (`None` until [`GpuCanvas::set_memory_budget`]).
     pub fn memory_budget(&self) -> Option<u64> {
         let r = self.rs.renderer.read();
-        r.callback_resources.get::<StoredResources>()?.compositor_budget
+        r.callback_resources.canvas(self.id)?.compositor_budget
     }
 
     /// Set the GPU bytes one document's display texture set may take (see [`canvas_budget`]).
     pub fn set_canvas_budget(&self, bytes: u64) {
         let mut r = self.rs.renderer.write();
-        if let Some(res) = r.callback_resources.get_mut::<StoredResources>() {
+        if let Some(res) = r.callback_resources.canvas_mut(self.id) {
             res.canvas_budget = bytes;
         }
     }
@@ -411,13 +433,13 @@ impl GpuCanvas {
         let size = [doc.size.width, doc.size.height];
         let bytes = canvas_texture_bytes(size, self.tile, texel_bytes(self.format_for(doc.depth, size)));
         let r = self.rs.renderer.read();
-        r.callback_resources.get::<StoredResources>().is_some_and(|res| bytes <= res.canvas_budget)
+        r.callback_resources.canvas(self.id).is_some_and(|res| bytes <= res.canvas_budget)
     }
 
     /// Cap lower-stack composite reuse; zero disables it for profiling the uncached path.
     pub fn set_composite_cache_budget(&self, bytes: u64) {
         let mut r = self.rs.renderer.write();
-        if let Some(res) = r.callback_resources.get_mut::<StoredResources>() {
+        if let Some(res) = r.callback_resources.canvas_mut(self.id) {
             res.compositor_cache_budget = Some(bytes);
             if let Some(comp) = &mut res.compositor {
                 comp.set_composite_cache_budget(bytes);
@@ -429,7 +451,7 @@ impl GpuCanvas {
     /// (a Move drag's preview), instead of uploading the moved copy every frame. Empty: none.
     pub fn set_translated(&self, translated: Vec<photocraft_gpu::Translated>) {
         let mut r = self.rs.renderer.write();
-        if let Some(res) = r.callback_resources.get_mut::<StoredResources>()
+        if let Some(res) = r.callback_resources.canvas_mut(self.id)
             && (!translated.is_empty() || !res.compositor_translated.is_empty())
         {
             res.compositor_translated = translated;
@@ -440,7 +462,7 @@ impl GpuCanvas {
     /// are the ones still resident for the edits that follow.
     pub fn set_focus(&self, focus: Option<photocraft_geom::Rect>) {
         let mut r = self.rs.renderer.write();
-        if let Some(res) = r.callback_resources.get_mut::<StoredResources>() {
+        if let Some(res) = r.callback_resources.canvas_mut(self.id) {
             res.compositor_focus = focus;
         }
     }
@@ -449,14 +471,14 @@ impl GpuCanvas {
     /// lower-stack chunks). Keep the scorecard's memory measurements inclusive of reuse.
     pub fn compositor_bytes(&self) -> Option<(u64, usize)> {
         let r = self.rs.renderer.read();
-        let c = r.callback_resources.get::<StoredResources>()?.compositor.as_ref()?;
+        let c = r.callback_resources.canvas(self.id)?.compositor.as_ref()?;
         Some((c.resident_bytes(), c.fx_cache_bytes().saturating_add(usize::try_from(c.composite_cache_bytes()).unwrap_or(usize::MAX))))
     }
 
     /// Set the checkerboard and gamut warning colours.
     pub fn set_style(&self, style: CanvasStyle) {
         let mut r = self.rs.renderer.write();
-        if let Some(res) = r.callback_resources.get_mut::<StoredResources>() {
+        if let Some(res) = r.callback_resources.canvas_mut(self.id) {
             res.style = style;
         }
     }
@@ -464,7 +486,7 @@ impl GpuCanvas {
     /// Whether document `doc` has been uploaded with this size.
     pub fn has(&self, doc: u64, size: [u32; 2]) -> bool {
         let r = self.rs.renderer.read();
-        r.callback_resources.get::<StoredResources>().and_then(|res| res.docs.get(&doc)).is_some_and(|d| d.size == size)
+        r.callback_resources.canvas(self.id).and_then(|res| res.docs.get(&doc)).is_some_and(|d| d.size == size)
     }
 
     /// WebGL, once a frame: builds the next of the compositor's first pipelines when it is due
@@ -474,7 +496,7 @@ impl GpuCanvas {
     pub fn warm_up(&self) -> bool {
         let now = now_ms();
         let mut renderer = self.rs.renderer.write();
-        let Some(res) = renderer.callback_resources.get_mut::<StoredResources>() else { return false };
+        let Some(res) = renderer.callback_resources.canvas_mut(self.id) else { return false };
         let Some(w) = res.warming.as_mut() else { return false };
         if !w.clock.due(now) {
             return true;
@@ -511,7 +533,7 @@ impl GpuCanvas {
     /// stays on the CPU.
     pub fn slow_pipelines(&self) -> Option<f64> {
         let r = self.rs.renderer.read();
-        r.callback_resources.get::<StoredResources>().and_then(|res| res.slow_pipelines)
+        r.callback_resources.canvas(self.id).and_then(|res| res.slow_pipelines)
     }
 
     /// Whether [`GpuCanvas::composite`] would draw `doc` with the wgpu compositor (rather than
@@ -521,7 +543,7 @@ impl GpuCanvas {
             return false;
         }
         let r = self.rs.renderer.read();
-        let Some(res) = r.callback_resources.get::<StoredResources>() else { return false };
+        let Some(res) = r.callback_resources.canvas(self.id) else { return false };
         if res.compositor_failed.is_some() || res.warming.is_some() {
             return false;
         }
@@ -545,7 +567,7 @@ impl GpuCanvas {
         }
         let (device, queue) = (&self.rs.device, &self.rs.queue);
         let mut renderer = self.rs.renderer.write();
-        let Some(res) = renderer.callback_resources.get_mut::<StoredResources>() else { return };
+        let Some(res) = renderer.callback_resources.canvas_mut(self.id) else { return };
         if res.docs.get(&doc).is_none_or(|d| d.size != size || d.format != format) {
             let Some(tex) = DocTextures::new(device, res, size, self.tile, format) else {
                 res.docs.remove(&doc);
@@ -567,7 +589,7 @@ impl GpuCanvas {
         }
         let (device, queue) = (&self.rs.device, &self.rs.queue);
         let mut renderer = self.rs.renderer.write();
-        let Some(res) = renderer.callback_resources.get_mut::<StoredResources>() else { return false };
+        let Some(res) = renderer.callback_resources.canvas_mut(self.id) else { return false };
         let Some(d) = res.docs.get(&doc) else { return false };
         if texels.len() as u64 != size[0] as u64 * size[1] as u64 * texel_bytes(d.format)
             || origin[0].saturating_add(size[0]) > d.size[0]
@@ -586,7 +608,7 @@ impl GpuCanvas {
     /// The texture format of uploaded document `doc`.
     fn format_of(&self, doc: u64) -> Option<wgpu::TextureFormat> {
         let r = self.rs.renderer.read();
-        r.callback_resources.get::<StoredResources>().and_then(|res| res.docs.get(&doc)).map(|d| d.format)
+        r.callback_resources.canvas(self.id).and_then(|res| res.docs.get(&doc)).map(|d| d.format)
     }
 
     /// Upload a CPU composite covering the whole document (a preview of a document of `depth`:
@@ -660,7 +682,7 @@ impl GpuCanvas {
             return Err(photocraft_gpu::Unsupported(f.to_string()));
         }
         let mut renderer = self.rs.renderer.write();
-        let Some(res) = renderer.callback_resources.get_mut::<StoredResources>() else { return Err(photocraft_gpu::Unsupported("no GPU canvas".into())) };
+        let Some(res) = renderer.callback_resources.canvas_mut(self.id) else { return Err(photocraft_gpu::Unsupported("no GPU canvas".into())) };
         // A driver that couldn't build the pipelines once won't later: stay on the CPU compositor.
         if let Some(e) = &res.compositor_failed {
             return Err(e.clone());
@@ -856,7 +878,7 @@ impl GpuCanvas {
         if !self.fits_canvas(doc) {
             // Neither compositor can fill textures that are never created: the CPU canvas draws
             // it. A set left from before the canvas grew is stale, so it goes too.
-            if let Some(res) = self.rs.renderer.write().callback_resources.get_mut::<StoredResources>() {
+            if let Some(res) = self.rs.renderer.write().callback_resources.canvas_mut(self.id) {
                 res.docs.remove(&key);
             }
             return Refresh { kind: REFRESH_OVER_BUDGET, fallback: Some(OVER_CANVAS_BUDGET.into()), ..Default::default() };
@@ -1112,7 +1134,7 @@ impl GpuCanvas {
 
     fn with_doc<T>(&self, key: u64, f: impl FnOnce(&mut Resources, &DocTextures) -> T) -> Option<T> {
         let mut r = self.rs.renderer.write();
-        let res: &mut Resources = r.callback_resources.get_mut::<StoredResources>()?;
+        let res: &mut Resources = r.callback_resources.canvas_mut(self.id)?;
         let d = res.docs.remove(&key)?;
         let out = f(res, &d);
         res.docs.insert(key, d);
@@ -1120,7 +1142,7 @@ impl GpuCanvas {
     }
 
     fn forget_doc(&self, key: u64) {
-        if let Some(res) = self.rs.renderer.write().callback_resources.get_mut::<StoredResources>() {
+        if let Some(res) = self.rs.renderer.write().callback_resources.canvas_mut(self.id) {
             res.docs.remove(&key);
         }
     }
@@ -1138,7 +1160,7 @@ impl GpuCanvas {
         let (device, queue) = (&self.rs.device, &self.rs.queue);
         {
             let mut renderer = self.rs.renderer.write();
-            let Some(res) = renderer.callback_resources.get_mut::<StoredResources>() else { return };
+            let Some(res) = renderer.callback_resources.canvas_mut(self.id) else { return };
             if res.docs.get(&key).is_none_or(|d| d.size != size || d.format != format) {
                 let Some(tex) = DocTextures::new(device, res, size, self.tile, format) else {
                     res.docs.remove(&key);
@@ -1154,7 +1176,7 @@ impl GpuCanvas {
             }
             texels_into(format, &texture_buffer(display, &band).px, &mut rgba);
             let renderer = self.rs.renderer.read();
-            let d = renderer.callback_resources.get::<StoredResources>().and_then(|r| r.docs.get(&key)).ok_or(())?;
+            let d = renderer.callback_resources.canvas(self.id).and_then(|r| r.docs.get(&key)).ok_or(())?;
             d.write(queue, [0, band.rect.y0 as u32], [size[0], band.rect.height()], size[0], &rgba);
             drop(renderer);
             // Flush the staged band so its staging memory is reclaimed while the next renders.
@@ -1166,7 +1188,7 @@ impl GpuCanvas {
             return;
         }
         let mut renderer = self.rs.renderer.write();
-        if let Some(res) = renderer.callback_resources.get_mut::<StoredResources>()
+        if let Some(res) = renderer.callback_resources.canvas_mut(self.id)
             && let Some(d) = res.docs.get(&key)
         {
             d.regenerate_mips(device, queue, res, [0, 0, size[0], size[1]]);
@@ -1179,7 +1201,7 @@ impl GpuCanvas {
     pub fn evict(&self, key: u64) -> u64 {
         let bytes = self.texture_info(key).map_or(0, |(_, b)| b);
         let mut renderer = self.rs.renderer.write();
-        if let Some(res) = renderer.callback_resources.get_mut::<StoredResources>() {
+        if let Some(res) = renderer.callback_resources.canvas_mut(self.id) {
             res.forget(&[key]);
         }
         bytes
@@ -1188,7 +1210,7 @@ impl GpuCanvas {
     /// Free textures, display LUTs and their signatures for documents not in `live`.
     pub fn retain(&self, live: &[u64]) {
         let mut renderer = self.rs.renderer.write();
-        let Some(res) = renderer.callback_resources.get_mut::<StoredResources>() else { return };
+        let Some(res) = renderer.callback_resources.canvas_mut(self.id) else { return };
         if res.docs.keys().any(|k| !live.contains(k)) {
             let gone: Vec<u64> = res.docs.keys().filter(|k| !live.contains(k)).copied().collect();
             res.forget(&gone);
@@ -1201,19 +1223,19 @@ impl GpuCanvas {
 
     pub(crate) fn display_lut_signature(&self, doc: u64, output: u32) -> Option<(u64, u8)> {
         let renderer = self.rs.renderer.read();
-        renderer.callback_resources.get::<StoredResources>()?.display_lut_signatures.get(&(doc, output)).copied()
+        renderer.callback_resources.canvas(self.id)?.display_lut_signatures.get(&(doc, output)).copied()
     }
 
     /// Whether document `doc` has a display LUT for display `output` (tests).
     #[cfg(test)]
     pub(crate) fn has_display_lut(&self, doc: u64, output: u32) -> bool {
         let renderer = self.rs.renderer.read();
-        renderer.callback_resources.get::<StoredResources>().is_some_and(|r| r.luts.contains_key(&(doc, output)))
+        renderer.callback_resources.canvas(self.id).is_some_and(|r| r.luts.contains_key(&(doc, output)))
     }
 
     pub(crate) fn cache_display_lut_signature(&self, doc: u64, output: u32, signature: u64, mode: u8) {
         let mut renderer = self.rs.renderer.write();
-        if let Some(res) = renderer.callback_resources.get_mut::<StoredResources>() {
+        if let Some(res) = renderer.callback_resources.canvas_mut(self.id) {
             res.display_lut_signatures.insert((doc, output), (signature, mode));
         }
     }
@@ -1227,7 +1249,7 @@ impl GpuCanvas {
         }
         let (device, queue) = (&self.rs.device, &self.rs.queue);
         let mut renderer = self.rs.renderer.write();
-        let Some(res) = renderer.callback_resources.get_mut::<StoredResources>() else { return };
+        let Some(res) = renderer.callback_resources.canvas_mut(self.id) else { return };
         res.display_lut_signatures.remove(&(doc, output));
         match rgba {
             None => {
@@ -1260,7 +1282,7 @@ impl GpuCanvas {
         }
         let (device, queue) = (&self.rs.device, &self.rs.queue);
         let renderer = self.rs.renderer.read();
-        let d = renderer.callback_resources.get::<StoredResources>()?.docs.get(&key)?;
+        let d = renderer.callback_resources.canvas(self.id)?.docs.get(&key)?;
         let bpp = texel_bytes(d.format);
         let (w, h) = ((d.size[0] >> level).max(1) as usize, (d.size[1] >> level).max(1) as usize);
         let mut out = vec![[0.0f32; 4]; w.checked_mul(h)?];
@@ -2194,6 +2216,52 @@ fn stored(res: Resources) -> StoredResources {
     res
 }
 
+/// Where [`GpuCanvas`]es keep their [`Resources`] in egui-wgpu's `callback_resources`, one set per
+/// canvas: the type map holds one value per type, and each app's document ids, view keys and
+/// budgets are its own, so several apps can draw on one renderer without touching each other.
+#[derive(Default)]
+struct CanvasStore {
+    canvases: HashMap<u64, StoredResources>,
+    /// The device's health flag, shared by its canvases.
+    health: Option<photocraft_gpu::DeviceHealth>,
+}
+
+/// One canvas's resources in the renderer's `callback_resources`.
+trait CanvasLookup {
+    fn canvas(&self, id: u64) -> Option<&Resources>;
+    fn canvas_mut(&mut self, id: u64) -> Option<&mut Resources>;
+}
+
+impl CanvasLookup for CallbackResources {
+    fn canvas(&self, id: u64) -> Option<&Resources> {
+        let res: &Resources = self.get::<CanvasStore>()?.canvases.get(&id)?;
+        Some(res)
+    }
+
+    fn canvas_mut(&mut self, id: u64) -> Option<&mut Resources> {
+        let res: &mut Resources = self.get_mut::<CanvasStore>()?.canvases.get_mut(&id)?;
+        Some(res)
+    }
+}
+
+/// The ids of [`GpuCanvas`]es, unique in the process.
+static NEXT_CANVAS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// Frees a canvas's [`Resources`] with its last clone: the renderer can outlive it (a host closing
+/// one of its panes).
+struct CanvasOwner {
+    rs: RenderState,
+    id: u64,
+}
+
+impl Drop for CanvasOwner {
+    fn drop(&mut self) {
+        if let Some(store) = self.rs.renderer.write().callback_resources.get_mut::<CanvasStore>() {
+            store.canvases.remove(&self.id);
+        }
+    }
+}
+
 struct Resources {
     view_bgl: wgpu::BindGroupLayout,
     tile_bgl: wgpu::BindGroupLayout,
@@ -2917,9 +2985,7 @@ impl CallbackTrait for CanvasCallback {
         _encoder: &mut wgpu::CommandEncoder,
         resources: &mut CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
-        let Some(res) = resources.get_mut::<StoredResources>() else { return Vec::new() };
-        // One deref up front, so the fields below borrow separately through the threads build's wrapper.
-        let res: &mut Resources = res;
+        let Some(res) = resources.canvas_mut(self.params.canvas) else { return Vec::new() };
         if !res.health.is_ok() {
             return Vec::new();
         }
@@ -2950,7 +3016,7 @@ impl CallbackTrait for CanvasCallback {
     }
 
     fn paint(&self, info: egui::PaintCallbackInfo, pass: &mut wgpu::RenderPass<'static>, resources: &CallbackResources) {
-        let Some(res) = resources.get::<StoredResources>() else { return };
+        let Some(res) = resources.canvas(self.params.canvas) else { return };
         if !res.health.is_ok() {
             return;
         }
@@ -3267,13 +3333,13 @@ mod tests {
     /// The threads web build stores the canvas resources as `SendWrapper<Resources>`, so a lookup
     /// by `Resources` finds nothing there: `fits_canvas` answered false and every document was
     /// drawn on the (much slower) CPU canvas in that build only. Natively the two types are the
-    /// same, so only the source can show it: every lookup goes through `StoredResources`.
+    /// same, so only the source can show it: every lookup goes through `CanvasLookup`.
     #[test]
     fn canvas_resources_are_looked_up_as_stored() {
         let src = include_str!("gpu_canvas.rs");
         let tests = src.find("#[cfg(test)]\n#[path").unwrap_or(src.len());
-        for bad in [concat!("get::<", "Resources>"), concat!("get_mut::<", "Resources>")] {
-            assert!(!src[..tests].contains(bad), "callback_resources lookup by `Resources` instead of `StoredResources`: {bad}");
+        for bad in [concat!("get::<", "Resources>"), concat!("get_mut::<", "Resources>"), concat!("get::<", "StoredResources>"), concat!("get_mut::<", "StoredResources>")] {
+            assert!(!src[..tests].contains(bad), "callback_resources lookup by `Resources` instead of `CanvasLookup`: {bad}");
         }
     }
 
