@@ -44,7 +44,7 @@ use std::path::Path;
 use photocraft_doc::Document;
 use photocraft_raster::Rgba8Image;
 
-pub use atomic::{atomic_write, atomic_write_progress};
+pub use atomic::{atomic_write, atomic_write_progress, atomic_write_stream, atomic_write_stream_progress};
 pub use autosave::{
     AutosaveCompletion, Autosaver, HistoryLimits, ObjectAutosaver, ObjectCheckpoint, RecoveryEntry, RecoveryInfo, discard_recovery, list_recovery,
     list_recovery_checked, object_checkpoint_info, recover, recover_checkpoint, recover_checkpoint_with_context, recover_object_checkpoint,
