@@ -5406,3 +5406,9 @@ fontTab	Find More	Buscar más
 	{n} font files	{n} archivos de fuentes
 	{n} lines ignored:	{n} líneas ignoradas:
 	Discard changes	Descartar cambios
+# Desktop usage statistics: the first-run notice, About.
+	Capishot sends anonymous usage statistics	Capishot envía estadísticas de uso anónimas
+	A random id, the commands and tools you use, timings, errors and your hardware model. Never files, images, text, names or paths.	Un id aleatorio, los comandos y herramientas que usas, tiempos, errores y el modelo de tu hardware. Nunca archivos, imágenes, textos, nombres ni rutas.
+	Turn it off in Preferences › General.	Desactívalas en Preferencias › General.
+	Open Preferences	Abrir Preferencias
+	Capishot sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	Capishot envía estadísticas de uso anónimas (sin archivos ni contenido); desactívalas en Preferencias › General.

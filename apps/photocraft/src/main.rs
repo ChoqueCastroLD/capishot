@@ -73,6 +73,7 @@ mod single_instance;
 mod tablet;
 mod ui_state;
 mod update_check;
+mod usage_stats;
 mod window_frame;
 
 use photocraft_engine::Session;
@@ -496,6 +497,7 @@ fn main() -> eframe::Result {
         Box::new(move |cc| {
             created_in_callback.store(true, std::sync::atomic::Ordering::Relaxed);
             let automation = control.as_ref().map(|(_, _, workspace)| workspace.clone());
+            let automated = automation.is_some();
             let mut services = services::native(automation);
             services.preset_store = presets;
             services.update_check = update_check::start(app_dirs::current().mode == app_dirs::Mode::Portable);
@@ -700,7 +702,12 @@ fn main() -> eframe::Result {
             }
             // The last update: a failed install or a declined administrator prompt is reported.
             photocraft_ui_egui::win_update::report_last(&mut app, app_dirs::current().mode == app_dirs::Mode::Portable);
-            Ok(Box::new(app))
+            // Anonymous usage statistics: only the official builds, off the frame (`usage_stats`).
+            let portable = app_dirs::current().mode == app_dirs::Mode::Portable;
+            Ok(match usage_stats::Shell::new(app, portable, automated) {
+                Ok(shell) => Box::new(shell) as Box<dyn eframe::App>,
+                Err(app) => app,
+            })
         }),
     );
     // The window is gone: refuse further files and free the lock, so a launch that is waiting (or

@@ -123,6 +123,15 @@ pub fn get_small(url: &str, max: u64) -> std::result::Result<Vec<u8>, String> {
     download(&f.agent, url, max, &AtomicBool::new(false)).map_err(|e| e.to_string())
 }
 
+/// One small POST of JSON (the desktop app's usage statistics) on the calling thread: short
+/// timeouts, HTTPS except to this machine, the response ignored. Sends no cookies; the only
+/// headers are the content type and [`user_agent`].
+pub fn post_json(url: &str, body: &str) -> std::result::Result<(), String> {
+    let loopback = ["http://127.0.0.1:", "http://127.0.0.1/", "http://localhost:", "http://localhost/", "http://[::1]"].iter().any(|p| url.starts_with(p));
+    let f = UreqFetcher::build(Timeouts { connect: Duration::from_secs(10), overall: Duration::from_secs(20) }, !loopback);
+    f.agent.post(url).header("Content-Type", "application/json").send(body).map(|_| ()).map_err(|e| describe(&e))
+}
+
 impl FontFetcher for UreqFetcher {
     fn get(&self, url: &str, max_bytes: u64, ctx: &JobCtx) -> Result<Vec<u8>> {
         ctx.check()?;

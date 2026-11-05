@@ -7,6 +7,7 @@
 use std::cell::{Cell, RefCell};
 
 use photocraft_ui_egui::PhotocraftApp;
+use photocraft_ui_egui::telemetry;
 use serde_json::{Value, json};
 use wasm_bindgen::JsCast as _;
 use wasm_bindgen::closure::Closure;
@@ -102,14 +103,9 @@ pub fn take_events() -> Vec<Value> {
         .with(|f| std::mem::take(&mut *f.borrow_mut()))
         .into_iter()
         .map(|v| {
-            json!({
-                "e": "unclean_exit",
-                "cmd": v.get("cmd").cloned().unwrap_or(Value::Null),
-                "tool": v.get("tool").cloned().unwrap_or(Value::Null),
-                "memMB": v.get("memMB").cloned().unwrap_or(Value::Null),
-                "upMin": v.get("upMin").cloned().unwrap_or(Value::Null),
-                "docs": v.get("docs").cloned().unwrap_or(Value::Null),
-            })
+            let text = |key: &str| v.get(key).and_then(Value::as_str);
+            let number = |key: &str| v.get(key).and_then(Value::as_f64).map(|n| n.max(0.0) as u64);
+            telemetry::unclean_exit_event(text("cmd"), text("tool"), number("memMB"), number("upMin"), number("docs"), None)
         })
         .collect()
 }

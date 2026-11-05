@@ -2,6 +2,7 @@
 
 use photocraft_codecs::{ChannelLayout, EncodeOptions, Image};
 use photocraft_doc::Document;
+use photocraft_ui_egui::telemetry;
 use photocraft_ui_egui::{FileDialogAnswer, FileDialogReply, FileDialogRequest, Services};
 use std::cell::{Cell, RefCell};
 use std::future::Future;
@@ -452,7 +453,14 @@ fn save_file(
     settings: &photocraft_ui_egui::ExportSettings,
     ctl: &photocraft_ui_egui::jobs_ui::SaveCtl,
 ) -> Result<Vec<String>, String> {
-    save_through(doc, path, settings, ctl, |p, b, progress| write_atomic_progress(Path::new(p), b, progress))
+    let t0 = std::time::Instant::now();
+    let encoded = std::cell::Cell::new(None);
+    let r = save_through(doc, path, settings, ctl, |p, b, progress| {
+        encoded.set(Some(b.len()));
+        write_atomic_progress(Path::new(p), b, progress)
+    });
+    telemetry::record_doc_saved(path, (doc.size.width, doc.size.height), doc.layer_count(), encoded.get(), r.as_ref().map(|_| ()), t0.elapsed().as_secs_f64() * 1000.0);
+    r
 }
 
 fn with_recovery<T>(
@@ -675,13 +683,25 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
     });
     Services {
         import: Some(Box::new(|name: &str, bytes: &[u8], opts: &photocraft_io::ImportOptions| {
-            crate::crash_guard::guard("Open", || {
+            let t0 = std::time::Instant::now();
+            let r = crate::crash_guard::guard("Open", || {
                 photocraft_io::import_with_options(name, bytes, opts).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string())
-            })
+            });
+            telemetry::record_doc_open(name, bytes.len(), r.as_ref().map(|(doc, _)| doc), t0.elapsed().as_secs_f64() * 1000.0);
+            r
         })),
         export: Some(Box::new(|doc: &Document, path: &str, settings: &photocraft_ui_egui::ExportSettings| {
             let opts = export_options(settings);
-            crate::crash_guard::guard("Export", || photocraft_io::export(doc, path, &opts).map(|r| (r.bytes, r.warnings)).map_err(|e| e.to_string()))
+            let t0 = std::time::Instant::now();
+            let r = crate::crash_guard::guard("Export", || photocraft_io::export(doc, path, &opts).map(|r| (r.bytes, r.warnings)).map_err(|e| e.to_string()));
+            let size = (doc.size.width, doc.size.height);
+            let encoded = r.as_ref().ok().map(|(bytes, _)| bytes.len());
+            telemetry::record_doc_saved(path, size, doc.layer_count(), encoded, r.as_ref().map(|_| ()), t0.elapsed().as_secs_f64() * 1000.0);
+            r
+        })),
+        // Exports encoded in the background count like inline ones.
+        file_saved: Some(Box::new(|path: &str, size: (u32, u32), layers: usize, ok: Result<(), &String>, ms: f64| {
+            telemetry::record_doc_saved(path, size, layers, None, ok, ms);
         })),
         save_file: Some(Arc::new(save_file)),
         file_dialog: Some(Box::new(show_file_dialog)),

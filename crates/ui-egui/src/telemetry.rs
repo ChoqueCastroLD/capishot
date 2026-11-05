@@ -1,9 +1,11 @@
-//! Anonymous usage statistics (the web build only; nothing is recorded or sent elsewhere).
+//! Anonymous usage statistics: the web build and the official Windows and Linux desktop builds.
 //!
 //! The platform shell installs a [`Recorder`] with [`start`] once the user's preference
-//! (Preferences › General › Send anonymous usage statistics) and the browser's privacy signals
-//! allow it, then drains [`take_batch`] every 30 s and when the page hides. Until then every hook
-//! is a relaxed atomic load and nothing else.
+//! (Preferences › General › Send anonymous usage statistics) and the platform's privacy signals
+//! allow it, then drains [`take_batch`] every 30 s, off the frame on the desktop
+//! (`apps/photocraft/src/usage_stats.rs`) and when the page hides on the web
+//! (`apps/photocraft-web/src/usage_stats.rs`). Until then every hook is a relaxed atomic load and
+//! nothing else.
 //!
 //! What is recorded (schema `v: 2`; the collector is a separate service):
 //! a random install id and session id, coarse environment buckets, command ids counted per
@@ -19,7 +21,12 @@
 //! tool and background job running) and `unclean_exit`; schema 5 adds to `freeze` the part of the
 //! frame that took longest (`phase`, a [`crate::perf_span`] id) and the user's last action
 //! (`action`, a command id or `tool.<Name>`), so no freeze is anonymous.
-//! Never: file names, paths, document content, typed text, error messages.
+//! Schema 7 adds the desktop app (`client`), the install channel and hardware names to
+//! `session_start`, every command's time per page size (`cmd_perf`), AI runs (`ai_run`), memory
+//! high-water marks (`memory`) and the first edit of a session (`edited`).
+//! Never: file names, paths, layer or font names, document content, typed text, error messages.
+//! [`Recorder::take_batch`] enforces it a last time: an event with a field outside [`FIELDS`] or a
+//! value that looks like a path or a file name is dropped.
 
 use std::cell::Cell;
 use std::collections::BTreeMap;
@@ -29,7 +36,7 @@ use std::sync::{Mutex, OnceLock};
 use serde_json::{Map, Value, json};
 
 /// Version of the batch schema the collector validates.
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 7;
 /// Events queued between flushes; later ones are dropped (and counted).
 pub const MAX_EVENTS: usize = 200;
 /// Distinct (command, source) and (command, error) keys aggregated between flushes.
@@ -44,6 +51,8 @@ pub const FREEZE_MS: f64 = 200.0;
 pub const PERF_MIN_MS: f64 = 100.0;
 /// A batch's JSON stays under this (the collector accepts 64 KB; `fetch` keepalive allows 64 KB).
 pub const MAX_BATCH_BYTES: usize = 48 * 1024;
+/// A batch's events stay at most this many (the collector refuses a whole batch above it).
+pub const MAX_BATCH_EVENTS: usize = 300;
 /// Distinct frame-statistics keys (canvas tools, `view`) per batch.
 pub const MAX_FRAME_KEYS: usize = 24;
 /// Frame-time histogram resolution: one bucket per millisecond, the last one open-ended.
@@ -52,6 +61,8 @@ const FRAME_BUCKETS: usize = 250;
 pub const LONG_FRAME_MS: f64 = 50.0;
 /// The `frames` key of view navigation (wheel zoom and scroll, pinch) without a tool drag.
 pub const VIEW_FRAMES: &str = "view";
+/// Distinct (command, page size) timings per batch (`cmd_perf`).
+pub const MAX_COMMAND_TIMES: usize = 64;
 /// Heartbeat period; a period counts as active when the user interacted during it.
 pub const HEARTBEAT_MS: f64 = 60_000.0;
 /// Flush period.
@@ -130,12 +141,31 @@ pub struct Environment {
     pub device: &'static str,
     /// `navigator.deviceMemory` in GB (0 = not reported), bucketed with [`memory_bucket`].
     pub memory_gb: f64,
+    /// The desktop app: no browser, `os` instead of the user agent's.
+    pub native: bool,
+    /// The OS family on the desktop (`windows`, `linux`, …).
+    pub os: &'static str,
+    /// How this copy was installed: `web-st`, `web-threads`, `msi`, `zip`, `appimage`, `deb`,
+    /// `tar` or `source`.
+    pub channel: &'static str,
+    /// OS name and version ([`os_version_token`]; in browsers parsed from the user agent).
+    pub os_version: String,
+    /// CPU model, GPU model and driver, as reported: only sent through [`hardware_name`].
+    pub cpu: String,
+    pub gpu_model: String,
+    pub gpu_driver: String,
+    /// Installed RAM in GB (0 = not known), bucketed with [`ram_bucket`]. Desktop only.
+    pub ram_gb: f64,
+    /// Free space where Capishot keeps its data, in GB (`None` = not known), bucketed with
+    /// [`disk_bucket`]. Desktop only.
+    pub free_disk_gb: Option<f64>,
 }
 
 /// The `session_start` event for `env`.
 pub fn session_start_event(env: &Environment) -> Value {
-    let (browser, major) = browser_family(&env.user_agent);
-    json!({
+    let (browser, major) = if env.native { ("native", 0) } else { browser_family(&env.user_agent) };
+    let os = if env.native { env.os } else { os_family(&env.user_agent) };
+    let mut e = json!({
         "e": "session_start",
         "app": photocraft_engine::build_info::VERSION,
         "commit": photocraft_engine::build_info::short_sha().unwrap_or("dev"),
@@ -146,12 +176,88 @@ pub fn session_start_event(env: &Environment) -> Value {
         "gpu_vendor": env.gpu_vendor,
         "browser": browser,
         "browser_major": major,
-        "os": os_family(&env.user_agent),
+        "os": os,
         "screen": screen_bucket(env.screen.0, env.screen.1),
         "lang": sanitize_token(&env.language, 12).unwrap_or_else(|| "other".into()),
         "device": if matches!(env.device, "mobile" | "tablet" | "desktop") { env.device } else { "unknown" },
         "mem": memory_bucket(env.memory_gb),
-    })
+    });
+    if matches!(env.channel, "web-st" | "web-threads" | "msi" | "zip" | "appimage" | "deb" | "tar" | "source") {
+        e["channel"] = json!(env.channel);
+    }
+    if let Some(v) = os_version_token(&env.os_version) {
+        e["os_ver"] = json!(v);
+    }
+    for (key, value) in [("cpu", &env.cpu), ("gpu_model", &env.gpu_model), ("gpu_driver", &env.gpu_driver)] {
+        if let Some(name) = hardware_name(value) {
+            e[key] = json!(name);
+        }
+    }
+    if env.native {
+        e["ram"] = json!(ram_bucket(env.ram_gb));
+        e["disk"] = json!(env.free_disk_gb.map_or("unknown", disk_bucket));
+    }
+    e
+}
+
+/// A CPU or GPU name or driver version as it may leave the machine: what comes before the first
+/// slash, backslash or colon (`GeForce GTX 1050 Ti/PCIe/SSE2`), of the characters such names use,
+/// at most 64. `None` when nothing is left. A path can't pass, whatever a driver reports.
+pub fn hardware_name(raw: &str) -> Option<String> {
+    let head = raw.split(['/', '\\', ':']).next().unwrap_or("");
+    let clean: String = head.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '.' | '_' | '(' | ')' | '+' | '@' | '#' | ',' | '-')).take(64).collect();
+    let clean = clean.trim().trim_start_matches(|c: char| !c.is_ascii_alphanumeric()).trim_end();
+    (!clean.is_empty()).then(|| clean.to_string())
+}
+
+/// An OS name and version as it may leave the machine: `[A-Za-z0-9._ -]`, at most 24 characters.
+/// `None` for anything with a path separator: filtering those out would leave the path's words.
+pub fn os_version_token(raw: &str) -> Option<String> {
+    if raw.contains(['/', '\\', ':']) {
+        return None;
+    }
+    let clean: String = raw.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '.' | '_' | '-')).take(24).collect();
+    let clean = clean.trim().trim_start_matches(|c: char| !c.is_ascii_alphanumeric()).trim_end();
+    (!clean.is_empty()).then(|| clean.to_string())
+}
+
+/// The OS version a user agent states (`Windows NT 10.0`, `Android 14`, `Mac OS X 10_15_7`,
+/// `iPhone OS 17_4`), if any.
+pub fn os_version_from_ua(ua: &str) -> String {
+    for token in ["Windows NT ", "Android ", "Mac OS X ", "iPhone OS ", "CPU OS ", "CrOS x86_64 "] {
+        if let Some(at) = ua.find(token) {
+            let rest = ua.get(at + token.len()..).unwrap_or("");
+            let version: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_')).take(16).collect();
+            return version.replace('_', ".");
+        }
+    }
+    String::new()
+}
+
+/// Installed RAM (GB) as a bucket.
+pub fn ram_bucket(gb: f64) -> &'static str {
+    match gb {
+        g if !g.is_finite() || g <= 0.0 => "unknown",
+        g if g < 2.0 => "<2",
+        g if g < 4.0 => "2-4",
+        g if g < 8.0 => "4-8",
+        g if g < 16.0 => "8-16",
+        g if g < 32.0 => "16-32",
+        g if g < 64.0 => "32-64",
+        _ => "64+",
+    }
+}
+
+/// Free disk space (GB) as a bucket.
+pub fn disk_bucket(gb: f64) -> &'static str {
+    match gb {
+        g if !g.is_finite() || g < 0.0 => "unknown",
+        g if g < 10.0 => "<10GB",
+        g if g < 50.0 => "10-50GB",
+        g if g < 200.0 => "50-200GB",
+        g if g < 1000.0 => "200GB-1TB",
+        _ => "1TB+",
+    }
 }
 
 /// The device class from the user agent, the number of touch points and the screen's shorter
@@ -218,6 +324,8 @@ pub struct FrameSample<'a> {
 /// the transport.
 #[derive(Debug)]
 pub struct Recorder {
+    /// `web` or `desktop` ([`Recorder::desktop`]).
+    client: &'static str,
     install_id: String,
     session_id: String,
     seq: u64,
@@ -236,6 +344,92 @@ pub struct Recorder {
     /// The display's frame period as observed (the shortest interval between painted frames
     /// seen, at least [`MIN_VSYNC_MS`]): what a dropped frame is measured against.
     vsync_ms: f64,
+    /// Every command's time since the last batch, per page-size bucket (a short list: looked up
+    /// without allocating).
+    command_times: Vec<(String, Option<&'static str>, TimeHist)>,
+    /// Memory high-water marks (MB), and the ones last reported.
+    ram_mb: u64,
+    gpu_mb: u64,
+    reported_memory: (u64, u64),
+}
+
+/// Times on a log scale (three buckets per doubling; [`TimeHist::add`] caps a time at an hour), fixed size.
+#[derive(Clone, Debug)]
+struct TimeHist {
+    buckets: [u32; TimeHist::LEN],
+    n: u32,
+    max_ms: f64,
+}
+
+impl TimeHist {
+    const LEN: usize = 80;
+
+    fn new() -> Self {
+        Self { buckets: [0; Self::LEN], n: 0, max_ms: 0.0 }
+    }
+
+    fn add(&mut self, ms: f64) {
+        let ms = if ms.is_finite() && ms > 0.0 { ms.min(3_600_000.0) } else { 0.0 };
+        let bucket = (((ms + 1.0).log2() * 3.0) as usize).min(Self::LEN - 1);
+        if let Some(slot) = self.buckets.get_mut(bucket) {
+            *slot = slot.saturating_add(1);
+        }
+        self.n = self.n.saturating_add(1);
+        self.max_ms = self.max_ms.max(ms);
+    }
+
+    /// The `p` quantile (0..1): its bucket's upper edge, never above the largest time seen.
+    fn quantile(&self, p: f64) -> u64 {
+        let want = ((f64::from(self.n) * p).ceil() as u64).max(1);
+        let mut seen = 0u64;
+        for (b, &c) in self.buckets.iter().enumerate() {
+            seen += u64::from(c);
+            if seen >= want {
+                let edge = 2f64.powf((b as f64 + 1.0) / 3.0) - 1.0;
+                return round_ms(edge.min(self.max_ms));
+            }
+        }
+        round_ms(self.max_ms)
+    }
+
+    fn merge(&mut self, other: &TimeHist) {
+        for (a, b) in self.buckets.iter_mut().zip(other.buckets.iter()) {
+            *a = a.saturating_add(*b);
+        }
+        self.n = self.n.saturating_add(other.n);
+        self.max_ms = self.max_ms.max(other.max_ms);
+    }
+}
+
+/// Every field a batch's events may carry. A field outside this list drops its event: adding one
+/// is a decision (and a line in README › Privacy), not a side effect.
+pub const FIELDS: &[&str] = &[
+    "e", "app", "commit", "threads", "coi", "cores", "gpu", "gpu_vendor", "browser", "browser_major", "os", "screen", "lang", "device", "mem", "channel", "os_ver",
+    "cpu", "gpu_model", "gpu_driver", "ram", "disk", "active_s", "total_s", "id", "src", "n", "kind", "bytes", "mp", "layers", "ms", "ok", "op", "tool", "p50", "p95",
+    "max", "long", "lat50", "lat95", "fps", "int95", "drop", "g", "w_in", "w_logic", "w_ui", "w_paint", "cmd", "job", "phase", "action", "api", "cause", "memMB", "upMin",
+    "docs", "model", "region", "fell_back", "lite", "ram_mb", "gpu_mb",
+];
+
+/// Fields holding a command or tool id, which [`sanitize_command_id`] already reduced to known ids
+/// (some of which end like a file name: `file.export.png`).
+const ID_FIELDS: &[&str] = &["id", "op", "cmd", "job", "action", "tool"];
+
+/// Whether an event may leave the machine: known fields only, and no string that looks like a
+/// path, a file name or free text.
+fn is_clean_event(event: &Value) -> bool {
+    let Some(fields) = event.as_object() else { return false };
+    fields.iter().all(|(key, value)| {
+        FIELDS.contains(&key.as_str())
+            && match value {
+                Value::String(text) => is_clean_text(key, text),
+                Value::Array(_) | Value::Object(_) => false,
+                _ => true,
+            }
+    })
+}
+
+fn is_clean_text(key: &str, text: &str) -> bool {
+    text.len() <= 80 && !text.contains(['/', '\\', ':', '\n']) && (ID_FIELDS.contains(&key) || file_kind(text) == "other")
 }
 
 /// Intervals shorter than this are back-to-back event frames, not the display's period.
@@ -313,6 +507,7 @@ impl Recorder {
     /// A new session at `now_ms` (any monotonic-enough millisecond clock).
     pub fn new(install_id: &str, session_id: &str, now_ms: f64) -> Self {
         Self {
+            client: "web",
             install_id: sanitize_token(install_id, 64).unwrap_or_default(),
             session_id: sanitize_token(session_id, 64).unwrap_or_default(),
             seq: 0,
@@ -329,7 +524,71 @@ impl Recorder {
             dropped: 0,
             ended: false,
             vsync_ms: DEFAULT_VSYNC_MS,
+            command_times: Vec::new(),
+            ram_mb: 0,
+            gpu_mb: 0,
+            reported_memory: (0, 0),
         }
+    }
+
+    /// This session's batches say they come from the desktop app.
+    pub fn desktop(mut self) -> Self {
+        self.client = "desktop";
+        self
+    }
+
+    /// One run of a command, whatever it took: summarised per id and page size at the batch.
+    pub fn command_time(&mut self, id: &str, ms: f64, megapixels: Option<f64>) {
+        if self.ended || !ms.is_finite() {
+            return;
+        }
+        let mp = megapixels.map(mp_bucket_of);
+        if let Some((_, _, hist)) = self.command_times.iter_mut().find(|(i, m, _)| i == id && *m == mp) {
+            hist.add(ms);
+        } else if self.command_times.len() >= MAX_COMMAND_TIMES {
+            self.dropped = self.dropped.saturating_add(1);
+        } else {
+            let mut hist = TimeHist::new();
+            hist.add(ms);
+            self.command_times.push((id.to_string(), mp, hist));
+        }
+    }
+
+    /// The first change to a document in this session.
+    pub fn edited(&mut self) {
+        self.event(json!({"e": "edited"}));
+    }
+
+    /// One AI job: `model` a catalog id, `device` from [`ai_device_class`], `region` the size of
+    /// what it worked on.
+    pub fn ai_run(&mut self, run: &AiRun<'_>) {
+        let mut e = json!({"e": "ai_run", "id": sanitize_command_id(run.command), "ms": round_ms(run.ms), "ok": run.ok});
+        if let Some(model) = run.model.and_then(|m| sanitize_token(m, 40)) {
+            e["model"] = json!(model);
+        }
+        if let Some(device) = run.device {
+            e["device"] = json!(device);
+        }
+        if let Some(mp) = run.megapixels {
+            e["region"] = json!(mp_bucket_of(mp));
+        }
+        if let Some(fell_back) = run.fell_back {
+            e["fell_back"] = json!(fell_back);
+        }
+        if let Some(lite) = run.lite {
+            e["lite"] = json!(lite);
+        }
+        self.event(e);
+    }
+
+    /// The process's memory now (RSS on the desktop, the wasm memory on the web), in MB.
+    pub fn note_ram(&mut self, mb: u64) {
+        self.ram_mb = self.ram_mb.max(mb);
+    }
+
+    /// The canvas textures' memory now, in MB.
+    pub fn note_gpu(&mut self, mb: u64) {
+        self.gpu_mb = self.gpu_mb.max(mb);
     }
 
     /// One frame's time while the canvas was being worked: `key` is the tool dragged (its
@@ -541,7 +800,7 @@ impl Recorder {
 
     /// Nothing waiting to be sent?
     pub fn is_empty(&self) -> bool {
-        self.events.is_empty() && self.commands.is_empty() && self.errors.is_empty() && self.frames.is_empty() && self.dropped == 0
+        self.events.is_empty() && self.commands.is_empty() && self.errors.is_empty() && self.frames.is_empty() && self.command_times.is_empty() && self.dropped == 0
     }
 
     /// Everything since the last batch as the JSON body to POST, or `None` when there is
@@ -553,7 +812,7 @@ impl Recorder {
         let mut events = std::mem::take(&mut self.events);
         let mut merged: BTreeMap<(String, &'static str), u32> = BTreeMap::new();
         for ((id, source), n) in std::mem::take(&mut self.commands) {
-            let id = if source == Source::Tool { id } else { sanitize_command_id(&id) };
+            let id = if source == Source::Tool { sanitize_tool_id(&id) } else { sanitize_command_id(&id) };
             let slot = merged.entry((id, source.as_str())).or_default();
             *slot = slot.saturating_add(n);
         }
@@ -568,7 +827,13 @@ impl Recorder {
             if h.n == 0 {
                 continue;
             }
-            let key = if key == VIEW_FRAMES || key.starts_with("tool.") { key } else { "other".into() };
+            let key = if key == VIEW_FRAMES {
+                key
+            } else if key.starts_with("tool.") {
+                sanitize_tool_id(&key)
+            } else {
+                "other".into()
+            };
             let mut e = json!({
                 "e": "frames", "tool": key, "n": h.n,
                 "p50": FrameHist::quantile(&h.frames, h.n, 0.5, h.max_ms),
@@ -601,13 +866,48 @@ impl Recorder {
             }
             events.push(e);
         }
+        let mut times: Vec<(String, Option<&'static str>, TimeHist)> = Vec::new();
+        for (id, mp, hist) in std::mem::take(&mut self.command_times) {
+            let id = sanitize_command_id(&id);
+            if let Some((_, _, merged)) = times.iter_mut().find(|(i, m, _)| *i == id && *m == mp) {
+                merged.merge(&hist);
+            } else {
+                times.push((id, mp, hist));
+            }
+        }
+        events.extend(times.into_iter().map(|(id, mp, h)| {
+            let mut e = json!({"e": "cmd_perf", "id": id, "n": h.n, "p50": h.quantile(0.5), "p95": h.quantile(0.95), "max": round_ms(h.max_ms)});
+            if let Some(mp) = mp {
+                e["mp"] = json!(mp);
+            }
+            e
+        }));
+        // Memory only when a high-water mark grew by at least 5% (and 16 MB) since it was reported.
+        let grew = |now: u64, then: u64| now > then.saturating_add((then / 20).max(16));
+        if grew(self.ram_mb, self.reported_memory.0) || grew(self.gpu_mb, self.reported_memory.1) {
+            self.reported_memory = (self.ram_mb, self.gpu_mb);
+            let mut e = json!({"e": "memory", "ram_mb": self.ram_mb});
+            if self.gpu_mb > 0 {
+                e["gpu_mb"] = json!(self.gpu_mb);
+            }
+            events.push(e);
+        }
         self.perf_queued = 0;
         self.freezes_queued = 0;
         let mut dropped = std::mem::take(&mut self.dropped);
+        // The last line of defence: nothing but known fields and harmless values leaves.
+        let before = events.len();
+        events.retain(is_clean_event);
+        dropped = dropped.saturating_add((before - events.len()) as u32);
+        if events.len() > MAX_BATCH_EVENTS {
+            dropped = dropped.saturating_add((events.len() - MAX_BATCH_EVENTS) as u32);
+            events.truncate(MAX_BATCH_EVENTS);
+        }
         self.seq = self.seq.saturating_add(1);
         loop {
             let mut batch = Map::new();
             batch.insert("v".into(), json!(SCHEMA_VERSION));
+            batch.insert("client".into(), json!(self.client));
             batch.insert("iid".into(), json!(self.install_id));
             batch.insert("sid".into(), json!(self.session_id));
             batch.insert("seq".into(), json!(self.seq));
@@ -914,6 +1214,8 @@ pub fn gpu_vendor_class(vendor: u32, name: &str) -> &'static str {
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 static RECORDER: Mutex<Option<Recorder>> = Mutex::new(None);
 static CLOCK: OnceLock<fn() -> f64> = OnceLock::new();
+/// This session's first edit was recorded.
+static EDITED: AtomicBool = AtomicBool::new(false);
 
 /// The shell's millisecond clock (the browser's `Date.now`); the shell installs it once.
 pub fn set_clock(clock: fn() -> f64) {
@@ -939,6 +1241,7 @@ fn recorder() -> Option<std::sync::MutexGuard<'static, Option<Recorder>>> {
 pub fn start(recorder: Recorder) {
     if let Some(mut slot) = self::recorder() {
         *slot = Some(recorder);
+        EDITED.store(false, Ordering::Relaxed);
         ACTIVE.store(true, Ordering::Relaxed);
     }
 }
@@ -1024,20 +1327,21 @@ impl Scope {
         Self { entered: true, outer: depth == 0, source, start_ms: now_ms() }
     }
 
-    /// Record the outermost command's outcome. `megapixels` is asked only for slow commands.
+    /// Record the outermost command's outcome.
     pub fn finish<T>(self, id: &str, result: &Result<T, String>, megapixels: impl FnOnce() -> Option<f64>) {
         if !self.outer {
             return;
         }
         let ms = now_ms() - self.start_ms;
         let source = self.source;
-        let mp = if ms >= PERF_MIN_MS { megapixels() } else { None };
+        let mp = megapixels();
         with(|r| {
             r.command(id, source);
             if let Err(e) = result {
                 r.error(id, e);
             }
             r.perf(id, ms, mp);
+            r.command_time(id, ms, mp);
         });
     }
 }
@@ -1047,6 +1351,280 @@ impl Drop for Scope {
         if self.entered {
             DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
         }
+    }
+}
+
+// ------------------------------------------------------------------ what both shells report
+
+/// Every frame, from either shell: tool switches, that the user interacted, the first edit.
+pub fn observe_frame(app: &crate::PhotocraftApp, ctx: &egui::Context) {
+    if !is_active() {
+        return;
+    }
+    observe_tool(app.ui.tool);
+    if ctx.input(|i| i.events.iter().any(is_interaction)) {
+        let now = now_ms();
+        with(|r| r.interaction(now));
+    }
+    if !EDITED.load(Ordering::Relaxed) && app.session.active().is_some_and(photocraft_engine::DocState::is_dirty) {
+        EDITED.store(true, Ordering::Relaxed);
+        with(Recorder::edited);
+    }
+}
+
+fn is_interaction(e: &egui::Event) -> bool {
+    matches!(
+        e,
+        egui::Event::PointerButton { .. }
+            | egui::Event::PointerMoved(_)
+            | egui::Event::MouseWheel { .. }
+            | egui::Event::Key { .. }
+            | egui::Event::Text(_)
+            | egui::Event::Touch { .. }
+            | egui::Event::Zoom(_)
+    )
+}
+
+/// A document was opened: `file` is only used for its extension; never its name, the document's
+/// layer names or anything else in it.
+pub fn record_doc_open(file: &str, bytes: usize, result: Result<&photocraft_doc::Document, &String>, ms: f64) {
+    record_doc_open_stats(file, bytes, result.map(|doc| Some((doc.size.width, doc.size.height, doc.layer_count()))), ms);
+}
+
+/// [`record_doc_open`] from the document's size and layer count (`None`: it waits for a prompt).
+pub fn record_doc_open_stats(file: &str, bytes: usize, result: Result<Option<(u32, u32, usize)>, &String>, ms: f64) {
+    if !is_active() {
+        return;
+    }
+    let mut e = json!({"e": "doc_open", "kind": file_kind(file), "bytes": bytes_bucket(bytes), "ms": round_ms(ms), "ok": result.is_ok()});
+    if let Ok(Some((width, height, layers))) = result {
+        e["mp"] = json!(mp_bucket(width, height));
+        e["layers"] = json!(layers_bucket(layers));
+    }
+    with(|r| {
+        r.event(e);
+        if let Err(message) = result {
+            r.error("file.open", message);
+        }
+    });
+}
+
+/// A document was encoded for saving (layered formats) or exporting (flat images): `file` is only
+/// used for its extension, `bytes` is the encoded size when known.
+pub fn record_doc_saved(file: &str, (width, height): (u32, u32), layers: usize, bytes: Option<usize>, ok: Result<(), &String>, ms: f64) {
+    if !is_active() {
+        return;
+    }
+    let kind = file_kind(file);
+    let (event, id) = if is_document_kind(kind) { ("doc_save", "file.save") } else { ("export", "file.export") };
+    let mut e = json!({
+        "e": event, "kind": kind, "mp": mp_bucket(width, height),
+        "layers": layers_bucket(layers), "ms": round_ms(ms), "ok": ok.is_ok(),
+    });
+    if let Some(bytes) = bytes {
+        e["bytes"] = json!(bytes_bucket(bytes));
+    }
+    with(|r| {
+        r.event(e);
+        if let Err(message) = ok {
+            r.error(id, message);
+        }
+    });
+}
+
+/// One AI job for [`Recorder::ai_run`].
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AiRun<'a> {
+    pub command: &'a str,
+    pub model: Option<&'a str>,
+    pub device: Option<&'static str>,
+    pub megapixels: Option<f64>,
+    pub ms: f64,
+    pub ok: bool,
+    pub fell_back: Option<bool>,
+    pub lite: Option<bool>,
+}
+
+/// The jobs that are AI runs.
+fn is_ai_job(command: &str) -> bool {
+    matches!(command, photocraft_engine::ai_cmds::COMMAND | photocraft_engine::ai_inpaint_cmds::ID | photocraft_engine::remove_ai_cmds::ID)
+}
+
+/// Where an AI run ended as a class, from the reply's `device` (a free string: the adapter's name
+/// on some paths) and `cpu`.
+pub fn ai_device_class(device: &str, cpu: bool) -> &'static str {
+    let d = device.to_ascii_lowercase();
+    if cpu {
+        "cpu"
+    } else if d.contains("directml") {
+        "directml"
+    } else if d.contains("webgpu") {
+        "webgpu"
+    } else if d.contains("webgl") {
+        "webgl"
+    } else if d.contains("wgpu") {
+        "wgpu"
+    } else if d.contains("gpu") {
+        "gpu"
+    } else {
+        "other"
+    }
+}
+
+/// An AI job ended: `reply` its result (`None`: it failed), `doc_mp` the document's size for
+/// replies that don't state their region. Cancelled jobs aren't reported.
+pub fn record_ai_job(command: &str, reply: Option<&Value>, doc_mp: Option<f64>, ms: f64) {
+    if !is_active() || !is_ai_job(command) {
+        return;
+    }
+    let text = |key: &str| reply.and_then(|r| r.get(key)).and_then(Value::as_str);
+    let flag = |key: &str| reply.and_then(|r| r.get(key)).and_then(Value::as_bool);
+    let region = reply.and_then(|r| r.get("region")).and_then(Value::as_array).and_then(|a| {
+        let side = |i: usize| a.get(i).and_then(Value::as_f64);
+        Some(side(2)? * side(3)? / 1_000_000.0)
+    });
+    let run = AiRun {
+        command,
+        model: text("model"),
+        device: text("device").map(|d| ai_device_class(d, flag("cpu").unwrap_or(false))),
+        megapixels: region.or(doc_mp),
+        ms,
+        ok: reply.is_some(),
+        fell_back: flag("fellBack"),
+        lite: flag("lite"),
+    };
+    with(|r| r.ai_run(&run));
+}
+
+/// A previous run of this install died without closing, as `unclean_exit`: its last command and
+/// tool, memory high-water mark, uptime and open documents (counts only). `panic`: it reported a
+/// panic on the way (`None`: not known, the web's breadcrumb).
+pub fn unclean_exit_event(cmd: Option<&str>, tool: Option<&str>, mem_mb: Option<u64>, up_min: Option<u64>, docs: Option<u64>, panic: Option<bool>) -> Value {
+    let mut e = json!({
+        "e": "unclean_exit",
+        "cmd": cmd.filter(|c| !c.is_empty()).map(sanitize_action_id),
+        "tool": tool.and_then(|t| sanitize_token(t, 40)),
+        "memMB": mem_mb,
+        "upMin": up_min,
+        "docs": docs,
+    });
+    if let Some(panic) = panic {
+        e["src"] = json!(if panic { "panic" } else { "killed" });
+    }
+    e
+}
+
+/// The tool working the canvas (`tool.Brush`), or `view` for wheel zoom/scroll and pinch over it,
+/// written into `out` (no allocation once it is long enough: called per frame). `false`: neither.
+pub fn canvas_activity(app: &crate::PhotocraftApp, ctx: &egui::Context, out: &mut String) -> bool {
+    use std::fmt::Write as _;
+    out.clear();
+    if let Some(tool) = app.canvas_gesture_tool(ctx) {
+        return write!(out, "tool.{tool:?}").is_ok();
+    }
+    let over_canvas = ctx.input(|i| i.pointer.hover_pos().is_some_and(|p| app.last_canvas_rect.contains(p)));
+    let navigating = ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::MouseWheel { .. } | egui::Event::Zoom(_))));
+    if over_canvas && navigating {
+        out.push_str(VIEW_FRAMES);
+        return true;
+    }
+    false
+}
+
+/// Layers in the document, groups and their contents included (no allocation: called per frame).
+pub fn layer_count(layers: &[photocraft_doc::Layer]) -> usize {
+    fn rec(layers: &[photocraft_doc::Layer], depth: usize) -> usize {
+        if depth > 64 {
+            return 0;
+        }
+        layers.iter().map(|l| 1 + l.children().map_or(0, |c| rec(c, depth + 1))).sum()
+    }
+    rec(layers, 0)
+}
+
+/// The canvas textures of every open document, in MB.
+pub fn canvas_memory_mb(app: &crate::PhotocraftApp) -> u64 {
+    app.session.documents().iter().map(|st| crate::doc_switch::canvas_bytes(app, st.doc.id)).sum::<u64>() >> 20
+}
+
+/// Frame timing on the desktop, the counterpart of the web shell's `FramePerf`: fed by the shell's
+/// `logic` and `ui`, it reports `frames` while the canvas is worked and `freeze` for a frame of
+/// [`FREEZE_MS`] or more. A frame's time is eframe's (`cpu_usage`), known one frame later.
+#[derive(Debug, Default)]
+pub struct FrameProbe {
+    start: f64,
+    logic_ms: f64,
+    update_ms: f64,
+    interval: Option<f64>,
+    last_start: Option<f64>,
+    last_cpu: Option<f32>,
+    /// The finished frame waiting for eframe's time: its key is in `key`.
+    pending: bool,
+    key: String,
+    prev_key: String,
+    megapixels: Option<f64>,
+    layers: Option<usize>,
+}
+
+impl FrameProbe {
+    /// Start of a frame; `cpu_usage` is eframe's time of the previous one, in seconds.
+    pub fn begin(&mut self, cpu_usage: Option<f32>) {
+        if !is_active() {
+            self.pending = false;
+            return;
+        }
+        let start = now_ms();
+        let fresh = cpu_usage.filter(|c| Some(*c) != self.last_cpu);
+        self.last_cpu = cpu_usage.or(self.last_cpu);
+        if std::mem::take(&mut self.pending) {
+            self.finish(fresh.map(|s| f64::from(s) * 1000.0));
+        }
+        self.interval = self.last_start.map(|t| start - t);
+        self.last_start = Some(start);
+        self.start = start;
+    }
+
+    /// End of the app's logic.
+    pub fn end_logic(&mut self) {
+        if is_active() {
+            self.logic_ms = now_ms() - self.start;
+        }
+    }
+
+    /// End of the app's update: what the canvas was doing this frame; a freeze is reported here.
+    pub fn end_update(&mut self, app: &crate::PhotocraftApp, ctx: &egui::Context) {
+        if !is_active() {
+            return;
+        }
+        self.update_ms = now_ms() - self.start;
+        self.pending = true;
+        if canvas_activity(app, ctx, &mut self.key) {
+            self.megapixels = app.session.active().map(|st| megapixels(st.doc.size.width, st.doc.size.height));
+            self.layers = app.session.active().map(|st| layer_count(&st.doc.layers));
+        }
+        if self.update_ms >= FREEZE_MS {
+            let context = app.freeze_context();
+            with(|r| r.freeze(FreezeSource::Frame, self.update_ms, &context));
+        }
+    }
+
+    fn finish(&mut self, total_ms: Option<f64>) {
+        let gesture_start = !self.key.is_empty() && self.key != self.prev_key;
+        if let (false, Some(ms)) = (self.key.is_empty(), total_ms) {
+            let parts = FrameParts { input: 0.0, logic: self.logic_ms, ui: (self.update_ms - self.logic_ms).max(0.0), paint: (ms - self.update_ms).max(0.0) };
+            let sample = FrameSample {
+                key: &self.key,
+                ms,
+                latency_ms: None,
+                interval_ms: self.interval,
+                megapixels: self.megapixels,
+                layers: self.layers,
+                gesture_start,
+                parts: Some(parts),
+            };
+            with(|r| r.frame_sample(&sample));
+        }
+        std::mem::swap(&mut self.prev_key, &mut self.key);
     }
 }
 

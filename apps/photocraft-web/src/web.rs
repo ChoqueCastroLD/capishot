@@ -361,6 +361,7 @@ impl Boot {
         listen_drag_position();
         app.set_theme(ctx, ThemeKind::Pro);
         let mut gpu = ("cpu", "unknown");
+        let mut gpu_names = (String::new(), String::new());
         // Preferences › Performance › Rendering: CPU (set by hand, or after the graphics context
         // was lost twice or the canvas's shaders took seconds to build: gpu_lost.rs).
         let cpu_pref = app.session.prefs().performance.effective_rendering_mode() == photocraft_engine::prefs::RenderingMode::Cpu;
@@ -393,13 +394,14 @@ impl Boot {
                 },
                 photocraft_ui_egui::telemetry::gpu_vendor_class(info.vendor, &info.name),
             );
+            gpu_names = (info.name.clone(), info.driver_info.clone());
             app.set_wgpu(rs);
         }
         crate::startup::mark("canvas");
         // An embedding host's sessions aren't the standalone app's: no usage statistics, and the
         // host decides about unsaved changes when its page unloads.
         if !hosted {
-            crate::usage_stats::init(gpu.0, gpu.1);
+            crate::usage_stats::init(gpu.0, gpu.1, &gpu_names.0, &gpu_names.1);
             if let Some(name) = &weak {
                 photocraft_ui_egui::telemetry::with(|r| {
                     r.gpu_lost("webgl", photocraft_ui_egui::telemetry::gpu_vendor_class(0, name), "weak_gpu", None, 0, None)

@@ -352,6 +352,7 @@ fn the_opening_card_keeps_a_long_name_and_cancel_inside() {
             preview: None,
             texture: None,
             quiet: false,
+            bytes: 0,
         });
         h.state_mut().jobs.focus = Some(job);
         h.run_steps(4);
@@ -385,6 +386,7 @@ fn the_opening_card_shows_the_preview_once_read() {
         preview: Some(Arc::clone(&slot)),
         texture: None,
         quiet: false,
+        bytes: 0,
     };
     h.state_mut().jobs.opens.push(tab);
     h.state_mut().jobs.focus = Some(job);
@@ -426,6 +428,7 @@ fn a_quiet_open_shows_the_preview_alone() {
         preview: Some(Arc::clone(&slot)),
         texture: None,
         quiet: true,
+        bytes: 0,
     };
     h.state_mut().jobs.opens.push(tab);
     h.state_mut().jobs.focus = Some(job);

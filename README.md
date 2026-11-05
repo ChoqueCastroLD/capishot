@@ -171,19 +171,48 @@ New contributors and AI agents: start with [`AGENTS.md`](AGENTS.md), then [`docs
 
 ## Privacy
 
-The desktop app sends nothing. The hosted web app (capichan.com/capishot) sends
-anonymous usage statistics to its own server, so we know how many people use it, for how long and
-which commands and tools matter: a random install id (kept in your browser) and session id, the
-command ids you run counted per batch (never their settings), tool switches, active and total
-session time, opened, saved and exported file *kinds* with coarse size buckets and timings, error
-classes (never messages), and coarse device classes (browser and OS family, GPU vendor class,
-screen size bucket, UI language, threads build), and page freezes over 200 ms with the command
-or tool that was running. The server keeps at most the country from
-Cloudflare, never your IP address. Never sent: file names, paths, document content, text you type.
-Raw events are deleted after 180 days. Turn it off in **Preferences › General › Send anonymous
-usage statistics**; a browser that sends Do Not Track or Global Privacy Control is never counted.
-Code: `crates/ui-egui/src/telemetry.rs` (what is recorded) and
-`apps/photocraft-web/src/usage_stats.rs` (sending).
+Capishot sends anonymous usage statistics, so we know how many people use it, on what machines,
+and which tools are slow or crash. There is no account, no nick and no identity: only a random id.
+
+**Where.** The hosted web app (capichan.com/capishot) and the official Windows and Linux desktop
+packages send them to our own server. Both have it on by default; the desktop app says so in a
+notice the first time it runs, and sends nothing until that notice was dismissed or on screen for
+30 seconds. Builds from source, distribution packages and macOS send nothing.
+
+**Turn it off** in **Preferences › General › Send anonymous usage statistics**; it applies at once
+and what was not sent yet is dropped. A browser that sends Do Not Track or Global Privacy Control is
+never counted. On the desktop, `DO_NOT_TRACK=1` or `CAPISHOT_TELEMETRY_URL=off` do the same.
+
+**What is sent:**
+
+- A random install id (in your browser's storage, or a `telemetry-id` file in the config folder) and
+  a random session id. Your open and close times, active time and active days follow from these.
+- Version, commit and channel (web single-thread or threads, MSI, ZIP, AppImage, deb, tar), UI
+  language.
+- Your device: CPU model and core count, RAM and free disk as coarse ranges (desktop), OS and
+  version, GPU model and driver, graphics API, screen size range, phone, tablet or desktop. In a
+  browser, only what the browser tells; on the desktop these come from the system. Sent once per
+  session.
+- The command ids and tools you use, counted (never their settings), and how long they took: p50,
+  p95 and max per tool and command, with a page-size range.
+- AI runs: the model, where it ran (CPU, DirectML, wgpu, …), the region's size range, how long it
+  took, whether it fell back.
+- Opened, saved and exported file *kinds* (`psd`, `png`, …) with size and layer-count ranges and
+  timings; that you edited something in the session.
+- Error classes (never messages), freezes over 200 ms, the highest RAM and GPU memory use, and after
+  a crash: its last command and tool, its memory, uptime and number of open documents, and whether
+  it panicked (never the panic's message).
+
+The server keeps at most the country from Cloudflare, never your IP address.
+
+**Never sent:** files, images, text you type or typeset, file names, paths, layer names, names of
+your fonts, error messages. A test fails if a file or layer name could reach a batch, and the
+recorder drops any event with a field outside its fixed list or a value that looks like a path or a
+file name.
+
+Raw events are deleted after 180 days; daily totals stay. Code:
+`crates/ui-egui/src/telemetry.rs` (what is recorded), `apps/photocraft-web/src/usage_stats.rs` and
+`apps/photocraft/src/usage_stats.rs` (sending).
 
 ## Roadmap
 

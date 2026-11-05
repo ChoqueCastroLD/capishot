@@ -119,6 +119,31 @@ pub fn wayland_file_drop_guidance(app: &mut PhotocraftApp) {
     }
 }
 
+/// The preference key set when the desktop's usage statistics notice is dismissed.
+pub const USAGE_STATISTICS_DISMISSED: &str = "usageStatisticsNoticeDismissed";
+
+/// Whether the desktop's usage statistics notice was dismissed (on an earlier run or this one).
+pub fn usage_statistics_notice_dismissed(app: &PhotocraftApp) -> bool {
+    app.session.prefs().dialogs.get(USAGE_STATISTICS_DISMISSED).and_then(serde_json::Value::as_bool) == Some(true)
+}
+
+/// Says that the desktop app sends anonymous usage statistics and where to turn them off, until
+/// it is dismissed.
+pub fn usage_statistics_notice(app: &mut PhotocraftApp) {
+    if usage_statistics_notice_dismissed(app) || app.ui.notices.iter().any(|notice| notice.dismiss_pref.as_deref() == Some(USAGE_STATISTICS_DISMISSED)) {
+        return;
+    }
+    let lines = vec![
+        "A random id, the commands and tools you use, timings, errors and your hardware model. Never files, images, text, names or paths.".to_owned(),
+        "Turn it off in Preferences › General.".to_owned(),
+    ];
+    let id = post(app, "Capishot sends anonymous usage statistics", lines, false, Some(USAGE_STATISTICS_DISMISSED));
+    if let Some(notice) = app.ui.notices.iter_mut().find(|notice| notice.id == id) {
+        notice.sticky = true;
+        notice.actions = vec![NoticeAction { label: "Open Preferences".to_owned(), command: "edit.preferences.general".to_owned() }];
+    }
+}
+
 /// A paste found no clipboard to read (#5031). In a Flatpak on Wayland the sandbox hides the
 /// data-control protocol that other apps' images are read through, and there is no X server to
 /// fall back to, so the clipboard may hold an image all the same. Say so, and give the command

@@ -58,6 +58,7 @@ pub fn is_hidden(path: &str) -> bool {
         || (!cfg!(target_os = "linux") && LINUX_ONLY.contains(&path))
         || (!cfg!(target_arch = "wasm32") && WEB_ONLY.contains(&path))
         || (!cfg!(windows) && WINDOWS_ONLY.contains(&path))
+        || (cfg!(target_os = "macos") && NOT_ON_MACOS.contains(&path))
 }
 
 /// Preferences that only do something in the Windows app (it updates itself); hidden elsewhere.
@@ -65,7 +66,11 @@ pub const WINDOWS_ONLY: &[&str] = &["interface.autoInstallUpdates"];
 
 /// Preferences that only do something in the web build; other builds don't show them. They
 /// still load, save and round-trip everywhere.
-pub const WEB_ONLY: &[&str] = &["general.sendAnonymousUsageStatistics", "performance.maxPixelDensity"];
+pub const WEB_ONLY: &[&str] = &["performance.maxPixelDensity"];
+
+/// Preferences that do nothing on macOS (it sends no usage statistics); the dialog doesn't show
+/// them there. They still load, save and round-trip.
+pub const NOT_ON_MACOS: &[&str] = &["general.sendAnonymousUsageStatistics"];
 
 /// Preferences that only do something on Linux; the dialog doesn't show them elsewhere. They
 /// still load, save and round-trip on every platform.
