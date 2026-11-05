@@ -875,6 +875,7 @@ fn a_set_of_background_opens_keeps_its_order_however_they_finish() {
         preview: None,
         texture: None,
         quiet: false,
+        bytes: 0,
     };
     app.jobs.opens.extend((0..4).map(tab));
     // f1 opened at once (a preset file, say, or background jobs off for it).
@@ -897,7 +898,7 @@ fn a_set_of_background_opens_keeps_its_order_however_they_finish() {
     assert_eq!(app.ui.views.len(), 5, "views follow their documents");
     assert!(app.jobs.batches.is_empty(), "forgotten once every member opened");
     // A tab with a slot (dropped on the tabs) keeps it; one from a forgotten set goes to the end.
-    let dropped = OpenTab { job: JobId(200), name: "dropped.psd".into(), path: None, slot: Some(0), order: None, preview: None, texture: None, quiet: false };
+    let dropped = OpenTab { job: JobId(200), name: "dropped.psd".into(), path: None, slot: Some(0), order: None, preview: None, texture: None, quiet: false, bytes: 0 };
     let index = app.session.add_document(Document::new("dropped.psd", Size::new(4, 4), ColorMode::Rgb, SampleType::U8), None);
     let id = app.session.documents()[index].doc.id;
     jobs_ui::finish_open_tab(&mut app, &dropped, &json!({"document": index, "docId": id.0})).unwrap();
@@ -910,6 +911,7 @@ fn a_set_of_background_opens_keeps_its_order_however_they_finish() {
         preview: None,
         texture: None,
         quiet: false,
+        bytes: 0,
     };
     let index = app.session.add_document(Document::new("late.psd", Size::new(4, 4), ColorMode::Rgb, SampleType::U8), None);
     let id = app.session.documents()[index].doc.id;

@@ -257,7 +257,7 @@ pub(crate) fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
 }
 
 /// The canvas textures document `id` holds: its GPU canvas texture set and its CPU canvas tiles.
-fn canvas_bytes(app: &PhotocraftApp, id: DocId) -> u64 {
+pub(crate) fn canvas_bytes(app: &PhotocraftApp, id: DocId) -> u64 {
     let gpu = app.gpu.as_ref().and_then(|g| g.texture_info(id.0)).map_or(0, |(_, b)| b);
     let tiles: usize = app.canvases.iter().filter(|((d, _), _)| *d == id).filter_map(|(_, c)| c.tiles.as_ref()).map(|t| t.texture_bytes()).sum();
     gpu.saturating_add(tiles as u64).saturating_add(crate::canvas::tile_views_bytes(app, id))

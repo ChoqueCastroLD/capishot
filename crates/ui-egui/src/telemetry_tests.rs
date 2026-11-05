@@ -226,6 +226,7 @@ fn session_start_holds_classes_not_the_user_agent() {
         language: "pt-br".into(),
         device: "tablet",
         memory_gb: 4.0,
+        ..Default::default()
     };
     let e = session_start_event(&env);
     assert_eq!(e["device"], "tablet");
@@ -295,9 +296,9 @@ fn the_app_counts_each_dispatch_once_with_its_source() {
 }
 
 /// Preferences › General › Send anonymous usage statistics: on by default, an old settings file
-/// without it keeps it on, it can be turned off, and only the web build shows it.
+/// without it keeps it on, it can be turned off, and every build that sends statistics shows it.
 #[test]
-fn the_preference_is_on_by_default_and_web_only() {
+fn the_preference_is_on_by_default_and_shown_where_it_works() {
     let mut s = photocraft_engine::Session::new();
     assert!(s.prefs().general.send_anonymous_usage_statistics);
     s.load_prefs_json(r#"{"general": {"beepWhenDone": true}}"#).expect("old prefs");
@@ -306,8 +307,8 @@ fn the_preference_is_on_by_default_and_web_only() {
     assert!(!s.prefs().general.send_anonymous_usage_statistics);
     assert_eq!(
         photocraft_engine::prefs::is_hidden("general.sendAnonymousUsageStatistics"),
-        !cfg!(target_arch = "wasm32"),
-        "shown only where it does something"
+        cfg!(target_os = "macos"),
+        "the web build and the Windows and Linux apps honour it"
     );
 }
 
@@ -505,4 +506,236 @@ fn gpu_lost_events_carry_their_class() {
     assert_eq!(ev[0]["api"], "webgl");
     assert_eq!(ev[0]["phase"], "gpu.pipelines");
     assert_eq!(ev[1]["ms"], 4840);
+}
+
+/// Names only the user's files can contain: none of them may ever be in a batch.
+const SECRETS: &[&str] = &["SecretPage", "SecretLayer", "SecretFont", "secretuser", "página"];
+
+fn secret_document() -> photocraft_doc::Document {
+    let size = photocraft_doc::Size { width: 800, height: 600 };
+    let mut doc = photocraft_doc::Document::new("SecretPage", size, photocraft_doc::ColorMode::Rgb, photocraft_doc::SampleType::U8);
+    doc.layers.push(photocraft_doc::Layer::group("SecretLayer SecretFont", Vec::new()));
+    doc
+}
+
+/// Everything that takes something the user named, fed with such names: a file name or a layer
+/// name that could reach a batch fails here.
+#[test]
+fn no_file_or_layer_name_can_reach_a_batch() {
+    let _guard = GLOBAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let path = "/home/secretuser/SecretPage página.psd";
+    let doc = secret_document();
+    let env = Environment {
+        native: true,
+        os: "linux",
+        channel: "appimage",
+        os_version: "/home/secretuser/SecretPage.psd".into(),
+        cpu: "/home/secretuser/SecretPage.psd".into(),
+        gpu_model: "C:\\Users\\secretuser\\SecretPage.psd".into(),
+        gpu_driver: "/home/secretuser:SecretPage".into(),
+        language: "/secretuser".into(),
+        ..Default::default()
+    };
+    start(Recorder::new("a1", "s1", 0.0).desktop());
+    with(|r| r.event(session_start_event(&env)));
+    record_doc_open(path, 100, Ok(&doc), 5.0);
+    let failed = format!("could not read {path}");
+    record_doc_open(path, 100, Err(&failed), 5.0);
+    record_doc_open_stats(path, 100, Ok(Some((800, 600, 1))), 5.0);
+    record_doc_open_stats(path, 100, Ok(None), 5.0);
+    record_doc_saved(path, (800, 600), 1, Some(10), Ok(()), 5.0);
+    record_doc_saved(path, (800, 600), 1, None, Err(&failed), 5.0);
+    record_ai_job("edit.inpaintAi", Some(&json!({"model": path, "device": path, "cpu": false, "region": [0, 0, 10, 10], "layerName": "SecretLayer"})), None, 1.0);
+    let context = FreezeContext { command: Some(path.into()), tool: Some(path.into()), job: Some(path.into()), megapixels: None, phase: Some("SecretPage/x"), action: Some(path.into()) };
+    with(|r| {
+        r.command(path, Source::Menu);
+        r.command("SecretLayer", Source::Tool);
+        r.error(path, &failed);
+        r.perf(path, 500.0, None);
+        r.command_time(path, 500.0, Some(1.0));
+        r.frame(path, 5.0, None, None);
+        r.freeze(FreezeSource::Frame, 500.0, &context);
+        r.gpu_lost(path, path, path, Some(path), 1, None);
+        r.event(unclean_exit_event(Some(path), Some(path), Some(1), Some(1), Some(1), Some(true)));
+    });
+    let body = take_batch().expect("a batch");
+    stop();
+    for secret in SECRETS {
+        assert!(!body.contains(secret), "{secret} in {body}");
+    }
+    assert!(body.contains("doc_open"), "the events themselves are kept: {body}");
+    assert!(body.contains("\"kind\":\"psd\""), "{body}");
+}
+
+/// The last line of defence: whatever a future hook queues, an unknown field or a value that looks
+/// like a path or a file name doesn't leave.
+#[test]
+fn an_event_with_an_unknown_field_or_a_file_name_is_dropped() {
+    let mut r = Recorder::new("a1", "s1", 0.0);
+    r.event(json!({"e": "doc_open", "kind": "psd", "file": "page.psd"}));
+    r.event(json!({"e": "doc_open", "kind": "psd", "name": "x"}));
+    r.event(json!({"e": "doc_open", "kind": "/home/me/page.psd"}));
+    r.event(json!({"e": "doc_open", "kind": "page01.psd"}));
+    r.event(json!({"e": "doc_open", "kind": "C:\\page"}));
+    r.event(json!({"e": "doc_open", "layers": ["a"]}));
+    r.event(json!({"e": "doc_open", "kind": "psd", "ok": true}));
+    let b = batch(&mut r);
+    assert_eq!(events(&b, "doc_open").len(), 1, "{b}");
+    assert_eq!(b["dropped"], 6, "{b}");
+    assert_eq!(b["v"], SCHEMA_VERSION);
+    assert_eq!(b["client"], "web");
+}
+
+#[test]
+fn hardware_names_never_carry_a_path() {
+    assert_eq!(hardware_name("NVIDIA GeForce GTX 1050 Ti/PCIe/SSE2").as_deref(), Some("NVIDIA GeForce GTX 1050 Ti"));
+    assert_eq!(hardware_name("Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz").as_deref(), Some("Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz"));
+    assert_eq!(hardware_name("  llvmpipe (LLVM 15.0.7, 256 bits) ").as_deref(), Some("llvmpipe (LLVM 15.0.7, 256 bits)"));
+    assert_eq!(hardware_name("/home/me/x"), None);
+    assert_eq!(hardware_name("").as_deref(), None);
+    assert_eq!(hardware_name("C:\\Users\\me").as_deref(), Some("C"));
+    assert_eq!(hardware_name(&"x".repeat(200)).map(|n| n.len()), Some(64));
+    assert_eq!(hardware_name("日本語 ÑÑ"), None);
+    assert_eq!(os_version_token("Windows 11 (26100)").as_deref(), Some("Windows 11 26100"));
+    assert_eq!(os_version_token("/home/me/x"), None);
+    assert_eq!(os_version_token("C:\\Users\\me"), None);
+    assert_eq!(os_version_from_ua("Mozilla/5.0 (Windows NT 10.0; Win64; x64)"), "10.0");
+    assert_eq!(os_version_from_ua("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"), "10.15.7");
+    assert_eq!(os_version_from_ua("Mozilla/5.0 (Linux; Android 14; Pixel 8)"), "14");
+    assert_eq!(os_version_from_ua("Mozilla/5.0 (X11; Linux x86_64)"), "");
+}
+
+#[test]
+fn a_desktop_session_start_says_what_the_collector_expects() {
+    let env = Environment {
+        native: true,
+        os: "windows",
+        channel: "msi",
+        gpu: "dx12",
+        gpu_vendor: "amd",
+        cores: 16,
+        device: "desktop",
+        language: "es".into(),
+        os_version: "Windows 11 (26100)".into(),
+        cpu: "AMD Ryzen 7 5800X".into(),
+        gpu_model: "AMD Radeon RX 6600".into(),
+        gpu_driver: "31.0.24027".into(),
+        ram_gb: 31.9,
+        free_disk_gb: Some(120.0),
+        screen: (2560, 1440),
+        ..Default::default()
+    };
+    let e = session_start_event(&env);
+    assert_eq!((&e["browser"], &e["browser_major"], &e["os"]), (&json!("native"), &json!(0), &json!("windows")));
+    assert_eq!((&e["channel"], &e["ram"], &e["disk"]), (&json!("msi"), &json!("16-32"), &json!("50-200GB")));
+    assert_eq!((&e["cpu"], &e["os_ver"]), (&json!("AMD Ryzen 7 5800X"), &json!("Windows 11 26100")));
+    assert!(is_clean_event(&e), "{e}");
+    let web = session_start_event(&Environment { channel: "web-threads", user_agent: "Mozilla/5.0 (Windows NT 10.0) Chrome/141.0".into(), ..Default::default() });
+    assert_eq!((&web["browser"], &web["channel"]), (&json!("chrome"), &json!("web-threads")));
+    assert!(web.get("ram").is_none() && web.get("disk").is_none(), "{web}");
+}
+
+#[test]
+fn every_command_gets_percentiles_per_page_size() {
+    let mut r = Recorder::new("a1", "s1", 0.0);
+    for ms in [1.0, 2.0, 3.0, 4.0, 100.0] {
+        r.command_time("edit.undo", ms, Some(2.0));
+    }
+    r.command_time("edit.undo", 7.0, Some(30.0));
+    r.command_time("unknown.SecretPage", 7.0, None);
+    r.command_time("edit.undo", f64::NAN, None);
+    let b = batch(&mut r);
+    let times = events(&b, "cmd_perf");
+    let undo = times.iter().find(|e| e["id"] == "edit.undo" && e["mp"] == "1-4").expect("edit.undo");
+    assert_eq!(undo["n"], 5);
+    assert_eq!(undo["max"], 100);
+    let (p50, p95) = (undo["p50"].as_u64().unwrap_or(0), undo["p95"].as_u64().unwrap_or(0));
+    assert!((2..=4).contains(&p50), "{undo}");
+    assert_eq!(p95, 100, "capped by the slowest: {undo}");
+    assert!(times.iter().any(|e| e["id"] == "edit.undo" && e["mp"] == "24-50"));
+    assert!(!b.to_string().contains("SecretPage"), "{b}");
+    for i in 0..(MAX_COMMAND_TIMES + 3) {
+        r.command_time(&format!("x{i}"), 1.0, None);
+    }
+    let b = batch(&mut r);
+    assert_eq!(b["dropped"], 3, "bounded: {b}");
+}
+
+#[test]
+fn memory_is_reported_when_a_high_water_mark_grows() {
+    let mut r = Recorder::new("a1", "s1", 0.0);
+    r.note_ram(1000);
+    r.note_gpu(200);
+    r.command("edit.undo", Source::Menu);
+    let b = batch(&mut r);
+    let mem = events(&b, "memory");
+    assert_eq!((&mem[0]["ram_mb"], &mem[0]["gpu_mb"]), (&json!(1000), &json!(200)));
+    r.note_ram(900);
+    r.note_ram(1010);
+    r.command("edit.undo", Source::Menu);
+    assert!(events(&batch(&mut r), "memory").is_empty(), "no growth worth a line");
+    r.note_ram(2000);
+    r.command("edit.undo", Source::Menu);
+    assert_eq!(events(&batch(&mut r), "memory")[0]["ram_mb"], 2000);
+}
+
+#[test]
+fn an_ai_job_reports_model_device_and_region_only() {
+    let _guard = GLOBAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    start(Recorder::new("a1", "s1", 0.0));
+    let reply = json!({"model": "manga-lama", "device": "DirectML (AMD Radeon RX 6600)", "cpu": false, "fellBack": true, "lite": false, "region": [0, 0, 2000, 1000], "layer": 3});
+    record_ai_job("edit.inpaintAi", Some(&reply), Some(30.0), 1234.0);
+    record_ai_job("image.upscaleAi", None, Some(30.0), 10.0);
+    record_ai_job("edit.undo", Some(&reply), None, 1.0);
+    let body = take_batch().expect("a batch");
+    stop();
+    let b: Value = serde_json::from_str(&body).expect("JSON");
+    let runs = events(&b, "ai_run");
+    assert_eq!(runs.len(), 2, "{b}");
+    assert_eq!((&runs[0]["model"], &runs[0]["device"], &runs[0]["region"], &runs[0]["fell_back"]), (&json!("manga-lama"), &json!("directml"), &json!("1-4"), &json!(true)));
+    assert_eq!((&runs[1]["ok"], &runs[1]["region"]), (&json!(false), &json!("24-50")));
+    assert_eq!(ai_device_class("anything", true), "cpu");
+    assert_eq!(ai_device_class("WebGPU", false), "webgpu");
+    assert_eq!(ai_device_class("NVIDIA", false), "other");
+}
+
+/// A name that isn't one of ours is no tool, whatever it starts with.
+#[test]
+fn only_real_tools_are_named() {
+    let mut r = Recorder::new("a1", "s1", 0.0);
+    r.command("tool.SecretLayer", Source::Tool);
+    r.frame("tool.SecretLayer", 5.0, None, None);
+    let b = batch(&mut r);
+    assert!(!b.to_string().contains("SecretLayer"), "{b}");
+    assert_eq!(events(&b, "command")[0]["id"], "tool.other");
+    assert_eq!(events(&b, "frames")[0]["tool"], "tool.other");
+}
+
+/// The collector refuses a whole batch over its limit: a flood loses the excess, not the batch.
+#[test]
+fn a_batch_never_has_more_events_than_the_collector_takes() {
+    let mut r = Recorder::new("a1", "s1", 0.0);
+    for _ in 0..MAX_EVENTS {
+        r.event(json!({"e": "edited"}));
+    }
+    for spec in photocraft_engine::commands::command_specs().iter().take(MAX_KEYS) {
+        r.command(spec.id, Source::Menu);
+    }
+    let b = batch(&mut r);
+    let sent = b["events"].as_array().map_or(0, Vec::len);
+    assert!(sent <= MAX_BATCH_EVENTS, "{sent} events");
+}
+
+/// A background open waiting for a prompt has no document yet: no invented size or layer count.
+#[test]
+fn an_open_without_a_document_states_no_size() {
+    let _guard = GLOBAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    start(Recorder::new("a1", "s1", 0.0));
+    record_doc_open_stats("a.psd", 100, Ok(None), 5.0);
+    let body = take_batch().expect("a batch");
+    stop();
+    let b: Value = serde_json::from_str(&body).expect("JSON");
+    let open = events(&b, "doc_open");
+    assert!(open[0].get("mp").is_none() && open[0].get("layers").is_none(), "{b}");
+    assert_eq!(open[0]["ok"], true);
 }

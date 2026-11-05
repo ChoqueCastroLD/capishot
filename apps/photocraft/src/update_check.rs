@@ -29,6 +29,25 @@ fn linux_channel(exe_dir: Option<&Path>, appimage: bool) -> Option<Channel> {
     }
 }
 
+/// How this official copy was installed, as the usage statistics name it (`None`: not an official
+/// package: a build from source, a distribution's, macOS).
+pub fn channel_name(portable: bool) -> Option<&'static str> {
+    if cfg!(windows) {
+        return Some(if portable { "zip" } else { "msi" });
+    }
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+    let exe = std::env::current_exe().ok();
+    match linux_channel(exe.as_deref().and_then(Path::parent), std::env::var_os("APPIMAGE").is_some_and(|v| !v.is_empty()))? {
+        Channel::AppImage => Some("appimage"),
+        Channel::Tar => Some("tar"),
+        Channel::Deb => Some("deb"),
+        // Windows' own, handled above.
+        Channel::Msi | Channel::Zip => None,
+    }
+}
+
 /// The manifest to fetch, from `CAPISHOT_UPDATE_URL`'s value (`None`: unset), if any; `known`:
 /// this copy's download is one the manifest lists.
 fn manifest_url(var: Option<String>, known: bool) -> Option<String> {

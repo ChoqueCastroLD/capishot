@@ -258,9 +258,10 @@ pub struct General {
     pub zoom_resizes_windows: bool,
     pub use_legacy_free_transform: bool,
     pub auto_show_home_screen: bool,
-    /// The web build sends anonymous usage statistics (commands used, session length, coarse
-    /// device classes; never files, names or content) to its own host. On by default; the
-    /// browser's Do Not Track or Global Privacy Control turns it off regardless.
+    /// The web build and the official desktop builds send anonymous usage statistics (commands
+    /// used, session length, timings, hardware models; never files, names or content) to
+    /// Capishot's own server. On by default; a browser's Do Not Track or Global Privacy Control,
+    /// and on the desktop `DO_NOT_TRACK=1` or `CAPISHOT_TELEMETRY_URL=off`, turn it off regardless.
     pub send_anonymous_usage_statistics: bool,
     /// Desktop: check published stable releases once in the background at launch.
     pub automatically_check_updates: bool,

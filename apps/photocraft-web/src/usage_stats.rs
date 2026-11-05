@@ -8,7 +8,7 @@
 //! and when the page hides, with `navigator.sendBeacon` (falling
 //! back to a `keepalive` fetch). A failed send is dropped, never retried. Errors are silent.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use js_sys::Reflect;
 use photocraft_doc::Document;
@@ -33,18 +33,22 @@ struct State {
 
 thread_local! {
     static STATE: RefCell<Option<State>> = const { RefCell::new(None) };
+    static LAST_MEMORY: Cell<f64> = const { Cell::new(0.0) };
 }
 
-/// Called once at startup with the canvas backend (`webgpu`, `webgl`, `cpu`) and GPU vendor
-/// class. Nothing is recorded until [`sync`] sees the preference on.
-pub fn init(gpu: &'static str, gpu_vendor: &'static str) {
+/// Called once at startup with the canvas backend (`webgpu`, `webgl`, `cpu`), the GPU vendor class
+/// and the adapter's name and driver as far as the browser tells. Nothing is recorded until [`sync`]
+/// sees the preference on.
+pub fn init(gpu: &'static str, gpu_vendor: &'static str, gpu_model: &str, gpu_driver: &str) {
     let Some(window) = web_sys::window() else { return };
     let host = window.location().hostname().unwrap_or_default();
     if !HOSTS.contains(&host.as_str()) || privacy_signal(&window) {
         return;
     }
     telemetry::set_clock(js_sys::Date::now);
-    let env = environment(&window, gpu, gpu_vendor);
+    let mut env = environment(&window, gpu, gpu_vendor);
+    env.gpu_model = gpu_model.to_string();
+    env.gpu_driver = gpu_driver.to_string();
     STATE.with(|s| *s.borrow_mut() = Some(State { env, enabled: false }));
     install_listeners(&window);
 }
@@ -68,23 +72,15 @@ pub fn sync(app: &PhotocraftApp, ctx: &egui::Context) {
     if !telemetry::is_active() {
         return;
     }
-    telemetry::observe_tool(app.ui.tool);
-    if ctx.input(|i| i.events.iter().any(is_interaction)) {
-        telemetry::with(|r| r.interaction(js_sys::Date::now()));
+    telemetry::observe_frame(app, ctx);
+    if js_sys::Date::now() - LAST_MEMORY.with(Cell::get) >= telemetry::FLUSH_MS {
+        LAST_MEMORY.with(|t| t.set(js_sys::Date::now()));
+        let gpu = telemetry::canvas_memory_mb(app);
+        telemetry::with(|r| {
+            r.note_ram(crate::breadcrumb::memory_bytes() >> 20);
+            r.note_gpu(gpu);
+        });
     }
-}
-
-fn is_interaction(e: &egui::Event) -> bool {
-    matches!(
-        e,
-        egui::Event::PointerButton { .. }
-            | egui::Event::PointerMoved(_)
-            | egui::Event::MouseWheel { .. }
-            | egui::Event::Key { .. }
-            | egui::Event::Text(_)
-            | egui::Event::Touch { .. }
-            | egui::Event::Zoom(_)
-    )
 }
 
 fn start_session(mut env: Environment) {
@@ -106,20 +102,7 @@ fn start_session(mut env: Environment) {
 
 /// A document was opened (`file` is only used for its extension).
 pub fn doc_open(file: &str, bytes: usize, result: Result<&Document, &String>, ms: f64) {
-    if !telemetry::is_active() {
-        return;
-    }
-    let mut e = json!({"e": "doc_open", "kind": telemetry::file_kind(file), "bytes": telemetry::bytes_bucket(bytes), "ms": round(ms), "ok": result.is_ok()});
-    if let Ok(doc) = result {
-        e["mp"] = json!(telemetry::mp_bucket(doc.size.width, doc.size.height));
-        e["layers"] = json!(telemetry::layers_bucket(doc.layer_count()));
-    }
-    telemetry::with(|r| {
-        r.event(e);
-        if let Err(message) = result {
-            r.error("file.open", message);
-        }
-    });
+    telemetry::record_doc_open(file, bytes, result, ms);
 }
 
 /// A document was encoded for saving (layered formats) or exporting (flat images).
@@ -128,26 +111,8 @@ pub fn doc_saved(file: &str, doc: &Document, ok: Result<(), &String>, ms: f64) {
 }
 
 /// [`doc_saved`] from the document's size and layer count (a save encoded on the worker pool).
-pub fn doc_saved_stats(file: &str, (width, height): (u32, u32), layers: usize, ok: Result<(), &String>, ms: f64) {
-    if !telemetry::is_active() {
-        return;
-    }
-    let kind = telemetry::file_kind(file);
-    let (event, id) = if telemetry::is_document_kind(kind) { ("doc_save", "file.save") } else { ("export", "file.export") };
-    let e = json!({
-        "e": event, "kind": kind, "mp": telemetry::mp_bucket(width, height),
-        "layers": telemetry::layers_bucket(layers), "ms": round(ms), "ok": ok.is_ok(),
-    });
-    telemetry::with(|r| {
-        r.event(e);
-        if let Err(message) = ok {
-            r.error(id, message);
-        }
-    });
-}
-
-fn round(ms: f64) -> u64 {
-    if ms.is_finite() && ms > 0.0 { ms.min(3_600_000.0).round() as u64 } else { 0 }
+pub fn doc_saved_stats(file: &str, size: (u32, u32), layers: usize, ok: Result<(), &String>, ms: f64) {
+    telemetry::record_doc_saved(file, size, layers, None, ok, ms);
 }
 
 /// Send what is waiting now (the page is about to reload).
@@ -239,6 +204,8 @@ fn environment(window: &web_sys::Window, gpu: &'static str, gpu_vendor: &'static
         device: telemetry::device_class(&user_agent, touch_points, w.min(h)),
         memory_gb,
         threads: cfg!(target_feature = "atomics"),
+        channel: if cfg!(target_feature = "atomics") { "web-threads" } else { "web-st" },
+        os_version: telemetry::os_version_from_ua(&user_agent),
         cross_origin_isolated: get(window, "crossOriginIsolated").and_then(|v| v.as_bool()) == Some(true),
         cores: number(get(&navigator, "hardwareConcurrency")),
         gpu,
@@ -246,6 +213,7 @@ fn environment(window: &web_sys::Window, gpu: &'static str, gpu_vendor: &'static
         user_agent,
         screen: (w, h),
         language: String::new(),
+        ..Default::default()
     }
 }
 

@@ -211,7 +211,7 @@ impl FramePerf {
         frame.key = canvas_activity(app, ctx);
         if frame.key.is_some() {
             frame.megapixels = app.session.active().map(|st| telemetry::megapixels(st.doc.size.width, st.doc.size.height));
-            frame.layers = app.session.active().map(|st| layer_count(&st.doc.layers));
+            frame.layers = app.session.active().map(|st| telemetry::layer_count(&st.doc.layers));
         }
         self.counters.borrow_mut().clone_from(&app.perf_counters);
         if self.debug {
@@ -322,23 +322,8 @@ impl FramePerf {
 
 /// The tool working the canvas, or `view` for wheel zoom/scroll and pinch over it.
 fn canvas_activity(app: &PhotocraftApp, ctx: &egui::Context) -> Option<String> {
-    if let Some(tool) = app.canvas_gesture_tool(ctx) {
-        return Some(telemetry::tool_id(tool));
-    }
-    let over_canvas = ctx.input(|i| i.pointer.hover_pos().is_some_and(|p| app.last_canvas_rect.contains(p)));
-    let navigating = ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::MouseWheel { .. } | egui::Event::Zoom(_))));
-    (over_canvas && navigating).then(|| telemetry::VIEW_FRAMES.to_string())
-}
-
-/// Layers in the document, groups and their contents included (no allocation: called per frame).
-fn layer_count(layers: &[photocraft_doc::Layer]) -> usize {
-    fn rec(layers: &[photocraft_doc::Layer], depth: usize) -> usize {
-        if depth > 64 {
-            return 0;
-        }
-        layers.iter().map(|l| 1 + l.children().map_or(0, |c| rec(c, depth + 1))).sum()
-    }
-    rec(layers, 0)
+    let mut key = String::new();
+    telemetry::canvas_activity(app, ctx, &mut key).then_some(key)
 }
 
 fn quantile(sorted: &[f64], p: f64) -> f64 {

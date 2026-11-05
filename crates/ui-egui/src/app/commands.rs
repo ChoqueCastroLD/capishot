@@ -19,7 +19,7 @@ impl PhotocraftApp {
         if gate.is_some() {
             self.session.authorize = gate;
         }
-        // Anonymous usage statistics (web only, opt-out): the id is counted, never the params.
+        // Anonymous usage statistics (opt-out): the id is counted, never the params.
         let scope = telemetry::Scope::enter(self.automation_input);
         self.last_command = Some((id.to_string(), gpu_canvas::now_ms()));
         self.last_action = Some(id.to_string());

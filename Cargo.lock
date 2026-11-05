@@ -7625,6 +7625,7 @@ dependencies = [
  "egui",
  "fmv-macos-events",
  "futures-lite",
+ "getrandom 0.4.3",
  "log",
  "muda",
  "objc2 0.6.5",
@@ -7654,6 +7655,7 @@ dependencies = [
  "ron",
  "serde",
  "serde_json",
+ "sysinfo",
  "tempfile",
  "thiserror 2.0.21",
  "winit",
@@ -8236,6 +8238,7 @@ dependencies = [
  "send_wrapper",
  "serde",
  "serde_json",
+ "stats_alloc",
  "sys-locale",
  "tempfile",
  "toml",
@@ -10405,6 +10408,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
+name = "stats_alloc"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c0e04424e733e69714ca1bbb9204c1a57f09f5493439520f9f68c132ad25eec"
+
+[[package]]
 name = "strength_reduce"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10675,7 +10684,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.5",
  "windows-sys 0.61.2",

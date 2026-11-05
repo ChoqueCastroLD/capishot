@@ -69,6 +69,9 @@ pub struct OpenTab {
     /// Once the preview shows, it shows alone: no card, a thin progress bar along the canvas's
     /// top (the embed API's `open(…, {quiet: true})`).
     pub quiet: bool,
+    /// The file's size when its bytes were handed over (0: the worker reads a path), for the usage
+    /// statistics.
+    pub bytes: usize,
 }
 
 /// An opening file's preview on the GPU, and its document's size.
@@ -545,6 +548,10 @@ pub fn start_open_deep(app: &mut PhotocraftApp, name: &str, path: Option<String>
 fn start_open_inner(app: &mut PhotocraftApp, name: &str, path: Option<String>, source: OpenSource, deep: bool) -> Result<(), String> {
     let name = &app.open_name(name);
     let preview: photocraft_engine::jobs::PreviewSlot = Arc::default();
+    let bytes = match &source {
+        OpenSource::Bytes(b) => b.len(),
+        OpenSource::Path(_) => 0,
+    };
     let started = if deep { app.session.start_open_deep(name, source) } else { app.session.start_open_with_preview(name, source, Arc::clone(&preview)) };
     match started.map_err(|e| e.to_string())? {
         // Inline (wasm): finish now, like a background open that ended at once.
@@ -559,6 +566,7 @@ fn start_open_inner(app: &mut PhotocraftApp, name: &str, path: Option<String>, s
                 preview: (!deep).then_some(preview),
                 texture: None,
                 quiet: false,
+                bytes,
             });
             app.jobs.focus = Some(job);
             app.ui.chrome.home = None;
@@ -926,6 +934,7 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
     if e.command == OPEN_JOB {
         let Some(i) = app.jobs.opens.iter().position(|o| o.job == e.id) else { return };
         let tab = app.jobs.opens.remove(i);
+        record_background_open(app, &tab, &e);
         let outcome = match e.outcome {
             JobOutcome::Done(v) => match finish_open_tab(app, &tab, &v) {
                 Ok(()) => {
@@ -962,6 +971,15 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
     // Google Fonts downloads show on their rows and in their dialogs (see `fonts_ui`).
     if crate::fonts_ui::on_job(app, &e) {
         return;
+    }
+    // AI runs, with their model and where they ran.
+    if crate::telemetry::is_active() {
+        let doc_mp = app.session.active().map(|st| crate::telemetry::megapixels(st.doc.size.width, st.doc.size.height));
+        match &e.outcome {
+            JobOutcome::Done(v) => crate::telemetry::record_ai_job(&e.command, Some(v), doc_mp, e.elapsed_ms),
+            JobOutcome::Failed(_) => crate::telemetry::record_ai_job(&e.command, None, doc_mp, e.elapsed_ms),
+            JobOutcome::Cancelled => {}
+        }
     }
     // Failed background jobs, and the notices of ones that succeeded anyway, count in the usage
     // statistics by class (never the message).
@@ -1043,6 +1061,25 @@ fn job_notices(app: &mut PhotocraftApp, command: &str, v: &Value) {
             crate::telemetry::with(|r| r.error(command, cause));
         }
         notices::post(app, text, Vec::new(), false, None);
+    }
+}
+
+/// A background open ended: the usage statistics get its kind, size buckets and time (the file's
+/// name only for its extension). Cancelled opens aren't reported.
+fn record_background_open(app: &PhotocraftApp, tab: &OpenTab, e: &JobEvent) {
+    if !crate::telemetry::is_active() {
+        return;
+    }
+    let stamped = || tab.path.as_deref().zip(app.services.file_stamp.as_ref()).and_then(|(path, stamp)| stamp(path)).map_or(0, |s| s.len as usize);
+    let bytes = if tab.bytes > 0 { tab.bytes } else { stamped() };
+    match &e.outcome {
+        JobOutcome::Done(v) => {
+            let doc = v.get("docId").and_then(Value::as_u64).and_then(|id| app.session.documents().iter().find(|st| st.doc.id.0 == id));
+            let stats = doc.map(|st| (st.doc.size.width, st.doc.size.height, st.doc.layer_count()));
+            crate::telemetry::record_doc_open_stats(&tab.name, bytes, Ok(stats), e.elapsed_ms);
+        }
+        JobOutcome::Failed(err) => crate::telemetry::record_doc_open_stats(&tab.name, bytes, Err(err), e.elapsed_ms),
+        JobOutcome::Cancelled => {}
     }
 }
 

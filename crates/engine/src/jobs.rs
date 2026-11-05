@@ -197,6 +197,8 @@ pub struct JobEvent {
     pub label: String,
     pub document: Option<DocId>,
     pub outcome: JobOutcome,
+    /// How long it ran, from start to end (ms).
+    pub elapsed_ms: f64,
 }
 
 /// A job's state for the UI, the control channel and MCP (`jobs.list`).
@@ -1824,7 +1826,7 @@ impl Session {
             let extra = self.jobs.recent.len() - RECENT;
             self.jobs.recent.drain(..extra);
         }
-        self.jobs.events.push(JobEvent { id: job.id, command: job.command.clone(), label: job.label.clone(), document: job.doc, outcome });
+        self.jobs.events.push(JobEvent { id: job.id, command: job.command.clone(), label: job.label.clone(), document: job.doc, outcome, elapsed_ms: now_ms() - job.started_ms });
     }
 }
 

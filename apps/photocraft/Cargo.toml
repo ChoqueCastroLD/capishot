@@ -62,6 +62,9 @@ open = "5"
 # Reads the saved window layout (eframe persistence) to drop values that would abort startup.
 ron = "0.12"
 # Background release checks; HTTPS with Rust TLS, no async runtime.
+# The usage statistics' hardware classes and own memory (`usage_stats.rs`); already in Cargo.lock.
+sysinfo = { version = "=0.39.6", default-features = false, features = ["system", "disk"] }
+getrandom = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Safe CoreGraphics bindings, compatible with the existing macOS 11 deployment target.

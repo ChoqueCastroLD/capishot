@@ -5393,3 +5393,9 @@ fontTab	Find More	Encontrar mais
 	Create Theme…	Criar tema…
 	Load Theme…	Carregar tema…
 	My Themes	Meus temas
+# Desktop usage statistics: the first-run notice, About.
+	Capishot sends anonymous usage statistics	O Capishot envia estatísticas de uso anônimas
+	A random id, the commands and tools you use, timings, errors and your hardware model. Never files, images, text, names or paths.	Um id aleatório, os comandos e ferramentas que você usa, tempos, erros e o modelo do seu hardware. Nunca arquivos, imagens, textos, nomes ou caminhos.
+	Turn it off in Preferences › General.	Desative-as em Preferências › Geral.
+	Open Preferences	Abrir Preferências
+	Capishot sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	O Capishot envia estatísticas de uso anônimas (sem arquivos nem conteúdo); desative-as em Preferências › Geral.
