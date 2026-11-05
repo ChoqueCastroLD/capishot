@@ -830,6 +830,33 @@ fn ui_set_selects_the_color_sampler_tool() {
     assert_eq!(Tool::ColorSampler.key(), 'I');
 }
 
+/// The Move tool's Auto-Select over the control channel, reported by `ui.inspect`.
+#[test]
+fn ui_set_drives_the_move_auto_select() {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    let ctx = egui::Context::default();
+    let tool = app.ui.tool;
+    assert_eq!(call(&mut app, &ctx, "ui.set", json!({"moveTarget": "layer", "moveAutoSelect": false}))["ok"], true);
+    let options = &call(&mut app, &ctx, "ui.inspect", json!({}))["result"]["toolOptions"];
+    assert_eq!(options["move_target"], "layer");
+    assert_eq!(options["move_auto_select"], false);
+    assert_eq!(app.ui.tool, tool, "the fields don't pick the tool");
+    for bad in [json!("Layer"), json!("artboard"), json!(""), json!(true), json!(1), Value::Null] {
+        assert_eq!(call(&mut app, &ctx, "ui.set", json!({"moveTarget": bad}))["ok"], false, "{bad}");
+        assert_eq!(app.ui.tool_options.move_target, "layer", "{bad}: unchanged");
+    }
+    for bad in [json!("yes"), json!(1), Value::Null] {
+        assert_eq!(call(&mut app, &ctx, "ui.set", json!({"moveAutoSelect": bad}))["ok"], false, "{bad}");
+        assert!(!app.ui.tool_options.move_auto_select, "{bad}: unchanged");
+    }
+    // A bad field applies none of the call's other fields.
+    assert_eq!(call(&mut app, &ctx, "ui.set", json!({"moveAutoSelect": true, "moveTarget": "nope"}))["ok"], false);
+    assert!(!app.ui.tool_options.move_auto_select);
+    assert_eq!(call(&mut app, &ctx, "ui.set", json!({"moveTarget": "group", "moveAutoSelect": true}))["ok"], true);
+    assert_eq!(app.ui.tool_options.move_target, "group");
+    assert!(app.ui.tool_options.move_auto_select);
+}
+
 /// #3823: the Crop tool's Fill over the control channel, reported by `ui.inspect`.
 #[test]
 fn ui_set_drives_the_crop_fill() {

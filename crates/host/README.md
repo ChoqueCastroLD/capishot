@@ -163,6 +163,10 @@ editor.set_mode(Mode::Full); // any frame: same documents, nothing reopened
   host's option to set).
 - **Tools, rulers, zoom**: `Host::set_tool`, `ViewOptions::rulers`, `CapishotView::set_camera`
   (`Fit`, `Fill`, `Set`, `ZoomBy`).
+- **Move tool**: `ViewOptions::move_target` (`Some(MoveTarget::Layer)` picks the layer under the
+  pointer rather than its outermost group, the editor's default) and
+  `ViewOptions::move_auto_select`. Applied when they change, so the person's choice in the options
+  bar stands until then; `None` leaves them alone.
 - **Optional:** forward eframe's `raw_input_hook` to `CapishotView::raw_input_hook` for Windows and
   Wayland pinch zoom and finger gestures (they must run before egui reads the input). Nothing
   else needs it.

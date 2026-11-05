@@ -94,6 +94,36 @@ fn tools_travel_both_ways() {
 }
 
 #[test]
+fn the_host_sets_the_move_auto_select() {
+    let ctx = Context::default();
+    let (mut editor, _) = editor_with_doc();
+    let _ = frame(&ctx, &mut editor);
+    let options = |e: &CapishotEditor| (e.view.app().ui.tool_options.move_target.clone(), e.view.app().ui.tool_options.move_auto_select);
+    assert_eq!(options(&editor), ("group".to_string(), true), "left alone by default");
+    editor.view.options_mut().move_target = Some(MoveTarget::Layer);
+    editor.view.options_mut().move_auto_select = Some(false);
+    let _ = frame(&ctx, &mut editor);
+    assert_eq!(options(&editor), ("layer".to_string(), false));
+    // Applied when it changes: the person's change in the options bar then stands.
+    editor.view.app_mut().ui.tool_options.move_target = "group".to_string();
+    let _ = frame(&ctx, &mut editor);
+    assert_eq!(options(&editor).0, "group");
+    editor.view.options_mut().move_target = Some(MoveTarget::Group);
+    let _ = frame(&ctx, &mut editor);
+    editor.view.options_mut().move_target = Some(MoveTarget::Layer);
+    let _ = frame(&ctx, &mut editor);
+    assert_eq!(options(&editor).0, "layer");
+    // None leaves it as it is, and the control channel takes the same fields.
+    editor.view.options_mut().move_target = None;
+    editor.view.options_mut().move_auto_select = None;
+    let _ = frame(&ctx, &mut editor);
+    assert_eq!(options(&editor), ("layer".to_string(), false));
+    editor.view.control("ui.set", json!({"moveTarget": "group", "moveAutoSelect": true}));
+    let _ = frame(&ctx, &mut editor);
+    assert_eq!(options(&editor), ("group".to_string(), true));
+}
+
+#[test]
 fn an_unknown_tool_is_reported_not_a_panic() {
     let ctx = Context::default();
     let (mut editor, _) = editor_with_doc();

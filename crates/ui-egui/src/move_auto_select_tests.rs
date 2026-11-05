@@ -106,6 +106,30 @@ fn group_mode_picks_and_moves_the_outermost_group() {
     assert_eq!(bounds(&app, b), Rect::new(40, 40, 56, 56));
 }
 
+/// `ui.set {moveTarget, moveAutoSelect}` drive what a press picks.
+#[test]
+fn ui_set_picks_the_layer_inside_its_group() {
+    let (mut app, a, b) = app();
+    app.session.execute("layer.select", json!({"layer": a.0})).unwrap();
+    app.session.execute("layer.new.groupFromLayers", json!({"name": "G"})).unwrap();
+    app.session.execute("layer.select", json!({"layer": b.0})).unwrap();
+    let ctx = egui::Context::default();
+    let set = |app: &mut PhotocraftApp, params| {
+        let (req, _rx) = crate::control::ControlRequest::new("ui.set", params);
+        app.dispatch_control(&ctx, req);
+    };
+    set(&mut app, json!({"moveTarget": "layer"}));
+    drag(&mut app, [16.0, 16.0], [0.0, 10.0], egui::Modifiers::NONE);
+    assert_eq!(active(&app), Some(a), "the layer, not its group");
+    assert_eq!(bounds(&app, a), Rect::new(8, 18, 24, 34));
+    // Auto-Select off: a press keeps the active layer, whatever is under the pointer.
+    set(&mut app, json!({"moveAutoSelect": false}));
+    drag(&mut app, [48.0, 48.0], [0.0, 2.0], egui::Modifiers::NONE);
+    assert_eq!(active(&app), Some(a));
+    assert_eq!(bounds(&app, a), Rect::new(8, 20, 24, 36), "the active layer moved");
+    assert_eq!(bounds(&app, b), Rect::new(40, 40, 56, 56));
+}
+
 #[test]
 fn dragging_one_of_several_selected_layers_moves_them_all() {
     let (mut app, a, b) = app();

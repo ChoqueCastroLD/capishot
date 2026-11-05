@@ -32,6 +32,9 @@ const psd = await capishot.saveDocument(doc.id, 'psd');
 - Calls that need the app run at the start of the next frame, so they return promises.
   `execute`, `request`, `setTool`, `fit`, `zoom`, `undo` and `redo` use the same control channel as
   the desktop control server (`docs/control-protocol.md`): same results, same errors.
+- `request('ui.set', {moveTarget: 'layer', moveAutoSelect: true})` sets what the Move tool's
+  Auto-Select picks (`'layer'`, or `'group'`, the default: the outermost group) and turns it on or
+  off; any other value is an error. `request('ui.inspect')` reports them under `toolOptions`.
 - `setMode('embedded')` hides the title/menu bar, options bar, toolbar, dock, rail, status bar,
   document tabs and scroll bars, every frame (so Tab / ⇧Tab / F can't bring half of them back);
   zoom, pan, the tool cursor and floating windows the user opens still work. `setMode('full')`
