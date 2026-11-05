@@ -49,7 +49,7 @@
   --radius-lg: 24;
   --bevel: false;
   --pro: false;
-  --round-chips: true;
+  --round-chips: false;
   /* Text sizes */
   --font-small: 10.5;
   --font-body: 12.5;

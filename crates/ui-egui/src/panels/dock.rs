@@ -28,7 +28,9 @@ pub fn right_dock(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         if app.ui.panels.rail && !t.pro {
             rail(app, ui, &t);
         }
-        egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| crate::panel_docking::show(app, ui));
+        // Filled: the layout's gap between the canvas and the dock would show the window's clear
+        // colour, a near-black seam in every theme.
+        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.chrome)).show(ui, |ui| crate::panel_docking::show(app, ui));
         crate::dock::persist(app, ui.ctx());
         return;
     }

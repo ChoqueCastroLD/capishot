@@ -51,6 +51,8 @@ fn the_new_themes_pair_up_and_keep_their_shape() {
     assert_eq!(manga.pattern, PatternKind::Dots);
     assert_eq!(manga.bar_pattern, PatternKind::Dots);
     assert!(Tokens::for_kind(ThemeKind::CapibaraLight).radius_lg >= 20.0, "very rounded");
+    // Round chips stacked on the toolbar would overlap and take a tool's room.
+    assert!(!Tokens::for_kind(ThemeKind::CapibaraLight).round_chips && !Tokens::for_kind(ThemeKind::CapibaraDark).round_chips);
     for (name, kind) in [
         ("manga", ThemeKind::MangaLight),
         ("Manga Dark", ThemeKind::MangaDark),

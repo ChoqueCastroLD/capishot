@@ -1357,6 +1357,32 @@ mod toolbar_tests {
         }
     }
 
+    /// Capibara's rounded corners leave the toolbar's room alone: the column is as tall as Manga's,
+    /// so a window shows the same tools above the same colour chips.
+    #[test]
+    fn capibara_toolbar_fits_the_tools_manga_does() {
+        let swap_rect = |kind: crate::theme::ThemeKind| {
+            let app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+            let mut h = egui_kittest::Harness::builder().with_size(vec2(200.0, 820.0)).build_ui_state(
+                |ui, app: &mut PhotocraftApp| {
+                    if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                        toolbar(app, ui);
+                    }
+                },
+                app,
+            );
+            PhotocraftApp::setup_context(&h.ctx, kind);
+            h.run_steps(2);
+            h.get_by_label("Swap colours (X)").rect()
+        };
+        for (capibara, manga) in [
+            (crate::theme::ThemeKind::CapibaraLight, crate::theme::ThemeKind::MangaLight),
+            (crate::theme::ThemeKind::CapibaraDark, crate::theme::ThemeKind::MangaDark),
+        ] {
+            assert_eq!(swap_rect(capibara), swap_rect(manga), "{capibara:?}");
+        }
+    }
+
     // Regression test for #2241: Quick Mask and Screen Mode ignored the two-column toolbar and
     // stayed stacked in one column; in two columns they sit side by side.
     #[test]
