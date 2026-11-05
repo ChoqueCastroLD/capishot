@@ -85,6 +85,10 @@ struct Job {
     context: serde_json::Value,
 }
 
+/// How long the page's thread encodes a checkpoint before it draws again (no workers).
+#[cfg(not(target_feature = "atomics"))]
+const ENCODE_SLICE_MS: f64 = 30.0;
+
 /// An encoded checkpoint and its thumbnail (a PNG).
 type Checkpointed = (ObjectCheckpoint, Option<Vec<u8>>);
 /// A checkpoint encoded off the page's thread, waiting to be written.
@@ -289,28 +293,36 @@ impl Recovery {
         let revision = job.revision;
         // On the page's thread (a worker has no window to measure).
         let limits = history_limits();
-        let encode = move || -> Result<Checkpointed, String> {
-            let checkpoint = saver
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .checkpoint_with_history(&job.doc, Some(&job.history), limits, info, job.context)
-                .map_err(|e| e.to_string())?;
-            Ok((checkpoint, thumbnail(&job.doc)))
-        };
         let slot: Encoded = Arc::default();
+        let out = slot.clone();
         // The threads build encodes on the worker pool; the page keeps drawing meanwhile.
         #[cfg(target_feature = "atomics")]
-        {
-            let out = slot.clone();
-            rayon::spawn(move || {
-                let r = encode();
-                *out.lock().unwrap_or_else(PoisonError::into_inner) = Some(r);
-            });
-        }
+        rayon::spawn(move || {
+            let checkpoint = checkpoint_of(&saver, &job, limits, info);
+            let thumb = checkpoint.is_ok().then(|| thumbnail(&job.doc)).flatten();
+            *out.lock().unwrap_or_else(PoisonError::into_inner) = Some(checkpoint.map(|c| (c, thumb)));
+        });
+        // Without workers it runs on the page's thread: in slices, or an 18 MP page would stop
+        // drawing and taking touches for seconds on a phone.
         #[cfg(not(target_feature = "atomics"))]
-        {
-            *slot.lock().unwrap_or_else(PoisonError::into_inner) = Some(encode());
-        }
+        wasm_bindgen_futures::spawn_local(async move {
+            let mut work = saver.lock().unwrap_or_else(PoisonError::into_inner).warmup(&job.doc, Some(&job.history), limits);
+            loop {
+                let start = now_ms();
+                let mut more = true;
+                while more && now_ms() - start < ENCODE_SLICE_MS {
+                    more = saver.lock().unwrap_or_else(PoisonError::into_inner).warm_step(&mut work);
+                }
+                crate::web::next_task().await;
+                if !more {
+                    break;
+                }
+            }
+            let checkpoint = checkpoint_of(&saver, &job, limits, info);
+            crate::web::next_task().await;
+            let thumb = checkpoint.is_ok().then(|| thumbnail(&job.doc)).flatten();
+            *out.lock().unwrap_or_else(PoisonError::into_inner) = Some(checkpoint.map(|c| (c, thumb)));
+        });
         self.0.borrow_mut().encoding.push((id, revision, slot));
     }
 
@@ -572,6 +584,15 @@ impl Inner {
         }
         self.slots.get_mut(&id).ok_or_else(|| "Recovery ownership unavailable".into())
     }
+}
+
+/// The checkpoint of `job`.
+fn checkpoint_of(saver: &Mutex<ObjectAutosaver>, job: &Job, limits: photocraft_format::HistoryLimits, info: RecoveryInfo) -> Result<ObjectCheckpoint, String> {
+    saver
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .checkpoint_with_history(&job.doc, Some(&job.history), limits, info, job.context.clone())
+        .map_err(|e| e.to_string())
 }
 
 /// A small PNG of `doc` for the recovery dialog.

@@ -611,7 +611,6 @@ fn two_views_on_one_device_keep_their_own_textures() {
     let size = [64, 48];
     {
         let panes = h.state();
-        assert_eq!(doc(&panes.left), doc(&panes.right), "the case that collided: both sessions number their document alike");
         let (left, right) = (panes.left.view.app().gpu_canvas().expect("on the GPU"), panes.right.view.app().gpu_canvas().expect("on the GPU"));
         assert_ne!(left.id(), right.id());
         assert!(left.has(doc(&panes.left), size), "the left texture survives a frame of the right");

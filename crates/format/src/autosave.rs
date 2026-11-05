@@ -834,7 +834,12 @@ pub struct ObjectAutosaver {
     stored: std::collections::HashSet<String>,
     /// History steps encoded by an earlier checkpoint, by [`HistoryState::source_key`].
     states: HashMap<(u64, usize), EncodedState>,
+    /// Objects [`Self::warm_step`] compressed for the next checkpoint.
+    warmed: HashMap<String, Vec<u8>>,
 }
+
+/// What [`ObjectAutosaver::warm_step`] still has to encode.
+pub struct Warmup(store::Named);
 
 impl ObjectAutosaver {
     /// The checkpoint of `doc` described by `info` (its key, name, time and revision) and the
@@ -909,7 +914,12 @@ impl ObjectAutosaver {
         undo.reverse();
         redo.reverse();
         let live: Vec<String> = all.keys().cloned().collect();
-        let objects = all.iter().filter(|(name, _)| !self.stored.contains(*name)).map(|(name, object)| (name.clone(), object.compressed())).collect();
+        let objects = all
+            .iter()
+            .filter(|(name, _)| !self.stored.contains(*name))
+            .map(|(name, object)| (name.clone(), self.warmed.remove(name).unwrap_or_else(|| object.compressed())))
+            .collect();
+        self.warmed.clear();
         let checkpoint = Checkpoint {
             version: 1,
             current,
@@ -925,6 +935,37 @@ impl ObjectAutosaver {
             return Err(FormatError::LimitExceeded("recovery checkpoint is too large".into()));
         }
         Ok(ObjectCheckpoint { descriptor, objects, live })
+    }
+
+    /// The work of a [`Self::checkpoint_with_history`] with the same arguments, as small steps for
+    /// a thread that can't stop for long (the browser's page without workers): run
+    /// [`Self::warm_step`] until it returns false, then the checkpoint takes the results and has
+    /// little left to do. A document that can't be encoded is left for the checkpoint to refuse.
+    pub fn warmup(&self, doc: &Document, history: Option<&HistoryCheckpoint>, limits: HistoryLimits) -> Warmup {
+        let mut named = store::Named::default();
+        let _ = named.add(doc);
+        let steps = history.into_iter().flat_map(|h| h.undo.iter().rev().chain(h.redo.iter().rev()));
+        for state in steps.take(limits.max_states).filter(|s| !self.states.contains_key(&s.source_key())) {
+            if let Ok(d) = state.load_document() {
+                let _ = named.add(&d);
+            }
+        }
+        Warmup(named)
+    }
+
+    /// Hashes and compresses one object of `work`. False when nothing is left.
+    pub fn warm_step(&mut self, work: &mut Warmup) -> bool {
+        let (name, object) = if let Some((format, tile)) = work.0.tiles.pop() {
+            self.writer.tile_object(format, &tile)
+        } else if let Some(blob) = work.0.blobs.pop() {
+            self.writer.blob_object(&blob)
+        } else {
+            return false;
+        };
+        if !self.stored.contains(&name) {
+            self.warmed.entry(name).or_insert_with(|| object.compressed());
+        }
+        !(work.0.tiles.is_empty() && work.0.blobs.is_empty())
     }
 
     /// A checkpoint's objects and descriptor are stored: later checkpoints skip `live`.
@@ -1051,6 +1092,55 @@ mod object_tests {
         doc.layers.push(Layer::raster("empty", doc.pixel_format()));
         let _ = Color::BLACK;
         doc
+    }
+
+    /// The page's thread encodes in steps: the checkpoint is the one encoded in one go, with
+    /// nothing left to compress when it runs.
+    #[test]
+    fn a_checkpoint_warmed_in_steps_equals_one_encoded_at_once() {
+        let d = doc();
+        let mut history = History::default();
+        let before = Arc::new(d.clone());
+        let mut edited = d.clone();
+        edited.layers[0].surface_mut().unwrap().fill_rect(photocraft_geom::Rect::new(0, 0, 4, 4), &[1.0, 0.0, 0.0, 1.0]);
+        history.record("Dab", before, photocraft_ops::LayerTarget::default());
+        let limits = HistoryLimits { max_states: 5, max_bytes: 16 << 20 };
+        let at_once = ObjectAutosaver::default().checkpoint_with_history(&edited, Some(&history.checkpoint()), limits, info("web-w-1", 2), serde_json::Value::Null).unwrap();
+
+        let mut saver = ObjectAutosaver::default();
+        let mut work = saver.warmup(&edited, Some(&history.checkpoint()), limits);
+        let mut steps = 0;
+        while saver.warm_step(&mut work) {
+            steps += 1;
+        }
+        assert!(steps > 0);
+        assert!(!saver.warm_step(&mut work), "stays done");
+        let names: std::collections::BTreeSet<_> = saver.warmed.keys().cloned().collect();
+        assert_eq!(names, at_once.objects.iter().map(|o| o.0.clone()).collect(), "every object is ready");
+        let stepped = saver.checkpoint_with_history(&edited, Some(&history.checkpoint()), limits, info("web-w-1", 2), serde_json::Value::Null).unwrap();
+        assert!(saver.warmed.is_empty(), "held only for that checkpoint");
+        assert_eq!(stepped.descriptor, at_once.descriptor);
+        assert_eq!(stepped.objects, at_once.objects);
+        assert_eq!(stepped.live, at_once.live);
+
+        // What the storage holds isn't compressed again.
+        saver.committed(stepped.live);
+        let mut work = saver.warmup(&edited, Some(&history.checkpoint()), limits);
+        while saver.warm_step(&mut work) {}
+        assert!(saver.warmed.is_empty());
+    }
+
+    /// A document too deep to save warms up to nothing: the checkpoint is what refuses it.
+    #[test]
+    fn warming_a_document_too_deep_to_save_does_nothing() {
+        let mut d = doc();
+        for _ in 0..crate::MAX_GROUP_DEPTH + 2 {
+            d.layers = vec![Layer::group("g", std::mem::take(&mut d.layers))];
+        }
+        let mut saver = ObjectAutosaver::default();
+        let mut work = saver.warmup(&d, None, HistoryLimits::NONE);
+        assert!(!saver.warm_step(&mut work));
+        assert!(saver.checkpoint(&d, info("web-w-2", 1), serde_json::Value::Null).is_err());
     }
 
     /// Store objects then descriptor, read them back: the same layers and pixels, and the

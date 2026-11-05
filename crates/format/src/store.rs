@@ -388,6 +388,34 @@ pub struct SaveStats {
 type BlobHashCache = HashMap<usize, (Weak<Vec<u8>>, Hash)>;
 type TileHashCache = HashMap<(usize, SampleType), (Weak<Tile>, Hash)>;
 
+/// The tiles and blobs a document names, nothing hashed yet.
+#[derive(Default)]
+pub(crate) struct Named {
+    pub(crate) tiles: Vec<(PixelFormat, Arc<Tile>)>,
+    pub(crate) blobs: Vec<Arc<Vec<u8>>>,
+}
+
+impl Named {
+    /// Adds what `doc` names.
+    pub(crate) fn add(&mut self, doc: &Document) -> Result<()> {
+        convert::check_nesting(&doc.layers)?;
+        convert::doc_m(doc, self);
+        Ok(())
+    }
+}
+
+impl Sink for Named {
+    fn tile(&mut self, format: PixelFormat, tile: &Arc<Tile>) -> Hash {
+        self.tiles.push((format, tile.clone()));
+        Hash::new()
+    }
+
+    fn blob(&mut self, data: &Arc<Vec<u8>>) -> Hash {
+        self.blobs.push(data.clone());
+        Hash::new()
+    }
+}
+
 #[derive(Default)]
 struct Collect<'c> {
     tiles: BTreeMap<Hash, (Arc<Tile>, SampleType)>,
@@ -960,6 +988,18 @@ impl PcraftWriter {
     /// failing without writing anything (10 s by default; see [`Self::save_dir`]).
     pub fn set_lock_wait(&mut self, wait: std::time::Duration) {
         self.lock_wait = wait;
+    }
+
+    /// A tile as an object of the bundle, its hash kept for the next [`Self::prepare`].
+    pub(crate) fn tile_object(&mut self, format: PixelFormat, tile: &Arc<Tile>) -> (String, Object) {
+        let mut c = Collect { hash_cache: Some(&mut self.hash_cache), ..Default::default() };
+        (tile_path(&c.tile(format, tile)), Object::Tile(tile.clone(), format.sample))
+    }
+
+    /// A blob as an object of the bundle, its hash kept for the next [`Self::prepare`].
+    pub(crate) fn blob_object(&mut self, blob: &Arc<Vec<u8>>) -> (String, Object) {
+        let mut c = Collect { blob_hash_cache: Some(&mut self.blob_hash_cache), ..Default::default() };
+        (blob_path(&c.blob(blob)), Object::Blob(blob.clone()))
     }
 
     pub(crate) fn prepare(&mut self, doc: &Document, opts: &SaveOptions) -> Result<Prepared> {

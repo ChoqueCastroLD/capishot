@@ -1869,7 +1869,7 @@ pub(crate) async fn read_array(data: &js_sys::Uint8Array) -> Vec<u8> {
 }
 
 /// Resolves in a later task (`setTimeout(0)`), letting the page draw and take input in between.
-async fn next_task() {
+pub(crate) async fn next_task() {
     let p = js_sys::Promise::new(&mut |resolve, _| {
         if let Some(w) = web_sys::window() {
             let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, 0);
