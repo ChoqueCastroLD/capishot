@@ -24,6 +24,9 @@
 //! Schema 7 adds the desktop app (`client`), the install channel and hardware names to
 //! `session_start`, every command's time per page size (`cmd_perf`), AI runs (`ai_run`), memory
 //! high-water marks (`memory`) and the first edit of a session (`edited`).
+//! Without a schema change (the collector refuses a whole batch for an unknown event or field), a
+//! canvas press a tool dropped goes out as a `command` with the id `toolDrop.<reason>.tool.<Name>`
+//! and source `tool` ([`Recorder::tool_drop`]): the reason is a fixed code, never free text.
 //! Never: file names, paths, layer or font names, document content, typed text, error messages.
 //! [`Recorder::take_batch`] enforces it a last time: an event with a field outside [`FIELDS`] or a
 //! value that looks like a path or a file name is dropped.
@@ -335,6 +338,8 @@ pub struct Recorder {
     last_heartbeat_ms: f64,
     commands: BTreeMap<(String, Source), u32>,
     errors: BTreeMap<(String, &'static str), u32>,
+    /// Dropped canvas presses since the last batch, by (reason code, tool id).
+    tool_drops: BTreeMap<(&'static str, String), u32>,
     events: Vec<Value>,
     perf_queued: usize,
     freezes_queued: usize,
@@ -517,6 +522,7 @@ impl Recorder {
             last_heartbeat_ms: now_ms,
             commands: BTreeMap::new(),
             errors: BTreeMap::new(),
+            tool_drops: BTreeMap::new(),
             events: Vec::new(),
             perf_queued: 0,
             freezes_queued: 0,
@@ -729,6 +735,16 @@ impl Recorder {
         self.event(e);
     }
 
+    /// A canvas press with `tool` (its [`tool_id`]) came to nothing for `reason`, a fixed code
+    /// (`canvas::press_watch`). Counted per batch, under [`MAX_KEYS`] distinct keys.
+    pub fn tool_drop(&mut self, reason: &'static str, tool: &str) {
+        let key = (reason, sanitize_tool_id(tool));
+        if self.tool_drops.len() < MAX_KEYS || self.tool_drops.contains_key(&key) {
+            let n = self.tool_drops.entry(key).or_default();
+            *n = n.saturating_add(1);
+        }
+    }
+
     /// The GPU canvas gave way to the CPU one: `api` "webgl" or "webgpu" (or a native backend),
     /// `gpu` the renderer class ([`gpu_vendor_class`]), `cause` "context_lost" (the black-canvas
     /// class: the browser dropped the graphics context), "slow_pipelines" (a canvas pipeline took
@@ -800,7 +816,7 @@ impl Recorder {
 
     /// Nothing waiting to be sent?
     pub fn is_empty(&self) -> bool {
-        self.events.is_empty() && self.commands.is_empty() && self.errors.is_empty() && self.frames.is_empty() && self.command_times.is_empty() && self.dropped == 0
+        self.events.is_empty() && self.commands.is_empty() && self.errors.is_empty() && self.tool_drops.is_empty() && self.frames.is_empty() && self.command_times.is_empty() && self.dropped == 0
     }
 
     /// Everything since the last batch as the JSON body to POST, or `None` when there is
@@ -823,6 +839,7 @@ impl Recorder {
             *slot = slot.saturating_add(n);
         }
         events.extend(errors.into_iter().map(|((id, kind), n)| json!({"e": "error", "id": id, "kind": kind, "n": n})));
+        events.extend(std::mem::take(&mut self.tool_drops).into_iter().map(|((reason, tool), n)| json!({"e": "command", "id": format!("toolDrop.{reason}.{tool}"), "src": "tool", "n": n})));
         for (key, h) in std::mem::take(&mut self.frames) {
             if h.n == 0 {
                 continue;

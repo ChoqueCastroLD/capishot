@@ -227,6 +227,7 @@ impl PhotocraftApp {
             prefs_rt: Default::default(),
             recovery: Default::default(),
             last_command: None,
+            tool_downs: 0,
             last_action: None,
             action_tool: None,
             updates_rt: Default::default(),

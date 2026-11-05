@@ -5418,3 +5418,11 @@ fontTab	Find More	Encontrar mais
 	Bar pattern opacity	Opacidade do padrão das barras
 	Pattern colour	Cor do padrão
 	Drawn behind the interface only, never over your page.	Desenhado só atrás da interface, nunca sobre a sua página.
+	An open menu took that click. Press Esc to close it.	Um menu aberto ficou com esse clique. Pressione Esc para fechá-lo.
+	A dialog is open, so the tool waits. Close it to go on.	Há uma caixa de diálogo aberta e a ferramenta aguarda. Feche-a para continuar.
+	Free Transform took that click. Press Enter to apply it or Esc to cancel it.	A Transformação livre ficou com esse clique. Pressione Enter para aplicá-la ou Esc para cancelá-la.
+	The Space key seems stuck, so the canvas pans. Tap Space to release it.	A barra de espaço parece presa e a tela se desloca. Pressione-a uma vez para soltá-la.
+	A zoom key seems stuck, so the canvas zooms. Tap Space to release it.	Uma tecla de zoom parece presa e a tela aplica zoom. Pressione a barra de espaço uma vez para soltá-la.
+	Ctrl or Command seems stuck, so the Move tool is active. Tap it to release it.	Ctrl ou Command parece presa e a ferramenta Mover está ativa. Pressione-a uma vez para soltá-la.
+	A tool key seems stuck. Tap it to release it.	A tecla de uma ferramenta parece presa. Pressione-a uma vez para soltá-la.
+	That click did nothing with this tool. If it keeps happening, reload the page.	Esse clique não fez nada com esta ferramenta. Se continuar acontecendo, recarregue a página.

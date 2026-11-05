@@ -78,6 +78,8 @@ mod embed_events;
 mod embed_open;
 
 #[cfg(target_arch = "wasm32")]
+mod key_guard;
+#[cfg(target_arch = "wasm32")]
 mod wheel_guard;
 
 #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]

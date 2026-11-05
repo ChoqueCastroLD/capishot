@@ -739,3 +739,19 @@ fn an_open_without_a_document_states_no_size() {
     assert!(open[0].get("mp").is_none() && open[0].get("layers").is_none(), "{b}");
     assert_eq!(open[0]["ok"], true);
 }
+
+/// A dropped press leaves as a `command`, which the strict collector takes: no new event or field.
+#[test]
+fn tool_drops_go_out_as_commands_with_fixed_ids() {
+    let mut r = Recorder::new("a", "s", 0.0);
+    r.tool_drop("no_effect", "tool.Remove");
+    r.tool_drop("no_effect", "tool.Remove");
+    r.tool_drop("overlay", "a typed/name");
+    assert!(!r.is_empty());
+    let b = batch(&mut r);
+    let cmds = events(&b, "command");
+    let n = |id: &str| cmds.iter().find(|e| e["id"] == id && e["src"] == "tool").map(|e| e["n"].as_u64().unwrap_or(0));
+    assert_eq!(n("toolDrop.no_effect.tool.Remove"), Some(2));
+    assert_eq!(n("toolDrop.overlay.tool.other"), Some(1));
+    assert!(r.is_empty(), "cleared after a batch");
+}
