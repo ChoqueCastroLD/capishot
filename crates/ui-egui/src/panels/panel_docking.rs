@@ -825,12 +825,71 @@ fn native_dock_width(app: &mut PhotocraftApp, ctx: &egui::Context) {
         return;
     }
     ctx.data_mut(|data| data.remove::<egui::PanelState>(id));
-    let pro = app.ui.theme.is_pro();
     let range = crate::panels::dock_width_range(ctx.content_rect().width());
     let width = state.size().x;
-    if app.ui.docking.is_none() && width.is_finite() && (width - default_width(pro)).abs() >= 1.0 {
+    // egui remembers the width the column had in the theme before a switch; both themes' own
+    // widths are not the user's.
+    let dragged = [default_width(true), default_width(false)].iter().all(|default| (width - default).abs() >= 1.0);
+    if app.ui.docking.is_none() && width.is_finite() && dragged {
         set_dock_width(app, width.clamp(*range.start(), *range.end()));
     }
+}
+
+/// Whether a saved workspace is what a theme switch alone made of the default dock in 0.13.9 and
+/// before ([`native_dock_width`] took the old theme's column width for one the user dragged): the
+/// native dock's groups in its order, with the other theme's column width and at most the Studio
+/// Properties card where the user could have changed anything else.
+fn from_theme_switch(app: &PhotocraftApp, workspace: &Workspace, returns: &Returns, collapsed: bool) -> bool {
+    let layout = &workspace.layout;
+    if workspace.saved.is_some() || !returns.is_empty() || collapsed {
+        return false;
+    }
+    let Some(Node::Split { axis: SplitAxis::Horizontal, size: SplitSize::FixedSecond(split), first, second }) = &layout.root else { return false };
+    let Node::Tabs { panels: canvas, .. } = first.as_ref() else { return false };
+    let Node::Dock { side: Side::End, columns } = second.as_ref() else { return false };
+    let [column] = columns.as_slice() else { return false };
+    let card = match layout.floating.as_slice() {
+        [] => false,
+        [window] => {
+            let parts = window.id == PROPERTIES_WINDOW && window.panels().all(|p| p == "properties" || p == "adjustments");
+            if !parts || window.rect[2] != 320.0 || window.rect[3] != 440.0 || window.native.is_some() || window.minimized {
+                return false;
+            }
+            true
+        }
+        _ => return false,
+    };
+    let from_pro = (column.width, *split) == (default_width(true), default_width(false));
+    let from_studio = !card && (column.width, *split) == (default_width(false), default_width(true));
+    if canvas.as_slice() != [CANVAS] || column.iconic || column.iconic_width.is_some() || !(from_pro || from_studio) {
+        return false;
+    }
+    // Native groups, whole, in the dock's order, at the heights the dock has.
+    let order = app.ui.dock.order();
+    let mut last = None;
+    column.groups.iter().all(|shown| {
+        let native = |panel: &String| PANELS.iter().find(|p| p.0 == panel.as_str()).map(|p| p.2);
+        let Some(group) = shown.panels.first().and_then(native) else { return false };
+        let at = order.iter().position(|g| *g == group);
+        let in_order = at > last;
+        last = at;
+        let height = shown.height.is_none_or(|h| app.ui.dock.heights.get(&group) == Some(&h));
+        in_order && height && !shown.minimized && shown.panels.iter().all(|panel| native(panel) == Some(group))
+    })
+}
+
+/// Back to the default dock if the saved workspace only came from a theme switch
+/// ([`from_theme_switch`]), so an update puts those users back where they were. Its tabs were
+/// marked hidden for the groups the dock wasn't showing, which would open empty.
+pub(crate) fn drop_theme_switch_layout(app: &mut PhotocraftApp) {
+    let Some(workspace) = &app.ui.docking else { return };
+    if !from_theme_switch(app, workspace, &app.ui.docking_returns, !app.ui.docking_collapsed.is_empty()) {
+        return;
+    }
+    app.ui.docking = None;
+    app.ui.docking_returns.clear();
+    let shown: Vec<Group> = Group::ALL.into_iter().filter(|g| g.shown(&app.ui.panels)).collect();
+    app.ui.dock.hidden_tabs.retain(|group, _| shown.contains(group));
 }
 
 /// `layout` as drawn: a dock group whose panels are all collapsed shows only its tab strip.
@@ -997,6 +1056,9 @@ pub(crate) mod probe {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod workspace_input_tests;
 
 #[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
