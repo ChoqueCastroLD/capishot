@@ -489,7 +489,7 @@ fn freezes_name_the_tool_the_phase_and_the_last_action() {
         (Some("tool.RemoveAi"), Some("gpu.composite"), Some("tool.Type"), Some("file.open"))
     );
     assert_eq!((f[1]["tool"].as_str(), f[1]["action"].as_str()), (Some("tool.other"), Some("layer.other")));
-    assert_eq!(b["v"], 5);
+    assert_eq!(b["v"], SCHEMA_VERSION);
 }
 
 /// `gpu_lost`: the context-lost (black canvas) class and the others, once each per batch.
