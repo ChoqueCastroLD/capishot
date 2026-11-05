@@ -187,6 +187,14 @@ pub fn set_visible(host: &mut Host, doc: DocumentId, layer: LayerId, visible: bo
     host.execute_with("layer.setProps", json!({"layer": layer.0, "visible": visible}), ExecOptions::on(doc)).map(|_| ())
 }
 
+/// The named view of the app's side-by-side tiles.
+pub const COMPARE_VIEW: &str = "without the selected layer";
+
+/// Define (or redefine) [`COMPARE_VIEW`]: `layer` hidden. No history step.
+pub fn define_compare_view(host: &mut Host, doc: DocumentId, layer: LayerId) -> Result<()> {
+    host.define_view(doc, COMPARE_VIEW, json!({"hidden": [layer.0]})).map(|_| ())
+}
+
 /// Select a layer from the host's list.
 pub fn select(host: &mut Host, doc: DocumentId, layer: LayerId) -> Result<()> {
     host.execute_with("layer.select", json!({"layer": layer.0}), ExecOptions::on(doc)).map(|_| ())

@@ -46,6 +46,7 @@ mod start_screen;
 mod strokes;
 mod tabs;
 mod textures;
+mod tiles;
 pub(super) mod tile_overlay;
 pub(super) mod tool_cursor;
 pub mod tool_feedback;
@@ -105,6 +106,8 @@ use strokes::{HOLD_REPEAT_MS, draw_clone_preview, feed_live_stroke, pointer_butt
 #[cfg(test)]
 pub(crate) use strokes::{SPOT_HEALING_TRAIL, live_retouch_points};
 pub(crate) use tabs::embedded_area;
+pub use tiles::{EmbedTile, MAX_TILES, TileCamera, TileDrawn};
+pub(crate) use tiles::{TileViews, embedded_tiles, free_document_tile_views, free_idle_tile_views, tile_rect_ok, tile_views_bytes, tiles_show};
 pub(crate) use tabs::arranged_cells;
 pub(crate) use tabs::tab_title_at;
 #[cfg(test)]
@@ -229,6 +232,8 @@ struct CanvasPaintInput<'a> {
     render_zoom: f32,
     target_xf: ViewXform,
     pixel_grid: bool,
+    /// Which of a host's tiles this view is (`None` outside tiles).
+    tile: Option<&'a tiles::TileSource>,
 }
 
 struct SelectionPaintInput<'a> {
@@ -357,6 +362,10 @@ fn paint_canvas(app: &mut PhotocraftApp, ui: &egui::Ui, view: &View, xf: ViewXfo
     let render_zoom = input.render_zoom;
     let target_xf = input.target_xf;
     let pixel_grid = input.pixel_grid;
+    let tile_salt = input.tile.map_or(0, |t| t.salt);
+    // A tile showing a named view: its own texture, the document's visibility left alone. It shows
+    // the document's committed state: an open preview is the live canvas's.
+    let named = input.tile.and_then(|t| t.named.as_deref());
 
     let point_zoom = view.zoom / ppp;
     let drop_shadow = border == photocraft_engine::prefs::CanvasBorder::DropShadow;
@@ -391,8 +400,11 @@ fn paint_canvas(app: &mut PhotocraftApp, ui: &egui::Ui, view: &View, xf: ViewXfo
             crate::render_path::view_cpu(app, doc.id.0);
         }
     }
+    let named_key = named.filter(|_| gpu_ok).and_then(|name| tiles::ensure_gpu(app, idx, name));
+    let gpu_key = named_key.unwrap_or(doc.id.0);
     if app.gpu.is_some()
         && gpu_ok
+        && named.is_none()
         && let Some((k, key, preview_size)) =
             ensure_adjust_proxy(app, idx, render_zoom).or_else(|| ensure_filter_preview(app, idx, ctx)).or_else(|| ensure_proxy_preview(app, idx))
     {
@@ -423,15 +435,17 @@ fn paint_canvas(app: &mut PhotocraftApp, ui: &egui::Ui, view: &View, xf: ViewXfo
             min_lod: 0.0,
         };
         paint_gpu_view(painter, rect, params, &pattern);
-    } else if gpu_ok
-        && ensure_gpu(
-            app,
-            idx,
-            redraw_focus(&target_xf, &xf),
-            crate::gpu_canvas::interactive_level(render_zoom),
-            crate::gpu_canvas::lod_level(render_zoom),
-            ctx,
-        )
+    } else if named_key.is_some()
+        || (named.is_none()
+            && gpu_ok
+            && ensure_gpu(
+                app,
+                idx,
+                redraw_focus(&target_xf, &xf),
+                crate::gpu_canvas::interactive_level(render_zoom),
+                crate::gpu_canvas::lod_level(render_zoom),
+                ctx,
+            ))
     {
         on_gpu = true;
         app.perf.gpu = true;
@@ -447,19 +461,31 @@ fn paint_canvas(app: &mut PhotocraftApp, ui: &egui::Ui, view: &View, xf: ViewXfo
                 !t.bevel && !t.pro && drop_shadow
             },
             pixel_grid,
-            view_key: egui::Id::unique(("pc-canvas", ctx.viewport_id(), idx)).value(),
-            display: sync_display_lut(app, doc, doc.id.0, output),
+            view_key: egui::Id::unique(("pc-canvas", ctx.viewport_id(), idx, tile_salt)).value(),
+            display: sync_display_lut(app, doc, gpu_key, output),
             output: output.unwrap_or(0),
             hdr: hdr_preview(app, doc),
             offset: [0.0, 0.0],
-            min_lod: app.gpu.as_ref().map_or(0.0, |g| g.view_floor(doc.id.0, visible_doc_rect(&xf))),
+            min_lod: app.gpu.as_ref().map_or(0.0, |g| g.view_floor(gpu_key, visible_doc_rect(&xf))),
         };
-        if app.navigator_plain.contains(&doc.id) {
-            app.navigator_gpu.insert(doc.id, params);
-        } else {
-            app.navigator_gpu.remove(&doc.id);
+        if named.is_none() {
+            if app.navigator_plain.contains(&doc.id) {
+                app.navigator_gpu.insert(doc.id, params);
+            } else {
+                app.navigator_gpu.remove(&doc.id);
+            }
         }
-        paint_gpu_view(painter, rect, params, &pattern);
+        paint_gpu_view(painter, rect, crate::gpu_canvas::ViewParams { doc: gpu_key, ..params }, &pattern);
+    } else if let Some(name) = named {
+        // A named view off the GPU (no device, a flipped view, over the texture budget): one
+        // reduced texture of the whole document.
+        if !crate::theme::Tokens::get(ctx).bevel && drop_shadow {
+            painter.add(egui::Shadow { offset: [0, 8], blur: 28, spread: 0, color: Color32::from_black_alpha(150) }.as_shape(img_rect, 0));
+        }
+        let rotated = view.rotation.abs() > 0.05;
+        let checkerboard = app.session.prefs().transparency_and_gamut.square().map(|square| (checker(app, ctx), square));
+        let tex = tiles::ensure_cpu(app, ctx, idx, name, output);
+        paint_cpu_document(painter, &xf, doc.bounds(), rotated, checkerboard, tex, false);
     } else if app.filter_preview.is_none() {
         // The CPU canvas: the checkerboard, then the document's tiles at display resolution,
         // composited on the worker pool as they come into view (cpu_canvas.rs).
@@ -1900,8 +1926,14 @@ fn polygon_edge_scroll(app: &PhotocraftApp, ctx: &egui::Context, idx: usize, rec
 }
 
 #[expect(clippy::cognitive_complexity, reason = "one view: the GPU or CPU canvas, then every overlay in order")]
-pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect: Rect, mut view: View, primary: bool) -> View {
+pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect: Rect, view: View, primary: bool) -> View {
+    canvas_view_tile(app, ui, idx, rect, view, primary, None)
+}
+
+/// [`canvas_view`] as one of a host's tiles (`tiles.rs`), which may show a named view.
+fn canvas_view_tile(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect: Rect, mut view: View, primary: bool, tile: Option<&tiles::TileSource>) -> View {
     let ctx = ui.ctx().clone();
+    let tile_salt = tile.map_or(0, |t| t.salt);
     // The camera as the app holds it before this frame's input. The canvas works on its own copy
     // (`view`) and writes it back at the end; a tool that moves the camera itself meanwhile (the
     // Crop tool's default mode pans and turns the view with the image, `crop_mode`) must not be
@@ -2008,6 +2040,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         render_zoom,
         target_xf,
         pixel_grid,
+        tile,
     };
     let painted = if crop_camera { None } else { Some(paint_canvas(app, ui, &display_view, xf, &paint_input)) };
     let img_rect = xf.doc_rect(doc.bounds());
@@ -2097,7 +2130,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     let transform_owns_pointer = primary && app.ui.transform.is_some() && temporary.is_none() && !middle;
     let hand_pan = tool == Tool::Hand && !transform_owns_pointer;
     // Preferences › Tools › Enable Flick Panning: a Hand drag let go while moving glides on.
-    let flick_id = egui::Id::unique(("pc-flick-pan", idx, primary, ctx.viewport_id()));
+    let flick_id = egui::Id::unique(("pc-flick-pan", idx, primary, ctx.viewport_id(), tile_salt));
     let flick_on = app.session.prefs().tools.enable_flick_panning;
     if let Some(d) = crate::flick_pan::frame(&ctx, flick_id, hand_pan && response.dragged() && !stroke_dismissal, response.drag_delta(), flick_on) {
         let d = xf.unmap_vec(d) / (view.zoom / ppp);
@@ -2114,7 +2147,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     }
     // Two fingers on a touch screen navigate (touch_nav.rs): the tools sit the gesture out.
     let touch_gestures = app.session.prefs().enhanced_controls.touch_gestures;
-    let nav_id = egui::Id::unique(("pc-touch-nav", idx, primary, ctx.viewport_id()));
+    let nav_id = egui::Id::unique(("pc-touch-nav", idx, primary, ctx.viewport_id(), tile_salt));
     let touch = crate::touch_nav::frame(&ctx, nav_id, rect, touch_gestures);
     // A finger held still is a right-click (context menus), for tools a press doesn't paint with.
     // With the touch interface, a painting tool's long press picks a color instead (the Clone

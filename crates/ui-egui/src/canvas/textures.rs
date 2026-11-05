@@ -720,11 +720,13 @@ pub(super) fn texture_buffer<'a>(
 pub(crate) fn retain_gpu_documents(app: &mut PhotocraftApp) {
     // Remove a closed adjustment owner's proxy before collecting its live GPU keys.
     crate::adjust_preview::retain_documents(app);
+    super::tiles::retain_documents(app);
     if let Some(gpu) = &app.gpu {
         // Keep each document's texture plus its preview textures (filter preview, adjustment proxy);
         // retaining only document ids freed the previews every frame (blank canvas while previewing).
         let mut live: Vec<u64> = app.session.documents().iter().flat_map(|st| [st.doc.id.0, st.doc.id.0 ^ (1u64 << 61), st.doc.id.0 ^ (1u64 << 62)]).collect();
         live.extend(crate::adjust_preview::gpu_keys(app));
+        live.extend(super::tiles::gpu_keys(app));
         gpu.retain(&live);
     }
     // Upload markers must not outlive the resources they describe: native reopen can reuse

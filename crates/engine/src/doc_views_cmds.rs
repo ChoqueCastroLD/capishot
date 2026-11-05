@@ -8,6 +8,10 @@
 //! history state keeps its own pixels (only the visibility is carried into it). Applying changes
 //! visibility only, so the canvas recomposites the layers it already holds: no type is laid out
 //! or rasterized again.
+//!
+//! A host can also show a view without applying it ([`view_document`]): a copy of the document
+//! with the view's visibility, sharing every layer's pixels, for a canvas of its own beside the
+//! document as it is. The document's own `layer.visible` stays as it was.
 
 use photocraft_doc::comps::next_comp_id;
 use photocraft_doc::{CompLayerState, Document, LayerComp, LayerId};
@@ -88,6 +92,31 @@ fn quiet_edit<R>(s: &mut Session, label: &str, f: impl FnOnce(&mut Document) -> 
     let r = s.edit(label, |doc, _| f(doc));
     s.end_scope(scope);
     r
+}
+
+/// A number that changes when view `name` of `doc` shows other layers; `None` without such a view.
+pub fn view_signature(doc: &Document, name: &str) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    let comp = doc.layer_comps.iter().find(|c| c.name == name)?;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for st in &comp.states {
+        (st.layer.0, st.visible).hash(&mut h);
+    }
+    Some(h.finish())
+}
+
+/// `doc` as view `name` shows it: a copy with the view's visibility (layers it doesn't list keep
+/// theirs, as `document.views.apply` leaves them), sharing the pixels. `doc` isn't touched and
+/// nothing reaches the history. `None` without such a view.
+pub fn view_document(doc: &Document, name: &str) -> Option<Document> {
+    let comp = doc.layer_comps.iter().find(|c| c.name == name)?;
+    let mut shown = doc.clone();
+    for st in &comp.states {
+        if let (Some(v), Some(l)) = (st.visible, shown.layer_mut(st.layer)) {
+            l.visible = v;
+        }
+    }
+    Some(shown)
 }
 
 fn define(s: &mut Session, p: &Value) -> Result<Value> {
@@ -247,6 +276,25 @@ mod tests {
 
     fn visible(s: &Session, id: u64) -> bool {
         s.active().and_then(|d| d.doc.layer(LayerId(id))).is_some_and(|l| l.visible)
+    }
+
+    #[test]
+    fn a_view_document_shows_the_view_and_leaves_the_document_alone() {
+        let (mut s, raw, group, _) = session();
+        s.execute("document.views.define", json!({"name": "raw", "visible": [raw], "hidden": ["Text"]})).expect("define");
+        s.execute("document.views.define", json!({"name": "typeset", "hidden": [raw]})).expect("define");
+        let revision = s.active().map(|d| d.revision);
+        let doc = s.active().expect("a document").doc.clone();
+        let shown = view_document(&doc, "raw").expect("the view");
+        assert!(shown.layer(LayerId(raw)).is_some_and(|l| l.visible));
+        assert!(shown.layer(LayerId(group)).is_some_and(|l| !l.visible));
+        assert!(visible(&s, group), "the document's own visibility stays");
+        assert_eq!(s.active().map(|d| d.revision), revision, "no edit");
+        assert!(view_document(&doc, "nope").is_none() && view_signature(&doc, "nope").is_none());
+        assert_ne!(view_signature(&doc, "raw"), view_signature(&doc, "typeset"));
+        s.execute("document.views.define", json!({"name": "raw", "visible": ["Text"]})).expect("redefine");
+        let redefined = s.active().expect("a document").doc.clone();
+        assert_ne!(view_signature(&doc, "raw"), view_signature(&redefined, "raw"), "a redefined view draws again");
     }
 
     #[test]

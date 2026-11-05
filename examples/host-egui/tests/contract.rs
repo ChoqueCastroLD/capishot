@@ -75,3 +75,15 @@ fn bad_input_is_an_error_not_a_panic() {
     assert!(script::layers(&host, missing).is_err());
     assert!(script::add_text(&mut host, missing, "x").is_err());
 }
+
+#[test]
+fn the_side_by_side_view_leaves_the_page_as_it_is() {
+    let mut host = Host::new();
+    let bytes = script::sample_psd(&mut host).unwrap();
+    let (doc, _) = script::open(&mut host, "page.psd", bytes).unwrap();
+    let page = script::paint_target(&host, doc).unwrap().expect("the page's pixel layer").id;
+    script::define_compare_view(&mut host, doc, page).unwrap();
+    let views = host.views(doc).unwrap();
+    assert_eq!(views["views"][0]["name"], script::COMPARE_VIEW, "{views}");
+    assert!(script::layers(&host, doc).unwrap().iter().all(|row| row.visible), "defining a view shows nothing yet");
+}

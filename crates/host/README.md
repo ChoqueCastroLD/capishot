@@ -170,6 +170,44 @@ editor.set_mode(Mode::Full); // any frame: same documents, nothing reopened
   (`Services` left empty: preferences last the session). `CapishotView::with_services` can set them
   (unstable).
 
+### Tiles
+
+```rust
+use capishot_host::view::{Tile, TileCamera};
+
+// Each frame, instead of `ui_in_rect`: pages side by side, or one page as named views.
+let out = editor.ui_tiles(ui, &[
+    Tile::new(page, left),                     // the document as it is: live if it is the active one
+    Tile::new(page, right).with_view("clean"), // `Host::define_view(page, "clean", ..)`
+]);
+for tile in &out.tiles {
+    if let Some(overlay) = tile.overlay() { /* per canvas, in document coordinates */ }
+    if let Some(why) = &tile.error { /* no such document or view, no area, Mode::Full */ }
+}
+editor.view.options_mut().tile_camera = TileCamera::Own; // default: `Shared`, one camera for all
+```
+
+- **Live.** The active document's first plain tile has the tools. The others pan and zoom; a press
+  on another document's tile makes that document the active one, and the live tile moves there.
+  `TileOutput::live` is the cue for a host's focus frame. With no plain tile of the active document,
+  no tile has the tools.
+- **Camera.** `Shared`: the same zoom, centre and rotation as numbers (same-sized pages line up),
+  moved from any tile. `Own`: a document's live or first tile has the document's camera
+  (`set_camera`, `camera`), its other tiles start fit to their rects and keep their own.
+- **Named views** show the committed document with the view's visibility, without touching
+  `layer.visible`, the revision or the history. Editing shows at once in the live tile and in the
+  named tile on commit (no live stroke or dialog preview).
+- **Memory.** A plain tile shares its document's canvas. A named view holds one more display texture
+  per document and view name, whatever the number of tiles showing it: `4/3 × 4 × width × height`
+  bytes with mips, twice that for a high-bit document on `Rgba16Float`. A 2400×3400 page is about
+  44 MB per view. Its layers' pixels are shared; drawing it takes the CPU compositor, in full on
+  the first show or a change of what the view lists, then in the changed area after an edit.
+  A document past the per-document canvas budget, a flipped view and a host without a GPU get one
+  reduced egui texture (4096 a side at most, 4 bytes a texel). `editor.setMemoryBudget`
+  (`CapishotView::set_memory_budget`) counts them all and frees views no tile shows first, then the
+  least recently shown documents; what tiles show on screen stays even over budget. Beyond the
+  budget, at most 4 unshown views stay, and none once the host stops calling `ui_tiles`.
+
 ### Raw pixels, hidden documents
 
 `Host::open(bytes, OpenOptions { hidden: true, .. })` opens a hidden document in the host's own
