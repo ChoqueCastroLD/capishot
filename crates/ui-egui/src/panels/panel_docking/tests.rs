@@ -303,6 +303,42 @@ fn floating_group_titles_are_opaque_in_studio_themes() {
     assert_eq!(magenta, 0, "canvas shows through the floating group's title strip {strip:?}");
 }
 
+/// The gap the layout leaves between the canvas and the dock shows the theme's surface: unpainted,
+/// it showed the window's clear colour, a near-black seam in every theme.
+#[test]
+fn the_gap_beside_the_canvas_shows_the_theme_surface() {
+    let mut app = app();
+    app.run("window.panel.float", json!({"panel":"swatches","x":40,"y":60,"width":300,"height":300})).unwrap();
+    let mut ready = false;
+    let mut h = Harness::builder().with_size(vec2(1280.0, 800.0)).build_ui_state(
+        move |ui, app: &mut PhotocraftApp| {
+            if !ready {
+                PhotocraftApp::setup_context(ui.ctx(), crate::theme::ThemeKind::CapibaraLight);
+                // The harness's own frame, under everything, fills with this: not the theme's.
+                ui.ctx().all_styles_mut(|style| style.visuals.panel_fill = egui::Color32::from_rgb(255, 0, 255));
+                ready = true;
+                return;
+            }
+            crate::panels::dock_area(app, ui);
+        },
+        app,
+    );
+    h.run_steps(5);
+    let hits = craft_ui::docking::DockArea::<String>::hit_rects(&h.ctx, area_id());
+    let divider = hits
+        .iter()
+        .find(|(hit, _)| matches!(hit, craft_ui::docking::Hit::Divider(craft_ui::docking::Divider::Column(_))))
+        .map(|(_, rect)| *rect)
+        .expect("the dock column's edge is drawn");
+    // The divider straddles the dock's edge; the gap is the 4 points before it.
+    let gap = divider.center() - vec2(3.0, 0.0);
+    let top = h.output().shapes.iter().rev().find_map(|clipped| match &clipped.shape {
+        egui::Shape::Rect(r) if r.fill.a() == 255 && r.rect.contains(gap) => Some(r.fill),
+        _ => None,
+    });
+    assert_eq!(top, Some(crate::theme::Tokens::get(&h.ctx).chrome));
+}
+
 #[test]
 fn serialized_layout_actions_cover_geometry_reorder_accordion_and_atomic_rejection() {
     let mut app = app();
