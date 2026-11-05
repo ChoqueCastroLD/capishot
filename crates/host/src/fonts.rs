@@ -21,6 +21,10 @@
 //! holds them too. The registry is the process's: while registered, a font is usable by type in
 //! any document. [`crate::Event::FontsReady`] says when a document has all its fonts: at its first
 //! poll when none is missing, otherwise after the registration that completes them.
+//!
+//! **Aliases:** a [`FontFile`] can name other names documents call it by. An alias counts as one
+//! of the file's families (`fonts_ready`, `FontsReady`, type layers asking for it) and is
+//! unregistered with the file.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, PoisonError};
@@ -48,6 +52,50 @@ pub struct FontFace {
     pub italic: bool,
 }
 
+/// A font file to register, with the other names it answers to.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FontFile {
+    /// Its file name, for messages and the format when the bytes don't tell.
+    pub name: String,
+    /// TTF, OTF, TTC or WOFF.
+    pub bytes: Vec<u8>,
+    /// Other names documents call it by (an old PostScript name, a group's name for it). Each
+    /// works as one of its families until the file is unregistered, except a name another font
+    /// already provides, which stays that font's. Up to [`MAX_FONT_ALIASES`].
+    pub aliases: Vec<String>,
+}
+
+impl FontFile {
+    /// A file with no aliases.
+    pub fn new(name: impl Into<String>, bytes: Vec<u8>) -> Self {
+        Self { name: name.into(), bytes, aliases: Vec::new() }
+    }
+
+    /// The same file answering to `aliases`.
+    pub fn with_aliases(mut self, aliases: Vec<String>) -> Self {
+        self.aliases = aliases;
+        self
+    }
+}
+
+impl From<(String, Vec<u8>)> for FontFile {
+    fn from((name, bytes): (String, Vec<u8>)) -> Self {
+        Self::new(name, bytes)
+    }
+}
+
+impl From<(&str, Vec<u8>)> for FontFile {
+    fn from((name, bytes): (&str, Vec<u8>)) -> Self {
+        Self::new(name, bytes)
+    }
+}
+
+/// At most this many aliases per [`FontFile`] (each one registers the file's faces again), each
+/// of at most [`MAX_FONT_ALIAS_CHARS`].
+pub const MAX_FONT_ALIASES: usize = 256;
+/// See [`MAX_FONT_ALIASES`].
+pub const MAX_FONT_ALIAS_CHARS: usize = 256;
+
 /// A registered font file.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -59,9 +107,11 @@ pub struct RegisteredFont {
     pub name: String,
     /// Its faces (a collection has several).
     pub faces: Vec<FontFace>,
-    /// The families it provides, in order, without repeats.
+    /// The families it provides, in order, without repeats (its aliases are in `aliases`).
     pub families: Vec<String>,
-    /// It was registered before (same bytes): nothing changed.
+    /// The aliases it answers to now ([`FontFile::aliases`]), from this registration and earlier ones.
+    pub aliases: Vec<String>,
+    /// It was registered before (same bytes): only new aliases changed anything.
     pub duplicate: bool,
 }
 
@@ -128,14 +178,29 @@ pub fn use_system_fonts(on: bool) -> bool {
 /// format when the bytes don't tell). From now on type in every document can use its families.
 /// Type layers already drawn without it are redrawn by [`crate::Host::refresh_fonts`]. Any thread.
 pub fn register(name: &str, bytes: Vec<u8>) -> Result<RegisteredFont> {
-    register_prepared(prepare(name, bytes)?)
+    register_file(FontFile::new(name, bytes))
+}
+
+/// [`register`] with aliases. Any thread.
+pub fn register_file(file: FontFile) -> Result<RegisteredFont> {
+    let (prepared, aliases) = prepare_file(file)?;
+    register_prepared(prepared, &aliases)
+}
+
+fn prepare_file(file: FontFile) -> Result<(photocraft_text::user_fonts::Prepared, Vec<String>)> {
+    let FontFile { name, bytes, aliases } = file;
+    if aliases.len() > MAX_FONT_ALIASES || aliases.iter().any(|a| a.chars().count() > MAX_FONT_ALIAS_CHARS) {
+        let name = photocraft_text::user_fonts::file_name(&name);
+        return Err(Error::File(format!("{name}: at most {MAX_FONT_ALIASES} aliases of {MAX_FONT_ALIAS_CHARS} characters")));
+    }
+    Ok((prepare(&name, bytes)?, aliases))
 }
 
 fn prepare(name: &str, bytes: Vec<u8>) -> Result<photocraft_text::user_fonts::Prepared> {
     photocraft_text::user_fonts::prepare(name, bytes).map_err(|why| Error::File(format!("{}: {why}", photocraft_text::user_fonts::file_name(name))))
 }
 
-fn register_prepared(p: photocraft_text::user_fonts::Prepared) -> Result<RegisteredFont> {
+fn register_prepared(p: photocraft_text::user_fonts::Prepared, aliases: &[String]) -> Result<RegisteredFont> {
     let faces: Vec<FontFace> = p
         .entry
         .faces
@@ -145,6 +210,7 @@ fn register_prepared(p: photocraft_text::user_fonts::Prepared) -> Result<Registe
     let mut eng = photocraft_text::shared().lock().unwrap_or_else(PoisonError::into_inner);
     let before = eng.fonts.has_user_font(&p.entry.id);
     let families = eng.fonts.register_user_font(&p.entry.id, Arc::clone(&p.data));
+    let alias_names = eng.fonts.alias_user_font(&p.entry.id, aliases);
     drop(eng);
     if families.is_empty() {
         return Err(Error::File(format!("{}: the file registered no font family", p.entry.name)));
@@ -155,7 +221,7 @@ fn register_prepared(p: photocraft_text::user_fonts::Prepared) -> Result<Registe
             unique.push(f);
         }
     }
-    Ok(RegisteredFont { id: p.entry.id, name: p.entry.name, faces, families: unique, duplicate: before })
+    Ok(RegisteredFont { id: p.entry.id, name: p.entry.name, faces, families: unique, aliases: alias_names, duplicate: before })
 }
 
 /// Removes a font [`register`] added (by its id). Returns the families that went with it. Type
@@ -353,10 +419,11 @@ impl crate::Host {
         request_missing(self.session(), document, provider)
     }
 
-    /// Registers font files (`(file name, bytes)`) and redraws the type that waited for them,
-    /// mapping loosely spelled missing names to them (one undo step per document; a clean
-    /// document stays clean). Returns each file's outcome, in order, and what was redrawn.
-    pub fn add_fonts(&mut self, files: Vec<(String, Vec<u8>)>) -> (Vec<Result<RegisteredFont>>, Refreshed) {
+    /// Registers font files (`(file name, bytes)`, or a [`FontFile`] with aliases) and redraws the
+    /// type that waited for them, mapping loosely spelled missing names to them (one undo step per
+    /// document; a clean document stays clean). Returns each file's outcome, in order, and what
+    /// was redrawn.
+    pub fn add_fonts<F: Into<FontFile>>(&mut self, files: Vec<F>) -> (Vec<Result<RegisteredFont>>, Refreshed) {
         let (out, refreshed) = self.add_font_files(files);
         for font in out.iter().flatten() {
             self.fonts.hold(font, None);
@@ -367,8 +434,9 @@ impl crate::Host {
     /// [`Self::add_fonts`] for one document: the files are held by `document` and unregistered
     /// when it closes, unless another document or [`Self::add_fonts`] holds them too. While
     /// registered they are usable by type in any document (the registry is the process's), and
-    /// layers waiting for them anywhere are redrawn. `Err` for a document that isn't open.
-    pub fn add_document_fonts(&mut self, document: DocumentId, files: Vec<(String, Vec<u8>)>) -> Result<(Vec<Result<RegisteredFont>>, Refreshed)> {
+    /// layers waiting for them anywhere are redrawn. A file's aliases go with it. `Err` for a
+    /// document that isn't open.
+    pub fn add_document_fonts<F: Into<FontFile>>(&mut self, document: DocumentId, files: Vec<F>) -> Result<(Vec<Result<RegisteredFont>>, Refreshed)> {
         self::document(self.session(), document)?;
         let (out, refreshed) = self.add_font_files(files);
         for font in out.iter().flatten() {
@@ -377,18 +445,21 @@ impl crate::Host {
         Ok((out, refreshed))
     }
 
-    fn add_font_files(&mut self, files: Vec<(String, Vec<u8>)>) -> (Vec<Result<RegisteredFont>>, Refreshed) {
-        let prepared: Vec<Result<photocraft_text::user_fonts::Prepared>> = files.into_iter().map(|(name, bytes)| prepare(&name, bytes)).collect();
-        // The faces' families and PostScript names, to find the layers drawn by our fallback
-        // before the new fonts change what "our layout" is.
+    fn add_font_files<F: Into<FontFile>>(&mut self, files: Vec<F>) -> (Vec<Result<RegisteredFont>>, Refreshed) {
+        let prepared: Vec<_> = files.into_iter().map(|f| prepare_file(f.into())).collect();
+        // The faces' families and PostScript names and the aliases, to find the layers drawn by
+        // our fallback before the new fonts change what "our layout" is.
         let mut names: Vec<String> = Vec::new();
-        for f in prepared.iter().flatten().flat_map(|p| &p.entry.faces) {
-            names.push(f.family.clone());
-            names.extend(f.postscript.clone());
+        for (p, aliases) in prepared.iter().flatten() {
+            for f in &p.entry.faces {
+                names.push(f.family.clone());
+                names.extend(f.postscript.clone());
+            }
+            names.extend(aliases.iter().cloned());
         }
         let waiting = self.pending_font_layers(&names);
-        let out: Vec<Result<RegisteredFont>> = prepared.into_iter().map(|p| p.and_then(register_prepared)).collect();
-        let families: Vec<String> = out.iter().flatten().flat_map(|f| f.families.iter().cloned()).collect();
+        let out: Vec<Result<RegisteredFont>> = prepared.into_iter().map(|p| p.and_then(|(p, aliases)| register_prepared(p, &aliases))).collect();
+        let families: Vec<String> = out.iter().flatten().flat_map(|f| f.families.iter().chain(&f.aliases).cloned()).collect();
         let refreshed = self.refresh_fonts(&families, Some(&waiting), true);
         (out, refreshed)
     }
@@ -488,6 +559,122 @@ mod tests {
         unregister(&id);
         // A document that isn't open.
         assert!(host.add_document_fonts(a, inter()).is_err());
+    }
+
+    /// JetBrains Mono (which draws unlike the fallback, Inter) renamed in memory to a fourteen-letter family.
+    fn mono(family: &str) -> Vec<u8> {
+        let enc = |s: &str| s.encode_utf16().flat_map(u16::to_be_bytes).collect::<Vec<u8>>();
+        let (from, to) = (enc("JetBrains Mono"), enc(family));
+        assert_eq!(from.len(), to.len());
+        let mut b = photocraft_text::fonts::JETBRAINS_MONO_REGULAR.clone();
+        for i in 0..b.len().saturating_sub(from.len()) {
+            if b[i..i + from.len()] == from[..] {
+                b[i..i + from.len()].copy_from_slice(&to);
+            }
+        }
+        b
+    }
+
+    /// A new document with one type layer asking for `style`.
+    fn type_document(host: &mut crate::Host, style: Value) -> (DocumentId, HostLayerId) {
+        host.execute("file.new", json!({"width": 256, "height": 64})).unwrap();
+        let layer = host.execute("type.create", json!({"text": "Iiii alias", "x": 5, "y": 30, "size": 12})).unwrap()["layer"].clone();
+        let mut p = style;
+        p["layer"] = layer.clone();
+        host.execute("type.setStyle", p).unwrap();
+        (host.active_document().unwrap(), HostLayerId(layer.as_u64().unwrap()))
+    }
+
+    fn fonts_ready_events(events: &[crate::Event], document: DocumentId) -> usize {
+        events.iter().filter(|e| matches!(e, crate::Event::FontsReady { document: d, .. } if *d == document)).count()
+    }
+
+    /// The layer's digest, and the SHA-256 of the font files its glyphs use.
+    fn layout_of(host: &mut crate::Host, document: DocumentId, layer: HostLayerId) -> (String, Vec<String>) {
+        let d = host.layout_digest(document, Some(layer), true).unwrap();
+        let fonts = d["fonts"].as_array().unwrap().iter().map(|f| f["sha256"].as_str().unwrap().to_string()).collect();
+        (d["digest"].as_str().unwrap().to_string(), fonts)
+    }
+
+    #[test]
+    fn a_document_asking_for_an_alias_uses_the_file_and_it_goes_with_the_last_holder() {
+        let has = |name: &str| photocraft_text::shared().lock().unwrap_or_else(PoisonError::into_inner).fonts.has_family(name);
+        let mut host = crate::Host::new();
+        let (doc, layer) = type_document(&mut host, json!({"font": "Scanlation Alias A"}));
+        let fallback = layout_of(&mut host, doc, layer);
+        let missing = host.fonts_ready(doc).unwrap();
+        assert!(!missing.is_ready());
+        assert!(missing.missing.iter().any(|m| m.family == "Scanlation Alias A"), "{missing:?}");
+        assert_eq!(fonts_ready_events(&host.poll(), doc), 0, "it waits");
+
+        let file = FontFile::new("a.ttf", mono("AliasRealFontA")).with_aliases(vec!["Scanlation Alias A".into()]);
+        let (out, refreshed) = host.add_document_fonts(doc, vec![file.clone()]).unwrap();
+        let font = out.into_iter().next().unwrap().unwrap();
+        assert_eq!(font.families, vec!["AliasRealFontA".to_string()]);
+        assert_eq!(font.aliases, vec!["Scanlation Alias A".to_string()]);
+        assert_eq!(refreshed.redrawn, vec![(doc, layer)], "the layer drawn by the fallback");
+        assert!(host.fonts_ready(doc).unwrap().is_ready());
+        assert_eq!(fonts_ready_events(&host.poll(), doc), 1);
+        struct Nothing;
+        impl FontProvider for Nothing {
+            fn request(&self, family: &str, _: &[String]) {
+                panic!("{family} isn't missing");
+            }
+        }
+        assert!(host.request_missing_fonts(doc, &Nothing).unwrap().is_empty());
+
+        let by_alias = layout_of(&mut host, doc, layer);
+        assert_eq!(by_alias.1, vec![font.id.clone()], "the registered file draws it");
+        assert_ne!(by_alias.0, fallback.0, "not the fallback");
+        let (real_doc, real_layer) = type_document(&mut host, json!({"font": "AliasRealFontA"}));
+        assert_eq!(layout_of(&mut host, real_doc, real_layer), by_alias, "the same layout as by the real family");
+
+        // A second holder: the alias stays until the last one closes, and then goes with the file.
+        host.add_document_fonts(real_doc, vec![file]).unwrap();
+        host.close(doc, true).unwrap();
+        assert!(has("Scanlation Alias A") && has("AliasRealFontA"));
+        host.close(real_doc, true).unwrap();
+        assert!(!has("Scanlation Alias A"), "the alias went");
+        assert!(!has("AliasRealFontA"), "the file went");
+    }
+
+    #[test]
+    fn an_old_postscript_name_as_an_alias_counts_and_draws() {
+        let mut host = crate::Host::new();
+        let (doc, layer) = type_document(&mut host, json!({"font": "OldAliasFam", "postscriptName": "OldAliasFam-Bold"}));
+        assert!(!host.fonts_ready(doc).unwrap().is_ready());
+        let file = FontFile::new("b.ttf", mono("AliasRealFontB")).with_aliases(vec!["OldAliasFam-Bold".into()]);
+        let (out, refreshed) = host.add_document_fonts(doc, vec![file]).unwrap();
+        let font = out.into_iter().next().unwrap().unwrap();
+        assert_eq!(refreshed.redrawn, vec![(doc, layer)]);
+        assert!(host.fonts_ready(doc).unwrap().is_ready());
+        assert_eq!(fonts_ready_events(&host.poll(), doc), 1);
+        assert_eq!(layout_of(&mut host, doc, layer).1, vec![font.id]);
+        host.close(doc, true).unwrap();
+    }
+
+    #[test]
+    fn aliases_are_bounded_and_never_take_another_font() {
+        let mut host = crate::Host::new();
+        let too_many = FontFile::new("c.ttf", mono("AliasRealFontC")).with_aliases(vec!["x".into(); MAX_FONT_ALIASES + 1]);
+        let too_long = FontFile::new("c.ttf", mono("AliasRealFontC")).with_aliases(vec!["x".repeat(MAX_FONT_ALIAS_CHARS + 1)]);
+        let (out, _) = host.add_fonts(vec![too_many, too_long]);
+        assert!(out.iter().all(|r| matches!(r, Err(Error::File(_)))), "{out:?}");
+
+        let taken = FontFile::new("c.ttf", mono("AliasRealFontC")).with_aliases(vec!["Inter".into(), String::new()]);
+        let (out, _) = host.add_fonts(vec![taken]);
+        let font = out.into_iter().next().unwrap().unwrap();
+        assert!(font.aliases.is_empty());
+        unregister(&font.id);
+        assert_eq!(family_status("Inter"), FamilyStatus::Loaded);
+
+        // The free function, for a worker thread; `(&str, bytes)` and `(String, bytes)` still work.
+        let free = register_file(FontFile::new("c.ttf", mono("AliasRealFontC")).with_aliases(vec!["Free Alias C".into()])).unwrap();
+        assert_eq!(family_status("Free Alias C"), FamilyStatus::Loaded);
+        assert_eq!(unregister(&free.id).iter().filter(|f| *f == "Free Alias C").count(), 1);
+        assert_eq!(family_status("Free Alias C"), FamilyStatus::Missing);
+        let (out, _) = host.add_fonts(vec![("c.ttf", vec![1u8, 2])]);
+        assert!(out[0].is_err());
     }
 
     #[test]

@@ -6,6 +6,16 @@ Every change to the stable API is listed here with the commit to pin. Breaking c
 may change in any commit; their changes are listed under **Experimental**. A change to the
 `[patch]` pins (README.md) is listed too: copy the blocks again when you move the pin.
 
+## API_VERSION 1, additions (font aliases)
+
+- `fonts::FontFile {name, bytes, aliases}` (`new`, `with_aliases`, `From<(String, Vec<u8>)>`,
+  `From<(&str, Vec<u8>)>`), `fonts::register_file`, `fonts::{MAX_FONT_ALIASES,
+  MAX_FONT_ALIAS_CHARS}`: a font file answers to other names, until it is unregistered.
+- `Host::add_fonts` and `Host::add_document_fonts` take `Vec<impl Into<FontFile>>`: `(name, bytes)`
+  calls compile as they are; an untyped empty `vec![]` needs a type.
+- `RegisteredFont::aliases`. `fonts_ready`, `request_missing_fonts`, `Event::FontsReady` and
+  `Opened::missing_fonts` count an alias as a family; so does a PostScript name given as an alias.
+
 ## API_VERSION 1, additions (full mode)
 
 - `view::Mode::{Embedded, Full}`, `CapishotView::{set_mode, mode}`, `CapishotEditor::{set_mode,

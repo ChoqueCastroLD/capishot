@@ -198,7 +198,9 @@ with no PNG or base64.
   `snapshot(doc)` to render on another thread (`Snapshot::render`, `Snapshot::thumbnail`).
 - **Fonts**: `add_fonts(files)` registers font files and redraws the type that waited for them;
   `add_document_fonts(doc, files)` holds them for one document (unregistered when the last holder
-  closes; the registry is the process's, so type elsewhere can use them meanwhile);
+  closes; the registry is the process's, so type elsewhere can use them meanwhile). A file is
+  `(name, bytes)` or `FontFile { name, bytes, aliases }`: an alias (an old PostScript name, a group's
+  name for the font) counts as one of its families and goes with the file;
   `fonts_ready(doc)`, `Event::FontsReady {document, ready}` (once per document, when it has them
   all), `request_missing_fonts(doc, &provider)`, `layout_digest(doc, layer, hashes)`;
   `fonts::use_system_fonts(false)` at start-up for the same layout on native and wasm.
