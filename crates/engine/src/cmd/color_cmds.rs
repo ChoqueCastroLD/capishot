@@ -1169,7 +1169,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "edit.assignProfile",
             "Assign Profile…",
             ["Edit"],
-            r##"{"profile":"working|srgb|display-p3|adobe-rgb-compat|prophoto-compat|linear-srgb|rec2020|gray-gamma-2.2|sgray|dot-gain-20-compat|lab-d50|coated-cmyk|none" (or a path to an .icc file)}"##,
+            r##"{"profile":"working|srgb|display-p3|adobe-rgb-compat|prophoto-compat|linear-srgb|rec2020|gray-gamma-2.2|sgray|dot-gain-10-compat|dot-gain-15-compat|dot-gain-20-compat|dot-gain-25-compat|dot-gain-30-compat|lab-d50|coated-cmyk|none" (or a path to an .icc file)}"##,
             has_doc,
             assign_profile,
             true
@@ -1178,7 +1178,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "edit.convertToProfile",
             "Convert to Profile…",
             ["Edit"],
-            r##"{"profile":"srgb|display-p3|adobe-rgb-compat|prophoto-compat|linear-srgb|rec2020|gray-gamma-2.2|sgray|lab-d50|coated-cmyk|working" (or a path to an .icc file),"intent":"perceptual|relative|saturation|absolute"="relative","bpc":bool=true}"##,
+            r##"{"profile":"srgb|display-p3|adobe-rgb-compat|prophoto-compat|linear-srgb|rec2020|gray-gamma-2.2|sgray|dot-gain-10-compat|dot-gain-15-compat|dot-gain-20-compat|dot-gain-25-compat|dot-gain-30-compat|lab-d50|coated-cmyk|working" (or a path to an .icc file),"intent":"perceptual|relative|saturation|absolute"="relative","bpc":bool=true}"##,
             has_doc,
             convert_to_profile,
             true
@@ -1187,7 +1187,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "edit.colorSettings",
             "Color Settings…",
             ["Edit"],
-            r##"{"workingRgb":"srgb|display-p3|adobe-rgb-compat|prophoto-compat|linear-srgb|rec2020","workingCmyk":"coated-cmyk","workingGray":"dot-gain-20-compat|sgray|gray-gamma-2.2","policyRgb":"preserve|convert|off","policyCmyk":"preserve|convert|off","policyGray":"preserve|convert|off","askOnMismatch":bool=true,"askOnPaste":bool=true,"askOnMissing":bool=false,"intent":"relative|perceptual|saturation|absolute","blendTextGamma":1.0..2.2|bool=1.45,"bpc":bool=true,"dither":bool=true,"monitorProfile":"auto|srgb|display-p3|adobe-rgb-compat|prophoto-compat|rec2020","reset":bool=false} (working spaces and the monitor profile also accept .icc paths; monitor `auto` = the main display's profile when the platform provides it, else sRGB; the reply's `monitorStatus` says which profile is in use and why: source auto|manual|fallback, reason)"##,
+            r##"{"workingRgb":"srgb|display-p3|adobe-rgb-compat|prophoto-compat|linear-srgb|rec2020","workingCmyk":"coated-cmyk","workingGray":"dot-gain-20-compat|dot-gain-10-compat|dot-gain-15-compat|dot-gain-25-compat|dot-gain-30-compat|sgray|gray-gamma-2.2","policyRgb":"preserve|convert|off","policyCmyk":"preserve|convert|off","policyGray":"preserve|convert|off","askOnMismatch":bool=true,"askOnPaste":bool=true,"askOnMissing":bool=false,"intent":"relative|perceptual|saturation|absolute","blendTextGamma":1.0..2.2|bool=1.45,"bpc":bool=true,"dither":bool=true,"monitorProfile":"auto|srgb|display-p3|adobe-rgb-compat|prophoto-compat|rec2020","reset":bool=false} (working spaces and the monitor profile also accept .icc paths; monitor `auto` = the main display's profile when the platform provides it, else sRGB; the reply's `monitorStatus` says which profile is in use and why: source auto|manual|fallback, reason)"##,
             always,
             color_settings,
             true,
@@ -1207,7 +1207,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "view.proofSetup",
             "Proof Setup…",
             [],
-            r##"{"profile":"working-cmyk|srgb|display-p3|adobe-rgb-compat|prophoto-compat|linear-srgb|rec2020|gray-gamma-2.2|sgray|lab-d50|coated-cmyk" (or a path to an .icc file)="working-cmyk","intent":"perceptual|relative|saturation|absolute"="relative","bpc":bool=true,"simulatePaper":bool=false}"##,
+            r##"{"profile":"working-cmyk|srgb|display-p3|adobe-rgb-compat|prophoto-compat|linear-srgb|rec2020|gray-gamma-2.2|sgray|dot-gain-10-compat|dot-gain-15-compat|dot-gain-20-compat|dot-gain-25-compat|dot-gain-30-compat|lab-d50|coated-cmyk" (or a path to an .icc file)="working-cmyk","intent":"perceptual|relative|saturation|absolute"="relative","bpc":bool=true,"simulatePaper":bool=false}"##,
             has_doc,
             proof_setup,
             false
@@ -1325,6 +1325,32 @@ mod tests {
         let after = doc(&s).layers[1].surface().unwrap().pixel(8, 8);
         for k in 0..3 {
             assert!((before[k] - after[k]).abs() < 1.0 / 255.0, "{before:?} -> {after:?}");
+        }
+    }
+
+    /// Image > Mode's Assign Profile and Convert to Profile take every Dot Gain gray, and their
+    /// dialogs list them: a menu is built from the `params` doc.
+    #[test]
+    fn dot_gain_grays_are_assigned_converted_and_listed() {
+        for (id, name) in [
+            ("dot-gain-10-compat", "Dot Gain 10%-compatible"),
+            ("dot-gain-15-compat", "Dot Gain 15%-compatible"),
+            ("dot-gain-20-compat", "Dot Gain 20%-compatible"),
+            ("dot-gain-25-compat", "Dot Gain 25%-compatible"),
+            ("dot-gain-30-compat", "Dot Gain 30%-compatible"),
+        ] {
+            let mut s = session("gray", 8);
+            s.execute("edit.assignProfile", json!({"profile": id})).unwrap();
+            assert!(document_profile(doc(&s)).description.starts_with(name), "{id}");
+            let mut s = session("rgb", 8);
+            paint_rgb(&mut s);
+            s.execute("edit.convertToProfile", json!({"profile": id})).unwrap();
+            assert_eq!(doc(&s).mode, ColorMode::Grayscale, "{id}");
+            assert!(document_profile(doc(&s)).description.starts_with(name), "{id}");
+            for cmd in ["edit.assignProfile", "edit.convertToProfile", "edit.colorSettings", "view.proofSetup"] {
+                let spec = specs().into_iter().find(|c| c.id == cmd).unwrap();
+                assert!(spec.params.contains(id), "{cmd} lists {id}");
+            }
         }
     }
 

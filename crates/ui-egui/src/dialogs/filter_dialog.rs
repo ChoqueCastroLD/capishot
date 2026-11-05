@@ -627,6 +627,10 @@ pub(crate) fn source_label(key: &str) -> String {
     if key == "bpc" {
         return "Black Point Compensation".into();
     }
+    // The Dot Gain grays' profile ids (Assign Profile, Convert to Profile, Color Settings).
+    if let Some(gain) = key.strip_prefix("dot-gain-").and_then(|k| k.strip_suffix("-compat")) {
+        return format!("Dot Gain {gain}%-compatible");
+    }
     // A name that already reads as text ("iPhone 14 Pro Max", "Web 1920") is not camelCase.
     if key.contains(' ') {
         return key.to_string();
