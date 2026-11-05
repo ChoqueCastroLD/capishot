@@ -492,7 +492,7 @@ impl WebUpscaler {
             && !s.mt_broken
             && let Some(url) = s.worker_mt_url.clone()
         {
-            return Some(Target { url, base, cpu, threads: true, pool });
+            return Some(Target { url, base, cpu, threads: true, pool: s.profile.cpu_pool(pool) });
         }
         Some(Target { url: s.worker_url.clone()?, base, cpu, threads: false, pool: 0 })
     }

@@ -51,6 +51,10 @@ impl GpuClass {
     }
 }
 
+/// The threads variant's rayon pool with [`DeviceProfile::small_pools`]: every nested worker costs
+/// its own JavaScript heap and module instance.
+pub const SMALL_CPU_POOL: usize = 4;
+
 /// What the shell knows about the machine.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -72,6 +76,18 @@ impl DeviceProfile {
     /// A phone, little memory or few cores: full models would be slow or run out of memory.
     pub fn weak(&self) -> bool {
         self.mobile || self.memory_gb.is_some_and(|m| m < 4.0) || self.cores.is_some_and(|c| c < 4)
+    }
+
+    /// A device whose memory calls for small worker pools: 4 GB or less, or a phone or tablet whose
+    /// browser doesn't say (Safari). A memory it does report, above that, keeps the full pool.
+    pub fn small_pools(&self) -> bool {
+        self.memory_gb.map_or(self.mobile, |m| m <= 4.0)
+    }
+
+    /// The threads variant's rayon pool for a run asking for `asked` threads (0: one per core, up
+    /// to the worker). With [`Self::small_pools`] 0 means at most [`SMALL_CPU_POOL`].
+    pub fn cpu_pool(&self, asked: usize) -> usize {
+        if asked == 0 && self.small_pools() { SMALL_CPU_POOL.min(self.cores.unwrap_or(SMALL_CPU_POOL).max(1)) } else { asked }
     }
 
     /// Very little memory (≤ 2 GB): smaller tiles too.
@@ -251,6 +267,24 @@ mod tests {
         // Not known yet: try the GPU with the full model (the worker falls back to the CPU).
         let c = choose(&DeviceProfile::default(), Quality::Auto, DevicePref::Auto);
         assert_eq!((c.lite, c.cpu, c.reason), (false, false, Reason::GpuUnknown));
+    }
+
+    #[test]
+    fn small_pools_on_little_memory_or_unknown_phones() {
+        let p = |memory_gb, mobile| DeviceProfile { memory_gb, mobile, ..Default::default() }.small_pools();
+        assert!(p(Some(4.0), false) && p(Some(2.0), true) && p(None, true));
+        assert!(!p(Some(8.0), true) && !p(Some(8.0), false) && !p(None, false));
+    }
+
+    #[test]
+    fn cpu_pool_shrinks_only_what_nobody_asked_for() {
+        let small = DeviceProfile { memory_gb: Some(4.0), cores: Some(14), ..Default::default() };
+        assert_eq!(small.cpu_pool(0), SMALL_CPU_POOL);
+        assert_eq!(small.cpu_pool(9), 9);
+        assert_eq!(DeviceProfile { cores: Some(2), ..small.clone() }.cpu_pool(0), 2);
+        assert_eq!(DeviceProfile { cores: Some(0), ..small.clone() }.cpu_pool(0), 1);
+        assert_eq!(DeviceProfile { cores: None, ..small }.cpu_pool(0), SMALL_CPU_POOL);
+        assert_eq!(DeviceProfile { memory_gb: Some(8.0), cores: Some(14), ..Default::default() }.cpu_pool(0), 0);
     }
 
     #[test]
