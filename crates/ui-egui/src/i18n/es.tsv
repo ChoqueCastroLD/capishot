@@ -5450,3 +5450,16 @@ fontTab	Find More	Buscar más
 	Bar pattern opacity	Opacidad del patrón de las barras
 	Pattern colour	Color del patrón
 	Drawn behind the interface only, never over your page.	Se dibuja solo detrás de la interfaz, nunca sobre tu página.
+	An open menu took that click. Press Esc to close it.	Un menú abierto se quedó con ese clic. Pulsa Esc para cerrarlo.
+	A dialog is open, so the tool waits. Close it to go on.	Hay un cuadro de diálogo abierto y la herramienta espera. Ciérralo para seguir.
+	Free Transform took that click. Press Enter to apply it or Esc to cancel it.	Transformación libre se quedó con ese clic. Pulsa Intro para aplicarla o Esc para cancelarla.
+	The Space key seems stuck, so the canvas pans. Tap Space to release it.	La barra espaciadora parece atascada y el lienzo se desplaza. Púlsala una vez para soltarla.
+	A zoom key seems stuck, so the canvas zooms. Tap Space to release it.	Una tecla de zoom parece atascada y el lienzo hace zoom. Pulsa la barra espaciadora una vez para soltarla.
+	Ctrl or Command seems stuck, so the Move tool is active. Tap it to release it.	Ctrl o Comando parece atascada y la herramienta Mover está activa. Púlsala una vez para soltarla.
+	A tool key seems stuck. Tap it to release it.	La tecla de una herramienta parece atascada. Púlsala una vez para soltarla.
+	That click did nothing with this tool. If it keeps happening, reload the page.	Ese clic no hizo nada con esta herramienta. Si sigue pasando, recarga la página.
+	Dot Gain 10%-compatible	Ganancia de punto 10 % (compatible)
+	Dot Gain 15%-compatible	Ganancia de punto 15 % (compatible)
+	Dot Gain 20%-compatible	Ganancia de punto 20 % (compatible)
+	Dot Gain 25%-compatible	Ganancia de punto 25 % (compatible)
+	Dot Gain 30%-compatible	Ganancia de punto 30 % (compatible)

@@ -298,6 +298,9 @@ fn handle_move_pointer(app: &mut PhotocraftApp, ev: ToolEvent, tool: Tool, mods:
 
 /// Tool state machine. Shared by mouse input and automation.
 pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers) {
+    if matches!(ev, ToolEvent::Down { .. }) {
+        app.tool_downs = app.tool_downs.wrapping_add(1);
+    }
     let Some((armed, mods)) = preflight_tool_event(app, ev, mods) else { return };
     let Some((raw, ev, mods)) = filter_event_before_tool(app, ev, mods, armed) else { return };
     let tool = event_tool(app, mods);

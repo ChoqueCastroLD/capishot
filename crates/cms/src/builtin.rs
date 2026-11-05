@@ -34,10 +34,18 @@ pub enum Builtin {
     GrayGamma22,
     /// Gray with the sRGB transfer function (sGray): gray `v` looks like RGB `(v, v, v)` in sRGB.
     SGray,
+    /// Gray for a press with 10 % dot gain, our own curve: gamma 1.322. See [`dot_gain_gamma`].
+    DotGain10Compat,
+    /// Gray for a press with 15 % dot gain, our own curve: gamma 1.515. See [`dot_gain_gamma`].
+    DotGain15Compat,
     /// Gray matching Photoshop's default working gray (Dot Gain 20 %) with our own curve: a pure
     /// gamma of 1.732, fitted on Photoshop 27.11's RGB → Grayscale (sRGB 64 / 128 / 192 and pure red
     /// become 46 / 105 / 177 / 107, all within 1 level). Not Adobe's profile.
     DotGain20Compat,
+    /// Gray for a press with 25 % dot gain, our own curve: gamma 2.0. See [`dot_gain_gamma`].
+    DotGain25Compat,
+    /// Gray for a press with 30 % dot gain, our own curve: gamma 2.322. See [`dot_gain_gamma`].
+    DotGain30Compat,
     /// CIE L*a*b* D50 identity (device Lab = PCS Lab, ICC v4 encoding).
     LabD50,
     /// Synthetic coated-offset CMYK (300 % total ink, medium GCR); see [`crate::synth`].
@@ -45,7 +53,7 @@ pub enum Builtin {
 }
 
 impl Builtin {
-    pub const ALL: [Builtin; 12] = [
+    pub const ALL: [Builtin; 16] = [
         Builtin::Srgb,
         Builtin::DisplayP3,
         Builtin::AdobeRgbCompat,
@@ -55,7 +63,11 @@ impl Builtin {
         Builtin::Rec2020,
         Builtin::GrayGamma22,
         Builtin::SGray,
+        Builtin::DotGain10Compat,
+        Builtin::DotGain15Compat,
         Builtin::DotGain20Compat,
+        Builtin::DotGain25Compat,
+        Builtin::DotGain30Compat,
         Builtin::LabD50,
         Builtin::CoatedCmyk,
     ];
@@ -72,7 +84,11 @@ impl Builtin {
             Builtin::Rec2020 => "rec2020",
             Builtin::GrayGamma22 => "gray-gamma-2.2",
             Builtin::SGray => "sgray",
+            Builtin::DotGain10Compat => "dot-gain-10-compat",
+            Builtin::DotGain15Compat => "dot-gain-15-compat",
             Builtin::DotGain20Compat => "dot-gain-20-compat",
+            Builtin::DotGain25Compat => "dot-gain-25-compat",
+            Builtin::DotGain30Compat => "dot-gain-30-compat",
             Builtin::LabD50 => "lab-d50",
             Builtin::CoatedCmyk => "coated-cmyk",
         }
@@ -90,7 +106,11 @@ impl Builtin {
             Builtin::Rec2020 => "Rec. ITU-R BT.2020 (PhotoCraft)",
             Builtin::GrayGamma22 => "Gray Gamma 2.2 (PhotoCraft)",
             Builtin::SGray => "sGray (sRGB tone curve, PhotoCraft)",
+            Builtin::DotGain10Compat => "Dot Gain 10%-compatible (gamma 1.322, PhotoCraft)",
+            Builtin::DotGain15Compat => "Dot Gain 15%-compatible (gamma 1.515, PhotoCraft)",
             Builtin::DotGain20Compat => "Dot Gain 20%-compatible (gamma 1.732, PhotoCraft)",
+            Builtin::DotGain25Compat => "Dot Gain 25%-compatible (gamma 2.0, PhotoCraft)",
+            Builtin::DotGain30Compat => "Dot Gain 30%-compatible (gamma 2.322, PhotoCraft)",
             Builtin::LabD50 => "Lab D50 identity (PhotoCraft)",
             Builtin::CoatedCmyk => crate::synth::DESCRIPTION,
         }
@@ -108,7 +128,11 @@ impl Builtin {
             "rec2020" | "bt2020" => Some(Builtin::Rec2020),
             "gray" | "graygamma22" | "gamma22" => Some(Builtin::GrayGamma22),
             "sgray" | "graysrgb" => Some(Builtin::SGray),
+            "dotgain10" | "dotgain10compat" => Some(Builtin::DotGain10Compat),
+            "dotgain15" | "dotgain15compat" => Some(Builtin::DotGain15Compat),
             "dotgain20" | "dotgain20compat" | "dotgain" => Some(Builtin::DotGain20Compat),
+            "dotgain25" | "dotgain25compat" => Some(Builtin::DotGain25Compat),
+            "dotgain30" | "dotgain30compat" => Some(Builtin::DotGain30Compat),
             "aces-cg" | "acescg" => Some(Builtin::AcesCg),
             "lab" | "labd50" | "cielab" => Some(Builtin::LabD50),
             "cmyk" | "coatedcmyk" | "defaultcmyk" | "photocraftcoatedcmyk" => Some(Builtin::CoatedCmyk),
@@ -119,11 +143,21 @@ impl Builtin {
 
     /// The profile (built once per process).
     pub fn profile(self) -> &'static Profile {
-        static CELLS: [OnceLock<Profile>; 12] = [const { OnceLock::new() }; 12];
+        static CELLS: [OnceLock<Profile>; 16] = [const { OnceLock::new() }; 16];
         // `ALL` lists the variants in declaration order (checked by `all_in_declaration_order`),
         // so the discriminant is the cell index.
         CELLS[self as usize].get_or_init(|| build(self))
     }
+}
+
+/// The gamma of a built-in Dot Gain gray for a gain of `gain` (0.25 for 25 %), from what dot gain
+/// means: a 50 % tint prints as `0.5 + gain` of ink, so it reflects `0.5 - gain` of the light, and
+/// a gamma curve through that point has gamma `ln(0.5 - gain) / ln(0.5)`. Rounded to 3 decimals in
+/// the profiles (`Curve::Gamma` of [`Builtin`]). It gives 1.737 for 20 %, where measuring Photoshop
+/// gave the 1.732 of [`Builtin::DotGain20Compat`], which stays. A published definition of the
+/// term, no Adobe curve: the other gains were not measured against Photoshop.
+pub fn dot_gain_gamma(gain: f64) -> f64 {
+    (0.5 - gain).ln() / 0.5f64.ln()
 }
 
 /// The default profile for a colour space: sRGB, Dot Gain 20 %-compatible gray (Photoshop's default
@@ -332,7 +366,11 @@ fn build(b: Builtin) -> Profile {
         Builtin::Rec2020 => rgb(b.description(), bt2020, d65(), rec709_trc()),
         Builtin::GrayGamma22 => gray(b.description(), Curve::Gamma(2.2)),
         Builtin::SGray => gray(b.description(), srgb_trc()),
+        Builtin::DotGain10Compat => gray(b.description(), Curve::Gamma(1.322)),
+        Builtin::DotGain15Compat => gray(b.description(), Curve::Gamma(1.515)),
         Builtin::DotGain20Compat => gray(b.description(), Curve::Gamma(1.732)),
+        Builtin::DotGain25Compat => gray(b.description(), Curve::Gamma(2.0)),
+        Builtin::DotGain30Compat => gray(b.description(), Curve::Gamma(2.322)),
         Builtin::LabD50 => lab(),
         // The shipped bytes are `synth::coated_cmyk()` (checked by the `regen` test); rebuild
         // them rather than crash if they ever fail to parse.
@@ -364,5 +402,29 @@ mod tests {
         assert!(cicp_rgb(9, 16, false).is_none());
         assert!(cicp_rgb(2, 13, false).is_none());
         assert!(cicp_rgb(u16::MAX, u16::MAX, true).is_none());
+    }
+
+    #[test]
+    fn dot_gain_grays_follow_their_gain() {
+        let grays = [
+            (Builtin::DotGain10Compat, 0.10),
+            (Builtin::DotGain15Compat, 0.15),
+            (Builtin::DotGain25Compat, 0.25),
+            (Builtin::DotGain30Compat, 0.30),
+        ];
+        for (b, gain) in grays {
+            let p = b.profile();
+            assert_eq!(p.color_space, ColorSpace::Gray, "{b:?}");
+            assert_eq!(Builtin::from_id(b.id()), Some(b));
+            assert_eq!(Builtin::from_id(&format!("dotgain{}", (gain * 100.0_f64).round() as u32)), Some(b));
+            let Some(Curve::Gamma(g)) = &p.gray_trc else { panic!("{b:?} has a gamma curve") };
+            let g = *g;
+            assert!((g - dot_gain_gamma(gain)).abs() < 1e-3, "{b:?}: {g}");
+            // A 50 % tint reflects 0.5 - gain.
+            assert!((0.5f64.powf(g) - (0.5 - gain)).abs() < 1e-3, "{b:?}");
+            assert!(p.description.contains(&format!("{}%-compatible", (gain * 100.0_f64).round() as u32)), "{}", p.description);
+        }
+        // Measured on Photoshop for 20 %: the rule lands within 0.3 % of it.
+        assert!((dot_gain_gamma(0.20) - 1.732).abs() < 0.006);
     }
 }

@@ -196,6 +196,7 @@ pub async fn run(canvas: web_sys::HtmlCanvasElement, hosted: Option<crate::embed
     crate::startup::mark("presets loaded");
     // Before eframe installs its listeners: real Ctrl + wheel, and no browser page zoom.
     crate::wheel_guard::install();
+    crate::key_guard::install();
     crate::breadcrumb::start();
     cap_pixel_density();
     cap_memory();
@@ -1431,6 +1432,7 @@ impl eframe::App for WebShell {
             self.app.touch.sync_active(raw_input, &ids);
         }
         crate::wheel_guard::restore(raw_input);
+        crate::key_guard::restore(raw_input);
         // The phone's Back closed what was open: Esc, which every dialog, the options and the
         // sheets take as close.
         if back_history::take_back() {

@@ -756,6 +756,8 @@ pub struct PhotocraftApp {
     /// The last command run and when (`gpu_canvas::now_ms`), for freeze reports
     /// ([`Self::freeze_context`]).
     last_command: Option<(String, f64)>,
+    /// Press events that have reached the tool state machine (`canvas::press_watch`).
+    pub(crate) tool_downs: u64,
     /// The last command run or tool picked, however long ago (freeze reports' `action`).
     last_action: Option<String>,
     /// The tool when [`Self::last_action`] last looked: a switch is an action too.

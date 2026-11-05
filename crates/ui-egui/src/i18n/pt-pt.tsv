@@ -3546,3 +3546,16 @@ fontWeight	Italic	Itálico
 	Bar pattern opacity	Opacidade do padrão das barras
 	Pattern colour	Cor do padrão
 	Drawn behind the interface only, never over your page.	Desenhado apenas atrás da interface, nunca sobre a sua página.
+	An open menu took that click. Press Esc to close it.	Um menu aberto ficou com esse clique. Prima Esc para o fechar.
+	A dialog is open, so the tool waits. Close it to go on.	Há uma caixa de diálogo aberta e a ferramenta aguarda. Feche-a para continuar.
+	Free Transform took that click. Press Enter to apply it or Esc to cancel it.	A Transformação livre ficou com esse clique. Prima Enter para a aplicar ou Esc para a cancelar.
+	The Space key seems stuck, so the canvas pans. Tap Space to release it.	A barra de espaços parece presa e a tela desloca-se. Prima-a uma vez para a soltar.
+	A zoom key seems stuck, so the canvas zooms. Tap Space to release it.	Uma tecla de zoom parece presa e a tela aplica zoom. Prima a barra de espaços uma vez para a soltar.
+	Ctrl or Command seems stuck, so the Move tool is active. Tap it to release it.	Ctrl ou Command parece presa e a ferramenta Mover está ativa. Prima-a uma vez para a soltar.
+	A tool key seems stuck. Tap it to release it.	A tecla de uma ferramenta parece presa. Prima-a uma vez para a soltar.
+	That click did nothing with this tool. If it keeps happening, reload the page.	Esse clique não fez nada com esta ferramenta. Se continuar a acontecer, recarregue a página.
+	Dot Gain 10%-compatible	Ganho de ponto 10 % (compatível)
+	Dot Gain 15%-compatible	Ganho de ponto 15 % (compatível)
+	Dot Gain 20%-compatible	Ganho de ponto 20 % (compatível)
+	Dot Gain 25%-compatible	Ganho de ponto 25 % (compatível)
+	Dot Gain 30%-compatible	Ganho de ponto 30 % (compatível)

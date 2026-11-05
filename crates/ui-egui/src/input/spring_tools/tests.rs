@@ -271,3 +271,16 @@ fn plain_functions_follow_the_rules() {
     assert_eq!(key_of('\0'), None);
     assert!(is_tool_key(Key::Z) && !is_tool_key(Key::F1));
 }
+
+/// The key's release went elsewhere (Alt+Tab, the browser's own UI): the tool still comes back.
+#[test]
+fn losing_the_window_releases_a_held_letter() {
+    let mut h = harness(Tool::Brush);
+    down(&mut h, Key::Z);
+    wait(&mut h, 0.4);
+    assert_eq!(h.state().ui.tool, Tool::Zoom);
+    h.event(Event::WindowFocused(false));
+    h.run_steps(3);
+    assert_eq!(h.state().ui.tool, Tool::Brush);
+    assert_eq!(h.state().ui.spring, None);
+}

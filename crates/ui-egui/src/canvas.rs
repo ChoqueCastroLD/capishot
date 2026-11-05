@@ -35,6 +35,7 @@ pub mod paint_mouse;
 pub mod patch_preview;
 pub mod pattern_preview;
 pub mod pixel_grid;
+mod press_watch;
 pub mod quick_pick;
 pub mod rotate_view;
 pub mod rulers;
@@ -2161,6 +2162,11 @@ fn canvas_view_tile(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect
         _ => alt || sticky_alt,
     };
 
+    if primary {
+        let before = press_watch::Before { temporary, dismissal: stroke_dismissal, zoom: view.zoom, center: view.center };
+        press_watch::before(app, &ctx, &response, &before);
+    }
+
     if under_dialog {
         handle_dialog_canvas_input(
             app,
@@ -2274,6 +2280,9 @@ fn canvas_view_tile(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect
             long_press,
         };
         handle_primary_canvas_input(app, ui, &mut view, &input);
+    }
+    if primary {
+        press_watch::after(app, &ctx, &response, under_dialog, view.zoom, view.center, view.doc_size);
     }
     if crop_camera && let (Some((center, rotation)), Some(now)) = (camera, app.ui.views.get(idx)) {
         if now.center != center {

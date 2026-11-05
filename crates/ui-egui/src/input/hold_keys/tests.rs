@@ -1019,3 +1019,15 @@ fn a_one_frame_cmd_click_with_the_hand_tool_zooms() {
     h.run_steps(2);
     assert!(h.state().ui.views[0].zoom > z0);
 }
+
+/// The key's release went elsewhere (Alt+Tab, the browser's own UI): Space is no longer the Hand.
+#[test]
+fn losing_the_window_releases_a_held_space() {
+    let mut h = harness(Tool::Zoom);
+    key(&mut h, Key::Space, true, Modifiers::NONE);
+    let ctx = h.ctx.clone();
+    assert_eq!(held_tool(h.state(), &ctx), Some(Temporary::Hand));
+    h.event(Event::WindowFocused(false));
+    h.run_steps(2);
+    assert_eq!(held_tool(h.state(), &ctx), None);
+}
