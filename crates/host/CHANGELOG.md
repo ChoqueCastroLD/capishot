@@ -20,6 +20,8 @@ may change in any commit; their changes are listed under **Experimental**. A cha
 - Features `full`, `camera-raw`, `exr`, `heif`, `all-catalogs`.
 - `ViewOptions::rulers` applies when it changes, no longer every frame: the person's View ›
   Rulers stays.
+- Native `ai-native`: a request with `allowDownload` now fetches missing weights from
+  `AiConfig::models_url` (it failed with "weights not found" without trying).
 
 ## API_VERSION 1 (first release)
 

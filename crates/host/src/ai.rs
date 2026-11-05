@@ -167,7 +167,7 @@ fn models_base(config: &AiConfig) -> Option<String> {
 #[cfg(all(feature = "ai-native", not(target_arch = "wasm32")))]
 fn install_impl(session: &mut Session, config: &AiConfig) -> AiAvailability {
     use photocraft_ai::cache::DiskCache;
-    use photocraft_ai::native::{DeviceChoice, NativeUpscaler};
+    use photocraft_ai::native::{DeviceChoice, NativeUpscaler, model_fetcher};
     use photocraft_ai::native_store::NativeModelStore;
     use photocraft_ai_lama::native::{MIGAN_FILE, NativeInpainter, WEIGHTS_FILE};
 
@@ -187,8 +187,11 @@ fn install_impl(session: &mut Session, config: &AiConfig) -> AiAvailability {
     // The upscaler's device profile is what the engine picks the device of every AI run from
     // (`DeviceChoice::Cpu` reports no GPU), so a CPU-only host runs everything on the CPU.
     session.set_ai_upscaler(Some(Arc::new(NativeUpscaler::new(DiskCache::in_dir(dir), base.clone(), choice))));
-    session.set_ai_models(Some(Arc::new(NativeModelStore::new(DiskCache::in_dir(dir), base))));
-    let inpainter = NativeInpainter::new(dir.join(WEIGHTS_FILE)).with_migan(dir.join(MIGAN_FILE)).with_downloads(dir.to_path_buf());
+    session.set_ai_models(Some(Arc::new(NativeModelStore::new(DiskCache::in_dir(dir), base.clone()))));
+    let mut inpainter = NativeInpainter::new(dir.join(WEIGHTS_FILE)).with_migan(dir.join(MIGAN_FILE)).with_downloads(dir.to_path_buf());
+    if base.is_some() {
+        inpainter = inpainter.with_fetch(Arc::new(model_fetcher(DiskCache::in_dir(dir), base)));
+    }
     session.set_inpainter(Some(cpu_inpainter(Arc::new(inpainter), cpu)));
     if config.generative_fill {
         let genfill = photocraft_ai_sd::native::NativeGenFill::new(vec![dir.to_path_buf()], true);

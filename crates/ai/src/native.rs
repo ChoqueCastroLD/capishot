@@ -35,6 +35,42 @@ impl DeviceChoice {
     }
 }
 
+/// A fetch's progress: `0..=1` and a short status.
+pub type FetchProgress<'a> = &'a (dyn Fn(f32, &str) + Sync);
+/// Whether the fetch should give up.
+pub type FetchCancelled<'a> = &'a (dyn Fn() -> bool + Sync);
+
+/// A [`Hooks`] over a [`model_fetcher`]'s two callbacks.
+struct FetchHooks<'a> {
+    progress: FetchProgress<'a>,
+    cancelled: FetchCancelled<'a>,
+}
+
+impl Hooks for FetchHooks<'_> {
+    fn progress(&self, fraction: f32, status: &str) {
+        (self.progress)(fraction, status);
+    }
+
+    fn cancelled(&self) -> bool {
+        (self.cancelled)()
+    }
+}
+
+/// Fetches a catalog model (by id) into `cache` from `base_url`, with checksums: what the inpainter
+/// runs for a request with `allowDownload` (`photocraft_ai_lama::native::NativeInpainter::with_fetch`).
+pub fn model_fetcher(
+    cache: DiskCache,
+    base_url: Option<String>,
+) -> impl Fn(&str, FetchProgress<'_>, FetchCancelled<'_>) -> std::result::Result<(), String> + Send + Sync {
+    move |id, progress, cancelled| {
+        let model = crate::catalog::model(id).ok_or_else(|| format!("{id} isn't in the model catalog"))?;
+        let Some(base) = &base_url else { return Err("model downloads are not configured in this build".into()) };
+        let hooks = FetchHooks { progress, cancelled };
+        let bytes = download(&model.url(base), model, &hooks).map_err(|e| e.to_string())?;
+        cache.store(model, &bytes).map_err(|e| e.to_string())
+    }
+}
+
 /// Failures to inject (tests): each makes that backend fail as a real one would.
 #[doc(hidden)]
 #[derive(Clone, Debug, Default)]
@@ -528,6 +564,20 @@ fn download(url: &str, _: &ModelInfo, _: &dyn Hooks) -> Result<Vec<u8>> {
 #[cfg(all(test, feature = "cpu"))]
 mod tests {
     use super::*;
+
+    /// `allowDownload`'s fetcher: an id outside the catalog and a build without downloads are
+    /// errors, and a server that refuses leaves nothing in the folder.
+    #[test]
+    fn the_fetcher_says_why_it_cant_fetch() {
+        let dir = std::env::temp_dir().join(format!("photocraft-ai-fetcher-{}", std::process::id()));
+        let (progress, cancelled) = (|_: f32, _: &str| {}, || false);
+        let none = model_fetcher(DiskCache::in_dir(&dir), None);
+        assert!(none(crate::catalog::LAMA_ID, &progress, &cancelled).unwrap_err().contains("not configured"));
+        let closed = model_fetcher(DiskCache::in_dir(&dir), Some("http://127.0.0.1:1/".into()));
+        assert!(closed("no-such-model", &progress, &cancelled).unwrap_err().contains("catalog"));
+        assert!(closed(crate::catalog::LAMA_ID, &progress, &cancelled).unwrap_err().contains("127.0.0.1"));
+        assert!(!dir.join(crate::catalog::model(crate::catalog::LAMA_ID).unwrap().file).exists());
+    }
 
     /// #22: wgpu can't start on an automatic run: the CPU runtime, and why; asked for the GPU:
     /// an error; asked for the CPU: nothing to say.

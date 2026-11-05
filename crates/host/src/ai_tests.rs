@@ -304,3 +304,34 @@ fn replies_are_read_whatever_their_shape() {
     let r = AiReply::from_value(&json!([1, 2]));
     assert_eq!((r.rect, r.device.as_str(), r.ms), (None, "", None));
 }
+
+/// A native host's `allowDownload` reaches the download (it used to fail on the missing file
+/// without trying); `models_url: ""` means no downloads.
+#[cfg(all(feature = "ai-native", not(target_arch = "wasm32")))]
+#[test]
+fn native_allow_download_fetches_from_the_models_url() {
+    use photocraft_ai_lama::service::{GpuBackend, Hooks, LAMA, Request};
+    struct Quiet;
+    impl Hooks for Quiet {
+        fn progress(&self, _: f32, _: &str) {}
+        fn cancelled(&self) -> bool {
+            false
+        }
+    }
+    let error_with = |url: &str, name: &str| {
+        let dir = std::env::temp_dir().join(format!("capishot-host-fetch-{name}-{}", std::process::id()));
+        let mut s = Session::new();
+        install(&mut s, &AiConfig { models_dir: Some(dir.clone()), models_url: Some(url.into()), device: AiDevice::Cpu, ..Default::default() });
+        let tile = photocraft_ai_lama::tiles::TileInput { rgb: vec![0.0; 3 * 8 * 8], mask: vec![0.0; 8 * 8], w: 8, h: 8 };
+        let req = Request { tile, allow_download: true, model: LAMA, cpu: true, threads: 1, unload: true, backend: GpuBackend::Auto };
+        let out = Arc::new(Mutex::new(None));
+        let sink = out.clone();
+        s.inpainter().unwrap().run(req, Arc::new(Quiet), Box::new(move |r| *sink.lock().unwrap() = Some(r.map(|_| ()))));
+        let _ = std::fs::remove_dir_all(dir);
+        out.lock().unwrap().take().unwrap().unwrap_err().to_string()
+    };
+    let e = error_with("http://127.0.0.1:1/", "closed");
+    assert!(e.contains("127.0.0.1"), "tried the models URL: {e}");
+    let e = error_with("", "off");
+    assert!(e.contains("not found"), "no downloads: {e}");
+}

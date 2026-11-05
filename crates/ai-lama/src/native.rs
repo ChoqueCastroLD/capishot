@@ -8,8 +8,8 @@
 //! The weights come from local files: the AI Model Manager's downloads (the app's models
 //! folder, `photocraft-ai`'s cache) first, else `CAPISHOT_LAMA_WEIGHTS`; MI-GAN from `CAPISHOT_MIGAN_WEIGHTS`, else
 //! [`MIGAN_FILE`] next to LaMa's. A missing file reports [`ModelState::NeedsDownload`] when
-//! there is a downloads folder (the Manager fetches it), else [`ModelState::Unavailable`] with
-//! the path to put it at.
+//! there is a downloads folder (the Manager fetches it, or [`NativeInpainter::with_fetch`] for a
+//! request with `allow_download`), else [`ModelState::Unavailable`] with the path to put it at.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -58,12 +58,22 @@ struct Burn {
     cpu_why: Option<String>,
 }
 
+/// A fetch's progress: `0..=1` and a short status.
+pub type FetchProgress<'a> = &'a (dyn Fn(f32, &str) + Sync);
+/// Whether the fetch should give up.
+pub type FetchCancelled<'a> = &'a (dyn Fn() -> bool + Sync);
+/// Fetches a model's weights into the downloads folder: `(model id, progress, cancelled)`. The
+/// shell provides it (this crate has no network): `photocraft_ai::native::model_fetcher`.
+pub type Fetch = Arc<dyn Fn(&str, FetchProgress<'_>, FetchCancelled<'_>) -> std::result::Result<(), String> + Send + Sync>;
+
 /// See the module docs.
 pub struct NativeInpainter {
     path: PathBuf,
     migan: Option<PathBuf>,
     /// The AI Model Manager's downloads folder, searched first.
     downloads: Option<PathBuf>,
+    /// Gets missing weights for a request that allows it (`allow_download`).
+    fetch: Option<Fetch>,
     /// The loaded model.
     model: Mutex<Option<Burn>>,
     /// Manga LaMa on DirectML, once loaded.
@@ -89,6 +99,7 @@ impl NativeInpainter {
             path,
             migan: None,
             downloads: None,
+            fetch: None,
             model: Mutex::new(None),
             dml: Mutex::new(None),
             dml_failed: Mutex::new(None),
@@ -116,6 +127,23 @@ impl NativeInpainter {
     pub fn with_downloads(mut self, dir: PathBuf) -> Self {
         self.downloads = Some(dir);
         self
+    }
+
+    /// How a request with `allow_download` gets weights that aren't here.
+    pub fn with_fetch(mut self, fetch: Fetch) -> Self {
+        self.fetch = Some(fetch);
+        self
+    }
+
+    /// Fetches `req`'s weights when they are missing and the request allows it.
+    fn fetch_if_missing(&self, req: &Request, hooks: &Arc<dyn Hooks>) -> Result<()> {
+        let Some(fetch) = self.fetch.as_ref().filter(|_| req.allow_download) else { return Ok(()) };
+        if self.path_of(req.model).is_none_or(|p| p.is_file()) {
+            return Ok(());
+        }
+        let progress = |fraction: f32, status: &str| hooks.progress(fraction, status);
+        let cancelled = || hooks.cancelled();
+        fetch(req.model, &progress, &cancelled).map_err(|e| if hooks.cancelled() { LamaError::Cancelled } else { LamaError::Unavailable(e) })
     }
 
     fn file_of(model: &str) -> Option<(&'static str, u64)> {
@@ -434,6 +462,7 @@ impl Inpainter for NativeInpainter {
         // burn panics on device failures (out of memory, a lost GPU): report it as an error and
         // drop the model so the next request loads it again.
         let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.fetch_if_missing(&req, &hooks)?;
             // An automatic run DirectML couldn't load the model for earlier: it leaves DirectML too.
             let mut left = (req.backend == GpuBackend::Auto && req.model == LAMA && !cpu_forced(req.cpu))
                 .then(|| self.dml_failed.lock().unwrap_or_else(PoisonError::into_inner).clone())
