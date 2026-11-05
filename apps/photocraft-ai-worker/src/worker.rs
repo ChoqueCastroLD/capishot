@@ -441,15 +441,7 @@ async fn read_stream(body: &web_sys::ReadableStream, model: &ModelInfo) -> Resul
     let reader: ReadableStreamDefaultReader = body.get_reader().dyn_into().map_err(|_| err("no reader".into()))?;
     let mut bytes: Vec<u8> = Vec::new();
     let total = usize::try_from(model.bytes).map_err(|_| err("too large".into()))?;
-    // Room for the decoded weights (f16 to f32: twice the file) below the file, which touches no
-    // page. They fill it, so the file ends up last in the module's heap and its space, once freed,
-    // joins the free end for the model's run. Below them it would stay a hole of 100 MB that the
-    // run's largest tensors don't fit, and a WebAssembly memory never shrinks.
-    let mut room: Vec<u8> = Vec::new();
-    let _ = room.try_reserve_exact(total.saturating_mul(2));
-    std::hint::black_box(room.as_ptr());
     bytes.try_reserve_exact(total).map_err(|_| err("not enough memory".into()))?;
-    drop(room);
     loop {
         let chunk = JsFuture::from(reader.read()).await.map_err(|e| err(js_err(e)))?;
         if get(&chunk, "done").as_bool().unwrap_or(true) {
@@ -744,11 +736,9 @@ async fn inpaint_inner(msg: &JsValue, id: f64) -> std::result::Result<(Vec<f32>,
         (Some((_, l)), Some(rt)) => (l, rt),
         _ => {
             STATE.with(|s| s.borrow_mut().inpaint = None);
-            // The runtime first: its thread pool's stacks stay in the heap for good, and above
-            // the weight file they would keep its space from joining the heap's free end.
-            let rt = runtime(cpu).await.map_err(|e| plain(e.to_string()))?;
             let bytes = weights(model, &base, download, &p).await.map_err(|e| plain(e.to_string()))?;
             p.send(0.12, "Preparing the model");
+            let rt = runtime(cpu).await.map_err(|e| plain(e.to_string()))?;
             let gpu = rt.accel() == Accel::Gpu;
             let l = Rc::new(photocraft_ai_lama::Generator::from_safetensors(&bytes, rt.device()).map_err(|e| (e.to_string(), gpu && is_device(&e)))?);
             STATE.with(|s| s.borrow_mut().inpaint = Some((model.id, l.clone())));
