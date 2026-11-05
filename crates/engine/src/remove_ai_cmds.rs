@@ -330,6 +330,34 @@ mod tests {
         assert!(r.get("device").is_none() && r.get("damage").is_some(), "{r}");
     }
 
+    /// The fake, on a device named `CPU` whatever the request asked for.
+    struct ForcedCpu(FakeInpainter);
+
+    impl photocraft_ai_lama::service::Inpainter for ForcedCpu {
+        fn model_state(&self) -> photocraft_ai_lama::service::ModelState {
+            self.0.model_state()
+        }
+        fn model_state_of(&self, id: &str) -> photocraft_ai_lama::service::ModelState {
+            self.0.model_state_of(id)
+        }
+        fn device(&self) -> String {
+            "CPU".into()
+        }
+        fn run(&self, req: photocraft_ai_lama::service::Request, hooks: Arc<dyn photocraft_ai_lama::service::Hooks>, done: photocraft_ai_lama::service::Done) {
+            self.0.run(req, hooks, done);
+        }
+    }
+
+    /// `CAPISHOT_AI_DEVICE=cpu` forces the CPU inside the service: the reply said `"device": "CPU"`,
+    /// `"cpu": false`.
+    #[test]
+    fn a_removal_forced_onto_the_cpu_says_so() {
+        let mut s = page(Arc::new(FakeInpainter::default()), true);
+        s.set_inpainter(Some(Arc::new(ForcedCpu(FakeInpainter::default()))));
+        let r = s.execute(ID, json!({"strokes": [[[29, 22], [35, 22]]], "size": 14})).unwrap();
+        assert_eq!((r["device"].clone(), r["cpu"].clone(), r["fellBack"].clone()), (json!("CPU"), json!(true), json!(false)), "{r}");
+    }
+
     /// The browser threads build reads the stroke's window and hole on the pool (seconds on a
     /// phone: the page froze 2 s in `cmd.run`), then hands them to the page's thread between
     /// frames, where the AI worker is: here the same path natively.

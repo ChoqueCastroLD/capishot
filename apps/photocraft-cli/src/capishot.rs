@@ -32,7 +32,12 @@ pub(crate) fn with_fonts_in(mut h: Headless, allow_online: bool, config_dir: Opt
     // `edit.inpaintAi` and the Remove tool's AI mode: Manga LaMa on this machine's GPU or CPU,
     // weights from the models folder or CAPISHOT_LAMA_WEIGHTS (feature `ai`).
     #[cfg(feature = "ai")]
-    if let Some(i) = photocraft_ai_lama::native::NativeInpainter::locate(models.as_deref()) {
+    if let Some(mut i) = photocraft_ai_lama::native::NativeInpainter::locate(models.as_deref()) {
+        // A request with `allowDownload` fetches the weights, as in the desktop app.
+        if let Some(dir) = &models {
+            let cache = photocraft_ai::cache::DiskCache::in_dir(dir);
+            i = i.with_fetch(std::sync::Arc::new(photocraft_ai::native::model_fetcher(cache, Some(photocraft_ai::cache::models_url_from_env()))));
+        }
         h.session.set_inpainter(Some(std::sync::Arc::new(i)));
     }
     // `edit.generativeFill`: Stable Diffusion inpainting on this machine (feature `ai`), files from

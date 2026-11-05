@@ -1,5 +1,7 @@
 //! The crate's integration tests, linked into one test binary.
 
+#[cfg(feature = "ai")]
+mod ai_download;
 mod cli;
 mod man_and_completions;
 mod orientation;
