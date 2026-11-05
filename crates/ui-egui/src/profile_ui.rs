@@ -22,9 +22,44 @@ fn all_sections() -> Vec<(&'static str, &'static str)> {
     photocraft_engine::prefs::profile::SECTIONS.iter().copied().chain(SHELL_SECTIONS).collect()
 }
 
+/// Window › Theme items of the user's themes: `window.theme.custom.<theme id>`.
+pub const CUSTOM: &str = "window.theme.custom.";
+/// Window › Theme: Manage Themes…, Create Theme… and Load Theme…, in menu order.
+pub const ACTIONS: [&str; 3] = ["window.theme.manage", "window.theme.create", "window.theme.load"];
+
+/// Runs a Window › Theme item of this dialog's; `None` when `id` isn't one.
+pub fn menu(app: &mut PhotocraftApp, id: &str) -> Option<Result<Value, String>> {
+    match id {
+        "window.theme.manage" => Some(Ok(json!({"dialog": open(app)}))),
+        "window.theme.create" => Some(Ok(json!({"dialog": create(app)}))),
+        "window.theme.load" => Some(load_theme(app)),
+        _ => id.strip_prefix(CUSTOM).map(str::to_string).map(|theme| app.run("theme.custom.use", json!({"id": theme}))),
+    }
+}
+
 /// Opens Profile & Themes on its themes tab.
 pub fn open(app: &mut PhotocraftApp) -> u64 {
     open_on(app, "themes")
+}
+
+/// Opens the Theme editor on a new theme starting from the one in use. A theme already being
+/// edited stays, with its unsaved changes.
+fn create(app: &mut PhotocraftApp) -> u64 {
+    let id = open(app);
+    let custom = app.session.prefs().interface.active_custom_theme().cloned();
+    let kind = app.ui.theme;
+    if let Some(d) = app.ui.dialog_mut(id)
+        && !d.fields.get("edit").is_some_and(Value::is_object)
+    {
+        match custom {
+            Some(c) => {
+                let name = crate::i18n::fmt(tl!("My {theme}"), &[("theme", &c.name)]);
+                edit(&mut d.fields, "", &name, &c.css, serde_json::to_value(&c.meta).unwrap_or_default(), &c.icon);
+            }
+            None => edit_from_builtin(&mut d.fields, kind),
+        }
+    }
+    id
 }
 
 fn open_on(app: &mut PhotocraftApp, tab: &str) -> u64 {
@@ -97,6 +132,12 @@ fn edit(f: &mut Map<String, Value>, id: &str, name: &str, css: &str, meta: Value
     f.insert("edit".into(), json!({"id": id, "name": name, "css": css, "meta": meta, "icon": icon, "text": false}));
 }
 
+/// Starts the editor on a new theme based on the built-in `kind`.
+fn edit_from_builtin(f: &mut Map<String, Value>, kind: ThemeKind) {
+    let name = crate::i18n::fmt(tl!("My {theme}"), &[("theme", tl!(kind.label()))]);
+    edit(f, "", &name, &format!(":root {{\n  --base: {};\n}}\n", kind.id()), json!({}), "");
+}
+
 fn themes_tab(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     let t = Tokens::get(ui.ctx());
     let interface = app.session.prefs().interface.clone();
@@ -160,7 +201,7 @@ fn themes_tab(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
     ui.add_space(6.0);
     ui.horizontal_wrapped(|ui| {
         if crate::widgets::secondary_button(ui, tl!("Import theme…"), 0.0).clicked()
-            && let Err(e) = app.pick_file_bytes_filtered(&["capishot"], |app, name, bytes| import_theme(app, &name, &bytes).map(|()| Value::Null))
+            && let Err(e) = load_theme(app)
         {
             say(f, e);
         }
@@ -181,8 +222,7 @@ fn themes_tab(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
                 app.set_theme(ui.ctx(), kind);
             }
             if ui.small_button(tl!("New theme from this…")).clicked() {
-                let name = crate::i18n::fmt(tl!("My {theme}"), &[("theme", tl!(kind.label()))]);
-                edit(f, "", &name, &format!(":root {{\n  --base: {};\n}}\n", kind.id()), json!({}), "");
+                edit_from_builtin(f, kind);
             }
         });
     }
@@ -195,6 +235,11 @@ fn export_theme(app: &mut PhotocraftApp, id: &str) -> Result<Value, String> {
     let file = out["file"].as_str().unwrap_or("theme.theme.capishot").to_string();
     crate::font_projects_ui::save_bytes(app, &file, bytes);
     Ok(Value::Null)
+}
+
+/// Asks for a `.theme.capishot` and imports it.
+fn load_theme(app: &mut PhotocraftApp) -> Result<Value, String> {
+    app.pick_file_bytes_filtered(&["capishot"], |app, name, bytes| import_theme(app, &name, &bytes).map(|()| Value::Null))
 }
 
 /// A `.theme.capishot` opened (File › Open, a drop, Import theme…): added and used, with what

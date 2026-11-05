@@ -60,6 +60,18 @@ fn sync_with_system_menu_keeps_saved_slots_and_its_checkmark_across_palettes() {
 }
 
 #[test]
+fn a_custom_themes_name_is_not_translated() {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+    app.run("theme.custom.save", json!({"name": "Theme", "css": ":root { --base: pro; }"})).unwrap();
+    let es = crate::i18n::Lang::all().find(|l| l.code() == "es").unwrap();
+    let items = menu_items(&app);
+    let item = items.iter().find(|i| i.id == "window.theme.custom.theme").unwrap();
+    assert_eq!(translated_menu_label(es, item), "Theme");
+    let bar = crate::native_menu::photocraft_layout(&items, es, "es").bar;
+    assert_eq!(bar.find("window.theme.custom.theme").unwrap().label, "Theme");
+}
+
+#[test]
 fn submenu_header_is_disabled_when_every_item_is() {
     let item = |label: &str, enabled: bool| MenuItem {
         id: label.into(),

@@ -152,9 +152,18 @@ pub(super) fn checked(app: &PhotocraftApp, id: &str) -> Option<bool> {
         return Some(checked);
     }
     use photocraft_doc::{ColorMode, SampleType};
+    if crate::profile_ui::ACTIONS.contains(&id) {
+        return None;
+    }
     if let Some(name) = id.strip_prefix("window.theme.").filter(|n| *n != "toggle") {
-        let auto = app.session.prefs().interface.appearance_mode == photocraft_engine::prefs::AppearanceMode::Auto;
-        return Some(if name == "system" { auto } else { !auto && crate::theme::ThemeKind::from_name(name) == Some(app.ui.theme) });
+        let interface = &app.session.prefs().interface;
+        // One mark: the custom theme in use, or the built-in choice when there is none.
+        let custom = interface.active_custom_theme();
+        if let Some(theme) = id.strip_prefix(crate::profile_ui::CUSTOM) {
+            return Some(custom.is_some_and(|c| c.id == theme));
+        }
+        let auto = interface.appearance_mode == photocraft_engine::prefs::AppearanceMode::Auto;
+        return Some(custom.is_none() && if name == "system" { auto } else { !auto && crate::theme::ThemeKind::from_name(name) == Some(app.ui.theme) });
     }
     if let Some(c) = crate::view_cmds::checked(app, id) {
         return Some(c);
@@ -249,8 +258,8 @@ pub(crate) fn reveal_label() -> &'static str {
 /// Translate the fixed command label and substitute the currently configured export format.
 /// Reuse the existing translated PNG sentence, so dynamic formats work in every UI language.
 pub(super) fn translated_menu_label(lang: crate::i18n::Lang, item: &MenuItem) -> String {
-    // A document's name is shown as it is.
-    if item.id.starts_with(DOCUMENT_ITEM) {
+    // A document's or custom theme's name is shown as it is.
+    if item.id.starts_with(DOCUMENT_ITEM) || item.id.starts_with(crate::profile_ui::CUSTOM) {
         return item.label.clone();
     }
     if item.id == "file.export.quickExportAsPng"

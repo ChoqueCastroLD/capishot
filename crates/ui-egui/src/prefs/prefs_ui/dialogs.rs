@@ -13,6 +13,9 @@ pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &V
     if id == "edit.preferences.profile" {
         return Some(Ok(json!({"dialog": crate::profile_ui::open(app)})));
     }
+    if let Some(r) = crate::profile_ui::menu(app, id) {
+        return Some(r);
+    }
     if let Some(section) = id.strip_prefix("edit.preferences.") {
         return Some(Ok(json!({"dialog": open_preferences(app, section)})));
     }

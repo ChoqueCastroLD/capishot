@@ -782,4 +782,8 @@ pub static CATALOG: &[(&[&str], &str, Option<&str>, &str)] = &[
     (&["Window"], "---", None, "---"),
     (&["Window"], "Options", None, "window.panel.options"),
     (&["Window"], "Tools", None, "window.panel.tools"),
+    // Placed after the built-in themes by `menu_items`.
+    (&["Window", "Theme"], "Manage Themes…", None, "window.theme.manage"),
+    (&["Window", "Theme"], "Create Theme…", None, "window.theme.create"),
+    (&["Window", "Theme"], "Load Theme…", None, "window.theme.load"),
 ];
