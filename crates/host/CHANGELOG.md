@@ -25,6 +25,18 @@ may change in any commit; their changes are listed under **Experimental**. A cha
 - **Experimental**: `PhotocraftApp::{gpu_canvas, sync_views_if_moved}`; `embed::camera` and
   `embed::set_camera` read the index as the session's document even before the frame's sync.
 
+## API_VERSION 1, additions (tiles)
+
+- `CapishotView::ui_tiles` and `CapishotEditor::ui_tiles`, `view::{Tile, TileOutput, TilesOutput,
+  TileCamera, MAX_TILES}`: one canvas per rect, the active document's first plain tile live.
+- `Tile::with_view`: one document as several named views, each composited on its own; the layers'
+  visibility, the revision and the history stay as they are. Each named view holds a display texture
+  (README › Tiles); `editor.setMemoryBudget` counts them.
+- `ViewOptions::tile_camera` (`TileCamera::Shared` by default): build `ViewOptions` with
+  `..Default::default()`.
+- **Experimental**: `embed::{tiles_frame, tiles_rect, EmbedTile, TileDrawn, TileCamera, MAX_TILES}`,
+  `photocraft_engine::doc_views_cmds::{view_document, view_signature}`.
+
 ## API_VERSION 1, additions (font aliases)
 
 - `fonts::FontFile {name, bytes, aliases}` (`new`, `with_aliases`, `From<(String, Vec<u8>)>`,

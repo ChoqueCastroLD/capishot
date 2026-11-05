@@ -18,6 +18,8 @@ use photocraft_engine::Session;
 use photocraft_engine::jobs::JobEvent;
 use serde_json::Value;
 
+pub use crate::canvas::{EmbedTile, MAX_TILES, TileCamera, TileDrawn};
+
 use crate::canvas::ViewXform;
 use crate::state::Tool;
 use crate::{ControlRequest, PhotocraftApp, Services, shortcuts, theme, type_tool};
@@ -326,10 +328,41 @@ pub fn frame(app: &mut PhotocraftApp, ui: &mut egui::Ui, rect: Rect, opts: &Embe
     // The host's fonts (Capishot's named weights don't exist in its context) and window.
     let hosted = crate::hosted::Hosted::enter();
     let (jobs, took_keys) = logic(app, &ctx, rect, opts);
-    let drawn = draw(app, ui, rect, opts);
+    let drawn = draw(app, ui, rect, opts, |app, ui| crate::canvas::embedded_area(app, ui, rect));
     let xform = if drawn { ViewXform::active(app) } else { None };
     let window = hosted.finish().into_iter().filter(|c| !matches!(c, egui::ViewportCommand::RequestPaintWhileHidden)).collect();
     EmbedFrame { drawn, xform, jobs, took_keys, window }
+}
+
+/// The screen area of `tiles`: the rect [`tiles_frame`] takes keys and draws in. Empty, at `ui`'s
+/// cursor, when none of them has an area.
+pub fn tiles_rect(ui: &egui::Ui, tiles: &[EmbedTile]) -> Rect {
+    tiles
+        .iter()
+        .map(|t| t.rect)
+        .filter(|r| crate::canvas::tile_rect_ok(*r))
+        .reduce(|a, b| a.union(b))
+        .unwrap_or_else(|| Rect::from_min_size(ui.cursor().min, egui::Vec2::ZERO))
+}
+
+/// [`frame`] with one canvas per tile: the same logic and dialogs, the active document's first
+/// plain tile live (tools, overlays), every other tile a view that pans, zooms and, on a press,
+/// makes its document the active one. The second value holds one entry per tile, in order.
+/// [`EmbedFrame::xform`] is the live tile's.
+pub fn tiles_frame(app: &mut PhotocraftApp, ui: &mut egui::Ui, tiles: &[EmbedTile], camera: TileCamera, opts: &EmbedOptions) -> (EmbedFrame, Vec<TileDrawn>) {
+    let ctx = ui.ctx().clone();
+    install(&ctx);
+    let rect = tiles_rect(ui, tiles);
+    let hosted = crate::hosted::Hosted::enter();
+    let (jobs, took_keys) = logic(app, &ctx, rect, opts);
+    let mut shown = Vec::new();
+    let drawn = draw(app, ui, rect, opts, |app, ui| {
+        shown = crate::canvas::embedded_tiles(app, ui, tiles, camera);
+        shown.iter().any(|t| t.drawn)
+    });
+    let xform = shown.iter().find(|t| t.live).and_then(|t| t.xform);
+    let window = hosted.finish().into_iter().filter(|c| !matches!(c, egui::ViewportCommand::RequestPaintWhileHidden)).collect();
+    (EmbedFrame { drawn, xform, jobs, took_keys, window }, shown)
 }
 
 /// `logic_frame`'s part the canvas needs. Returns the ended jobs and whether keys were taken.
@@ -419,8 +452,8 @@ fn keys(app: &mut PhotocraftApp, ctx: &egui::Context, rect: Rect, keys: &Keys) -
     true
 }
 
-/// `ui_frame`'s part the canvas needs: the canvas in `rect`, the editor's windows, the IME tail.
-fn draw(app: &mut PhotocraftApp, ui: &mut egui::Ui, rect: Rect, opts: &EmbedOptions) -> bool {
+/// `ui_frame`'s part the canvas needs: the canvas (`area`) in `rect`, the editor's windows, the IME tail.
+fn draw(app: &mut PhotocraftApp, ui: &mut egui::Ui, rect: Rect, opts: &EmbedOptions, area: impl FnOnce(&mut PhotocraftApp, &mut egui::Ui) -> bool) -> bool {
     let ctx = ui.ctx().clone();
     if !app.ui.dialogs.is_empty() || app.ui.text_edit.is_none() || ctx.text_edit_focused() || ctx.egui_wants_keyboard_input() {
         type_tool::controls_only(app, &ctx);
@@ -433,7 +466,7 @@ fn draw(app: &mut PhotocraftApp, ui: &mut egui::Ui, rect: Rect, opts: &EmbedOpti
     let clip = rect.intersect(ui.clip_rect());
     let mut canvas_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).id_salt("capishot-embedded-canvas"));
     canvas_ui.set_clip_rect(clip);
-    let drawn = crate::canvas::embedded_area(app, &mut canvas_ui, rect);
+    let drawn = area(app, &mut canvas_ui);
     if opts.dialogs {
         windows(app, &ctx);
     }

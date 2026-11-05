@@ -260,15 +260,22 @@ pub(crate) fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
 fn canvas_bytes(app: &PhotocraftApp, id: DocId) -> u64 {
     let gpu = app.gpu.as_ref().and_then(|g| g.texture_info(id.0)).map_or(0, |(_, b)| b);
     let tiles: usize = app.canvases.iter().filter(|((d, _), _)| *d == id).filter_map(|(_, c)| c.tiles.as_ref()).map(|t| t.texture_bytes()).sum();
-    gpu.saturating_add(tiles as u64)
+    gpu.saturating_add(tiles as u64).saturating_add(crate::canvas::tile_views_bytes(app, id))
 }
 
 /// Evict the canvas textures of the least recently shown documents until every document's fit
-/// the budget; the active document and those being shown or prewarmed keep theirs. The documents
-/// stay open: the next frame that shows one draws it again.
+/// the budget; named views no tile shows go first, and the active document, those a host's tiles
+/// show and those being shown or prewarmed keep theirs. The documents stay open: the next frame
+/// that shows one draws it again.
 fn enforce_budget(app: &mut PhotocraftApp) -> Vec<DocId> {
     let Some(budget) = app.doc_switch.budget else { return Vec::new() };
     let active = app.session.active().map(|st| st.doc.id);
+    let total_now = |app: &PhotocraftApp| -> u64 { app.session.documents().iter().map(|st| canvas_bytes(app, st.doc.id)).sum() };
+    let over = total_now(app).saturating_sub(budget);
+    if over == 0 {
+        return Vec::new();
+    }
+    crate::canvas::free_idle_tile_views(app, over);
     let mut held: Vec<(DocId, u64)> =
         app.session.documents().iter().map(|st| (st.doc.id, canvas_bytes(app, st.doc.id))).filter(|(_, b)| *b > 0).collect();
     let mut total: u64 = held.iter().map(|(_, b)| b).sum();
@@ -282,7 +289,7 @@ fn enforce_budget(app: &mut PhotocraftApp) -> Vec<DocId> {
         if total <= budget {
             break;
         }
-        if Some(id) == active || app.doc_switch.waiting.iter().any(|w| w.id == id) {
+        if Some(id) == active || crate::canvas::tiles_show(app, id) || app.doc_switch.waiting.iter().any(|w| w.id == id) {
             continue;
         }
         total = total.saturating_sub(bytes);
@@ -293,6 +300,7 @@ fn enforce_budget(app: &mut PhotocraftApp) -> Vec<DocId> {
             gpu.evict(id.0);
         }
         app.canvases.retain(|(d, _), _| d != id);
+        crate::canvas::free_document_tile_views(app, *id);
     }
     evicted
 }

@@ -17,7 +17,9 @@ What it does, one button each (`src/script.rs`, also run headless by `tests/cont
 6. saves the document as PSD bytes (incremental).
 
 The selected layer's bounds are drawn over the canvas by the host, in document coordinates
-(`src/view.rs`): the overlay pattern for item boxes, links and other people's cursors.
+(`src/view.rs`): the overlay pattern for item boxes, links and other people's cursors. The
+"Side by side" checkbox draws the page twice with `CapishotView::ui_tiles`: as it is (live) and as a
+named view without the selected layer, on one camera, the layers' visibility untouched.
 
 ## It is its own Cargo workspace
 

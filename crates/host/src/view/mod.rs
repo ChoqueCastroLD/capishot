@@ -42,6 +42,13 @@
 //! field has the keyboard, and never the app shell's shortcuts (Open, New, Save, Close, Quit,
 //! Print, Preferences). A host filter decides key by key ([`Keys::filter`]); the keys the editor
 //! doesn't take stay in egui's input for the host's widgets drawn after the view.
+//!
+//! **Tiles.** [`CapishotView::ui_tiles`] draws one canvas per [`Tile`] instead of one in a rect:
+//! pages side by side, or one page as several named views (`Host::define_view`) without touching
+//! its layers' visibility. The active document's first plain tile is live; the others pan, zoom
+//! and, on a press, make their document the active one. [`ViewOptions::tile_camera`]: one camera
+//! for all, or one each. A tile with a named view holds its own display texture (`4/3 × 4 ×
+//! width × height` bytes, about 44 MB for a 2400×3400 page; see `README.md` › Tiles).
 
 mod hooks;
 mod overlay;
@@ -58,7 +65,7 @@ use serde_json::{Value, json};
 
 pub use overlay::{CanvasTransform, Overlay};
 pub use shell::{FileDialog, FileRequest};
-pub use photocraft_ui_egui::embed::{Camera, CameraChange, KeyFilter, KeyRouting, Keys, RenderState, Shortcut, default_filter};
+pub use photocraft_ui_egui::embed::{Camera, CameraChange, KeyFilter, KeyRouting, Keys, MAX_TILES, RenderState, Shortcut, TileCamera, default_filter};
 pub use theme::HostTheme;
 
 use crate::{DocumentId, Event, Host};
@@ -190,6 +197,8 @@ pub struct ViewOptions {
     /// The Move tool's Auto-Select checkbox, applied when it changes; `None` leaves it as the
     /// editor (and the person, through the options bar) has it. The editor starts with it on.
     pub move_auto_select: Option<bool>,
+    /// [`CapishotView::ui_tiles`]: one camera for all the tiles (default), or one each.
+    pub tile_camera: TileCamera,
 }
 
 impl Default for ViewOptions {
@@ -203,7 +212,40 @@ impl Default for ViewOptions {
             rulers: Some(false),
             move_target: None,
             move_auto_select: None,
+            tile_camera: TileCamera::default(),
         }
+    }
+}
+
+/// One canvas of [`CapishotView::ui_tiles`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct Tile {
+    /// The document.
+    pub document: DocumentId,
+    /// Where, in egui points, inside the `ui` given.
+    pub rect: Rect,
+    /// The named view it shows (`Host::define_view`), composited on its own: the document's layers
+    /// keep their visibility and the tile takes a display texture. `None`: the document as it is.
+    /// A named view's tile shows the committed document (no live stroke or dialog preview).
+    pub view: Option<String>,
+}
+
+impl Tile {
+    /// `document` as it is, in `rect`.
+    pub fn new(document: DocumentId, rect: Rect) -> Self {
+        Tile { document, rect, view: None }
+    }
+
+    /// Showing named view `name`.
+    #[must_use]
+    pub fn with_view(self, name: impl Into<String>) -> Self {
+        Tile { view: Some(name.into()), ..self }
+    }
+}
+
+impl From<(DocumentId, Rect)> for Tile {
+    fn from((document, rect): (DocumentId, Rect)) -> Self {
+        Tile::new(document, rect)
     }
 }
 
@@ -308,6 +350,46 @@ impl ViewOutput {
     pub fn overlay(&self) -> Option<&Overlay> {
         self.overlay.as_ref()
     }
+}
+
+/// What one tile of [`CapishotView::ui_tiles`] drew, in the order the tiles were given.
+#[derive(Debug)]
+pub struct TileOutput {
+    /// The document asked for.
+    pub document: DocumentId,
+    /// The named view asked for.
+    pub view: Option<String>,
+    /// The rect asked for.
+    pub rect: Rect,
+    /// A canvas was drawn (false: see [`Self::error`]; the rect shows the pasteboard).
+    pub drawn: bool,
+    /// This tile has the tools: the host's cue for a focus frame around it.
+    pub live: bool,
+    /// Its canvas mapping, `None` when it wasn't drawn.
+    pub transform: Option<CanvasTransform>,
+    /// The document point under the pointer, when it is over this canvas.
+    pub hover: Option<[f64; 2]>,
+    /// Why it wasn't drawn: no such document or view, a rect without an area, more than
+    /// [`MAX_TILES`] tiles, [`Mode::Full`]. Reported every frame it holds.
+    pub error: Option<String>,
+    overlay: Option<Overlay>,
+}
+
+impl TileOutput {
+    /// A painter over this canvas with its mapping, as [`ViewOutput::overlay`].
+    pub fn overlay(&self) -> Option<&Overlay> {
+        self.overlay.as_ref()
+    }
+}
+
+/// What one [`CapishotView::ui_tiles`] call did.
+#[derive(Debug)]
+pub struct TilesOutput {
+    /// As [`CapishotView::ui_in_rect`] reports it: events, the active document, and the live
+    /// tile's `transform`, `hover` and `overlay` (`None` without a live tile).
+    pub view: ViewOutput,
+    /// One per tile asked for, in order.
+    pub tiles: Vec<TileOutput>,
 }
 
 /// The editor's canvas as an egui widget. One per editor area; not `Send` (it lives with the UI).
@@ -506,6 +588,50 @@ impl CapishotView {
     /// document switches, the shortcuts the host lets through), the active document's canvas,
     /// the editor's dialogs; then the host's events. The one call a host makes per frame.
     pub fn ui_in_rect(&mut self, ui: &mut egui::Ui, rect: Rect, host: &mut Host) -> ViewOutput {
+        self.run_frame(ui, rect, None, host).0
+    }
+
+    /// The widget for this frame as one canvas per tile: the same one call as [`Self::ui_in_rect`]
+    /// (make either, not both, per frame), in [`Mode::Embedded`]. The active document's first
+    /// plain tile is live, with the tools and their overlays; every other tile pans and zooms, and a
+    /// press on another document's tile makes that document the active one. Without a plain tile
+    /// of the active document no tile has the tools. A bad tile (no such document or view, a
+    /// rect without an area) reports [`TileOutput::error`] and the others draw.
+    ///
+    /// [`Mode::Full`] draws Capishot's whole interface over the tiles' area instead, and every tile
+    /// reports an error.
+    pub fn ui_tiles(&mut self, ui: &mut egui::Ui, tiles: &[Tile], host: &mut Host) -> TilesOutput {
+        let asked: Vec<embed::EmbedTile> = tiles.iter().map(|t| embed::EmbedTile { document: t.document.into(), rect: t.rect, view: t.view.clone() }).collect();
+        let rect = embed::tiles_rect(ui, &asked);
+        let (view, drawn) = self.run_frame(ui, rect, Some(&asked), host);
+        let pointer = view.response.hover_pos();
+        let tiles = tiles
+            .iter()
+            .enumerate()
+            .map(|(i, t)| {
+                let d = drawn.get(i);
+                let transform = d.and_then(|d| d.xform.map(|xf| CanvasTransform::new(xf, t.document, d.size)));
+                TileOutput {
+                    document: t.document,
+                    view: t.view.clone(),
+                    rect: t.rect,
+                    drawn: d.is_some_and(|d| d.drawn),
+                    live: d.is_some_and(|d| d.live),
+                    transform,
+                    hover: transform.and_then(|x| pointer.and_then(|p| x.doc_at(p))),
+                    error: match d {
+                        Some(d) => d.error.clone(),
+                        None => Some("no tiles were drawn this frame: Mode::Full, or see ViewEvent::Failed".into()),
+                    },
+                    overlay: transform.map(|x| Overlay::new(ui.painter_at(x.canvas_rect()), x)),
+                }
+            })
+            .collect();
+        TilesOutput { view, tiles }
+    }
+
+    /// One frame: the canvas in `rect`, or `tiles` when given. Returns what each tile drew too.
+    fn run_frame(&mut self, ui: &mut egui::Ui, rect: Rect, tiles: Option<&[embed::EmbedTile]>, host: &mut Host) -> (ViewOutput, Vec<embed::TileDrawn>) {
         self.attach(host);
         let ctx = ui.ctx().clone();
         let tokens = match &self.options.theme {
@@ -516,7 +642,7 @@ impl CapishotView {
         let host_tool = host.tool().to_string();
         // Lend the host's session to the editor for this frame.
         std::mem::swap(host.session_mut(), &mut self.app.session);
-        let lent = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.lent_frame(ui, rect, &host_tool)));
+        let lent = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.lent_frame(ui, rect, tiles, &host_tool)));
         std::mem::swap(host.session_mut(), &mut self.app.session);
         let (frame, mut view_events, tool) = match lent {
             Ok(r) => r,
@@ -539,7 +665,7 @@ impl CapishotView {
         let response = ui.interact(rect, ui.scope_id().with("capishot-view"), Sense::hover());
         let hover = frame.transform.and_then(|t| response.hover_pos().and_then(|p| t.doc_at(p)));
         let overlay = frame.transform.map(|t| Overlay::new(ui.painter_at(t.canvas_rect()), t));
-        ViewOutput {
+        let output = ViewOutput {
             events,
             view_events,
             response,
@@ -548,12 +674,13 @@ impl CapishotView {
             hover,
             took_keys: frame.took_keys,
             overlay,
-        }
+        };
+        (output, frame.tiles)
     }
 
     /// The frame while the editor holds the session. Returns what it did, the view's events and
     /// the tool the person picked (to tell the host once the session is back).
-    fn lent_frame(&mut self, ui: &mut egui::Ui, rect: Rect, host_tool: &str) -> (Lent, Vec<ViewEvent>, Option<String>) {
+    fn lent_frame(&mut self, ui: &mut egui::Ui, rect: Rect, tiles: Option<&[embed::EmbedTile]>, host_tool: &str) -> (Lent, Vec<ViewEvent>, Option<String>) {
         let ctx = ui.ctx().clone();
         let mut events = Vec::new();
         // The host owned the session since the last frame (`Host::show` reorders it at once): the
@@ -604,8 +731,11 @@ impl CapishotView {
         let f = match self.options.mode {
             Mode::Embedded => {
                 let opts = EmbedOptions { keys: self.options.keys.clone(), dialogs: self.options.dialogs };
-                let f = embed::frame(&mut self.app, ui, rect, &opts);
-                Drawn { jobs: f.jobs, took_keys: f.took_keys, window: f.window, xform: f.xform }
+                let (f, tiles) = match tiles {
+                    Some(tiles) => embed::tiles_frame(&mut self.app, ui, tiles, self.options.tile_camera, &opts),
+                    None => (embed::frame(&mut self.app, ui, rect, &opts), Vec::new()),
+                };
+                Drawn { jobs: f.jobs, took_keys: f.took_keys, window: f.window, xform: f.xform, tiles }
             }
             #[cfg(feature = "full")]
             Mode::Full => {
@@ -618,7 +748,7 @@ impl CapishotView {
                 };
                 let opts = embed::FullOptions { keys: self.options.keys.clone(), tokens };
                 let f = embed::full_frame(&mut self.app, ui, rect, &opts, &mut self.full);
-                Drawn { jobs: f.jobs, took_keys: f.took_keys, window: f.window, xform: f.xform }
+                Drawn { jobs: f.jobs, took_keys: f.took_keys, window: f.window, xform: f.xform, tiles: Vec::new() }
             }
         };
         let window = asked.into_iter().filter(|c| !matches!(c, egui::ViewportCommand::RequestPaintWhileHidden)).chain(f.window);
@@ -667,7 +797,7 @@ impl CapishotView {
             self.synced_tool = Some(now.clone());
             now
         });
-        (Lent { jobs: f.jobs, document, transform, took_keys: f.took_keys }, events, tool)
+        (Lent { jobs: f.jobs, document, transform, took_keys: f.took_keys, tiles: f.tiles }, events, tool)
     }
 
     /// The queued requests, against the lent session.
@@ -715,6 +845,7 @@ struct Drawn {
     took_keys: bool,
     window: Vec<egui::ViewportCommand>,
     xform: Option<photocraft_ui_egui::canvas::ViewXform>,
+    tiles: Vec<embed::TileDrawn>,
 }
 
 /// Milliseconds to a tenth.
@@ -729,6 +860,7 @@ struct Lent {
     document: Option<DocumentId>,
     transform: Option<CanvasTransform>,
     took_keys: bool,
+    tiles: Vec<embed::TileDrawn>,
 }
 
 /// `editor.showDocument` / `document.prewarm`'s `viewport` for a camera (`None`: its own).
@@ -786,6 +918,11 @@ impl CapishotEditor {
         self.view.ui_in_rect(ui, rect, &mut self.host)
     }
 
+    /// One canvas per tile ([`CapishotView::ui_tiles`]).
+    pub fn ui_tiles(&mut self, ui: &mut egui::Ui, tiles: &[Tile]) -> TilesOutput {
+        self.view.ui_tiles(ui, tiles, &mut self.host)
+    }
+
     /// Canvas only or Capishot's whole interface ([`CapishotView::set_mode`]).
     pub fn set_mode(&mut self, mode: Mode) {
         self.view.set_mode(mode);
@@ -799,3 +936,5 @@ impl CapishotEditor {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tiles_tests;

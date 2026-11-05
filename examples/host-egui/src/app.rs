@@ -28,6 +28,8 @@ pub struct HostApp {
     #[cfg(not(target_arch = "wasm32"))]
     selftest: Option<crate::selftest::SelfTest>,
     status: String,
+    /// Side by side: the page as it is and as `script::COMPARE_VIEW` (without the selected layer).
+    compare: bool,
     saved: Option<usize>,
     /// The layer list needs reading again.
     stale: bool,
@@ -63,6 +65,7 @@ impl HostApp {
             #[cfg(not(target_arch = "wasm32"))]
             selftest: crate::selftest::SelfTest::from_args(),
             status,
+            compare: false,
             saved: None,
             stale: true,
         };
@@ -152,6 +155,14 @@ impl HostApp {
             }
             if ui.checkbox(&mut self.digit_keys, "Capishot gets the 1–9 keys").changed() {
                 c.set_digit_keys(self.digit_keys);
+            }
+        }
+        // Two tiles of one page: as it is, and as a named view without the selected layer.
+        if ui.checkbox(&mut self.compare, "Side by side, without the selected layer").changed() && self.compare {
+            let layer = self.layers.iter().find(|row| row.selected).or_else(|| self.layers.first()).map(|row| row.id);
+            if let (Some(doc), Some(layer)) = (self.doc, layer) {
+                let r = script::define_compare_view(&mut self.host, doc, layer).map(|()| String::new());
+                self.report("Side by side", r);
             }
         }
         ui.separator();
@@ -292,8 +303,14 @@ impl eframe::App for HostApp {
         });
         let highlight = self.highlight();
         let mut out = None;
+        let compare = self.doc.filter(|_| self.compare && self.canvas.as_ref().is_some_and(|c| c.mode() == Mode::Embedded));
         egui::CentralPanel::default().show(ui, |ui| match self.canvas.as_mut() {
-            Some(c) => out = Some(c.ui(ui, &mut self.host, highlight)),
+            Some(c) => {
+                out = Some(match compare {
+                    Some(doc) => c.side_by_side(ui, &mut self.host, doc, script::COMPARE_VIEW, highlight),
+                    None => c.ui(ui, &mut self.host, highlight),
+                })
+            }
             None => {
                 ui.centered_and_justified(|ui| ui.label("The canvas needs the wgpu renderer."));
             }

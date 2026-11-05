@@ -2,7 +2,7 @@
 //! host creates `CapishotView` on its own wgpu device, draws it in a rect it chooses, and paints
 //! its overlays in document coordinates. Everything else in the example uses the engine API.
 
-use capishot_host::view::{CameraChange, CapishotView, Keys, Mode, Shortcut, ViewOutput};
+use capishot_host::view::{CameraChange, CapishotView, Keys, Mode, Shortcut, Tile, ViewOutput};
 use capishot_host::{DocumentId, Host};
 
 /// The canvas plus what the host draws over it.
@@ -49,6 +49,18 @@ impl Canvas {
             overlay.doc_rect_stroke([f64::from(x), f64::from(y), f64::from(w), f64::from(h)], stroke);
         }
         out
+    }
+
+    /// `doc` twice side by side with one camera: as it is (live, with the host's overlay) and as
+    /// named view `view`, composited on its own without touching the layers' visibility.
+    pub fn side_by_side(&mut self, ui: &mut egui::Ui, host: &mut Host, doc: DocumentId, view: &str, highlight: Option<[f32; 4]>) -> ViewOutput {
+        let area = ui.available_rect_before_wrap();
+        let (left, right) = area.split_left_right_at_fraction(0.5);
+        let out = self.view.ui_tiles(ui, &[Tile::new(doc, left.shrink(1.0)), Tile::new(doc, right.shrink(1.0)).with_view(view)], host);
+        if let (Some(overlay), Some([x, y, w, h])) = (out.view.overlay(), highlight) {
+            overlay.doc_rect_stroke([f64::from(x), f64::from(y), f64::from(w), f64::from(h)], egui::Stroke::new(1.5, ui.visuals().selection.stroke.color));
+        }
+        out.view
     }
 
     /// Zoom so the whole document fits the canvas (next frame).
