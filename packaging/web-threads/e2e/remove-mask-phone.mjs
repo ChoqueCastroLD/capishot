@@ -3,17 +3,37 @@
 // blobs wait as a mask (nothing runs, no history step); the touch bar's eraser takes the third
 // blob back out; the bar's Run fills the mask once (one undo step); Undo brings every blob back.
 // Works on either web build. With SHOTS=<dir> it saves a screenshot of each step there.
+// TOOL=RemoveAi does the same with Remove with AI: Run downloads the model from `models/` next to
+// the site's index.html (a symlink; weights are never part of a build) and fills in one job. It
+// must fetch MI-GAN with DEVICE_MEMORY=2 or less and Manga LaMa above that.
 //
-//   CHROME=<chromium> [SHOTS=<dir>] node remove-mask-phone.mjs <url>
+//   CHROME=<chromium> [SHOTS=<dir>] [TOOL=RemoveAi] [DEVICE_MEMORY=4] node remove-mask-phone.mjs <url>
 import { chromium } from 'playwright-core';
 import fs from 'node:fs';
 
 const [url] = process.argv.slice(2);
 const shots = process.env.SHOTS;
+const tool = process.env.TOOL || 'Remove';
+const ai = tool === 'RemoveAi';
+const gb = Number(process.env.DEVICE_MEMORY || '4');
 if (shots) fs.mkdirSync(shots, { recursive: true });
 const b = await chromium.launch({ executablePath: process.env.CHROME, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const ctx = await b.newContext({ viewport: { width: 360, height: 780 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, locale: 'es-ES' });
+await ctx.addInitScript((gb) => Object.defineProperty(navigator, 'deviceMemory', { get: () => gb }), gb);
+const origin = new URL(url).origin;
+await ctx.route('**/*', async (route) => {
+  const r = route.request();
+  if (!r.url().startsWith(origin)) return route.abort();
+  if (ai && r.resourceType() === 'document') {
+    const res = await route.fetch();
+    const html = (await res.text()).replace(/<meta name="capishot-ai-models"[^>]*>/, '');
+    return route.fulfill({ response: res, body: html.replace('</head>', `<meta name="capishot-ai-models" content="${origin}/models/"></head>`) });
+  }
+  return route.continue();
+});
 const p = await ctx.newPage();
+const weights = [];
+p.on('request', (r) => { if (r.url().includes('/models/')) weights.push(r.url().split('/').pop()); });
 p.on('pageerror', (e) => console.log('PAGEERROR', e.message.slice(0, 300)));
 await p.goto(url);
 await p.waitForFunction(() => self.photocraft && self.photocraft.request, null, { timeout: 300000 });
@@ -51,7 +71,7 @@ const tapRect = async (label) => {
   await touches('touchStart', [c]); await sleep(60); await touches('touchEnd', []); await sleep(500);
   return true;
 };
-const mask = async () => ((await req('ui.removeMask')).result || {}).remove || {};
+const mask = async () => (await req('ui.removeMask'))[ai ? 'removeAi' : 'remove'] || {};
 const past = async () => ((await ex('document.inspect')).history || []).length;
 // A dark blob's centre pixel, read back from the document (0..255 grey).
 const grey = async (x, y) => { const c = await ex('document.sampleColor', { x, y, size: 1 }); const v = c.color || c; return Array.isArray(v) ? Math.round(v[0] * 255) : -1; };
@@ -60,9 +80,9 @@ await ex('prefs.set', { values: { 'interface.simpleUi': 'on', 'interface.languag
 await ex('file.new', { width: 1200, height: 1800, background: 'white' });
 const blobs = [[300, 400], [800, 900], [400, 1400]];
 for (const [x, y] of blobs) await ex('paint.pencil', { points: [[x - 60, y], [x + 60, y]], size: 90, color: '#202020' });
-await req('ui.set', { tool: 'Remove', fit: true, brushSize: 200 });
+await req('ui.set', { tool, fit: true, brushSize: 200 });
 const on = await req('ui.removeMask', { on: true });
-check(!on.err && on.result?.remove?.on === true, `the switch is on (${JSON.stringify(on).slice(0, 120)})`);
+check(!on.err && on[ai ? 'removeAi' : 'remove']?.on === true, `the switch is on (${JSON.stringify(on).slice(0, 120)})`);
 await sleep(1200);
 const before = await past();
 check((await grey(...blobs[0])) < 80, 'blobs painted');
@@ -77,7 +97,7 @@ check((await grey(...blobs[0])) < 80, 'nothing removed yet');
 await shot('1-mask');
 
 check(await tapRect('removeMaskErase'), 'touch bar: eraser');
-check((await req('ui.removeMask')).result?.erase === true, 'eraser on');
+check((await req('ui.removeMask')).erase === true, 'eraser on');
 await drag([blobs[2][0] - 120, blobs[2][1]], [blobs[2][0] + 120, blobs[2][1]]);
 m = await mask();
 check(m.strokes === 4 && m.erased === 1, `one erasing stroke (${JSON.stringify(m)})`);
@@ -86,6 +106,13 @@ await shot('2-erased');
 check(await tapRect('removeMaskRun'), 'touch bar: Run');
 await idle();
 await sleep(800);
+// With AI, Run first downloads the model (no job yet), then fills.
+for (let i = 0; ai && i < 600 && (await past()) === before; i++) await sleep(1000);
+await idle();
+if (ai) {
+  const want = gb <= 2 ? 'migan' : 'manga-lama';
+  check(weights.some((w) => w.startsWith(want)) && !weights.some((w) => !w.startsWith(want) && w.includes('safetensors')), `${gb} GB fetches ${want} (${[...new Set(weights)]})`);
+}
 m = await mask();
 check(m.strokes === 0, 'the mask is gone after Run');
 check((await past()) === before + 1, `one undo step (${before} -> ${await past()})`);

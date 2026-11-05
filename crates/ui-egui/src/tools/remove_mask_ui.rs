@@ -208,6 +208,12 @@ pub fn run(app: &mut PhotocraftApp) -> bool {
             }
         }
     }
+    // It couldn't start (no model on this build, say): what was painted isn't lost.
+    if app.ui.status_error
+        && let Some(waiting) = mask_mut(app, tool)
+    {
+        *waiting = m;
+    }
     true
 }
 
