@@ -461,7 +461,7 @@ pub(crate) fn rasterize_passes(
     let stride = n + 1;
     let any_bold = colors.iter().any(|&(_, b)| b);
     // The accumulator (f32 per sample) is live while the output tiles are allocated.
-    let acc_bytes = (w * h * stride * size_of::<f32>()) as u64;
+    let acc_bytes = (w as u64).saturating_mul(h as u64).saturating_mul(stride as u64).saturating_mul(size_of::<f32>() as u64);
     if !fits_raster_budget(w, h, stride, format.sample, any_bold, MAX_RASTER_BYTES) || !fits_tile_budget(rect, format, acc_bytes, MAX_RASTER_BYTES) {
         return nothing(format);
     }
