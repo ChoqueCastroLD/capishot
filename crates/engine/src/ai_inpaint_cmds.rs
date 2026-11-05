@@ -243,10 +243,6 @@ pub(crate) fn ai_fill_rgb_async(
     opts: AiOptions,
     finish: FillDone,
 ) {
-    #[cfg(not(target_family = "wasm"))]
-    if let Err(e) = fetch_weights(svc.as_ref(), &ctx, &opts) {
-        return finish(Err(e));
-    }
     let plan = match tiles::plan(&cover, w, h, &opts.tiles) {
         Ok(p) if !p.is_empty() => p,
         Ok(_) => return finish(Err(bad("nothing to clean: the area is empty"))),
@@ -259,34 +255,6 @@ pub(crate) fn ai_fill_rgb_async(
     };
     let state = FillState { svc, ctx, rgb, cover, binary, w, h, opts, plan, split, next: 0, fell_back: false, trail: Arc::default(), finish };
     fill_step(state);
-}
-
-/// `allowDownload` with an inpainter that only reads files (native): fetches the model through
-/// the AI Model Manager's queue and waits for it, on the job's worker thread.
-#[cfg(not(target_family = "wasm"))]
-fn fetch_weights(svc: &dyn Inpainter, ctx: &JobCtx, opts: &AiOptions) -> Result<()> {
-    use photocraft_ai::models::Status;
-    let model = opts.model;
-    if !opts.allow_download || svc.fetches_weights() || !matches!(svc.model_state_of(model.id), ModelState::NeedsDownload { .. }) {
-        return Ok(());
-    }
-    let Some(store) = opts.store.as_ref() else { return Ok(()) };
-    let failed = |e: String| EngineError::Other(format!("{}: {e}", model.title));
-    store.download(model).map_err(|e| failed(e.to_string()))?;
-    loop {
-        if ctx.cancelled() {
-            store.cancel(Some(model));
-            return Err(EngineError::Cancelled);
-        }
-        match store.status(model) {
-            Status::Downloaded => return Ok(()),
-            Status::Failed(e) | Status::Unavailable(e) => return Err(failed(e)),
-            Status::Queued | Status::Checking => {}
-            Status::Downloading { done, total, .. } => ctx.progress(done as f32 / total.max(1) as f32, model.title),
-            Status::NotDownloaded | Status::Paused { .. } | Status::UpdateAvailable => return Err(failed("the download stopped".into())),
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
 }
 
 /// What the plan's split tiles share ([`tiles::Split`]), when it has any.

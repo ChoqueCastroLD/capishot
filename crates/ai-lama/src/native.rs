@@ -455,10 +455,6 @@ impl Inpainter for NativeInpainter {
         self.device_name.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
 
-    fn fetches_weights(&self) -> bool {
-        false
-    }
-
     fn run(&self, req: Request, hooks: Arc<dyn Hooks>, done: Done) {
         if hooks.cancelled() {
             return done(Err(LamaError::Cancelled));
