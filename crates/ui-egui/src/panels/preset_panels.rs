@@ -8,6 +8,7 @@
 //! an engine command (`gradient.presets.*`, `pattern.presets.*`, `style.presets.*`,
 //! `shape.presets.*`, `tool.presets.*`, `cloneSource.*`); this module only draws and dispatches.
 
+use crate::mobile_sheet::SheetMenu as _;
 use std::collections::{BTreeMap, BTreeSet};
 
 use egui::{Align2, Color32, ColorImage, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, TextureHandle, TextureOptions, pos2, vec2};
@@ -394,7 +395,7 @@ fn draw_group_header(ui: &mut egui::Ui, group: &GroupView, context: GroupHeaderC
             state.toggled.insert(key);
         }
     }
-    response.context_menu(|ui| {
+    response.sheet_menu(|ui| {
         if ui.button(tl!("Rename Group…")).clicked() {
             state.renaming = Some((panel.to_string(), format!("group:{}", group.name), group.name.clone()));
             ui.close();
@@ -546,7 +547,7 @@ pub(crate) fn browser(
                     {
                         dropped = Some((it.key.clone(), pp));
                     }
-                    resp.context_menu(|ui| {
+                    resp.sheet_menu(|ui| {
                         if ui.button(tl!("Rename…")).clicked() {
                             st.renaming = Some((panel.to_string(), it.key.clone(), it.name.clone()));
                             ui.close();
@@ -555,7 +556,7 @@ pub(crate) fn browser(
                             ev.push(Ev::Delete(it.key.clone()));
                             ui.close();
                         }
-                        ui.menu_button(tl!("Move to"), |ui| {
+                        crate::mobile_sheet::submenu(ui, tl!("Move to"), |ui| {
                             for gname in group_names.iter().filter(|n| **n != g.name) {
                                 if ui.button(gname).clicked() {
                                     ev.push(Ev::Move(it.key.clone(), gname.clone()));

@@ -11,6 +11,7 @@ mod invoke;
 mod items;
 pub mod menu_keys;
 pub mod menu_nav;
+pub mod mobile_menu;
 pub mod native_menu;
 pub mod parity;
 #[cfg(feature = "plugins")]
@@ -24,7 +25,7 @@ pub mod workspace_ui;
 pub(crate) use bar::compact_menus;
 #[cfg(test)]
 use bar::pointer_reaches_title;
-pub use bar::{BarLayout, menu_bar, menu_bar_with};
+pub use bar::menu_bar;
 pub use invoke::{TYPESETTING_TYPER_HEIGHT, apply_workspace, invoke};
 pub(crate) use invoke::{invoke_unguarded, panel_alias};
 pub(crate) use items::ItemCache;

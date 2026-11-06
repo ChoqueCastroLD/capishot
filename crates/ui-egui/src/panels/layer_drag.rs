@@ -1,3 +1,4 @@
+use crate::mobile_sheet::SheetMenu as _;
 use super::layers::footer_label;
 use super::{Layer, LayerId, MaskKind, PhotocraftApp, Pos2, Rect, Sense, Stroke, StrokeKind, Tokens, Value, icons, json, pos2, vec2};
 
@@ -359,7 +360,7 @@ pub(super) fn effect_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, l: &Layer,
             crate::layer_style::open_for_layer(app, l.id, kind);
         }
         // #2846: right-click opens the layer style menu (Create Layer, Copy Layer Style…), as in Photoshop.
-        resp.context_menu(|ui| {
+        resp.sheet_menu(|ui| {
             crate::widgets::style_spectrum_popup_menu(ui);
             crate::layer_menu_ui::show_effects(app, ui, l, actions);
         });

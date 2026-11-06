@@ -1,3 +1,4 @@
+use crate::mobile_sheet::SheetMenu as _;
 use super::layer_drag::{MaskDrag, fx_drop, layer_drag_and_drop, mask_drag_key, start_fx_drag, starts_mask_drag};
 use super::layers::simple_lock_toggle;
 use super::{
@@ -330,7 +331,7 @@ fn eye_column(app: &mut PhotocraftApp, ui: &mut egui::Ui, l: &Layer, row: RowSel
             actions.push(("layer.setProps".into(), json!({"layer": l.id.0, "visible": !l.visible})));
         }
     }
-    eye_resp.context_menu(|ui| {
+    eye_resp.sheet_menu(|ui| {
         crate::widgets::style_spectrum_popup_menu(ui);
         crate::layer_menu_ui::color_choices(app, ui, l, row.multi && selected, actions);
     });
@@ -481,8 +482,8 @@ fn row_context_menu(app: &mut PhotocraftApp, ui: &mut egui::Ui, rc: &RowCtx<'_>,
         let on_mask = resp.interact_pointer_pos().and_then(|p| masks.hit(p)) == Some(crate::mask_thumbs_ui::MaskKind::Pixel);
         ctx.data_mut(|d| d.insert_temp(on_mask_id, on_mask));
     }
-    if !eye_resp.secondary_clicked() && !eye_resp.context_menu_opened() {
-        resp.context_menu(|ui| {
+    if !eye_resp.secondary_clicked() && !eye_resp.sheet_menu_opened() {
+        resp.sheet_menu(|ui| {
             crate::widgets::style_spectrum_popup_menu(ui);
             if ui.ctx().data(|d| d.get_temp::<bool>(on_mask_id)).unwrap_or(false) {
                 crate::layer_menu_ui::show_mask(app, ui, l, actions);

@@ -4,6 +4,7 @@
 //! files asks first; the last tab can't be closed; a dot marks tabs with page files. Hidden when
 //! Settings › Behavior › Work tabs is off (`multiTabEnabled`).
 
+use crate::mobile_sheet::SheetMenu as _;
 use egui::{RichText, Sense, Stroke, StrokeKind, vec2};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -95,7 +96,7 @@ pub(super) fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     } else if resp.clicked() && !current {
                         action = Some(Action::Switch(id.clone()));
                     }
-                    resp.context_menu(|ui| {
+                    resp.sheet_menu(|ui| {
                         if ui.button(tl!("Rename tab")).clicked() {
                             action = Some(Action::StartRenaming(id.clone(), label.clone()));
                             ui.close();

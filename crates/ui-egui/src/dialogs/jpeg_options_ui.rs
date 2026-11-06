@@ -207,7 +207,8 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             let quality_caption = ui.label(tl!("Quality"));
             ui.add(egui::DragValue::new(&mut quality).range(0..=MAX_QUALITY).speed(0.1)).labelled_by(quality_caption.id);
             // Photoshop's presets: picking one sets the quality it starts at.
-            let preset = craft_ui::ComboBox::from_id_salt("jpeg-quality-preset").selected_text(quality_label(quality)).show_ui(ui, |ui| {
+            let list = craft_ui::ComboBox::from_id_salt("jpeg-quality-preset").selected_text(quality_label(quality));
+            let preset = crate::mobile_sheet::combo(ui, list, "", |ui| {
                 for q in [3, 5, 8, 10] {
                     if ui.selectable_label(quality_label(quality) == quality_label(q), quality_label(q)).clicked() {
                         quality = q;

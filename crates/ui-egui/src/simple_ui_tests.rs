@@ -48,11 +48,11 @@ fn a_phone_gets_the_simple_interface() {
         a.sync_views();
         let mut h = harness(a, w, hh);
         assert!(h.state().simple);
-        // File, Edit and Image by name, the rest behind "⋯"; no ☰.
-        for m in ["File", "Edit", "Image", "More menus"] {
-            assert!(h.query_by_label(m).is_some(), "{w}: {m}");
+        // One Menu button, no menu titles.
+        assert!(h.query_by_label("Menu").is_some(), "{w}: the Menu button");
+        for m in ["File", "Edit", "Image", "More menus", "Filter"] {
+            assert!(h.query_by_label(m).is_none(), "{w}: {m} is in the sheet");
         }
-        assert!(h.query_by_label("Menu").is_none() && h.query_by_label("Filter").is_none(), "{w}: no hamburger, Filter is behind ⋯");
         assert!(h.query_by_label("Gradient Tool").is_none(), "{w}: no toolbar column");
         // The two bars: favorites (6) above, recent tools (6) below, Capi centred between.
         let s = inspect(h.state(), &h.ctx);

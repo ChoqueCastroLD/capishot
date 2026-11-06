@@ -4,6 +4,7 @@
 //! `play` / `list` / `get` / `delete` / `move` / `rename`), so the panel, the CLI and MCP share them. This module
 //! keeps only which row is selected and which rows are expanded.
 
+use crate::mobile_sheet::SheetMenu as _;
 use egui::{Align2, Color32, Rect, Sense, Stroke, pos2, vec2};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -852,7 +853,7 @@ fn draw_set_header(ui: &mut egui::Ui, set: &str, count: u64, collapsed: bool, to
     ui.painter().text(pos2(rect.right() - 8.0, rect.center().y), Align2::RIGHT_CENTER, summary, egui::FontId::proportional(11.0), tokens.text_faint);
     let toggled = response.clicked();
     let mut save = false;
-    response.context_menu(|ui| {
+    response.sheet_menu(|ui| {
         if ui.button(tl!("Save Set…")).clicked() {
             save = true;
             ui.close();
@@ -883,7 +884,7 @@ fn action_context_menu(app: &mut PhotocraftApp, response: &egui::Response, index
             }
         });
         ui.separator();
-        ui.menu_button(tl!("Color"), |ui| {
+        crate::mobile_sheet::submenu(ui, tl!("Color"), |ui| {
             for (id, label) in [
                 ("", tl!("None")),
                 ("red", tl!("Red")),

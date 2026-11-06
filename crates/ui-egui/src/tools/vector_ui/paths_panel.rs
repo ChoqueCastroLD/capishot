@@ -1,3 +1,4 @@
+use crate::mobile_sheet::SheetMenu as _;
 use super::overlay::path_lines;
 use super::shapes::hex;
 use super::{Color32, Document, LayerContent, Path, PhotocraftApp, Rect, Sense, Stroke, Tokens, Value, json, pos2, vec2};
@@ -285,7 +286,7 @@ pub fn paths_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 {
                     ui.ctx().data_mut(|d| d.insert_temp(rename_id, PathRename { key: key.clone(), text, focused: false }));
                 }
-                resp.context_menu(|ui| {
+                resp.sheet_menu(|ui| {
                     crate::widgets::menu_scroll(ui, |ui| {
                         ui.set_min_width(190.0);
                         let entry = PathEntry { name: name.clone(), path: path.clone(), kind: *kind };

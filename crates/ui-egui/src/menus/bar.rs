@@ -7,21 +7,7 @@ use super::{PhotocraftApp, TOP_MENUS, Value, json};
 /// Draws the menu bar; returns the inner edge of the menu titles, facing the rest of the title bar
 /// (the right edge of the last title, or its left edge in a right-to-left UI, where File is at the
 /// right). The bar itself fills the row.
-/// Which titles the menu bar shows.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum BarLayout {
-    /// Every menu's title; on a phone-width screen one ☰ title holding them all.
-    Auto,
-    /// These menus' titles, then "⋯" holding the others as submenus (the simple interface).
-    Split(&'static [&'static str]),
-}
-
 pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
-    menu_bar_with(app, ui, BarLayout::Auto)
-}
-
-/// [`menu_bar`] with the titles `layout` asks for.
-pub fn menu_bar_with(app: &mut PhotocraftApp, ui: &mut egui::Ui, layout: BarLayout) -> f32 {
     // Built only while a menu is open: every item's enabled/checked state scales with the
     // document (layer lookups), which cost milliseconds per frame on large layouts (#125). While
     // one stays open, the items are reused until what they depend on changes.
@@ -56,18 +42,8 @@ pub fn menu_bar_with(app: &mut PhotocraftApp, ui: &mut egui::Ui, layout: BarLayo
             ui.spacing_mut().button_padding = egui::vec2(6.0, 3.0);
             nav.bar_bottom = Some(ui.max_rect().bottom());
             // A phone-width screen: one ☰ title holding the menus as submenus (`COMPACT_MENU`).
-            let compact = layout == BarLayout::Auto && compact_menus(ui.ctx());
-            let split: Vec<&str> = match layout {
-                BarLayout::Split(direct) => direct.iter().copied().chain([MORE_MENU]).collect(),
-                BarLayout::Auto => Vec::new(),
-            };
-            let tops: &[&str] = if compact {
-                &[COMPACT_MENU]
-            } else if !split.is_empty() {
-                &split
-            } else {
-                &TOP_MENUS
-            };
+            let compact = compact_menus(ui.ctx());
+            let tops: &[&str] = if compact { &[COMPACT_MENU] } else { &TOP_MENUS };
             let mut buttons = Vec::with_capacity(tops.len());
             for (k, top) in tops.iter().enumerate() {
                 // egui's menu_button toggles on release; these titles open on the press (one
@@ -76,14 +52,6 @@ pub fn menu_bar_with(app: &mut PhotocraftApp, ui: &mut egui::Ui, layout: BarLayo
                 let k = TOP_MENUS.iter().position(|m| m == top).unwrap_or(k);
                 let title = if compact {
                     hamburger(ui, t.text_dim, crate::i18n::tr(lang, "Menu"))
-                } else if *top == MORE_MENU {
-                    // Three dots, drawn (the UI fonts have no "⋯").
-                    let r = ui.add(egui::Button::new("").min_size(egui::vec2(34.0, 28.0)));
-                    for dx in [-6.0, 0.0, 6.0] {
-                        ui.painter().circle_filled(r.rect.center() + egui::vec2(dx, 0.0), 1.8, t.text_dim);
-                    }
-                    r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::i18n::tr(lang, "More menus")));
-                    r
                 } else {
                     // The title the keyboard is on (Alt / F10) is lit like a hovered one.
                     let focused = keys.focus == Some(if rtl { TOP_MENUS.len() - 1 - k } else { k });
@@ -130,16 +98,13 @@ pub fn menu_bar_with(app: &mut PhotocraftApp, ui: &mut egui::Ui, layout: BarLayo
                                 ItemCache { state, items }
                             })
                             .items;
-                        // The compact title holds every menu, "⋯" the menus without a title of
-                        // their own: the same items, one level down.
-                        let holder = (*top == COMPACT_MENU || *top == MORE_MENU).then_some(*top);
+                        // The compact title holds every menu: the same items, one level down.
+                        let holder = (*top == COMPACT_MENU).then_some(*top);
                         let nested: Vec<MenuItem> = match holder {
                             Some(h) => items
                                 .iter()
                                 // Commands without a menu (shortcuts only) have no path.
-                                .filter(|i| {
-                                    i.path.first().is_some_and(|t| TOP_MENUS.contains(&t.as_str()) && (h == COMPACT_MENU || !tops.contains(&t.as_str())))
-                                })
+                                .filter(|i| i.path.first().is_some_and(|t| TOP_MENUS.contains(&t.as_str())))
                                 .map(|i| {
                                     let mut i = i.clone();
                                     i.path.insert(0, h.to_string());
@@ -191,31 +156,33 @@ pub fn menu_bar_with(app: &mut PhotocraftApp, ui: &mut egui::Ui, layout: BarLayo
     }
     if let Some(id) = clicked {
         let ctx = ui.ctx().clone();
-        let alt = ctx.input(|i| i.modifiers.alt);
-        // ⌥ while choosing an Image › Adjustments item opens it at its last settings (#8900).
-        let r = if alt && crate::adjust_dialog::has_dialog(&id) {
-            let opened = crate::adjust_dialog::open_last(app, &id).map(|_| Value::Null).ok_or_else(|| "no document".to_string());
-            // Edit › Search's recents, as `invoke` notes a plain click.
-            if opened.is_ok() {
-                crate::palette::note_recent(&ctx, &id);
-            }
-            opened
-        } else {
-            crate::telemetry::with_source(crate::telemetry::Source::Menu, || invoke(app, &ctx, &alt_click(id, alt), json!({})))
-        };
-        if let Err(e) = r {
-            app.ui.status = e;
-            app.ui.status_error = true;
-        }
+        run_choice(app, &ctx, id);
     }
     edge
 }
 
+/// Runs the menu item `id` that was just chosen, here or in the phone's sheet (`mobile_menu`).
+pub(super) fn run_choice(app: &mut PhotocraftApp, ctx: &egui::Context, id: String) {
+    let alt = ctx.input(|i| i.modifiers.alt);
+    // ⌥ while choosing an Image › Adjustments item opens it at its last settings (#8900).
+    let r = if alt && crate::adjust_dialog::has_dialog(&id) {
+        let opened = crate::adjust_dialog::open_last(app, &id).map(|_| Value::Null).ok_or_else(|| "no document".to_string());
+        // Edit › Search's recents, as `invoke` notes a plain click.
+        if opened.is_ok() {
+            crate::palette::note_recent(ctx, &id);
+        }
+        opened
+    } else {
+        crate::telemetry::with_source(crate::telemetry::Source::Menu, || invoke(app, ctx, &alt_click(id, alt), json!({})))
+    };
+    if let Err(e) = r {
+        app.ui.status = e;
+        app.ui.status_error = true;
+    }
+}
+
 /// The one menu title on a phone-width screen.
 const COMPACT_MENU: &str = "☰";
-
-/// The simple interface's last title: the menus that have no title of their own there.
-const MORE_MENU: &str = "⋯";
 
 /// Whether the menu bar collapses into [`COMPACT_MENU`] and menu rows grow to finger size: a
 /// phone-width screen, where ten titles overflow the bar.

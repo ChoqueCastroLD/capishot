@@ -5,6 +5,7 @@
 //! Rows can be dragged onto the footer's buttons, as in Photoshop (#4689): New duplicates the
 //! channel, Delete deletes it, and Load Channel as Selection loads it.
 
+use crate::mobile_sheet::SheetMenu as _;
 use egui::{Align2, Color32, Rect, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
 use photocraft_doc::ColorIndicates;
 use photocraft_engine::channel_cmds::{self, ChannelTarget};
@@ -85,7 +86,7 @@ fn handle_row_interactions(ui: &mut egui::Ui, mut row: RowInteractions<'_>) {
     let rename_id = egui::Id::unique(("chan-rename", row.doc.id.0, format!("{:?}", row.row.reference())));
     handle_channel_row_click(ui, &mut row);
     handle_channel_row_double_click(ui, &mut row, rename_id);
-    row.response.context_menu(|ui| draw_row_menu(ui, row.row, row.doc, row.masked, row.actions));
+    row.response.sheet_menu(|ui| draw_row_menu(ui, row.row, row.doc, row.masked, row.actions));
 }
 
 fn handle_channel_row_click(ui: &egui::Ui, row: &mut RowInteractions<'_>) {
@@ -579,7 +580,7 @@ fn indicates_items(ui: &mut egui::Ui, actions: &mut Vec<(String, Value)>, channe
 
 /// Overlay colour presets (Channel Options › Color) and opacity.
 fn overlay_colors(ui: &mut egui::Ui, actions: &mut Vec<(String, Value)>, channel: Value) {
-    ui.menu_button(tl!("Overlay Color"), |ui| {
+    crate::mobile_sheet::submenu(ui, tl!("Overlay Color"), |ui| {
         for (label, hex) in [
             (tl!("Red"), "#ff0000"),
             (tl!("Green"), "#00c000"),
@@ -594,7 +595,7 @@ fn overlay_colors(ui: &mut egui::Ui, actions: &mut Vec<(String, Value)>, channel
             }
         }
     });
-    ui.menu_button(tl!("Overlay Opacity"), |ui| {
+    crate::mobile_sheet::submenu(ui, tl!("Overlay Opacity"), |ui| {
         for o in [25, 50, 75, 100] {
             if ui.button(format!("{o}%")).clicked() {
                 actions.push(("channel.options".into(), json!({ "channel": channel.clone(), "opacity": o })));

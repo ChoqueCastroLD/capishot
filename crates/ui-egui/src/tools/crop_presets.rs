@@ -143,8 +143,8 @@ pub fn dropdown(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let can_new = savable(o).is_some();
     let mut chosen: Option<Choice> = None;
     let parent_layer = ui.layer_id();
-    let combo =
-        craft_ui::ComboBox::from_id_salt("crop-ratio").selected_text(label).width(140.0).height(420.0).icon(crate::widgets::chevron_icon).show_ui(ui, |ui| {
+    let list = craft_ui::ComboBox::from_id_salt("crop-ratio").selected_text(label).width(140.0).height(420.0).icon(crate::widgets::chevron_icon);
+    let combo = crate::mobile_sheet::combo(ui, list, tl!("Aspect Ratio"), |ui| {
             crate::press_menu::above_parent_ui(parent_layer, ui);
             let (before, after): (Vec<_>, Vec<_>) = builtin.iter().partition(|(k, _)| k != crop_size::FRONT);
             for (k, l) in &before {

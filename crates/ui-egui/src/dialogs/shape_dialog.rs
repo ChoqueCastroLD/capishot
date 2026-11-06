@@ -5,6 +5,7 @@
 //! `ui.dialog.set`) and shown in the ruler unit, or each in one picked from its right-click menu
 //! (`widthUnit`, `heightUnit`; not remembered, as in Photoshop).
 
+use crate::mobile_sheet::SheetMenu as _;
 use egui::{Align2, Sense, pos2, vec2};
 use serde_json::{Map, Value, json};
 
@@ -185,7 +186,7 @@ pub fn body(app: &PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) 
                 f.insert(key.into(), json!((px * 1000.0).round() / 1000.0));
             }
             // Right-click: the length units for this field (the sizes stay in pixels).
-            resp.context_menu(|ui| {
+            resp.sheet_menu(|ui| {
                 if let Some(name) = crate::rulers::unit_menu_of(ui, unit, &crate::rulers::LENGTH_UNITS) {
                     f.insert(unit_key.into(), json!(name));
                 }

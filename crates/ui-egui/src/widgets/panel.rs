@@ -11,7 +11,10 @@ pub fn style_spectrum_popup_menu(ui: &mut Ui) {
     if !t.pro {
         return;
     }
-    ui.spacing_mut().button_padding = vec2(10.0, 4.0);
+    // In a phone's sheet the rows stay finger-sized.
+    if !crate::mobile_sheet::drawing(ui.ctx()) {
+        ui.spacing_mut().button_padding = vec2(10.0, 4.0);
+    }
     let v = &mut ui.style_mut().visuals;
     v.widgets.hovered.weak_bg_fill = t.accent;
     v.widgets.hovered.bg_fill = t.accent;

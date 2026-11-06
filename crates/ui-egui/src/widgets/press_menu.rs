@@ -98,6 +98,16 @@ pub fn above_parent_ui(parent: egui::LayerId, popup_ui: &egui::Ui) {
 /// Shows `button`'s menu (an `egui::Popup::menu`) with press-drag-release; `content` chooses its
 /// items with [`PressMenu::item`].
 pub fn show<R>(button: &Response, content: impl FnOnce(&mut Ui, &PressMenu) -> R) -> Option<R> {
+    let ctx = &button.ctx;
+    // A phone: the menu's rows in a sheet, opened by the tap.
+    if crate::mobile_sheet::enabled(ctx) && !crate::mobile_sheet::drawing(ctx) && (!Popup::is_any_open(ctx) || crate::mobile_sheet::any_open(ctx)) {
+        let menu = PressMenu { popup: Popup::default_response_id(button) };
+        let id = menu.popup.with("mobile-sheet");
+        if button.clicked() || button.secondary_clicked() {
+            crate::mobile_sheet::open(ctx, id);
+        }
+        return crate::mobile_sheet::show(ctx, id, crate::mobile_sheet::Style::MENU, |_| {}, |ui| crate::mobile_sheet::scroll(ui, id, |ui| content(ui, &menu)));
+    }
     show_with_close_behavior(button, PopupCloseBehavior::CloseOnClick, content)
 }
 
@@ -128,6 +138,9 @@ pub fn show_with_close_behavior<R>(button: &Response, close_behavior: PopupClose
 /// after it.
 pub struct PressCombo {
     popup: egui::Id,
+    /// The list opens in a phone's sheet (`mobile_sheet::combo`), by a plain tap: a press-drag
+    /// gesture would end on whatever row rose under the finger.
+    sheet: bool,
 }
 
 impl PressCombo {
@@ -135,8 +148,12 @@ impl PressCombo {
     /// close behaviour to give it.
     pub fn before(ui: &Ui, salt: impl egui::AsIdSalt) -> (Self, PopupCloseBehavior) {
         // egui's ids for the box (`ComboBox::show_ui`) and its list (`widget_to_popup_id`).
-        let combo = PressCombo { popup: ui.make_persistent_id(egui::IdSalt::new(salt)).with("popup") };
+        let sheet = crate::mobile_sheet::use_sheet(ui);
+        let combo = PressCombo { popup: ui.make_persistent_id(egui::IdSalt::new(salt)).with("popup"), sheet };
         let ctx = ui.ctx();
+        if sheet {
+            return (combo, PopupCloseBehavior::CloseOnClick);
+        }
         // The click ending the press that opened the list (the pointer didn't leave the box): egui
         // toggles the list on it, so close it first and the toggle leaves it open, drawn this
         // frame. No click may close it either.
@@ -164,6 +181,9 @@ impl PressCombo {
     /// After the combo box (`button`: its response). A primary press on the box opens a closed
     /// list, starting a press-drag gesture; the gesture ends with the button.
     pub fn after(&self, button: &Response) {
+        if self.sheet {
+            return;
+        }
         let ctx = &button.ctx;
         let pressed = ctx.input(|i| i.pointer.primary_pressed()) && button.is_pointer_button_down_on();
         if pressed && !Popup::is_id_open(ctx, self.popup) {

@@ -7,6 +7,7 @@
 //! - `contourEditor`: `{effect, key, original}` while the Contour Editor is open; `original` is
 //!   the param Cancel restores.
 
+use crate::mobile_sheet::SheetMenu as _;
 use egui::{Color32, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
 use photocraft_doc::Contour;
 use photocraft_doc::adjust::CurvePoint;
@@ -167,7 +168,7 @@ pub(super) fn row(
                         if resp.clicked() {
                             chosen_user = Some(contour_param(u));
                         }
-                        resp.context_menu(|ui| {
+                        resp.sheet_menu(|ui| {
                             if ui.button(tl!("Delete Contour")).clicked() {
                                 delete = Some(name.clone());
                                 ui.close();

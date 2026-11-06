@@ -493,17 +493,16 @@ fn settings_editor(ui: &mut egui::Ui, salt: &str, s: &RoleSettings) -> Option<Ro
         crate::widgets::checkbox(ui, &mut caps, tl!("Letter case"));
         let mut c = n.caps.clone().unwrap_or_else(|| "all".into());
         ui.add_enabled_ui(caps, |ui| {
-            craft_ui::ComboBox::from_id_salt(("role-caps", salt))
-                .selected_text(match c.as_str() {
-                    "small" => tl!("Small Caps"),
-                    "normal" => tl!("Normal"),
-                    _ => tl!("All Caps"),
-                })
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut c, "all".to_string(), tl!("All Caps"));
-                    ui.selectable_value(&mut c, "small".to_string(), tl!("Small Caps"));
-                    ui.selectable_value(&mut c, "normal".to_string(), tl!("Normal"));
-                });
+            let list = craft_ui::ComboBox::from_id_salt(("role-caps", salt)).selected_text(match c.as_str() {
+                "small" => tl!("Small Caps"),
+                "normal" => tl!("Normal"),
+                _ => tl!("All Caps"),
+            });
+            crate::mobile_sheet::combo(ui, list, "", |ui| {
+                ui.selectable_value(&mut c, "all".to_string(), tl!("All Caps"));
+                ui.selectable_value(&mut c, "small".to_string(), tl!("Small Caps"));
+                ui.selectable_value(&mut c, "normal".to_string(), tl!("Normal"));
+            });
         });
         n.caps = caps.then_some(c);
         ui.end_row();
@@ -646,10 +645,10 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
         }
         // The project list.
         ui.horizontal_wrapped(|ui| {
-            craft_ui::ComboBox::from_id_salt("font-projects-pick")
+            let list = craft_ui::ComboBox::from_id_salt("font-projects-pick")
                 .selected_text(selected.as_deref().and_then(|id| all.get(id)).map_or_else(|| tl!("No projects yet").to_string(), |p| p.name.clone()))
-                .width(200.0)
-                .show_ui(ui, |ui| {
+                .width(200.0);
+            crate::mobile_sheet::combo(ui, list, "", |ui| {
                     let mut folders: Vec<Option<String>> = all.projects.iter().map(|p| p.folder.clone()).collect();
                     folders.sort();
                     folders.dedup();
@@ -771,19 +770,17 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
             });
             let role_combo = |ui: &mut egui::Ui, salt: &str, current: Option<&String>| -> Option<Option<String>> {
                 let mut out = None;
-                craft_ui::ComboBox::from_id_salt(salt).selected_text(current.map_or_else(|| tl!("None").to_string(), |r| role_name(&project, r))).show_ui(
-                    ui,
-                    |ui| {
-                        if ui.selectable_label(current.is_none(), tl!("None")).clicked() {
-                            out = Some(None);
+                let list = craft_ui::ComboBox::from_id_salt(salt).selected_text(current.map_or_else(|| tl!("None").to_string(), |r| role_name(&project, r)));
+                crate::mobile_sheet::combo(ui, list, "", |ui| {
+                    if ui.selectable_label(current.is_none(), tl!("None")).clicked() {
+                        out = Some(None);
+                    }
+                    for r in &project.roles {
+                        if ui.selectable_label(current == Some(&r.id), role_name(&project, &r.id)).clicked() {
+                            out = Some(Some(r.id.clone()));
                         }
-                        for r in &project.roles {
-                            if ui.selectable_label(current == Some(&r.id), role_name(&project, &r.id)).clicked() {
-                                out = Some(Some(r.id.clone()));
-                            }
-                        }
-                    },
-                );
+                    }
+                });
                 out
             };
             // Bubble Type.

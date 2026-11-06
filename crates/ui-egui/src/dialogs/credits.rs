@@ -266,7 +266,8 @@ fn contributors_in(app: &mut PhotocraftApp, ui: &mut egui::Ui, contributors: &[C
         ui.separator();
         ui.label(tl!("Sort"));
         let (press, close) = crate::press_menu::PressCombo::before(ui, "credits_sort");
-        let sort = craft_ui::ComboBox::from_id_salt("credits_sort").selected_text(v.key.label().0).close_behavior(close).show_ui(ui, |ui| {
+        let list = craft_ui::ComboBox::from_id_salt("credits_sort").selected_text(v.key.label().0).close_behavior(close);
+        let sort = crate::mobile_sheet::combo(ui, list, tl!("Sort"), |ui| {
             for k in SortKey::ALL {
                 let item = ui.selectable_label(v.key == k, k.label().0);
                 if press.chosen(ui, &item) {

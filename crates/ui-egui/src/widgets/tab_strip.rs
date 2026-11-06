@@ -4,6 +4,7 @@
 //! strip. The selected tab always stays on the strip, and no tab ever runs under the menu button.
 //! On a reorderable strip a tab dragged along the strip moves to where it is dropped (#2272).
 
+use crate::mobile_sheet::SheetMenu as _;
 use egui::{CornerRadius, Rect, Response, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 
 use crate::theme::{self, Tokens};
@@ -146,7 +147,7 @@ fn tabs_in(
         }
         // The context menu belongs to the actual tab response, so its normal clicks
         // and double-click-to-collapse behavior are not intercepted by an overlay.
-        resp.context_menu(|ui| {
+        resp.sheet_menu(|ui| {
             if ui.button(tl!("Close")).clicked() {
                 out.context = Some(TabContextAction::Close(i));
                 ui.close();
