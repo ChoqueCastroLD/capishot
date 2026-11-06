@@ -96,16 +96,16 @@ fn menu_opens_a_full_width_sheet_listing_every_menu() {
 fn submenus_are_pages_with_back_and_one_level_shows_at_a_time() {
     let mut h = phone();
     open_menu(&mut h);
-    tap(&mut h, "sheet:sub:File");
-    assert_eq!(path(&h), ["File"]);
+    tap(&mut h, "sheet:sub:Layer");
+    assert_eq!(path(&h), ["Layer"]);
     assert!(noted_rect(&h.ctx, "sheet:sub:Edit").is_none(), "the first page is gone");
-    assert!(noted_rect(&h.ctx, "sheet:item:file.new").is_some());
-    tap(&mut h, "sheet:sub:Export");
-    assert_eq!(path(&h), ["File", "Export"]);
-    assert!(noted_rect(&h.ctx, "sheet:item:file.new").is_none(), "File's rows are gone");
-    assert!(noted_rect(&h.ctx, "sheet:item:file.export.exportAs").is_some());
+    assert!(noted_rect(&h.ctx, "sheet:sub:New").is_some());
+    tap(&mut h, "sheet:sub:New");
+    assert_eq!(path(&h), ["Layer", "New"]);
+    assert!(noted_rect(&h.ctx, "sheet:sub:New").is_none(), "Layer's rows are gone");
+    assert!(noted_rect(&h.ctx, "sheet:item:layer.new.layer").is_some());
     tap(&mut h, "sheet:back");
-    assert_eq!(path(&h), ["File"]);
+    assert_eq!(path(&h), ["Layer"]);
     tap(&mut h, "sheet:back");
     assert!(path(&h).is_empty());
     assert!(noted_rect(&h.ctx, "sheet:sub:Help").is_some());

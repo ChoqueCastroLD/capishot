@@ -55,6 +55,8 @@ struct OpenSheet {
     /// How far a finger has dragged it down, and how fast (points, points per second).
     drag: f32,
     fling: f32,
+    /// Where a press that began on the handle is now.
+    grab: Option<f32>,
     /// The height its contents asked for last frame.
     fit: Option<f32>,
 }
@@ -124,7 +126,7 @@ pub fn open(ctx: &egui::Context, id: Id) {
     }
     let instant = ctx.global_style().animation_time <= 0.0;
     let opened_at = if instant { f64::NEG_INFINITY } else { ctx.input(|i| i.time) };
-    let sheet = OpenSheet { id, seen: ctx.cumulative_pass_nr(), opened_at, armed: false, drag: 0.0, fling: 0.0, fit: None };
+    let sheet = OpenSheet { id, seen: ctx.cumulative_pass_nr(), opened_at, armed: false, drag: 0.0, fling: 0.0, grab: None, fit: None };
     ctx.data_mut(|d| d.insert_temp(state_id(), sheet));
     ctx.request_repaint();
 }
@@ -202,17 +204,28 @@ pub fn show<R>(ctx: &egui::Context, id: Id, style: Style, header: impl FnOnce(&m
         ui.painter().rect_stroke(panel, radius, Stroke::new(1.0, t.card_border), StrokeKind::Inside);
         // The handle and the header drag the sheet; their buttons, drawn over, keep their taps.
         let head = Rect::from_min_size(panel.min, vec2(width, HANDLE + style.header));
-        let grip = ui.interact(head, area.with("drag"), Sense::drag());
-        if grip.dragged() {
-            let dy = grip.drag_delta().y;
-            let dt = ctx.input(|i| i.stable_dt).max(1.0 / 240.0);
-            st.drag = (st.drag + dy).max(0.0);
-            st.fling = st.fling * 0.6 + dy / dt * 0.4;
+        // Followed by hand, from where the press landed: on a slow phone a flick can leave the strip
+        // in the frame the press arrives, and egui would give it to what's under the finger then.
+        let (pressed, origin, down, at, dt) = ctx.input(|i| {
+            (i.pointer.primary_pressed(), i.pointer.press_origin(), i.pointer.primary_down(), i.pointer.interact_pos(), i.stable_dt.max(1.0 / 240.0))
+        });
+        if pressed && origin.is_some_and(|o| head.contains(o)) {
+            st.grab = origin.map(|o| o.y);
         }
-        if grip.drag_stopped() {
-            closing |= should_dismiss(st.drag, height, st.fling);
-            st.drag = 0.0;
-            st.fling = 0.0;
+        if let Some(last) = st.grab {
+            if down {
+                if let Some(y) = at.map(|p| p.y) {
+                    let dy = y - last;
+                    st.drag = (st.drag + dy).max(0.0);
+                    st.fling = st.fling * 0.6 + dy / dt * 0.4;
+                    st.grab = Some(y);
+                }
+            } else {
+                closing |= should_dismiss(st.drag, height, st.fling);
+                st.drag = 0.0;
+                st.fling = 0.0;
+                st.grab = None;
+            }
         }
         let pill = Rect::from_center_size(pos2(panel.center().x, panel.top() + HANDLE / 2.0), vec2(40.0, 4.0));
         ui.painter().rect_filled(pill, 2.0, t.text_faint);
