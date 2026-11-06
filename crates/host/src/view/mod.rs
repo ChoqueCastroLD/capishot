@@ -442,6 +442,8 @@ impl CapishotView {
         let shell = shell::Queue::default();
         shell::fill(&mut services, &shell);
         let mut app = Box::new(PhotocraftApp::new_embedded(services));
+        // A canvas gesture runs as a job, as `Host::start` does: not inside the release's frame.
+        app.background_jobs = cfg!(any(not(target_arch = "wasm32"), target_feature = "atomics"));
         if let Some(rs) = render_state {
             app.set_wgpu(rs);
         }
