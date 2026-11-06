@@ -113,6 +113,10 @@ pub struct RegisteredFont {
     pub aliases: Vec<String>,
     /// It was registered before (same bytes): only new aliases changed anything.
     pub duplicate: bool,
+    /// The aliases asked for that it doesn't answer to: another font holds the name, or a file
+    /// with a face alike (same weight and slant) does. A text asking for this font by that name
+    /// gets the other one.
+    pub refused_aliases: Vec<String>,
 }
 
 /// Where a document's fonts stand.
@@ -221,7 +225,13 @@ fn register_prepared(p: photocraft_text::user_fonts::Prepared, aliases: &[String
             unique.push(f);
         }
     }
-    Ok(RegisteredFont { id: p.entry.id, name: p.entry.name, faces, families: unique, aliases: alias_names, duplicate: before })
+    let refused_aliases = aliases
+        .iter()
+        .map(|a| a.trim())
+        .filter(|a| !a.is_empty() && !alias_names.iter().chain(&unique).any(|n| n.eq_ignore_ascii_case(a)))
+        .map(str::to_string)
+        .collect();
+    Ok(RegisteredFont { id: p.entry.id, name: p.entry.name, faces, families: unique, aliases: alias_names, refused_aliases, duplicate: before })
 }
 
 /// Removes a font [`register`] added (by its id). Returns the families that went with it. Type
@@ -665,6 +675,7 @@ mod tests {
         let (out, _) = host.add_fonts(vec![taken]);
         let font = out.into_iter().next().unwrap().unwrap();
         assert!(font.aliases.is_empty());
+        assert_eq!(font.refused_aliases, vec!["Inter".to_string()], "an alias it didn't get is said");
         unregister(&font.id);
         assert_eq!(family_status("Inter"), FamilyStatus::Loaded);
 
