@@ -167,6 +167,8 @@ editor.set_mode(Mode::Full); // any frame: same documents, nothing reopened
   pointer rather than its outermost group, the editor's default) and
   `ViewOptions::move_auto_select`. Applied when they change, so the person's choice in the options
   bar stands until then; `None` leaves them alone.
+- **The wheel over your widgets**: `ViewOptions::wheel_over`, the rects where a widget of yours over
+  the canvas lets the wheel through to it.
 - **Optional:** forward eframe's `raw_input_hook` to `CapishotView::raw_input_hook` for Windows and
   Wayland pinch zoom and finger gestures (they must run before egui reads the input). Nothing
   else needs it.
@@ -256,14 +258,17 @@ with no PNG or base64.
   `add_document_fonts(doc, files)` holds them for one document (unregistered when the last holder
   closes; the registry is the process's, so type elsewhere can use them meanwhile). A file is
   `(name, bytes)` or `FontFile { name, bytes, aliases }`: an alias (an old PostScript name, a group's
-  name for the font) counts as one of its families and goes with the file;
+  name for the font) counts as one of its families and goes with the file, and
+  `RegisteredFont::refused_aliases` names those another font holds;
   `fonts_ready(doc)`, `Event::FontsReady {document, ready}` (once per document, when it has them
   all), `request_missing_fonts(doc, &provider)`, `layout_digest(doc, layer, hashes)`;
   `fonts::use_system_fonts(false)` at start-up for the same layout on native and wasm.
 - **AI**: `install_ai(&AiConfig { models_dir, models_url, device, worker_url, .. })`,
   `ai_availability()`, `prepare_remove_ai()`, `ai_model_status(model)`, `download_ai_model(model)`;
   typed params (`ai::RemoveAi`, `InpaintAi`, `RemoveBubbleText`, `UpscaleAi`) and replies
-  (`ai::AiReply`: device, cpu, fellBack, notices, ms). Remove with AI is one undo step.
+  (`ai::AiReply`: device, cpu, fellBack, notices, ms). Remove with AI is one undo step. Strokes the
+  person ends during a run wait and run in order when it ends. `warm_ai(model)` loads a model off the
+  frame, as a job (`{model, device, cpu, fellBack, ms}`), so the first removal doesn't wait for it.
 - **Other helpers**: `get_pixels`, `put_pixels`, `open_rgba`, `put_rgba`, `add_rgba`, `batch`, `undo`/`redo`,
   `begin_group`/`end_group`/`group`, `views`/`define_view`/`apply_view`, `show`, `prewarm`,
   `close`, `tool`/`set_tool`.
