@@ -199,6 +199,9 @@ pub struct ViewOptions {
     pub move_auto_select: Option<bool>,
     /// [`CapishotView::ui_tiles`]: one camera for all the tiles (default), or one each.
     pub tile_camera: TileCamera,
+    /// Where the host's own widgets over the canvas let the wheel through to it (egui points):
+    /// a widget there takes the hover, and the wheel would stop. Set it whenever they move.
+    pub wheel_over: Vec<Rect>,
 }
 
 impl Default for ViewOptions {
@@ -213,6 +216,7 @@ impl Default for ViewOptions {
             move_target: None,
             move_auto_select: None,
             tile_camera: TileCamera::default(),
+            wheel_over: Vec::new(),
         }
     }
 }
@@ -700,6 +704,7 @@ impl CapishotView {
                 self.app.ui.extras.rulers = rulers;
             }
         }
+        self.app.wheel_over.clone_from(&self.options.wheel_over);
         if self.options.move_target != self.applied_move_target {
             self.applied_move_target = self.options.move_target;
             if let Some(target) = self.options.move_target {

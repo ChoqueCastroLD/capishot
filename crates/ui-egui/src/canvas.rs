@@ -705,7 +705,9 @@ fn update_canvas_navigation(app: &mut PhotocraftApp, view: &mut View, input: Can
     // Navigation (wheel_nav.rs): scroll pans (⇧ or ⌘/Ctrl sideways); pinch and ⌥-scroll zoom around the pointer.
     // The wheel also scrolls over the scrollbars drawn on top of the canvas (last frame's hover).
     let over_bars = input.ctx.data(|d| d.get_temp::<bool>(input.bars_id)).unwrap_or(false);
-    let nav_hovered = input.response.hovered() || input.free_hover || over_bars;
+    // A host's widgets over the canvas that let the wheel through (`ViewOptions::wheel_over`).
+    let over_host = input.ctx.pointer_hover_pos().is_some_and(|p| input.response.rect.contains(p) && app.wheel_over.iter().any(|r| r.contains(p)));
+    let nav_hovered = input.response.hovered() || input.free_hover || over_bars || over_host;
     // Interface › Enable Animations off: the wheel moves the canvas without a glide (#5721).
     // General › Animated Zoom: the wheel zoom eases over the frames of a notch, or is one instant step.
     // Enhanced Controls › Enable Gestures off: two fingers on a touch screen neither zoom nor

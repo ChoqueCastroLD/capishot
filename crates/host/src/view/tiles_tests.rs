@@ -144,3 +144,40 @@ fn a_drag_on_a_tiles_scrollbar_goes_the_right_way() {
     pointer_frame(&ctx, &mut editor, &tiles, vec![press(false)]);
     assert!(y(&editor) > before + 40.0, "{before} -> {}", y(&editor));
 }
+
+/// A host's widget over the canvas takes the hover and the wheel with it, unless its rect is in
+/// `ViewOptions::wheel_over`.
+#[test]
+fn the_wheel_passes_a_hosts_widget_when_told() {
+    let mut editor = CapishotEditor::new(None);
+    editor.host.execute("file.new", json!({"width": 760, "height": 1200})).expect("a document");
+    let doc = editor.host.active_document().expect("active");
+    let ctx = Context::default();
+    let tiles = [Tile::new(doc, left())];
+    let handle = Rect::from_center_size(Pos2::new(150.0, 200.0), vec2(40.0, 40.0));
+    let mut frame = |editor: &mut CapishotEditor, events: Vec<egui::Event>| {
+        let raw = RawInput { events, ..input() };
+        let mut o = ctx.run_ui(raw, |ui| {
+            editor.ui_tiles(ui, &tiles);
+            ui.interact(handle, egui::Id::unique("host-handle"), egui::Sense::click_and_drag());
+        });
+        o.textures_delta.clear();
+    };
+    frame(&mut editor, vec![]);
+    editor.view.set_camera(doc, CameraChange::Set { zoom: Some(2.0), center: Some([380.0, 400.0]), rotation: None });
+    frame(&mut editor, vec![egui::Event::PointerMoved(handle.center())]);
+    frame(&mut editor, vec![]);
+    let center = |e: &CapishotEditor| e.view.camera(doc).expect("a camera").center;
+    let wheel = || egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: vec2(0.0, -60.0), phase: egui::TouchPhase::Move, source: egui::MouseWheelSource::Unknown, modifiers: Default::default() };
+    let before = center(&editor);
+    for _ in 0..3 {
+        frame(&mut editor, vec![wheel()]);
+    }
+    assert_eq!(center(&editor), before, "the widget holds the wheel");
+    editor.view.options_mut().wheel_over = vec![handle];
+    frame(&mut editor, vec![]);
+    for _ in 0..3 {
+        frame(&mut editor, vec![wheel()]);
+    }
+    assert_ne!(center(&editor), before, "let through");
+}

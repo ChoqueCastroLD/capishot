@@ -237,6 +237,25 @@ fn a_type_layer_from_a_psd_keeps_its_new_style_in_perspective() {
     assert_eq!(t.color, styled.color, "the new colour");
 }
 
+/// A host opens Distort on type by its menu id, and changes an open box's mode the same way; it
+/// stays type and is drawn as vectors.
+#[test]
+fn edit_transform_distort_opens_on_type_and_a_menu_id_changes_the_mode() {
+    let (mut app, id) = app_with_type();
+    let ctx = egui::Context::default();
+    crate::menus::invoke(&mut app, &ctx, "edit.transform.distort", json!({})).unwrap();
+    assert_eq!(app.ui.transform.as_ref().unwrap().mode, TransformMode::Distort);
+    assert_eq!(kind(&app), "text");
+    assert!(app.transform_preview.as_ref().is_some_and(|pv| pv.vector_type.is_some()), "drawn as vectors");
+    crate::menus::invoke(&mut app, &ctx, "edit.transform.perspective", json!({})).unwrap();
+    assert_eq!(app.ui.transform.as_ref().unwrap().mode, TransformMode::Perspective);
+    let t = app.ui.transform.as_mut().unwrap();
+    t.quad[0][0] += 20.0;
+    t.quad[1][0] -= 20.0;
+    super::commit(&mut app);
+    assert!(text_of(&app, id).perspective.is_some(), "the commit keeps it type, in perspective");
+}
+
 /// A document made by the old route (type converted to a smart object, then put in perspective)
 /// still opens as that smart object, through .pcraft and PSD.
 #[test]

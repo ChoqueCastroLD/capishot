@@ -807,6 +807,8 @@ pub struct PhotocraftApp {
     /// `jobs_ui`). The desktop app turns it on; off (the default), everything runs inline as
     /// before, which tests and scripts rely on.
     pub background_jobs: bool,
+    /// A host's widgets over the canvas that let the wheel through to it.
+    pub wheel_over: Vec<egui::Rect>,
     /// Open picked and dropped PSD/PSB files a step at a time between frames, their merged image
     /// shown meanwhile, instead of inline (the single-threaded browser build, where
     /// [`Self::background_jobs`] is off: an open would otherwise hold the page until done).

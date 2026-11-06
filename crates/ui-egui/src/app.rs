@@ -250,6 +250,7 @@ impl PhotocraftApp {
             touch: Default::default(),
             ui_hidden: false,
             background_jobs: false,
+            wheel_over: Vec::new(),
             stepped_opens: false,
             min_frame_ms: None,
             last_frame_start_ms: 0.0,
