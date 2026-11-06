@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 
 use crate::ai_inpaint_cmds::{ai_fill_rgb_async, ai_options, ready_inpainter};
 use crate::cmd::CommandSpec;
-use crate::{EngineError, Result, Session};
+use crate::{Result, Session};
 
 pub const ID: &str = "ai.warm";
 const LABEL: &str = "Load AI Model";
