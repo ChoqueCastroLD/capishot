@@ -535,7 +535,7 @@ fn paint_canvas(app: &mut PhotocraftApp, ui: &egui::Ui, view: &View, xf: ViewXfo
         let checkerboard = app.session.prefs().transparency_and_gamut.square().map(|square| (checker(app, ctx), square));
         let tex = tiles::ensure_cpu(app, ctx, idx, name, output);
         paint_cpu_document(painter, &xf, doc.bounds(), rotated, checkerboard, tex, false);
-    } else if app.filter_preview.is_none() {
+    } else if app.filter_preview.is_none() && ensure_filter_preview(app, idx, ctx).is_none() {
         // The CPU canvas: the checkerboard, then the document's tiles at display resolution,
         // composited on the worker pool as they come into view (cpu_canvas.rs).
         app.navigator_gpu.remove(&doc.id);

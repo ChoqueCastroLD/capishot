@@ -858,6 +858,8 @@ mod doc_switch_tests;
 #[cfg(test)]
 mod navigator_gpu_tests;
 #[cfg(test)]
+mod type_drag_gpu_tests;
+#[cfg(test)]
 mod nonmodal_bar_tests;
 #[cfg(test)]
 mod mobile_menu_tests;

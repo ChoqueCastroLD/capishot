@@ -156,6 +156,51 @@ fn warp_text_dialog_previews_the_warp_without_editing_the_document() {
     assert_eq!(warp(app), None, "the document is not edited");
 }
 
+/// On the CPU canvas of a narrow window a frame of the canvas starts the preview: it never showed
+/// until OK.
+#[test]
+fn a_narrow_cpu_canvas_previews_the_warp() {
+    let mut app = app_with_type();
+    let (id, _) = open(&mut app);
+    let mut h = Harness::builder().with_size(egui::vec2(360.0, 780.0)).with_max_steps(64).build_eframe(move |cc| {
+        PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+        app
+    });
+    h.run_steps(4);
+    let f = &mut h.state_mut().ui.dialog_mut(id).unwrap().fields;
+    f.insert("style".into(), json!("arc"));
+    f.insert("bend".into(), json!(60.0));
+    h.run_steps(4);
+    assert!(h.state().filter_preview.as_ref().is_some_and(|p| p.result.is_some()), "a frame computed the preview");
+}
+
+/// The preview off the UI thread, as the desktop app and the browser's threads build run it.
+#[test]
+fn warp_text_previews_off_the_ui_thread() {
+    let mut app = app_with_type();
+    app.background_jobs = true;
+    let (id, _) = open(&mut app);
+    let original = app.session.active().unwrap().doc.clone();
+    let mut h = harness(app);
+    if let Some(d) = h.state_mut().ui.dialog_mut(id) {
+        d.fields.insert("style".into(), json!("arc"));
+        d.fields.insert("bend".into(), json!(60.0));
+    }
+    let mut shown = None;
+    for _ in 0..400 {
+        h.run_steps(1);
+        let ctx = egui::Context::default();
+        crate::canvas::ensure_filter_preview(h.state_mut(), 0, &ctx);
+        shown = h.state().filter_preview.as_ref().and_then(|p| p.result.clone());
+        if shown.is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let shown = shown.expect("a preview");
+    assert_ne!(photocraft_compose::flatten(&shown).px, photocraft_compose::flatten(&original).px, "the preview shows the warp");
+}
+
 #[test]
 fn cancelling_warp_text_leaves_the_document_and_history_untouched() {
     let mut app = app_with_type();
