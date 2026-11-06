@@ -226,18 +226,10 @@ pub struct JobInfo {
 type Payload = Box<dyn Any + Send>;
 type Apply = Box<dyn FnOnce(&mut Session, Payload) -> Result<Value> + Send>;
 
-/// Wall-clock milliseconds since some fixed point (0 on wasm, where `Instant` is unavailable and
-/// jobs run inline anyway).
+/// Wall-clock milliseconds since some fixed point.
 fn now_ms() -> f64 {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-        START.get_or_init(std::time::Instant::now).elapsed().as_secs_f64() * 1000.0
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        0.0
-    }
+    static START: std::sync::OnceLock<web_time::Instant> = std::sync::OnceLock::new();
+    START.get_or_init(web_time::Instant::now).elapsed().as_secs_f64() * 1000.0
 }
 
 struct Running {

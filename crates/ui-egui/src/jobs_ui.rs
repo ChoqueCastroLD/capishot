@@ -1416,7 +1416,9 @@ pub fn dialog(app: &mut PhotocraftApp, ctx: &egui::Context) {
         None => {
             let Some(j) = app.session.active_job() else { return };
             // AI runs have their own card (`ai_progress`), which doesn't block the window.
-            if j.elapsed_ms < DIALOG_DELAY_MS || app.jobs.saves.iter().any(|s| s.job == j.id) || crate::ai_progress::follows(app, j.id) {
+            // The browser keeps the page's own progress (the job time was always 0 there until the
+            // statistics needed it): no new dialog over a phone's canvas.
+            if cfg!(target_arch = "wasm32") || j.elapsed_ms < DIALOG_DELAY_MS || app.jobs.saves.iter().any(|s| s.job == j.id) || crate::ai_progress::follows(app, j.id) {
                 return;
             }
             j
