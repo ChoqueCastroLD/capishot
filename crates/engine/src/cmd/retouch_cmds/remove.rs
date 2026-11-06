@@ -745,7 +745,7 @@ fn run_labelled(s: &mut Session, p: &Value, label: &'static str, ink: bool) -> R
     // inpainter, and apply when the last tile is back.
     if let Some((svc, opts)) = plan.ai.take() {
         let device = svc.device();
-        let margin = opts.tiles.margin;
+        let margin = opts.context_margin();
         let pp = p.clone();
         return crate::jobs::run_async_prepared(
             s,

@@ -125,6 +125,14 @@ pub fn model_state(s: &Session, p: &Value) -> Option<(&'static ModelInfo, ModelS
     Some((model, s.inpainter.as_ref()?.model_state_of(model.id)))
 }
 
+impl AiOptions {
+    /// How far around the hole to read: with fixed tile sizes, enough for real pixels to reach the
+    /// tile's edge (mirrored ones there make the model draw stray marks).
+    pub(crate) fn context_margin(&self) -> usize {
+        if self.tiles.fixed_sizes { self.tiles.margin.max(photocraft_ai_lama::tiles::FIXED_SIDES[0]) } else { self.tiles.margin }
+    }
+}
+
 /// `full_res_default`: without `maxSide`, crops larger than the working side are split into
 /// full-resolution tiles (the Remove tools) rather than downscaled (`edit.inpaintAi`).
 pub(crate) fn ai_options(s: &Session, p: &Value, cmd: &str, full_res_default: bool) -> Result<AiOptions> {
@@ -449,7 +457,7 @@ fn plan(s: &Session, p: &Value) -> Result<Head> {
     if sb.is_empty() {
         return Err(bad("the selection is outside the canvas"));
     }
-    let region = context_region(sb, canvas, opts.tiles.margin);
+    let region = context_region(sb, canvas, opts.context_margin());
     let pixels = u64::from(region.width()) * u64::from(region.height());
     if pixels > MAX_PIXELS {
         return Err(bad(format!("the area is too large to clean at once ({pixels} pixels, at most {MAX_PIXELS}); select less")));
