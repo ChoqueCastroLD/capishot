@@ -9,7 +9,7 @@ use parley::{Alignment, AlignmentOptions, FontFeatures, Layout, LayoutContext, S
 use photocraft_doc::text::{CharStyle, ParagraphStyle, TextAlign, TextDirection};
 
 use super::area::{LineMetrics, MAX_AREA_PASSES, area_metrics, break_area};
-use super::capishot::{HyphenBreak, HyphenParams, hyphenate_paragraph, ink_extent, longest_unbreakable};
+use super::capishot::{HyphenBreak, HyphenParams, hyphenate_paragraph, ink_extent, longest_unbreakable, line_hyphen_break};
 use super::paragraphs::{TabWidth, strip_break, tab_widths};
 use super::style::{
     SYNTHETIC_SMALL_CAPS_SCALE, SmallCapsMode, drawn_style, effective_horizontal_scale, feature_list, hangul_runs, probe_smcp, small_caps_mode, style_props,
@@ -416,8 +416,13 @@ impl<'a> Para<'a> {
         // Type in a path: its own bands (`in_path`); tabs keep their shaped width there.
         if let (Some(area), Some(slots)) = (self.env.in_path.as_ref(), flow.in_path.as_mut()) {
             let pending = flow.pending_space;
-            let slots = self.break_in_path(&mut layout, area, slots, pending);
-            return (layout, slots, false, Vec::new());
+            let start = slots.clone();
+            let mut lines = self.break_in_path(&mut layout, area, slots, pending, &[]);
+            let hyphens = self.hyphenate_in_path(&mut layout, &mut lines, |layout, breaks| {
+                *slots = start.clone();
+                self.break_in_path(layout, area, slots, pending, breaks)
+            });
+            return (layout, lines, false, hyphens);
         }
         let (mut slots, mut full) = self.break_lines(&mut layout, flow);
         if self.env.wraps
@@ -440,15 +445,22 @@ impl<'a> Para<'a> {
         else {
             return Vec::new();
         };
-        let content = &env.text[self.start..self.content_end];
-        let guess = crate::hyphen::guess_language(content);
-        let lang_at = |o: usize| -> Option<crate::hyphen::HyphLang> {
-            let st = env.styles.get(env.style_at(self.map_offset(o)))?;
-            match st.language.as_deref() {
-                Some(t) if !t.trim().is_empty() => crate::hyphen::HyphLang::from_tag(t),
-                _ => Some(guess),
-            }
-        };
+        let guess = crate::hyphen::guess_language(&env.text[self.start..self.content_end]);
+        let lang_at = |o: usize| self.hyphen_language(guess, o);
+        hyphenate_paragraph(layout, &self.ptext, avail, self.first_indent, &self.hyphen_params(), &lang_at)
+    }
+
+    /// The language hyphenating the text at offset `o` follows.
+    fn hyphen_language(&self, guess: crate::hyphen::HyphLang, o: usize) -> Option<crate::hyphen::HyphLang> {
+        let env = self.env;
+        let st = env.styles.get(env.style_at(self.map_offset(o)))?;
+        match st.language.as_deref() {
+            Some(t) if !t.trim().is_empty() => crate::hyphen::HyphLang::from_tag(t),
+            _ => Some(guess),
+        }
+    }
+
+    fn hyphen_params(&self) -> HyphenParams {
         let justified = !matches!(self.ps.align, TextAlign::Left | TextAlign::Center | TextAlign::Right);
         let base = crate::hyphen::Rules::PHOTOSHOP;
         let letters = |v: Option<u8>, d: usize| v.map_or(d, usize::from);
@@ -459,14 +471,46 @@ impl<'a> Para<'a> {
             zone_pt: self.ps.hyphenate_zone_pt.unwrap_or(base.zone_pt),
             ..base
         };
-        let params = HyphenParams { rules, zone_px: rules.zone_pt * env.k, justified };
-        hyphenate_paragraph(layout, &self.ptext, avail, self.first_indent, &params, &lang_at)
+        HyphenParams { rules, zone_px: rules.zone_pt * self.env.k, justified }
+    }
+
+    /// Automatic hyphenation of type in a path: as [`hyphenate_paragraph`], each line at its own
+    /// band's width. `rebreak` breaks the lines again with these hyphens (the bands from the top).
+    fn hyphenate_in_path(
+        &self,
+        layout: &mut Layout<RunBrush>,
+        lines: &mut Vec<Slot>,
+        mut rebreak: impl FnMut(&mut Layout<RunBrush>, &[HyphenBreak]) -> Vec<Slot>,
+    ) -> Vec<HyphenBreak> {
+        let mut breaks: Vec<HyphenBreak> = Vec::new();
+        if self.env.vertical || !self.ps.hyphenate || !self.tabs.is_empty() || layout.is_rtl() {
+            return breaks;
+        }
+        let guess = crate::hyphen::guess_language(&self.env.text[self.start..self.content_end]);
+        let lang_at = |o: usize| self.hyphen_language(guess, o);
+        let params = self.hyphen_params();
+        // Lines past the bands aren't drawn: nothing to hyphenate there.
+        for li in 0..4096usize {
+            if li + 1 >= layout.len() || li >= lines.len() {
+                break;
+            }
+            let consecutive = (0..li).rev().take_while(|&l| breaks.iter().any(|b| b.line == l)).count();
+            if params.rules.limit > 0 && consecutive >= params.rules.limit {
+                continue;
+            }
+            let avail = lines[li].width / self.break_scale;
+            if let Some(b) = line_hyphen_break(layout, &self.ptext, li, avail, self.first_indent / self.break_scale, &params, &lang_at) {
+                breaks.push(b);
+                *lines = rebreak(layout, &breaks);
+            }
+        }
+        breaks
     }
 
     /// Type in a path: each line breaks at the width of the path across its band, the bands
     /// placed top to bottom a leading apart (`in_path::Slots`). `pending` is the space after the
     /// previous paragraph.
-    fn break_in_path(&self, layout: &mut Layout<RunBrush>, area: &crate::in_path::Area, slots: &mut crate::in_path::Slots, pending: f32) -> Vec<Slot> {
+    fn break_in_path(&self, layout: &mut Layout<RunBrush>, area: &crate::in_path::Area, slots: &mut crate::in_path::Slots, pending: f32, breaks: &[HyphenBreak]) -> Vec<Slot> {
         let env = self.env;
         let k = env.k;
         let first_style = self.first_style();
@@ -494,6 +538,7 @@ impl<'a> Para<'a> {
         loop {
             let slot = slots.next(area, ascent, descent, leading, if first { extra } else { 0.0 }, min_width, overhang);
             first = false;
+            let placed = slot.is_some();
             let width = match slot {
                 Some(slot) => {
                     line_slots.push(slot);
@@ -503,7 +548,17 @@ impl<'a> Para<'a> {
                 None => max,
             };
             breaker.state_mut().set_line_max_advance(width);
-            if breaker.break_next().is_none() {
+            let line = line_slots.len().saturating_sub(1);
+            let done = match breaks.iter().find(|b| placed && b.line == line) {
+                Some(b) => {
+                    let done = breaker.break_next_with_length(b.clusters).is_none();
+                    // Align the line as if the band were narrower by the hyphen it ends with.
+                    breaker.set_prior_line_width((width - b.advance).max(0.0));
+                    done
+                }
+                None => breaker.break_next().is_none(),
+            };
+            if done {
                 break;
             }
         }
