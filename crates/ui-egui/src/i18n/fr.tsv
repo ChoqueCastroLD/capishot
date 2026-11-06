@@ -3314,6 +3314,7 @@ curves	Smooth	Lisser
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	Envoyer des statistiques d’utilisation anonymes
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	La version web envoie des statistiques d’utilisation anonymes (aucun fichier ni contenu) ; désactivez-les dans Préférences › Général.
+	Crash reports say where the code failed, never your files, names or text.	Les rapports de plantage indiquent où le code a échoué, jamais vos fichiers, noms ou textes.
 # The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
 	Load Fonts…	Charger des polices…
 	Load Font Folder…	Charger un dossier de polices…

@@ -3245,6 +3245,7 @@ curves	Smooth	Сгладить
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	Отправлять анонимную статистику использования
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	Веб-версия отправляет анонимную статистику использования (без файлов и содержимого); отключить её можно в Настройки › Основные.
+	Crash reports say where the code failed, never your files, names or text.	Отчёты о сбоях указывают, где произошла ошибка в коде, но никогда не содержат ваши файлы, имена или тексты.
 # The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
 	Load Fonts…	Загрузить шрифты…
 	Load Font Folder…	Загрузить папку шрифтов…

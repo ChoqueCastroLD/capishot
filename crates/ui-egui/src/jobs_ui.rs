@@ -479,9 +479,14 @@ pub fn run(app: &mut PhotocraftApp, id: &str, params: Value) -> Result<Value, St
     // AI runs show the progress card (`ai_progress`): remember what ran, follow its job.
     let ai = crate::ai_progress::is_ai(id, &params).then(|| params.clone());
     if let Some(p) = &ai {
+        crate::telemetry::set_stage(crate::telemetry::Stage::Ai);
         crate::ai_progress::note_start(app, id, p);
     }
     let r = run_inner(app, id, params);
+    // Over already, unless it became a job (`telemetry::leave_ai_stage` when that ends).
+    if ai.is_some() && !r.as_ref().is_ok_and(|v| v.get("job").is_some()) {
+        crate::telemetry::leave_stage(crate::telemetry::Stage::Ai);
+    }
     if let (Some(p), Ok(v)) = (&ai, &r)
         && let Some(job) = v.get("job").and_then(Value::as_u64)
     {
@@ -560,6 +565,8 @@ fn start_open_inner(app: &mut PhotocraftApp, name: &str, path: Option<String>, s
         OpenSource::Bytes(b) => b.len(),
         OpenSource::Path(_) => 0,
     };
+    // Until the job ends (`record_background_open`), or `finish_open` takes over.
+    crate::telemetry::set_stage(crate::telemetry::Stage::Decoding);
     let started = if deep { app.session.start_open_deep(name, source) } else { app.session.start_open_with_preview(name, source, Arc::clone(&preview)) };
     match started.map_err(|e| e.to_string())? {
         // Inline (wasm): finish now, like a background open that ended at once.
@@ -1087,6 +1094,7 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
     if crate::fonts_ui::on_job(app, &e) {
         return;
     }
+    crate::telemetry::leave_ai_stage(&e.command);
     // AI runs, with their model and where they ran.
     if crate::telemetry::is_active() {
         let doc_mp = app.session.active().map(|st| crate::telemetry::megapixels(st.doc.size.width, st.doc.size.height));
@@ -1182,6 +1190,7 @@ fn job_notices(app: &mut PhotocraftApp, command: &str, v: &Value) {
 /// A background open ended: the usage statistics get its kind, size buckets and time (the file's
 /// name only for its extension). Cancelled opens aren't reported.
 fn record_background_open(app: &PhotocraftApp, tab: &OpenTab, e: &JobEvent) {
+    crate::telemetry::leave_stage(crate::telemetry::Stage::Decoding);
     if !crate::telemetry::is_active() {
         return;
     }
@@ -1202,6 +1211,7 @@ fn record_background_open(app: &PhotocraftApp, tab: &OpenTab, e: &JobEvent) {
 /// (`{document, docId, warnings, color}` or `{held, …}`).
 fn finish_open(app: &mut PhotocraftApp, name: &str, path: Option<&str>, v: &Value, slot: Option<usize>) -> Result<(), String> {
     let _s = crate::perf_span::span("open.finish");
+    let _stage = crate::telemetry::stage_scope(crate::telemetry::Stage::Opening);
     let warnings: Vec<String> =
         v.get("warnings").and_then(Value::as_array).map(|a| a.iter().filter_map(|w| w.as_str().map(str::to_string)).collect()).unwrap_or_default();
     let held = |doc, read_only, question, policy_applied| crate::open_prompt::Held {

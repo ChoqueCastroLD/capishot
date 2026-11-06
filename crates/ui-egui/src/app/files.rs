@@ -146,6 +146,7 @@ impl PhotocraftApp {
     }
 
     fn open_data(&mut self, name: &str, data: OpenData<'_>, path: Option<&str>) -> Result<Vec<String>, String> {
+        let _stage = crate::telemetry::stage_scope(crate::telemetry::Stage::Opening);
         let bytes = data.bytes();
         if let Some(r) = preset_files_ui::open(self, name, bytes) {
             return r.map(|()| Vec::new());
@@ -168,6 +169,9 @@ impl PhotocraftApp {
             jobs_ui::start_open(self, name, path.map(str::to_string), photocraft_engine::jobs::OpenSource::Bytes(data.shared()))?;
             return Ok(Vec::new());
         }
+        // Decoded here, on this thread.
+        crate::telemetry::set_stage(crate::telemetry::Stage::Decoding);
+        let _decoding = crate::telemetry::StageScope::leaving(crate::telemetry::Stage::Decoding);
         let import = self.services.import.as_ref().ok_or("no importer configured")?;
         let opts = photocraft_engine::jobs::import_options(self.session.prefs());
         let (mut doc, warnings, damaged) = if photocraft_io::is_psd(bytes) {

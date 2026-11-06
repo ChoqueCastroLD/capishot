@@ -34,6 +34,8 @@ const URL_VAR: &str = "CAPISHOT_TELEMETRY_URL";
 const ID_FILE: &str = "telemetry-id";
 /// Breadcrumbs of running copies, in the config folder.
 const CRUMB_DIR: &str = "telemetry-crumbs";
+/// Unclean exits in a row, in the config folder; removed by a run that closes normally.
+const CRASH_LOOP_FILE: &str = "telemetry-crash-loop";
 /// How often the background thread wakes: the breadcrumb's heartbeat.
 const BEAT: Duration = Duration::from_secs(5);
 /// A breadcrumb this old whose process is gone belongs to a copy that died.
@@ -136,12 +138,39 @@ struct Crumb {
 
 static PANIC_MARK: OnceLock<PathBuf> = OnceLock::new();
 
-/// From the panic hook: marks this run's breadcrumb, so that if it dies of the panic the next run
-/// can say so. Only the fact: not the message, which may name a file.
-pub fn note_panic() {
+/// From the panic hook: marks this run's breadcrumb with the panic's location and class, so that if
+/// it dies of the panic the next run can say so, and queues them for this run's next batch (the
+/// crash guard may keep it alive). Never the message, which may name a file.
+pub fn note_panic(info: &std::panic::PanicHookInfo<'_>) {
+    let (location, code) = telemetry::panic_report(info);
     if let Some(mark) = PANIC_MARK.get() {
-        let _ = std::fs::write(mark, b"");
+        let _ = std::fs::write(mark, panic_mark(&location, code));
     }
+    // A loop of caught panics stays a few events. The recorder's lock is only tried: this thread
+    // may be holding it.
+    if PANICS_QUEUED.fetch_add(1, Ordering::Relaxed) < MAX_PANICS_QUEUED {
+        let event = telemetry::crash_event("panic", Some(&location), Some(code), None, Some(telemetry::stage_name()), None);
+        telemetry::with(|r| r.event(event));
+    }
+}
+
+/// Panics of one run that go out as `crash`.
+const MAX_PANICS_QUEUED: u64 = 3;
+static PANICS_QUEUED: AtomicU64 = AtomicU64::new(0);
+
+fn panic_mark(location: &str, code: &str) -> String {
+    json!({"loc": location, "msg": code, "stage": telemetry::stage_name()}).to_string()
+}
+
+/// `previous` unclean exits in a row, then the `unclean_exit`s among `events`: each says its place
+/// in the row. Returns the new count.
+fn stamp_crash_loop(events: &mut [Value], previous: u64) -> u64 {
+    let mut n = previous;
+    for e in events.iter_mut().filter(|e| e["e"] == "unclean_exit") {
+        n = n.saturating_add(1);
+        telemetry::unclean_exit_detail(e, None, None, None, Some(n));
+    }
+    n
 }
 
 fn unix_secs() -> u64 {
@@ -154,7 +183,7 @@ fn crumb_files(dir: &Path, pid: u32) -> (PathBuf, PathBuf) {
 }
 
 fn write_crumb(file: &Path, crumb: &Crumb, started: u64, now: u64) {
-    let body = json!({"t": now, "start": started, "cmd": crumb.cmd, "tool": crumb.tool, "docs": crumb.docs, "memMB": crumb.mem_mb});
+    let body = json!({"t": now, "start": started, "cmd": crumb.cmd, "tool": crumb.tool, "docs": crumb.docs, "memMB": crumb.mem_mb, "stage": telemetry::stage_name()});
     let _ = std::fs::write(file, body.to_string());
 }
 
@@ -189,7 +218,14 @@ fn collect_crumbs(dir: &Path, now: u64, alive: &dyn Fn(u32) -> bool) -> Vec<Valu
             let text = |key: &str| c.get(key).and_then(Value::as_str);
             let number = |key: &str| c.get(key).and_then(Value::as_u64);
             let up = beat.saturating_sub(number("start").unwrap_or(beat)) / 60;
-            events.push(telemetry::unclean_exit_event(text("cmd"), text("tool"), number("memMB"), Some(up), number("docs"), Some(mark.exists())));
+            let mut exit = telemetry::unclean_exit_event(text("cmd"), text("tool"), number("memMB"), Some(up), number("docs"), Some(mark.exists()));
+            telemetry::unclean_exit_detail(&mut exit, text("stage"), None, None, None);
+            events.push(exit);
+            // An empty or damaged mark is only the fact, as the older versions wrote it.
+            if let Some(p) = std::fs::read_to_string(&mark).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
+                let field = |key: &str| p.get(key).and_then(Value::as_str);
+                events.push(telemetry::crash_event("panic", field("loc"), field("msg"), None, field("stage"), number("memMB")));
+            }
         }
         remove_crumb(&file, &mark);
     }
@@ -234,6 +270,7 @@ fn run_thread(url: String, config: Option<PathBuf>, shared: Arc<Shared>, rx: mps
     let pid = Pid::from_u32(pid_number);
     let mut sys = System::new();
     let crumb_dir = config.as_ref().map(|d| d.join(CRUMB_DIR));
+    let crash_loop = config.as_ref().map(|d| d.join(CRASH_LOOP_FILE));
     let files = crumb_dir.as_deref().map(|dir| {
         let _ = std::fs::create_dir_all(dir);
         crumb_files(dir, pid_number)
@@ -243,7 +280,15 @@ fn run_thread(url: String, config: Option<PathBuf>, shared: Arc<Shared>, rx: mps
     }
     if let Some(dir) = &crumb_dir {
         let alive = |p: u32| System::new_with_specifics(sysinfo::RefreshKind::nothing().with_processes(sysinfo::ProcessRefreshKind::nothing())).process(Pid::from_u32(p)).is_some();
-        *shared.crashes.lock().unwrap_or_else(PoisonError::into_inner) = collect_crumbs(dir, unix_secs(), &alive);
+        let mut crashes = collect_crumbs(dir, unix_secs(), &alive);
+        if let Some(file) = &crash_loop {
+            let previous = std::fs::read_to_string(file).ok().and_then(|t| t.trim().parse::<u64>().ok()).unwrap_or(0);
+            let now = stamp_crash_loop(&mut crashes, previous);
+            if now != previous {
+                let _ = std::fs::write(file, now.to_string());
+            }
+        }
+        *shared.crashes.lock().unwrap_or_else(PoisonError::into_inner) = crashes;
     }
     if let Some(id) = install_id(config.as_deref()) {
         let _ = shared.install_id.set(id);
@@ -273,6 +318,9 @@ fn run_thread(url: String, config: Option<PathBuf>, shared: Arc<Shared>, rx: mps
                 }
                 if let Some((file, mark)) = &files {
                     remove_crumb(file, mark);
+                }
+                if let Some(file) = &crash_loop {
+                    let _ = std::fs::remove_file(file);
                 }
                 let _ = done.send(());
                 return;
@@ -365,6 +413,7 @@ impl Shell {
     /// Every frame: follows the preference at once; starts a session once the thread has read the
     /// hardware and the window knows its adapter.
     fn sync(&mut self, ctx: &egui::Context) {
+        telemetry::leave_stage(telemetry::Stage::Boot);
         let want = self.app.session.prefs().general.send_anonymous_usage_statistics;
         if want != self.enabled {
             if want {
@@ -405,6 +454,9 @@ impl Shell {
             return; // the window's device isn't up yet
         }
         let Some(session) = random_id() else { return };
+        telemetry::install_gpu_fault_reports(|event| {
+            telemetry::with(|r| r.event(event));
+        });
         // On a first run the notice comes first. It stays until dismissed.
         notices::usage_statistics_notice(&mut self.app);
         let info = &self.app.perf.gpu_info;
@@ -586,6 +638,33 @@ mod tests {
         assert!(!dead.exists() && !dead_mark.exists() && !killed.exists() && !dir.join("555.json").exists() && !dir.join("page.psd.json").exists());
         assert!(collect_crumbs(&dir, 5011, &|pid| pid == 333).is_empty(), "once");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_panic_mark_becomes_a_crash_event_without_any_user_data() {
+        let dir = temp_dir("crash-mark");
+        let (dead, mark) = crumb_files(&dir, 111);
+        write_crumb(&dead, &Crumb::default(), 1000, 1600);
+        std::fs::write(&mark, panic_mark("crates/gpu/src/health.rs:12", "index_oob")).unwrap();
+        let (hostile, hostile_mark) = crumb_files(&dir, 222);
+        write_crumb(&hostile, &Crumb::default(), 1000, 1600);
+        std::fs::write(&hostile_mark, r#"{"loc":"/home/SecretUser/page.psd:1","msg":"SecretLayer","stage":"SecretPage"}"#).unwrap();
+        let events = collect_crumbs(&dir, 5010, &|_| false);
+        let crashes: Vec<&Value> = events.iter().filter(|e| e["e"] == "crash").collect();
+        assert_eq!(crashes.len(), 2, "{events:?}");
+        assert_eq!(crashes.iter().filter(|e| e["loc"] == "crates/gpu/src/health.rs:12" && e["msg"] == "index_oob").count(), 1, "{crashes:?}");
+        let text = Value::Array(events.clone()).to_string();
+        assert!(!text.contains("Secret"), "{text}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn unclean_exits_in_a_row_are_counted() {
+        let mut events = vec![json!({"e": "unclean_exit"}), json!({"e": "crash", "kind": "panic"}), json!({"e": "unclean_exit"})];
+        assert_eq!(stamp_crash_loop(&mut events, 2), 4);
+        assert_eq!((events[0]["loop"].as_u64(), events[2]["loop"].as_u64()), (Some(3), Some(4)));
+        assert!(events[1].get("loop").is_none());
+        assert_eq!(stamp_crash_loop(&mut [], 2), 2);
     }
 
     #[test]

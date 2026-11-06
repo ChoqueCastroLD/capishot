@@ -34,6 +34,9 @@ pub fn install(canvas: &web_sys::HtmlCanvasElement) {
         e.prevent_default();
         LOST.store(true, Ordering::Release);
         log::error!("photocraft-web: the graphics context was lost");
+        // Now: the reload that follows doesn't wait for a statistics flush.
+        let stage = photocraft_ui_egui::telemetry::stage_name();
+        crate::usage_stats::send_crash(&photocraft_ui_egui::telemetry::crash_event("gpu_lost", None, None, Some("context_lost"), Some(stage), Some(crate::breadcrumb::memory_bytes() >> 20)));
     });
     let _ = canvas.add_event_listener_with_callback("webglcontextlost", cb.as_ref().unchecked_ref());
     cb.forget();

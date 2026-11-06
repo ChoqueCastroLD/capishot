@@ -2852,6 +2852,7 @@ fontWeight	Italic	Itálico
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	Enviar estatísticas de utilização anónimas
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	A versão web envia estatísticas de utilização anónimas (sem ficheiros nem conteúdo); desative-as em Preferências › Geral.
+	Crash reports say where the code failed, never your files, names or text.	Os relatórios de falha indicam onde o código falhou, nunca os seus ficheiros, nomes ou textos.
 # TypeR (Type › TypeR menu; TypeR strings ship in es/pt only, see TYPER_LANGUAGES in i18n/mod.rs).
 	TypeR	TypeR
 	Next Line	Linha seguinte

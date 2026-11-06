@@ -257,10 +257,10 @@ if (how === 'picker') {
   // Through the app's File > Open, as a person: the browser asks for the files.
   const asked = s.req('ui.menu.invoke', { id: 'file.open' });
   const fc = await chooser;
-  // A page killed behind the picker must say so in its breadcrumb (`stage.picker`).
-  const crumb = await p.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('capishot.crumb.')).map((k) => JSON.parse(localStorage.getItem(k)).cmd));
+  // A page killed behind the picker must say so in its breadcrumb (`stage`: `picker`).
+  const crumb = await p.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('capishot.crumb.')).map((k) => JSON.parse(localStorage.getItem(k)).stage));
   console.log('breadcrumb behind the picker:', JSON.stringify(crumb));
-  if (!process.env.NO_STAGE) ok('the breadcrumb names the picker', crumb.includes('stage.picker'));
+  if (!process.env.NO_STAGE) ok('the breadcrumb names the picker', crumb.includes('picker'));
   // FREEZE_S: Android puts the page behind the picker (hidden, then frozen) until a file is chosen.
   if (process.env.FREEZE_S) {
     await cdp.send('Page.enable');

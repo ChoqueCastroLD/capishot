@@ -370,7 +370,13 @@ pub fn record_gpu_lost(app: &PhotocraftApp, cause: &str, n: u32, ms: Option<f64>
     let api = api_class(app);
     let gpu = crate::telemetry::gpu_vendor_class(0, &app.perf.gpu_info.adapter);
     let phase = crate::perf_span::top(0.0);
-    crate::telemetry::with(|r| r.gpu_lost(api, gpu, cause, phase, n, ms));
+    let fault = app.window_device.as_ref().and_then(|(_, health)| health.fault());
+    crate::telemetry::with(|r| {
+        r.gpu_lost(api, gpu, cause, phase, n, ms);
+        if let Some(fault) = &fault {
+            r.gpu_lost_reason(cause, fault.detail());
+        }
+    });
 }
 
 /// Recovery is an explicit choice; the CPU document renderer stays active while the user works.

@@ -291,6 +291,8 @@ impl Recovery {
             revision: job.revision,
         };
         let revision = job.revision;
+        // Until [`Self::finish`].
+        photocraft_ui_egui::telemetry::set_stage(photocraft_ui_egui::telemetry::Stage::RecoveryCheckpoint);
         // On the page's thread (a worker has no window to measure).
         let limits = history_limits();
         let slot: Encoded = Arc::default();
@@ -373,6 +375,7 @@ impl Recovery {
 
     /// A checkpoint of document `id` ended: report it and start the next (or the removal).
     fn finish(&self, id: u64, revision: u64, result: Result<(), String>, live: Option<Vec<String>>) {
+        photocraft_ui_egui::telemetry::leave_stage(photocraft_ui_egui::telemetry::Stage::RecoveryCheckpoint);
         let retire = {
             let mut inner = self.0.borrow_mut();
             let Some(slot) = inner.slots.get_mut(&id) else { return };
@@ -478,6 +481,8 @@ impl Recovery {
 
     /// Loads the checkpoints `keys` for the app to open.
     fn read(&self, keys: Vec<String>) {
+        // Until [`Self::tick`] has reopened what was read.
+        photocraft_ui_egui::telemetry::set_stage(photocraft_ui_egui::telemetry::Stage::RecoveryLoad);
         let me = self.clone();
         wasm_bindgen_futures::spawn_local(async move {
             for key in keys {
@@ -552,8 +557,12 @@ impl Recovery {
                 app.accept_recovery_offer();
             }
         }
+        let read_ended = !recovered.is_empty() || !errors.is_empty();
         if !recovered.is_empty() {
             app.recover_documents(recovered);
+        }
+        if read_ended {
+            photocraft_ui_egui::telemetry::leave_stage(photocraft_ui_egui::telemetry::Stage::RecoveryLoad);
         }
         for e in errors {
             photocraft_ui_egui::notices::post(app, photocraft_ui_egui::i18n::t("Crash recovery"), vec![e], true, None);

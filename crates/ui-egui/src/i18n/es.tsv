@@ -2988,6 +2988,7 @@ curves	Smooth	Suavizar
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	Enviar estadísticas de uso anónimas
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	La versión web envía estadísticas de uso anónimas (sin archivos ni contenido); desactívalas en Preferencias › General.
+	Crash reports say where the code failed, never your files, names or text.	Los informes de fallo dicen dónde falló el código, nunca tus archivos, nombres ni textos.
 # TypeR (Type › TypeR menu; TypeR strings ship in es/pt only, see TYPER_LANGUAGES in i18n/mod.rs).
 	TypeR	TypeR
 	Next Line	Línea siguiente

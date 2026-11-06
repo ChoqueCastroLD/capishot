@@ -904,11 +904,13 @@ fn drop_position(canvas: &web_sys::HtmlCanvasElement, ctx: &egui::Context) -> Op
 /// desktop window does: the browser shows its own "Leave site?" prompt (#1380). `unsaved` is
 /// refreshed every frame by [`WebShell`].
 /// Wraps the panic hook eframe installed: a panic first hands recovery what it can
-/// (`recovery::on_panic`), so the next load offers the unsaved documents.
+/// (`recovery::on_panic`), so the next load offers the unsaved documents, then says where it
+/// happened (`breadcrumb::on_panic`). In that order: the user's work comes before the report.
 fn install_panic_hook() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         crate::recovery::on_panic();
+        crate::breadcrumb::on_panic(info);
         previous(info);
     }));
 }
@@ -1483,6 +1485,11 @@ impl eframe::App for WebShell {
         if self.startup_frames < 2 {
             self.startup_frames += 1;
             crate::startup::mark(if self.startup_frames == 1 { "first frame" } else { "first frame drawn" });
+            if self.startup_frames == 1 {
+                photocraft_ui_egui::telemetry::set_stage(photocraft_ui_egui::telemetry::Stage::FirstFrame);
+            } else {
+                photocraft_ui_egui::telemetry::leave_stage(photocraft_ui_egui::telemetry::Stage::FirstFrame);
+            }
             if self.startup_frames == 2 {
                 crate::startup::report();
                 crate::code_split::first_frame();
@@ -1738,11 +1745,11 @@ fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig
                 } else {
                     rfd::AsyncFileDialog::new().add_filter("All Formats", &crate::open_formats::open_exts()).add_filter("SVG", SVG_EXTS)
                 };
-                crate::breadcrumb::stage(Some("stage.picker"));
+                photocraft_ui_egui::telemetry::set_page_stage(Some(photocraft_ui_egui::telemetry::Stage::Picker));
                 let answer = if multiple {
                     match dialog.pick_files().await {
                         Some(picked) if !picked.is_empty() => {
-                            crate::breadcrumb::stage(Some("stage.read"));
+                            photocraft_ui_egui::telemetry::set_page_stage(Some(photocraft_ui_egui::telemetry::Stage::Reading));
                             let mut files = Vec::with_capacity(picked.len());
                             for file in picked {
                                 files.push((file.file_name(), read_file(&file).await));
@@ -1753,11 +1760,14 @@ fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig
                     }
                 } else {
                     match dialog.pick_file().await {
-                        Some(file) => Some(FileDialogAnswer::Contents(file.file_name(), read_file(&file).await)),
+                        Some(file) => {
+                            photocraft_ui_egui::telemetry::set_page_stage(Some(photocraft_ui_egui::telemetry::Stage::Reading));
+                            Some(FileDialogAnswer::Contents(file.file_name(), read_file(&file).await))
+                        }
                         None => None,
                     }
                 };
-                crate::breadcrumb::stage(None);
+                photocraft_ui_egui::telemetry::set_page_stage(None);
                 reply.send(answer);
             }),
             // Browser folder handles cannot be represented as filesystem paths for engine commands.

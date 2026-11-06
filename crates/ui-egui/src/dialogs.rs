@@ -915,6 +915,9 @@ fn about_tab_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, tab: &str) {
                 ui.add_space(6.0);
                 ui.weak(tl!("Capishot sends anonymous usage statistics (no files or content); turn them off in Preferences › General."));
             }
+            if cfg!(target_arch = "wasm32") || crate::telemetry::is_active() {
+                ui.weak(tl!("Crash reports say where the code failed, never your files, names or text."));
+            }
         }
     }
 }

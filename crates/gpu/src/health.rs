@@ -8,11 +8,12 @@
 //! healthy (catching the poll's panic as a last resort). Every GPU entry point checks
 //! [`DeviceHealth::fault`] first.
 //!
-//! Builds for the web too: the callbacks only touch atomics and a mutex.
+//! Builds for the web too: the callbacks only touch atomics and a mutex, and tell the observer of
+//! [`set_fault_observer`], if any.
 
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 /// Why the GPU can't be used any more.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -59,6 +60,33 @@ impl fmt::Display for Fault {
 /// The message an out-of-memory [`Fault::Error`] carries (wgpu's `Error::OutOfMemory`).
 pub const OUT_OF_MEMORY: &str = "Out of Memory";
 
+/// A fault as it happens, for the usage statistics ([`set_fault_observer`]).
+#[derive(Clone, Copy, Debug)]
+pub struct FaultReport<'a> {
+    /// The device was lost (otherwise an uncaptured error).
+    pub lost: bool,
+    /// The API's class: `unknown`, `destroyed` for a loss; `validation`, `out_of_memory`,
+    /// `internal` for an error.
+    pub reason: &'static str,
+    /// The driver's or wgpu's message: it can name anything, so an observer must not pass it on.
+    pub message: &'a str,
+}
+
+static OBSERVER: OnceLock<fn(FaultReport<'_>)> = OnceLock::new();
+
+/// Tells `observer` about every device-lost callback and uncaptured error of a watched device, at
+/// once and on the thread wgpu calls back on, with wgpu's locks held: it must not call into wgpu.
+/// The first observer stays.
+pub fn set_fault_observer(observer: fn(FaultReport<'_>)) {
+    let _ = OBSERVER.set(observer);
+}
+
+fn observe(report: FaultReport<'_>) {
+    if let Some(observer) = OBSERVER.get() {
+        observer(report);
+    }
+}
+
 #[derive(Default)]
 struct Inner {
     faulted: AtomicBool,
@@ -97,6 +125,7 @@ impl DeviceHealth {
                 (_, false) => message,
             };
             log::error!("wgpu device lost ({reason:?}): {detail}");
+            observe(FaultReport { lost: true, reason: if matches!(reason, wgpu::DeviceLostReason::Destroyed) { "destroyed" } else { "unknown" }, message: &detail });
             lost.0.device_lost.store(true, Ordering::Release);
             lost.mark(Fault::Lost(detail));
         });
@@ -110,6 +139,12 @@ impl DeviceHealth {
         self.0.errors.fetch_add(1, Ordering::Relaxed);
         let text = e.to_string();
         log::error!("uncaptured wgpu error: {text}");
+        let reason = match e {
+            wgpu::Error::OutOfMemory { .. } => "out_of_memory",
+            wgpu::Error::Validation { .. } => "validation",
+            _ => "internal",
+        };
+        observe(FaultReport { lost: false, reason, message: &text });
         self.mark(fault_of(e));
     }
 

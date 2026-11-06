@@ -756,10 +756,163 @@ fn tool_drops_go_out_as_commands_with_fixed_ids() {
     assert!(r.is_empty(), "cleared after a batch");
 }
 
+/// A panic's location is kept inside this tree only: a dependency's or the standard library's path
+/// names the build machine, and anything path-shaped from elsewhere may name a user.
 #[test]
-fn a_page_stage_survives_the_breadcrumb_report() {
-    for stage in PAGE_STAGES {
-        assert_eq!(unclean_exit_event(Some(stage), None, None, None, None, None)["cmd"], stage);
+fn a_crash_location_stays_inside_the_tree() {
+    assert_eq!(crash_location("crates/gpu/src/health.rs", 12), "crates/gpu/src/health.rs:12");
+    assert_eq!(crash_location("apps\\photocraft-web\\src\\web.rs", 7), "apps/photocraft-web/src/web.rs:7");
+    for outside in [
+        "/home/builder/.cargo/registry/src/index.crates.io-1949/wgpu-30.0.1/src/lib.rs",
+        "/rustc/abc/library/core/src/option.rs",
+        "C:\\Users\\Secret Person\\capishot\\crates\\gpu\\src\\lib.rs",
+        "/home/SecretUser/crates/gpu/src/lib.rs",
+        "crates/../../SecretFolder/x.rs",
+        "crates/gpu/src/My Page.psd",
+        "crates/gpu/src/página.rs",
+        "page.psd",
+        "",
+    ] {
+        assert_eq!(crash_location(outside, 3), EXTERNAL_LOCATION, "{outside}");
     }
-    assert_eq!(unclean_exit_event(Some("stage.secret"), None, None, None, None, None)["cmd"], "other");
+    assert_eq!(crash_location(&format!("crates/{}.rs", "x".repeat(200)), 1), EXTERNAL_LOCATION);
+}
+
+/// No byte of a message leaves: whatever a panic or a driver says comes out as a fixed code.
+#[test]
+fn crash_messages_reduce_to_fixed_codes() {
+    assert_eq!(panic_code("called `Option::unwrap()` on a `None` value"), "unwrap_none");
+    assert_eq!(panic_code("called `Result::unwrap()` on an `Err` value: open /home/SecretUser/page.psd"), "unwrap_err");
+    assert_eq!(panic_code("index out of bounds: the len is 3 but the index is 7"), "index_oob");
+    assert_eq!(panic_code("range end index 9 out of range for slice of length 3"), "slice_range");
+    assert_eq!(panic_code("byte index 3 is not a char boundary; it is inside 'é' of `Capítulo 1`"), "str_boundary");
+    assert_eq!(panic_code("attempt to divide by zero"), "div_zero");
+    assert_eq!(panic_code("attempt to add with overflow"), "overflow");
+    assert_eq!(panic_code("capacity overflow"), "capacity");
+    assert_eq!(panic_code("already mutably borrowed: BorrowError"), "refcell");
+    assert_eq!(panic_code("couldn't read SecretLayer of Chapter 12"), "other");
+    assert_eq!(panic_code(""), "other");
+    assert_eq!(gpu_code("Dawn: the device was removed (DXGI_ERROR_DEVICE_REMOVED) on SecretPage"), "device_removed");
+    assert_eq!(gpu_code("Out of Memory"), "oom");
+    assert_eq!(gpu_code("Buffer 'SecretLayer' is invalid"), "invalid_object");
+    assert_eq!(gpu_code("SecretLayer"), "other");
+    for code in [panic_code("SecretLayer"), gpu_code("SecretLayer")] {
+        assert!(PANIC_CODES.contains(&code) || GPU_CODES.contains(&code), "{code}");
+    }
+}
+
+/// A crash event's values may come back from a breadcrumb in storage: anything that isn't exactly
+/// what it should be is left out, so neither user data nor a batch the collector refuses gets out.
+#[test]
+fn a_crash_event_keeps_only_known_values() {
+    let good = crash_event("panic", Some("crates/gpu/src/health.rs:12"), Some("index_oob"), None, Some("decoding"), Some(900));
+    assert_eq!(good, json!({"e": "crash", "kind": "panic", "loc": "crates/gpu/src/health.rs:12", "msg": "index_oob", "stage": "decoding", "memMB": 900}));
+    let body = crash_batch("0123456789abcdef", "fedcba9876543210", "web", &good).expect("may leave");
+    let batch: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!((batch["v"].as_u64(), batch["client"].as_str(), batch["seq"].as_u64()), (Some(u64::from(SCHEMA_VERSION)), Some("web"), Some(1)));
+    assert_eq!(batch["events"][0], good);
+
+    let hostile = "/home/SecretUser/SecretPage.psd:1";
+    let bad = crash_event(hostile, Some(hostile), Some(hostile), Some(hostile), Some(hostile), None);
+    assert_eq!(bad, json!({"e": "crash", "kind": "panic"}));
+    assert!(crash_batch("not an id!", "fedcba9876543210", "web", &good).is_none());
+    // Hand-built, past `crash_event`: still stopped by the last line of defence.
+    assert!(crash_batch("0123456789abcdef", "fedcba9876543210", "web", &json!({"e": "crash", "kind": "panic", "loc": hostile})).is_none());
+    assert!(crash_batch("0123456789abcdef", "fedcba9876543210", "web", &json!({"e": "crash", "kind": "panic", "file": "x"})).is_none());
+}
+
+/// A crash event goes through the recorder too (the desktop), with its path-shaped `loc`.
+#[test]
+fn a_crash_event_survives_the_recorders_last_check() {
+    let mut r = Recorder::new("a", "s", 0.0);
+    r.event(crash_event("panic", Some("crates/gpu/src/health.rs:12"), Some("other"), None, None, None));
+    r.event(json!({"e": "crash", "kind": "panic", "loc": "/home/SecretUser/x.rs:1"}));
+    let b = r.take_batch().unwrap();
+    assert!(b.contains("crates/gpu/src/health.rs:12"), "{b}");
+    assert!(!b.contains("SecretUser"), "{b}");
+}
+
+#[test]
+fn unclean_exit_detail_takes_only_what_is_sane() {
+    let mut e = unclean_exit_event(None, None, None, None, None, Some(true));
+    unclean_exit_detail(&mut e, Some("recovery_load"), Some(512), Some(0.5), Some(3));
+    assert_eq!((e["src"].as_str(), e["stage"].as_str(), e["js_mb"].as_u64(), e["dev_gb"].as_f64(), e["loop"].as_u64()), (Some("panic"), Some("recovery_load"), Some(512), Some(0.5), Some(3)));
+    let mut e = unclean_exit_event(None, None, None, None, None, Some(false));
+    unclean_exit_detail(&mut e, Some("SecretPage"), None, Some(f64::NAN), Some(0));
+    for key in ["stage", "js_mb", "dev_gb", "loop"] {
+        assert!(e.get(key).is_none(), "{key}: {e}");
+    }
+}
+
+/// Last entered wins; leaving one that is no longer current changes nothing.
+#[test]
+fn stages_follow_the_last_one_entered() {
+    let stages = Stages::new();
+    assert!(stages.enter(Stage::Idle));
+    assert!(stages.enter(Stage::Opening));
+    assert_eq!(stages.name(), "opening");
+    assert!(stages.enter(Stage::Decoding));
+    assert!(!stages.enter(Stage::Decoding));
+    assert_eq!(stages.leave(Stage::Opening), None);
+    assert_eq!(stages.name(), "decoding");
+    assert_eq!(stages.leave(Stage::Decoding), None);
+    assert_eq!(stages.name(), "idle");
+    for s in Stage::ALL {
+        assert!(Stage::is_name(s.name()) && s.name().len() <= 24 && s.name().bytes().all(|b| b.is_ascii_lowercase() || b == b'_'), "{s:?}");
+    }
+}
+
+/// `gpu_lost` says why, as a code.
+#[test]
+fn gpu_lost_carries_a_coded_reason() {
+    let mut r = Recorder::new("a", "s", 0.0);
+    r.gpu_lost("webgpu", "intel", "device_lost", None, 1, None);
+    r.gpu_lost_reason("device_lost", "Dawn: device removed while drawing SecretLayer");
+    let b = r.take_batch().unwrap();
+    assert!(b.contains("\"reason\":\"device_removed\""), "{b}");
+    assert!(!b.contains("SecretLayer"), "{b}");
+}
+
+/// `boot.js` writes its `crash` batches by hand: it follows the schema version.
+#[test]
+fn the_page_loaders_crash_batches_use_this_schema() {
+    let boot = include_str!("../../../apps/photocraft-web/boot.js");
+    assert!(boot.contains(&format!("v: {SCHEMA_VERSION}, client: 'web'")), "boot.js's `crash` batch");
+}
+
+/// Page stages are stages like any other: one name in the breadcrumb, no second mechanism in `cmd`.
+#[test]
+fn page_stages_are_stages_and_only_some_are_background() {
+    let mut exit = unclean_exit_event(Some("stage.secret"), None, None, None, None, None);
+    assert_eq!(exit["cmd"], "other");
+    for stage in ["picker", "reading", "hidden"] {
+        unclean_exit_detail(&mut exit, Some(stage), None, None, None);
+        assert_eq!(exit["stage"], stage);
+    }
+    assert!(Stage::is_background("picker") && Stage::is_background("hidden"));
+    for stage in ["reading", "decoding", "boot", "idle", ""] {
+        assert!(!Stage::is_background(stage), "{stage}");
+    }
+}
+
+/// Where the page rests survives the work done meanwhile, and work isn't relabelled by it.
+#[test]
+fn work_returns_to_where_the_page_rests() {
+    let stages = Stages::new();
+    assert_eq!(stages.set_hidden(true), Some(Stage::Hidden), "starting hidden");
+    assert_eq!(stages.set_hidden(false), Some(Stage::Idle));
+    assert_eq!(stages.set_page(Some(Stage::Picker)), Some(Stage::Picker));
+    assert_eq!(stages.set_hidden(true), None, "the picker says more than hidden");
+    assert_eq!(stages.name(), "picker");
+    assert!(stages.enter(Stage::RecoveryCheckpoint));
+    assert_eq!(stages.set_page(Some(Stage::Picker)), None, "work stays what it is");
+    assert_eq!(stages.name(), "recovery_checkpoint");
+    assert_eq!(stages.leave(Stage::Opening), None, "not in that stage");
+    assert_eq!(stages.leave(Stage::RecoveryCheckpoint), Some(Stage::Picker), "written at once: no frames behind the picker");
+    assert_eq!(stages.set_page(Some(Stage::Reading)), Some(Stage::Reading));
+    assert_eq!(stages.set_page(None), Some(Stage::Hidden));
+    assert!(stages.enter(Stage::Decoding));
+    assert_eq!(stages.set_hidden(false), None);
+    assert_eq!(stages.leave(Stage::Decoding), None, "back in front: the next heartbeat writes it");
+    assert_eq!(stages.name(), "idle");
 }

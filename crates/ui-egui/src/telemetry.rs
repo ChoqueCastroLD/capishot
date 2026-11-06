@@ -24,6 +24,12 @@
 //! Schema 7 adds the desktop app (`client`), the install channel and hardware names to
 //! `session_start`, every command's time per page size (`cmd_perf`), AI runs (`ai_run`), memory
 //! high-water marks (`memory`) and the first edit of a session (`edited`).
+//! Schema 8 adds `crash` (a panic, a script error, a lost device or an uncaught GPU error, sent the
+//! moment it happens: [`crash_event`], [`crash_batch`]), to `unclean_exit` what the app was doing
+//! (`stage`, [`Stage`]), the browser's memory and how many unclean exits in a row (`loop`), and to
+//! `gpu_lost` its `reason`. A panic's location is kept only inside this source tree
+//! ([`crash_location`]), and no byte of a panic's or a driver's message leaves: each is reduced to a
+//! fixed code ([`panic_code`], [`gpu_code`]).
 //! Without a schema change (the collector refuses a whole batch for an unknown event or field), a
 //! canvas press a tool dropped goes out as a `command` with the id `toolDrop.<reason>.tool.<Name>`
 //! and source `tool` ([`Recorder::tool_drop`]): the reason is a fixed code, never free text.
@@ -33,13 +39,13 @@
 
 use std::cell::Cell;
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use serde_json::{Map, Value, json};
 
 /// Version of the batch schema the collector validates.
-pub const SCHEMA_VERSION: u32 = 7;
+pub const SCHEMA_VERSION: u32 = 8;
 /// Events queued between flushes; later ones are dropped (and counted).
 pub const MAX_EVENTS: usize = 200;
 /// Distinct (command, source) and (command, error) keys aggregated between flushes.
@@ -412,7 +418,7 @@ pub const FIELDS: &[&str] = &[
     "e", "app", "commit", "threads", "coi", "cores", "gpu", "gpu_vendor", "browser", "browser_major", "os", "screen", "lang", "device", "mem", "channel", "os_ver",
     "cpu", "gpu_model", "gpu_driver", "ram", "disk", "active_s", "total_s", "id", "src", "n", "kind", "bytes", "mp", "layers", "ms", "ok", "op", "tool", "p50", "p95",
     "max", "long", "lat50", "lat95", "fps", "int95", "drop", "g", "w_in", "w_logic", "w_ui", "w_paint", "cmd", "job", "phase", "action", "api", "cause", "memMB", "upMin",
-    "docs", "model", "region", "fell_back", "lite", "ram_mb", "gpu_mb",
+    "docs", "model", "region", "fell_back", "lite", "ram_mb", "gpu_mb", "loc", "msg", "reason", "stage", "js_mb", "dev_gb", "loop",
 ];
 
 /// Fields holding a command or tool id, which [`sanitize_command_id`] already reduced to known ids
@@ -434,6 +440,10 @@ fn is_clean_event(event: &Value) -> bool {
 }
 
 fn is_clean_text(key: &str, text: &str) -> bool {
+    // A crash's location is the one value shaped like a path: only this tree's sources pass.
+    if key == "loc" {
+        return is_crash_location(text);
+    }
     text.len() <= 80 && !text.contains(['/', '\\', ':', '\n']) && (ID_FIELDS.contains(&key) || file_kind(text) == "other")
 }
 
@@ -766,6 +776,13 @@ impl Recorder {
         self.event(e);
     }
 
+    /// Why the `gpu_lost` of `cause` queued in this batch happened: a [`gpu_code`].
+    pub fn gpu_lost_reason(&mut self, cause: &str, reason: &str) {
+        if let Some(e) = self.events.iter_mut().rev().find(|e| e.get("e").and_then(Value::as_str) == Some("gpu_lost") && e.get("cause").and_then(Value::as_str) == Some(cause)) {
+            e["reason"] = json!(gpu_code(reason));
+        }
+    }
+
     /// The user pressed, moved, scrolled or typed.
     pub fn interaction(&mut self, now_ms: f64) {
         self.last_interaction_ms = Some(now_ms);
@@ -1021,15 +1038,10 @@ pub fn sanitize_command_id(id: &str) -> String {
     }
 }
 
-/// What a breadcrumb names instead of a command when the page died away from the front: behind the
-/// file picker, reading the picked files, or in the background.
-pub const PAGE_STAGES: [&str; 3] = ["stage.picker", "stage.read", "stage.hidden"];
-
 fn is_known_command(id: &str) -> bool {
     id.len() <= 80
         && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_' || b == b'-')
         && (photocraft_engine::commands::find(id).is_some()
-            || PAGE_STAGES.contains(&id)
             || crate::menus::UI_COMMANDS.iter().any(|c| c.0 == id)
             || crate::menu_catalog::CATALOG.iter().any(|c| c.3 == id))
 }
@@ -1534,6 +1546,412 @@ pub fn unclean_exit_event(cmd: Option<&str>, tool: Option<&str>, mem_mb: Option<
         e["src"] = json!(if panic { "panic" } else { "killed" });
     }
     e
+}
+
+/// Adds to an `unclean_exit` what the crash breadcrumb knows beyond [`unclean_exit_event`]: the
+/// last [`Stage`], the browser's memory (`js_mb`: `performance.memory`, `dev_gb`:
+/// `navigator.deviceMemory`) and the unclean exits in a row, this one included. A breadcrumb is
+/// read back from storage, so nothing in it is trusted.
+pub fn unclean_exit_detail(event: &mut Value, stage: Option<&str>, js_mb: Option<u64>, dev_gb: Option<f64>, crash_loop: Option<u64>) {
+    if let Some(stage) = stage.filter(|s| Stage::is_name(s)) {
+        event["stage"] = json!(stage);
+    }
+    if let Some(mb) = js_mb {
+        event["js_mb"] = json!(mb.min(10_000_000));
+    }
+    if let Some(gb) = dev_gb.filter(|g| g.is_finite() && *g > 0.0) {
+        event["dev_gb"] = json!(gb.min(1024.0));
+    }
+    if let Some(n) = crash_loop.filter(|n| *n > 0) {
+        event["loop"] = json!(n.min(1000));
+    }
+}
+
+// ------------------------------------------------------------------ crash detail (schema 8)
+
+/// What the app was doing, for a crash report: the last stage entered wins (several can overlap),
+/// and leaving one goes back to where the page rests: [`Stage::Picker`] or [`Stage::Reading`] while
+/// the file picker is out, [`Stage::Hidden`] in the background, otherwise [`Stage::Idle`]. A page
+/// that died resting in `Picker` or `Hidden` was reclaimed or closed from the background, which is
+/// not a crash ([`Stage::is_background`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Stage {
+    Boot,
+    FirstFrame,
+    Idle,
+    Opening,
+    Decoding,
+    Composing,
+    Prewarm,
+    RecoveryLoad,
+    RecoveryCheckpoint,
+    Ai,
+    /// The browser's file picker is out, which on a phone puts the page behind it.
+    Picker,
+    /// The picked files are being read in.
+    Reading,
+    /// The page is in the background: no frames, so no heartbeat.
+    Hidden,
+}
+
+impl Stage {
+    const ALL: [Stage; 13] = [
+        Stage::Boot,
+        Stage::FirstFrame,
+        Stage::Idle,
+        Stage::Opening,
+        Stage::Decoding,
+        Stage::Composing,
+        Stage::Prewarm,
+        Stage::RecoveryLoad,
+        Stage::RecoveryCheckpoint,
+        Stage::Ai,
+        Stage::Picker,
+        Stage::Reading,
+        Stage::Hidden,
+    ];
+
+    /// Its name in `stage` (the collector accepts any `[a-z_]{1,24}`).
+    pub fn name(self) -> &'static str {
+        match self {
+            Stage::Boot => "boot",
+            Stage::FirstFrame => "first_frame",
+            Stage::Idle => "idle",
+            Stage::Opening => "opening",
+            Stage::Decoding => "decoding",
+            Stage::Composing => "composing",
+            Stage::Prewarm => "prewarm",
+            Stage::RecoveryLoad => "recovery_load",
+            Stage::RecoveryCheckpoint => "recovery_checkpoint",
+            Stage::Ai => "ai",
+            Stage::Picker => "picker",
+            Stage::Reading => "reading",
+            Stage::Hidden => "hidden",
+        }
+    }
+
+    fn is_name(name: &str) -> bool {
+        Self::ALL.iter().any(|s| s.name() == name)
+    }
+
+    /// A page last seen in stage `name` wasn't doing anything of its own: the phone took it back
+    /// behind the picker or in the background, or the user closed it from there.
+    pub fn is_background(name: &str) -> bool {
+        name == Stage::Picker.name() || name == Stage::Hidden.name()
+    }
+}
+
+/// The stage, and where the page rests (a state of its own for the tests: stages change from every
+/// test that opens a document).
+struct Stages {
+    now: AtomicU8,
+    /// [`Stage::Picker`] or [`Stage::Reading`] while the file picker's work is going on, else `Idle`.
+    page: AtomicU8,
+    hidden: AtomicBool,
+}
+
+impl Stages {
+    const fn new() -> Self {
+        Self { now: AtomicU8::new(Stage::Boot as u8), page: AtomicU8::new(Stage::Idle as u8), hidden: AtomicBool::new(false) }
+    }
+
+    fn name(&self) -> &'static str {
+        let now = self.now.load(Ordering::Relaxed);
+        Stage::ALL.iter().find(|s| **s as u8 == now).map_or("idle", |s| s.name())
+    }
+
+    /// Where the page rests when no work is going on.
+    fn resting(&self) -> Stage {
+        let page = self.page.load(Ordering::Relaxed);
+        if page == Stage::Picker as u8 {
+            Stage::Picker
+        } else if page == Stage::Reading as u8 {
+            Stage::Reading
+        } else if self.hidden.load(Ordering::Relaxed) {
+            Stage::Hidden
+        } else {
+            Stage::Idle
+        }
+    }
+
+    /// Whether this is a change.
+    fn enter(&self, stage: Stage) -> bool {
+        self.now.swap(stage as u8, Ordering::Relaxed) != stage as u8
+    }
+
+    /// Back to where the page rests, if still in `stage`: that resting stage, when it needs writing
+    /// now (resting away from the front, the page draws no frame to write it at).
+    fn leave(&self, stage: Stage) -> Option<Stage> {
+        let rest = self.resting();
+        let left = self.now.compare_exchange(stage as u8, rest as u8, Ordering::Relaxed, Ordering::Relaxed).is_ok();
+        (left && rest != Stage::Idle).then_some(rest)
+    }
+
+    /// Goes to where the page now rests, unless it is at work: that work's end comes back to it.
+    /// The new stage, if it changed.
+    fn settle(&self) -> Option<Stage> {
+        let rest = self.resting();
+        let now = self.now.load(Ordering::Relaxed);
+        let resting = [Stage::Boot, Stage::Idle, Stage::Picker, Stage::Reading, Stage::Hidden].iter().any(|s| *s as u8 == now);
+        (resting && now != rest as u8 && self.now.compare_exchange(now, rest as u8, Ordering::Relaxed, Ordering::Relaxed).is_ok()).then_some(rest)
+    }
+
+    fn set_page(&self, stage: Option<Stage>) -> Option<Stage> {
+        self.page.store(stage.unwrap_or(Stage::Idle) as u8, Ordering::Relaxed);
+        self.settle()
+    }
+
+    fn set_hidden(&self, hidden: bool) -> Option<Stage> {
+        self.hidden.store(hidden, Ordering::Relaxed);
+        self.settle()
+    }
+}
+
+static STAGES: Stages = Stages::new();
+/// Told when a stage is entered: the web's breadcrumb, which must be written before the work that
+/// may kill the page, not at the next heartbeat.
+static STAGE_HOOK: OnceLock<fn(&'static str)> = OnceLock::new();
+
+/// See [`STAGE_HOOK`].
+pub fn set_stage_hook(hook: fn(&'static str)) {
+    let _ = STAGE_HOOK.set(hook);
+}
+
+fn tell_stage_hook(stage: Option<Stage>) {
+    if let (Some(stage), Some(hook)) = (stage, STAGE_HOOK.get()) {
+        hook(stage.name());
+    }
+}
+
+/// The app enters `stage`. Costs an atomic store (and the hook, on a change).
+pub fn set_stage(stage: Stage) {
+    tell_stage_hook(STAGES.enter(stage).then_some(stage));
+}
+
+/// The app left `stage`; a later stage entered meanwhile stays.
+pub fn leave_stage(stage: Stage) {
+    tell_stage_hook(STAGES.leave(stage));
+}
+
+/// The file picker came out ([`Stage::Picker`]), its files are being read ([`Stage::Reading`]), or
+/// that is over (`None`).
+pub fn set_page_stage(stage: Option<Stage>) {
+    tell_stage_hook(STAGES.set_page(stage));
+}
+
+/// The page went to the background or came back.
+pub fn set_page_hidden(hidden: bool) {
+    tell_stage_hook(STAGES.set_hidden(hidden));
+}
+
+/// The current stage's name.
+pub fn stage_name() -> &'static str {
+    STAGES.name()
+}
+
+/// In `stage` until dropped ([`stage_scope`]).
+pub struct StageScope(Stage);
+
+impl Drop for StageScope {
+    fn drop(&mut self) {
+        leave_stage(self.0);
+    }
+}
+
+impl StageScope {
+    /// Leaves `stage` when dropped, for a stage already entered.
+    pub fn leaving(stage: Stage) -> Self {
+        Self(stage)
+    }
+}
+
+/// Enters `stage` until the returned guard drops.
+pub fn stage_scope(stage: Stage) -> StageScope {
+    set_stage(stage);
+    StageScope(stage)
+}
+
+/// An AI job ended: its stage is over.
+pub fn leave_ai_stage(command: &str) {
+    if is_ai_job(command) || crate::ai_progress::is_ai(command, &Value::Null) {
+        leave_stage(Stage::Ai);
+    }
+}
+
+/// A `crash`'s `loc` for code outside this tree (a dependency, the standard library): their paths
+/// name the machine that built them, and a location in them says little anyway.
+pub const EXTERNAL_LOCATION: &str = "external";
+
+/// `crates/gpu/src/health.rs:12` for a source of this tree (as the compiler names one: relative to
+/// the workspace), anything else [`EXTERNAL_LOCATION`].
+pub fn crash_location(file: &str, line: u32) -> String {
+    let location = format!("{}:{line}", file.replace('\\', "/"));
+    if is_crash_location(&location) { location } else { EXTERNAL_LOCATION.to_string() }
+}
+
+/// Whether `text` is a `loc`: [`EXTERNAL_LOCATION`] or `<crates|apps|xtask>/…/<file>.rs:<line>`.
+fn is_crash_location(text: &str) -> bool {
+    if text == EXTERNAL_LOCATION {
+        return true;
+    }
+    let Some((file, line)) = text.rsplit_once(':') else { return false };
+    text.len() <= 100
+        && !line.is_empty()
+        && line.len() <= 7
+        && line.bytes().all(|b| b.is_ascii_digit())
+        && (file.starts_with("crates/") || file.starts_with("apps/") || file.starts_with("xtask/"))
+        && file.ends_with(".rs")
+        && !file.contains("..")
+        && !file.contains("//")
+        && file.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'.' | b'_' | b'-'))
+}
+
+/// What a panic's message is reduced to. Only ever one of these fixed strings: a message may quote
+/// a file or layer name, so none of its text leaves.
+const PANIC_CODES: &[&str] =
+    &["unwrap_none", "unwrap_err", "index_oob", "slice_range", "str_boundary", "div_zero", "overflow", "capacity", "alloc", "refcell", "poisoned", "assert", "unreachable", "unimplemented", "other"];
+/// What a GPU driver's or wgpu's message is reduced to, likewise.
+const GPU_CODES: &[&str] = &["oom", "device_removed", "device_hung", "device_reset", "timeout", "limit", "invalid_object", "destroyed", "other"];
+
+/// The first bytes of a message, lower case, to classify.
+fn message_head(message: &str) -> String {
+    message.chars().take(300).collect::<String>().to_ascii_lowercase()
+}
+
+/// The class of a panic's message.
+pub fn panic_code(message: &str) -> &'static str {
+    let m = message_head(message);
+    let has = |needles: &[&str]| needles.iter().any(|n| m.contains(n));
+    if has(&["option::unwrap()"]) {
+        "unwrap_none"
+    } else if has(&["result::unwrap()"]) {
+        "unwrap_err"
+    } else if has(&["index out of bounds"]) {
+        "index_oob"
+    } else if has(&["char boundary", "byte index"]) {
+        "str_boundary"
+    } else if has(&["range end index", "range start index", "slice index"]) {
+        "slice_range"
+    } else if has(&["divide by zero", "divisor of zero"]) {
+        "div_zero"
+    } else if has(&["capacity overflow"]) {
+        "capacity"
+    } else if has(&["with overflow"]) {
+        "overflow"
+    } else if has(&["memory allocation", "out of memory"]) {
+        "alloc"
+    } else if has(&["already borrowed", "already mutably borrowed"]) {
+        "refcell"
+    } else if has(&["poison"]) {
+        "poisoned"
+    } else if has(&["assertion"]) {
+        "assert"
+    } else if has(&["entered unreachable"]) {
+        "unreachable"
+    } else if has(&["not implemented", "not yet implemented"]) {
+        "unimplemented"
+    } else {
+        "other"
+    }
+}
+
+/// The class of a GPU driver's or wgpu's message.
+pub fn gpu_code(message: &str) -> &'static str {
+    let m = message_head(message);
+    let has = |needles: &[&str]| needles.iter().any(|n| m.contains(n));
+    if has(&["out of memory", "out-of-memory"]) {
+        "oom"
+    } else if has(&["removed"]) {
+        "device_removed"
+    } else if has(&["hung"]) {
+        "device_hung"
+    } else if has(&["reset"]) {
+        "device_reset"
+    } else if has(&["timeout", "timed out", "tdr"]) {
+        "timeout"
+    } else if has(&["limit", "exceeds", "too large"]) {
+        "limit"
+    } else if has(&["destroyed"]) {
+        "destroyed"
+    } else if has(&["invalid"]) {
+        "invalid_object"
+    } else {
+        "other"
+    }
+}
+
+/// A panic's location and class, from the panic hook.
+pub fn panic_report(info: &std::panic::PanicHookInfo<'_>) -> (String, &'static str) {
+    let location = info.location().map_or_else(|| EXTERNAL_LOCATION.to_string(), |l| crash_location(l.file(), l.line()));
+    let payload = info.payload();
+    let message = payload.downcast_ref::<&str>().copied().or_else(|| payload.downcast_ref::<String>().map(String::as_str)).unwrap_or("");
+    (location, panic_code(message))
+}
+
+/// A `crash` event. `kind`: "panic", "gpu_lost" or "gpu_error" ("js" comes from the page's loader,
+/// `boot.js`); `loc` a [`crash_location`], `msg` a [`panic_code`] or [`gpu_code`], `reason` what the
+/// GPU API said (`unknown`, `destroyed`, `context_lost`, `validation`, `out_of_memory`, `internal`),
+/// `stage` a [`Stage`] name. These may come back from a breadcrumb in storage, so whatever isn't
+/// exactly that is left out: the collector refuses a whole batch for one bad value.
+pub fn crash_event(kind: &str, loc: Option<&str>, msg: Option<&str>, reason: Option<&str>, stage: Option<&str>, mem_mb: Option<u64>) -> Value {
+    const REASONS: &[&str] = &["unknown", "destroyed", "context_lost", "validation", "out_of_memory", "internal"];
+    let mut e = json!({"e": "crash", "kind": if matches!(kind, "panic" | "gpu_lost" | "gpu_error") { kind } else { "panic" }});
+    if let Some(loc) = loc.filter(|l| is_crash_location(l)) {
+        e["loc"] = json!(loc);
+    }
+    if let Some(msg) = msg.filter(|m| PANIC_CODES.contains(m) || GPU_CODES.contains(m)) {
+        e["msg"] = json!(msg);
+    }
+    if let Some(reason) = reason.filter(|r| REASONS.contains(r)) {
+        e["reason"] = json!(reason);
+    }
+    if let Some(stage) = stage.filter(|s| Stage::is_name(s)) {
+        e["stage"] = json!(stage);
+    }
+    if let Some(mb) = mem_mb {
+        e["memMB"] = json!(mb.min(1_000_000));
+    }
+    e
+}
+
+/// `event` alone as a batch's JSON body, to send right away and without the recorder: a dying page
+/// may have panicked with the recorder's lock held, and its queue would never be flushed. `None`
+/// for an event that may not leave ([`is_clean_event`]).
+pub fn crash_batch(install_id: &str, session_id: &str, client: &str, event: &Value) -> Option<String> {
+    if !is_clean_event(event) {
+        return None;
+    }
+    let (iid, sid) = (sanitize_token(install_id, 64)?, sanitize_token(session_id, 64)?);
+    Some(json!({"v": SCHEMA_VERSION, "client": client, "iid": iid, "sid": sid, "seq": 1, "events": [event]}).to_string())
+}
+
+/// Where GPU faults go ([`install_gpu_fault_reports`]).
+static CRASH_SINK: OnceLock<fn(Value)> = OnceLock::new();
+/// The kinds of GPU fault reported so far: each once per run, as a driver can repeat one per frame.
+static GPU_FAULTS_SEEN: AtomicU8 = AtomicU8::new(0);
+
+/// Hands a `crash` event for every kind of fault of a watched device to `sink`, as it happens: the
+/// page may reload right after a lost device.
+pub fn install_gpu_fault_reports(sink: fn(Value)) {
+    let _ = CRASH_SINK.set(sink);
+    photocraft_gpu::health::set_fault_observer(gpu_fault);
+}
+
+fn gpu_fault(fault: photocraft_gpu::health::FaultReport<'_>) {
+    let bit = match (fault.lost, fault.reason) {
+        (true, "destroyed") => 1,
+        (true, _) => 2,
+        (false, "validation") => 4,
+        (false, "out_of_memory") => 8,
+        (false, _) => 16,
+    };
+    if GPU_FAULTS_SEEN.fetch_or(bit, Ordering::Relaxed) & bit != 0 {
+        return;
+    }
+    if let Some(sink) = CRASH_SINK.get() {
+        sink(crash_event(if fault.lost { "gpu_lost" } else { "gpu_error" }, None, Some(gpu_code(fault.message)), Some(fault.reason), Some(stage_name()), None));
+    }
 }
 
 /// The tool working the canvas (`tool.Brush`), or `view` for wheel zoom/scroll and pinch over it,
