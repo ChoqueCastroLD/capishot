@@ -37,6 +37,7 @@ fn stages_are_read_from_the_progress_messages() {
 #[derive(Default)]
 struct Held {
     pending: Mutex<Option<(Arc<dyn Hooks>, Done)>>,
+    side: Mutex<(usize, usize)>,
 }
 
 impl Inpainter for Held {
@@ -46,7 +47,8 @@ impl Inpainter for Held {
     fn device(&self) -> String {
         "test".into()
     }
-    fn run(&self, _req: Request, hooks: Arc<dyn Hooks>, done: Done) {
+    fn run(&self, req: Request, hooks: Arc<dyn Hooks>, done: Done) {
+        *self.side.lock().unwrap() = (req.tile.w, req.tile.h);
         *self.pending.lock().unwrap() = Some((hooks, done));
     }
 }
@@ -71,6 +73,13 @@ impl Held {
         self.arrived();
         let (_, done) = self.pending.lock().unwrap().take().expect("a request");
         done(Err(photocraft_ai_lama::LamaError::Device(why.into())));
+    }
+    /// Answers the run waiting with a grey tile.
+    fn finish(&self) {
+        self.arrived();
+        let (_, done) = self.pending.lock().unwrap().take().expect("a request");
+        let (w, h) = *self.side.lock().unwrap();
+        done(Ok(vec![0.5; w * h * 3]));
     }
     fn waiting(&self) -> bool {
         self.pending.lock().unwrap().is_some()
@@ -158,6 +167,41 @@ fn remove_with_ai_on_an_empty_layer_says_so() {
     assert!(h.state().session.jobs().is_empty(), "it ended");
     assert!(held.pending.lock().unwrap().is_none(), "the model never ran");
     assert_eq!(h.state().ui.status, "Esta capa está vacía aquí: elige la capa que tiene la página");
+}
+
+/// A stroke ended while a run is going waits and runs when it ends, on the layer it was drawn on.
+/// A failed run drops the strokes waiting.
+#[test]
+fn remove_with_ai_queues_a_stroke_ended_during_a_run() {
+    let held = Arc::new(Held::default());
+    let mut h = phone(held.clone());
+    let stroke = |y: i32| json!({"strokes": [[[100, y, 1], [180, y + 20, 1]]], "size": 20});
+    crate::remove_ai_ui::request(h.state_mut(), stroke(100));
+    h.run_steps(3);
+    held.arrived();
+    crate::remove_ai_ui::request(h.state_mut(), stroke(300));
+    h.run_steps(2);
+    assert_eq!(h.state().session.jobs().len(), 1, "one run at a time");
+    assert!(!h.state().ui.status_error, "not refused: {}", h.state().ui.status);
+    held.fail("first");
+    h.run_steps(4);
+    assert!(h.state().session.jobs().is_empty(), "a failure drops what waits");
+    crate::remove_ai_ui::request(h.state_mut(), stroke(100));
+    h.run_steps(3);
+    held.arrived();
+    crate::remove_ai_ui::request(h.state_mut(), stroke(300));
+    h.run_steps(2);
+    held.finish();
+    let mut second = false;
+    for _ in 0..400 {
+        h.run_steps(1);
+        if held.waiting() {
+            second = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(second, "the waiting stroke runs");
 }
 
 /// A stroke off the page is refused in the person's language, not the engine's English.

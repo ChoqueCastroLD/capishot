@@ -10,6 +10,7 @@ use photocraft_ai::models::Status;
 use serde_json::{Value, json};
 
 use crate::PhotocraftApp;
+use photocraft_doc::DocId;
 
 /// Strokes no larger than this (document px) with a selection are a tap: fill the selection.
 const TAP: f64 = 6.0;
@@ -18,6 +19,8 @@ const TAP: f64 = 6.0;
 #[derive(Clone, Debug, Default)]
 pub struct Pending {
     pub params: Option<Value>,
+    /// Strokes ended while the document's run was going: they run in order when it ends.
+    queued: std::collections::VecDeque<(DocId, Value)>,
 }
 
 /// The model the tool runs on this device: Manga LaMa, or MI-GAN with little memory.
@@ -77,7 +80,42 @@ pub fn request(app: &mut PhotocraftApp, params: Value) {
     }
 }
 
-fn run(app: &mut PhotocraftApp, params: Value) {
+fn active_doc(app: &PhotocraftApp) -> Option<DocId> {
+    app.session.active().map(|st| st.doc.id)
+}
+
+/// The document whose run of the tool is going now, when it is the active one.
+fn running_here(app: &PhotocraftApp) -> Option<DocId> {
+    let active = active_doc(app)?;
+    let running = app.session.jobs().iter().any(|j| j.command == photocraft_engine::remove_ai_cmds::ID && j.document == Some(active));
+    running.then_some(active)
+}
+
+/// A run of the tool ended: the next stroke waiting on its document runs, on the layer it was
+/// drawn on. A failure or a cancel drops them.
+pub(crate) fn run_ended(app: &mut PhotocraftApp, doc: Option<DocId>, finished: bool) {
+    if !finished {
+        app.remove_ai.queued.retain(|(d, _)| Some(*d) != doc);
+        return;
+    }
+    let Some(doc) = doc.filter(|d| active_doc(app) == Some(*d)) else { return };
+    if let Some(at) = app.remove_ai.queued.iter().position(|(d, _)| *d == doc)
+        && let Some((_, params)) = app.remove_ai.queued.remove(at)
+    {
+        run(app, params);
+    }
+}
+
+fn run(app: &mut PhotocraftApp, mut params: Value) {
+    if let Some(doc) = running_here(app) {
+        if params.get("strokes").is_some()
+            && let Some(layer) = app.session.active().and_then(|st| st.active_layer)
+        {
+            params["layer"] = json!(layer.0);
+        }
+        app.remove_ai.queued.push_back((doc, params));
+        return;
+    }
     app.ui.status.clear();
     if let Err(e) = app.run(photocraft_engine::remove_ai_cmds::ID, params) {
         app.ui.status = crate::tools::retouch_ui::remove_refusal(e);

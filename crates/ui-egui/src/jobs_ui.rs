@@ -1113,6 +1113,9 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
         JobOutcome::Done(v) => job_notices(app, &e.command, v),
         JobOutcome::Cancelled => {}
     }
+    if e.command == photocraft_engine::remove_ai_cmds::ID {
+        crate::remove_ai_ui::run_ended(app, e.document, matches!(e.outcome, JobOutcome::Done(_)));
+    }
     match e.outcome {
         JobOutcome::Done(v) if e.command == "brush.presets.importAbr" => {
             let n = v.get("count").and_then(Value::as_u64).unwrap_or(0);
