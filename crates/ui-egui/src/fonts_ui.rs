@@ -855,12 +855,8 @@ fn missing_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, 
                     let shown = if cur.is_empty() { tl!("Don't replace").to_string() } else { cur.clone() };
                     let mut chosen = cur.clone();
                     ui.label(RichText::new(tl!("Replace with")).color(t.text_faint).size(11.5));
-                    craft_ui::ComboBox::from_id_salt(("gf-replace", m))
-                        .selected_text(shown)
-                        .width(160.0)
-                        .height(320.0)
-                        .icon(crate::widgets::chevron_icon)
-                        .show_ui(ui, |ui| {
+                    let list = craft_ui::ComboBox::from_id_salt(("gf-replace", m)).selected_text(shown).width(160.0).height(320.0).icon(crate::widgets::chevron_icon);
+                    crate::mobile_sheet::combo(ui, list, tl!("Replace with"), |ui| {
                             if ui.selectable_label(chosen.is_empty(), tl!("Don't replace")).clicked() {
                                 chosen.clear();
                             }

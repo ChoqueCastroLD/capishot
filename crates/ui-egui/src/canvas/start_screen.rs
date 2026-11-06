@@ -1,3 +1,4 @@
+use crate::mobile_sheet::SheetMenu as _;
 use super::tabs::{open_on_double_click, paint_dots};
 use super::{PhotocraftApp, Rect, Sense};
 
@@ -151,7 +152,7 @@ fn home_recent(app: &mut PhotocraftApp, ui: &mut egui::Ui, recent: &[String]) {
         if resp.clicked() && remove.is_none() {
             open = Some(path.clone());
         }
-        resp.context_menu(|ui| {
+        resp.sheet_menu(|ui| {
             if ui.button(tl!("Remove from Recent")).clicked() {
                 remove = Some(path.clone());
                 ui.close();

@@ -5,6 +5,7 @@
 //! appearance). Footer: previous / next comp, update, new, delete. Every action is a
 //! `layerComp.*` engine command; the selection is `UiState::layer_comp_selected`.
 
+use crate::mobile_sheet::SheetMenu as _;
 use egui::{Align2, Rect, Sense, Stroke, pos2, vec2};
 use serde_json::{Value, json};
 
@@ -141,7 +142,7 @@ pub fn panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     action = Some(("layerComp.reorder", json!({"comp":source.comp, "index":to})));
                 }
             }
-            resp.context_menu(|ui| {
+            resp.sheet_menu(|ui| {
                 if ui.add_enabled(index > 0, egui::Button::new(tl!("Move Up"))).clicked() {
                     action = Some(("layerComp.reorder", json!({"comp":c.id, "index":index.saturating_sub(1)})));
                     select = Some(c.id);

@@ -2,6 +2,7 @@
 //! moved with the Move tool (drag one off the canvas or onto a ruler to delete it), all through
 //! undoable engine commands (`view.newGuide` / `view.moveGuide` / `view.deleteGuide`).
 
+use crate::mobile_sheet::SheetMenu as _;
 use egui::{Align2, Color32, Pos2, Rect, Sense, Stroke, pos2, vec2};
 use photocraft_doc::Document;
 use photocraft_engine::prefs::{GuidesGridAndSlices, Unit};
@@ -528,7 +529,7 @@ pub fn draw_rulers(app: &mut PhotocraftApp, ui: &mut egui::Ui, full: Rect, xf: &
             d.over_ruler = resp.interact_pointer_pos().is_some_and(|p| dropped_on_a_ruler(app, full, p));
             finish_drag(app, d);
         }
-        resp.context_menu(|ui| {
+        resp.sheet_menu(|ui| {
             if let Some(name) = unit_menu(ui, unit) {
                 chosen_unit = Some(name);
             }

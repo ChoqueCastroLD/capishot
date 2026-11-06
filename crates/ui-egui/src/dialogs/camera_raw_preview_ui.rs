@@ -1,4 +1,5 @@
 //! Camera Raw navigation in source-pixel coordinates. No document edits.
+use crate::mobile_sheet::SheetMenu as _;
 use egui::{Key, Modifiers, PointerButton, Pos2, Rect, Response, Sense, Ui, Vec2, vec2};
 use serde_json::Value;
 
@@ -187,7 +188,7 @@ pub(crate) fn interact(
         }
         ui.ctx().data_mut(|data| data.remove::<ZoomCapture>(capture_id));
     }
-    response.context_menu(|ui| {
+    response.sheet_menu(|ui| {
         if ui.button(tl!("Fit in View")).clicked() {
             state.fit();
             ui.close();

@@ -293,7 +293,7 @@ pub fn panel_menu(app: &mut crate::PhotocraftApp, ui: &mut egui::Ui) {
     ui.separator();
     run_menu_command(app, ui, tl!("New Artboard…"), "layer.new.artboard");
     ui.separator();
-    ui.menu_button(tl!("Filter Options"), |ui| {
+    crate::mobile_sheet::submenu(ui, tl!("Filter Options"), |ui| {
         let mut show = app.ui.layers_panel_options.show_filters;
         if ui.checkbox(&mut show, tl!("Show")).changed() {
             app.ui.layers_panel_options.show_filters = show;
@@ -304,7 +304,7 @@ pub fn panel_menu(app: &mut crate::PhotocraftApp, ui: &mut egui::Ui) {
     // Animation Options control Photoshop's frame-unification buttons. Capishot's Layers
     // panel does not expose those buttons; do not offer nonfunctional toggles.
     ui.add_enabled_ui(false, |ui| {
-        ui.menu_button(tl!("Animation Options"), |_ui| {});
+        crate::mobile_sheet::submenu(ui, tl!("Animation Options"), |_ui| {});
     });
     if ui.button(tl!("Panel Options…")).clicked() {
         let mut options = app.ui.layers_panel_options.clone();

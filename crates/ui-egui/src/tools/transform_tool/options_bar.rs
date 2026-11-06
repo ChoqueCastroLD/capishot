@@ -1,3 +1,4 @@
+use crate::mobile_sheet::SheetMenu as _;
 use super::begin::{enter_warp, leave_warp, warps_type};
 use super::commit::{cancel, commit};
 use super::pointer::point_on_quad;
@@ -334,7 +335,7 @@ pub(crate) fn position_size_fields(app: &mut PhotocraftApp, ui: &mut egui::Ui, t
     lbl(ui, "H:");
     let rh = crate::widgets::value_field_extent(ui, &mut h, -hlim_u..=hlim_u, suffix, size_w, places, units, side_h).accessible_name(tl!("Height"));
     for r in [&rw, &rh] {
-        r.context_menu(|ui| {
+        r.sheet_menu(|ui| {
             if let Some(name) = crate::rulers::unit_menu(ui, u.unit) {
                 set_size_unit(app, name);
             }

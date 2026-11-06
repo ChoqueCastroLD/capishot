@@ -9,6 +9,7 @@
 //! "add":{"a":[x,y],"b":[x,y],"orientation":"…"}, "orient":{"index":i,"orientation":"…"}, "remove":i,
 //! "commit":true | "cancel":true}}}`.
 
+use crate::mobile_sheet::SheetMenu as _;
 use egui::{Align2, Color32, FontId, Pos2, Rect as ERect, Sense, Stroke, TextureHandle, pos2, vec2};
 use photocraft_algo::transform::Interp;
 use photocraft_algo::wideangle::{self, Camera, Constraint, Orientation, WideAngle, WideModel};
@@ -320,7 +321,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 .min_by(|a, b| a.1.total_cmp(&b.1));
             d.menu_for = near.filter(|(_, dist)| *dist < 10.0).map(|(i, _)| i);
         }
-        resp.context_menu(|ui| constraint_menu(ui, d));
+        resp.sheet_menu(|ui| constraint_menu(ui, d));
         let show_src = !d.preview || d.drag.is_some();
         let tex = if show_src { d.src_tex.as_ref() } else { d.out_tex.as_ref() };
         widgets::checker(&painter, img_r, 8.0);

@@ -6,6 +6,7 @@
 //! duplicate, export, delete). A style dragged onto a folder (a mouse drag, or a finger's press
 //! and hold, then drag) moves there; a folder dragged onto a sibling goes before it.
 
+use crate::mobile_sheet::SheetMenu as _;
 use egui::{Color32, Rect, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
 use photocraft_typer::{Id, presets};
 use serde_json::{Value, json};
@@ -340,7 +341,7 @@ fn header(
         actions.push(Action::Toggle(key));
     }
     let folder_id = folder.map(|(v, _)| v.clone());
-    resp.context_menu(|ui| {
+    resp.sheet_menu(|ui| {
         crate::widgets::style_spectrum_popup_menu(ui);
         if ui.button(tl!("Add style here…")).clicked() {
             actions.push(Action::NewStyle(folder_id.clone()));
@@ -515,7 +516,7 @@ fn style_row(
     if resp.double_clicked() && !clicked_inner {
         actions.push(Action::Edit(r.id.clone()));
     }
-    resp.context_menu(|ui| {
+    resp.sheet_menu(|ui| {
         crate::widgets::style_spectrum_popup_menu(ui);
         if ui.button(tl!("Edit style…")).clicked() {
             actions.push(Action::Edit(r.id.clone()));
@@ -538,7 +539,7 @@ fn style_row(
             actions.push(Action::Run("typer.style.duplicate", json!({"id": r.id})));
             ui.close();
         }
-        ui.menu_button(tl!("Move to folder"), |ui| {
+        crate::mobile_sheet::submenu(ui, tl!("Move to folder"), |ui| {
             crate::widgets::style_spectrum_popup_menu(ui);
             if ui.add_enabled(r.folder.is_some(), egui::Button::new(tl!("Unsorted"))).clicked() {
                 actions.push(Action::MoveStyle(r.id.clone(), None));

@@ -344,6 +344,7 @@ impl PhotocraftApp {
         // Phones: the simple interface (a compact top bar; floating bars and the Capi button over
         // the canvas, drawn after it) instead of the desktop chrome, which stays as it was.
         self.simple = chrome && simple_ui::active(self, &ctx);
+        crate::mobile_sheet::set_enabled(&ctx, self.simple);
         touch_ui::begin_frame(self, &ctx);
         let chrome_span = perf_span::span("ui.chrome");
         // A custom docking workspace draws the canvas inside its layout (panel_docking).
@@ -442,6 +443,10 @@ impl PhotocraftApp {
         wide_angle_ui::show(self, &ctx);
         canvas::extra_windows(self, &ctx);
         touch_ui::overlays(self, &ctx);
+        // Last of the floating pieces: over all of them.
+        if self.simple && !self.ui_hidden {
+            crate::menus::mobile_menu::show(self, &ctx);
+        }
         notices::show(self, &ctx);
         crate::tool_toast::draw(self, &ctx);
         gpu_status::warm_up(self, &ctx);

@@ -1,5 +1,5 @@
 //! The simple interface for phones (Preferences › Interface › Simple UI, Window › Simple UI):
-//! a compact top bar (menus folded into ☰, the document's name, Undo, Redo and Search), the
+//! a compact top bar (one Menú button, the document's name, Undo, Redo and Search), the
 //! canvas across the whole window, and floating over it the recent commands, the favorites bar
 //! and the Capi button, which opens a sheet with every tool, the main panels and the file
 //! actions. The desktop chrome (toolbar, options bar, docks, status bar) is hidden, not closed:
@@ -74,7 +74,7 @@ fn rects_id() -> Id {
 
 /// Where a button of the simple interface was drawn this frame (for `ui.inspect`: automation
 /// and tests tap it there).
-fn note(ctx: &egui::Context, label: &str, rect: Rect) {
+pub(crate) fn note(ctx: &egui::Context, label: &str, rect: Rect) {
     ctx.data_mut(|d| {
         d.get_temp_mut_or_default::<Vec<(String, [f32; 4])>>(rects_id()).push((label.to_string(), [rect.min.x, rect.min.y, rect.max.x, rect.max.y]))
     });
@@ -88,7 +88,7 @@ pub fn inspect(app: &PhotocraftApp, ctx: &egui::Context) -> serde_json::Value {
         Sheet::Master => json!("master"),
         Sheet::Panel(g, tab) => json!({"panel": g.key(), "tab": tab}),
     };
-    json!({"active": app.simple, "sheet": sheet, "buttons": rects.into_iter().map(|(l, r)| json!({"label": l, "rect": r})).collect::<Vec<_>>()})
+    json!({"active": app.simple, "sheet": sheet, "menu": crate::menus::mobile_menu::inspect(ctx), "buttons": rects.into_iter().map(|(l, r)| json!({"label": l, "rect": r})).collect::<Vec<_>>()})
 }
 
 /// Forget where the buttons were (the interface is hidden this frame).
@@ -136,7 +136,7 @@ pub fn command_label(id: &str) -> Option<String> {
 }
 
 /// An icon for a command that has one (the rest show their name).
-fn command_icon(id: &str) -> Option<&'static str> {
+pub(crate) fn command_icon(id: &str) -> Option<&'static str> {
     Some(match id {
         "edit.undo" | "edit.stepBackward" => "undo-2",
         "edit.redo" | "edit.stepForward" => "redo-2",
@@ -165,7 +165,7 @@ pub fn run_entry(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str) {
     }
 }
 
-/// The compact top bar: menus (☰ on a phone), the document's name, Undo, Redo, Search.
+/// The compact top bar: the Menú button, the document's name, Undo, Redo, Search.
 pub fn top_bar(app: &mut PhotocraftApp, ui: &mut Ui) {
     // The first of the simple interface's pieces each frame: a fresh list of where its buttons are.
     ui.ctx().data_mut(|d| d.remove::<Vec<(String, [f32; 4])>>(rects_id()));
@@ -182,8 +182,8 @@ pub fn top_bar(app: &mut PhotocraftApp, ui: &mut Ui) {
             crate::theme::pattern::paint_bar(ui);
             let full = ui.max_rect();
             ui.horizontal_centered(|ui| {
-                // File, Edit and Image by name; the other menus behind "⋯".
-                let menus_end = crate::menus::menu_bar_with(app, ui, crate::menus::BarLayout::Split(&["File", "Edit", "Image"]));
+                // Every menu is in the sheet this opens (`mobile_menu`).
+                let menus_end = crate::menus::mobile_menu::button(ui);
                 // Undo, Redo and Search at the far end when there is room for them (else they are
                 // in the Capi sheet), then the name in the room between.
                 let fit = full.right() - menus_end >= 3.0 * 40.0 + 12.0;
@@ -886,8 +886,11 @@ fn bottom_sheet(ctx: &egui::Context, screen: Rect, id: &str, height: f32, add: i
     });
     // egui raises an area that was tapped: once the scrim had closed a sheet it stayed above the
     // next one and took its taps. The sheet and the Capi button always go over the scrim.
-    ctx.move_to_top(egui::LayerId::new(egui::Order::Foreground, Id::unique(id)));
-    ctx.move_to_top(egui::LayerId::new(egui::Order::Foreground, Id::unique("simple-capi")));
+    // A dropdown's sheet opened from inside stays over both (`mobile_sheet`).
+    if !crate::mobile_sheet::any_open(ctx) {
+        ctx.move_to_top(egui::LayerId::new(egui::Order::Foreground, Id::unique(id)));
+        ctx.move_to_top(egui::LayerId::new(egui::Order::Foreground, Id::unique("simple-capi")));
+    }
 }
 
 fn heading(ui: &mut Ui, text: &str) {
@@ -1055,6 +1058,7 @@ pub fn back_target(app: &PhotocraftApp, ctx: &egui::Context) -> bool {
     !app.ui.dialogs.is_empty()
         || options_open(ctx)
         || sheet(ctx) != Sheet::Closed
+        || crate::mobile_sheet::any_open(ctx)
         || crate::remove_ai_ui::is_open(app)
         || app.ui.text_edit.is_some()
         || help_open(ctx).is_some()

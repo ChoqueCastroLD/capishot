@@ -261,7 +261,7 @@ fn common_color(app: &crate::PhotocraftApp, l: &Layer, on_set: bool) -> Option<L
 }
 
 fn color_menu(app: &crate::PhotocraftApp, ui: &mut egui::Ui, l: &Layer, on_set: bool, actions: &mut Vec<(String, Value)>) {
-    ui.menu_button(tl!("Color"), |ui| {
+    crate::mobile_sheet::submenu(ui, tl!("Color"), |ui| {
         color_choices(app, ui, l, on_set, actions);
     });
 }

@@ -74,6 +74,7 @@ pub mod genfill_ui;
 pub mod help_text;
 pub mod lut_library_ui;
 pub(crate) mod move_cpu;
+pub mod mobile_sheet;
 pub mod overlay_guard;
 pub mod palette_search;
 pub mod perf_counters;
@@ -856,6 +857,8 @@ mod doc_switch_tests;
 mod navigator_gpu_tests;
 #[cfg(test)]
 mod nonmodal_bar_tests;
+#[cfg(test)]
+mod mobile_menu_tests;
 #[cfg(test)]
 mod phone_dialog_tests;
 #[cfg(test)]

@@ -6,6 +6,7 @@
 //! Colors) and Make Ramp Web Safe. Shift-click on the ramp cycles the ramps, Alt-click picks the
 //! colour the panel isn't editing, and a right-click opens the ramp menu.
 
+use crate::mobile_sheet::SheetMenu as _;
 use std::f32::consts::TAU;
 use std::sync::Arc;
 
@@ -515,7 +516,7 @@ fn ramp(app: &mut PhotocraftApp, ui: &mut egui::Ui, height: f32) {
         let c = ramp_color(cp.ramp, cp.web_safe_ramp, fg, bg, x, y);
         set_color(app, ui.ctx(), target, c);
     }
-    resp.context_menu(|ui| {
+    resp.sheet_menu(|ui| {
         widgets::style_spectrum_popup_menu(ui);
         ramp_menu(app, ui);
     });

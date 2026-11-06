@@ -127,7 +127,7 @@ pub fn bindings(app: &PhotocraftApp) -> Vec<(String, KeyboardShortcut)> {
 /// - any text field has focus (dialogs, panel fields, a layer rename, the palette and font search,
 ///   the TypeR script and style editors, number and hex fields, Preferences);
 /// - an input method is composing;
-/// - a menu or dropdown list is open (its letters pick an item);
+/// - a menu, dropdown list or phone sheet is open (its letters pick an item);
 /// - a text input outside the app has the keyboard (the web page's own fields).
 pub fn keyboard_captured_by_text(app: &PhotocraftApp, ctx: &egui::Context) -> bool {
     app.ui.text_edit.is_some()
@@ -136,6 +136,7 @@ pub fn keyboard_captured_by_text(app: &PhotocraftApp, ctx: &egui::Context) -> bo
         || Focus::of(ctx) == Focus::Text
         || ime_composing(ctx)
         || crate::menu_nav::is_open(ctx)
+        || crate::mobile_sheet::any_open(ctx)
         || crate::menu_keys::is_focused(ctx)
         || crate::widgets::dropdown_list_open(ctx)
 }

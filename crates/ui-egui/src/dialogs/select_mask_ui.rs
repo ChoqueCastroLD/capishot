@@ -23,6 +23,7 @@
 //! Not here yet: Refine Hair (#2671) and Object Aware (a learned model, #2788) are shown but greyed
 //! out, and Photoshop's Presets.
 
+use crate::mobile_sheet::SheetMenu as _;
 use std::sync::Arc;
 
 use egui::{Align2, Color32, FontId, Pos2, Rect as ERect, Sense, Stroke, TextureHandle, pos2, vec2};
@@ -1857,7 +1858,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 // The slot's flyout triangle, as the main toolbar's.
                 let c = r.rect.right_bottom() - vec2(3.0, 3.0);
                 painter.add(egui::Shape::convex_polygon(vec![c, c - vec2(5.0, 0.0), c - vec2(0.0, 5.0)], t.icon, Stroke::NONE));
-                r.context_menu(|ui| {
+                r.sheet_menu(|ui| {
                     for l in [SmTool::Lasso, SmTool::PolygonalLasso] {
                         if ui.selectable_label(w.tool == l, l.tip()).clicked() {
                             w.pick(l);

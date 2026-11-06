@@ -1,3 +1,4 @@
+use crate::mobile_sheet::SheetMenu as _;
 use super::start_screen::start_screen;
 use super::textures::retain_gpu_documents;
 use super::{Color32, PhotocraftApp, Pos2, Rect, Sense, Stroke, TextureOptions, canvas_view, fmt_zoom, json, mode_label, pos2};
@@ -257,7 +258,7 @@ pub(super) fn tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
                 None => {}
             }
             let has_path = st.path.is_some();
-            resp.context_menu(|ui| {
+            resp.sheet_menu(|ui| {
                 tab_action = tab_context_menu(ui, i, tab_count, has_path);
             });
         }
@@ -601,7 +602,7 @@ fn pro_tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> TabStrip {
             None => {}
         }
         let has_path = app.session.documents().get(i).is_some_and(|d| d.path.is_some());
-        resp.context_menu(|ui| {
+        resp.sheet_menu(|ui| {
             tab_action = tab_context_menu(ui, i, tab_count, has_path);
         });
         doc_tabs.push((i, r));

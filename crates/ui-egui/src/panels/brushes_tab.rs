@@ -13,6 +13,7 @@
 //! The list itself ([`preset_list`]) is shared with the Brush Preset picker (`brush_picker`), so
 //! both show, pick and organise presets the same way; each keeps its own view state.
 
+use crate::mobile_sheet::SheetMenu as _;
 use egui::{Color32, RichText, Sense, Stroke, pos2, vec2};
 use photocraft_engine::paint::{BrushPreset, MAX_BRUSH_SIZE};
 use serde_json::json;
@@ -318,7 +319,7 @@ fn preset_interactions(ui: &egui::Ui, resp: &egui::Response, r: egui::Rect, p: &
     } else if resp.clicked() {
         acts.push(Action::Select(p.name.clone()));
     }
-    resp.context_menu(|ui| {
+    resp.sheet_menu(|ui| {
         if ui.button(tl!("Rename Brush…")).clicked() {
             acts.push(Action::BeginRename(Renaming { group: false, name: p.name.clone(), folder: Vec::new(), text: String::new() }));
             ui.close();
@@ -727,7 +728,7 @@ fn group_header(ui: &mut egui::Ui, label: &str, key: &str, folder: &[String], op
     if resp.clicked() {
         acts.push(Action::ToggleGroup(folder_view_key(label, folder)));
     }
-    resp.context_menu(|ui| {
+    resp.sheet_menu(|ui| {
         if ui.button(tl!("Rename Group…")).clicked() {
             acts.push(Action::BeginRename(Renaming { group: true, name: key.to_string(), folder: folder.to_vec(), text: String::new() }));
             ui.close();

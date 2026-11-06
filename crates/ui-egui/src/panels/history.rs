@@ -1,3 +1,4 @@
+use crate::mobile_sheet::SheetMenu as _;
 use super::layer_drag::dropped_on;
 use super::{Align2, Color32, HistorySource, PhotocraftApp, Rect, Sense, Stroke, StrokeKind, Tokens, Tool, Value, empty, icons, json, pos2, vec2, widgets};
 
@@ -317,7 +318,7 @@ fn snapshot_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, selected: Option<u6
         } else if resp.clicked() {
             cmd = Some(("history.selectSnapshot", json!({"snapshot": snap.id})));
         }
-        resp.context_menu(|ui| {
+        resp.sheet_menu(|ui| {
             if ui.button(tl!("Rename…")).clicked() {
                 renaming = Some((snap.id, snap.name.clone()));
                 ui.close();

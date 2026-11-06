@@ -167,13 +167,8 @@ fn metric_field(
         }
         let near = |p: f32| (p * u - value).abs() <= 1e-4 * value.abs().max(1.0);
         let (press, close) = crate::press_menu::PressCombo::before(ui, menu);
-        let combo = craft_ui::ComboBox::from_id_salt(menu)
-            .selected_text("")
-            .width(combo_w)
-            .height(420.0)
-            .icon(crate::widgets::chevron_icon)
-            .close_behavior(close)
-            .show_ui(ui, |ui| {
+        let list = craft_ui::ComboBox::from_id_salt(menu).selected_text("").width(combo_w).height(420.0).icon(crate::widgets::chevron_icon).close_behavior(close);
+        let combo = crate::mobile_sheet::combo(ui, list, tl!(menu), |ui| {
                 if let Some(on) = auto {
                     let item = ui.selectable_label(on, tl!("Auto"));
                     if press.chosen(ui, &item) {

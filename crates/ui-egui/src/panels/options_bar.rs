@@ -1,3 +1,4 @@
+use crate::mobile_sheet::SheetMenu as _;
 use super::brush_controls::{brush_preset_chip, mixer_load_swatch, paint_mode_dropdown, smoothing_field, smoothing_options, tool_mode_dropdown};
 use super::properties::{select_and_mask_button, selection_mode_buttons};
 use super::{BlendMode, Color32, PhotocraftApp, RichText, Sense, Tokens, Tool, Value, icons, json, vec2, widgets};
@@ -85,7 +86,7 @@ pub(crate) fn tool_options_contents(app: &mut PhotocraftApp, ui: &mut egui::Ui) 
     let tool_icon = icons::button(ui, icons::tool_icon(app.ui.tool), if t.pro { 26.0 } else { 28.0 }, !t.pro, tl!(app.ui.tool.label()));
     // Photoshop: right-click the tool icon for Reset Tool / Reset All Tools (#2825).
     let mut reset = None;
-    tool_icon.context_menu(|ui| {
+    tool_icon.sheet_menu(|ui| {
         if ui.button(tl!("Reset Tool")).clicked() {
             reset = Some("tool.reset");
             ui.close();
@@ -806,7 +807,7 @@ fn fixed_size_field(ui: &mut egui::Ui, px: &mut f32, units: widgets::FieldUnits,
         *px = unit.to_px(f64::from(v), dpi, extent, ppi).clamp(1.0, FIXED_SIZE_MAX_PX) as f32;
     }
     let mut picked = None;
-    resp.context_menu(|ui| picked = crate::rulers::unit_menu(ui, unit));
+    resp.sheet_menu(|ui| picked = crate::rulers::unit_menu(ui, unit));
     picked
 }
 

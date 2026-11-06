@@ -51,6 +51,11 @@ fn dropdown_with<T: PartialEq + Clone>(
 ) -> (Vec<T>, Option<T>) {
     let shown = |l: &str| if translate { tl!(l).to_string() } else { l.to_string() };
     let label = options.iter().find(|(v, _)| v == current).map(|(_, l)| shown(l)).unwrap_or_else(|| "—".into());
+    if crate::mobile_sheet::use_sheet(ui) {
+        let rows: Vec<(T, String)> = options.iter().map(|(v, l)| (v.clone(), shown(l))).collect();
+        let combo = craft_ui::ComboBox::from_id_salt(id).selected_text(label).width(width).icon(chevron_icon);
+        return (sheet_list(ui, name, combo, current, &rows), None);
+    }
     let (mut chosen, mut hovered) = (Vec::new(), None);
     // The wheel's notches add up over the button and the open list alike.
     let wheel_id = ui.make_persistent_id(id).with("wheel");
@@ -133,6 +138,33 @@ fn dropdown_with<T: PartialEq + Clone>(
         hovered = None;
     }
     (chosen, hovered)
+}
+
+/// A dropdown on a phone: the box, and its options as rows of a sheet. Returns the option chosen.
+fn sheet_list<T: PartialEq + Clone>(ui: &mut Ui, name: &str, combo: craft_ui::ComboBox<'_>, current: &mut T, rows: &[(T, String)]) -> Vec<T> {
+    use crate::mobile_sheet::{Mark, Row};
+    let mut chosen = Vec::new();
+    let shown = crate::mobile_sheet::combo(ui, combo, name, |ui| {
+        for (v, text) in rows {
+            let mark = if v == &*current { Mark::Check } else { Mark::None };
+            let item = crate::mobile_sheet::row(ui, &Row { mark, ..Row::new(text) });
+            crate::simple_ui::note(ui.ctx(), &format!("sheet:opt:{text}"), item.rect);
+            if item.clicked() {
+                *current = v.clone();
+                chosen.push(v.clone());
+                ui.close();
+            }
+        }
+    });
+    match take_label_scrub_name(ui, shown.response.rect) {
+        Some(label) => {
+            let _ = shown.response.labelled_by(label);
+        }
+        None => {
+            let _ = shown.response.accessible_name(name);
+        }
+    }
+    chosen
 }
 
 /// Makes an open dropdown list as wide as its widest option is when hovered, from the start. egui
@@ -265,6 +297,11 @@ pub fn swatch_popup(swatch: &Response) -> egui::Popup<'static> {
 
 pub fn dropdown_with_tooltips<T: PartialEq + Clone>(ui: &mut Ui, id: &str, name: &str, current: &mut T, options: &[(T, &str, &str)], width: f32) -> bool {
     let label = options.iter().find(|(v, _, _)| v == current).map(|(_, l, _)| tl!(l)).unwrap_or("—");
+    if crate::mobile_sheet::use_sheet(ui) {
+        let rows: Vec<(T, String)> = options.iter().map(|(v, l, _)| (v.clone(), tl!(l).to_string())).collect();
+        let combo = craft_ui::ComboBox::from_id_salt(id).selected_text(label).width(width).icon(chevron_icon);
+        return !sheet_list(ui, name, combo, current, &rows).is_empty();
+    }
     let mut changed = false;
     let (press, close) = crate::press_menu::PressCombo::before(ui, id);
     let response =

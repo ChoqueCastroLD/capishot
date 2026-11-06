@@ -1,3 +1,4 @@
+use crate::mobile_sheet::SheetMenu as _;
 use super::{
     Align2, Color32, CornerRadius, Ev, FontId, GroupView, ItemView, PhotocraftApp, Place, Pos2, Rect, Sense, Stroke, TextureHandle, Tokens, Tool, Value,
     browser, canvas_drop_rect, empty, generic, json, paint_gradient, pattern_texture, pos2, run, shape_texture, style_texture, vec2,
@@ -500,7 +501,7 @@ pub fn tool_presets_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             if resp.clicked() {
                 pick = Some(name.clone());
             }
-            resp.context_menu(|ui| {
+            resp.sheet_menu(|ui| {
                 if ui.button(tl!("Rename Tool Preset…")).clicked() {
                     app.ui.presets_ui.renaming = Some(("toolPresets".into(), name.clone(), name.clone()));
                     ui.close();

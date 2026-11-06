@@ -848,13 +848,8 @@ pub(super) fn kerning_field(ui: &mut egui::Ui, shown: &str, width: f32) -> Optio
         }
         let presets = ["Metrics", "Optical", "0", "-100", "-75", "-50", "-25", "-10", "-5", "5", "10", "25", "50", "75", "100", "200"];
         let (press, close) = crate::press_menu::PressCombo::before(ui, "props-kern-presets");
-        let combo = craft_ui::ComboBox::from_id_salt("props-kern-presets")
-            .selected_text("")
-            .width(16.0)
-            .height(420.0)
-            .icon(crate::widgets::chevron_icon)
-            .close_behavior(close)
-            .show_ui(ui, |ui| {
+        let list = craft_ui::ComboBox::from_id_salt("props-kern-presets").selected_text("").width(16.0).height(420.0).icon(crate::widgets::chevron_icon).close_behavior(close);
+        let combo = crate::mobile_sheet::combo(ui, list, "", |ui| {
                 for p in presets {
                     let item = ui.selectable_label(p == shown, p);
                     if press.chosen(ui, &item) {
