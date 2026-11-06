@@ -69,13 +69,19 @@ pub struct TileOptions {
     /// A crop larger than `max_side` is split into overlapping full-resolution tiles (see
     /// [`Split`]) instead of resized down (which blurs screentone and fine detail).
     pub full_res: bool,
+    /// Work at the [`FIXED_SIDES`] that fit `max_side`, with real pixels as the extra context: a
+    /// runtime that re-specialises for each new size (DirectML) stays fast.
+    pub fixed_sizes: bool,
 }
 
 impl Default for TileOptions {
     fn default() -> Self {
-        Self { max_side: 512, margin: 64, full_res: false }
+        Self { max_side: 512, margin: 64, full_res: false, fixed_sizes: false }
     }
 }
+
+/// The square working sizes of [`TileOptions::fixed_sizes`].
+pub const FIXED_SIDES: [usize; 3] = [256, 384, 512];
 
 /// One unit of model work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -219,7 +225,8 @@ pub fn plan(mask: &[f32], w: usize, h: usize, opts: &TileOptions) -> Result<Vec<
         let long = crop.w.max(crop.h);
         if long <= opts.max_side {
             // Full resolution: use real pixels for the padding where the image has them.
-            let (tw, th) = (round_up8(crop.w.max(MIN_WORK_SIDE)), round_up8(crop.h.max(MIN_WORK_SIDE)));
+            let fixed = FIXED_SIDES.iter().copied().find(|s| opts.fixed_sizes && *s >= long && *s <= opts.max_side);
+            let (tw, th) = fixed.map_or((round_up8(crop.w.max(MIN_WORK_SIDE)), round_up8(crop.h.max(MIN_WORK_SIDE))), |s| (s, s));
             let rect = grow_to(crop, tw, th, w, h);
             tiles.push(Tile { rect, core, work_w: tw, work_h: th, fit: Fit::Pad, split: false });
         } else if opts.full_res {
@@ -594,6 +601,34 @@ fn weights(src: usize, dst: usize) -> Vec<(usize, Vec<f32>)> {
 mod tests {
     use super::*;
 
+    /// With fixed sizes every tile works at a square from the list, with real pixels around its
+    /// core; a crop past `max_side` still splits, and what's asked to fit never gets smaller.
+    #[test]
+    fn fixed_sizes_work_at_a_few_squares() {
+        let (w, h) = (2000, 3000);
+        let o = TileOptions { full_res: true, fixed_sizes: true, ..TileOptions::default() };
+        for (hole, side) in [(Rect { x: 900, y: 900, w: 20, h: 20 }, 256), (Rect { x: 900, y: 900, w: 200, h: 60 }, 384), (Rect { x: 900, y: 900, w: 330, h: 40 }, 512)] {
+            let tiles = plan(&mask_with(w, h, &[hole]), w, h, &o).unwrap();
+            assert_eq!(tiles.len(), 1, "{hole:?}");
+            let t = tiles[0];
+            assert_eq!((t.work_w, t.work_h, t.fit), (side, side, Fit::Pad), "{hole:?}");
+            assert_eq!((t.rect.w, t.rect.h), (side, side), "all real pixels: {t:?}");
+            assert!(t.rect.x <= t.core.x && t.rect.y <= t.core.y && t.rect.x + t.rect.w >= t.core.x + t.core.w);
+        }
+        // At the page's edge the rect stays inside the page.
+        let t = plan(&mask_with(w, h, &[Rect { x: 0, y: 0, w: 20, h: 20 }]), w, h, &o).unwrap()[0];
+        assert_eq!((t.rect.x, t.rect.y, t.work_w), (0, 0, 256));
+        // A page smaller than the size: mirrored up to it, as before.
+        let t = plan(&mask_with(100, 100, &[Rect { x: 40, y: 40, w: 10, h: 10 }]), 100, 100, &o).unwrap()[0];
+        assert_eq!((t.rect.w, t.rect.h, t.work_w, t.work_h), (100, 100, 256, 256));
+        // Past the largest: still split in tiles of `max_side`.
+        let tiles = plan(&mask_with(w, h, &[Rect { x: 200, y: 200, w: 1200, h: 60 }]), w, h, &o).unwrap();
+        assert!(tiles.len() > 1 && tiles.iter().all(|t| t.work_w == 512 && t.work_h == 512 || t.work_w <= 512), "{tiles:?}");
+        // Off: the crop's own size, as before.
+        let t = plan(&mask_with(w, h, &[Rect { x: 900, y: 900, w: 200, h: 60 }]), w, h, &TileOptions::default()).unwrap()[0];
+        assert_ne!(t.work_w, t.work_h);
+    }
+
     fn mask_with(w: usize, h: usize, rects: &[Rect]) -> Vec<f32> {
         let mut m = vec![0f32; w * h];
         for r in rects {
@@ -734,8 +769,8 @@ mod tests {
     fn bad_inputs_are_errors() {
         let o = TileOptions::default();
         assert!(plan(&[1.0; 10], 4, 4, &o).is_err());
-        assert!(plan(&[1.0; 16], 4, 4, &TileOptions { max_side: 500, margin: 0, full_res: false }).is_err());
-        assert!(plan(&[1.0; 16], 4, 4, &TileOptions { max_side: 8, margin: 0, full_res: true }).is_err());
+        assert!(plan(&[1.0; 16], 4, 4, &TileOptions { max_side: 500, margin: 0, full_res: false, fixed_sizes: false }).is_err());
+        assert!(plan(&[1.0; 16], 4, 4, &TileOptions { max_side: 8, margin: 0, full_res: true, fixed_sizes: false }).is_err());
         assert!(plan(&[], 0, 0, &o).is_err());
         let t = Tile { rect: Rect { x: 0, y: 0, w: 10, h: 10 }, core: Rect { x: 0, y: 0, w: 10, h: 10 }, work_w: 64, work_h: 64, fit: Fit::Pad, split: false };
         let (img, m) = (rgb(8, 8), vec![1.0; 64]);

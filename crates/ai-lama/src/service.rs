@@ -112,6 +112,11 @@ pub trait Inpainter: Send + Sync {
     fn device(&self) -> String {
         String::new()
     }
+    /// Whether a run of `model` should work at [`crate::tiles::FIXED_SIDES`]: each new size costs
+    /// this runtime far more than a larger one (`cpu`: the request is for the CPU).
+    fn fixed_tile_sizes(&self, _model: &str, _cpu: bool) -> bool {
+        false
+    }
     /// Inpaints one tile and calls `done` exactly once.
     fn run(&self, req: Request, hooks: Arc<dyn Hooks>, done: Done);
 }

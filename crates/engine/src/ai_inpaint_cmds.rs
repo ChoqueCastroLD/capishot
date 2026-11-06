@@ -153,7 +153,8 @@ pub(crate) fn ai_options(s: &Session, p: &Value, cmd: &str, full_res_default: bo
     let threads = uint("threads", 0, 0, 64)? as usize;
     let unload = !crate::ai_cmds::keep_loaded(p, cmd)?;
     let pinned = !matches!(p.get("model").and_then(Value::as_str).unwrap_or("auto"), "auto" | "");
-    Ok(AiOptions { tiles: TileOptions { max_side: max_side as usize, margin: margin as usize, full_res }, allow_download, model, run, threads, unload, pinned })
+    let fixed_sizes = run.backend != photocraft_ai::service::GpuBackend::Wgpu && s.inpainter.as_ref().is_some_and(|i| i.fixed_tile_sizes(model.id, run.choice.cpu));
+    Ok(AiOptions { tiles: TileOptions { max_side: max_side as usize, margin: margin as usize, full_res, fixed_sizes }, allow_download, model, run, threads, unload, pinned })
 }
 
 /// The service, if it can run `opts.model` now (else the reason, for the user).
