@@ -495,7 +495,9 @@ impl crate::Host {
 
     /// `type.layoutDigest` of open document `document` (one layer, or every type layer): equal
     /// digests mean every glyph is placed alike, bit for bit (the same on native and wasm with
-    /// the same fonts and [`use_system_fonts`]`(false)`).
+    /// the same fonts and [`use_system_fonts`]`(false)`). It measures a fresh layout: pixels a file
+    /// brought for a type layer whose font was there at the open are kept, and may have been
+    /// drawn in another face. A `type.edit` redraws them.
     pub fn layout_digest(&mut self, document: DocumentId, layer: Option<HostLayerId>, font_hashes: bool) -> Result<Value> {
         layout_digest(self.session_mut(), document, layer, font_hashes)
     }

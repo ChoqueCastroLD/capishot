@@ -1028,7 +1028,7 @@ pub(crate) fn style_json(t: &photocraft_doc::TextLayer) -> Value {
         "shape": t.shape,
         "transform": t.transform.m,
         "warp": t.warp,
-        "perspective": t.perspective.and_then(|p| p.quad()).map(|quad| json!({ "quad": quad })),
+        "perspective": t.perspective.and_then(|p| Some(json!({ "quad": p.quad()?, "frame": p.frame }))),
     })
 }
 

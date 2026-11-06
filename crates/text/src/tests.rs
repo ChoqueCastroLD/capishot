@@ -3735,3 +3735,26 @@ fn horizontally_scaled_lines_stay_centred_and_flush_right() {
         }
     }
 }
+
+/// A file also installed: unregistering the registered copy leaves the installed one.
+#[test]
+fn unregistering_a_font_leaves_its_installed_copy() {
+    const FILE: &str = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf";
+    let Ok(bytes) = std::fs::read(FILE) else {
+        eprintln!("skipped: {FILE} isn't installed");
+        return;
+    };
+    let mut e = TextEngine::with_system_fonts();
+    let family = "DejaVu Sans Mono";
+    let bold = |e: &mut TextEngine| e.fonts.faces(family).iter().filter(|f| f.weight.round() as u16 == 700 && !f.italic).count();
+    let installed = bold(&mut e);
+    if installed == 0 {
+        eprintln!("skipped: {family} Bold isn't installed");
+        return;
+    }
+    e.fonts.register_user_font("copy", std::sync::Arc::new(bytes));
+    assert_eq!(bold(&mut e), installed + 1);
+    e.fonts.unregister_user_font("copy");
+    assert_eq!(bold(&mut e), installed, "the installed face stays");
+    assert!(e.fonts.has_family(family));
+}

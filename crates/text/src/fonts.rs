@@ -756,13 +756,31 @@ impl FontDb {
             self.data.retain(|d| !matches!(d, FontData::Shared(b) if Arc::ptr_eq(b, bytes)));
         }
         let mut names = Vec::new();
+        #[cfg(not(target_arch = "wasm32"))]
+        let mut installed: Vec<std::path::PathBuf> = Vec::new();
         for (id, width, style, weight) in m.faces {
             if let Some(n) = self.fcx.collection.family_name(id).map(str::to_string)
                 && !names.contains(&n)
             {
                 names.push(n);
             }
+            // `unregister_font` goes by weight and style: an installed copy of the face goes too.
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(info) = self.fcx.collection.family(id) {
+                use parley::fontique::SourceKind;
+                for f in info.fonts().iter().filter(|f| (f.width(), f.style(), f.weight()) == (width, style, weight)) {
+                    if let SourceKind::Path(p) = &f.source().kind
+                        && !m.files.iter().any(|x| x.as_path() == &**p)
+                    {
+                        installed.push(p.to_path_buf());
+                    }
+                }
+            }
             self.fcx.collection.unregister_font(id, width, style, weight);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        for path in installed {
+            self.fcx.collection.load_fonts_from_paths([path]);
         }
         for n in &names {
             if self.fcx.collection.family_by_name(n).is_none_or(|f| f.fonts().is_empty()) {

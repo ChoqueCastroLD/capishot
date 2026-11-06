@@ -1018,6 +1018,8 @@ fn type_edit_sets_the_perspective_absolutely() {
     };
     s.execute("type.edit", json!({"layer": id, "perspective": {"quad": quad}})).unwrap();
     assert!(close(&read(&s)), "{}", read(&s));
+    let frame = text_layer(&s, id).perspective.unwrap().frame;
+    assert_eq!(style_json(&text_layer(&s, id))["perspective"]["frame"], json!(frame), "the map is frame to quad");
     s.execute("type.edit", json!({"layer": id, "perspective": {"quad": quad}})).unwrap();
     assert!(close(&read(&s)), "twice goes no further: {}", read(&s));
     assert!(s.execute("type.edit", json!({"layer": id, "perspective": {"quad": [[0, 0]]}})).is_err());
