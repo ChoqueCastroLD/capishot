@@ -11,7 +11,9 @@
 // Raw DevTools protocol, not Playwright: Playwright emulates focus, so its pages are never hidden.
 // Threads build or st.
 //
-//   CHROME=<chromium> COLLECTOR=<collector app dir> node crash-report.mjs <dist dir>
+//   CHROME=<chromium> COLLECTOR=<collector app dir> [ST=1] node crash-report.mjs <dist dir>
+// ST=1: dist/web, the single-threaded build. It alone names a panic's file and line: the threads
+// build strips them (-Zlocation-detail=none), so there it must say `external`.
 import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import https from 'node:https';
@@ -60,7 +62,7 @@ const site = https.createServer({ key: fs.readFileSync(path.join(tmp, 'key')), c
   }
   const file = path.join(dist, decodeURIComponent(url.pathname), url.pathname.endsWith('/') ? 'index.html' : '');
   if (!file.startsWith(dist) || !fs.existsSync(file) || !fs.statSync(file).isFile()) { res.writeHead(404); res.end(); return; }
-  res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream', 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'require-corp', 'Cross-Origin-Resource-Policy': 'same-origin' });
+  res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream', ...(process.env.ST ? {} : { 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'require-corp' }), 'Cross-Origin-Resource-Policy': 'same-origin' });
   fs.createReadStream(file).pipe(res);
 });
 await new Promise((r) => site.listen(0, '127.0.0.1', r));
@@ -112,7 +114,7 @@ async function open({ background = false } = {}) {
   const session = (await send('Target.attachToTarget', { targetId, flatten: true })).result.sessionId;
   await send('Page.enable', {}, session);
   const js = async (expression) => {
-    const r = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, session);
+    const r = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true, userGesture: true }, session);
     return r.result?.result?.value;
   };
   const ready = await until(() => js(`self.photocraft && self.photocraft.request ? self.photocraft.request('engine.commands').then(() => true, () => false) : false`), 300_000, 1000);
@@ -151,8 +153,7 @@ const main = async () => {
   const hidden = await open({ background: true });
   ok('the background page really is hidden', (await hidden.hidden()) === true);
   await sleep(STALE_MS);
-  const staleHidden = (await second.crumbs()).find((c) => c.stage === 'hidden');
-  ok('its breadcrumb went stale and says hidden', !!staleHidden && Date.now() - staleHidden.t > 15_000, JSON.stringify(await second.crumbs()));
+  ok('its breadcrumb says hidden', (await second.crumbs()).some((c) => c.stage === 'hidden'), JSON.stringify(await second.crumbs()));
   const third = await open();
   await settle(third);
   ok('a live hidden page is not reported by a tab that loads meanwhile', exitsBefore() === 0, JSON.stringify(events('unclean_exit')));
@@ -180,6 +181,8 @@ const main = async () => {
   await sleep(STALE_MS);
   from = exitsBefore();
   const fifth = await open();
+  const frozen = (await fifth.crumbs()).find((c) => c.stage === 'picker');
+  ok('its heartbeat stopped: only its lock says it is alive', !!frozen && Date.now() - frozen.t > 15_000, JSON.stringify(frozen));
   await settle(fifth);
   ok('a page frozen behind the picker is not reported by a tab that loads meanwhile', exitsBefore() === from, JSON.stringify(events('unclean_exit').slice(from)));
   await send('Page.setWebLifecycleState', { state: 'active' }, picking.session);
@@ -196,7 +199,8 @@ const main = async () => {
   // Killed in front: a crash.
   await sixth.js(`self.photocraft.request('engine.execute', { command: 'file.new', params: { width: 64, height: 64, name: 'SecretPage' } })`);
   await sixth.js(`self.photocraft.request('engine.execute', { command: 'layer.new.layer', params: { name: 'SecretLayer' } })`);
-  await sleep(3000);
+  const quiet = await until(async () => (await sixth.crumbs()).every((c) => c.stage === 'idle'), 60_000);
+  ok('a checkpoint\'s stage ends with it', quiet, JSON.stringify(await sixth.crumbs()));
   await sixth.crash();
   from = exitsBefore();
   const seventh = await open();
@@ -216,7 +220,8 @@ const main = async () => {
   await seventh.js(`self.__capishotCrashTest = 'panic'; true`);
   const panic = await until(() => events('crash', 'panic')[0], 15_000);
   ok('a panic sends crash panic at once', !!panic, JSON.stringify(panic));
-  ok('with this tree\'s location and a fixed code', /^apps\/photocraft-web\/src\/breadcrumb\.rs:\d+$/.test(panic?.loc || '') && panic?.msg === 'other', JSON.stringify(panic));
+  const whereItPanicked = process.env.ST ? /^apps\/photocraft-web\/src\/breadcrumb\.rs:\d+$/ : /^external$/;
+  ok('with this tree\'s location and a fixed code', whereItPanicked.test(panic?.loc || '') && panic?.msg === 'other', JSON.stringify(panic));
   ok('then the trap, as a script error with a fixed code', !!(await until(() => events('crash', 'js').find((x) => x.name === 'RuntimeError'), 10_000)), JSON.stringify(events('crash', 'js')));
   await sleep(1000);
   await seventh.close();
@@ -227,11 +232,10 @@ const main = async () => {
   const reported = await until(() => events('unclean_exit').slice(from).find((x) => x.src === 'panic'), 30_000);
   // pagehide ran on the panicked page: the close was clean, its report the beacon. Either way only one crash is sent.
   ok('the panic isn\'t sent twice', events('crash', 'panic').length === 1, JSON.stringify({ reported, panics: events('crash', 'panic') }));
-  const threads = await eighth.js('self.crossOriginIsolated && !!self.SharedArrayBuffer');
-  if (threads) {
+  if (!process.env.ST) {
     await eighth.js(`self.__capishotCrashTest = 'worker'; true`);
     const worker = await until(() => (events('crash', 'panic').length >= 2 ? events('crash', 'panic')[1] : null), 20_000);
-    ok('a worker\'s panic sends crash panic too', /^apps\/photocraft-web\/src\/breadcrumb\.rs:\d+$/.test(worker?.loc || ''), JSON.stringify(events('crash', 'panic')));
+    ok('a worker\'s panic sends crash panic too', whereItPanicked.test(worker?.loc || ''), JSON.stringify(events('crash', 'panic')));
   } else {
     console.log('single-threaded build: no worker panic to test');
   }
