@@ -7,13 +7,19 @@
 //! nothing third-party) when the session starts (with the previous page's unclean exit), every 30 s
 //! and when the page hides, with `navigator.sendBeacon` (falling
 //! back to a `keepalive` fetch). A failed send is dropped, never retried. Errors are silent.
+//!
+//! A `crash` doesn't wait for any of that, nor for the recorder a panic may have left locked:
+//! [`send_crash`] sends it alone, from any thread. Script errors do the same from `boot.js`, once
+//! this file has told it the statistics are on.
 
 use std::cell::{Cell, RefCell};
+use std::sync::Mutex;
 
-use js_sys::Reflect;
+use js_sys::{Function, Object, Reflect};
 use photocraft_doc::Document;
 use photocraft_ui_egui::PhotocraftApp;
 use photocraft_ui_egui::telemetry::{self, Environment, Recorder};
+use serde_json::Value;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast as _, JsValue};
 
@@ -23,6 +29,18 @@ const ENDPOINT: &str = "/capishot/api/t";
 const HOSTS: &[&str] = &["capichan.com"];
 /// The random install id (localStorage).
 const INSTALL_KEY: &str = "capishot.telemetry.iid";
+
+/// Where a `crash` goes: set while a session records.
+struct CrashTarget {
+    install_id: String,
+    session_id: String,
+    /// Absolute: a worker's base URL may be a blob.
+    url: String,
+}
+
+/// Only ever tried, never waited for: a lock can trap on the page's thread (threads build), and the
+/// panic hook may run with anything held.
+static CRASH_TARGET: Mutex<Option<CrashTarget>> = Mutex::new(None);
 
 struct State {
     env: Environment,
@@ -50,6 +68,9 @@ pub fn init(gpu: &'static str, gpu_vendor: &'static str, gpu_model: &str, gpu_dr
     env.gpu_driver = gpu_driver.to_string();
     STATE.with(|s| *s.borrow_mut() = Some(State { env, enabled: false }));
     install_listeners(&window);
+    telemetry::install_gpu_fault_reports(|event| {
+        send_crash(&event);
+    });
 }
 
 /// Every frame: follows the preference, notes tool switches and that the user interacted.
@@ -65,7 +86,10 @@ pub fn sync(app: &PhotocraftApp, ctx: &egui::Context) {
     });
     match changed {
         Some(env) if want => start_session(env),
-        Some(_) => telemetry::stop(),
+        Some(_) => {
+            telemetry::stop();
+            set_crash_target(None);
+        }
         None => {}
     }
     if !telemetry::is_active() {
@@ -84,7 +108,9 @@ pub fn sync(app: &PhotocraftApp, ctx: &egui::Context) {
 
 fn start_session(mut env: Environment) {
     env.language = photocraft_ui_egui::i18n::current().code().to_string();
-    let mut recorder = Recorder::new(&install_id(), &random_id(), js_sys::Date::now());
+    let (install, session) = (install_id(), random_id());
+    set_crash_target(Some((install.as_str(), session.as_str())));
+    let mut recorder = Recorder::new(&install, &session, js_sys::Date::now());
     recorder.event(telemetry::session_start_event(&env));
     // The previous page died without closing (out of memory, a renderer crash): its last
     // command, tool and memory high-water mark (breadcrumb.rs).
@@ -97,6 +123,38 @@ fn start_session(mut env: Environment) {
     // crash before it.
     flush();
     crate::breadcrumb::reported();
+}
+
+/// Follows the session: where a `crash` goes, here and in `boot.js` (script errors).
+fn set_crash_target(ids: Option<(&str, &str)>) {
+    let origin = web_sys::window().and_then(|w| w.location().origin().ok()).unwrap_or_default();
+    if let Ok(mut target) = CRASH_TARGET.try_lock() {
+        *target = ids.map(|(install_id, session_id)| CrashTarget { install_id: install_id.to_string(), session_id: session_id.to_string(), url: format!("{origin}{ENDPOINT}") });
+    }
+    let Some(window) = web_sys::window() else { return };
+    let Some(tell) = Reflect::get(&window, &JsValue::from_str("capishotCrashTarget")).ok().and_then(|f| f.dyn_into::<Function>().ok()) else { return };
+    let (install, session) = ids.map_or((JsValue::NULL, JsValue::NULL), |(i, s)| (JsValue::from_str(i), JsValue::from_str(s)));
+    let _ = tell.call2(&JsValue::NULL, &install, &session);
+}
+
+/// Sends a `crash` event now, alone in its batch, from any thread (the panic hook, a GPU callback).
+/// Whether it was handed to the browser; never when statistics are off.
+pub fn send_crash(event: &Value) -> bool {
+    let Ok(target) = CRASH_TARGET.try_lock() else { return false };
+    let Some(target) = target.as_ref() else { return false };
+    let Some(body) = telemetry::crash_batch(&target.install_id, &target.session_id, "web", event) else { return false };
+    if let Some(window) = web_sys::window() {
+        return window.navigator().send_beacon_with_opt_str(&target.url, Some(&body)).unwrap_or(false);
+    }
+    // A worker has no `sendBeacon`. A `keepalive` fetch outlives the trap that follows the panic.
+    let global = js_sys::global();
+    let Some(fetch) = Reflect::get(&global, &JsValue::from_str("fetch")).ok().and_then(|f| f.dyn_into::<Function>().ok()) else { return false };
+    let init = Object::new();
+    let set = |key: &str, value: JsValue| Reflect::set(&init, &JsValue::from_str(key), &value).is_ok();
+    if !(set("method", JsValue::from_str("POST")) && set("body", JsValue::from_str(&body)) && set("keepalive", JsValue::TRUE)) {
+        return false;
+    }
+    fetch.call2(&global, &JsValue::from_str(&target.url), &init).is_ok()
 }
 
 /// A document was opened (`file` is only used for its extension).

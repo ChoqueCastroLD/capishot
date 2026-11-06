@@ -200,13 +200,19 @@ never counted. On the desktop, `DO_NOT_TRACK=1` or `CAPISHOT_TELEMETRY_URL=off` 
 - Opened, saved and exported file *kinds* (`psd`, `png`, …) with size and layer-count ranges and
   timings; that you edited something in the session.
 - Error classes (never messages), freezes over 200 ms, the highest RAM and GPU memory use, and after
-  a crash: its last command and tool, its memory, uptime and number of open documents, and whether
-  it panicked (never the panic's message).
+  a crash: its last command and tool, what the app was doing (starting, opening, decoding, …), its
+  memory, uptime and number of open documents, and how many crashes in a row.
+- Crash details, the moment one happens: where in Capishot's own source code it failed (for
+  example `crates/gpu/src/health.rs:12`; anything outside that code is just "external"), and a fixed
+  code for the kind of failure (for example `index_oob`). For a browser script error: the name of
+  our script file, the line and the error's name. For a graphics failure: the reason the browser or
+  driver gives, as a fixed code. The text of a panic or driver message never leaves your machine:
+  it is only matched against that fixed list.
 
 The server keeps at most the country from Cloudflare, never your IP address.
 
 **Never sent:** files, images, text you type or typeset, file names, paths, layer names, names of
-your fonts, error messages. A test fails if a file or layer name could reach a batch, and the
+your fonts, error and crash messages. A test fails if a file or layer name could reach a batch, and the
 recorder drops any event with a field outside its fixed list or a value that looks like a path or a
 file name.
 

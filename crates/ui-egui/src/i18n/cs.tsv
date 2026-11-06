@@ -3915,6 +3915,7 @@ navigator	Zoom	Zvětšení
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	Odesílat anonymní statistiky používání
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	Webová verze odesílá anonymní statistiky používání (žádné soubory ani obsah); vypnete je v Předvolby › Obecné.
+	Crash reports say where the code failed, never your files, names or text.	Hlášení o pádech uvádějí, kde kód selhal, nikdy vaše soubory, názvy ani texty.
 # The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
 	Load Fonts…	Načíst písma…
 	Load Font Folder…	Načíst složku písem…

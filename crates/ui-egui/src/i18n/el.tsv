@@ -3990,6 +3990,7 @@ curves	Smooth	Εξομάλυνση
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	Αποστολή ανώνυμων στατιστικών χρήσης
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	Η έκδοση web στέλνει ανώνυμα στατιστικά χρήσης (χωρίς αρχεία ή περιεχόμενο)· απενεργοποιήστε τα στις Προτιμήσεις › Γενικά.
+	Crash reports say where the code failed, never your files, names or text.	Οι αναφορές σφαλμάτων δείχνουν πού απέτυχε ο κώδικας, ποτέ τα αρχεία, τα ονόματα ή τα κείμενά σας.
 # The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
 	Load Fonts…	Φόρτωση γραμματοσειρών…
 	Load Font Folder…	Φόρτωση φακέλου γραμματοσειρών…

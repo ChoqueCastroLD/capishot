@@ -259,7 +259,7 @@ pub struct General {
     pub use_legacy_free_transform: bool,
     pub auto_show_home_screen: bool,
     /// The web build and the official desktop builds send anonymous usage statistics (commands
-    /// used, session length, timings, hardware models; never files, names or content) to
+    /// used, session length, timings, hardware models, where the code crashed; never files, names or content) to
     /// Capishot's own server. On by default; a browser's Do Not Track or Global Privacy Control,
     /// and on the desktop `DO_NOT_TRACK=1` or `CAPISHOT_TELEMETRY_URL=off`, turn it off regardless.
     pub send_anonymous_usage_statistics: bool,

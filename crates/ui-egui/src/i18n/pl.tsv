@@ -3925,6 +3925,7 @@ curves	Smooth	Wygładź
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	Wysyłaj anonimowe statystyki użycia
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	Wersja internetowa wysyła anonimowe statystyki użycia (bez plików ani treści); wyłącz je w Preferencje › Ogólne.
+	Crash reports say where the code failed, never your files, names or text.	Raporty o awariach podają, gdzie kod zawiódł, nigdy Twoje pliki, nazwy ani teksty.
 # The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
 	Load Fonts…	Wczytaj czcionki…
 	Load Font Folder…	Wczytaj folder czcionek…

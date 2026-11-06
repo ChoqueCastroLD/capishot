@@ -3994,6 +3994,7 @@ curves	Smooth	Згладити
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	Надсилати анонімну статистику використання
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	Веб-версія надсилає анонімну статистику використання (без файлів і вмісту); вимкнути її можна в Налаштування › Загальні.
+	Crash reports say where the code failed, never your files, names or text.	Звіти про збої вказують, де стався збій у коді, але ніколи не містять ваші файли, назви чи тексти.
 # The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
 	Load Fonts…	Завантажити шрифти…
 	Load Font Folder…	Завантажити теку шрифтів…

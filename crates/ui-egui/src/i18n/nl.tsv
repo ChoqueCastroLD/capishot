@@ -4050,6 +4050,7 @@ curves	Smooth	Vloeiend maken
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	Anonieme gebruiksstatistieken verzenden
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	De webversie verzendt anonieme gebruiksstatistieken (geen bestanden of inhoud); uitschakelen via Voorkeuren › Algemeen.
+	Crash reports say where the code failed, never your files, names or text.	Crashrapporten vermelden waar de code faalde, nooit je bestanden, namen of teksten.
 # The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
 	Load Fonts…	Lettertypen laden…
 	Load Font Folder…	Map met lettertypen laden…

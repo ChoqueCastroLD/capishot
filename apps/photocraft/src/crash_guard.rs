@@ -12,7 +12,7 @@ pub fn install_hook() {
     let default = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         log::error!("Capishot internal error: {info}");
-        crate::usage_stats::note_panic();
+        crate::usage_stats::note_panic(info);
         default(info);
     }));
 }

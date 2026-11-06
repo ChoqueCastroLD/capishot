@@ -2961,6 +2961,7 @@ curves	Smooth	平滑
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	发送匿名使用统计
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	网页版会发送匿名使用统计（不含文件或内容）；可在 首选项 › 常规 中关闭。
+	Crash reports say where the code failed, never your files, names or text.	崩溃报告只说明代码出错的位置，绝不包含您的文件、名称或文字。
 # The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
 	Load Fonts…	载入字体…
 	Load Font Folder…	载入字体文件夹…

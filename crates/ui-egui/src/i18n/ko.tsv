@@ -3510,6 +3510,7 @@ curves	Smooth	매끄럽게
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	익명 사용 통계 보내기
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	웹 버전은 익명 사용 통계를 보냅니다(파일이나 내용은 보내지 않음). 환경 설정 › 일반에서 끌 수 있습니다.
+	Crash reports say where the code failed, never your files, names or text.	충돌 보고서에는 코드가 실패한 위치만 포함되며 파일, 이름, 텍스트는 절대 포함되지 않습니다.
 # The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
 	Load Fonts…	글꼴 불러오기…
 	Load Font Folder…	글꼴 폴더 불러오기…

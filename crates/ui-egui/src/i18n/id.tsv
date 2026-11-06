@@ -3317,6 +3317,7 @@ curves	Smooth	Haluskan
 # Anonymous usage statistics (web build): Preferences › General, About.
 	Send anonymous usage statistics	Kirim statistik penggunaan anonim
 	The web version sends anonymous usage statistics (no files or content); turn them off in Preferences › General.	Versi web mengirim statistik penggunaan anonim (tanpa file atau konten); matikan di Preferensi › Umum.
+	Crash reports say where the code failed, never your files, names or text.	Laporan kerusakan hanya menyebut letak kegagalan kode, bukan file, nama, atau teks Anda.
 # The user's own fonts: Type › Load Fonts…, Manage Fonts…, missing fonts notice.
 	Load Fonts…	Muat Font…
 	Load Font Folder…	Muat Folder Font…

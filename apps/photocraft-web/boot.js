@@ -11,6 +11,11 @@
 // - A failed load is reported with one small beacon (`load_failed`, no WebAssembly needed) on
 //   Capishot's own hosts, unless the browser sends Do Not Track or Global Privacy Control.
 //
+// - A script error or an unhandled rejection at any time is reported as `crash` (kind `js`): the
+//   script's file name and line (ours only), the error's name and, for a WebAssembly trap, a fixed
+//   code. Never the message's text. Only once the app has said the statistics are on
+//   (`capishotCrashTarget`, usage_stats.rs).
+//
 // Only failures of the load itself count: the module's files, the WebAssembly compile and
 // instantiate, the worker pool and the app's start. An unrelated failing request (a blocked
 // third-party fetch, a missing font) before the app has started is not a broken load.
@@ -343,6 +348,79 @@
     box.append(p, b);
     (document.body || document.documentElement).append(box);
   };
+
+  // `crash` (kind `js`): at most a few per page, none before the app says statistics are on (held
+  // until then). What can leave is fixed text, the error's name and a file name of this origin.
+  const TRAPS = [
+    [/unreachable/i, 'unreachable'],
+    [/table index|table access/i, 'table_oob'],
+    [/out of bounds/i, 'memory_oob'],
+    [/out of memory|could not allocate|allocation failed/i, 'out_of_memory'],
+    [/call stack|too much recursion/i, 'stack_overflow'],
+    [/divide by zero|division by zero|remainder by zero/i, 'divide_by_zero'],
+    [/integer overflow|float unrepresentable|float-to-int/i, 'int_overflow'],
+    [/null function|signature mismatch|indirect call/i, 'bad_call'],
+    [/unaligned/i, 'unaligned'],
+  ];
+  const crashes = { iid: '', sid: '', on: false, off: false, held: [], sent: 0 };
+  const sendCrash = (ev) => {
+    if (crashes.off) return;
+    if (!crashes.on) {
+      if (crashes.held.length < 3) crashes.held.push(ev);
+      return;
+    }
+    if (crashes.sent >= 5) return;
+    crashes.sent++;
+    try {
+      const body = JSON.stringify({ v: 8, client: 'web', iid: crashes.iid, sid: crashes.sid, seq: 1, events: [ev] });
+      const url = '/capishot/api/t';
+      if (!(navigator.sendBeacon && navigator.sendBeacon(url, body))) {
+        realFetch(url, { method: 'POST', body, keepalive: true }).catch(() => {});
+      }
+    } catch (e) {}
+  };
+  // The app's statistics: on with this install's and session's ids, off with none.
+  self.capishotCrashTarget = (iid, sid) => {
+    crashes.on = typeof iid === 'string' && typeof sid === 'string';
+    crashes.off = !crashes.on;
+    crashes.iid = crashes.on ? iid : '';
+    crashes.sid = crashes.on ? sid : '';
+    const held = crashes.held;
+    crashes.held = [];
+    if (crashes.on) held.forEach(sendCrash);
+  };
+  // `boot.js:12`, the file name only and only for a script of this origin. A foreign one (a browser
+  // extension's) is just `external`.
+  const scriptLocation = (file, line) => {
+    try {
+      const u = new URL(file, location.href);
+      const name = u.pathname.split('/').pop();
+      if (u.origin !== location.origin || !/^[A-Za-z0-9_][A-Za-z0-9._-]{0,59}\.(?:m?js|wasm)$/.test(name)) return 'external';
+      return Number.isInteger(line) && line >= 0 && line <= 9999999 ? `${name}:${line}` : name;
+    } catch (e) { return 'external'; }
+  };
+  const jsCrash = (err, file, line) => {
+    const name = err && typeof err.name === 'string' && /^[A-Za-z]{1,32}$/.test(err.name) ? err.name : 'none';
+    const ev = { e: 'crash', kind: 'js', name };
+    if (file) ev.loc = scriptLocation(file, line);
+    if (name === 'RuntimeError' || name === 'RangeError') {
+      const text = String((err && err.message) || '');
+      const trap = TRAPS.find(([re]) => re.test(text));
+      if (trap) ev.msg = trap[1];
+    }
+    if (!state.started) ev.stage = 'boot';
+    sendCrash(ev);
+  };
+  addEventListener('error', (ev) => {
+    if (!(typeof ErrorEvent === 'function' && ev instanceof ErrorEvent) || (!ev.error && !ev.filename)) return; // a resource's load
+    jsCrash(ev.error, ev.filename, ev.lineno);
+  }, true);
+  addEventListener('unhandledrejection', (ev) => {
+    const err = ev.reason;
+    // Where it came from is the stack's first frame: only its address is read.
+    const at = err && typeof err.stack === 'string' && /((?:https?|blob):[^\s)]+?):(\d+):\d+/.exec(err.stack);
+    jsCrash(err, at ? at[1] : '', at ? Number(at[2]) : -1);
+  });
 
   self.capishotBoot = { stage, progress, counted, fail, build, state, chunkFailed };
   // The pre-boot.js name, still called by older pages' scripts.

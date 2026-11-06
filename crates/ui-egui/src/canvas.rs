@@ -1885,6 +1885,7 @@ fn layer_picker_eyedropper(app: &mut PhotocraftApp, ui: &egui::Ui, ctx: &egui::C
 /// painter that draws nothing. True once what that view shows is current at the level it samples
 /// (`full`: all of the document; at full size on the GPU canvas).
 pub(crate) fn prewarm(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize, full: bool) -> bool {
+    let _stage = crate::telemetry::stage_scope(crate::telemetry::Stage::Prewarm);
     let Some(doc) = app.session.documents().get(idx).map(|st| st.doc.clone()) else { return false };
     let Some(mut view) = app.ui.views.get(idx).cloned() else { return false };
     let rect = crate::rulers::content_rect(app, app.last_canvas_rect);

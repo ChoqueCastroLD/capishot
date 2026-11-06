@@ -967,6 +967,7 @@ impl GpuCanvas {
             }
             let buf = {
                 let _s = crate::perf_span::span("canvas.cpu_rect");
+                let _stage = crate::telemetry::stage_scope(crate::telemetry::Stage::Composing);
                 photocraft_compose::render(doc, r)
             };
             let t1 = now_ms();
@@ -1173,6 +1174,7 @@ impl GpuCanvas {
             }
         }
         let mut rgba = Vec::new();
+        let _stage = crate::telemetry::stage_scope(crate::telemetry::Stage::Composing);
         let _ = photocraft_compose::render_bands(doc, doc.bounds(), 0, |band| -> Result<(), ()> {
             if !self.health.is_ok() {
                 return Err(());

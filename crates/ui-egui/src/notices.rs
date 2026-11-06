@@ -135,6 +135,7 @@ pub fn usage_statistics_notice(app: &mut PhotocraftApp) {
     }
     let lines = vec![
         "A random id, the commands and tools you use, timings, errors and your hardware model. Never files, images, text, names or paths.".to_owned(),
+        "Crash reports say where the code failed, never your files, names or text.".to_owned(),
         "Turn it off in Preferences › General.".to_owned(),
     ];
     let id = post(app, "Capishot sends anonymous usage statistics", lines, false, Some(USAGE_STATISTICS_DISMISSED));
