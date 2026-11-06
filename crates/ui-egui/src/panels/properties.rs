@@ -124,14 +124,22 @@ fn layer_controls(app: &mut PhotocraftApp, ui: &mut egui::Ui, layer: &Layer) {
     }
     let mut o = layer.opacity * 100.0;
     let r = widgets::slider_row(ui, tl!("Opacity"), &mut o, 0.0..=100.0, "%", None);
-    if r.drag_stopped() || (r.changed() && !r.dragged()) {
-        let _ = app.run("layer.setProps", json!({"layer": layer.id.0, "opacity": o / 100.0}));
+    if r.changed() {
+        set_prop(app, ui, json!({"layer": layer.id.0, "opacity": o / 100.0}));
     }
     let mut f = layer.fill_opacity * 100.0;
     let r = widgets::slider_row(ui, crate::i18n::tr_ctx(crate::i18n::current(), "layers", "Fill"), &mut f, 0.0..=100.0, "%", None);
-    if r.drag_stopped() || (r.changed() && !r.dragged()) {
-        let _ = app.run("layer.setProps", json!({"layer": layer.id.0, "fill": f / 100.0}));
+    if r.changed() {
+        set_prop(app, ui, json!({"layer": layer.id.0, "fill": f / 100.0}));
     }
+}
+
+/// `layer.setProps`, one history step per drag.
+fn set_prop(app: &mut PhotocraftApp, ui: &egui::Ui, mut p: serde_json::Value) {
+    if let Some(key) = crate::layer_props_ui::drag_step(ui.ctx()) {
+        p["coalesce"] = json!(key);
+    }
+    let _ = app.run("layer.setProps", p);
 }
 
 /// Docked Properties body (Pro theme).

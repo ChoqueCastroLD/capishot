@@ -695,7 +695,6 @@ struct CanvasNavigationInput<'a> {
     wheel_owner: egui::Id,
     xf: ViewXform,
     ppp: f32,
-    idx: usize,
     primary: bool,
     bars_id: egui::Id,
 }
@@ -2123,7 +2122,7 @@ fn canvas_view_tile(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect
     }
     let bars_id = bars_hover_id(idx, tile_salt);
     let box_pinch =
-        update_canvas_navigation(app, &mut view, CanvasNavigationInput { ctx: &ctx, response: &response, free_hover, wheel_owner, xf, ppp, idx, primary, bars_id });
+        update_canvas_navigation(app, &mut view, CanvasNavigationInput { ctx: &ctx, response: &response, free_hover, wheel_owner, xf, ppp, primary, bars_id });
 
     // Pen pressure/tilt for this frame's tool events (mouse = 1.0), unless Preferences › Tools ›
     // Use Tablet Pressure is off; the pen's eraser end selects the Eraser.

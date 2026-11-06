@@ -46,12 +46,13 @@ fn edit_tolerance(layer: &Layer, u: LenUnit, extent: f64) -> f32 {
     }
 }
 
-/// A number field that reports a value once committed (drag released, Enter, focus lost). `label` is its own
-/// label and the one stacked with it in the same column ("W" over "X"), which share a centre.
-/// `len` is the unit shown and its 100% extent (for percent); `name` is the field's accessible name.
+/// A number field that reports a value once committed (drag released, Enter, focus lost), and
+/// each step of a drag when `live`. `label` is its own label and the one stacked with it in the
+/// same column ("W" over "X"), which share a centre. `len` is the unit shown and its 100% extent
+/// (for percent); `name` is the field's accessible name.
 // The explicit accessible name accompanies the existing numeric-field parameters.
 #[expect(clippy::too_many_arguments)]
-fn field(ui: &mut egui::Ui, id: &str, label: (&str, &str), name: &str, current: f32, width: f32, len: (LenUnit, f64), tol: f32) -> Option<f32> {
+fn field(ui: &mut egui::Ui, id: &str, label: (&str, &str), name: &str, current: f32, width: f32, len: (LenUnit, f64), tol: f32, live: bool) -> Option<f32> {
     let (u, extent) = len;
     stacked_label(ui, tl!(label.0), &[tl!(label.0), tl!(label.1)], LABEL_W, 2.0);
     let key = ui.make_persistent_id(("layer-props-field", id));
@@ -59,14 +60,24 @@ fn field(ui: &mut egui::Ui, id: &str, label: (&str, &str), name: &str, current: 
     let resp = widgets::value_field(ui, &mut v, -300_000.0..=300_000.0, u.unit.suffix(), width).accessible_name(tl!(name));
     if resp.dragged() || resp.has_focus() {
         ui.data_mut(|d| d.insert_temp(key, v));
-        return None;
-    }
-    ui.data_mut(|d| d.remove::<f32>(key));
-    if !(resp.drag_stopped() || resp.lost_focus() || resp.changed()) {
-        return None;
+        if !(live && resp.dragged() && resp.changed()) {
+            return None;
+        }
+    } else {
+        ui.data_mut(|d| d.remove::<f32>(key));
+        if !(resp.drag_stopped() || resp.lost_focus() || resp.changed()) {
+            return None;
+        }
     }
     let px = u.px(v, extent) as f32;
     ((px - current).abs() >= tol).then_some(px)
+}
+
+/// Every step of one drag in a field is one history step.
+pub(crate) fn drag_step(ctx: &egui::Context) -> Option<String> {
+    let id = ctx.dragged_id()?;
+    let t = ctx.input(|i| i.pointer.press_start_time())?;
+    Some(format!("layer-props-drag-{}-{}", id.value(), t.to_bits()))
 }
 
 /// Lengths in the Units & Rulers unit, as Photoshop's Properties panel shows them (cm when the
@@ -157,6 +168,9 @@ pub fn properties(app: &mut PhotocraftApp, ui: &mut egui::Ui, layer: &Layer) {
         let u = LenUnit::of(app);
         let (dw, dh) = app.session.active().map_or((1.0, 1.0), |s| (f64::from(s.doc.size.width), f64::from(s.doc.size.height)));
         let (tw, th) = (edit_tolerance(layer, u, dw), edit_tolerance(layer, u, dh));
+        // Sizes follow a drag where the layer draws again from its model: a pixel layer would be
+        // resampled at every step, and shows its new size on release. A move loses nothing.
+        let live_size = matches!(layer.content, LayerContent::Text(_) | LayerContent::Shape(_) | LayerContent::Smart(_));
         if section(ui, "transform", tl!("Transform")) {
             let link_key = egui::Id::unique("layer-props-link");
             let linked = ui.data(|d| d.get_temp::<bool>(link_key)).unwrap_or(true);
@@ -164,24 +178,24 @@ pub fn properties(app: &mut PhotocraftApp, ui: &mut egui::Ui, layer: &Layer) {
             let w = ((ui.available_width() - 2.0 * (LABEL_W + LABEL_GAP) - LINK_W - 2.0 * LABEL_GAP) / 2.0).max(36.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = LABEL_GAP;
-                if let Some(v) = field(ui, "w", ("W", "X"), "Width", (bb[2] - bb[0]) as f32, w, (u, dw), tw) {
+                if let Some(v) = field(ui, "w", ("W", "X"), "Width", (bb[2] - bb[0]) as f32, w, (u, dw), tw, live_size) {
                     run.extend(transform_params(layer.id.0, bb, Some(v), None, linked, tw).map(|p| ("edit.transform".to_string(), p)));
                 }
                 if crate::icons::button(ui, if linked { "link" } else { "unlink" }, LINK_W, linked, tl!("Link width and height")).clicked() {
                     ui.data_mut(|d| d.insert_temp(link_key, !linked));
                 }
-                if let Some(v) = field(ui, "h", ("H", "Y"), "Height", (bb[3] - bb[1]) as f32, w, (u, dh), th) {
+                if let Some(v) = field(ui, "h", ("H", "Y"), "Height", (bb[3] - bb[1]) as f32, w, (u, dh), th, live_size) {
                     run.extend(transform_params(layer.id.0, bb, None, Some(v), linked, th).map(|p| ("edit.transform".to_string(), p)));
                 }
             });
             ui.add_space(ROW_GAP);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = LABEL_GAP;
-                if let Some(v) = field(ui, "x", ("X", "W"), "X", bb[0] as f32, w, (u, dw), 0.5) {
+                if let Some(v) = field(ui, "x", ("X", "W"), "X", bb[0] as f32, w, (u, dw), 0.5, true) {
                     run.push(("layer.translate".into(), json!({"layer": layer.id.0, "dx": (v - bb[0] as f32).round() as i32, "dy": 0})));
                 }
                 ui.add_space(LINK_W + LABEL_GAP);
-                if let Some(v) = field(ui, "y", ("Y", "H"), "Y", bb[1] as f32, w, (u, dh), 0.5) {
+                if let Some(v) = field(ui, "y", ("Y", "H"), "Y", bb[1] as f32, w, (u, dh), 0.5, true) {
                     run.push(("layer.translate".into(), json!({"layer": layer.id.0, "dx": 0, "dy": (v - bb[1] as f32).round() as i32})));
                 }
             });
@@ -196,7 +210,11 @@ pub fn properties(app: &mut PhotocraftApp, ui: &mut egui::Ui, layer: &Layer) {
     if !gradient {
         align_and_distribute(app, ui, &mut run);
     }
-    for (id, p) in run.drain(..) {
+    let step = drag_step(ui.ctx());
+    for (id, mut p) in run.drain(..) {
+        if let Some(key) = &step {
+            p["coalesce"] = json!(key);
+        }
         if let Err(e) = app.run(&id, p) {
             app.ui.status = e;
             app.ui.status_error = true;
@@ -280,6 +298,76 @@ pub fn selection_align(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The active layer's drawn width.
+    fn drawn_width(app: &PhotocraftApp) -> f64 {
+        let st = app.session.active().unwrap();
+        let l = st.doc.layer(st.active_layer.unwrap()).unwrap();
+        f64::from(l.surface().unwrap().content_bounds().width())
+    }
+
+    /// Drags `name`'s field in the Properties panel of `app` and returns the layer's width held
+    /// mid-drag, after release, and how many history steps the drag took.
+    fn drag_width(app: PhotocraftApp, name: &str, by: f32) -> (f64, f64, usize) {
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(280.0, 900.0)).build_ui_state(
+            |ui, app: &mut PhotocraftApp| {
+                if ui.ctx().cumulative_pass_nr() == 0 {
+                    PhotocraftApp::setup_context(ui.ctx(), crate::theme::ThemeKind::ProMedium);
+                    return;
+                }
+                let state = app.session.active().unwrap();
+                let layer = state.doc.layer(state.active_layer.unwrap()).unwrap().clone();
+                properties(app, ui, &layer);
+            },
+            app,
+        );
+        h.run_steps(4);
+        let frame_w = |h: &egui_kittest::Harness<'_, PhotocraftApp>| drawn_width(h.state());
+        use egui_kittest::kittest::Queryable as _;
+        let at = h.get_by_label(name).rect().center();
+        let past = h.state().session.active().unwrap().history.past_len();
+        h.hover_at(at);
+        h.run_steps(2);
+        h.drag_at(at);
+        h.run_steps(1);
+        for i in 1..=8 {
+            h.hover_at(at + vec2(by * i as f32 / 8.0, 0.0));
+            h.run_steps(1);
+        }
+        let held = frame_w(&h);
+        h.drop_at(at + vec2(by, 0.0));
+        h.run_steps(3);
+        let steps = h.state().session.active().unwrap().history.past_len() - past;
+        (held, frame_w(&h), steps)
+    }
+
+    /// A type layer's width follows the drag, as one history step.
+    #[test]
+    fn dragging_a_type_layers_width_shows_while_held() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 800, "height": 600})).unwrap();
+        app.run("type.create", json!({"text": "HOLA", "size": 60, "x": 100, "y": 200})).unwrap();
+        let before = drawn_width(&app);
+        let (held, released, steps) = drag_width(app, "Width", 60.0);
+        assert!(held > before + 5.0, "{before} -> {held} while held");
+        assert!((released - held).abs() < 8.0, "{held} -> {released} on release");
+        assert_eq!(steps, 1, "one step");
+    }
+
+    /// A pixel layer isn't resampled at every step: its new size comes on release.
+    #[test]
+    fn dragging_a_pixel_layers_width_applies_on_release() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 800, "height": 600})).unwrap();
+        app.run("layer.new.layer", json!({})).unwrap();
+        app.run("select.rect", json!({"x": 10, "y": 10, "width": 200, "height": 100})).unwrap();
+        app.run("edit.fill", json!({"contents": "color", "color": "#336699"})).unwrap();
+        app.run("select.deselect", json!({})).unwrap();
+        let (held, released, steps) = drag_width(app, "Width", 60.0);
+        assert_eq!(held, 200.0, "not while held");
+        assert!(released > 205.0, "{released} on release");
+        assert_eq!(steps, 1);
+    }
 
     #[test]
     fn switching_between_gradient_and_raster_keeps_alignment_on_raster_only() {
