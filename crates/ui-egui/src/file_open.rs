@@ -205,6 +205,15 @@ impl PhotocraftApp {
     pub fn open_contents_in_order(&mut self, mut files: Vec<(String, Vec<u8>)>) -> usize {
         files.sort_by(|a, b| natural_cmp(&a.0, &b.0));
         let batch = crate::jobs_ui::begin_batch(self);
+        // A phone or small device: one at a time, as each lands (`jobs_ui::pump_opens`).
+        if self.jobs.open_budget.is_some() {
+            let opened = files.len();
+            for (seq, (name, bytes)) in files.into_iter().enumerate() {
+                self.jobs.queued.push_back(crate::jobs_ui::QueuedOpen { name, bytes, order: crate::jobs_ui::OpenOrder { batch, seq } });
+            }
+            crate::jobs_ui::pump_opens(self);
+            return opened;
+        }
         let mut opened = 0;
         for (seq, (name, bytes)) in files.into_iter().enumerate() {
             let order = crate::jobs_ui::OpenOrder { batch, seq };

@@ -2,7 +2,9 @@
 //! renderer crash) runs no code on the way out, so each page keeps a breadcrumb in localStorage
 //! (its last command and tool, the memory high-water mark, a heartbeat) and removes it when it
 //! goes away normally. A breadcrumb whose heartbeat stopped, found by the next load, is an
-//! unclean exit: reported once as `unclean_exit` (when statistics are on) and logged.
+//! unclean exit: reported once as `unclean_exit` (when statistics are on) and logged. A page behind
+//! the file picker or in the background draws no frames, so its heartbeat stops too: its [`stage`]
+//! goes in the breadcrumb's `cmd` at once and tells that death from one with the page in front.
 
 use std::cell::{Cell, RefCell};
 
@@ -22,6 +24,10 @@ thread_local! {
     static LAST: Cell<f64> = const { Cell::new(0.0) };
     static HIGH: Cell<u64> = const { Cell::new(0) };
     static STARTED: Cell<f64> = const { Cell::new(0.0) };
+    /// Where the page is, when not simply running: the file picker open, its files being read.
+    static STAGE: Cell<Option<&'static str>> = const { Cell::new(None) };
+    /// The page is in the background.
+    static HIDDEN: Cell<bool> = const { Cell::new(false) };
     /// Unclean exits found at start, for the statistics.
     static FOUND: RefCell<Vec<(String, Value)>> = const { RefCell::new(Vec::new()) };
     /// Breadcrumbs taken into a statistics batch, removed once it is sent ([`reported`]).
@@ -45,6 +51,27 @@ pub fn memory_bytes() -> u64 {
     {
         0
     }
+}
+
+/// The stage this page's breadcrumb should name, ahead of its last command.
+fn current_stage() -> Option<&'static str> {
+    STAGE.with(Cell::get).or_else(|| HIDDEN.with(Cell::get).then_some("stage.hidden"))
+}
+
+/// The page enters `stage` (`None`: it is simply running again). Written now: frames may have
+/// stopped, and the page may die before the next one.
+pub fn stage(stage: Option<&'static str>) {
+    STAGE.with(|s| s.set(stage));
+    write_stage();
+}
+
+fn write_stage() {
+    let (Some(st), Some(k)) = (storage(), KEY.with(|k| k.borrow().clone())) else { return };
+    let Some(Ok(mut crumb)) = st.get_item(&k).ok().flatten().map(|t| serde_json::from_str::<Value>(&t)) else { return };
+    if let Some(stage) = current_stage() {
+        crumb["cmd"] = json!(stage);
+    }
+    let _ = st.set_item(&k, &crumb.to_string());
 }
 
 /// Moves the breadcrumbs of dead pages (no heartbeat for [`DEAD_MS`]) not seen yet into
@@ -97,6 +124,15 @@ pub fn start() {
         });
         let _ = window.add_event_listener_with_callback("pagehide", gone.as_ref().unchecked_ref());
         gone.forget();
+        if let Some(document) = window.document() {
+            let page = document.clone();
+            let visibility = Closure::<dyn FnMut()>::new(move || {
+                HIDDEN.with(|h| h.set(page.hidden()));
+                write_stage();
+            });
+            let _ = document.add_event_listener_with_callback("visibilitychange", visibility.as_ref().unchecked_ref());
+            visibility.forget();
+        }
     }
 }
 
@@ -133,7 +169,7 @@ pub fn tick(app: &PhotocraftApp) {
     let (Some(st), Some(k)) = (storage(), KEY.with(|k| k.borrow().clone())) else { return };
     let crumb = json!({
         "t": now,
-        "cmd": app.perf.last_command,
+        "cmd": current_stage().map_or_else(|| app.perf.last_command.clone(), str::to_string),
         "tool": format!("{:?}", app.ui.tool),
         "memMB": HIGH.with(Cell::get) >> 20,
         "upMin": ((now - STARTED.with(Cell::get)) / 60_000.0).round(),

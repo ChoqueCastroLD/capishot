@@ -1121,3 +1121,87 @@ fn twelve_dropped_contents_open_as_tabs_in_natural_order_whatever_order_they_fin
     assert_eq!(doc_names(&app), want);
     assert!(app.jobs.batches.is_empty());
 }
+
+/// Finishes the one background open running and lets the next start, as frames do.
+fn land_next(app: &mut PhotocraftApp) {
+    let tab = app.jobs.opens.remove(0);
+    let v = app.session.wait_job(tab.job).unwrap();
+    crate::jobs_ui::finish_open_tab(app, &tab, &v).unwrap();
+    crate::jobs_ui::pump_opens(app);
+}
+
+#[test]
+fn a_small_device_opens_a_set_one_at_a_time_in_order_showing_the_first() {
+    let (mut app, _) = app_with(Vec::new());
+    app.background_jobs = true;
+    app.jobs.open_budget = Some(1 << 30);
+    let files: Vec<(String, Vec<u8>)> = ["c_10.png", "a_2.png", "b_1.png"].iter().map(|n| (n.to_string(), png_bytes(4, 4))).collect();
+    assert_eq!(app.open_contents_in_order(files), 3);
+    assert_eq!((app.jobs.opens.len(), app.jobs.queued.len()), (1, 2), "one decode at a time");
+    land_next(&mut app);
+    assert_eq!((app.jobs.opens.len(), app.jobs.queued.len()), (1, 1));
+    assert!(app.jobs.focus.is_none(), "the first page stays on screen while the next opens");
+    assert!(app.ui.status.contains("2") && app.ui.status.contains("3"), "{}", app.ui.status);
+    land_next(&mut app);
+    land_next(&mut app);
+    assert_eq!(doc_names(&app), ["a_2.png", "b_1.png", "c_10.png"]);
+    assert_eq!(app.session.active().map(|st| st.doc.name.as_str()), Some("a_2.png"));
+    assert!(app.jobs.batches.is_empty() && app.jobs.queued.is_empty() && app.jobs.opens.is_empty());
+}
+
+#[test]
+fn a_small_device_opens_inline_a_file_a_frame() {
+    let (mut app, _) = app_with(Vec::new());
+    app.jobs.open_budget = Some(1 << 30);
+    let files: Vec<(String, Vec<u8>)> = ["b.png", "a.png"].iter().map(|n| (n.to_string(), b"x".to_vec())).collect();
+    app.open_contents_in_order(files);
+    assert_eq!(doc_names(&app), ["a.png"]);
+    crate::jobs_ui::pump_opens(&mut app);
+    assert_eq!(doc_names(&app), ["a.png", "b.png"]);
+    assert_eq!(app.session.active().map(|st| st.doc.name.as_str()), Some("a.png"));
+    assert!(app.jobs.batches.is_empty());
+}
+
+#[test]
+fn past_the_budget_the_rest_stay_closed_and_a_notice_names_them() {
+    let (mut app, _) = app_with(Vec::new());
+    app.background_jobs = true;
+    app.jobs.open_budget = Some(u64::MAX);
+    let files: Vec<(String, Vec<u8>)> = (1..=4).map(|i| (format!("p{i}.png"), png_bytes(64, 64))).collect();
+    app.open_contents_in_order(files);
+    let tab = app.jobs.opens.remove(0);
+    let v = app.session.wait_job(tab.job).unwrap();
+    crate::jobs_ui::finish_open_tab(&mut app, &tab, &v).unwrap();
+    // Room for one more page's 16 KiB, as its header tells.
+    app.jobs.open_budget = Some(app.session.pixel_bytes() as u64 + 16 * 1024);
+    crate::jobs_ui::pump_opens(&mut app);
+    land_next(&mut app);
+    assert_eq!(doc_names(&app), ["p1.png", "p2.png"]);
+    assert!(app.jobs.opens.is_empty() && app.jobs.queued.is_empty() && app.jobs.batches.is_empty());
+    let notice = app.ui.notices.last().expect("a notice");
+    assert!(notice.error && notice.title.contains("2") && notice.title.contains("4"), "{notice:?}");
+    assert!(notice.lines.iter().any(|l| l == "p3.png") && notice.lines.iter().any(|l| l == "p4.png"), "{notice:?}");
+    // The next set starts counting again; the first document of an empty session always opens.
+    let (mut app, _) = app_with(Vec::new());
+    app.background_jobs = true;
+    app.jobs.open_budget = Some(1);
+    app.open_contents_in_order(vec![("big.png".to_string(), png_bytes(64, 64))]);
+    assert_eq!(app.jobs.opens.len(), 1);
+}
+
+#[test]
+fn a_damaged_file_in_a_set_does_not_stop_the_queue() {
+    let (mut app, _) = app_with(Vec::new());
+    app.background_jobs = true;
+    app.jobs.open_budget = Some(1 << 30);
+    // The header says nothing and the decode fails: it is reported, the next one opens.
+    let files = vec![("a.png".to_string(), b"not a png".to_vec()), ("b.png".to_string(), png_bytes(4, 4))];
+    app.open_contents_in_order(files);
+    let tab = app.jobs.opens.remove(0);
+    assert!(app.session.wait_job(tab.job).is_err());
+    app.open_failed(&tab.name, "damaged");
+    crate::jobs_ui::end_batch(&mut app.jobs);
+    crate::jobs_ui::pump_opens(&mut app);
+    land_next(&mut app);
+    assert_eq!(doc_names(&app), ["b.png"]);
+}

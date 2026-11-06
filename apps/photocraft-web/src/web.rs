@@ -329,6 +329,8 @@ impl Boot {
         app.background_jobs = cfg!(target_feature = "atomics");
         // The single-threaded build opens a PSD a step at a time between frames instead.
         app.stepped_opens = !app.background_jobs;
+        // A host page decides what it opens and keeps open.
+        app.jobs.open_budget = if hosted { None } else { open_budget() };
         // Reloaded after the graphics context was lost (gpu_lost.rs): what was open comes back.
         let lost_notice = crate::gpu_lost::take_notice();
         if (app.session.prefs().file_handling.recover_on_launch || lost_notice.is_some()) && photopea.is_none() && !hosted {
@@ -586,6 +588,21 @@ fn cap_memory() {
     };
     photocraft_engine::prefs::set_memory_cap(cap);
     log::info!("photocraft-web: memory {} GB, Memory Usage capped at {} MB", gb.map_or("unknown".to_string(), |g| g.to_string()), cap >> 20);
+}
+
+/// The pixel memory open documents may take here, on a device whose browser kills a page early: a
+/// quarter of the memory on 4 GB or less, as a 4 GB device on a phone that doesn't say (Safari).
+/// `None` elsewhere: files open at once. `deviceMemory` is rounded down, so 4 can be a 6 GB phone.
+fn open_budget() -> Option<u64> {
+    use wasm_bindgen::JsValue;
+    let window = web_sys::window()?;
+    let nav = window.navigator();
+    let gb = js_sys::Reflect::get(&nav, &JsValue::from_str("deviceMemory")).ok().and_then(|v| v.as_f64()).filter(|v| v.is_finite() && *v > 0.0);
+    match gb {
+        Some(gb) if gb <= 4.0 => Some(((gb / 4.0) * f64::from(1u32 << 30)) as u64),
+        Some(_) => None,
+        None => (nav.max_touch_points() > 0).then_some(1 << 30),
+    }
 }
 
 /// Preferences › Performance › Max Pixel Density (read from the saved preferences, so it applies
@@ -1721,9 +1738,11 @@ fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig
                 } else {
                     rfd::AsyncFileDialog::new().add_filter("All Formats", &crate::open_formats::open_exts()).add_filter("SVG", SVG_EXTS)
                 };
+                crate::breadcrumb::stage(Some("stage.picker"));
                 let answer = if multiple {
                     match dialog.pick_files().await {
                         Some(picked) if !picked.is_empty() => {
+                            crate::breadcrumb::stage(Some("stage.read"));
                             let mut files = Vec::with_capacity(picked.len());
                             for file in picked {
                                 files.push((file.file_name(), read_file(&file).await));
@@ -1738,6 +1757,7 @@ fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig
                         None => None,
                     }
                 };
+                crate::breadcrumb::stage(None);
                 reply.send(answer);
             }),
             // Browser folder handles cannot be represented as filesystem paths for engine commands.

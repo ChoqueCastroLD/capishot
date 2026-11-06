@@ -1021,10 +1021,15 @@ pub fn sanitize_command_id(id: &str) -> String {
     }
 }
 
+/// What a breadcrumb names instead of a command when the page died away from the front: behind the
+/// file picker, reading the picked files, or in the background.
+pub const PAGE_STAGES: [&str; 3] = ["stage.picker", "stage.read", "stage.hidden"];
+
 fn is_known_command(id: &str) -> bool {
     id.len() <= 80
         && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_' || b == b'-')
         && (photocraft_engine::commands::find(id).is_some()
+            || PAGE_STAGES.contains(&id)
             || crate::menus::UI_COMMANDS.iter().any(|c| c.0 == id)
             || crate::menu_catalog::CATALOG.iter().any(|c| c.3 == id))
 }

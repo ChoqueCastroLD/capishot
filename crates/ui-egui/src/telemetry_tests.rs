@@ -755,3 +755,11 @@ fn tool_drops_go_out_as_commands_with_fixed_ids() {
     assert_eq!(n("toolDrop.overlay.tool.other"), Some(1));
     assert!(r.is_empty(), "cleared after a batch");
 }
+
+#[test]
+fn a_page_stage_survives_the_breadcrumb_report() {
+    for stage in PAGE_STAGES {
+        assert_eq!(unclean_exit_event(Some(stage), None, None, None, None, None)["cmd"], stage);
+    }
+    assert_eq!(unclean_exit_event(Some("stage.secret"), None, None, None, None, None)["cmd"], "other");
+}
