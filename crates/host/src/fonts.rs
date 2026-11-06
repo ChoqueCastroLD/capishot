@@ -544,6 +544,26 @@ mod tests {
         assert!(check("x.otf", Vec::new()).is_err());
     }
 
+    /// A file also installed: the document holding it closes, and the installed font stays.
+    #[test]
+    fn closing_a_document_leaves_the_installed_copy_of_its_font() {
+        const FILE: &str = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf";
+        let Ok(bytes) = std::fs::read(FILE) else {
+            eprintln!("skipped: {FILE} isn't installed");
+            return;
+        };
+        let family = "DejaVu Sans Mono";
+        if family_status(family) == FamilyStatus::Loaded {
+            let mut host = crate::Host::new();
+            host.execute("file.new", json!({"width": 8, "height": 8})).unwrap();
+            let doc = host.active_document().unwrap();
+            let (fonts, _) = host.add_document_fonts(doc, vec![("DejaVuSansMono-Bold.ttf".to_string(), bytes)]).unwrap();
+            assert!(fonts[0].is_ok());
+            host.close(doc, true).unwrap();
+            assert_eq!(family_status(family), FamilyStatus::Loaded);
+        }
+    }
+
     #[test]
     fn document_fonts_go_when_the_last_holder_closes_and_global_ones_stay() {
         let inter = || vec![("Inter.ttf".to_string(), photocraft_text::fonts::INTER_REGULAR.as_slice().to_vec())];
