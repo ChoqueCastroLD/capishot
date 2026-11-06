@@ -209,7 +209,8 @@ fn harness() -> egui_kittest::Harness<'static, PhotocraftApp> {
 }
 
 fn harness_with_services(services: Services) -> egui_kittest::Harness<'static, PhotocraftApp> {
-    let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).with_max_steps(64).build_eframe(move |cc| {
+    // The first frame of a language draws tofu: the script's font loads for the next one.
+    let mut harness = egui_kittest::Harness::builder().allow_missing_glyphs().with_size(egui::vec2(1200.0, 800.0)).with_max_steps(64).build_eframe(move |cc| {
         PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);
         app.run("file.new", json!({"name": "User layer name", "width": 64, "height": 64})).expect("new document");
