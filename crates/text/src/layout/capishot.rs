@@ -81,9 +81,9 @@ pub(super) struct HyphenBreak {
     /// Line index in the paragraph layout.
     pub(super) line: usize,
     /// Clusters on the line (the line breaker's `break_next_with_length`).
-    clusters: u32,
+    pub(super) clusters: u32,
     /// Hyphen advance (px, before horizontal scale), kept free at the line end for alignment.
-    advance: f32,
+    pub(super) advance: f32,
 }
 
 pub(super) struct HyphenParams {
@@ -136,7 +136,7 @@ pub(super) fn hyphenate_paragraph(
 }
 
 /// The hyphen break that pulls the head of line `li + 1`'s first word onto line `li`, if any.
-fn line_hyphen_break(
+pub(super) fn line_hyphen_break(
     layout: &Layout<RunBrush>,
     ptext: &str,
     li: usize,

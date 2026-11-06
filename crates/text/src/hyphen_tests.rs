@@ -183,3 +183,32 @@ fn a_paragraph_can_set_hyphenations_limits() {
     assert!(!hyphens(&mut e, None, None), "under Photoshop's six letters");
     assert!(hyphens(&mut e, Some(4), Some(0.0)), "four letters, no zone");
 }
+
+/// Type in a path hyphenates too, each line at its band's width.
+#[test]
+fn type_in_a_path_hyphenates_at_each_bands_width() {
+    let mut e = TextEngine::new();
+    let ellipse = crate::area::tests_ellipse(200.0, 150.0, 160.0, 110.0);
+    let area = crate::in_path::Area::new(&ellipse).unwrap().with_inset(None);
+    let mut any = false;
+    for size in [18.0, 22.0, 26.0, 30.0] {
+        let layer = |hyphenate| {
+            let mut t = boxed(ES, 100.0, TextAlign::Center, hyphenate, Some("es"));
+            t.runs[0].style.size_pt = size;
+            t.shape = TextShape::in_path(ellipse.clone());
+            t
+        };
+        let off = e.layout(&layer(false), 72.0);
+        assert!(off.lines.iter().all(|l| !l.hyphen));
+        let on = e.layout(&layer(true), 72.0);
+        for l in &on.lines {
+            if l.hyphen {
+                any = true;
+                // The hyphen, at the middle of the letters, is inside the path.
+                let y = l.baseline - size * 0.3;
+                assert!(area.contains(l.x1 - 1.0, y) && area.contains(l.x0 + 1.0, y), "{size}: {:?} at {y}", (l.x0, l.x1));
+            }
+        }
+    }
+    assert!(any, "some line ends in a hyphen");
+}
