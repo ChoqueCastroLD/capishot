@@ -64,6 +64,7 @@ mod psd_cache;
 pub mod pdf;
 mod pdn;
 mod perspective_type;
+mod type_language;
 pub use pcraft_cache::PcraftExportCache;
 pub use psd_cache::{PsdCacheStats, PsdExportCache};
 pub mod pixels;

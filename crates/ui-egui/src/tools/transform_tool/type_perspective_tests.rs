@@ -256,6 +256,37 @@ fn edit_transform_distort_opens_on_type_and_a_menu_id_changes_the_mode() {
     assert!(text_of(&app, id).perspective.is_some(), "the commit keeps it type, in perspective");
 }
 
+/// A character's language comes back from a PSD, run by run and through a smart object in
+/// perspective; Photoshop's own index isn't what carries it, and nothing of ours stays on the layer.
+#[test]
+fn a_type_layers_language_round_trips_through_psd() {
+    let (mut app, id) = app_with_type();
+    app.run("type.setStyle", json!({"layer": id.0, "range": [0, 4], "language": "es"})).unwrap();
+    app.run("type.setStyle", json!({"layer": id.0, "range": [4, 11], "language": "pt"})).unwrap();
+    let languages = |t: &photocraft_doc::TextLayer| t.char_runs().iter().map(|r| (r.len, r.style.language.clone())).collect::<Vec<_>>();
+    let want = languages(&text_of(&app, id));
+    assert_eq!(want, vec![(4, Some("es".to_string())), (7, Some("pt".to_string()))]);
+    let reopen = |app: &PhotocraftApp| {
+        let doc = app.session.active().unwrap().doc.clone();
+        let name = doc.layer(id).unwrap().name.clone();
+        let out = photocraft_io::export(&doc, "page.psd", &Default::default()).unwrap();
+        let back = photocraft_io::import("page.psd", &out.bytes).unwrap().document;
+        back.walk().into_iter().map(|(_, _, l)| l.clone()).find(|l| l.name == name).expect("the layer")
+    };
+    let back = reopen(&app);
+    assert!(!back.psd_blocks.iter().any(|(k, _)| k == b"CpLn"), "read and taken off");
+    let LayerContent::Text(t) = &back.content else { panic!("type") };
+    assert_eq!(languages(t), want);
+    let ctx = egui::Context::default();
+    crate::menus::invoke(&mut app, &ctx, super::TYPE_PERSPECTIVE, json!({})).unwrap();
+    pull_top_in(&mut app);
+    super::commit(&mut app);
+    let back = reopen(&app);
+    let LayerContent::Text(t) = &back.content else { panic!("type in perspective") };
+    assert!(t.perspective.is_some());
+    assert_eq!(languages(t), want, "in perspective too");
+}
+
 /// A document made by the old route (type converted to a smart object, then put in perspective)
 /// still opens as that smart object, through .pcraft and PSD.
 #[test]
