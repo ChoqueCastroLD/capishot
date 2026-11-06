@@ -104,3 +104,43 @@ fn full_mode_reports_every_tile_instead_of_drawing_it() {
     let out = tiles_frame(&ctx, &mut editor, &[Tile::new(doc, left())]);
     assert!(!out.tiles[0].drawn && out.tiles[0].error.is_some());
 }
+
+/// A frame with these pointer events.
+fn pointer_frame(ctx: &Context, editor: &mut CapishotEditor, tiles: &[Tile], events: Vec<egui::Event>) {
+    let raw = RawInput { events, ..input() };
+    let mut o = ctx.run_ui(raw, |ui| {
+        editor.ui_tiles(ui, tiles);
+    });
+    o.textures_delta.clear();
+}
+
+/// Each tile's scrollbars are its own: a drag on the live tile's moves the page the way it goes,
+/// with another tile of the document beside it (they shared their widget ids: the wrong way).
+#[test]
+fn a_drag_on_a_tiles_scrollbar_goes_the_right_way() {
+    let mut editor = CapishotEditor::new(None);
+    editor.host.execute("file.new", json!({"width": 760, "height": 1200})).expect("a document");
+    let doc = editor.host.active_document().expect("active");
+    let layer = editor.host.execute("layer.new.layer", json!({"name": "text"})).expect("a layer")["layer"].as_u64().expect("an id");
+    editor.host.define_view(doc, "other", json!({"hidden": [layer]})).expect("a view");
+    let ctx = Context::default();
+    let tiles = [Tile::new(doc, left()), Tile::new(doc, right()).with_view("other")];
+    tiles_frame(&ctx, &mut editor, &tiles);
+    editor.view.set_camera(doc, CameraChange::Set { zoom: Some(2.0), center: Some([380.0, 400.0]), rotation: None });
+    tiles_frame(&ctx, &mut editor, &tiles);
+    tiles_frame(&ctx, &mut editor, &tiles);
+    let y = |e: &CapishotEditor| e.view.camera(doc).expect("a camera").center[1];
+    let before = y(&editor);
+    // On the thumb of the left tile's vertical bar, 60 points down.
+    let x = left().right() - 6.0;
+    let thumb = left().top() + left().height() * before / 1200.0;
+    let at = |dy: f32| Pos2::new(x, thumb + dy);
+    let press = |pressed| egui::Event::PointerButton { pos: at(if pressed { 0.0 } else { 60.0 }), button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+    pointer_frame(&ctx, &mut editor, &tiles, vec![egui::Event::PointerMoved(at(0.0))]);
+    pointer_frame(&ctx, &mut editor, &tiles, vec![press(true)]);
+    for dy in [20.0, 40.0, 60.0] {
+        pointer_frame(&ctx, &mut editor, &tiles, vec![egui::Event::PointerMoved(at(dy))]);
+    }
+    pointer_frame(&ctx, &mut editor, &tiles, vec![press(false)]);
+    assert!(y(&editor) > before + 40.0, "{before} -> {}", y(&editor));
+}

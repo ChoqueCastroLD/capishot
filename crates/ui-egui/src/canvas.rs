@@ -681,6 +681,13 @@ fn paint_canvas(app: &mut PhotocraftApp, ui: &egui::Ui, view: &View, xf: ViewXfo
     (beyond, layer_edges, edge_rect)
 }
 
+/// Where a canvas keeps "the pointer is on its scrollbars" (last frame's), and the id its bars grow
+/// from: each tile has its own.
+fn bars_hover_id(idx: usize, tile_salt: u64) -> egui::Id {
+    let id = egui::Id::unique(("pc-canvas-bars-hover", idx));
+    if tile_salt == 0 { id } else { id.with(tile_salt) }
+}
+
 struct CanvasNavigationInput<'a> {
     ctx: &'a egui::Context,
     response: &'a egui::Response,
@@ -690,14 +697,14 @@ struct CanvasNavigationInput<'a> {
     ppp: f32,
     idx: usize,
     primary: bool,
+    bars_id: egui::Id,
 }
 
 /// Returns whether a two-finger pinch is scaling the Free Transform box (not the view).
 fn update_canvas_navigation(app: &mut PhotocraftApp, view: &mut View, input: CanvasNavigationInput<'_>) -> bool {
     // Navigation (wheel_nav.rs): scroll pans (⇧ or ⌘/Ctrl sideways); pinch and ⌥-scroll zoom around the pointer.
     // The wheel also scrolls over the scrollbars drawn on top of the canvas (last frame's hover).
-    let bars_id = egui::Id::unique(("pc-canvas-bars-hover", input.idx));
-    let over_bars = input.ctx.data(|d| d.get_temp::<bool>(bars_id)).unwrap_or(false);
+    let over_bars = input.ctx.data(|d| d.get_temp::<bool>(input.bars_id)).unwrap_or(false);
     let nav_hovered = input.response.hovered() || input.free_hover || over_bars;
     // Interface › Enable Animations off: the wheel moves the canvas without a glide (#5721).
     // General › Animated Zoom: the wheel zoom eases over the frames of a notch, or is one instant step.
@@ -1815,7 +1822,7 @@ fn finish_canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, view: &mut Vie
     // The touch interface pans with fingers: scrollbars there only cover the canvas's edges.
     let over_bars = app.ui.view.shows_scrollbars()
         && !crate::touch_ui::active(app)
-        && crate::scrollbars::show(ui, rect, view, flip, aspect, app.session.prefs().tools.overscroll, egui::Id::unique(("pc-canvas", idx)));
+        && crate::scrollbars::show(ui, rect, view, flip, aspect, app.session.prefs().tools.overscroll, bars_id.with("bars"));
     ctx.data_mut(|d| d.insert_temp(bars_id, over_bars));
     if view.center != before {
         ctx.request_repaint();
@@ -2112,9 +2119,9 @@ fn canvas_view_tile(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect
     if !under_dialog && ctx.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| rect.contains(p))) {
         crate::spring_tools::note_canvas_press(app);
     }
-    let bars_id = egui::Id::unique(("pc-canvas-bars-hover", idx));
+    let bars_id = bars_hover_id(idx, tile_salt);
     let box_pinch =
-        update_canvas_navigation(app, &mut view, CanvasNavigationInput { ctx: &ctx, response: &response, free_hover, wheel_owner, xf, ppp, idx, primary });
+        update_canvas_navigation(app, &mut view, CanvasNavigationInput { ctx: &ctx, response: &response, free_hover, wheel_owner, xf, ppp, idx, primary, bars_id });
 
     // Pen pressure/tilt for this frame's tool events (mouse = 1.0), unless Preferences › Tools ›
     // Use Tablet Pressure is off; the pen's eraser end selects the Eraser.
