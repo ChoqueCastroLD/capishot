@@ -335,3 +335,12 @@ fn native_allow_download_fetches_from_the_models_url() {
     let e = error_with("", "off");
     assert!(e.contains("not found"), "no downloads: {e}");
 }
+
+/// A host warms the model at start-up, before any document is open.
+#[test]
+fn warm_ai_needs_no_document() {
+    let mut host = crate::Host::new();
+    host.session_mut().set_inpainter(Some(Arc::new(FakeInpainter::default())));
+    assert!(host.active_document().is_none());
+    assert!(host.warm_ai("manga-lama").is_ok());
+}

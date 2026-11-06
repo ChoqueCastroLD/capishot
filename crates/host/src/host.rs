@@ -348,7 +348,11 @@ impl Host {
     /// first removal doesn't wait for it: a job; its result has `{model, device, cpu, fellBack, ms}`.
     /// An error when the model isn't downloaded.
     pub fn warm_ai(&mut self, model: &str) -> Result<Started> {
-        self.start(photocraft_engine::ai_warm_cmds::ID, json!({ "model": model }), None)
+        // No document's scope: it needs none, and a host warms at start-up.
+        Ok(match self.session.start(photocraft_engine::ai_warm_cmds::ID, json!({ "model": model }))? {
+            jobs::Started::Done(v) => Started::Done(v),
+            jobs::Started::Job(id) => Started::Job(id.into()),
+        })
     }
 
     /// Run `command` in the background when it supports it (filters, Content-Aware Fill, Remove

@@ -44,10 +44,12 @@ fn warm(s: &mut Session, p: &Value) -> Result<Value> {
                 opts,
                 Box::new(move |r| {
                     let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+                    let device = device.device();
                     done.finish(r.map(|(_, run)| json!({
                         "model": run.model.id,
-                        "device": device.device(),
-                        "cpu": run.cpu,
+                        // `device` too: `CAPISHOT_AI_DEVICE=cpu` forces the CPU without the request knowing.
+                        "cpu": run.cpu || device == "CPU",
+                        "device": device,
                         "fellBack": run.fell_back,
                         "ms": ms,
                     })));
