@@ -72,6 +72,7 @@ await tapLabel('sheet:back');
 await tapLabel('sheet:sub:Window');
 await shot('05-window-checks');
 check(((await simple()).buttons || []).some((x) => x.label.startsWith('sheet:check:')), 'active items show their check');
+for (let i = 0; i < 6; i++) { const r = await rect('sheet:sub:Theme'); if (r && r[3] < 770) break; await drag([180, 640], [180, 340]); await p.waitForTimeout(400); }
 await tapLabel('sheet:sub:Theme');
 await shot('06-themes-dynamic');
 await tapLabel('sheet:back');
