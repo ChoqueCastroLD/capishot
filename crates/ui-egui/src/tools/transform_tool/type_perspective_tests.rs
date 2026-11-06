@@ -208,6 +208,35 @@ fn perspective_type_round_trips_through_psd() {
     assert!((ca[0] - cb[0]).abs() < 2.0 && (ca[1] - cb[1]).abs() < 2.0, "the same place: {qa:?} {qb:?}");
 }
 
+/// A type layer read from a PSD, restyled and put in perspective: the new style and the perspective
+/// come back, not the file's first `TySh`.
+#[test]
+fn a_type_layer_from_a_psd_keeps_its_new_style_in_perspective() {
+    let (app, id) = app_with_type();
+    let doc = app.session.active().unwrap().doc.clone();
+    let name = doc.layer(id).unwrap().name.clone();
+    let first = photocraft_io::export(&doc, "page.psd", &Default::default()).unwrap();
+    let opened = photocraft_io::import("page.psd", &first.bytes).unwrap().document;
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    app.session.add_document(opened, None);
+    app.sync_views();
+    let find = |d: &photocraft_doc::Document| d.walk().into_iter().map(|(_, _, l)| l.clone()).find(|l| l.name == name).expect("the layer");
+    let id = find(&app.session.active().unwrap().doc).id;
+    app.run("layer.select", json!({"layer": id.0})).unwrap();
+    assert!(find(&app.session.active().unwrap().doc).psd_blocks.iter().any(|(k, _)| k == b"TySh"), "as read from a file");
+    app.run("type.setStyle", json!({"layer": id.0, "color": "#ff0000"})).unwrap();
+    let ctx = egui::Context::default();
+    crate::menus::invoke(&mut app, &ctx, super::TYPE_PERSPECTIVE, json!({})).unwrap();
+    pull_top_in(&mut app);
+    super::commit(&mut app);
+    let styled = text_of(&app, id);
+    let saved = photocraft_io::export(&app.session.active().unwrap().doc, "page.psd", &Default::default()).unwrap();
+    let back = find(&photocraft_io::import("page.psd", &saved.bytes).unwrap().document);
+    let LayerContent::Text(t) = &back.content else { panic!("opens as type, not {}", back.content.kind_name()) };
+    assert!(t.perspective.is_some(), "in perspective");
+    assert_eq!(t.color, styled.color, "the new colour");
+}
+
 /// A document made by the old route (type converted to a smart object, then put in perspective)
 /// still opens as that smart object, through .pcraft and PSD.
 #[test]

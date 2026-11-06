@@ -46,7 +46,9 @@ fn wrap_layers(layers: &mut [Layer], doc: &Document) {
         let Some(p) = t.perspective.filter(|p| p.is_valid()) else { continue };
         if let Some(sm) = smart_of(doc, t, &p) {
             l.content = LayerContent::Smart(sm);
-            l.psd_blocks.retain(|(k, _)| *k != BLOCK);
+            // The file's `TySh`, if it came from one, is the type as it was then: on opening it
+            // would win over the contents.
+            l.psd_blocks.retain(|(k, _)| *k != BLOCK && k != b"TySh");
             l.psd_blocks.push((BLOCK, Arc::new(MARK.to_vec())));
         }
     }
