@@ -316,6 +316,10 @@ fn create_in_bubble(s: &mut Session, p: &Value) -> Result<Value> {
     if p.get("inPath").is_some_and(|v| !v.is_null()) || p.get("box").is_some_and(|v| !v.is_null()) {
         return Err(bad("the bubble is the path: no \"inPath\" or \"box\""));
     }
+    let area = match p.get("area") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(area_param(v)?),
+    };
     // Every style is checked first, so a bad one fails whatever the click hits.
     for k in [Kind::Bubble, Kind::Narration, Kind::Floating] {
         if p.get("shapeStyles").is_some() {
@@ -328,6 +332,7 @@ fn create_in_bubble(s: &mut Session, p: &Value) -> Result<Value> {
         stroke_param(&q)?;
     }
     let region = match want {
+        _ if area.is_some() => None,
         Some(Kind::Floating) => None,
         _ => match region_at(s, x, y, want) {
             Ok(r) => Some(r),
@@ -336,34 +341,9 @@ fn create_in_bubble(s: &mut Session, p: &Value) -> Result<Value> {
             Err(e) => return Err(e),
         },
     };
-    let kind = region.as_ref().map_or(Kind::Floating, |r| r.0);
-    let mut q = style_params(p, kind)?;
-    // Another source's style: picked, or what Auto maps this shape to. One that is gone (a role
-    // the active project lacks, a deleted library style) falls back to the kind's own.
-    let chosen = match picked {
-        Some(r) => Some(r),
-        None if want.is_none() => shape_ref(s, p, kind)?,
-        None => None,
-    };
-    let mut fallback = None;
-    let mut typer = None;
-    let used = match chosen {
-        Some(r) if !ref_exists(s, &r) => {
-            fallback = Some(r.key());
-            None
-        }
-        Some(StyleRef::Project(role)) => {
-            if let Some(project) = crate::font_projects::active(s) {
-                apply_role(&mut q, &project, &role);
-            }
-            Some(StyleRef::Project(role))
-        }
-        Some(StyleRef::Typer(id)) => {
-            typer = typer_style(s, &id).cloned();
-            Some(StyleRef::Typer(id))
-        }
-        None => None,
-    };
+    // A zone the person drew is a bubble's text unless a style says otherwise.
+    let kind = if area.is_some() { want.unwrap_or(Kind::Bubble) } else { region.as_ref().map_or(Kind::Floating, |r| r.0) };
+    let Chosen { mut q, typer, used, fallback } = chosen_style(s, p, kind, picked, want)?;
     let mut stroke = stroke_param(&q)?;
     let (inset, valign) = crate::type_cmds::in_path_props(&q).map_err(bad)?;
     let mut base = q.clone();
@@ -376,23 +356,23 @@ fn create_in_bubble(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let mut t = crate::type_cmds::new_text_layer(s, &base, CMD)?;
     if let Some(style) = &typer {
-        // The TypeR style's character and paragraph settings over the whole text, as TypeR
-        // places it (the kind keeps its margin and vertical placement).
-        let st = s.active().ok_or(EngineError::NoDocument)?;
-        let opts = photocraft_typer::psjson::MapOptions {
-            dpi: f64::from(st.doc.resolution_dpi),
-            text_scale: s.typer.state.settings.text_scale,
-            page_width: Some(f64::from(st.doc.size.width)),
-            direction: s.typer.state.settings.direction,
-        };
-        let styled = crate::typer_place_cmds::support::styled(style, &opts, None, t.size_pt);
-        let len = t.text.len();
-        t.runs = vec![photocraft_doc::text::TextRun { len, style: styled.char_style.clone() }];
-        t.paragraphs = vec![photocraft_doc::text::ParagraphRun { len, style: styled.paragraph.clone() }];
-        if let Some(aa) = styled.antialias {
-            t.antialias = aa;
+        stroke = apply_typer(s, &mut t, style)?;
+    }
+    if let Some([x, y, width, height]) = area {
+        t.shape = TextShape::Box { x, y, width, height };
+        t.transform = Affine::IDENTITY;
+        t.sync_summary();
+        let effects = role_effects(&q);
+        let mut out = crate::type_cmds::add_type_layer_with(s, &base, t, |layer, mode| {
+            crate::typer_place_cmds::set_stroke(layer, stroke.as_ref(), mode);
+            layer.effects.items.extend(effects.into_iter().map(|e| e.in_mode(mode)));
+        })?;
+        out["style"] = json!(kind.name());
+        if let Some(r) = &used {
+            out["styleRef"] = json!(r.key());
+            out["styleName"] = json!(ref_name(s, r));
         }
-        stroke = styled.stroke;
+        return Ok(out);
     }
     match &region {
         Some((_, path, _)) => {
@@ -429,13 +409,154 @@ fn create_in_bubble(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(out)
 }
 
+/// A zone `[x, y, width, height]` in document pixels.
+fn area_param(v: &Value) -> Result<[f32; 4]> {
+    let a = v.as_array().filter(|a| a.len() == 4).ok_or_else(|| bad("\"area\" must be [x, y, width, height]"))?;
+    let n = |i: usize| a[i].as_f64().filter(|v| v.is_finite() && v.abs() < 1e9).map(|v| v as f32).ok_or_else(|| bad("\"area\" must be numbers"));
+    let r = [n(0)?, n(1)?, n(2)?, n(3)?];
+    if r[2] <= 0.0 || r[3] <= 0.0 {
+        return Err(bad("\"area\" must have a size"));
+    }
+    Ok(r)
+}
+
+/// What a pick comes to for a text of `kind`.
+struct Chosen {
+    q: Value,
+    typer: Option<photocraft_typer::Style>,
+    used: Option<StyleRef>,
+    fallback: Option<String>,
+}
+
+/// Another source's style: picked, or what Auto maps this shape to. One that is gone (a role the
+/// active project lacks, a deleted library style) falls back to the kind's own.
+fn chosen_style(s: &Session, p: &Value, kind: Kind, picked: Option<StyleRef>, want: Option<Kind>) -> Result<Chosen> {
+    let mut q = style_params(p, kind)?;
+    let chosen = match picked {
+        Some(r) => Some(r),
+        None if want.is_none() => shape_ref(s, p, kind)?,
+        None => None,
+    };
+    let (mut fallback, mut typer) = (None, None);
+    let used = match chosen {
+        Some(r) if !ref_exists(s, &r) => {
+            fallback = Some(r.key());
+            None
+        }
+        Some(StyleRef::Project(role)) => {
+            if let Some(project) = crate::font_projects::active(s) {
+                apply_role(&mut q, &project, &role);
+            }
+            Some(StyleRef::Project(role))
+        }
+        Some(StyleRef::Typer(id)) => {
+            typer = typer_style(s, &id).cloned();
+            Some(StyleRef::Typer(id))
+        }
+        None => None,
+    };
+    Ok(Chosen { q, typer, used, fallback })
+}
+
+/// The TypeR style's character and paragraph settings over the whole text, as TypeR places it
+/// (the kind keeps its margin and vertical placement). Returns its stroke.
+fn apply_typer(s: &Session, t: &mut photocraft_doc::TextLayer, style: &photocraft_typer::Style) -> Result<Option<photocraft_typer::psjson::Stroke>> {
+    let st = s.active().ok_or(EngineError::NoDocument)?;
+    let opts = photocraft_typer::psjson::MapOptions {
+        dpi: f64::from(st.doc.resolution_dpi),
+        text_scale: s.typer.state.settings.text_scale,
+        page_width: Some(f64::from(st.doc.size.width)),
+        direction: s.typer.state.settings.direction,
+    };
+    let styled = crate::typer_place_cmds::support::styled(style, &opts, None, t.size_pt);
+    let len = t.text.len();
+    t.runs = vec![photocraft_doc::text::TextRun { len, style: styled.char_style.clone() }];
+    t.paragraphs = vec![photocraft_doc::text::ParagraphRun { len, style: styled.paragraph.clone() }];
+    if let Some(aa) = styled.antialias {
+        t.antialias = aa;
+    }
+    Ok(styled.stroke)
+}
+
+/// `type.setBubbleStyle`: another of the tool's styles on a type layer it already holds. Its text,
+/// shape and place stay; its character and paragraph style, stroke and (in a bubble) margin change.
+fn set_bubble_style(s: &mut Session, p: &Value) -> Result<Value> {
+    const SET: &str = "type.setBubbleStyle";
+    let id = photocraft_doc::LayerId(p.get("layer").and_then(Value::as_u64).ok_or_else(|| bad("\"layer\" is required"))?);
+    let (want, picked) = parse_pick(p.get("style"))?;
+    let old = match s.active().ok_or(EngineError::NoDocument)?.doc.layer(id).map(|l| &l.content) {
+        Some(photocraft_doc::LayerContent::Text(t)) => t.clone(),
+        Some(_) => return Err(bad("the layer isn't type")),
+        None => return Err(EngineError::NoLayer(id)),
+    };
+    let kind = want.unwrap_or(match old.shape {
+        TextShape::InPath { .. } | TextShape::Box { .. } => Kind::Bubble,
+        _ => Kind::Floating,
+    });
+    let Chosen { mut q, typer, used, .. } = chosen_style(s, p, kind, picked, want.or(Some(kind)))?;
+    let mut stroke = stroke_param(&q)?;
+    let (inset, valign) = crate::type_cmds::in_path_props(&q).map_err(bad)?;
+    let effects = role_effects(&q);
+    if let Value::Object(m) = &mut q {
+        for k in ["inset", "vertical", "stroke", ROLE_EFFECTS, "x", "y", "box", "inPath"] {
+            m.remove(k);
+        }
+        m.insert("text".into(), json!(old.text));
+    }
+    let mut t = crate::type_cmds::new_text_layer(s, &q, SET)?;
+    if let Some(style) = &typer {
+        stroke = apply_typer(s, &mut t, style)?;
+    }
+    t.shape = match old.shape.clone() {
+        TextShape::InPath { path, inset: was, valign: at } => TextShape::InPath { path, inset: inset.unwrap_or(was), valign: valign.unwrap_or(at) },
+        shape => shape,
+    };
+    t.transform = old.transform;
+    t.perspective = old.perspective;
+    t.warp = old.warp.clone();
+    t.orientation = old.orientation;
+    t.sync_summary();
+    s.edit("Text Style", |doc, _| {
+        let (dpi, format, mode) = (doc.resolution_dpi, doc.pixel_format(), doc.mode);
+        let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
+        crate::type_cmds::refresh_at(dpi, format, &mut t);
+        l.content = photocraft_doc::LayerContent::Text(t);
+        // The old style's outline goes with it.
+        l.effects.items.retain(|e| !matches!(e, photocraft_doc::Effect::Stroke(_)));
+        crate::typer_place_cmds::set_stroke(l, stroke.as_ref(), mode);
+        l.effects.items.extend(effects.into_iter().map(|e| e.in_mode(mode)));
+        Ok(())
+    })?;
+    let mut out = json!({"layer": id.0, "style": kind.name()});
+    if let Some(r) = &used {
+        out["styleRef"] = json!(r.key());
+        out["styleName"] = json!(ref_name(s, r));
+    }
+    Ok(out)
+}
+
 pub fn specs() -> Vec<CommandSpec> {
+    let mut v = bubble_specs();
+    v.push(CommandSpec {
+        id: "type.setBubbleStyle",
+        label: "Text Style",
+        menu: &[],
+        shortcut: None,
+        params: r##"{"layer":id,"style":"bubble|narration|floating|project:<role>|typer:<id>","styles":{...}? (as type.createInBubble)}: another of Bubble Type's styles on a type layer; its text, shape and place stay"##,
+        enabled: |s| s.active().map(|_| ()).ok_or_else(|| "no document".into()),
+        journal: true,
+        run: set_bubble_style,
+    });
+    v
+}
+
+fn bubble_specs() -> Vec<CommandSpec> {
     vec![CommandSpec {
         id: CMD,
         label: "New Type in Bubble",
         menu: &[],
         shortcut: None,
-        params: r##"{"x":px,"y":px (the click),"style":"auto|bubble|narration|floating|project:<role>|typer:<id>"="auto" (project: a role of the active font project, its font and settings over the shape's style; typer: a TypeR library style, its text settings; the shape still found as for Auto),"shapeStyles":{"bubble|narration|floating":style}? (what Auto uses per shape found; default: the active project's Bubble Type mapping),"styles":{"bubble":{…},"narration":{…},"floating":{…}}? (each: character keys, "align", "inset":px|"auto", "vertical":"center|top", "stroke":{"width":px,"color":"#rrggbb"}|null; over the command's own keys),"text":str?, …character keys} → {"layer","bounds","style" (what was made),"styleRef"?,"styleName"? (the other source's style used),"fallback"? (the picked style that no longer exists: the shape's own was used),"path"? (the bubble's or box's path, document px),"rectangularity"?}. Auto: the light area around the point (found on the page without its type layers, outline gaps closed, a click on lettering or the outline still finds it) becomes type in a narration box when it is rectangular (area over its minimum rectangle above 0.92: a rectangle fit), else type in the bubble's traced body (the tail left out); with no bubble there, floating point text centred on the point. A forced "bubble" or "narration" with no bubble there is an error starting "noBubble" and creates nothing. One undo step"##,
+        params: r##"{"x":px,"y":px (the click),"area":[x,y,w,h]? (a zone the person drew: a text box there, in the style, no bubble looked for),"style":"auto|bubble|narration|floating|project:<role>|typer:<id>"="auto" (project: a role of the active font project, its font and settings over the shape's style; typer: a TypeR library style, its text settings; the shape still found as for Auto),"shapeStyles":{"bubble|narration|floating":style}? (what Auto uses per shape found; default: the active project's Bubble Type mapping),"styles":{"bubble":{…},"narration":{…},"floating":{…}}? (each: character keys, "align", "inset":px|"auto", "vertical":"center|top", "stroke":{"width":px,"color":"#rrggbb"}|null; over the command's own keys),"text":str?, …character keys} → {"layer","bounds","style" (what was made),"styleRef"?,"styleName"? (the other source's style used),"fallback"? (the picked style that no longer exists: the shape's own was used),"path"? (the bubble's or box's path, document px),"rectangularity"?}. Auto: the light area around the point (found on the page without its type layers, outline gaps closed, a click on lettering or the outline still finds it) becomes type in a narration box when it is rectangular (area over its minimum rectangle above 0.92: a rectangle fit), else type in the bubble's traced body (the tail left out); with no bubble there, floating point text centred on the point. A forced "bubble" or "narration" with no bubble there is an error starting "noBubble" and creates nothing. One undo step"##,
         enabled: |s| s.active().map(|_| ()).ok_or_else(|| "no document".into()),
         journal: true,
         run: create_in_bubble,
@@ -448,6 +569,36 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    /// A zone drawn with the tool: a text box there, in the style, with no bubble to find; and a
+    /// style changed afterwards keeps the text and its place, as one undo step.
+    #[test]
+    fn a_zone_gets_a_box_in_the_style_and_the_style_can_change() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 400, "height": 300, "background": "white"})).unwrap();
+        let styles = json!({"bubble": {"size": 20, "color": "#000000"}, "narration": {"size": 30, "color": "#ff0000", "stroke": {"width": 2, "color": "#ffffff"}}});
+        let r = s.execute(CMD, json!({"x": 40, "y": 50, "area": [40, 50, 120, 80], "style": "auto", "styles": styles, "text": "HOLA"})).unwrap();
+        assert_eq!(r["style"], "bubble");
+        let id = photocraft_doc::LayerId(r["layer"].as_u64().unwrap());
+        let text = |s: &Session| match &s.active().unwrap().doc.layer(id).unwrap().content {
+            photocraft_doc::LayerContent::Text(t) => t.clone(),
+            _ => panic!("type"),
+        };
+        assert!(matches!(text(&s).shape, TextShape::Box { x: 40.0, y: 50.0, width: 120.0, height: 80.0 }));
+        assert_eq!(text(&s).size_pt, 20.0);
+        let before = text(&s).shape;
+        let past = s.active().unwrap().history.past_len();
+        s.execute("type.setBubbleStyle", json!({"layer": id.0, "style": "narration", "styles": styles})).unwrap();
+        assert_eq!(s.active().unwrap().history.past_len(), past + 1, "one step");
+        let t = text(&s);
+        assert_eq!((t.text.as_str(), t.size_pt), ("HOLA", 30.0));
+        assert_eq!(t.shape, before, "its place stays");
+        let strokes = |s: &Session| s.active().unwrap().doc.layer(id).unwrap().effects.items.iter().filter(|e| matches!(e, photocraft_doc::Effect::Stroke(_))).count();
+        assert_eq!(strokes(&s), 1);
+        s.execute("type.setBubbleStyle", json!({"layer": id.0, "style": "bubble", "styles": styles})).unwrap();
+        assert_eq!(strokes(&s), 0, "the old outline goes");
+        assert!(s.execute(CMD, json!({"x": 1, "y": 1, "area": [1, 1, 0, 5]})).is_err());
+    }
 
     fn page() -> Session {
         let mut s = Session::new();

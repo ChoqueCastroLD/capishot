@@ -491,6 +491,73 @@ pub fn picker_button(app: &mut PhotocraftApp, ui: &mut egui::Ui, width: f32) -> 
     resp
 }
 
+/// The styles the bar under a text offers: the tool's three, then the project's and TypeR's.
+fn bar_styles(app: &PhotocraftApp) -> Vec<(String, String)> {
+    let mut items: Vec<(String, String)> = Vec::new();
+    for (key, label) in sections(app, "").into_iter().flat_map(|s| s.items) {
+        if key != "auto" && !items.iter().any(|(k, _)| *k == key) {
+            items.push((key, label));
+        }
+    }
+    items
+}
+
+/// The type layer the bar changes: the one Bubble Type is on.
+fn bar_target(app: &PhotocraftApp) -> Option<u64> {
+    if app.ui.tool != crate::state::Tool::BubbleType || app.ui.transform.is_some() {
+        return None;
+    }
+    crate::type_tool::target(app).map(|(id, _)| id)
+}
+
+/// Runs `key` on the text under the bar, and makes it the tool's next style.
+fn restyle(app: &mut PhotocraftApp, layer: u64, key: &str) {
+    let styles = crate::font_projects_ui::bubble_styles(app, &app.ui.tool_options.bubble_styles.clone());
+    pick(app, key);
+    app.ui.type_insertion_style = None;
+    if let Err(e) = app.run("type.setBubbleStyle", json!({"layer": layer, "style": key, "styles": styles})) {
+        app.ui.status = e;
+        app.ui.status_error = true;
+    }
+}
+
+/// The bar at the bottom of the canvas while Bubble Type is on a text: which kind of text it is.
+pub fn style_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let Some(layer) = bar_target(app) else { return };
+    let canvas = app.last_canvas_rect;
+    if canvas.width() < 120.0 {
+        return;
+    }
+    let t = crate::theme::Tokens::get(ctx);
+    let current = app.ui.tool_options.bubble_pick.clone();
+    let phone = ctx.content_rect().width() < crate::simple_ui::PHONE_BELOW;
+    let id = egui::Id::unique("bubble-style-bar");
+    crate::overlay_guard::non_modal(ctx, id);
+    let width = (canvas.width() - 16.0).min(640.0);
+    let bottom = canvas.bottom() - if phone { 170.0 } else { 12.0 };
+    let mut chosen = None;
+    egui::Area::new(id).order(egui::Order::Middle).pivot(egui::Align2::CENTER_BOTTOM).fixed_pos(egui::pos2(canvas.center().x, bottom)).show(ctx, |ui| {
+        egui::Frame::NONE.fill(t.card).stroke(Stroke::new(1.0, t.card_border)).corner_radius(egui::CornerRadius::same(10)).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
+            ui.set_max_width(width);
+            egui::ScrollArea::horizontal().id_salt("bubble-style-bar-scroll").show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    for (key, label) in bar_styles(app) {
+                        let b = egui::Button::new(label).selected(key == current).min_size(vec2(0.0, if phone { 36.0 } else { 26.0 }));
+                        let r = ui.add(b);
+                        crate::simple_ui::note(ctx, &format!("bubbleBar:{key}"), r.rect);
+                        if r.clicked() {
+                            chosen = Some(key);
+                        }
+                    }
+                });
+            });
+        });
+    });
+    if let Some(key) = chosen {
+        restyle(app, layer, &key);
+    }
+}
+
 /// The picker, when open: a popup under its button, a sheet on a phone.
 pub fn picker(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if !picker_open(ctx) {
@@ -608,3 +675,43 @@ fn picker_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, phone: bool) {
 #[cfg(test)]
 #[path = "bubble_picker_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod bar_tests {
+    use egui_kittest::Harness;
+    use serde_json::json;
+
+    use crate::PhotocraftApp;
+    use crate::state::Tool;
+
+    /// With Bubble Type on a text, the bar shows its kinds; a click changes that text's style and
+    /// the tool's next one.
+    #[test]
+    fn the_bar_changes_the_kind_of_the_text() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 800, "height": 600, "background": "white"})).unwrap();
+        let id = app.run("type.createInBubble", json!({"x": 100, "y": 100, "area": [100, 100, 200, 100], "text": "HOLA", "style": "bubble"})).unwrap()["layer"].as_u64().unwrap();
+        app.ui.tool = Tool::BubbleType;
+        app.sync_views();
+        let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).with_max_steps(64).build_eframe(move |cc| {
+            PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+            app
+        });
+        h.run_steps(6);
+        let at = crate::simple_ui::noted_rect(&h.ctx, "bubbleBar:narration").expect("the bar").center();
+        let size = |h: &Harness<'_, PhotocraftApp>| match &h.state().session.active().unwrap().doc.layer(photocraft_doc::LayerId(id)).unwrap().content {
+            photocraft_doc::LayerContent::Text(t) => t.size_pt,
+            _ => panic!("type"),
+        };
+        let before = (size(&h), h.state().session.active().unwrap().history.past_len());
+        h.hover_at(at);
+        h.run_steps(2);
+        h.drag_at(at);
+        h.run_steps(1);
+        h.drop_at(at);
+        h.run_steps(4);
+        assert_eq!(h.state().ui.tool_options.bubble_pick, "narration");
+        assert_eq!(h.state().session.active().unwrap().history.past_len(), before.1 + 1, "one step");
+        assert_ne!(size(&h), before.0, "its style changed");
+    }
+}

@@ -491,6 +491,7 @@ fn windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
     crate::jobs_ui::dialog(app, ctx);
     crate::ai_progress::show(app, ctx);
     crate::ai_models_ui::window(app, ctx);
+    crate::bubble_type_ui::style_bar(app, ctx);
     crate::bubble_type_ui::picker(app, ctx);
     crate::notices::show(app, ctx);
     crate::tool_toast::draw(app, ctx);

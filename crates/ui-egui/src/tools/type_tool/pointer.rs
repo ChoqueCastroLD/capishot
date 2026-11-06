@@ -350,15 +350,17 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
     if let Some(l) = o.type_leading {
         p["leading"] = json!(l);
     }
-    if w >= min && h >= min {
-        p["box"] = json!([start[0].min(end[0]).round(), start[1].min(end[1]).round(), w.round(), h.round()]);
-    } else if bubble {
-        // Bubble Type: type in the bubble or narration box under the click, else floating text,
-        // each in its own style (the tool's Styles).
+    let zone = (w >= min && h >= min).then(|| json!([start[0].min(end[0]).round(), start[1].min(end[1]).round(), w.round(), h.round()]));
+    if bubble {
+        // Bubble Type: type in the bubble or narration box under the click, in the zone a drag
+        // drew, else floating text, each in its own style (the tool's Styles).
         if let serde_json::Value::Object(m) = &mut p {
             for k in ["font", "fontStyle", "size", "align", "color", "leading"] {
                 m.remove(k);
             }
+        }
+        if let Some(zone) = zone {
+            p["area"] = zone;
         }
         p["x"] = json!(start[0]);
         p["y"] = json!(start[1]);
@@ -367,6 +369,8 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
         if let Some(map) = crate::bubble_type_ui::shape_styles_param(app) {
             p["shapeStyles"] = map;
         }
+    } else if let Some(zone) = zone {
+        p["box"] = zone;
     } else if let Some(src) = (!mask).then(|| in_path_at(app, start[0], start[1])).flatten() {
         // A click inside a closed path: type in the path, as in Photoshop (made in one step: no
         // area-type follow-up).
@@ -378,7 +382,7 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
     }
     let key = session_key(app);
     p["coalesce"] = json!(key);
-    let command = if bubble && p.get("box").is_none() { "type.createInBubble" } else { "type.create" };
+    let command = if bubble { "type.createInBubble" } else { "type.create" };
     let created = app.run(command, p);
     if bubble && let Ok(v) = &created {
         let kind = v.get("style").and_then(serde_json::Value::as_str).unwrap_or("bubble");
