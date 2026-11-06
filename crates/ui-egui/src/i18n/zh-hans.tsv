@@ -3691,3 +3691,6 @@ curves	Smooth	平滑
 	Load Theme…	载入主题…
 	My Themes	我的主题
 	This layer is empty here: choose the layer with the page	此图层在该处为空,请选择包含页面的图层
+	This stroke is outside the page	此笔画在页面之外
+	This stroke covers nothing that can change: check the selection	此笔画未覆盖任何可更改的内容,请检查选区
+	Nothing is left around this stroke to fill it from	此笔画周围没有可用于填充的内容

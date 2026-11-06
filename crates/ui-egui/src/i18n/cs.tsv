@@ -4735,3 +4735,6 @@ cameraRaw	Dehaze	Odstranění oparu
 	Load Theme…	Načíst motiv…
 	My Themes	Moje motivy
 	This layer is empty here: choose the layer with the page	Tato vrstva je zde prázdná: vyberte vrstvu se stránkou
+	This stroke is outside the page	Tento tah je mimo stránku
+	This stroke covers nothing that can change: check the selection	Tento tah nepokrývá nic, co lze změnit: zkontrolujte výběr
+	Nothing is left around this stroke to fill it from	Kolem tohoto tahu nezbylo nic, čím by se dal vyplnit

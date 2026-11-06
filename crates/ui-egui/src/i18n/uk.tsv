@@ -4713,3 +4713,6 @@ curves	Smooth	Згладити
 	Load Theme…	Завантажити тему…
 	My Themes	Мої теми
 	This layer is empty here: choose the layer with the page	Цей шар тут порожній: виберіть шар зі сторінкою
+	This stroke is outside the page	Цей штрих розташований за межами сторінки
+	This stroke covers nothing that can change: check the selection	Цей штрих не покриває нічого, що можна змінити: перевірте виділення
+	Nothing is left around this stroke to fill it from	Навколо цього штриха не залишилося нічого, чим його можна заповнити

@@ -4672,3 +4672,6 @@ curves	Smooth	スムーズ
 	Load Theme…	テーマを読み込み…
 	My Themes	マイテーマ
 	This layer is empty here: choose the layer with the page	このレイヤーのこの部分は空です。ページのあるレイヤーを選択してください
+	This stroke is outside the page	このストロークはページの外にあります
+	This stroke covers nothing that can change: check the selection	このストロークには変更できる部分がありません。選択範囲を確認してください
+	Nothing is left around this stroke to fill it from	このストロークの周囲に塗りつぶしの元になる部分がありません

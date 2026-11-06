@@ -5185,3 +5185,6 @@ shape	Appearance	Оформление
 	Load Theme…	Загрузить тему…
 	My Themes	Мои темы
 	This layer is empty here: choose the layer with the page	Этот слой здесь пуст: выберите слой со страницей
+	This stroke is outside the page	Этот штрих находится за пределами страницы
+	This stroke covers nothing that can change: check the selection	Этот штрих не закрывает ничего, что можно изменить: проверьте выделение
+	Nothing is left around this stroke to fill it from	Вокруг этого штриха не осталось ничего, чем его можно заполнить

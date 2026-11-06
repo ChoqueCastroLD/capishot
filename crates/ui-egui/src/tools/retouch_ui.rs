@@ -195,7 +195,7 @@ pub fn finish_stroke(app: &mut PhotocraftApp, tool: Tool, points: &[[f64; 3]], m
         }
         Ok(_) => {}
         Err(e) => {
-            app.ui.status = e;
+            app.ui.status = remove_refusal(e);
             app.ui.status_error = true;
         }
     }
@@ -360,6 +360,19 @@ pub fn report_smart_result(app: &mut PhotocraftApp, res: Result<Value, String>, 
     if matches!(res, Ok(ref v) if v.get("changed").and_then(Value::as_bool) == Some(false)) {
         app.ui.status = empty_msg.into();
         app.ui.status_error = false;
+    }
+}
+
+/// What a Remove stroke's refusal says to the person: the engine's text is for agents, in English.
+pub fn remove_refusal(err: String) -> String {
+    if err.contains("the stroke is outside the canvas") {
+        tl!("This stroke is outside the page").into()
+    } else if err.contains("the stroke doesn't cover anything") {
+        tl!("This stroke covers nothing that can change: check the selection").into()
+    } else if err.contains("nothing is left around the stroke") {
+        tl!("Nothing is left around this stroke to fill it from").into()
+    } else {
+        err
     }
 }
 

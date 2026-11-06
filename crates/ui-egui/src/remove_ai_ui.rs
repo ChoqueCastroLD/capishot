@@ -80,7 +80,7 @@ pub fn request(app: &mut PhotocraftApp, params: Value) {
 fn run(app: &mut PhotocraftApp, params: Value) {
     app.ui.status.clear();
     if let Err(e) = app.run(photocraft_engine::remove_ai_cmds::ID, params) {
-        app.ui.status = e;
+        app.ui.status = crate::tools::retouch_ui::remove_refusal(e);
         app.ui.status_error = true;
     }
 }

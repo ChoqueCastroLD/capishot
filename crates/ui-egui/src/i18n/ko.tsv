@@ -4219,3 +4219,6 @@ curves	Smooth	매끄럽게
 	Load Theme…	테마 불러오기…
 	My Themes	내 테마
 	This layer is empty here: choose the layer with the page	이 레이어의 해당 위치는 비어 있습니다. 페이지가 있는 레이어를 선택하세요
+	This stroke is outside the page	이 획은 페이지 밖에 있습니다
+	This stroke covers nothing that can change: check the selection	이 획에는 변경할 수 있는 부분이 없습니다. 선택 영역을 확인하세요
+	Nothing is left around this stroke to fill it from	이 획 주변에 채울 때 참고할 부분이 없습니다

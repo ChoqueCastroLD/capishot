@@ -5469,3 +5469,6 @@ fontTab	Find More	Buscar más
 	Dot Gain 25%-compatible	Ganancia de punto 25 % (compatible)
 	Dot Gain 30%-compatible	Ganancia de punto 30 % (compatible)
 	This layer is empty here: choose the layer with the page	Esta capa está vacía aquí: elige la capa que tiene la página
+	This stroke is outside the page	Este trazo está fuera de la página
+	This stroke covers nothing that can change: check the selection	Este trazo no cubre nada que se pueda cambiar: revisa la selección
+	Nothing is left around this stroke to fill it from	No queda nada alrededor de este trazo para rellenarlo

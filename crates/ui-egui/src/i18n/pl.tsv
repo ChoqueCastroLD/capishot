@@ -4620,3 +4620,6 @@ curves	Smooth	Wygładź
 	Load Theme…	Wczytaj motyw…
 	My Themes	Moje motywy
 	This layer is empty here: choose the layer with the page	Ta warstwa jest tu pusta: wybierz warstwę ze stroną
+	This stroke is outside the page	To pociągnięcie jest poza stroną
+	This stroke covers nothing that can change: check the selection	To pociągnięcie nie obejmuje niczego, co można zmienić: sprawdź zaznaczenie
+	Nothing is left around this stroke to fill it from	Wokół tego pociągnięcia nie ma nic, czym można by je wypełnić

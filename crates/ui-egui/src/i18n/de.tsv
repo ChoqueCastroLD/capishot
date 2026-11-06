@@ -4024,3 +4024,6 @@ curves	Smooth	Glätten
 	Load Theme…	Design laden…
 	My Themes	Meine Designs
 	This layer is empty here: choose the layer with the page	Diese Ebene ist hier leer: Wähle die Ebene mit der Seite
+	This stroke is outside the page	Dieser Strich liegt außerhalb der Seite
+	This stroke covers nothing that can change: check the selection	Dieser Strich deckt nichts ab, was sich ändern lässt: Prüfe die Auswahl
+	Nothing is left around this stroke to fill it from	Um diesen Strich herum ist nichts übrig, womit er gefüllt werden könnte

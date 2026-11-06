@@ -3565,3 +3565,6 @@ fontWeight	Italic	Itálico
 	Dot Gain 25%-compatible	Ganho de ponto 25 % (compatível)
 	Dot Gain 30%-compatible	Ganho de ponto 30 % (compatível)
 	This layer is empty here: choose the layer with the page	Esta camada está vazia aqui: escolha a camada com a página
+	This stroke is outside the page	Este traço está fora da página
+	This stroke covers nothing that can change: check the selection	Este traço não cobre nada que possa mudar: verifique a seleção
+	Nothing is left around this stroke to fill it from	Não restou nada à volta deste traço para o preencher

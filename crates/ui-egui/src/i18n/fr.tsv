@@ -5027,3 +5027,6 @@ shape	Appearance	Apparence
 	Load Theme…	Charger un thème…
 	My Themes	Mes thèmes
 	This layer is empty here: choose the layer with the page	Ce calque est vide à cet endroit : choisissez le calque qui contient la page
+	This stroke is outside the page	Ce trait est en dehors de la page
+	This stroke covers nothing that can change: check the selection	Ce trait ne couvre rien de modifiable : vérifiez la sélection
+	Nothing is left around this stroke to fill it from	Il ne reste rien autour de ce trait pour le remplir

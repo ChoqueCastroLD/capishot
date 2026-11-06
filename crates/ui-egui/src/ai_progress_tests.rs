@@ -160,6 +160,18 @@ fn remove_with_ai_on_an_empty_layer_says_so() {
     assert_eq!(h.state().ui.status, "Esta capa está vacía aquí: elige la capa que tiene la página");
 }
 
+/// A stroke off the page is refused in the person's language, not the engine's English.
+#[test]
+fn remove_with_ai_off_the_page_says_so_in_words() {
+    let held = Arc::new(Held::default());
+    let mut h = phone(held.clone());
+    crate::remove_ai_ui::request(h.state_mut(), json!({"strokes": [[[-5000, -5000, 1], [-4900, -4900, 1]]], "size": 20}));
+    h.run_steps(2);
+    assert!(held.pending.lock().unwrap().is_none(), "the model never ran");
+    assert_eq!(h.state().ui.status, "Este trazo está fuera de la página");
+    assert!(h.state().ui.status_error);
+}
+
 /// A failed run keeps its error on the card with Retry, which runs it again.
 #[test]
 fn a_failure_says_why_and_retry_runs_it_again() {
