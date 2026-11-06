@@ -283,7 +283,7 @@ impl NativeInpainter {
                             *m = None;
                         }
                         // Each new size costs a re-specialisation: have them all ready.
-                        if !req.unload {
+                        if !req.unload && fixed_sizes_on() {
                             warm_sizes(&d);
                         }
                         let d = Arc::new(d);
@@ -428,6 +428,12 @@ fn warm_sizes(dml: &crate::directml::DmlLama) {
     }
 }
 
+/// `CAPISHOT_AI_FIXED_TILES=1` turns on [`crate::tiles::FIXED_SIDES`]: off until they're measured
+/// on a GPU and compared on real masks.
+fn fixed_sizes_on() -> bool {
+    std::env::var_os("CAPISHOT_AI_FIXED_TILES").is_some_and(|v| v == "1")
+}
+
 /// The request is for the CPU, or `CAPISHOT_AI_DEVICE=cpu` says every request is.
 fn cpu_forced(cpu: bool) -> bool {
     cpu || std::env::var("CAPISHOT_AI_DEVICE").is_ok_and(|v| v.eq_ignore_ascii_case("cpu"))
@@ -469,13 +475,8 @@ impl Inpainter for NativeInpainter {
         self.device_name.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
 
-    fn fixed_tile_sizes(&self, model: &str, cpu: bool) -> bool {
-        // `CAPISHOT_AI_FIXED_TILES=1`: any device, to compare the result with the plain sizes.
-        std::env::var_os("CAPISHOT_AI_FIXED_TILES").is_some_and(|v| v == "1")
-            || (cfg!(all(feature = "directml", windows))
-                && model == LAMA
-                && !cpu_forced(cpu)
-                && self.dml_failed.lock().unwrap_or_else(PoisonError::into_inner).is_none())
+    fn fixed_tile_sizes(&self, _model: &str, _cpu: bool) -> bool {
+        fixed_sizes_on()
     }
 
     fn run(&self, req: Request, hooks: Arc<dyn Hooks>, done: Done) {
