@@ -1511,6 +1511,10 @@ pub fn record_ai_job(command: &str, reply: Option<&Value>, doc_mp: Option<f64>, 
     if !is_active() || !is_ai_job(command) {
         return;
     }
+    // Nothing to fill: the model never ran.
+    if reply.and_then(|r| r.get("changed")).and_then(Value::as_bool) == Some(false) {
+        return;
+    }
     let text = |key: &str| reply.and_then(|r| r.get(key)).and_then(Value::as_str);
     let flag = |key: &str| reply.and_then(|r| r.get(key)).and_then(Value::as_bool);
     let region = reply.and_then(|r| r.get("region")).and_then(Value::as_array).and_then(|a| {

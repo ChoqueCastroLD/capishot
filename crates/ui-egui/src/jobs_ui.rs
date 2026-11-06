@@ -1132,6 +1132,12 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
             app.ui.status = tl!("Quick Selection found nothing there").into();
             app.ui.status_error = false;
         }
+        // The strokes fell on nothing (a blank layer over the page): no fill, no history step.
+        JobOutcome::Done(v) if e.command == photocraft_engine::remove_ai_cmds::ID && v.get("changed").and_then(Value::as_bool) == Some(false) => {
+            app.sync_views();
+            app.ui.status = tl!("This layer is empty here: choose the layer with the page").into();
+            app.ui.status_error = false;
+        }
         // The update download: its label says "Downloading", so the end says what happened instead.
         #[cfg(not(target_arch = "wasm32"))]
         outcome if e.command == crate::win_update::DOWNLOAD => crate::win_update::on_download_end(app, &e.label, outcome),

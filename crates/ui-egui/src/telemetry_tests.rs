@@ -687,6 +687,7 @@ fn an_ai_job_reports_model_device_and_region_only() {
     record_ai_job("edit.inpaintAi", Some(&reply), Some(30.0), 1234.0);
     record_ai_job("image.upscaleAi", None, Some(30.0), 10.0);
     record_ai_job("edit.undo", Some(&reply), None, 1.0);
+    record_ai_job("edit.removeAi", Some(&json!({"changed": false})), Some(30.0), 0.0);
     let body = take_batch().expect("a batch");
     stop();
     let b: Value = serde_json::from_str(&body).expect("JSON");

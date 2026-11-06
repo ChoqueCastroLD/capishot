@@ -139,6 +139,27 @@ fn remove_with_ai_shows_its_stages_and_cancel_stops_it() {
     assert!(!busy(h.state()));
 }
 
+/// Strokes on a blank layer over the page: the model never runs, and the status says why.
+#[test]
+fn remove_with_ai_on_an_empty_layer_says_so() {
+    let held = Arc::new(Held::default());
+    let mut h = phone(held.clone());
+    h.state_mut().run("layer.new.layer", json!({})).unwrap();
+    h.run_steps(2);
+    crate::remove_ai_ui::request(h.state_mut(), json!({"strokes": [[[100, 100, 1], [180, 120, 1]]], "size": 20}));
+    for _ in 0..200 {
+        h.run_steps(1);
+        if h.state().session.jobs().is_empty() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    h.run_steps(2);
+    assert!(h.state().session.jobs().is_empty(), "it ended");
+    assert!(held.pending.lock().unwrap().is_none(), "the model never ran");
+    assert_eq!(h.state().ui.status, "Esta capa está vacía aquí: elige la capa que tiene la página");
+}
+
 /// A failed run keeps its error on the card with Retry, which runs it again.
 #[test]
 fn a_failure_says_why_and_retry_runs_it_again() {
