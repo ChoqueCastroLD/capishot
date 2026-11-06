@@ -1001,3 +1001,28 @@ fn type_pixels_from_a_file_stay_in_history() {
     let past = s.active().unwrap().history.past_len();
     assert!(stored_cache(&s, past - 1, id).is_some(), "the file's pixels stay");
 }
+
+/// `type.edit {perspective}` sets the corners, doesn't compose: twice is the same; `document.inspect
+/// {textStyle}` reads them back; null takes it off; a bad one changes nothing.
+#[test]
+fn type_edit_sets_the_perspective_absolutely() {
+    let mut s = session();
+    let id = s.execute("type.create", json!({"text": "PERSPECTIVA", "size": 20, "x": 20, "y": 50})).unwrap()["layer"].as_u64().unwrap();
+    let quad = [[30.0, 20.0], [150.0, 30.0], [160.0, 70.0], [20.0, 80.0]];
+    let read = |s: &Session| {
+        let t = text_layer(s, id);
+        style_json(&t)["perspective"]["quad"].clone()
+    };
+    let close = |v: &Value| {
+        quad.iter().enumerate().all(|(i, q)| (v[i][0].as_f64().unwrap() - q[0]).abs() < 1e-6 && (v[i][1].as_f64().unwrap() - q[1]).abs() < 1e-6)
+    };
+    s.execute("type.edit", json!({"layer": id, "perspective": {"quad": quad}})).unwrap();
+    assert!(close(&read(&s)), "{}", read(&s));
+    s.execute("type.edit", json!({"layer": id, "perspective": {"quad": quad}})).unwrap();
+    assert!(close(&read(&s)), "twice goes no further: {}", read(&s));
+    assert!(s.execute("type.edit", json!({"layer": id, "perspective": {"quad": [[0, 0]]}})).is_err());
+    assert!(close(&read(&s)), "a bad one changes nothing");
+    s.execute("type.edit", json!({"layer": id, "perspective": null})).unwrap();
+    assert!(text_layer(&s, id).perspective.is_none());
+    assert!(read(&s).is_null());
+}

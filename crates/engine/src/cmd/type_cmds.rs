@@ -978,7 +978,7 @@ fn info(s: &Session, p: &Value) -> Result<Value> {
 }
 
 /// A type layer's style without laying it out: the character runs and paragraphs (char offsets +
-/// styles, as `type.info` gives them), antialias, orientation, shape, transform and warp
+/// styles, as `type.info` gives them), antialias, orientation, shape, transform, warp and perspective
 /// (`document.inspect {textStyle: true}`).
 pub(crate) fn style_json(t: &photocraft_doc::TextLayer) -> Value {
     let text = &t.text;
@@ -1010,6 +1010,7 @@ pub(crate) fn style_json(t: &photocraft_doc::TextLayer) -> Value {
         "shape": t.shape,
         "transform": t.transform.m,
         "warp": t.warp,
+        "perspective": t.perspective.and_then(|p| p.quad()).map(|quad| json!({ "quad": quad })),
     })
 }
 
@@ -1266,7 +1267,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Edit Type",
             menu: &[],
             shortcut: None,
-            params: r##"{"layer":id?,"text":str? (replace all, styles kept),"replace":{"start":char,"end":char,"text":str}?,"runs":[{"start":char,"end":char,…character keys}]?,"box":[x,y,w,h]? (to paragraph text),"point":[x,y]? (to point text),"move":[dx,dy]?,"transform":[a,b,c,d,e,f]?,"antialias":"none|sharp|crisp|strong|smooth"?,"path":{"subpaths":[…]}? (type in a path: its new closed path, document px; with "subpath":n?=0),"inPath":true|{"shape":layerId?,"subpath":n?}? (or the work path's or a shape layer's path),"inset":px|"auto"? (type in a path),"vertical":"center|top"? (type in a path),"name":str?,"kerning":1/1000em|"metrics"|"optical"|"off"? (with "range":[startChar,endChar]?, default all),"kernPair":{"at":caretChar,"by":1/1000em}? (Alt+←/→: the pair before the caret becomes manual, its current kerning + by)}"##,
+            params: r##"{"layer":id?,"text":str? (replace all, styles kept),"replace":{"start":char,"end":char,"text":str}?,"runs":[{"start":char,"end":char,…character keys}]?,"box":[x,y,w,h]? (to paragraph text),"point":[x,y]? (to point text),"move":[dx,dy]?,"transform":[a,b,c,d,e,f]?,"antialias":"none|sharp|crisp|strong|smooth"?,"path":{"subpaths":[…]}? (type in a path: its new closed path, document px; with "subpath":n?=0),"inPath":true|{"shape":layerId?,"subpath":n?}? (or the work path's or a shape layer's path),"inset":px|"auto"? (type in a path),"vertical":"center|top"? (type in a path),"name":str?,"kerning":1/1000em|"metrics"|"optical"|"off"? (with "range":[startChar,endChar]?, default all),"kernPair":{"at":caretChar,"by":1/1000em}? (Alt+←/→: the pair before the caret becomes manual, its current kerning + by),"perspective":{"quad":[[x,y]×4]}|null? (absolute: the frame's corners on these, whatever it had; null takes it off)}"##,
             enabled: has_doc,
             journal: true,
             run: |s, p| {
@@ -1300,8 +1301,19 @@ pub fn specs() -> Vec<CommandSpec> {
                     }
                 };
                 let new_path = edit_in_path_source(s, p)?;
+                // Absolute: `null` takes it off. Read here so a bad one leaves the layer untouched.
+                let perspective = match p.get("perspective") {
+                    None => None,
+                    Some(Value::Null) => Some(None),
+                    Some(v) => Some(Some(crate::transform_cmds::quad_param(v).ok_or_else(|| bad("type.edit", "perspective must be {\"quad\": [[x,y]×4]} or null"))?)),
+                };
                 let label = if kern_pair.is_some() { "Kerning" } else { "Edit Type" };
                 with_text_layer(s, p, label, |t, dpi, rename| {
+                    match perspective {
+                        Some(Some(quad)) => t.perspective = Some(crate::transform_cmds::text_perspective_at(t, quad)?),
+                        Some(None) => t.perspective = None,
+                        None => {}
+                    }
                     if let Some((at, by)) = kern_pair {
                         // Photoshop's Alt+←/→: the pair before the caret becomes manually kerned,
                         // starting from what it shows now (its metrics/optical or manual value).

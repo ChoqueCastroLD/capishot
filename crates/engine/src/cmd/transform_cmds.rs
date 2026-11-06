@@ -563,15 +563,32 @@ pub fn type_in_perspective(doc: &Document, t: &photocraft_doc::TextLayer, h: &Ho
 /// `t`'s perspective after the projective map `h` (document pixels): composed with the one it has,
 /// or a new one framed on its drawn bounds. The map is kept with `w > 0` over its frame (the side of
 /// the horizon the text is drawn on).
-fn compose_text_perspective(t: &photocraft_doc::TextLayer, h: &Homography) -> Result<photocraft_doc::text::TextPerspective> {
-    let (cur, frame) = match t.perspective.filter(|p| p.is_valid()) {
-        Some(p) => (Homography(p.h), p.frame),
+/// What a type layer's perspective maps: the frame it has, or the drawn text's bounds.
+fn text_perspective_frame(t: &photocraft_doc::TextLayer) -> [f64; 4] {
+    match t.perspective.filter(|p| p.is_valid()) {
+        Some(p) => p.frame,
         None => {
             let r = t.cache.as_ref().map(|c| c.content_bounds()).filter(|r| !r.is_empty()).unwrap_or(photocraft_geom::Rect::new(0, 0, 1, 1));
-            (Homography::IDENTITY, [f64::from(r.x0), f64::from(r.y0), f64::from(r.x1), f64::from(r.y1)])
+            [f64::from(r.x0), f64::from(r.y0), f64::from(r.x1), f64::from(r.y1)]
         }
-    };
-    let mut m = h.mul(&cur).0;
+    }
+}
+
+/// `type.edit {perspective: {quad}}`: the perspective that puts the frame's corners on `quad`,
+/// whatever the layer had (`edit.transform` composes; this doesn't).
+pub(crate) fn text_perspective_at(t: &photocraft_doc::TextLayer, quad: [[f64; 2]; 4]) -> Result<photocraft_doc::text::TextPerspective> {
+    let frame = text_perspective_frame(t);
+    let h = Homography::rect_to_quad(frame, quad).ok_or_else(|| EngineError::BadParams { cmd: "type.edit".into(), msg: "perspective: degenerate quad".into() })?;
+    text_perspective_of(h.0, frame)
+}
+
+fn compose_text_perspective(t: &photocraft_doc::TextLayer, h: &Homography) -> Result<photocraft_doc::text::TextPerspective> {
+    let frame = text_perspective_frame(t);
+    let cur = t.perspective.filter(|p| p.is_valid()).map_or(Homography::IDENTITY, |p| Homography(p.h));
+    text_perspective_of(h.mul(&cur).0, frame)
+}
+
+fn text_perspective_of(mut m: [f64; 9], frame: [f64; 4]) -> Result<photocraft_doc::text::TextPerspective> {
     let w = Homography(m).w((frame[0] + frame[2]) / 2.0, (frame[1] + frame[3]) / 2.0);
     if w < 0.0 {
         m.iter_mut().for_each(|v| *v = -*v);
@@ -815,7 +832,7 @@ fn relative_matrix(p: &Value, rect: [f64; 4]) -> Result<Option<Homography>> {
     Ok(Some(Homography([a, c, e, b, d, f, 0.0, 0.0, 1.0])))
 }
 
-fn quad_param(p: &Value) -> Option<[[f64; 2]; 4]> {
+pub(crate) fn quad_param(p: &Value) -> Option<[[f64; 2]; 4]> {
     quad_named(p, "quad")
 }
 
