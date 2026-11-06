@@ -2034,6 +2034,9 @@
 	No path to make a selection from: draw one with the Pen tool or select one in the Paths panel.	Nenhum demarcador para criar a seleção: desenhe um com a ferramenta Caneta ou selecione um no painel Demarcadores.
 	Cancel opening	Cancelar abertura
 	Cancelled opening {name}	Abertura de {name} cancelada
+	Opened {opened} of {total}: not enough memory for the rest	{opened} de {total} abertos: não há memória para o resto
+	This device could close the page with more open. Close some documents, then open these again:	Este dispositivo pode fechar a página com mais abertos. Feche alguns documentos e volte a abrir estes:
+	Opening {name} ({n} of {total})…	A abrir {name} ({n} de {total})…
 	Developing {name}	Revelando {name}
 	Cancelled {label}	{label} cancelado
 	Esc to cancel	Esc para cancelar

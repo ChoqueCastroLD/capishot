@@ -2253,6 +2253,9 @@
 	No path to make a selection from: draw one with the Pen tool or select one in the Paths panel.	No hay ningún trazado para crear una selección: dibuje uno con la herramienta Pluma o seleccione uno en el panel Trazados.
 	Cancel opening	Cancelar apertura
 	Cancelled opening {name}	Se canceló la apertura de {name}
+	Opened {opened} of {total}: not enough memory for the rest	Se abrieron {opened} de {total}: no hay memoria para el resto
+	This device could close the page with more open. Close some documents, then open these again:	Este dispositivo podría cerrar la página con más abiertos. Cierra algunos documentos y vuelve a abrir estos:
+	Opening {name} ({n} of {total})…	Abriendo {name} ({n} de {total})…
 	Damaged Photoshop document	Documento de Photoshop dañado
 	The document “{name}” may be damaged.	Es posible que el documento «{name}» esté dañado.
 	Some layers, pixels or masks could not be read. Do you want to continue opening it?	No se pudieron leer algunas capas, píxeles o máscaras. ¿Desea seguir abriéndolo?

@@ -124,7 +124,8 @@ pub fn big_page(w: u32, h: u32, ram: Option<u64>) -> bool {
 pub fn after_open(app: &mut PhotocraftApp, document: photocraft_doc::DocId) {
     let Some(st) = app.session.documents().iter().find(|st| st.doc.id == document) else { return };
     let (w, h) = (st.doc.size.width, st.doc.size.height);
-    if !big_page(w, h, crate::gpu_canvas::physical_memory()) {
+    // Once for a set of big pages: the same words, one for each, would push out what else was said.
+    if !big_page(w, h, crate::gpu_canvas::physical_memory()) || app.ui.notices.iter().any(|n| n.title == BIG_PAGE_TITLE) {
         return;
     }
     let mp = format!("{:.0}", f64::from(w) * f64::from(h) / 1e6);

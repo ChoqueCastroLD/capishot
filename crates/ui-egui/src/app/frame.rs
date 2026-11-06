@@ -146,6 +146,7 @@ impl PhotocraftApp {
         if !arrived.is_empty() {
             self.open_contents_in_order(arrived);
         }
+        crate::jobs_ui::pump_opens(self);
         // Web drops onto the canvas, read since the last frame: placed below, one at a time.
         let to_place: Vec<(String, Vec<u8>)> =
             self.services.place_inbox.as_ref().map(|q| std::mem::take(&mut *q.lock().unwrap_or_else(|e| e.into_inner()))).unwrap_or_default();
