@@ -93,6 +93,7 @@ isolation). WebGPU is used where available, WebGL2 otherwise; `?webgl` and `?cpu
 ```sh
 packaging/web-release.sh             # -> dist/web (st) + dist/web-threads, both with their AI workers
 packaging/web-release.sh --preview   # quick test build: thin LTO (not for a release, see below)
+packaging/web-release.sh --test-build [threads|st]   # the fastest build that runs: one site, thin LTO, no wasm-opt, no split
 ```
 
 The same output as Trunk, `build.sh` (with `PHOTOCRAFT_WEB_FALLBACK=st/`) and

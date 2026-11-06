@@ -14,6 +14,8 @@
 # wasm-opt (binaryen) comes from PATH, or is downloaded once into target/tools.
 # Override the toolchain with PHOTOCRAFT_WEB_TOOLCHAIN (default: nightly); PHOTOCRAFT_WEB_FALLBACK
 # sets where a browser without cross-origin isolation goes (the single-threaded build).
+# PHOTOCRAFT_WEB_TEST_BUILD=1 (packaging/web-release.sh --test-build): the fast gzip of a test
+# build. PHOTOCRAFT_WEB_RUSTFLAGS and PHOTOCRAFT_WEB_CARGO_ARGS add to rustc's and cargo's flags.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HERE="$ROOT/packaging/web-threads"
@@ -54,7 +56,7 @@ for a in --shared-memory --import-memory --max-memory=4294967296 --export=__heap
 done
 # -Zlocation-detail=none (nightly, like the std rebuild): panic messages keep their text but not
 # the source file and line, which drops every panic location's path string from the module.
-export RUSTFLAGS="-C target-feature=+atomics,+bulk-memory,+simd128$link -Zlocation-detail=none"
+export RUSTFLAGS="-C target-feature=+atomics,+bulk-memory,+simd128$link -Zlocation-detail=none${PHOTOCRAFT_WEB_RUSTFLAGS:+ $PHOTOCRAFT_WEB_RUSTFLAGS}"
 # The About dialog's "dev build" stamp, as the release workflow sets it.
 export PHOTOCRAFT_BUILD_SHA="${PHOTOCRAFT_BUILD_SHA:-$(git rev-parse HEAD 2>/dev/null || true)}"
 export PHOTOCRAFT_BUILD_DATE="${PHOTOCRAFT_BUILD_DATE:-$(date -u +%F)}"
@@ -62,7 +64,7 @@ export PHOTOCRAFT_BUILD_DATE="${PHOTOCRAFT_BUILD_DATE:-$(date -u +%F)}"
 # PHOTOCRAFT_WEB_FEATURES: extra cargo features of photocraft-web (`full` for everything the
 # desktop app has: HEIF, OpenEXR, camera raw, plug-ins, all catalogs compiled in).
 cargo "+$TC" build --profile "$PROFILE" -p photocraft-web --bin photocraft-web ${PHOTOCRAFT_WEB_FEATURES:+--features "$PHOTOCRAFT_WEB_FEATURES"} \
-  --target wasm32-unknown-unknown -Z build-std=panic_abort,std --target-dir "$TARGET_DIR"
+  --target wasm32-unknown-unknown -Z build-std=panic_abort,std --target-dir "$TARGET_DIR" ${PHOTOCRAFT_WEB_CARGO_ARGS:-}
 
 STAGE="$TARGET_DIR/bindgen"
 rm -rf "$STAGE" "$OUT"
@@ -98,7 +100,9 @@ snip=$( (find "$OUT/snippets" -name '*.js' -type f | LC_ALL=C sort | xargs cat; 
 sed -i -E "/^import /s#(['\"]\./snippets/[^'\"]+\.js)(['\"])#\1?v=$snip\2#" "$OUT/photocraft.js"
 # pigz -11 is zopfli on every core: still plain gzip for every browser, about 4% (0.4 MB) less to
 # download than gzip -9, in a few seconds.
-if command -v pigz >/dev/null; then
+if [ "${PHOTOCRAFT_WEB_TEST_BUILD:-0}" = "1" ]; then
+  if command -v pigz >/dev/null; then pigz -6 -n "$OUT/photocraft_bg.wasm"; else gzip -6 -n "$OUT/photocraft_bg.wasm"; fi
+elif command -v pigz >/dev/null; then
   pigz -11 -n "$OUT/photocraft_bg.wasm"
 else
   gzip -9 -n "$OUT/photocraft_bg.wasm"

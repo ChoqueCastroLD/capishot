@@ -23,6 +23,14 @@
 #                                       For quick test deploys only, never a release: it is also
 #                                       5-19% slower at run time (packaging/web-threads/README.md).
 #                                       Switching between the two recompiles every crate once.
+#   packaging/web-release.sh --test-build [threads|st]
+#                                       the fastest build that still runs, for a private test URL:
+#                                       one site (default threads), no fallback to the other,
+#                                       thin LTO with 16 codegen units, no wasm-opt, no split, fast
+#                                       gzip, a fixed build stamp (a commit's stamp in the engine
+#                                       would recompile everything above it), and the AI workers
+#                                       of the newest cached build whose sources are unchanged. The
+#                                       module is much bigger and slower: never a release.
 #
 # Fails (non-zero, the other builds stopped) as soon as any stage fails: never deploy after a
 # failure. Environment:
@@ -36,12 +44,22 @@
 #   PHOTOCRAFT_AI_MODELS_URL, PHOTOCRAFT_WEB_FEATURES, PHOTOCRAFT_WEB_SPLIT: passed through.
 # Needs what the three scripts need (packaging/web-threads/README.md).
 set -euo pipefail
+TEST_SITE=""
 case "${1:-}" in
   "") ;;
+  --test-build)
+    TEST_SITE="${2:-threads}"
+    case "$TEST_SITE" in threads | st) ;; *) echo "usage: packaging/web-release.sh --test-build [threads|st]" >&2; exit 1 ;; esac
+    export CARGO_PROFILE_WASM_RELEASE_LTO="${CARGO_PROFILE_WASM_RELEASE_LTO:-thin}"
+    export CARGO_PROFILE_WASM_RELEASE_CODEGEN_UNITS="${CARGO_PROFILE_WASM_RELEASE_CODEGEN_UNITS:-16}"
+    export PHOTOCRAFT_WEB_TEST_BUILD=1 PHOTOCRAFT_WEB_SPLIT=0 PHOTOCRAFT_WEB_FALLBACK=""
+    export PHOTOCRAFT_BUILD_SHA=test-build PHOTOCRAFT_BUILD_DATE=test-build
+    export PHOTOCRAFT_WASM_MAX_BYTES="${PHOTOCRAFT_WASM_MAX_BYTES:-268435456}"
+    echo "[web-release] TEST build of the $TEST_SITE site: not for a release" ;;
   --preview)
     export CARGO_PROFILE_WASM_RELEASE_LTO=thin CARGO_PROFILE_WASM_RELEASE_CODEGEN_UNITS=16
     echo "[web-release] PREVIEW build (thin LTO): bigger wasm, not for a release" ;;
-  *) echo "usage: packaging/web-release.sh [--preview]" >&2; exit 1 ;;
+  *) echo "usage: packaging/web-release.sh [--preview | --test-build [threads|st]]" >&2; exit 1 ;;
 esac
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -107,6 +125,36 @@ EOF
   export PATH="$WR/bin:$PATH"
 fi
 
+# A test build's sites skip wasm-opt: this stand-in copies the module through. The AI workers,
+# which live in the cache, still get the real one.
+if [ -n "$TEST_SITE" ]; then
+  REAL_WASM_OPT=$(command -v wasm-opt) || { echo "error: a test build needs wasm-opt on PATH" >&2; exit 1; }
+  mkdir -p "$WR/bin-test"
+  cat >"$WR/bin-test/wasm-opt.tmp" <<EOF
+#!/usr/bin/env bash
+# Written by packaging/web-release.sh --test-build: no optimization, the input as the output.
+set -euo pipefail
+REAL='$REAL_WASM_OPT'
+EOF
+  cat >>"$WR/bin-test/wasm-opt.tmp" <<'EOF'
+in="" out="" prev=""
+for a in "$@"; do
+  if [ -n "$prev" ]; then out=$a prev=""; continue; fi
+  case "$a" in
+    -o | --output) prev=$a ;;
+    --output=*) out=${a#--output=} ;;
+    --version | --help) exec "$REAL" "$@" ;;
+    -*) ;;
+    *) in=$a ;;
+  esac
+done
+[ -n "$in" ] && [ -n "$out" ] || exec "$REAL" "$@"
+cp "$in" "$out"
+EOF
+  chmod +x "$WR/bin-test/wasm-opt.tmp"
+  mv -f "$WR/bin-test/wasm-opt.tmp" "$WR/bin-test/wasm-opt"
+fi
+
 # --- AI workers: cache key -----------------------------------------------------------------------
 AI=1
 [ "${PHOTOCRAFT_WEB_AI:-1}" = "0" ] && AI=0
@@ -122,7 +170,7 @@ $(wasm-bindgen --version 2>&1 || true)
 $(wasm-opt --version 2>&1 || true)
 ${PHOTOCRAFT_AI_PROFILE:-}|${PHOTOCRAFT_AI_THREADS_TOOLCHAIN:-}|${PHOTOCRAFT_WEB_AI_THREADS:-}"
   AI_KEY=$(cargo metadata --format-version 1 --filter-platform wasm32-unknown-unknown --locked 2>/dev/null \
-    | AI_TOOLS="$tools" python3 -c '
+    | AI_TOOLS="$tools" AI_DIRS="$WR/ai-dirs" python3 -c '
 import hashlib, json, os, subprocess, sys
 m = json.load(sys.stdin)
 root = m["workspace_root"]
@@ -142,6 +190,7 @@ dirs = sorted({os.path.relpath(os.path.dirname(pkgs[i]["manifest_path"]), root)
 files = subprocess.run(["git", "ls-files", "-co", "--exclude-standard", "-z", "--", *dirs,
                         "Cargo.lock", "Cargo.toml", ".cargo", "packaging/web-ai/build.sh"],
                        cwd=root, capture_output=True, check=True).stdout.split(b"\0")
+open(os.environ["AI_DIRS"], "w").write("\n".join(dirs) + "\n")
 h = hashlib.sha256(os.environ["AI_TOOLS"].encode())
 for f in sorted(x for x in files if x):
     p = os.path.join(root.encode(), f)
@@ -150,6 +199,19 @@ for f in sorted(x for x in files if x):
 print(h.hexdigest()[:24])
 ') || { echo "error: could not hash the AI worker's inputs (cargo metadata)" >&2; exit 1; }
   AI_DIR="$WR/ai/$AI_KEY"
+  # A test build is happy with the newest cached workers built from the same sources (the exact
+  # key also covers Cargo.lock, the manifest and the tools, which a test doesn't care about).
+  if [ -n "$TEST_SITE" ] && [ "${PHOTOCRAFT_AI_CACHE:-1}" != "0" ] && [ ! -f "$AI_DIR/done" ]; then
+    # shellcheck disable=SC2046
+    for d in $(ls -1dt "$WR"/ai/*/ 2>/dev/null | grep -v '/tmp-' || true); do
+      if [ -f "$d/done" ] && [ -f "$d/commit" ] \
+        && git diff --quiet "$(cat "$d/commit")" -- $(cat "$WR/ai-dirs") packaging/web-ai/build.sh 2>/dev/null; then
+        log "AI workers: exact key not cached, sources unchanged since $(cut -c1-9 "$d/commit"): reusing them"
+        AI_DIR=${d%/}
+        break
+      fi
+    done
+  fi
 fi
 
 # --- the builds, concurrently --------------------------------------------------------------------
@@ -160,6 +222,11 @@ if [ "$AI" = 1 ] && { [ "${PHOTOCRAFT_AI_CACHE:-1}" = "0" ] || [ ! -f "$AI_DIR/d
 else
   BUILD_AI=0
   J_SITE=$(( JOBS / 2 )) J_AI=1
+fi
+# A test build is one site with a thin link.
+if [ -n "$TEST_SITE" ]; then
+  J_SITE=$JOBS J_AI=1
+  [ "$BUILD_AI" = 0 ] || { J_SITE=$(( JOBS / 2 )) J_AI=$(( JOBS / 4 )); }
 fi
 [ "$J_SITE" -ge 1 ] || J_SITE=1
 [ "$J_AI" -ge 1 ] || J_AI=1
@@ -201,6 +268,7 @@ wait_all() {
 }
 
 AI_TMP="$WR/ai/tmp-$$"
+AI_COMMIT=$(git rev-parse HEAD 2>/dev/null || true)
 if [ "$BUILD_AI" = 1 ]; then
   rm -rf "$AI_TMP"
   run ai-plain "$J_AI" packaging/web-ai/build.sh --stage "$AI_TMP/plain" plain
@@ -215,7 +283,11 @@ fi
 # each with the whole share of jobs.
 avail_gb=$(awk '/^MemAvailable:/ {print int($2 / 1048576)}' /proc/meminfo 2>/dev/null || echo 0)
 need_gb="${PHOTOCRAFT_WEB_MEM_GB:-$([ -n "${CARGO_PROFILE_WASM_RELEASE_LTO:-}" ] && echo 8 || echo 24)}"
-if [ "${avail_gb:-0}" -ge "$need_gb" ]; then
+if [ "$TEST_SITE" = threads ]; then
+  run threads "$J_SITE" env PATH="$WR/bin-test:$PATH" PHOTOCRAFT_WEB_AI=0 packaging/web-threads/build.sh
+elif [ "$TEST_SITE" = st ]; then
+  run st "$J_SITE" env PATH="$WR/bin-test:$PATH" bash -c 'cd apps/photocraft-web && exec trunk build --release'
+elif [ "${avail_gb:-0}" -ge "$need_gb" ]; then
   run st "$J_SITE" bash -c 'cd apps/photocraft-web && exec trunk build --release'
   run threads "$J_SITE" env PHOTOCRAFT_WEB_AI=0 packaging/web-threads/build.sh
 else
@@ -226,7 +298,11 @@ fi
 wait_all
 trap - INT TERM
 # Both sites must come from this run (a stage that silently did nothing would deploy a stale one).
-for f in dist/web/index.html dist/web-threads/index.html; do
+SITES="dist/web dist/web-threads"
+[ "$TEST_SITE" = threads ] && SITES=dist/web-threads
+[ "$TEST_SITE" = st ] && SITES=dist/web
+for s in $SITES; do
+  f=$s/index.html
   [ "$f" -nt "$STAMP" ] || { log "error: $f was not rebuilt by this run: do not deploy"; exit 1; }
 done
 
@@ -238,6 +314,7 @@ if [ "$BUILD_AI" = 1 ]; then
   cp -R "$AI_TMP/plain/." "$AI_TMP/threads/"
   [ -d "$AI_TMP/mt" ] && cp -R "$AI_TMP/mt/." "$AI_TMP/threads/"
   rm -rf "$AI_TMP/mt" "$AI_DIR"
+  echo "$AI_COMMIT" >"$AI_TMP/commit"
   touch "$AI_TMP/done"
   mv "$AI_TMP" "$AI_DIR"
   # Keep the last 3 cached builds.
@@ -246,18 +323,19 @@ if [ "$BUILD_AI" = 1 ]; then
 fi
 if [ "$AI" = 1 ]; then
   touch "$AI_DIR"
-  run ai-install-st 1 packaging/web-ai/build.sh dist/web --prebuilt "$AI_DIR/plain"
-  run ai-install-threads 1 packaging/web-ai/build.sh dist/web-threads --threads --prebuilt "$AI_DIR/threads"
+  [ "$TEST_SITE" = threads ] || run ai-install-st 1 packaging/web-ai/build.sh dist/web --prebuilt "$AI_DIR/plain"
+  [ "$TEST_SITE" = st ] || run ai-install-threads 1 packaging/web-ai/build.sh dist/web-threads --threads --prebuilt "$AI_DIR/threads"
   wait_all
 fi
 
 # The threads build's per-file cap, now with the AI workers in (as packaging/web-threads/build.sh).
 max="${PHOTOCRAFT_WASM_MAX_BYTES:-33554432}"
-big=$(find dist/web dist/web-threads -type f -size +"$max"c)
+# shellcheck disable=SC2086
+big=$(find $SITES -type f -size +"$max"c)
 [ -z "$big" ] || { log "error: over the $max-byte limit: $big"; exit 1; }
 for s in st threads st+threads ai-install-st ai-install-threads; do
   if [ -f "$LOGS/$s.log" ]; then
     grep -hE '^(split: |photocraft_bg.wasm: |wrote |AI worker: )' "$LOGS/$s.log" | sed "s/^/  $s: /" || true
   fi
 done
-log "done in $(el "$T0")s: dist/web, dist/web-threads"
+log "done in $(el "$T0")s: ${SITES// /, }"
