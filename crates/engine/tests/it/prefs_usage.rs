@@ -120,8 +120,7 @@ fn every_preference_is_read_or_hidden() {
     let prefs_dir = root.join("crates/engine/src/prefs");
     let files: Vec<(PathBuf, String)> = files
         .into_iter()
-        // The definitions are no reads; `prefs/profile.rs` is a feature that reads them.
-        .filter(|p| !p.ends_with("engine/src/prefs.rs") && (!p.starts_with(&prefs_dir) || p.ends_with("prefs/profile.rs")))
+        .filter(|p| !p.ends_with("engine/src/prefs.rs") && !p.starts_with(&prefs_dir))
         .filter_map(|p| std::fs::read_to_string(&p).ok().map(|t| (p, production(&t))))
         .collect();
     let mut sources: Vec<String> = files.iter().map(|(_, t)| t.clone()).collect();
@@ -158,6 +157,8 @@ fn every_preference_is_read_or_hidden() {
         }
     }
 
+    // Saved state of `profile.import` (read in `prefs/profile.rs`), not in the dialog.
+    paths.retain(|(section, _)| section != "profileBackup");
     let mut unread = Vec::new();
     let mut stale = Vec::new();
     for (section, key) in &paths {

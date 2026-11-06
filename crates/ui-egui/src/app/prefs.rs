@@ -95,6 +95,10 @@ impl PhotocraftApp {
     /// to also mark the app as prepared; otherwise `logic_frame` repeats setup and skips its
     /// first editor frame. Registration during a pass takes effect on the following pass.
     pub fn setup_context(ctx: &egui::Context, kind: theme::ThemeKind) {
+        // A script's fallback font loads for the frame after the first that needs it, as in the
+        // app: egui_kittest would panic on that first frame's tofu.
+        #[cfg(test)]
+        ctx.set_missing_glyph_policy(egui::MissingGlyphPolicy::Tofu);
         Self::install_type_reset_hooks(ctx);
         ctx.add_plugin(tool_cursor::CursorLifecycle);
         ctx.add_plugin(single_line_drag::SingleLineDrag::default());
