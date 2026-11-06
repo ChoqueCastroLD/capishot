@@ -127,6 +127,10 @@ fn perturbed_para() -> ParagraphStyle {
         auto_leading: -1.0,
         direction: TextDirection::Rtl,
         hyphenate: true,
+        hyphenate_min_word: Some(99),
+        hyphenate_before: Some(99),
+        hyphenate_after: Some(99),
+        hyphenate_zone_pt: Some(-1.0),
         style_sheet: None,
     }
 }

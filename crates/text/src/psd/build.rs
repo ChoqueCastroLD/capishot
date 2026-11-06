@@ -76,7 +76,7 @@ pub(crate) fn paragraph_properties(p: &ParagraphStyle, k: f32) -> E {
         TextAlign::JustifyCenter => 5,
         TextAlign::JustifyAll => 6,
     };
-    E::Dict(vec![
+    let mut props = vec![
         ("Justification".into(), E::Int(j)),
         ("FirstLineIndent".into(), real(p.first_line_indent_pt / k)),
         ("StartIndent".into(), real(p.start_indent_pt / k)),
@@ -86,7 +86,13 @@ pub(crate) fn paragraph_properties(p: &ParagraphStyle, k: f32) -> E {
         ("AutoHyphenate".into(), E::Bool(p.hyphenate)),
         ("AutoLeading".into(), real(p.auto_leading)),
         ("LeadingType".into(), E::Int(0)),
-    ])
+    ];
+    let letters = [("HyphenatedWordSize", p.hyphenate_min_word), ("PreHyphen", p.hyphenate_before), ("PostHyphen", p.hyphenate_after)];
+    props.extend(letters.into_iter().filter_map(|(key, v)| Some((key.into(), E::Int(v?.into())))));
+    if let Some(z) = p.hyphenate_zone_pt {
+        props.push(("Zone".into(), real(z / k)));
+    }
+    E::Dict(props)
 }
 
 pub(super) fn utf16_len(s: &str) -> i64 {

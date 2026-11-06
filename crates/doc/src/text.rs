@@ -192,6 +192,19 @@ pub struct ParagraphStyle {
     pub auto_leading: f32,
     pub direction: TextDirection,
     pub hyphenate: bool,
+    /// Hyphenation's shortest word, in letters; `None`: Photoshop's default (6).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hyphenate_min_word: Option<u8>,
+    /// Letters kept before a hyphen; `None`: Photoshop's default (2).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hyphenate_before: Option<u8>,
+    /// Letters kept after a hyphen; `None`: Photoshop's default (2).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hyphenate_after: Option<u8>,
+    /// The hyphenation zone in points: lines with a smaller end gap aren't hyphenated; `None`:
+    /// Photoshop's default (36).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hyphenate_zone_pt: Option<f32>,
     /// Applied paragraph style (id in [`crate::TextStyles`]); `None` = Basic Paragraph.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub style_sheet: Option<u32>,
@@ -209,6 +222,10 @@ impl Default for ParagraphStyle {
             auto_leading: 1.2,
             direction: TextDirection::Auto,
             hyphenate: false,
+            hyphenate_min_word: None,
+            hyphenate_before: None,
+            hyphenate_after: None,
+            hyphenate_zone_pt: None,
             style_sheet: None,
         }
     }

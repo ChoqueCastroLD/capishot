@@ -166,3 +166,20 @@ fn english_and_portuguese_paragraphs() {
         assert!(hits > 5, "{lang:?}: {hits}");
     }
 }
+
+/// The paragraph's limits: a comic's "CASA" breaks with a shorter minimum and no zone, and only then.
+#[test]
+fn a_paragraph_can_set_hyphenations_limits() {
+    let mut e = TextEngine::new();
+    let text = "CASA PERO CASA PERO";
+    let hyphens = |e: &mut TextEngine, min: Option<u8>, zone: Option<f32>| {
+        (10..200).step_by(5).any(|w| {
+            let mut t = boxed(text, w as f32, TextAlign::Left, true, Some("es"));
+            t.paragraphs[0].style.hyphenate_min_word = min;
+            t.paragraphs[0].style.hyphenate_zone_pt = zone;
+            e.layout(&t, 72.0).lines.iter().any(|l| l.hyphen)
+        })
+    };
+    assert!(!hyphens(&mut e, None, None), "under Photoshop's six letters");
+    assert!(hyphens(&mut e, Some(4), Some(0.0)), "four letters, no zone");
+}

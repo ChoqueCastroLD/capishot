@@ -622,6 +622,7 @@ pub(crate) fn char_style(base: &[Option<&E>], d: &E, fonts: &[String], k: f32) -
 pub(crate) fn para_style(base: &[Option<&E>], d: &E, k: f32) -> ParagraphStyle {
     let num = |key: &str| lookup(d, base, key).and_then(E::as_f64);
     let numk = |key: &str, k: f32| num(key).map(|v| v as f32 * k).filter(|v| v.is_finite());
+    let letters = |key: &str, default: i64| num(key).map(|v| v as i64).filter(|v| *v != default && (1..=25).contains(v)).map(|v| v as u8);
     ParagraphStyle {
         align: match num("Justification").map(|v| v as i64) {
             Some(1) => TextAlign::Right,
@@ -639,6 +640,11 @@ pub(crate) fn para_style(base: &[Option<&E>], d: &E, k: f32) -> ParagraphStyle {
         space_after_pt: numk("SpaceAfter", k).unwrap_or(0.0),
         auto_leading: numk("AutoLeading", 1.0).unwrap_or(1.2),
         hyphenate: lookup(d, base, "AutoHyphenate").and_then(E::as_bool).unwrap_or(false),
+        // Photoshop writes its defaults on every paragraph: only what differs is kept.
+        hyphenate_min_word: letters("HyphenatedWordSize", 6),
+        hyphenate_before: letters("PreHyphen", 2),
+        hyphenate_after: letters("PostHyphen", 2),
+        hyphenate_zone_pt: num("Zone").filter(|z| (z - 36.0).abs() > 1e-3).map(|z| z as f32 * k).filter(|z| z.is_finite() && *z >= 0.0),
         ..Default::default()
     }
 }
@@ -854,4 +860,20 @@ pub fn apply_txt2_in_path(layer: &mut TextLayer, tysh: &[u8], txt2: &E) {
         inset: Some(0.0),
         valign: photocraft_doc::text::InPathAlign::Top,
     };
+}
+
+#[cfg(test)]
+mod hyphenation_tests {
+    use super::*;
+
+    /// Hyphenation's limits round-trip through a PSD's paragraph properties, and Photoshop's
+    /// defaults read as unset.
+    #[test]
+    fn hyphenations_limits_round_trip_through_psd_properties() {
+        let build = super::super::paragraph_properties;
+        let p = ParagraphStyle { hyphenate: true, hyphenate_min_word: Some(4), hyphenate_before: Some(1), hyphenate_after: Some(3), hyphenate_zone_pt: Some(10.0), ..Default::default() };
+        assert_eq!(para_style(&[], &build(&p, 2.0), 2.0), p);
+        let plain = ParagraphStyle { hyphenate: true, ..Default::default() };
+        assert_eq!(para_style(&[], &build(&plain, 1.0), 1.0), plain);
+    }
 }

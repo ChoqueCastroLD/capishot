@@ -1026,3 +1026,16 @@ fn type_edit_sets_the_perspective_absolutely() {
     assert!(text_layer(&s, id).perspective.is_none());
     assert!(read(&s).is_null());
 }
+
+/// `type.setStyle` sets hyphenation's limits on the paragraph; null goes back to the default.
+#[test]
+fn type_set_style_takes_hyphenations_limits() {
+    let mut s = session();
+    let id = s.execute("type.create", json!({"text": "CASA", "box": [10, 10, 60, 60]})).unwrap()["layer"].as_u64().unwrap();
+    s.execute("type.setStyle", json!({"layer": id, "hyphenate": true, "hyphenateMinWord": 4, "hyphenateBefore": 1, "hyphenateAfter": 3, "hyphenateZone": 10})).unwrap();
+    let p = text_layer(&s, id).paragraphs[0].style.clone();
+    assert_eq!((p.hyphenate_min_word, p.hyphenate_before, p.hyphenate_after, p.hyphenate_zone_pt), (Some(4), Some(1), Some(3), Some(10.0)));
+    s.execute("type.setStyle", json!({"layer": id, "hyphenateMinWord": null, "hyphenateZone": null})).unwrap();
+    let p = text_layer(&s, id).paragraphs[0].style.clone();
+    assert_eq!((p.hyphenate_min_word, p.hyphenate_zone_pt, p.hyphenate_before), (None, None, Some(1)));
+}

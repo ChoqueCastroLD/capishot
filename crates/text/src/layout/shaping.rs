@@ -450,7 +450,15 @@ impl<'a> Para<'a> {
             }
         };
         let justified = !matches!(self.ps.align, TextAlign::Left | TextAlign::Center | TextAlign::Right);
-        let rules = crate::hyphen::Rules::PHOTOSHOP;
+        let base = crate::hyphen::Rules::PHOTOSHOP;
+        let letters = |v: Option<u8>, d: usize| v.map_or(d, usize::from);
+        let rules = crate::hyphen::Rules {
+            min_word: letters(self.ps.hyphenate_min_word, base.min_word),
+            before: letters(self.ps.hyphenate_before, base.before),
+            after: letters(self.ps.hyphenate_after, base.after),
+            zone_pt: self.ps.hyphenate_zone_pt.unwrap_or(base.zone_pt),
+            ..base
+        };
         let params = HyphenParams { rules, zone_px: rules.zone_pt * env.k, justified };
         hyphenate_paragraph(layout, &self.ptext, avail, self.first_indent, &params, &lang_at)
     }

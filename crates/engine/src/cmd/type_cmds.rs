@@ -479,6 +479,24 @@ pub fn apply_para_props(s: &mut ParagraphStyle, p: &Value) -> bool {
         s.hyphenate = v;
         any = true;
     }
+    // Hyphenation's limits: a number sets one, null goes back to Photoshop's default.
+    let letters = |key: &str, min: u64| p.get(key).map(|v| v.as_u64().map(|n| n.clamp(min, 25) as u8));
+    if let Some(v) = letters("hyphenateMinWord", 2) {
+        s.hyphenate_min_word = v;
+        any = true;
+    }
+    if let Some(v) = letters("hyphenateBefore", 1) {
+        s.hyphenate_before = v;
+        any = true;
+    }
+    if let Some(v) = letters("hyphenateAfter", 1) {
+        s.hyphenate_after = v;
+        any = true;
+    }
+    if let Some(v) = p.get("hyphenateZone") {
+        s.hyphenate_zone_pt = v.as_f64().filter(|z| z.is_finite()).map(|z| z.clamp(0.0, 720.0) as f32);
+        any = true;
+    }
     any
 }
 
@@ -1423,7 +1441,7 @@ pub fn specs() -> Vec<CommandSpec> {
             menu: &[],
             shortcut: None,
             params: Box::leak(
-                format!(r##"{{"layer":id? or "layers":[id,…]? (default selected Type layers),"range":[startChar,endChar]? (single layer; default all),"metricsAsShown":bool=false (size/leading/leadingBy include each layer's transform scale), {CHAR_PARAMS}, relative steps from each character's own value: "leadingBy":pt (auto leading starts from its laid-out value; result 0.01..=5000),"baselineShiftBy":pt (result -5000..=5000),"trackingBy":1/1000 em (result -1000..=10000), paragraph keys: "align":"left|center|right|justify|justifyCenter|justifyRight|justifyAll","firstLineIndent":pt,"startIndent":pt,"endIndent":pt,"spaceBefore":pt,"spaceAfter":pt,"autoLeading":%,"direction":"auto|ltr|rtl","hyphenate":bool}}"##)
+                format!(r##"{{"layer":id? or "layers":[id,…]? (default selected Type layers),"range":[startChar,endChar]? (single layer; default all),"metricsAsShown":bool=false (size/leading/leadingBy include each layer's transform scale), {CHAR_PARAMS}, relative steps from each character's own value: "leadingBy":pt (auto leading starts from its laid-out value; result 0.01..=5000),"baselineShiftBy":pt (result -5000..=5000),"trackingBy":1/1000 em (result -1000..=10000), paragraph keys: "align":"left|center|right|justify|justifyCenter|justifyRight|justifyAll","firstLineIndent":pt,"startIndent":pt,"endIndent":pt,"spaceBefore":pt,"spaceAfter":pt,"autoLeading":%,"direction":"auto|ltr|rtl","hyphenate":bool,"hyphenateMinWord":n|null?,"hyphenateBefore":n|null?,"hyphenateAfter":n|null? (letters; null: Photoshop's 6, 2, 2),"hyphenateZone":pt|null? (null: 36)}}"##)
                     .into_boxed_str(),
             ),
             enabled: has_doc,
