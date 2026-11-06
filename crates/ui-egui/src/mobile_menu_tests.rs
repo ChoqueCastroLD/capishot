@@ -279,3 +279,22 @@ fn the_desktop_is_unchanged() {
         assert!(h.query_by_label(top).is_some(), "{top}");
     }
 }
+
+#[test]
+fn a_long_press_on_a_layer_row_opens_its_menu_in_the_sheet() {
+    let mut h = phone();
+    h.state_mut().run("layer.new.layer", json!({})).unwrap();
+    h.run_steps(4);
+    tap(&mut h, "capi");
+    tap(&mut h, "Layers");
+    h.run_steps(8);
+    let row = egui::pos2(180.0, 420.0);
+    frame(&mut h, vec![touch(TouchPhase::Start, row)]);
+    for _ in 0..30 {
+        frame(&mut h, vec![touch(TouchPhase::Move, row)]);
+    }
+    assert!(mobile_sheet::any_open(&h.ctx), "open while the finger rests");
+    frame(&mut h, vec![touch(TouchPhase::End, row)]);
+    h.run_steps(8);
+    assert!(mobile_sheet::any_open(&h.ctx), "and it stays when the finger lifts");
+}

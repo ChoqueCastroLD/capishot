@@ -76,8 +76,6 @@ for (let i = 0; i < 6; i++) { const r = await rect('sheet:sub:Theme'); if (r && 
 await tapLabel('sheet:sub:Theme');
 await shot('06-themes-dynamic');
 await tapLabel('sheet:back');
-console.log('after a back', JSON.stringify(await page()));
-await shot('06b-after-back');
 await tapLabel('sheet:back');
 
 // A greyed row: listed, and a tap does nothing.
@@ -138,17 +136,22 @@ const capi = await rect('capi');
 await tap(centre(capi));
 await tapLabel('Capas');
 await p.waitForTimeout(500);
-await hold([180, 420]);
+await touches('touchStart', [[180, 420]]);
+// Long: software rendering draws few frames here, and the press counts from the first one.
+for (let t = 0; t < 3000; t += 100) { await p.waitForTimeout(100); await touches('touchMove', [[180, 420]]); }
+await touches('touchEnd', []);
+await p.waitForTimeout(600);
 await shot('10-layer-long-press');
 check(!!(await rect('sheet:handle')), 'a long press on a layer opens the sheet');
 await tap([180, 24]);
 
 // A dropdown (the blend mode) in the same sheet: the panel's first selector row.
 await p.waitForTimeout(400);
-await tap(centre(await rect('capi')));
+// The first tap on Capi may only close the panel that is still open.
+for (let i = 0; i < 3 && !(await rect('Capas')); i++) { await tap(centre(await rect('capi'))); await p.waitForTimeout(400); }
 await tapLabel('Capas');
 await p.waitForTimeout(500);
-await tap([96, 298]);
+await tap([52, 263]);
 await shot('11-dropdown');
 check(!!(await rect('sheet:handle')), 'a dropdown opens the sheet');
 await tap([180, 24]);
