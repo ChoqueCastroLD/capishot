@@ -1665,6 +1665,30 @@ fn relayout_damage_covers_a_layer_whose_gradient_frame_moved() {
     assert_eq!(crate::relayout_damage(&off, &grown(&off, Rect::new(10, 10, 36, 34), [1.0, 0.0, 0.0, 1.0])), Rect::EMPTY);
 }
 
+/// A Gradient Overlay that fades to nothing shows the layer's own colour where it has faded, and
+/// its own colour where it's solid; the layer's shape doesn't change.
+#[test]
+fn a_fading_gradient_overlay_shows_the_layers_colour_under_it() {
+    let doc = fx_doc(vec![Effect::GradientOverlay {
+        common: FxCommon::new(photocraft_color::BlendMode::Normal, 1.0),
+        gradient: Gradient {
+            stops: vec![(0.0, Color::rgb(0.0, 0.0, 1.0)), (1.0, Color::rgb(0.0, 0.0, 1.0))],
+            opacity_stops: vec![(0.0, 1.0), (1.0, 0.0)],
+            angle: 90.0,
+            ..Gradient::default()
+        },
+        dither: false,
+        interpolation: None,
+    }]);
+    let (a, b) = (px(&doc, 20, 11), px(&doc, 20, 28));
+    // The ends of the square: one nearly the overlay's blue, the other nearly the layer's red.
+    let (blue, red) = if a[2] > b[2] { (a, b) } else { (b, a) };
+    assert!(blue[2] > 0.85 && blue[0] < 0.15, "{blue:?}");
+    assert!(red[0] > 0.85 && red[2] < 0.15, "{red:?}");
+    // Outside the square the white page: the fade doesn't reach past the layer.
+    assert!(px(&doc, 5, 5)[0] > 0.99 && px(&doc, 5, 5)[2] > 0.99);
+}
+
 #[test]
 fn gradient_overlay_follows_angle_and_reverse() {
     let g = Gradient { stops: vec![(0.0, Color::BLACK), (1.0, Color::WHITE)], angle: 0.0, ..Gradient::default() };
