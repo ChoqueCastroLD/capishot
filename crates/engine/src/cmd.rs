@@ -1244,6 +1244,7 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::solid_fill_cmds::specs());
     v.extend(crate::pattern_fill_cmds::specs());
     v.extend(crate::type_cmds::specs());
+    v.extend(crate::ai_warm_cmds::specs());
     v.extend(crate::remove_ai_cmds::specs());
     v.extend(crate::type_bubble_cmds::specs());
     v.extend(crate::bubble_text_cmds::specs());

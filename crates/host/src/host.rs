@@ -344,6 +344,13 @@ impl Host {
         self.execute("command.list", json!({}))
     }
 
+    /// Loads an inpainting model (`"manga-lama"`, `"migan-512"`, or `"auto"`) off the frame, so the
+    /// first removal doesn't wait for it: a job; its result has `{model, device, cpu, fellBack, ms}`.
+    /// An error when the model isn't downloaded.
+    pub fn warm_ai(&mut self, model: &str) -> Result<Started> {
+        self.start(photocraft_engine::ai_warm_cmds::ID, json!({ "model": model }), None)
+    }
+
     /// Run `command` in the background when it supports it (filters, Content-Aware Fill, Remove
     /// with AI…): a [`JobHandle`] at once, or the result if it finished inline. Not with
     /// [`History::None`] (a change outside the history must finish inline) or inside a group.

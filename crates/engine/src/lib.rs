@@ -63,6 +63,7 @@ mod lut_id_params;
 pub mod lut_library;
 pub mod lut_library_cmds;
 pub mod package;
+pub mod ai_warm_cmds;
 pub mod remove_ai_cmds;
 pub mod theme_cmds;
 pub mod type_bubble_cmds;
