@@ -9,7 +9,7 @@ use parley::{Alignment, AlignmentOptions, FontFeatures, Layout, LayoutContext, S
 use photocraft_doc::text::{CharStyle, ParagraphStyle, TextAlign, TextDirection};
 
 use super::area::{LineMetrics, MAX_AREA_PASSES, area_metrics, break_area};
-use super::capishot::{HyphenBreak, HyphenParams, hyphenate_paragraph, ink_extent, longest_unbreakable, line_hyphen_break};
+use super::capishot::{HyphenBreak, HyphenParams, emergency_hyphen_break, hyphenate_paragraph, ink_extent, line_hyphen_break, longest_unbreakable};
 use super::paragraphs::{TabWidth, strip_break, tab_widths};
 use super::style::{
     SYNTHETIC_SMALL_CAPS_SCALE, SmallCapsMode, drawn_style, effective_horizontal_scale, feature_list, hangul_runs, probe_smcp, small_caps_mode, style_props,
@@ -495,11 +495,11 @@ impl<'a> Para<'a> {
                 break;
             }
             let consecutive = (0..li).rev().take_while(|&l| breaks.iter().any(|b| b.line == l)).count();
-            if params.rules.limit > 0 && consecutive >= params.rules.limit {
-                continue;
-            }
-            let avail = lines[li].width / self.break_scale;
-            if let Some(b) = line_hyphen_break(layout, &self.ptext, li, avail, self.first_indent / self.break_scale, &params, &lang_at) {
+            let limited = params.rules.limit > 0 && consecutive >= params.rules.limit;
+            let (avail, indent) = (lines[li].width / self.break_scale, self.first_indent / self.break_scale);
+            let found = emergency_hyphen_break(layout, &self.ptext, li, avail, indent, &params, &lang_at)
+                .or_else(|| if limited { None } else { line_hyphen_break(layout, &self.ptext, li, avail, indent, &params, &lang_at) });
+            if let Some(b) = found {
                 breaks.push(b);
                 *lines = rebreak(layout, &breaks);
             }

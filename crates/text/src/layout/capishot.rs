@@ -126,7 +126,8 @@ pub(super) fn hyphenate_paragraph(
         }
         let consecutive = (0..li).rev().take_while(|&l| breaks.iter().any(|b| b.line == l)).count();
         let limited = params.rules.limit > 0 && consecutive >= params.rules.limit;
-        let found = if limited { None } else { line_hyphen_break(layout, ptext, li, avail, first_indent, params, lang_at) };
+        let found = emergency_hyphen_break(layout, ptext, li, avail, first_indent, params, lang_at)
+            .or_else(|| if limited { None } else { line_hyphen_break(layout, ptext, li, avail, first_indent, params, lang_at) });
         if let Some(b) = found {
             breaks.push(b);
             rebreak(layout, avail, &breaks);
@@ -196,6 +197,66 @@ pub(super) fn line_hyphen_break(
         if m.advance + head + hyphen <= line_avail + 1e-3 {
             let count = u32::try_from(on_line + idx).ok()?;
             return Some(HyphenBreak { line: li, clusters: count, advance: hyphen });
+        }
+    }
+    None
+}
+
+/// A word wider than line `li`, cut there by the wrap: where it gets its hyphen. At a pattern's
+/// point when one fits, else as far as fits, leaving two letters on each side when it can.
+pub(super) fn emergency_hyphen_break(
+    layout: &Layout<RunBrush>,
+    ptext: &str,
+    li: usize,
+    avail: f32,
+    first_indent: f32,
+    params: &HyphenParams,
+    lang_at: &dyn Fn(usize) -> Option<crate::hyphen::HyphLang>,
+) -> Option<HyphenBreak> {
+    let line = layout.get(li)?;
+    if line.break_reason() != parley::BreakReason::Emergency || line.runs().any(|r| r.is_rtl()) {
+        return None;
+    }
+    let line_avail = avail - if li == 0 { first_indent } else { 0.0 };
+    let end = line.text_range().end;
+    let start = ptext.get(..end)?.char_indices().rev().find(|(_, c)| !crate::hyphen::is_word_char(*c)).map_or(0, |(i, c)| i + c.len_utf8());
+    let stop = end + ptext.get(end..)?.char_indices().find(|(_, c)| !crate::hyphen::is_word_char(*c)).map_or(ptext.len() - end, |(i, _)| i);
+    if stop == end {
+        return None;
+    }
+    let word = ptext.get(start..stop)?;
+    let mut clusters: Vec<(usize, f32, bool)> = Vec::new();
+    let mut hyphen = None;
+    for run in line.runs() {
+        hyphen = hyphen_glyph(run.font(), run.normalized_coords(), run.font_size()).map(|(_, a)| a).or(hyphen);
+        clusters.extend(run.clusters().map(|c| (c.text_range().start, c.advance(), c.is_ligature_continuation())));
+    }
+    let hyphen = hyphen?;
+    // The clusters kept on the line for a cut at byte `at`, when that and the hyphen fit.
+    let cut = |at: usize| -> Option<u32> {
+        let idx = if at == end { clusters.len() } else { clusters.iter().position(|c| c.0 == at)? };
+        let continues = clusters.get(idx).is_some_and(|c| c.2);
+        let head: f32 = clusters.get(..idx)?.iter().map(|c| c.1).sum();
+        (idx > 0 && !continues && head + hyphen <= line_avail + 1e-3).then_some(u32::try_from(idx).ok()?)
+    };
+    let done = |clusters: u32| Some(HyphenBreak { line: li, clusters, advance: hyphen });
+    let rules = crate::hyphen::Rules { min_word: 2, ..params.rules };
+    let points = lang_at(start).map(|lang| crate::hyphen::break_points(word, lang, &rules)).unwrap_or_default();
+    for &p in points.iter().rev() {
+        if let Some(n) = (start + p <= end).then(|| cut(start + p)).flatten() {
+            return done(n);
+        }
+    }
+    let letters = |r: &str| r.chars().count();
+    let ends: Vec<usize> = word.char_indices().map(|(i, _)| start + i).filter(|at| *at > start && *at <= end).chain((end < stop).then_some(end)).collect();
+    for keep in [2, 1] {
+        for &at in ends.iter().rev() {
+            if letters(&ptext[start..at]) >= keep
+                && letters(&ptext[at..stop]) >= keep
+                && let Some(n) = cut(at)
+            {
+                return done(n);
+            }
         }
     }
     None

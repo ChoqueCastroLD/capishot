@@ -48,7 +48,8 @@ fn off_changes_nothing() {
 fn hyphenated_lines_break_at_pattern_points_and_fit() {
     let mut e = TextEngine::new();
     let mut seen = 0;
-    for w in (80..=320).step_by(7) {
+    // Every word fits these boxes (a wider one is `a_word_wider_than_the_box_gets_a_hyphen_when_cut`).
+    for w in (150..=320).step_by(7) {
         let w = w as f32;
         for align in [TextAlign::JustifyLeft, TextAlign::Left, TextAlign::Center] {
             let l = e.layout(&boxed(ES, w, align, true, Some("es")), 72.0);
@@ -127,7 +128,7 @@ fn language_comes_from_the_style_or_the_text() {
 fn unjustified_lines_respect_the_hyphenation_zone() {
     let mut e = TextEngine::new();
     // At 300 dpi the 36 pt zone is 150 px: wider than " mur-" in 10 pt type.
-    let text = "Hola murciélago";
+    let text = "Extraordinario murciélago";
     let mut small = |w: f32, align: TextAlign, hyphenate: bool| {
         let mut t = boxed(text, w, align, hyphenate, Some("es"));
         t.runs[0].style.size_pt = 10.0;
@@ -142,7 +143,7 @@ fn unjustified_lines_respect_the_hyphenation_zone() {
     assert!(left.lines.iter().all(|ln| !ln.hyphen), "{:?}", lines(&left, text));
     // Justified text ignores the zone.
     let j = small(w, TextAlign::JustifyLeft, true);
-    assert_eq!(lines(&j, text), ["Hola mur-", "ciélago"]);
+    assert_eq!(lines(&j, text), ["Extraordinario mur-", "ciélago"]);
 }
 
 #[test]
@@ -173,7 +174,8 @@ fn a_paragraph_can_set_hyphenations_limits() {
     let mut e = TextEngine::new();
     let text = "CASA PERO CASA PERO";
     let hyphens = |e: &mut TextEngine, min: Option<u8>, zone: Option<f32>| {
-        (10..200).step_by(5).any(|w| {
+        // Boxes the words fit: a wider one gets its hyphen whatever the limits.
+        (70..200).step_by(5).any(|w| {
             let mut t = boxed(text, w as f32, TextAlign::Left, true, Some("es"));
             t.paragraphs[0].style.hyphenate_min_word = min;
             t.paragraphs[0].style.hyphenate_zone_pt = zone;
@@ -211,4 +213,29 @@ fn type_in_a_path_hyphenates_at_each_bands_width() {
         }
     }
     assert!(any, "some line ends in a hyphen");
+}
+
+/// A word wider than the box gets a hyphen where the wrap cuts it, in a paragraph that hyphenates;
+/// without, it's cut as before. All of its letters stay, and every line fits.
+#[test]
+fn a_word_wider_than_the_box_gets_a_hyphen_when_cut() {
+    let mut e = TextEngine::new();
+    for (text, width) in [("CASA!", 40.0), ("MONTAÑAS", 45.0), ("HOLA PARACAIDAS", 60.0)] {
+        let layer = |hyphenate| {
+            let mut t = boxed(text, width, TextAlign::Left, hyphenate, Some("es"));
+            t.runs[0].style.size_pt = 30.0;
+            t.runs[0].style.font_family = "Inter".into();
+            t
+        };
+        let off = e.layout(&layer(false), 72.0);
+        assert!(off.lines.len() > 1 && off.lines.iter().all(|l| !l.hyphen), "{text}");
+        let on = e.layout(&layer(true), 72.0);
+        assert!(on.lines.iter().any(|l| l.hyphen), "{text}: {:?}", lines(&on, text));
+        for l in on.lines.iter().filter(|l| l.hyphen) {
+            assert!(l.x1 - l.x0 <= width + 0.5, "{text}: {} in {width}", l.x1 - l.x0);
+        }
+        let joined: String = on.lines.iter().map(|l| &text[l.range.clone()]).collect();
+        assert_eq!(joined, text, "no letter is lost");
+        assert_eq!(on.lines.last().map(|l| l.hyphen), Some(false), "{text}");
+    }
 }
