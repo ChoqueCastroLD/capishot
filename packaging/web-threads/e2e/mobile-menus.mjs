@@ -75,6 +75,8 @@ check(((await simple()).buttons || []).some((x) => x.label.startsWith('sheet:che
 await tapLabel('sheet:sub:Theme');
 await shot('06-themes-dynamic');
 await tapLabel('sheet:back');
+console.log('after a back', JSON.stringify(await page()));
+await shot('06b-after-back');
 await tapLabel('sheet:back');
 
 // A greyed row: listed, and a tap does nothing.
@@ -140,9 +142,12 @@ await shot('10-layer-long-press');
 check(!!(await rect('sheet:handle')), 'a long press on a layer opens the sheet');
 await tap([180, 24]);
 
-// A dropdown (the blend mode) in the same sheet.
+// A dropdown (the blend mode) in the same sheet: the panel's first selector row.
 await p.waitForTimeout(400);
-await tap([120, 150]);
+await tap(centre(await rect('capi')));
+await tapLabel('Capas');
+await p.waitForTimeout(500);
+await tap([96, 298]);
 await shot('11-dropdown');
 check(!!(await rect('sheet:handle')), 'a dropdown opens the sheet');
 await tap([180, 24]);

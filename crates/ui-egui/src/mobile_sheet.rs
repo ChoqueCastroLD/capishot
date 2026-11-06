@@ -459,7 +459,8 @@ impl SheetMenu for Response {
             return self.context_menu(add);
         }
         let id = Popup::default_response_id(self).with("mobile-sheet");
-        if self.secondary_clicked() {
+        // As `Response::context_menu`: a finger's long press is the right click.
+        if self.secondary_clicked() || self.long_touched() {
             open(ctx, id);
         }
         show(ctx, id, Style::MENU, |_| {}, |ui| scroll(ui, id, add)).map(|()| InnerResponse::new((), self.clone()))
