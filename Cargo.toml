@@ -49,6 +49,7 @@ photocraft-ai = { path = "crates/ai" }
 photocraft-ai-lama = { path = "crates/ai-lama", default-features = false }
 photocraft-ai-ort = { path = "crates/ai-ort" }
 photocraft-ai-textmask = { path = "crates/ai-textmask" }
+photocraft-fontmatch = { path = "crates/fontmatch" }
 photocraft-ai-web = { path = "crates/ai-web" }
 # Generative Fill (SD 1.5 inpainting); without features only its prompt, crop, schedulers and service seam.
 photocraft-ai-sd = { path = "crates/ai-sd", default-features = false }

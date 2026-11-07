@@ -1,0 +1,18 @@
+[package]
+name = "photocraft-fontmatch"
+description = "Finds the font of lettering on a page by its shapes: deterministic, no model, no OCR"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "photocraft_fontmatch"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+skrifa = "0.44"

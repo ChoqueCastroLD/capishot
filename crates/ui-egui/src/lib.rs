@@ -326,6 +326,7 @@ pub use tools::move_hover;
 pub use tools::move_lock;
 pub use tools::move_mods;
 pub use tools::object_finder;
+pub use tools::font_finder_ui;
 pub use tools::text_select_ui;
 pub use tools::perspective_crop_ui;
 pub use tools::perspective_ui;
@@ -437,6 +438,8 @@ pub struct PhotocraftApp {
     pub(crate) object_finder: Option<object_finder::Finder>,
     /// The Text Selection tool's pieces (`text_select_ui`).
     pub(crate) text_select: text_select_ui::State,
+    /// The Font Finder's window (`font_finder_ui`).
+    pub(crate) font_finder: font_finder_ui::State,
     /// A blend mode hovered in the Layers panel, shown live (`blend_preview`).
     pub(crate) blend_preview: Option<blend_preview::BlendPreview>,
     /// Layers panel drag: temporary reordered document displayed until mouse release.

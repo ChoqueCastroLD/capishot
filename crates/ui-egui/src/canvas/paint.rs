@@ -650,7 +650,7 @@ pub(super) fn draw_drag_preview(app: &mut PhotocraftApp, painter: &egui::Painter
         }
         // Nothing selected yet: no outline, as the release would deselect.
         Tool::RectMarquee | Tool::EllipseMarquee if marquee.is_none() => {}
-        Tool::RectMarquee | Tool::EllipseMarquee | Tool::ObjectSelection => {
+        Tool::RectMarquee | Tool::EllipseMarquee | Tool::ObjectSelection | Tool::FontFinder => {
             // Marching ants, visible on any pixels (#172): built in document space and mapped
             // corner by corner, so a rotated view shows them where the release commits (#2512).
             let pts = marquee_drag_ants(d, xf, marquee);

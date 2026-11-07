@@ -4805,3 +4805,9 @@ curves	Smooth	Vloeiend maken
 	Brush {px}	Penseel {px}
 	Smaller Brush	Kleiner penseel
 	Bigger Brush	Groter penseel
+	Font Finder Tool	Gereedschap Lettertype zoeken
+	Click on lettering or drag a rectangle around it to find its font	Klik op letters of sleep er een rechthoek omheen om het lettertype te vinden
+	Using {font}	{font} wordt gebruikt
+	Find Font	Lettertype zoeken
+	No lettering found here. Try a tighter rectangle around the letters.	Hier zijn geen letters gevonden. Probeer een kleinere rechthoek.
+	Click one to use it	Klik op een lettertype om het te gebruiken

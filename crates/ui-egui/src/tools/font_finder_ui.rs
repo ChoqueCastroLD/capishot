@@ -1,0 +1,211 @@
+//! The Font Finder tool (T group): a click takes a square of the page around it, a drag takes that
+//! rectangle, and `font.find` answers five fonts that look like the lettering there, with its fill
+//! and outline, with no model and no OCR. Each shows drawn with its look; choosing one applies it to
+//! the type layer in use and to the next text.
+
+use std::sync::Arc;
+
+use photocraft_engine::font_find_cmds::ID;
+use serde_json::{Value, json};
+
+use crate::PhotocraftApp;
+use crate::state::{BubbleTextStyle, Tool};
+use crate::theme::Tokens;
+
+/// The square a click takes, in document pixels.
+const CLICK_SIDE: f64 = 256.0;
+/// What the options draw: every kind of letter, as no words are known.
+const SAMPLE: &str = "ABCDEF abcdef 123";
+/// A drawing's letter size, whatever the zone's, so they can be told apart.
+const SAMPLE_PT: f32 = 40.0;
+/// The tallest the zone shows.
+const CROP_HEIGHT: f32 = 110.0;
+/// A drag smaller than this is a click.
+const CLICK_DRAG: f64 = 4.0;
+
+/// The tool's window (`PhotocraftApp::font_finder`).
+#[derive(Default)]
+pub(crate) struct State {
+    /// The answer on screen, and each option's picture.
+    shown: Option<Arc<Value>>,
+    cards: Vec<Option<egui::TextureHandle>>,
+    /// The zone as it is on the page, to compare with.
+    crop: Option<egui::TextureHandle>,
+    closed: bool,
+}
+
+/// A press and release of the tool (document px).
+pub fn finish(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
+    let (w, h) = ((end[0] - start[0]).abs(), (end[1] - start[1]).abs());
+    let rect = if w.max(h) < CLICK_DRAG {
+        [end[0] - CLICK_SIDE / 2.0, end[1] - CLICK_SIDE / 2.0, CLICK_SIDE, CLICK_SIDE]
+    } else {
+        [start[0].min(end[0]), start[1].min(end[1]), w, h]
+    };
+    app.font_finder.closed = false;
+    if let Err(e) = app.run(ID, json!({"rect": rect})) {
+        app.ui.status = e;
+        app.ui.status_error = true;
+    }
+}
+
+pub fn options_bar(_app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    ui.label(tl!("Click on lettering or drag a rectangle around it to find its font"));
+}
+
+fn style_of(o: &Value) -> BubbleTextStyle {
+    let p = &o["params"];
+    let text = |k: &str| p[k].as_str().unwrap_or_default().to_string();
+    let stroke = &p["stroke"];
+    BubbleTextStyle {
+        font: text("font"),
+        style: text("fontStyle"),
+        size: p["size"].as_f64().unwrap_or(30.0) as f32,
+        color: text("color"),
+        stroke: stroke.is_object(),
+        stroke_color: stroke["color"].as_str().unwrap_or("#ffffff").to_string(),
+        stroke_width: stroke["width"].as_f64().unwrap_or(4.0) as f32,
+        ..BubbleTextStyle::default()
+    }
+}
+
+/// The answer's zone as the page shows it.
+fn crop_of(app: &PhotocraftApp, answer: &Value, ctx: &egui::Context) -> Option<egui::TextureHandle> {
+    let side = |i: usize| answer["rect"].get(i).and_then(Value::as_i64);
+    let (x, y, w, h) = (side(0)? as i32, side(1)? as i32, side(2)? as u32, side(3)? as u32);
+    let doc = &app.session.active()?.doc;
+    let buffer = photocraft_compose::render(doc, photocraft_geom::Rect::from_xywh(x, y, w, h));
+    let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+    let px: Vec<egui::Color32> = buffer.px.iter().map(|p| egui::Color32::from_rgba_unmultiplied(q(p[0]), q(p[1]), q(p[2]), q(p[3]))).collect();
+    Some(ctx.load_texture("font-finder-zone", egui::ColorImage::new([w as usize, h as usize], px), egui::TextureOptions::LINEAR))
+}
+
+/// `o` on the type layer in use, and on what the type tools write next.
+fn choose(app: &mut PhotocraftApp, o: &Value) {
+    let st = style_of(o);
+    let params = o["params"].clone();
+    let tools = &mut app.ui.tool_options;
+    tools.type_font.clone_from(&st.font);
+    tools.type_style.clone_from(&st.style);
+    tools.type_size = st.size;
+    let bubble = &mut tools.bubble_styles.bubble;
+    (bubble.font, bubble.style, bubble.size, bubble.color) = (st.font.clone(), st.style.clone(), st.size, st.color.clone());
+    (bubble.stroke, bubble.stroke_color, bubble.stroke_width) = (st.stroke, st.stroke_color.clone(), st.stroke_width);
+    let name = o["family"].as_str().unwrap_or_default().to_string();
+    let layer = app.session.active().and_then(|d| d.active_layer).filter(|id| {
+        app.session.active().is_some_and(|d| matches!(d.doc.layer(*id).map(|l| &l.content), Some(photocraft_doc::LayerContent::Text(_))))
+    });
+    if let Some(id) = layer {
+        let styles = json!({"bubble": params.clone(), "narration": params.clone(), "floating": params});
+        if let Err(e) = app.run("type.setBubbleStyle", json!({"layer": id.0, "styles": styles})) {
+            app.ui.status = e;
+            app.ui.status_error = true;
+            return;
+        }
+    }
+    app.ui.status = crate::i18n::fmt(tl!("Using {font}"), &[("font", &name)]);
+    app.ui.status_error = false;
+}
+
+/// The window with the answer, each option drawn with its look.
+pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let found = app.session.font_found();
+    if !app.font_finder.shown.as_ref().zip(found.as_ref()).is_some_and(|(a, b)| Arc::ptr_eq(a, b)) {
+        app.font_finder.shown.clone_from(&found);
+        app.font_finder.cards.clear();
+        app.font_finder.crop = found.as_deref().and_then(|a| crop_of(app, a, ctx));
+    }
+    if app.ui.tool != Tool::FontFinder || app.font_finder.closed {
+        return;
+    }
+    let Some(answer) = app.font_finder.shown.clone() else { return };
+    let options = answer["options"].as_array().cloned().unwrap_or_default();
+    // A drawing a frame: five at once would hold the page.
+    if app.font_finder.cards.len() < options.len() {
+        let st = BubbleTextStyle { size: SAMPLE_PT, ..style_of(&options[app.font_finder.cards.len()]) };
+        let img = crate::bubble_type_ui::render_text(&st, SAMPLE);
+        let n = app.font_finder.cards.len();
+        app.font_finder.cards.push(img.map(|i| ctx.load_texture(format!("font-finder-{n}"), i, egui::TextureOptions::LINEAR)));
+        ctx.request_repaint();
+    }
+    let t = Tokens::get(ctx);
+    let screen = crate::safe_area::rect(ctx);
+    let phone = screen.width() < 600.0;
+    let mut open = true;
+    let mut picked = None;
+    let mut w = egui::Window::new(tl!("Find Font")).id(egui::Id::unique("font-finder-window")).open(&mut open).collapsible(false);
+    // Beside the page, where the zone can still be seen.
+    w = if phone { w.fixed_rect(screen.shrink(4.0)).resizable(false) } else { w.default_width(420.0).default_height(screen.height() * 0.8).default_pos(egui::pos2(screen.right() - 700.0, screen.top() + 90.0)) };
+    w.show(ctx, |ui| {
+        if options.is_empty() {
+            ui.label(tl!("No lettering found here. Try a tighter rectangle around the letters."));
+            return;
+        }
+        if let Some(tex) = &app.font_finder.crop {
+            let s = tex.size_vec2();
+            let k = (ui.available_width() / s.x).min(CROP_HEIGHT / s.y);
+            ui.add(egui::Image::new((tex.id(), s * k)));
+        }
+        ui.label(egui::RichText::new(tl!("Click one to use it")).color(t.text_dim));
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for (i, o) in options.iter().enumerate() {
+                let name = format!("{}  {}", o["family"].as_str().unwrap_or_default(), o["style"].as_str().unwrap_or_default());
+                let size = o["params"]["size"].as_f64().unwrap_or(0.0);
+                let r = ui.scope_builder(egui::UiBuilder::new().sense(egui::Sense::click()), |ui| {
+                    ui.label(egui::RichText::new(format!("{name}  ·  {size:.0} pt")).strong());
+                    if let Some(Some(tex)) = app.font_finder.cards.get(i) {
+                        let s = tex.size_vec2();
+                        let width = ui.available_width().min(s.x);
+                        ui.add(egui::Image::new((tex.id(), egui::vec2(width, s.y * width / s.x))));
+                    }
+                });
+                crate::touch_ui::note_rect(ctx, &format!("fontFinder:{i}"), r.response.rect);
+                if r.response.clicked() {
+                    picked = Some(o.clone());
+                }
+                ui.add_space(6.0);
+            }
+        });
+    });
+    if !open {
+        app.font_finder.closed = true;
+    }
+    if let Some(o) = picked {
+        choose(app, &o);
+        app.font_finder.closed = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_click_takes_a_square_and_a_drag_its_rectangle() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.session.execute("file.new", json!({"width": 600, "height": 200, "background": "white"})).unwrap();
+        app.session.execute("type.create", json!({"x": 40, "y": 110, "text": "NO PUEDE SER", "font": "Inter", "size": 60, "color": "#000000"})).unwrap();
+        app.ui.tool = Tool::FontFinder;
+        finish(&mut app, [10.0, 40.0], [590.0, 160.0]);
+        let answer = app.session.font_found().expect("an answer");
+        assert_eq!(answer["rect"], json!([10, 40, 580, 120]));
+        assert!(!answer["options"].as_array().unwrap().is_empty());
+        finish(&mut app, [300.0, 100.0], [300.0, 100.0]);
+        let answer = app.session.font_found().expect("an answer");
+        assert_eq!(answer["rect"], json!([172, 0, 256, 200]), "256 px around the click, inside the page");
+    }
+
+    #[test]
+    fn choosing_an_option_sets_the_next_text_and_the_layer_in_use() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.session.execute("file.new", json!({"width": 600, "height": 200, "background": "white"})).unwrap();
+        app.session.execute("type.create", json!({"x": 40, "y": 110, "text": "HOLA", "font": "JetBrains Mono", "size": 40})).unwrap();
+        let o = json!({"family": "Inter", "style": "Regular", "params": {"font": "Inter", "fontStyle": "Regular", "size": 33.0, "color": "#112233", "stroke": null}});
+        choose(&mut app, &o);
+        assert_eq!(app.ui.tool_options.type_font, "Inter");
+        assert_eq!(app.ui.tool_options.bubble_styles.bubble.color, "#112233");
+        let st = app.session.active().unwrap();
+        let photocraft_doc::LayerContent::Text(t) = &st.doc.layer(st.active_layer.unwrap()).unwrap().content else { panic!("type") };
+        assert_eq!(t.runs[0].style.font_family, "Inter");
+    }
+}

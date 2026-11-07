@@ -956,7 +956,7 @@ fn handle_primary_canvas_input(app: &mut PhotocraftApp, ui: &mut egui::Ui, view:
     // Capture intent at the press, before egui's drag threshold or click replay on release:
     // Type transforms keep Command; selections keep Add/Subtract if Shift/Alt is released.
     let capture_press =
-        tool.is_type() || matches!(tool, Tool::RectMarquee | Tool::EllipseMarquee | Tool::SingleRowMarquee | Tool::SingleColumnMarquee | Tool::ObjectSelection);
+        tool.is_type() || matches!(tool, Tool::RectMarquee | Tool::EllipseMarquee | Tool::SingleRowMarquee | Tool::SingleColumnMarquee | Tool::ObjectSelection | Tool::FontFinder);
     let tool_press = egui::Id::unique(("tool-pointer-press-modifiers", idx));
     if capture_press
         && let Some((p, press_mods)) = ui.input(|i| {
@@ -1449,6 +1449,7 @@ fn paint_primary_overlays(app: &mut PhotocraftApp, ui: &mut egui::Ui, view: &mut
     if app.session.active_index() == Some(idx) {
         crate::genfill_ui::prompt_bar(app, ctx);
         crate::text_select_ui::bar(app, ctx);
+        crate::font_finder_ui::window(app, ctx);
     }
     // A view menu row (Zoom In, Fit on Screen…) changed the camera: it wins over this
     // frame's copy, which is written back at the end.

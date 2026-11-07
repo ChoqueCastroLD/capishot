@@ -4276,3 +4276,9 @@ curves	Smooth	매끄럽게
 	Brush {px}	브러시 {px}
 	Smaller Brush	브러시 작게
 	Bigger Brush	브러시 크게
+	Font Finder Tool	글꼴 찾기 도구
+	Click on lettering or drag a rectangle around it to find its font	글자를 클릭하거나 주위에 사각형을 드래그해 글꼴을 찾으세요
+	Using {font}	{font} 사용 중
+	Find Font	글꼴 찾기
+	No lettering found here. Try a tighter rectangle around the letters.	여기에서 글자를 찾지 못했습니다. 더 좁은 사각형으로 해 보세요.
+	Click one to use it	클릭해서 사용

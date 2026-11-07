@@ -40,6 +40,7 @@ photocraft-psd = { workspace = true }
 # `edit.inpaintAi`: tiling only; the model runs behind the injected `Inpainter` service.
 photocraft-ai-lama = { workspace = true }
 photocraft-ai-textmask = { workspace = true }
+photocraft-fontmatch = { workspace = true }
 photocraft-ai-sd = { workspace = true }
 photocraft-format = { workspace = true }
 # Image › Upscale with AI: catalog, selection rules and the upscaler seam (no inference).

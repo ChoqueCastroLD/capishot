@@ -724,7 +724,7 @@ mod tests {
         assert!(!Tool::RedEye.is_brushlike());
         assert_eq!(Tool::from_name("patternStamp"), Some(Tool::PatternStamp));
         assert_eq!(Tool::from_name("Pattern Stamp Tool"), Some(Tool::PatternStamp));
-        assert_eq!(Tool::ALL.len(), 72);
+        assert_eq!(Tool::ALL.len(), 73);
         assert_eq!(Tool::from_name("Remove with AI Tool"), Some(Tool::RemoveAi));
         assert!(Tool::RemoveAi.is_brushlike() && Tool::RemoveAi.key() == 'J');
         assert_eq!(Tool::from_name("Bubble Type Tool"), Some(Tool::BubbleType));

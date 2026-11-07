@@ -38,6 +38,8 @@ pub enum Tool {
     VerticalTypeMask,
     /// Bubble Type: a click in a speech bubble makes type in the bubble's shape.
     BubbleType,
+    /// Font Finder: a click or a drag on lettering finds its font, with no model and no OCR.
+    FontFinder,
     Hand,
     RotateView,
     Zoom,
@@ -87,7 +89,7 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Tool; 72] = [
+    pub const ALL: [Tool; 73] = [
         Tool::Move,
         Tool::Artboard,
         Tool::RectMarquee,
@@ -119,6 +121,7 @@ impl Tool {
         Tool::HorizontalTypeMask,
         Tool::VerticalTypeMask,
         Tool::BubbleType,
+        Tool::FontFinder,
         Tool::Hand,
         Tool::RotateView,
         Tool::Zoom,
@@ -198,6 +201,7 @@ impl Tool {
             Tool::HorizontalTypeMask => "Horizontal Type Mask Tool",
             Tool::VerticalTypeMask => "Vertical Type Mask Tool",
             Tool::BubbleType => "Bubble Type Tool",
+            Tool::FontFinder => "Font Finder Tool",
             Tool::Hand => "Hand Tool",
             Tool::RotateView => "Rotate View Tool",
             Tool::Zoom => "Zoom Tool",
@@ -304,6 +308,8 @@ impl Tool {
             Tool::CloneStamp | Tool::PatternStamp => 'S',
             Tool::HistoryBrush | Tool::ArtHistoryBrush => 'Y',
             Tool::Blur | Tool::Sharpen | Tool::Smudge => '\0',
+            // In the Type flyout, but T only cycles the tools that write.
+            Tool::FontFinder => '\0',
             // In the Marquee flyout, but M cycles only the Rectangular and Elliptical Marquee.
             Tool::SingleRowMarquee | Tool::SingleColumnMarquee => '\0',
             Tool::Dodge | Tool::Burn | Tool::Sponge => 'O',

@@ -65,6 +65,7 @@ pub mod lut_library_cmds;
 pub mod package;
 pub mod ai_warm_cmds;
 pub mod remove_ai_cmds;
+pub mod font_find_cmds;
 pub mod text_mask_cmds;
 pub mod theme_cmds;
 pub mod type_bubble_cmds;
@@ -343,6 +344,9 @@ pub struct Session {
     text_masker: Option<std::sync::Arc<dyn photocraft_ai_textmask::TextMasker>>,
     /// The last `select.detectText` of each document.
     text_detections: Vec<(photocraft_doc::DocId, std::sync::Arc<photocraft_ai_textmask::Detection>)>,
+    /// The font finder's alphabets, for the font list of this generation, and its last answer.
+    font_library: Option<(u64, std::sync::Arc<photocraft_fontmatch::Library>)>,
+    font_found: Option<std::sync::Arc<serde_json::Value>>,
     /// Downloads and deletes AI model weights (`ai.models.*`, the AI Model Manager), injected by
     /// the shell; `None` where downloads are unavailable (see `ai_models_cmds`).
     ai_models: Option<Arc<dyn photocraft_ai::models::ModelStore>>,

@@ -5494,3 +5494,9 @@ fontTab	Find More	Encontrar mais
 	Brush {px}	Pincel {px}
 	Smaller Brush	Pincel menor
 	Bigger Brush	Pincel maior
+	Font Finder Tool	Ferramenta Buscar fonte
+	Click on lettering or drag a rectangle around it to find its font	Clique nas letras ou arraste um retângulo em volta para buscar a fonte
+	Using {font}	Usando {font}
+	Find Font	Buscar fonte
+	No lettering found here. Try a tighter rectangle around the letters.	Nenhuma letra encontrada aqui. Tente um retângulo mais justo.
+	Click one to use it	Clique em uma para usá-la

@@ -305,6 +305,11 @@ fn preview(ui: &mut egui::Ui, tab: &str, st: &BubbleTextStyle) {
 const PREVIEW: (u32, u32) = (380, 110);
 
 fn render_sample(st: &BubbleTextStyle) -> Option<egui::ColorImage> {
+    render_text(st, tl!("Sample text"))
+}
+
+/// `text` in the style, on a small neutral ground.
+pub(crate) fn render_text(st: &BubbleTextStyle, text: &str) -> Option<egui::ColorImage> {
     let mut s = photocraft_engine::Session::new();
     s.execute("file.new", json!({"width": PREVIEW.0, "height": PREVIEW.1, "background": "#d9d9d9"})).ok()?;
     let mut floating = style_params(st);
@@ -321,7 +326,7 @@ fn render_sample(st: &BubbleTextStyle) -> Option<egui::ColorImage> {
     };
     s.execute(
         "type.createInBubble",
-        json!({"x": x, "y": f64::from(PREVIEW.1) / 2.0, "style": "floating", "text": tl!("Sample text"), "styles": {"floating": floating}}),
+        json!({"x": x, "y": f64::from(PREVIEW.1) / 2.0, "style": "floating", "text": text, "styles": {"floating": floating}}),
     )
     .ok()?;
     let doc = &s.active()?.doc;

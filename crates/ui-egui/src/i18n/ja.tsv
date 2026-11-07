@@ -4729,3 +4729,9 @@ curves	Smooth	スムーズ
 	Brush {px}	ブラシ {px}
 	Smaller Brush	ブラシを小さく
 	Bigger Brush	ブラシを大きく
+	Font Finder Tool	フォント検索ツール
+	Click on lettering or drag a rectangle around it to find its font	文字をクリックするか周囲を長方形でドラッグしてフォントを検索します
+	Using {font}	{font} を使用中
+	Find Font	フォントを検索
+	No lettering found here. Try a tighter rectangle around the letters.	ここに文字が見つかりません。もっと狭い長方形で試してください。
+	Click one to use it	クリックして使用

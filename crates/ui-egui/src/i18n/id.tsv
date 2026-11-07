@@ -4079,3 +4079,9 @@ curves	Smooth	Haluskan
 	Brush {px}	Kuas {px}
 	Smaller Brush	Kuas Lebih Kecil
 	Bigger Brush	Kuas Lebih Besar
+	Font Finder Tool	Alat Cari Font
+	Click on lettering or drag a rectangle around it to find its font	Klik huruf atau seret persegi panjang di sekelilingnya untuk mencari fontnya
+	Using {font}	Menggunakan {font}
+	Find Font	Cari Font
+	No lettering found here. Try a tighter rectangle around the letters.	Tidak ada huruf di sini. Coba persegi panjang yang lebih pas.
+	Click one to use it	Klik salah satu untuk memakainya

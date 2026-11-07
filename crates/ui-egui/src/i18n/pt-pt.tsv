@@ -3623,3 +3623,9 @@ fontWeight	Italic	Itálico
 	Brush {px}	Pincel {px}
 	Smaller Brush	Pincel menor
 	Bigger Brush	Pincel maior
+	Font Finder Tool	Ferramenta Procurar tipo de letra
+	Click on lettering or drag a rectangle around it to find its font	Clique nas letras ou arraste um retângulo à volta para procurar o tipo de letra
+	Using {font}	A usar {font}
+	Find Font	Procurar tipo de letra
+	No lettering found here. Try a tighter rectangle around the letters.	Nenhuma letra encontrada aqui. Tente um retângulo mais justo.
+	Click one to use it	Clique num para o usar

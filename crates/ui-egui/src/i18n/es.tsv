@@ -5526,3 +5526,9 @@ fontTab	Find More	Buscar más
 	Brush {px}	Pincel {px}
 	Smaller Brush	Pincel más chico
 	Bigger Brush	Pincel más grande
+	Font Finder Tool	Herramienta Buscar fuente
+	Click on lettering or drag a rectangle around it to find its font	Haz clic sobre las letras o arrastra un rectángulo a su alrededor para buscar su fuente
+	Using {font}	Usando {font}
+	Find Font	Buscar fuente
+	No lettering found here. Try a tighter rectangle around the letters.	No se encontraron letras aquí. Prueba con un rectángulo más ajustado.
+	Click one to use it	Haz clic en una para usarla

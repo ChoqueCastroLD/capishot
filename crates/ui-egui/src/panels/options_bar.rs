@@ -620,6 +620,7 @@ fn tool_specific_options(app: &mut PhotocraftApp, ui: &mut egui::Ui, t: Tokens, 
         return;
     }
     match app.ui.tool {
+        Tool::FontFinder => crate::font_finder_ui::options_bar(app, ui),
         Tool::Move => {
             let o = &mut app.ui.tool_options;
             widgets::checkbox(ui, &mut o.move_auto_select, tl!("Auto-Select:"));

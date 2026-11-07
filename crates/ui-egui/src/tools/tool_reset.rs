@@ -166,6 +166,7 @@ pub fn option_keys(tool: Tool) -> &'static [&'static str] {
         Tool::MagicWand => reset!(tolerance, anti_alias, contiguous, wand_sample_size),
         Tool::QuickSelection => reset!(enhance_edge),
         Tool::ObjectSelection => reset!(enhance_edge, object_finder),
+        Tool::FontFinder => &[],
         Tool::TextSelection => reset!(text_select_clean_click, text_select_by_blocks, clean_output, text_select_show, text_select_on, text_select_off, text_select_opacity, text_select_contour),
         Tool::Crop => reset!(
             crop_ratio,

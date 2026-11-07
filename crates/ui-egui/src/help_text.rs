@@ -99,6 +99,7 @@ pub const HELP: &[Help] = &[
     h("tool:Burn", "Paint to darken areas", "Pinta para oscurecer zonas", "Pinte para escurecer áreas"),
     h("tool:Sponge", "Paint to make colors more or less saturated", "Pinta para saturar o desaturar los colores", "Pinte para saturar ou dessaturar as cores"),
     h("tool:QuickSelection", "Paint over an object and the selection grows to its edges", "Pinta sobre un objeto y la selección crece hasta sus bordes", "Pinte sobre um objeto e a seleção cresce até as bordas"),
+    h("tool:FontFinder", "Click or drag on lettering: five fonts that look like it, with its colors", "Haz clic o arrastra sobre letras: cinco fuentes parecidas, con sus colores", "Clique ou arraste sobre letras: cinco fontes parecidas, com suas cores"),
     h("tool:TextSelection", "Finds the text on the page: choose the pieces to select, then clean them", "Encuentra el texto de la página: elige las piezas a seleccionar y luego límpialas", "Encontra o texto da página: escolha as peças a selecionar e depois limpe-as"),
     h("tool:ObjectSelection", "Draw a box around an object and it is selected for you", "Dibuja un recuadro alrededor de un objeto y se selecciona solo", "Desenhe um retângulo ao redor de um objeto e ele é selecionado sozinho"),
     h("tool:Pen", "Click points to draw precise paths and curves", "Haz clic en puntos para trazar líneas y curvas precisas", "Clique em pontos para traçar caminhos e curvas precisos"),

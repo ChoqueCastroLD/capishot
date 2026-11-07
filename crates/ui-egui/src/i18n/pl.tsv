@@ -4677,3 +4677,9 @@ curves	Smooth	Wygładź
 	Brush {px}	Pędzel {px}
 	Smaller Brush	Mniejszy pędzel
 	Bigger Brush	Większy pędzel
+	Font Finder Tool	Narzędzie Znajdź czcionkę
+	Click on lettering or drag a rectangle around it to find its font	Kliknij litery lub przeciągnij wokół nich prostokąt, aby znaleźć czcionkę
+	Using {font}	Używana czcionka: {font}
+	Find Font	Znajdź czcionkę
+	No lettering found here. Try a tighter rectangle around the letters.	Nie znaleziono tu liter. Spróbuj ciaśniejszego prostokąta.
+	Click one to use it	Kliknij, aby użyć

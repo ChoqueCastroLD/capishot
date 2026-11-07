@@ -47,6 +47,7 @@ pub const SYNONYMS: &[(&[&str], &str)] = &[
     (&["degradado", "degrade", "gradiente", "gradient"], "tool:Gradient"),
     (&["bote", "balde", "rellenar", "preencher", "bucket", "fill"], "tool:PaintBucket"),
     (&["varita", "varinha", "magic wand", "wand"], "tool:MagicWand"),
+    (&["buscar fuente", "encontrar fonte", "font finder", "find font", "que fuente"], "tool:FontFinder"),
     (&["mascara de texto", "seleccion de texto", "selecao de texto", "text mask", "text selection"], "tool:TextSelection"),
     (&["seleccion rapida", "selecao rapida", "quick selection"], "tool:QuickSelection"),
     (&["deshacer", "desfazer", "undo", "atras", "volver"], "edit.undo"),

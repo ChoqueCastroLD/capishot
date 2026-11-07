@@ -28,6 +28,7 @@ pub mod move_distance;
 pub mod move_hover;
 pub mod move_lock;
 pub mod move_mods;
+pub mod font_finder_ui;
 pub mod object_finder;
 pub mod text_select_ui;
 pub mod perspective_crop_ui;

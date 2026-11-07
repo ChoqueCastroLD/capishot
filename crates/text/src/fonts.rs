@@ -166,6 +166,20 @@ pub fn shared_generation() -> u64 {
     SHARED_GENERATION.load(Ordering::Relaxed)
 }
 
+/// A face with its file.
+pub struct FaceBlob {
+    pub family: String,
+    pub style: String,
+    pub index: u32,
+    data: parley::fontique::Blob<u8>,
+}
+
+impl FaceBlob {
+    pub fn bytes(&self) -> &[u8] {
+        self.data.as_ref()
+    }
+}
+
 /// One face in the database (for font menus).
 #[derive(Clone, Debug, PartialEq)]
 pub struct FaceInfo {
@@ -401,6 +415,21 @@ impl FontDb {
     /// type with these in the browser.
     pub fn font_data(&self) -> Vec<FontData> {
         self.data.clone()
+    }
+
+    /// Every face of every family, with its file, to read their outlines off the UI's thread.
+    pub fn face_blobs(&mut self) -> Vec<FaceBlob> {
+        let mut out = Vec::new();
+        for family in self.families() {
+            let faces = self.faces(&family);
+            let Some(info) = self.fcx.collection.family_by_name(&family) else { continue };
+            for (f, face) in info.fonts().iter().zip(faces) {
+                if let Some(data) = f.load(Some(&mut self.fcx.source_cache)) {
+                    out.push(FaceBlob { family: family.clone(), style: face.style, index: f.index(), data });
+                }
+            }
+        }
+        out
     }
 
     /// The font files this database has for `family` that a font project can carry: the user's

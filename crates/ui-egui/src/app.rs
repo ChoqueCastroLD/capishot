@@ -88,6 +88,7 @@ impl PhotocraftApp {
             move_distance: None,
             object_finder: None,
             text_select: Default::default(),
+            font_finder: Default::default(),
             blend_preview: None,
             reorder_preview: None,
             reorder_preview_hit: false,
