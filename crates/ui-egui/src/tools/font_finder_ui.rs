@@ -10,10 +10,11 @@
 //! shapes and, for each answer from it, that font's file, to draw it; choosing one keeps it.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, PoisonError};
 
 use photocraft_engine::font_find_cmds::{Face, ID, pack, read_font_file};
 use photocraft_text::user_fonts;
+use wasm_sync::Mutex;
 use serde_json::{Value, json};
 
 use crate::PhotocraftApp;
@@ -85,6 +86,10 @@ fn pump_pack(app: &mut PhotocraftApp, ctx: &egui::Context) {
             }
         }
     }
+    // Asked for, not woken: a thread of the browser's pool can't touch the window.
+    if app.font_finder.pack_fetching {
+        ctx.request_repaint_after(std::time::Duration::from_millis(150));
+    }
     if !app.ui.tool_options.font_find_google || app.session.has_font_pack() || app.font_finder.pack_fetching {
         return;
     }
@@ -94,7 +99,7 @@ fn pump_pack(app: &mut PhotocraftApp, ctx: &egui::Context) {
         return;
     };
     app.font_finder.pack_fetching = true;
-    let (slot, wake) = (app.font_finder.pack_arrived.clone(), ctx.clone());
+    let slot = app.font_finder.pack_arrived.clone();
     fetch(pack::URL.to_string(), pack::BYTES.saturating_mul(2).max(1 << 20), Box::new(move |r| {
         let work = move || {
             let read = r.and_then(|bytes| {
@@ -104,7 +109,6 @@ fn pump_pack(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 pack::read(&bytes).ok_or_else(|| "the file can't be read".to_string())
             });
             *slot.lock().unwrap_or_else(PoisonError::into_inner) = Some(read);
-            wake.request_repaint();
         };
         if crate::jobs_ui::OFF_THREAD { crate::jobs_ui::off_thread(work) } else { work() }
     }));
@@ -146,11 +150,13 @@ fn pump_fonts(app: &mut PhotocraftApp, ctx: &egui::Context, options: &[Value]) {
         }
         let Some(fetch) = &app.services.fetch else { return };
         app.font_finder.font_fetching.insert(url.to_string());
-        let (slot, wake, url) = (app.font_finder.font_arrived.clone(), ctx.clone(), url.to_string());
+        let (slot, url) = (app.font_finder.font_arrived.clone(), url.to_string());
         fetch(url.clone(), 64 << 20, Box::new(move |r| {
             slot.lock().unwrap_or_else(PoisonError::into_inner).push((url, r));
-            wake.request_repaint();
         }));
+    }
+    if !app.font_finder.font_fetching.is_empty() {
+        ctx.request_repaint_after(std::time::Duration::from_millis(150));
     }
 }
 

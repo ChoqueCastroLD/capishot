@@ -142,30 +142,38 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
     let cached = s.font_library.as_ref().filter(|(g, n, _)| *g == generation && *n == files).map(|(_, _, l)| l.clone());
     let known = s.font_library.as_ref().map(|(_, _, l)| l.clone());
     let extra: Vec<Face> = if cached.is_some() { Vec::new() } else { s.font_files.values().flatten().chain(pack.iter().flat_map(|p| p.faces.iter())).cloned().collect() };
-    crate::jobs::run_async(
+    // In parts on the browser's pool, or between frames in its single-threaded build: nothing here
+    // runs on the page's thread, however many fonts there are.
+    crate::jobs::run_async_prepared(
         s,
         LABEL,
         false,
-        move |ctx, done| {
-            let library = cached.unwrap_or_else(|| {
-                let faces = face_blobs();
-                let sources: Vec<FaceSource<'_>> = faces.iter().map(|f| FaceSource { family: &f.family, style: &f.style, data: f.bytes(), index: f.index }).collect();
-                let step = ctx.clone();
-                Arc::new(Library::build_from(&sources, known.as_deref(), &extra, &mut |f| step.progress(f * 0.9, LABEL)))
-            });
-            ctx.progress(0.9, LABEL);
-            let buffer = photocraft_compose::render(&doc, area);
-            let mut rgb = Vec::with_capacity(buffer.px.len() * 3);
-            for px in &buffer.px {
-                for c in &px[..3] {
-                    // What shows, over white.
-                    rgb.push(((c * px[3] + 1.0 - px[3]).clamp(0.0, 1.0) * 255.0).round() as u8);
-                }
-            }
-            let zone = Zone { rgb: &rgb, width: area.width() as usize, height: area.height() as usize };
-            let found: Vec<Value> = find_in(&library, &zone, k, &scope).iter().map(|c| option(c, dpi)).collect();
-            done.finish(Ok((library, generation, json!({"options": found, "rect": [area.x0, area.y0, area.width(), area.height()], "faces": 0}))));
+        move |_ctx| {
+            Ok(crate::jobs::Prep::then(move |ctx| {
+                let library = cached.unwrap_or_else(|| {
+                    let faces = face_blobs();
+                    let sources: Vec<FaceSource<'_>> = faces.iter().map(|f| FaceSource { family: &f.family, style: &f.style, data: f.bytes(), index: f.index }).collect();
+                    let step = ctx.clone();
+                    Arc::new(Library::build_from(&sources, known.as_deref(), &extra, &mut |f| step.progress(f * 0.9, LABEL)))
+                });
+                ctx.progress(0.9, LABEL);
+                Ok(crate::jobs::Prep::then(move |_| {
+                    let buffer = photocraft_compose::render(&doc, area);
+                    let mut rgb = Vec::with_capacity(buffer.px.len() * 3);
+                    for px in &buffer.px {
+                        for c in &px[..3] {
+                            // What shows, over white.
+                            rgb.push(((c * px[3] + 1.0 - px[3]).clamp(0.0, 1.0) * 255.0).round() as u8);
+                        }
+                    }
+                    let zone = Zone { rgb: &rgb, width: area.width() as usize, height: area.height() as usize };
+                    let found: Vec<Value> = find_in(&library, &zone, k, &scope).iter().map(|c| option(c, dpi)).collect();
+                    let out = json!({"options": found, "rect": [area.x0, area.y0, area.width(), area.height()], "faces": 0});
+                    Ok(crate::jobs::Prep::Done((library, generation, out)))
+                }))
+            }))
         },
+        move |_ctx, found, done| done.finish(Ok(found)),
         move |s, (library, generation, mut out): (Arc<Library>, u64, Value)| {
             out["faces"] = json!(library.faces.len());
             if let Some(pack) = &pack {
