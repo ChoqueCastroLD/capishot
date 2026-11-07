@@ -508,6 +508,29 @@ impl Detection {
         Detection { width, height, labels, regions }
     }
 
+    /// The pieces and a zone a person drew, as a new piece. Pixels that already are a piece stay
+    /// theirs. `None` when it adds nothing.
+    pub fn with_zone(&self, zone: impl Fn(usize, usize) -> bool) -> Option<Detection> {
+        let w = self.width.max(1);
+        let id = self.regions.len() as u32 + 1;
+        let group = self.regions.iter().map(|r| r.group).max().unwrap_or(0) + 1;
+        let mut labels = self.labels.clone();
+        let [mut x0, mut y0, mut x1, mut y1, mut area] = [u32::MAX, u32::MAX, 0, 0, 0];
+        for (i, l) in labels.iter_mut().enumerate() {
+            if *l == 0 && zone(i % w, i / w) {
+                *l = id;
+                let (x, y) = ((i % w) as u32, (i / w) as u32);
+                (x0, y0, x1, y1, area) = (x0.min(x), y0.min(y), x1.max(x + 1), y1.max(y + 1), area + 1);
+            }
+        }
+        if u64::from(area) < MIN_AREA {
+            return None;
+        }
+        let mut regions = self.regions.clone();
+        regions.push(Region { id, group, bbox: [x0, y0, x1, y1], area: u64::from(area), score: 1.0 });
+        Some(Detection { width: self.width, height: self.height, labels, regions })
+    }
+
     /// Only what's inside `zone` (a flag per pixel): pieces are cut at its edge, and what little
     /// is left of one goes.
     pub fn clipped(&self, zone: impl Fn(usize, usize) -> bool) -> Detection {
@@ -604,6 +627,22 @@ mod tests {
         blob(&mut p, w, 10, 10, 40, 40, 0.6); // Never confident.
         blob(&mut p, w, 60, 60, 62, 62, 0.995); // Tiny.
         assert!(find_regions(&p, w, h).regions.is_empty());
+    }
+
+    #[test]
+    fn a_zone_drawn_by_hand_is_a_piece_of_its_own() {
+        let (w, h) = (100, 100);
+        let mut p = vec![0.0; w * h];
+        blob(&mut p, w, 10, 10, 30, 30, 0.995);
+        let d = find_regions(&p, w, h);
+        let z = d.with_zone(|x, y| (20..60).contains(&x) && (20..60).contains(&y)).expect("it adds");
+        assert_eq!(z.regions.len(), 2);
+        assert_eq!(z.regions[1].id, 2);
+        assert_ne!(z.regions[1].group, z.regions[0].group);
+        assert_eq!(z.labels[25 * w + 25], 1, "what was a piece stays its");
+        assert_eq!(z.labels[40 * w + 40], 2);
+        assert!(z.regions[1].suggested());
+        assert!(d.with_zone(|x, y| (10..30).contains(&x) && (10..30).contains(&y)).is_none(), "nothing new");
     }
 
     #[test]

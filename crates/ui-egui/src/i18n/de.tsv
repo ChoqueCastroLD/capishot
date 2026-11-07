@@ -4092,3 +4092,39 @@ curves	Smooth	Glätten
 	Reading your fonts: {done} of {total}	Deine Schriften werden gelesen: {done} von {total}
 	Very few fonts are loaded: load yours and the search looks through them	Es sind nur sehr wenige Schriften geladen: Lade deine, dann werden sie durchsucht
 	Among {n} loaded fonts. Click one to use it	Unter {n} geladenen Schriften. Klicke auf eine, um sie zu verwenden
+	Content Fill	Füllung
+	Flat Color	Farbe
+	Pick	Wählen
+	Result in	Ergebnis in
+	On the Page	Auf der Seite
+	Clean with	Bereinigen mit
+	Clean {n}	{n} bereinigen
+	Drag Adds	Ziehen fügt hinzu
+	Drag Removes	Ziehen entfernt
+	Drag: {shape}	Ziehen: {shape}
+	Marks every piece with the method in use	Markiert alle Teile mit der aktuellen Methode
+	Leaves out what the model doubts	Lässt aus, was das Modell bezweifelt
+	Marks the others instead	Markiert stattdessen die anderen
+	Takes every piece off	Nimmt alle Teile heraus
+	With its options, on everything chosen	Mit Optionen, für alles Gewählte
+	Flat Color from Around Each Block	Farbe aus der Umgebung jedes Blocks
+	The color to paint with	Die Malfarbe
+	Manga LaMa draws what was behind the letters. The best over drawings, and it takes a while	Manga LaMa zeichnet, was hinter den Buchstaben war. Am besten auf Zeichnungen, dauert etwas
+	Copies from around each block. Quick, for tones and simple backgrounds	Kopiert aus der Umgebung jedes Blocks. Schnell, für Raster und einfache Hintergründe
+	Paints each block in the color around it. Instant, for letters on an even balloon	Malt jeden Block in der Farbe seiner Umgebung. Sofort, für Buchstaben in gleichmäßigen Blasen
+	Click a block, or drag a box around several	Klicke auf einen Block oder ziehe einen Rahmen um mehrere
+	Drag a rectangle: a zone of its own	Ziehe ein Rechteck: eine eigene Zone
+	Draw around a zone of its own	Umrande eine eigene Zone
+	Paint a zone of its own	Male eine eigene Zone
+	Click a block or drag a box around several. Ctrl: a single piece. Alt: take away	Klicke auf einen Block oder ziehe einen Rahmen um mehrere. Strg: ein Teil. Alt: entfernen
+	Tap a block or drag a box around several	Tippe auf einen Block oder ziehe einen Rahmen um mehrere
+	Drag a rectangle to add a zone. Alt cuts it out	Ziehe ein Rechteck, um eine Zone hinzuzufügen. Alt schneidet sie aus
+	Drag a rectangle to add a zone	Ziehe ein Rechteck, um eine Zone hinzuzufügen
+	Draw around a zone to add it. Alt cuts it out	Umrande eine Zone, um sie hinzuzufügen. Alt schneidet sie aus
+	Draw around a zone to add it	Umrande eine Zone, um sie hinzuzufügen
+	Paint a zone to add it. Alt cuts it out	Male eine Zone, um sie hinzuzufügen. Alt schneidet sie aus
+	Paint a zone to add it	Male eine Zone, um sie hinzuzufügen
+	Tap a block to clean it	Tippe auf einen Block, um ihn zu bereinigen
+	Click a block to clean it	Klicke auf einen Block, um ihn zu bereinigen
+	Each click cleans that block right away, one at a time	Jeder Klick bereinigt den Block sofort, einen nach dem anderen
+	Finds the text and sound effects on the page, or drag a box to look only there. You choose what to clean	Findet Text und Soundeffekte auf der Seite, oder ziehe einen Rahmen, um nur dort zu suchen. Du wählst, was bereinigt wird

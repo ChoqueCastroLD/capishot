@@ -3,13 +3,15 @@
 //! art, so its doubtful pieces start unchosen and nothing runs by itself.
 //!
 //! The selection is a normal one, and what's chosen is read from it: Undo, the Lasso and
-//! Select › Modify all count. A click on a piece adds or takes it; a drag paints the selection
-//! (⌥ takes away), with the brush's size. The contour is how far a selection reaches past the
-//! letters: too close and cleaning copies their dark edge back as a smudge. The bar on the canvas
-//! cleans what's selected with Manga LaMa at its fixed best (`edit.removeAi`, as Remove with AI),
-//! fills it by content, or leaves it as a selection.
+//! Select › Modify all count. Each piece chosen also has how it will be cleaned: Manga LaMa at its
+//! fixed best (`edit.removeAi`, as Remove with AI), filled by content or painted flat
+//! (`edit.cleanQuick`). A click marks a block with the method in use, or takes it off; a box around
+//! pieces marks them, and on nothing, or with the Rectangle, the Lasso or the Brush, a drag draws a
+//! zone of its own, a piece like the others. ⌥ takes away. Clean runs each method on its pieces,
+//! the quick ones first. The contour is how far a selection reaches past the letters: too close
+//! and cleaning copies their dark edge back as a smudge.
 //!
-//! All at once or one at a time: with Clean on Click a click cleans that piece, and clicks made
+//! All at once or one at a time: with Clean on Click a click cleans that block, and clicks made
 //! while one runs wait their turn. Either way what was cleaned leaves the pieces and the rest stay.
 
 use std::collections::{HashMap, VecDeque};
@@ -21,13 +23,14 @@ use photocraft_ai::models::Status;
 use photocraft_ai_textmask::regions::MAX_GROW;
 use photocraft_ai_textmask::{Detection, ModelState, default_grow};
 use photocraft_doc::DocId;
-use photocraft_engine::text_mask_cmds::{DETECT, PIECES, STROKE};
+use photocraft_engine::ai_inpaint_cmds::quick;
+use photocraft_engine::text_mask_cmds::{DETECT, PIECES, ZONE};
 use photocraft_geom::Rect;
 use serde_json::{Value, json};
 
 use crate::PhotocraftApp;
 use crate::canvas::ViewXform;
-use crate::state::Tool;
+use crate::state::{CleanMethod, Tool, ZoneShape};
 use crate::theme::Tokens;
 
 /// Longest side of the overlay's texture (a guide, not the selection).
@@ -49,6 +52,12 @@ struct Pieces {
     applied: f32,
     /// By piece, `id - 1`.
     chosen: Vec<bool>,
+    /// How it's cleaned if it's chosen.
+    method: Vec<CleanMethod>,
+    /// Still to clean in the run under way.
+    todo: Vec<bool>,
+    /// Changes when `method` does.
+    marks: u64,
     /// The document revision `chosen` was read at.
     revision: u64,
 }
@@ -58,8 +67,10 @@ struct Pieces {
 struct Look {
     doc: DocId,
     revision: u64,
+    marks: u64,
     by_suggestion: bool,
-    on: Color32,
+    active: CleanMethod,
+    on: [Color32; 3],
     off: Color32,
 }
 
@@ -74,12 +85,59 @@ pub(crate) struct State {
     /// A clean under way: the document, its revision then and what it cleans. When the revision
     /// changes that leaves the pieces.
     cleaning: Option<(DocId, u64, photocraft_raster::Surface)>,
+    /// The methods left in the run under way, the next one last.
+    plan: Vec<CleanMethod>,
     /// The clicks waiting to clean their piece (Clean on Click): document px.
     queue: VecDeque<[f64; 2]>,
     /// What the overlay shows, and its texture.
     overlay: Option<(Look, egui::TextureHandle)>,
     /// On a touch screen, where there's no ⌥: drags take away.
     pub(crate) erase: bool,
+}
+
+const METHODS: [CleanMethod; 3] = [CleanMethod::Ai, CleanMethod::Fill, CleanMethod::Color];
+const SHAPES: [ZoneShape; 4] = [ZoneShape::Pick, ZoneShape::Rect, ZoneShape::Lasso, ZoneShape::Brush];
+
+fn method_label(m: CleanMethod) -> &'static str {
+    match m {
+        CleanMethod::Ai => tl!("AI"),
+        CleanMethod::Fill => tl!("Content Fill"),
+        CleanMethod::Color => tl!("Flat Color"),
+    }
+}
+
+fn method_tip(m: CleanMethod) -> &'static str {
+    match m {
+        CleanMethod::Ai => tl!("Manga LaMa draws what was behind the letters. The best over drawings, and it takes a while"),
+        CleanMethod::Fill => tl!("Copies from around each block. Quick, for tones and simple backgrounds"),
+        CleanMethod::Color => tl!("Paints each block in the color around it. Instant, for letters on an even balloon"),
+    }
+}
+
+fn method_tint(o: &crate::state::ToolOptions, m: CleanMethod) -> [u8; 3] {
+    match m {
+        CleanMethod::Ai => o.text_select_on,
+        CleanMethod::Fill => o.text_select_fill_tint,
+        CleanMethod::Color => o.text_select_flat_tint,
+    }
+}
+
+fn shape_label(s: ZoneShape) -> &'static str {
+    match s {
+        ZoneShape::Pick => tl!("Pick"),
+        ZoneShape::Rect => tl!("Rectangle"),
+        ZoneShape::Lasso => tl!("Lasso"),
+        ZoneShape::Brush => tl!("Brush"),
+    }
+}
+
+fn shape_tip(s: ZoneShape) -> &'static str {
+    match s {
+        ZoneShape::Pick => tl!("Click a block, or drag a box around several"),
+        ZoneShape::Rect => tl!("Drag a rectangle: a zone of its own"),
+        ZoneShape::Lasso => tl!("Draw around a zone of its own"),
+        ZoneShape::Brush => tl!("Paint a zone of its own"),
+    }
 }
 
 fn model() -> Option<&'static catalog::ModelInfo> {
@@ -171,10 +229,12 @@ fn sync(app: &mut PhotocraftApp) {
     }
     let idle = !app.session.has_jobs() && app.ui.dialogs.is_empty() && !crate::remove_ai_ui::is_open(app);
     if idle && app.text_select.cleaning.as_ref().is_some_and(|(d, _, _)| *d == doc) {
-        if let Some((_, before, zone)) = app.text_select.cleaning.take()
-            && revision != before
-        {
-            finish_clean(app, doc, &zone);
+        if let Some((_, before, zone)) = app.text_select.cleaning.take() {
+            if revision != before {
+                finish_clean(app, doc, &zone);
+            } else {
+                abort_plan(app, doc);
+            }
         }
     }
     let Some(detection) = app.session.text_detection() else {
@@ -184,8 +244,9 @@ fn sync(app: &mut PhotocraftApp) {
     };
     if !app.text_select.docs.get(&doc).is_some_and(|p| Arc::ptr_eq(&p.detection, &detection)) {
         let grow = (default_grow(detection.width, detection.height) as f32 + app.ui.tool_options.text_select_contour).clamp(0.0, MAX_GROW as f32);
-        let chosen = vec![false; detection.regions.len()];
-        app.text_select.docs.insert(doc, Pieces { detection, grow, applied: grow, chosen, revision: u64::MAX });
+        let n = detection.regions.len();
+        let method = vec![app.ui.tool_options.text_select_method; n];
+        app.text_select.docs.insert(doc, Pieces { detection, grow, applied: grow, chosen: vec![false; n], method, todo: vec![false; n], marks: 0, revision: u64::MAX });
         if !app.ui.tool_options.text_select_clean_click {
             if let Err(e) = app.run(PIECES, json!({"pieces": "suggested", "grow": grow})) {
                 say(app, e);
@@ -210,48 +271,143 @@ fn sync(app: &mut PhotocraftApp) {
     }
 }
 
-/// A clean ended: what it cleaned leaves the pieces, and the selection with it.
+/// `new` takes the place of the document's pieces: what's left of each keeps its marks, and what's
+/// new has the method in use.
+fn adopt(app: &mut PhotocraftApp, doc: DocId, new: Arc<Detection>) {
+    let active = app.ui.tool_options.text_select_method;
+    let Some(p) = app.text_select.docs.get_mut(&doc) else { return };
+    let mut from = vec![0u32; new.regions.len() + 1];
+    for (n, o) in new.labels.iter().zip(&p.detection.labels) {
+        if *n != 0 && *o != 0 {
+            from[*n as usize] = *o;
+        }
+    }
+    let old = |id: u32| from[id as usize].checked_sub(1).map(|o| o as usize);
+    p.method = new.regions.iter().map(|r| old(r.id).map_or(active, |o| p.method[o])).collect();
+    p.todo = new.regions.iter().map(|r| old(r.id).is_some_and(|o| p.todo[o])).collect();
+    p.chosen = vec![false; new.regions.len()];
+    p.detection = new;
+    p.revision = u64::MAX;
+    p.marks += 1;
+}
+
+/// A clean ended: what it cleaned leaves the pieces, and the selection with it. The run goes on.
 fn finish_clean(app: &mut PhotocraftApp, doc: DocId, zone: &photocraft_raster::Surface) {
     let _ = app.run("select.deselect", json!({}));
     let Some(d) = app.session.text_detection() else { return };
     let left = Arc::new(d.clipped(|x, y| zone.sample_channel(x as i32, y as i32, 0) < 0.5));
     if left.regions.is_empty() {
         app.session.forget_text_detection();
+        app.text_select.plan.clear();
         return;
     }
     app.session.set_text_detection(left.clone());
-    if let Some(p) = app.text_select.docs.get_mut(&doc) {
-        p.chosen = vec![false; left.regions.len()];
-        p.detection = left;
-        p.revision = u64::MAX;
+    adopt(app, doc, left);
+    plan_next(app, doc);
+}
+
+/// A clean changed nothing, or was cancelled: what was left of the run is chosen again.
+fn abort_plan(app: &mut PhotocraftApp, doc: DocId) {
+    app.text_select.plan.clear();
+    let Some(p) = app.text_select.docs.get_mut(&doc) else { return };
+    let left: Vec<u32> = p.detection.regions.iter().filter(|r| p.todo[r.id as usize - 1]).map(|r| r.id).collect();
+    p.todo.fill(false);
+    let grow = p.applied;
+    if !left.is_empty() && let Err(e) = app.run(PIECES, json!({"pieces": left, "grow": grow, "mode": "add"})) {
+        say(app, e);
     }
 }
 
-/// Cleans what's selected (`edit.removeAi`).
-fn clean(app: &mut PhotocraftApp) {
+/// Cleans what's selected with `m`.
+fn run_method(app: &mut PhotocraftApp, m: CleanMethod) {
     let Some(st) = app.session.active() else { return };
     let (doc, revision) = (st.doc.id, st.revision);
     let Some(zone) = st.doc.selection.clone() else { return };
     app.text_select.cleaning = Some((doc, revision, zone));
-    let all = app.ui.tool_options.sample_all.remove_ai;
-    let by_blocks = app.ui.tool_options.text_select_by_blocks;
-    crate::remove_ai_ui::request(app, json!({"sampleAllLayers": all, "byBlocks": by_blocks}));
+    let o = &app.ui.tool_options;
+    if m == CleanMethod::Ai {
+        let all = o.sample_all.remove_ai;
+        let by_blocks = o.text_select_by_blocks;
+        crate::remove_ai_ui::request(app, json!({"sampleAllLayers": all, "byBlocks": by_blocks}));
+        return;
+    }
+    let mut params = json!({"method": if m == CleanMethod::Fill { "fill" } else { "color" }, "output": o.clean_output, "layerName": tl!("AI Clean")});
+    if m == CleanMethod::Color && !o.text_select_flat_auto {
+        let [r, g, b] = o.text_select_flat;
+        params["color"] = json!(format!("#{r:02x}{g:02x}{b:02x}"));
+    }
+    if let Err(e) = app.run(quick::ID, params) {
+        app.text_select.cleaning = None;
+        abort_plan(app, doc);
+        say(app, e);
+    }
 }
 
-/// The next click waiting to clean its piece.
+/// Cleans the pieces chosen, each with its method.
+fn clean(app: &mut PhotocraftApp) {
+    let Some(doc) = app.session.active().map(|st| st.doc.id) else { return };
+    let Some(p) = app.text_select.docs.get_mut(&doc) else { return };
+    let used = |m: CleanMethod| p.chosen.iter().zip(&p.method).any(|(c, h)| *c && *h == m);
+    // The quick ones first, so that the model reads a cleaner page. Last in, first out.
+    let plan: Vec<CleanMethod> = [CleanMethod::Ai, CleanMethod::Fill, CleanMethod::Color].into_iter().filter(|m| used(*m)).collect();
+    match plan.as_slice() {
+        // One method: what's selected, whatever else the selection has.
+        [] | [_] => {
+            let m = plan.first().copied().unwrap_or(app.ui.tool_options.text_select_method);
+            run_method(app, m);
+        }
+        _ => {
+            p.todo.clone_from(&p.chosen);
+            app.text_select.plan = plan;
+            plan_next(app, doc);
+        }
+    }
+}
+
+/// The next method of a run, on its pieces.
+fn plan_next(app: &mut PhotocraftApp, doc: DocId) {
+    while let Some(m) = app.text_select.plan.pop() {
+        let Some(p) = app.text_select.docs.get_mut(&doc) else { return };
+        let grow = p.applied;
+        let ids: Vec<u32> = p.detection.regions.iter().filter(|r| p.todo[r.id as usize - 1] && p.method[r.id as usize - 1] == m).map(|r| r.id).collect();
+        if ids.is_empty() {
+            continue;
+        }
+        for id in &ids {
+            p.todo[*id as usize - 1] = false;
+        }
+        if let Err(e) = app.run(PIECES, json!({"pieces": ids, "grow": grow})) {
+            abort_plan(app, doc);
+            say(app, e);
+            return;
+        }
+        run_method(app, m);
+        return;
+    }
+}
+
+/// The next click waiting to clean its block.
 fn clean_next(app: &mut PhotocraftApp, doc: DocId) {
     while let Some([x, y]) = app.text_select.queue.pop_front() {
         let Some(p) = app.text_select.docs.get(&doc) else { return };
         let grow = p.applied;
         // A click on what an earlier one already cleaned finds nothing and is dropped.
         let Some(id) = piece_at(&p.detection, x, y, reach(app, p)) else { continue };
-        if let Err(e) = app.run(PIECES, json!({"pieces": [id], "grow": grow})) {
+        let ids = block_of(p, id);
+        if let Err(e) = app.run(PIECES, json!({"pieces": ids, "grow": grow})) {
             say(app, e);
             return;
         }
-        clean(app);
+        let m = app.ui.tool_options.text_select_method;
+        run_method(app, m);
         return;
     }
+}
+
+/// The pieces of the block `id` is in.
+fn block_of(p: &Pieces, id: u32) -> Vec<u32> {
+    let group = p.detection.regions.get(id as usize - 1).map(|r| r.group);
+    p.detection.regions.iter().filter(|r| Some(r.group) == group).map(|r| r.id).collect()
 }
 
 /// The piece under a pixel, else the nearest within `reach`: its contour counts as the piece.
@@ -271,7 +427,69 @@ fn piece_at(d: &Detection, x: f64, y: f64, reach: i64) -> Option<u32> {
     best.map(|(_, l)| l)
 }
 
-/// A finished stroke of the tool (document px): a click takes or adds a piece, a drag paints.
+#[derive(Clone, Copy, PartialEq)]
+enum Mark {
+    Toggle,
+    Add,
+    Remove,
+}
+
+/// `ids` get the method in use, or (a [`Mark::Toggle`] of ones that have it) leave the selection.
+fn mark(app: &mut PhotocraftApp, doc: DocId, ids: &[u32], how: Mark) {
+    let m = app.ui.tool_options.text_select_method;
+    let Some(p) = app.text_select.docs.get_mut(&doc) else { return };
+    let at = |id: u32| id as usize - 1;
+    let take = how == Mark::Remove || (how == Mark::Toggle && ids.iter().all(|id| p.chosen[at(*id)] && p.method[at(*id)] == m));
+    let params = if take {
+        let out: Vec<u32> = ids.iter().copied().filter(|id| p.chosen[at(*id)]).collect();
+        if out.is_empty() {
+            return;
+        }
+        let keep: Vec<u32> = p.detection.regions.iter().filter(|r| p.chosen[at(r.id)] && !out.contains(&r.id)).map(|r| r.id).collect();
+        json!({"pieces": out, "grow": p.applied, "mode": "subtract", "keep": keep})
+    } else {
+        for id in ids {
+            p.method[at(*id)] = m;
+        }
+        p.marks += 1;
+        let new: Vec<u32> = ids.iter().copied().filter(|id| !p.chosen[at(*id)]).collect();
+        if new.is_empty() {
+            return;
+        }
+        json!({"pieces": new, "grow": p.applied, "mode": "add"})
+    };
+    if let Err(e) = app.run(PIECES, params) {
+        say(app, e);
+    }
+}
+
+/// `ids` are the pieces chosen, with the method in use.
+fn mark_only(app: &mut PhotocraftApp, doc: DocId, ids: Vec<u32>) {
+    let m = app.ui.tool_options.text_select_method;
+    let Some(p) = app.text_select.docs.get_mut(&doc) else { return };
+    for id in &ids {
+        p.method[*id as usize - 1] = m;
+    }
+    p.marks += 1;
+    let grow = p.applied;
+    if let Err(e) = app.run(PIECES, json!({"pieces": ids, "grow": grow})) {
+        say(app, e);
+    }
+}
+
+/// A zone drawn on the page joins the pieces, or leaves them.
+fn draw_zone(app: &mut PhotocraftApp, doc: DocId, mut params: Value, remove: bool) {
+    params["mode"] = json!(if remove { "subtract" } else { "add" });
+    if let Err(e) = app.run(ZONE, params) {
+        say(app, e);
+        return;
+    }
+    if let Some(new) = app.session.text_detection() {
+        adopt(app, doc, new);
+    }
+}
+
+/// A finished drag or click of the tool (document px).
 pub fn finish_stroke(app: &mut PhotocraftApp, points: &[[f64; 3]], mods: egui::Modifiers) {
     let (mut x0, mut y0, mut x1, mut y1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
     for p in points {
@@ -280,20 +498,53 @@ pub fn finish_stroke(app: &mut PhotocraftApp, points: &[[f64; 3]], mods: egui::M
     let Some(doc) = app.session.active().map(|st| st.doc.id) else { return };
     sync(app);
     let slop = if crate::touch_ui::active(app) { TAP_SCREEN_TOUCH } else { TAP_SCREEN };
-    if (x1 - x0).max(y1 - y0) > TAP_DOC.max(screen_px(app) * f64::from(slop)) {
-        let xy: Vec<[f64; 2]> = points.iter().map(|q| [q[0], q[1]]).collect();
-        let mode = if mods.alt || app.text_select.erase { "subtract" } else { "add" };
-        if let Err(e) = app.run(STROKE, json!({"points": xy, "size": app.session.tools.brush.size, "mode": mode})) {
+    let dragged = (x1 - x0).max(y1 - y0) > TAP_DOC.max(screen_px(app) * f64::from(slop));
+    let remove = mods.alt || app.text_select.erase;
+    let shape = app.ui.tool_options.text_select_shape;
+    let Some(p) = app.text_select.docs.get(&doc) else {
+        if detecting(app, doc) || app.text_select.waiting.is_some() {
+            return;
+        }
+        // A drag with nothing found yet: look there, and only there.
+        if dragged && let Err(e) = app.run("select.rect", json!({"x": x0.floor(), "y": y0.floor(), "width": (x1 - x0).ceil(), "height": (y1 - y0).ceil()})) {
             say(app, e);
+        }
+        detect_here(app);
+        return;
+    };
+    if dragged {
+        let (first, last) = (points.first().copied().unwrap_or_default(), points.last().copied().unwrap_or_default());
+        let rect = json!({"rect": [first[0].min(last[0]), first[1].min(last[1]), first[0].max(last[0]), first[1].max(last[1])]});
+        let xy: Vec<[f64; 2]> = points.iter().map(|q| [q[0], q[1]]).collect();
+        match shape {
+            ZoneShape::Pick => {
+                let (bx0, by0, bx1, by1) = (first[0].min(last[0]), first[1].min(last[1]), first[0].max(last[0]), first[1].max(last[1]));
+                // What the box holds at least half of, by its bounds.
+                let ids: Vec<u32> = p
+                    .detection
+                    .regions
+                    .iter()
+                    .filter(|r| {
+                        let [a, b, c, d] = r.bbox.map(f64::from);
+                        let (w, h) = ((c.min(bx1) - a.max(bx0)).max(0.0), (d.min(by1) - b.max(by0)).max(0.0));
+                        w * h * 2.0 >= (c - a) * (d - b)
+                    })
+                    .map(|r| r.id)
+                    .collect();
+                if ids.is_empty() {
+                    if !remove {
+                        draw_zone(app, doc, rect, false);
+                    }
+                } else {
+                    mark(app, doc, &ids, if remove { Mark::Remove } else { Mark::Add });
+                }
+            }
+            ZoneShape::Rect => draw_zone(app, doc, rect, remove),
+            ZoneShape::Lasso => draw_zone(app, doc, json!({"points": xy}), remove),
+            ZoneShape::Brush => draw_zone(app, doc, json!({"points": xy, "size": app.session.tools.brush.size}), remove),
         }
         return;
     }
-    let Some(p) = app.text_select.docs.get(&doc) else {
-        if !detecting(app, doc) && app.text_select.waiting.is_none() {
-            detect_here(app);
-        }
-        return;
-    };
     let Some(&[x, y, _]) = points.first() else { return };
     if app.ui.tool_options.text_select_clean_click {
         app.text_select.queue.push_back([x, y]);
@@ -301,19 +552,24 @@ pub fn finish_stroke(app: &mut PhotocraftApp, points: &[[f64; 3]], mods: egui::M
         return;
     }
     let Some(id) = piece_at(&p.detection, x, y, reach(app, p)) else { return };
-    let params = toggle_params(p, id);
-    if let Err(e) = app.run(PIECES, params) {
-        say(app, e);
-    }
+    // ⌘ or Ctrl: only that piece, not its block.
+    let ids = if mods.command || mods.ctrl { vec![id] } else { block_of(p, id) };
+    mark(app, doc, &ids, if remove { Mark::Remove } else { Mark::Toggle });
 }
 
-fn toggle_params(p: &Pieces, id: u32) -> Value {
-    if p.chosen.get(id as usize - 1).copied().unwrap_or(false) {
-        let keep: Vec<u32> = p.detection.regions.iter().filter(|r| r.id != id && p.chosen[r.id as usize - 1]).map(|r| r.id).collect();
-        json!({"pieces": [id], "grow": p.applied, "mode": "subtract", "keep": keep})
-    } else {
-        json!({"pieces": [id], "grow": p.applied, "mode": "add"})
+/// The box or the lasso being drawn.
+pub(crate) fn draw_drag(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform, points: &[[f64; 3]], mods: egui::Modifiers) {
+    let (Some(a), Some(b)) = (points.first(), points.last()) else { return };
+    let at = |x: f64, y: f64| xf.to_screen(x as f32, y as f32);
+    let t = Tokens::get(painter.ctx());
+    let tint = if mods.alt || app.text_select.erase { t.danger } else { t.accent };
+    if app.ui.tool_options.text_select_shape == ZoneShape::Lasso {
+        let line: Vec<egui::Pos2> = points.iter().map(|p| at(p[0], p[1])).collect();
+        painter.add(egui::Shape::closed_line(line, Stroke::new(1.5, tint)));
+        return;
     }
+    let corners = vec![at(a[0], a[1]), at(b[0], a[1]), at(b[0], b[1]), at(a[0], b[1])];
+    painter.add(egui::Shape::convex_polygon(corners, tint.gamma_multiply(0.15), Stroke::new(1.5, tint)));
 }
 
 /// The overlay: the pieces chosen in a colour, the others in another.
@@ -327,9 +583,9 @@ fn overlay_image(p: &Pieces, look: &Look) -> egui::ColorImage {
             let l = d.labels[y * step * d.width + x * step];
             px.push(match l {
                 0 => Color32::TRANSPARENT,
-                l if p.chosen.get(l as usize - 1).copied().unwrap_or(false) => look.on,
+                l if p.chosen[l as usize - 1] || p.todo[l as usize - 1] => look.on[p.method[l as usize - 1] as usize],
                 // Nothing is chosen when a click cleans: the model's doubts still show.
-                l if look.by_suggestion && d.regions.get(l as usize - 1).is_some_and(|r| r.suggested()) => look.on,
+                l if look.by_suggestion && d.regions.get(l as usize - 1).is_some_and(|r| r.suggested()) => look.on[look.active as usize],
                 _ => look.off,
             });
         }
@@ -337,11 +593,11 @@ fn overlay_image(p: &Pieces, look: &Look) -> egui::ColorImage {
     egui::ColorImage::new([tw, th], px)
 }
 
-fn look(app: &PhotocraftApp, doc: DocId, revision: u64) -> Look {
+fn look(app: &PhotocraftApp, doc: DocId, revision: u64, marks: u64) -> Look {
     let o = &app.ui.tool_options;
     let a = (o.text_select_opacity / 100.0).clamp(0.0, 1.0);
     let tint = |c: [u8; 3], a: f32| Color32::from_rgba_unmultiplied(c[0], c[1], c[2], (a.min(1.0) * 255.0) as u8);
-    Look { doc, revision, by_suggestion: o.text_select_clean_click, on: tint(o.text_select_on, a), off: tint(o.text_select_off, a * OTHERS_STRONGER) }
+    Look { doc, revision, marks, by_suggestion: o.text_select_clean_click, active: o.text_select_method, on: METHODS.map(|m| tint(method_tint(o, m), a)), off: tint(o.text_select_off, a * OTHERS_STRONGER) }
 }
 
 /// One screen pixel, in document pixels.
@@ -371,8 +627,8 @@ pub(crate) fn draw(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewXf
         return;
     }
     let Some(doc) = app.session.active().map(|st| st.doc.id) else { return };
-    let Some(revision) = app.text_select.docs.get(&doc).map(|p| p.revision) else { return };
-    let wanted = look(app, doc, revision);
+    let Some((revision, marks)) = app.text_select.docs.get(&doc).map(|p| (p.revision, p.marks)) else { return };
+    let wanted = look(app, doc, revision, marks);
     if !app.text_select.overlay.as_ref().is_some_and(|(l, _)| *l == wanted) {
         let Some(p) = app.text_select.docs.get(&doc) else { return };
         let tex = ctx.load_texture("text-select", overlay_image(p, &wanted), TextureOptions::LINEAR);
@@ -388,8 +644,12 @@ pub(crate) fn draw(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewXf
     mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
     painter.add(egui::Shape::mesh(mesh));
     let under = hover.map(|h| xf.to_doc(h)).and_then(|at| piece_at(&p.detection, at[0], at[1], p.applied as i64));
-    if let Some(r) = under.and_then(|id| p.detection.regions.get(id as usize - 1)) {
-        let [x0, y0, x1, y1] = r.bbox.map(|v| v as i32);
+    if let Some(id) = under {
+        // A click takes the block, and that's what shows.
+        let block = block_of(p, id);
+        let boxes = || block.iter().filter_map(|id| p.detection.regions.get(*id as usize - 1)).map(|r| r.bbox.map(|v| v as i32));
+        let (x0, y0) = (boxes().map(|b| b[0]).min().unwrap_or(0), boxes().map(|b| b[1]).min().unwrap_or(0));
+        let (x1, y1) = (boxes().map(|b| b[2]).max().unwrap_or(0), boxes().map(|b| b[3]).max().unwrap_or(0));
         let edge = Tokens::get(&ctx).accent;
         painter.rect_stroke(xf.doc_rect(Rect::new(x0, y0, x1, y1)), 2.0, Stroke::new(1.5, edge), StrokeKind::Outside);
     }
@@ -400,6 +660,9 @@ pub(crate) fn draw(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewXf
 enum Act {
     Find,
     FindAgain,
+    Method(CleanMethod),
+    Shape(ZoneShape),
+    NextShape,
     All,
     Suggested,
     Invert,
@@ -435,9 +698,34 @@ fn act(app: &mut PhotocraftApp, ctx: &egui::Context, what: Act) {
             detect(app);
             return;
         }
-        Act::All => Some((PIECES, json!({"pieces": "all", "grow": applied}))),
-        Act::Suggested => Some((PIECES, json!({"pieces": "suggested", "grow": applied}))),
-        Act::Invert => Some((PIECES, json!({"pieces": piece_ids(app, false), "grow": applied}))),
+        Act::Method(m) => {
+            app.ui.tool_options.text_select_method = m;
+            return;
+        }
+        Act::Shape(shape) => {
+            app.ui.tool_options.text_select_shape = shape;
+            return;
+        }
+        Act::NextShape => {
+            let at = SHAPES.iter().position(|s| *s == app.ui.tool_options.text_select_shape).unwrap_or(0);
+            app.ui.tool_options.text_select_shape = SHAPES[(at + 1) % SHAPES.len()];
+            return;
+        }
+        Act::All => {
+            let ids = app.text_select.docs.get(&doc).map_or_else(Vec::new, |p| p.detection.regions.iter().map(|r| r.id).collect());
+            mark_only(app, doc, ids);
+            return;
+        }
+        Act::Suggested => {
+            let ids = app.text_select.docs.get(&doc).map_or_else(Vec::new, |p| p.detection.regions.iter().filter(|r| r.suggested()).map(|r| r.id).collect());
+            mark_only(app, doc, ids);
+            return;
+        }
+        Act::Invert => {
+            let ids = piece_ids(app, false);
+            mark_only(app, doc, ids);
+            return;
+        }
         Act::None => Some(("select.deselect", json!({}))),
         Act::Grow(by) => {
             set_grow(app, doc, applied + by, None);
@@ -494,6 +782,7 @@ fn act(app: &mut PhotocraftApp, ctx: &egui::Context, what: Act) {
         Act::Done => {
             app.session.forget_text_detection();
             app.text_select.queue.clear();
+            app.text_select.plan.clear();
             return;
         }
     };
@@ -530,19 +819,31 @@ fn set_grow(app: &mut PhotocraftApp, doc: DocId, grow: f32, step: Option<String>
     }
 }
 
-/// The hint on the page, and how many pieces there are.
-fn status_line(app: &PhotocraftApp, p: &Pieces) -> String {
-    let total = p.detection.regions.len();
+/// How many pieces are chosen, of how many.
+fn count_line(p: &Pieces) -> String {
+    let on = p.chosen.iter().filter(|c| **c).count();
+    crate::i18n::fmt(tl!("{on} of {total} pieces"), &[("on", &on.to_string()), ("total", &p.detection.regions.len().to_string())])
+}
+
+/// What the pointer does now.
+fn hint_line(app: &PhotocraftApp, p: &Pieces) -> String {
     let touch = crate::touch_ui::active(app);
     if app.ui.tool_options.text_select_clean_click {
-        let hint = if touch { tl!("Tap a piece to clean it") } else { tl!("Click a piece to clean it") };
-        let pieces = crate::i18n::fmt(tl!("{total} pieces"), &[("total", &total.to_string())]);
+        let hint = if touch { tl!("Tap a block to clean it") } else { tl!("Click a block to clean it") };
         let waiting = app.text_select.queue.len();
+        let pieces = crate::i18n::fmt(tl!("{total} pieces"), &[("total", &p.detection.regions.len().to_string())]);
         return if waiting > 0 { format!("{pieces}  ·  {}  ·  {hint}", crate::i18n::fmt(tl!("{n} waiting"), &[("n", &waiting.to_string())])) } else { format!("{pieces}  ·  {hint}") };
     }
-    let on = p.chosen.iter().filter(|c| **c).count();
-    let hint = if touch { tl!("Tap a piece to add or take it; paint to add") } else { tl!("Click a piece to add or take it; paint to add, Alt to take away") };
-    format!("{}  ·  {hint}", crate::i18n::fmt(tl!("{on} of {total} pieces"), &[("on", &on.to_string()), ("total", &total.to_string())]))
+    match (app.ui.tool_options.text_select_shape, touch) {
+        (ZoneShape::Pick, false) => tl!("Click a block or drag a box around several. Ctrl: a single piece. Alt: take away").to_string(),
+        (ZoneShape::Pick, true) => tl!("Tap a block or drag a box around several").to_string(),
+        (ZoneShape::Rect, false) => tl!("Drag a rectangle to add a zone. Alt cuts it out").to_string(),
+        (ZoneShape::Rect, true) => tl!("Drag a rectangle to add a zone").to_string(),
+        (ZoneShape::Lasso, false) => tl!("Draw around a zone to add it. Alt cuts it out").to_string(),
+        (ZoneShape::Lasso, true) => tl!("Draw around a zone to add it").to_string(),
+        (ZoneShape::Brush, false) => tl!("Paint a zone to add it. Alt cuts it out").to_string(),
+        (ZoneShape::Brush, true) => tl!("Paint a zone to add it").to_string(),
+    }
 }
 
 /// Whether a detection can't start now, and what to say instead.
@@ -575,50 +876,68 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         if crate::widgets::primary_button(ui, find_label(app), 0.0).clicked() {
             act(app, &ctx, Act::Find);
         }
-        ui.label(tl!("Finds the text and sound effects on the page; you choose what to select"));
+        ui.label(tl!("Finds the text and sound effects on the page, or drag a box to look only there. You choose what to clean"));
         return;
     };
     let mut todo = None;
-    let by_click = app.ui.tool_options.text_select_clean_click;
     if crate::widgets::secondary_button(ui, tl!("Find Again"), 0.0).on_hover_text(tl!("Looks on the whole page again")).clicked() {
         todo = Some(Act::FindAgain);
     }
     crate::widgets::vline(ui, 22.0);
-    if !by_click {
-        for (label, what) in [(tl!("All"), Act::All), (tl!("Suggested"), Act::Suggested), (tl!("Invert"), Act::Invert), (tl!("None"), Act::None)] {
-            if crate::widgets::secondary_button(ui, label, 0.0).clicked() {
-                todo = Some(what);
-            }
+    for shape in SHAPES {
+        let on = app.ui.tool_options.text_select_shape == shape;
+        if crate::widgets::pill_tab(ui, shape_label(shape), on).on_hover_text(shape_tip(shape)).clicked() {
+            todo = Some(Act::Shape(shape));
         }
-        crate::widgets::vline(ui, 22.0);
     }
-    ui.label(tl!("Contour"));
-    let mut grow = shown;
-    let r = crate::widgets::value_field_named(ui, tl!("Contour"), &mut grow, 0.0..=MAX_GROW as f32, " px", 54.0);
-    grow = grow.round();
-    if let Some(p) = app.text_select.docs.get_mut(&doc) {
-        p.grow = grow;
-    }
-    // Live while dragging, as one history step; a typed number when it's done.
-    if grow != applied && !r.has_focus() {
-        let step = r.dragged().then(|| crate::panels::layer_props_ui::drag_step(&ctx)).flatten();
-        set_grow(app, doc, grow, step);
-    }
-    r.on_hover_text(tl!("How far the selection reaches past the letters. Too little leaves smudges when cleaning; too much takes the lines around them"));
     crate::widgets::vline(ui, 22.0);
-    let mut by_click_box = by_click;
-    if crate::widgets::checkbox(ui, &mut by_click_box, tl!("Clean on Click")).on_hover_text(tl!("Each click cleans that piece right away, one at a time")).clicked() {
-        todo = Some(Act::ToggleClick);
-    }
-    crate::widgets::checkbox(ui, &mut app.ui.tool_options.text_select_by_blocks, tl!("Block by Block")).on_hover_text(tl!("Cleans each block of text on its own, one after another, not those close together at once"));
-    crate::widgets::vline(ui, 22.0);
-    crate::remove_ai_ui::output_dropdown(app, ui);
-    crate::widgets::vline(ui, 22.0);
-    let o = &mut app.ui.tool_options;
-    crate::widgets::checkbox(ui, &mut o.text_select_show, tl!("Show Pieces"));
-    crate::widgets::color_edit_button_srgb(ui, &mut o.text_select_on).on_hover_text(tl!("Color of the chosen pieces"));
-    crate::widgets::color_edit_button_srgb(ui, &mut o.text_select_off).on_hover_text(tl!("Color of the other pieces"));
-    crate::widgets::value_field_named(ui, tl!("Opacity"), &mut o.text_select_opacity, 10.0..=90.0, " %", 54.0);
+    let more = crate::widgets::secondary_button(ui, tl!("Options"), 0.0);
+    egui::Popup::menu(&more).close_behavior(egui::PopupCloseBehavior::IgnoreClicks).show(|ui| {
+        ui.set_min_width(280.0);
+        ui.label(egui::RichText::new(tl!("Cleaning")).strong());
+        ui.horizontal(|ui| {
+            ui.label(tl!("Contour"));
+            let mut grow = shown;
+            let r = crate::widgets::value_field_named(ui, tl!("Contour"), &mut grow, 0.0..=MAX_GROW as f32, " px", 54.0);
+            grow = grow.round();
+            if let Some(p) = app.text_select.docs.get_mut(&doc) {
+                p.grow = grow;
+            }
+            // Live while dragging, as one history step; a typed number when it's done.
+            if grow != applied && !r.has_focus() {
+                let step = r.dragged().then(|| crate::panels::layer_props_ui::drag_step(&ctx)).flatten();
+                set_grow(app, doc, grow, step);
+            }
+            r.on_hover_text(tl!("How far the selection reaches past the letters. Too little leaves smudges when cleaning; too much takes the lines around them"));
+        });
+        let mut by_click_box = app.ui.tool_options.text_select_clean_click;
+        if crate::widgets::checkbox(ui, &mut by_click_box, tl!("Clean on Click")).on_hover_text(tl!("Each click cleans that block right away, one at a time")).clicked() {
+            todo = Some(Act::ToggleClick);
+        }
+        let o = &mut app.ui.tool_options;
+        crate::widgets::checkbox(ui, &mut o.text_select_by_blocks, tl!("Block by Block")).on_hover_text(tl!("Cleans each block of text on its own, one after the other: slower and a little cleaner"));
+        ui.horizontal(|ui| {
+            crate::widgets::checkbox(ui, &mut o.text_select_flat_auto, tl!("Flat Color from Around Each Block"));
+            if !o.text_select_flat_auto {
+                crate::widgets::color_edit_button_srgb(ui, &mut o.text_select_flat).on_hover_text(tl!("The color to paint with"));
+            }
+        });
+        ui.add_space(4.0);
+        ui.label(tl!("Result in"));
+        for (key, label) in crate::remove_ai_ui::output_options() {
+            ui.radio_value(&mut o.clean_output, key, label);
+        }
+        ui.add_space(6.0);
+        ui.label(egui::RichText::new(tl!("On the Page")).strong());
+        crate::widgets::checkbox(ui, &mut o.text_select_show, tl!("Show Pieces"));
+        ui.horizontal(|ui| {
+            crate::widgets::color_edit_button_srgb(ui, &mut o.text_select_on).on_hover_text(method_label(CleanMethod::Ai));
+            crate::widgets::color_edit_button_srgb(ui, &mut o.text_select_fill_tint).on_hover_text(method_label(CleanMethod::Fill));
+            crate::widgets::color_edit_button_srgb(ui, &mut o.text_select_flat_tint).on_hover_text(method_label(CleanMethod::Color));
+            crate::widgets::color_edit_button_srgb(ui, &mut o.text_select_off).on_hover_text(tl!("Color of the other pieces"));
+            crate::widgets::value_field_named(ui, tl!("Opacity"), &mut o.text_select_opacity, 10.0..=90.0, " %", 54.0);
+        });
+    });
     if let Some(what) = todo {
         act(app, &ctx, what);
     }
@@ -637,7 +956,28 @@ fn bar_button(ui: &mut egui::Ui, icon: &str, label: &str, main: bool) -> egui::R
     )
 }
 
-/// What to do with the selection, on the canvas: how many pieces, then what next.
+/// A button that's a word.
+fn quiet_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
+    let t = Tokens::get(ui.ctx());
+    ui.add(egui::Button::new(egui::RichText::new(label).size(12.0).color(t.text)).fill(Color32::TRANSPARENT).stroke(Stroke::NONE).corner_radius(6).min_size(egui::vec2(0.0, 24.0)))
+}
+
+/// A method to clean with: its colour on the page, then its name.
+fn method_chip(ui: &mut egui::Ui, label: &str, tint: [u8; 3], on: bool) -> egui::Response {
+    let t = Tokens::get(ui.ctx());
+    let color = Color32::from_rgb(tint[0], tint[1], tint[2]);
+    let r = ui.add(
+        egui::Button::new(egui::RichText::new(format!("     {label}")).color(if on { t.text } else { t.text_dim }))
+            .fill(if on { color.gamma_multiply(0.25) } else { Color32::TRANSPARENT })
+            .stroke(if on { Stroke::new(1.5, color) } else { Stroke::new(1.0, t.card_border) })
+            .corner_radius(8)
+            .min_size(egui::vec2(0.0, 30.0)),
+    );
+    ui.painter().circle_filled(pos2(r.rect.left() + 13.0, r.rect.center().y), 5.0, color);
+    r
+}
+
+/// What to do on the canvas: which pieces, how to clean them, and what the pointer does.
 pub fn bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if app.ui.tool != Tool::TextSelection || !app.ui.dialogs.is_empty() || crate::touch_ui::active(app) {
         return;
@@ -645,18 +985,21 @@ pub fn bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let Some(st) = app.session.active() else { return };
     let doc = st.doc.id;
     let Some(p) = app.text_select.docs.get(&doc) else { return };
-    let line = status_line(app, p);
-    let busy = app.session.has_jobs();
-    let actions = has_selection(app) && !app.ui.tool_options.text_select_clean_click && !busy;
+    let (count, hint) = (count_line(p), hint_line(app, p));
+    let counts = METHODS.map(|m| p.chosen.iter().zip(&p.method).filter(|(c, h)| **c && **h == m).count());
+    let chosen: usize = counts.iter().sum();
+    let busy = app.session.has_jobs() || !app.text_select.plan.is_empty();
+    let by_click = app.ui.tool_options.text_select_clean_click;
+    let active = app.ui.tool_options.text_select_method;
+    let tints = METHODS.map(|m| method_tint(&app.ui.tool_options, m));
     let t = Tokens::get(ctx);
     let screen = app.last_canvas_rect;
     let id = egui::Id::unique("text-select-bar");
-    let size = ctx.memory(|m| m.area_rect(id)).map_or(egui::vec2(520.0, 70.0), |a| a.size());
+    let size = ctx.memory(|m| m.area_rect(id)).map_or(egui::vec2(560.0, 110.0), |a| a.size());
     let pos = pos2((screen.center().x - size.x / 2.0).max(screen.left() + 8.0), screen.bottom() - size.y - 14.0);
     let mut todo = None;
-    crate::overlay_guard::non_modal(ctx, id);
     egui::Area::new(id).order(egui::Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
-        egui::Frame::NONE
+        egui::Frame::new()
             .fill(t.card)
             .stroke(Stroke::new(1.0, t.card_border))
             .corner_radius(12)
@@ -664,31 +1007,63 @@ pub fn bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
             .shadow(ui.style().visuals.popup_shadow)
             .show(ui, |ui| {
                 ui.set_max_width((screen.width() - 40.0).max(240.0));
+                // Which pieces.
                 ui.horizontal(|ui| {
-                    ui.add(egui::Label::new(egui::RichText::new(&line).size(12.0).color(t.text_dim)).wrap());
+                    if !by_click {
+                        ui.label(egui::RichText::new(&count).strong());
+                        ui.add_space(6.0);
+                        for (label, what, tip) in [
+                            (tl!("All"), Act::All, tl!("Marks every piece with the method in use")),
+                            (tl!("Suggested"), Act::Suggested, tl!("Leaves out what the model doubts")),
+                            (tl!("Invert"), Act::Invert, tl!("Marks the others instead")),
+                            (tl!("None"), Act::None, tl!("Takes every piece off")),
+                        ] {
+                            if quiet_button(ui, label).on_hover_text(tip).clicked() {
+                                todo = Some(what);
+                            }
+                        }
+                    }
+                    ui.add_space(6.0);
                     if bar_button(ui, "x", tl!("Done"), false).on_hover_text("Esc").clicked() {
                         todo = Some(Act::Done);
                     }
                 });
-                if actions {
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        if bar_button(ui, "sparkles", tl!("Remove with AI"), true).on_hover_text("↩").clicked() {
+                ui.add_space(4.0);
+                // How to clean them.
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(tl!("Clean with")).color(t.text_dim));
+                    for (i, m) in METHODS.into_iter().enumerate() {
+                        let label = if by_click || counts[i] == 0 { method_label(m).to_string() } else { format!("{}  {}", method_label(m), counts[i]) };
+                        if method_chip(ui, &label, tints[i], m == active).on_hover_text(method_tip(m)).clicked() {
+                            todo = Some(Act::Method(m));
+                        }
+                    }
+                    if !by_click {
+                        ui.add_space(8.0);
+                        let label = crate::i18n::fmt(tl!("Clean {n}"), &[("n", &chosen.to_string())]);
+                        if ui.add_enabled_ui(chosen > 0 && !busy, |ui| bar_button(ui, "sparkles", &label, true)).inner.on_hover_text("↩").clicked() {
                             todo = Some(Act::Clean);
                         }
-                        if bar_button(ui, "paint-bucket", tl!("Content-Aware Fill…"), false).clicked() {
+                    }
+                });
+                ui.add_space(2.0);
+                ui.horizontal(|ui| {
+                    ui.add(egui::Label::new(egui::RichText::new(&hint).size(11.5).color(t.text_dim)).wrap());
+                    if !by_click && chosen > 0 && !busy {
+                        ui.add_space(8.0);
+                        if quiet_button(ui, tl!("Content-Aware Fill…")).on_hover_text(tl!("With its options, on everything chosen")).clicked() {
                             todo = Some(Act::Fill);
                         }
-                        if bar_button(ui, "square-dashed", tl!("Leave as Selection"), false).clicked() {
+                        if quiet_button(ui, tl!("Leave as Selection")).clicked() {
                             todo = Some(Act::Keep);
                         }
-                    });
-                }
+                    }
+                });
             });
     });
     // ↩ and Esc, unless a field is taking the keys.
     if !ctx.egui_wants_keyboard_input() {
-        if actions && ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+        if chosen > 0 && !by_click && !busy && ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
             todo = Some(Act::Clean);
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
@@ -730,32 +1105,37 @@ pub fn touch_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
     };
     let o = &app.ui.tool_options;
     let by_click = o.text_select_clean_click;
+    let shape = o.text_select_shape;
     let contour = crate::i18n::fmt(tl!("Contour {px}"), &[("px", &format!("{:.0}", p.applied))]);
     let brush = crate::i18n::fmt(tl!("Brush {px}"), &[("px", &format!("{:.0}", app.session.tools.brush.size))]);
-    let line = status_line(app, p);
+    let (count, hint) = (count_line(p), hint_line(app, p));
+    let line = if by_click { hint } else { format!("{count}  ·  {hint}") };
+    let counts = METHODS.map(|m| p.chosen.iter().zip(&p.method).filter(|(c, h)| **c && **h == m).count());
+    let chosen: usize = counts.iter().sum();
     let output = crate::remove_ai_ui::output_options().into_iter().find(|(k, _)| *k == o.clean_output).map_or(tl!("Current Layer"), |(_, l)| l);
-    let mut items: Vec<(&str, &str, &str)> = vec![("click", if by_click { tl!("Clean on Tap: On") } else { tl!("Clean on Tap: Off") }, "sparkles")];
+    let drawing = crate::i18n::fmt(tl!("Drag: {shape}"), &[("shape", shape_label(shape))]);
+    let mut items: Vec<(&str, &str, &str)> = Vec::new();
     if !by_click {
         items.extend([
             ("all", tl!("All"), "check"),
             ("suggested", tl!("Suggested"), "text-select"),
             ("invert", tl!("Invert"), "contrast"),
             ("none", tl!("None"), "x"),
+            ("shape", drawing.as_str(), "square-dashed"),
         ]);
+        if shape == ZoneShape::Brush {
+            items.extend([
+                ("smaller", tl!("Smaller Brush"), "minus"),
+                ("brush", brush.as_str(), "brush"),
+                ("bigger", tl!("Bigger Brush"), "plus"),
+            ]);
+        }
     }
+    items.push(("click", if by_click { tl!("Clean on Tap: On") } else { tl!("Clean on Tap: Off") }, "sparkles"));
     items.extend([
         ("less", tl!("Less Contour"), "minus"),
         ("contour", contour.as_str(), "circle-dashed"),
         ("more", tl!("More Contour"), "plus"),
-    ]);
-    if !by_click {
-        items.extend([
-            ("smaller", tl!("Smaller Brush"), "minus"),
-            ("brush", brush.as_str(), "brush"),
-            ("bigger", tl!("Bigger Brush"), "plus"),
-        ]);
-    }
-    items.extend([
         ("blocks", if o.text_select_by_blocks { tl!("Block by Block: On") } else { tl!("Block by Block: Off") }, "layers"),
         ("output", output, "layers"),
         ("show", if o.text_select_show { tl!("Hide Pieces") } else { tl!("Show Pieces") }, if o.text_select_show { "eye-off" } else { "eye" }),
@@ -782,10 +1162,11 @@ pub fn touch_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
             "fill" => Act::Fill,
             "keep" => Act::Keep,
             "output" => Act::NextOutput,
+            "shape" => Act::NextShape,
             _ => return None,
         })
     });
-    let can_clean = has_selection(app) && !by_click && !app.session.has_jobs();
+    let can_clean = chosen > 0 && !by_click && !app.session.has_jobs() && app.text_select.plan.is_empty();
     let (done_w, paint_w) = (84.0, 96.0);
     let main_w = (area.width() - 16.0 - done_w - paint_w - 2.0 * gap).min(220.0);
     let row_w = done_w + gap + main_w + if by_click { 0.0 } else { paint_w + gap };
@@ -794,26 +1175,46 @@ pub fn touch_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let paint = egui::Rect::from_min_size(pos2(done.right() + gap, top), egui::vec2(paint_w, h));
     let main = egui::Rect::from_min_size(pos2(if by_click { done.right() + gap } else { paint.right() + gap }, top), egui::vec2(main_w, h));
     let erasing = app.text_select.erase;
+    let active = app.ui.tool_options.text_select_method;
+    // How to clean: above, three the same size.
+    let chip_h = 44.0;
+    let chip_top = top - gap - chip_h;
+    let chip_w = (row_w.max(area.width() - 16.0).min(area.width() - 16.0) - 2.0 * gap) / 3.0;
+    let chips_x = area.center().x - (chip_w * 3.0 + 2.0 * gap) / 2.0;
+    let chip = |i: usize| egui::Rect::from_min_size(pos2(chips_x + (chip_w + gap) * i as f32, chip_top), egui::vec2(chip_w, chip_h));
     let t = Tokens::get(ctx);
     let g = ctx.fonts_mut(|f| f.layout(line.clone(), crate::theme::medium(11.0), t.text, area.width() - 32.0));
-    let back = egui::Rect::from_center_size(pos2(area.center().x, top - 8.0 - (g.size().y + 8.0) / 2.0), g.size() + egui::vec2(16.0, 8.0));
+    let back = egui::Rect::from_center_size(pos2(area.center().x, chip_top - 8.0 - (g.size().y + 8.0) / 2.0), g.size() + egui::vec2(16.0, 8.0));
+    let clean_label = crate::i18n::fmt(tl!("Clean {n}"), &[("n", &chosen.to_string())]);
+    let tints = METHODS.map(|m| method_tint(&app.ui.tool_options, m));
     // The area starts here, not at the canvas's top: it would lie over the bar up there and take
     // its touches.
     egui::Area::new(id).order(egui::Order::Foreground).fixed_pos(pos2(area.left(), back.top())).show(ctx, |ui| {
         ui.set_min_size(egui::Vec2::ZERO);
         ui.painter().rect_filled(back, 8.0, t.card);
         ui.painter().galley(back.min + egui::vec2(8.0, 4.0), g, t.text);
+        for (i, m) in METHODS.into_iter().enumerate() {
+            let label = if by_click || counts[i] == 0 { method_label(m).to_string() } else { format!("{}  {}", method_label(m), counts[i]) };
+            let r = chip(i);
+            if crate::touch_ui::round_button(ui, r, None, &label, m == active).clicked() {
+                todo = Some(Act::Method(m));
+            }
+            ui.painter().circle_filled(pos2(r.left() + 12.0, r.center().y), 5.0, Color32::from_rgb(tints[i][0], tints[i][1], tints[i][2]));
+        }
         if crate::touch_ui::round_button(ui, done, None, tl!("Done"), false).clicked() {
             todo = Some(Act::Done);
         }
         // What a drag does: the big switch to take zones away, as ⌥ does with a keyboard.
-        if !by_click && crate::touch_ui::round_button(ui, paint, None, if erasing { tl!("Painting Removes") } else { tl!("Painting Adds") }, erasing).clicked() {
+        if !by_click && crate::touch_ui::round_button(ui, paint, None, if erasing { tl!("Drag Removes") } else { tl!("Drag Adds") }, erasing).clicked() {
             todo = Some(Act::ToggleErase);
         }
-        if can_clean && crate::touch_ui::round_button(ui, main, None, tl!("Remove with AI"), true).clicked() {
+        if can_clean && crate::touch_ui::round_button(ui, main, None, &clean_label, true).clicked() {
             todo = Some(Act::Clean);
         }
     });
+    for (i, name) in ["textSelectMethod:ai", "textSelectMethod:fill", "textSelectMethod:color"].into_iter().enumerate() {
+        crate::touch_ui::note_rect(ctx, name, chip(i));
+    }
     crate::touch_ui::note_rect(ctx, "textSelectDone", done);
     crate::touch_ui::note_rect(ctx, "textSelectPaint", paint);
     crate::touch_ui::note_rect(ctx, "textSelectClean", main);
@@ -860,7 +1261,7 @@ mod tests {
     }
 
     fn test_look(doc: DocId, by_suggestion: bool) -> Look {
-        Look { doc, revision: 0, by_suggestion, on: Color32::BLUE, off: Color32::RED }
+        Look { doc, revision: 0, marks: 0, by_suggestion, active: CleanMethod::Ai, on: [Color32::BLUE, Color32::GREEN, Color32::YELLOW], off: Color32::RED }
     }
 
     fn covered(app: &PhotocraftApp, x: i32, y: i32) -> bool {
@@ -1001,12 +1402,12 @@ mod tests {
         let mut app = page();
         click(&mut app, 150.0, 90.0, egui::Modifiers::NONE);
         sync(&mut app);
-        app.session.tools.brush.size = 10.0;
-        finish_stroke(&mut app, &[[100.0, 20.0, 1.0], [150.0, 20.0, 1.0]], egui::Modifiers::NONE);
-        assert!(covered(&app, 125, 20));
+        app.ui.tool_options.text_select_shape = ZoneShape::Rect;
+        finish_stroke(&mut app, &[[100.0, 20.0, 1.0], [150.0, 60.0, 1.0]], egui::Modifiers::NONE);
+        assert!(covered(&app, 125, 40));
         app.text_select.erase = true;
-        finish_stroke(&mut app, &[[100.0, 20.0, 1.0], [150.0, 20.0, 1.0]], egui::Modifiers::NONE);
-        assert!(!covered(&app, 125, 20));
+        finish_stroke(&mut app, &[[100.0, 20.0, 1.0], [150.0, 60.0, 1.0]], egui::Modifiers::NONE);
+        assert!(!covered(&app, 125, 40));
     }
 
     #[test]
@@ -1024,17 +1425,122 @@ mod tests {
     }
 
     #[test]
-    fn a_drag_paints_the_selection_and_alt_takes_away() {
+    fn a_box_marks_the_pieces_in_it_and_on_nothing_it_is_a_zone() {
         let mut app = page();
         click(&mut app, 150.0, 90.0, egui::Modifiers::NONE);
         sync(&mut app);
+        let doc = app.session.active().unwrap().doc.id;
+        let drag = |app: &mut PhotocraftApp, a: [f64; 2], b: [f64; 2], m| finish_stroke(app, &[[a[0], a[1], 1.0], [b[0], b[1], 1.0]], m);
+        // A box around one takes it off with ⌥ and marks it with the method in use without.
+        drag(&mut app, [10.0, 10.0], [80.0, 70.0], egui::Modifiers::ALT);
+        sync(&mut app);
+        assert_eq!(app.text_select.docs[&doc].chosen, vec![false, true]);
+        app.ui.tool_options.text_select_method = CleanMethod::Fill;
+        drag(&mut app, [10.0, 10.0], [80.0, 70.0], egui::Modifiers::NONE);
+        sync(&mut app);
+        let p = &app.text_select.docs[&doc];
+        assert_eq!(p.chosen, vec![true, true]);
+        assert_eq!(p.method, vec![CleanMethod::Fill, CleanMethod::Ai]);
+        // On nothing: a zone, a piece of its own, with the method in use. No new detection.
+        drag(&mut app, [100.0, 20.0], [150.0, 60.0], egui::Modifiers::NONE);
+        sync(&mut app);
+        let p = &app.text_select.docs[&doc];
+        assert_eq!(p.detection.regions.len(), 3);
+        assert_eq!(p.chosen, vec![true, true, true]);
+        assert_eq!(p.method, vec![CleanMethod::Fill, CleanMethod::Ai, CleanMethod::Fill]);
+        assert!(covered(&app, 125, 40));
+    }
+
+    #[test]
+    fn a_lasso_and_a_brush_draw_zones_and_alt_cuts_them() {
+        let mut app = page();
+        click(&mut app, 150.0, 90.0, egui::Modifiers::NONE);
+        sync(&mut app);
+        let doc = app.session.active().unwrap().doc.id;
+        app.ui.tool_options.text_select_shape = ZoneShape::Lasso;
+        let shape = [[100.0, 100.0, 1.0], [150.0, 100.0, 1.0], [150.0, 150.0, 1.0], [100.0, 150.0, 1.0]];
+        finish_stroke(&mut app, &shape, egui::Modifiers::NONE);
+        assert!(covered(&app, 125, 125));
+        app.ui.tool_options.text_select_shape = ZoneShape::Brush;
         app.session.tools.brush.size = 10.0;
-        let stroke = |app: &mut PhotocraftApp, m| finish_stroke(app, &[[100.0, 20.0, 1.0], [150.0, 20.0, 1.0]], m);
-        stroke(&mut app, egui::Modifiers::NONE);
-        assert!(covered(&app, 125, 20), "added");
-        stroke(&mut app, egui::Modifiers::ALT);
-        assert!(!covered(&app, 125, 20), "taken");
-        assert!(covered(&app, 30, 30), "the rest stays");
+        finish_stroke(&mut app, &[[100.0, 125.0, 1.0], [150.0, 125.0, 1.0]], egui::Modifiers::ALT);
+        assert!(!covered(&app, 125, 125) && covered(&app, 125, 110), "a cut through it");
+        sync(&mut app);
+        assert_eq!(app.text_select.docs[&doc].detection.regions.len(), 3);
+    }
+
+    #[test]
+    fn a_click_takes_the_block_and_with_ctrl_a_single_piece() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.session.execute("file.new", json!({"width": 300, "height": 200, "background": "white"})).unwrap();
+        app.session.set_text_masker(Some(Arc::new(Dark)));
+        // Two letters of a word, close together.
+        for x in [40, 65] {
+            app.session.execute("select.rect", json!({"x": x, "y": 40, "width": 20, "height": 30})).unwrap();
+            app.session.execute("edit.fill", json!({"color": "#000000"})).unwrap();
+        }
+        app.session.execute("select.deselect", json!({})).unwrap();
+        app.ui.tool = Tool::TextSelection;
+        click(&mut app, 150.0, 150.0, egui::Modifiers::NONE);
+        sync(&mut app);
+        let doc = app.session.active().unwrap().doc.id;
+        assert_eq!(app.text_select.docs[&doc].chosen, vec![true, true]);
+        click(&mut app, 50.0, 50.0, egui::Modifiers::CTRL);
+        sync(&mut app);
+        assert_eq!(app.text_select.docs[&doc].chosen, vec![true, false], "a single piece: the first in manga order is the right one");
+        click(&mut app, 75.0, 50.0, egui::Modifiers::NONE);
+        sync(&mut app);
+        assert_eq!(app.text_select.docs[&doc].chosen, vec![true, true], "the block: not all had it");
+        click(&mut app, 75.0, 50.0, egui::Modifiers::NONE);
+        sync(&mut app);
+        assert_eq!(app.text_select.docs[&doc].chosen, vec![false, false], "the block leaves");
+    }
+
+    #[test]
+    fn each_piece_is_cleaned_with_its_own_method() {
+        let mut app = page();
+        click(&mut app, 150.0, 90.0, egui::Modifiers::NONE);
+        sync(&mut app);
+        let doc = app.session.active().unwrap().doc.id;
+        // One flat, one by content.
+        app.ui.tool_options.text_select_method = CleanMethod::Color;
+        click(&mut app, 30.0, 30.0, egui::Modifiers::NONE);
+        app.ui.tool_options.text_select_method = CleanMethod::Fill;
+        click(&mut app, 210.0, 130.0, egui::Modifiers::NONE);
+        sync(&mut app);
+        let p = &app.text_select.docs[&doc];
+        assert_eq!((p.chosen.clone(), p.method.clone()), (vec![true, true], vec![CleanMethod::Color, CleanMethod::Fill]));
+        let img = overlay_image(p, &test_look(doc, false));
+        assert_ne!(img.pixels[30 * img.size[0] + 30], img.pixels[130 * img.size[0] + 210], "a colour each");
+        let ctx = egui::Context::default();
+        act(&mut app, &ctx, Act::Clean);
+        for _ in 0..4 {
+            sync(&mut app);
+        }
+        let px = |app: &PhotocraftApp, x, y| photocraft_compose::render(&app.session.active().unwrap().doc, Rect::from_xywh(x, y, 1, 1)).px[0][0];
+        assert!(px(&app, 30, 30) > 0.9, "the flat one is clean");
+        assert!(px(&app, 210, 130) > 0.9, "and the other");
+        assert!(app.session.text_detection().is_none(), "nothing left");
+        assert!(app.text_select.plan.is_empty());
+    }
+
+    #[test]
+    fn with_one_method_the_selection_goes_as_it_is() {
+        let mut app = page();
+        click(&mut app, 150.0, 90.0, egui::Modifiers::NONE);
+        sync(&mut app);
+        let doc = app.session.active().unwrap().doc.id;
+        app.ui.tool_options.text_select_method = CleanMethod::Color;
+        act(&mut app, &egui::Context::default(), Act::All);
+        // What another tool added stays in the clean.
+        app.session.execute("select.rect", json!({"x": 100, "y": 150, "width": 20, "height": 20, "mode": "add"})).unwrap();
+        app.session.execute("edit.fill", json!({"color": "#000000"})).unwrap();
+        sync(&mut app);
+        assert_eq!(app.text_select.docs[&doc].method, vec![CleanMethod::Color, CleanMethod::Color]);
+        act(&mut app, &egui::Context::default(), Act::Clean);
+        sync(&mut app);
+        let px = photocraft_compose::render(&app.session.active().unwrap().doc, Rect::from_xywh(110, 160, 1, 1)).px[0][0];
+        assert!(px > 0.9, "{px}");
     }
 
     #[test]

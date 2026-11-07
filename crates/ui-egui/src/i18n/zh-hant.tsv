@@ -3715,3 +3715,39 @@ curves	Smooth	平滑
 	Reading your fonts: {done} of {total}	正在讀取你的字型: {done} / {total}
 	Very few fonts are loaded: load yours and the search looks through them	已載入的字型很少: 載入你的字型後即可搜尋它們
 	Among {n} loaded fonts. Click one to use it	在已載入的 {n} 個字型中。點擊一個即可使用
+	Content Fill	填充
+	Flat Color	純色
+	Pick	選擇
+	Result in	結果放在
+	On the Page	頁面上
+	Clean with	清理方式
+	Clean {n}	清理 {n} 個
+	Drag Adds	拖動新增
+	Drag Removes	拖動移除
+	Drag: {shape}	拖動: {shape}
+	Marks every piece with the method in use	用目前方式標記所有片段
+	Leaves out what the model doubts	跳過模型存疑的部分
+	Marks the others instead	改為標記其餘片段
+	Takes every piece off	取消所有片段
+	With its options, on everything chosen	帶選項,套用於所有選取內容
+	Flat Color from Around Each Block	取每塊周圍的顏色
+	The color to paint with	用於繪製的顏色
+	Manga LaMa draws what was behind the letters. The best over drawings, and it takes a while	Manga LaMa 繪製文字背後的內容。在畫面上效果最好,需要一點時間
+	Copies from around each block. Quick, for tones and simple backgrounds	從每塊周圍複製。速度快,適合網點和簡單背景
+	Paints each block in the color around it. Instant, for letters on an even balloon	用周圍顏色塗滿每塊。瞬間完成,適合均勻對話框內的文字
+	Click a block, or drag a box around several	點擊一塊,或拖框選取多塊
+	Drag a rectangle: a zone of its own	拖出矩形: 獨立區域
+	Draw around a zone of its own	圈出獨立區域
+	Paint a zone of its own	塗出獨立區域
+	Click a block or drag a box around several. Ctrl: a single piece. Alt: take away	點擊一塊或拖框選多塊。Ctrl: 單個片段。Alt: 移除
+	Tap a block or drag a box around several	點按一塊或拖框選多塊
+	Drag a rectangle to add a zone. Alt cuts it out	拖出矩形新增區域。Alt 裁去
+	Drag a rectangle to add a zone	拖出矩形新增區域
+	Draw around a zone to add it. Alt cuts it out	圈出區域以新增。Alt 裁去
+	Draw around a zone to add it	圈出區域以新增
+	Paint a zone to add it. Alt cuts it out	塗出區域以新增。Alt 裁去
+	Paint a zone to add it	塗出區域以新增
+	Tap a block to clean it	點按一塊即可清理
+	Click a block to clean it	點擊一塊即可清理
+	Each click cleans that block right away, one at a time	每次點擊立即清理該塊,一次一塊
+	Finds the text and sound effects on the page, or drag a box to look only there. You choose what to clean	尋找頁面上的文字和擬聲詞,或拖框只在該處尋找。清理內容由你選擇

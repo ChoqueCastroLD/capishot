@@ -15,6 +15,7 @@ use crate::{EngineError, Result, Session};
 pub const DETECT: &str = "select.detectText";
 pub const PIECES: &str = "select.textPieces";
 pub const STROKE: &str = "select.brushStroke";
+pub const ZONE: &str = "select.textZone";
 const LABEL: &str = "Detect Text";
 const UNAVAILABLE: &str = "text detection isn't available in this build";
 
@@ -159,6 +160,57 @@ fn stroke(s: &mut Session, p: &Value) -> Result<Value> {
     crate::selection_cmds::set_selection(s, "Text Selection", area, mask, mode)
 }
 
+/// The inside of a closed shape.
+fn polygon_mask(points: &[[f64; 2]], area: Rect) -> Vec<f32> {
+    let (w, h) = (area.width() as usize, area.height() as usize);
+    let mut mask = vec![0f32; w * h];
+    let mut crossings = Vec::new();
+    for y in 0..h {
+        let line = y as f64 + 0.5 + f64::from(area.y0);
+        crossings.clear();
+        for (i, a) in points.iter().enumerate() {
+            let b = points[(i + 1) % points.len()];
+            if (a[1] <= line) != (b[1] <= line) {
+                crossings.push(a[0] + (line - a[1]) / (b[1] - a[1]) * (b[0] - a[0]) - f64::from(area.x0));
+            }
+        }
+        crossings.sort_by(f64::total_cmp);
+        for pair in crossings.chunks_exact(2) {
+            let (x0, x1) = (pair[0].round().clamp(0.0, w as f64) as usize, pair[1].round().clamp(0.0, w as f64) as usize);
+            mask[y * w + x0..y * w + x1].fill(1.0);
+        }
+    }
+    mask
+}
+
+/// `select.textZone`: what a person drew joins the pieces as a piece of its own, or leaves them.
+fn zone(s: &mut Session, p: &Value) -> Result<Value> {
+    let bad = |m: &str| EngineError::BadParams { cmd: ZONE.into(), msg: m.into() };
+    let d = s.text_detection().ok_or_else(|| bad("detect the text first (select.detectText)"))?;
+    let area = Rect::new(0, 0, i32::try_from(d.width).unwrap_or(i32::MAX), i32::try_from(d.height).unwrap_or(i32::MAX));
+    let points: Option<Vec<[f64; 2]>> = p.get("points").cloned().and_then(|v| serde_json::from_value(v).ok());
+    let mask = if let Some(r) = p.get("rect").cloned().and_then(|v| serde_json::from_value::<[f64; 4]>(v).ok()) {
+        polygon_mask(&[[r[0], r[1]], [r[2], r[1]], [r[2], r[3]], [r[0], r[3]]], area)
+    } else if let Some(points) = points.filter(|v| v.len() >= 2) {
+        match p.get("size").and_then(Value::as_f64) {
+            Some(size) => stroke_mask(&points, (size / 2.0).max(0.5), area),
+            None => polygon_mask(&points, area),
+        }
+    } else {
+        return Err(bad("give \"rect\" or \"points\""));
+    };
+    let inside = |x: usize, y: usize| mask[y * d.width + x] > 0.0;
+    let mode = p.get("mode").and_then(Value::as_str).unwrap_or("add");
+    let subtract = mode == "subtract";
+    let changed = if subtract { Some(d.clipped(|x, y| !inside(x, y))) } else { d.with_zone(inside) };
+    match changed {
+        Some(left) if left.regions.is_empty() => s.forget_text_detection(),
+        Some(left) => s.set_text_detection(Arc::new(left)),
+        None => {}
+    }
+    crate::selection_cmds::set_selection(s, "Text Selection", area, mask, sel::SelectionMode::parse(mode))
+}
+
 /// The discs of a stroke along `points`, close enough to read as a line.
 fn stroke_mask(points: &[[f64; 2]], radius: f64, area: Rect) -> Vec<f32> {
     let (w, h) = (area.width() as usize, area.height() as usize);
@@ -226,6 +278,16 @@ pub fn specs() -> Vec<CommandSpec> {
             enabled: |s| s.active().map(|_| ()).ok_or_else(|| "no document".to_string()),
             journal: true,
             run: stroke,
+        },
+        CommandSpec {
+            id: ZONE,
+            label: "Text Selection",
+            menu: &[],
+            shortcut: None,
+            params: r#"{"rect": [x0, y0, x1, y1] | "points": [[x, y], …] (a closed shape; with "size": a brush stroke of that width), "mode"?: "add"|"subtract"}: adds a zone to the pieces as a piece of its own and to the selection, or cuts it from both"#,
+            enabled: has_masker,
+            journal: true,
+            run: zone,
         },
     ]
 }
@@ -317,6 +379,27 @@ mod tests {
         assert!(covered(&s, 135, 20), "the brush's stayed");
         s.execute(STROKE, json!({"points": [[120, 20], [150, 20]], "size": 10, "mode": "subtract"})).unwrap();
         assert!(!covered(&s, 135, 20), "and comes out with the brush");
+    }
+
+    #[test]
+    fn a_zone_joins_the_pieces_and_another_cuts_them() {
+        let mut s = page();
+        s.execute(DETECT, json!({})).unwrap();
+        s.execute(ZONE, json!({"rect": [100, 20, 150, 60]})).unwrap();
+        let d = s.text_detection().unwrap();
+        assert_eq!(d.regions.len(), 3, "a piece of its own");
+        assert_eq!(d.regions[2].bbox, [100, 20, 150, 60]);
+        assert!(covered(&s, 120, 40), "and selected");
+        s.execute(ZONE, json!({"points": [[90, 10], [160, 10], [160, 30], [90, 30]], "mode": "subtract"})).unwrap();
+        let d = s.text_detection().unwrap();
+        assert_eq!(d.regions[2].bbox, [100, 30, 150, 60], "cut");
+        assert!(!covered(&s, 120, 25) && covered(&s, 120, 40));
+        s.execute(ZONE, json!({"points": [[0, 100], [90, 100]], "size": 20})).unwrap();
+        assert!(covered(&s, 45, 100), "a stroke");
+        assert!(!covered(&s, 45, 80));
+        s.execute(ZONE, json!({"points": [[100, 150], [150, 150], [125, 190]]})).unwrap();
+        assert!(covered(&s, 125, 160) && !covered(&s, 102, 185), "a lasso");
+        assert!(s.execute(ZONE, json!({})).is_err());
     }
 
     #[test]

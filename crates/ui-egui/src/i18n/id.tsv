@@ -4090,3 +4090,39 @@ curves	Smooth	Haluskan
 	Reading your fonts: {done} of {total}	Membaca font Anda: {done} dari {total}
 	Very few fonts are loaded: load yours and the search looks through them	Font yang dimuat sangat sedikit: muat font Anda agar ikut dicari
 	Among {n} loaded fonts. Click one to use it	Di antara {n} font yang dimuat. Klik salah satu untuk memakainya
+	Content Fill	Isian
+	Flat Color	Warna
+	Pick	Pilih
+	Result in	Hasil di
+	On the Page	Di halaman
+	Clean with	Bersihkan dengan
+	Clean {n}	Bersihkan {n}
+	Drag Adds	Seret menambah
+	Drag Removes	Seret menghapus
+	Drag: {shape}	Seret: {shape}
+	Marks every piece with the method in use	Menandai semua bagian dengan metode yang dipakai
+	Leaves out what the model doubts	Melewatkan yang diragukan model
+	Marks the others instead	Menandai yang lain
+	Takes every piece off	Menghapus semua bagian
+	With its options, on everything chosen	Dengan opsinya, pada semua yang dipilih
+	Flat Color from Around Each Block	Warna dari sekitar tiap blok
+	The color to paint with	Warna untuk melukis
+	Manga LaMa draws what was behind the letters. The best over drawings, and it takes a while	Manga LaMa menggambar apa yang ada di balik huruf. Terbaik di atas gambar, agak lama
+	Copies from around each block. Quick, for tones and simple backgrounds	Menyalin dari sekitar tiap blok. Cepat, untuk tone dan latar sederhana
+	Paints each block in the color around it. Instant, for letters on an even balloon	Mengecat tiap blok dengan warna sekitarnya. Instan, untuk huruf di balon polos
+	Click a block, or drag a box around several	Klik satu blok, atau seret kotak di sekitar beberapa
+	Drag a rectangle: a zone of its own	Seret persegi: zona tersendiri
+	Draw around a zone of its own	Gambar di sekitar zona tersendiri
+	Paint a zone of its own	Lukis zona tersendiri
+	Click a block or drag a box around several. Ctrl: a single piece. Alt: take away	Klik blok atau seret kotak di sekitar beberapa. Ctrl: satu bagian. Alt: hapus
+	Tap a block or drag a box around several	Ketuk blok atau seret kotak di sekitar beberapa
+	Drag a rectangle to add a zone. Alt cuts it out	Seret persegi untuk menambah zona. Alt memotongnya
+	Drag a rectangle to add a zone	Seret persegi untuk menambah zona
+	Draw around a zone to add it. Alt cuts it out	Gambar di sekitar zona untuk menambahnya. Alt memotongnya
+	Draw around a zone to add it	Gambar di sekitar zona untuk menambahnya
+	Paint a zone to add it. Alt cuts it out	Lukis zona untuk menambahnya. Alt memotongnya
+	Paint a zone to add it	Lukis zona untuk menambahnya
+	Tap a block to clean it	Ketuk blok untuk membersihkannya
+	Click a block to clean it	Klik blok untuk membersihkannya
+	Each click cleans that block right away, one at a time	Setiap klik langsung membersihkan blok itu, satu per satu
+	Finds the text and sound effects on the page, or drag a box to look only there. You choose what to clean	Menemukan teks dan efek suara di halaman, atau seret kotak untuk mencari di sana saja. Anda memilih yang dibersihkan

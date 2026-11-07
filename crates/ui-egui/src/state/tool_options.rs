@@ -2,6 +2,26 @@ use super::tool::Tool;
 use super::{Deserialize, Serialize};
 
 /// One of the Bubble Type tool's text styles ("Texto globo", "Texto narración", "Texto flotante").
+/// How the Text Selection tool cleans a piece.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CleanMethod {
+    #[default]
+    Ai,
+    Fill,
+    Color,
+}
+
+/// What a drag with the Text Selection tool does.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ZoneShape {
+    /// A box around pieces chooses them.
+    #[default]
+    Pick,
+    Rect,
+    Lasso,
+    Brush,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BubbleTextStyle {
@@ -325,6 +345,16 @@ pub struct ToolOptions {
     /// difference, 1–255; 0 = automatic, from the bubble's noise).
     #[serde(default)]
     pub bubble_text_new_layer: bool,
+    /// Text Selection: what the pieces chosen now are cleaned with.
+    pub text_select_method: CleanMethod,
+    /// Text Selection: what a drag on the page does.
+    pub text_select_shape: ZoneShape,
+    /// Text Selection: the colour of the pieces to fill by content, and of those to paint flat.
+    pub text_select_fill_tint: [u8; 3],
+    pub text_select_flat_tint: [u8; 3],
+    /// Text Selection: a flat clean takes the colour around each block, else `text_select_flat`.
+    pub text_select_flat_auto: bool,
+    pub text_select_flat: [u8; 3],
     /// Text Selection: a click on a piece cleans it, instead of choosing it.
     pub text_select_clean_click: bool,
     /// Type: long words that don't fit are split with a hyphen. Off, as in Photoshop.
@@ -597,6 +627,12 @@ impl Default for ToolOptions {
             magnetic_frequency: 57.0,
             magnetic_pressure: false,
             bubble_text_new_layer: false,
+            text_select_method: CleanMethod::Ai,
+            text_select_shape: ZoneShape::Pick,
+            text_select_fill_tint: [46, 170, 90],
+            text_select_flat_tint: [170, 80, 220],
+            text_select_flat_auto: true,
+            text_select_flat: [255, 255, 255],
             text_select_clean_click: false,
             type_hyphenate: false,
             bubble_hyphenate: true,

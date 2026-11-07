@@ -123,7 +123,7 @@ fn tool_options_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, t: Tokens) {
     // chip, so a tool change swaps the brush with it (Photoshop keeps one per tool).
     crate::paint_mouse::sync_tool_brush(app);
     // Brush edits here go through `tools.setBrush`, one journal entry per gesture (Rule 1).
-    if (tool.is_brushlike() && !matches!(tool, Tool::Brush | Tool::Pencil | Tool::MixerBrush | Tool::Eraser)) || matches!(tool, Tool::QuickSelection | Tool::TextSelection) {
+    if (tool.is_brushlike() && !matches!(tool, Tool::Brush | Tool::Pencil | Tool::MixerBrush | Tool::Eraser)) || tool == Tool::QuickSelection || (tool == Tool::TextSelection && app.ui.tool_options.text_select_shape == crate::state::ZoneShape::Brush) {
         brush_preset_chip(ui, &app.session.tools.brush, &mut app.ui);
         crate::brush_picker::settings_toggle(app, ui);
         widgets::vline(ui, 22.0);

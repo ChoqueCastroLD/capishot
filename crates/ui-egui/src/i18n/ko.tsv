@@ -4287,3 +4287,39 @@ curves	Smooth	매끄럽게
 	Reading your fonts: {done} of {total}	글꼴 읽는 중: {done} / {total}
 	Very few fonts are loaded: load yours and the search looks through them	불러온 글꼴이 매우 적습니다. 내 글꼴을 불러오면 함께 검색합니다
 	Among {n} loaded fonts. Click one to use it	불러온 글꼴 {n}개 중에서. 클릭하면 사용합니다
+	Content Fill	채우기
+	Flat Color	단색
+	Pick	선택
+	Result in	결과 위치
+	On the Page	페이지에서
+	Clean with	정리 방법
+	Clean {n}	{n}개 정리
+	Drag Adds	드래그로 추가
+	Drag Removes	드래그로 제거
+	Drag: {shape}	드래그: {shape}
+	Marks every piece with the method in use	모든 조각을 현재 방법으로 표시
+	Leaves out what the model doubts	모델이 확신하지 못하는 것은 제외
+	Marks the others instead	대신 나머지를 표시
+	Takes every piece off	모든 조각을 해제
+	With its options, on everything chosen	옵션과 함께, 선택한 모든 항목에
+	Flat Color from Around Each Block	각 블록 주변의 색
+	The color to paint with	칠할 색
+	Manga LaMa draws what was behind the letters. The best over drawings, and it takes a while	Manga LaMa가 글자 뒤를 그려 줍니다. 그림 위에서 가장 좋고 시간이 조금 걸립니다
+	Copies from around each block. Quick, for tones and simple backgrounds	각 블록 주변에서 복사합니다. 빠르며 톤과 단순한 배경에 적합
+	Paints each block in the color around it. Instant, for letters on an even balloon	각 블록을 주변 색으로 칠합니다. 즉시 처리되며 균일한 말풍선 글자에 적합
+	Click a block, or drag a box around several	블록을 클릭하거나 여러 개를 드래그로 묶으세요
+	Drag a rectangle: a zone of its own	사각형을 드래그: 별도 영역
+	Draw around a zone of its own	별도 영역을 둘러 그리기
+	Paint a zone of its own	별도 영역을 칠하기
+	Click a block or drag a box around several. Ctrl: a single piece. Alt: take away	블록을 클릭하거나 드래그로 여러 개를 묶으세요. Ctrl: 한 조각. Alt: 제거
+	Tap a block or drag a box around several	블록을 탭하거나 드래그로 여러 개를 묶으세요
+	Drag a rectangle to add a zone. Alt cuts it out	사각형을 드래그해 영역 추가. Alt는 잘라냄
+	Drag a rectangle to add a zone	사각형을 드래그해 영역 추가
+	Draw around a zone to add it. Alt cuts it out	영역을 둘러 그려 추가. Alt는 잘라냄
+	Draw around a zone to add it	영역을 둘러 그려 추가
+	Paint a zone to add it. Alt cuts it out	영역을 칠해 추가. Alt는 잘라냄
+	Paint a zone to add it	영역을 칠해 추가
+	Tap a block to clean it	블록을 탭해 정리
+	Click a block to clean it	블록을 클릭해 정리
+	Each click cleans that block right away, one at a time	클릭할 때마다 그 블록을 바로 정리합니다(하나씩)
+	Finds the text and sound effects on the page, or drag a box to look only there. You choose what to clean	페이지의 글자와 효과음을 찾습니다. 드래그로 범위를 지정하면 그곳만 찾습니다. 정리할 대상은 직접 고릅니다

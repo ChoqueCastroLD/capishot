@@ -4740,3 +4740,39 @@ curves	Smooth	スムーズ
 	Reading your fonts: {done} of {total}	フォントを読み込み中: {done} / {total}
 	Very few fonts are loaded: load yours and the search looks through them	読み込まれたフォントがごくわずかです。自分のフォントを読み込むと検索対象になります
 	Among {n} loaded fonts. Click one to use it	読み込み済みの {n} フォントから。クリックして使用
+	Content Fill	塗りつぶし
+	Flat Color	単色
+	Pick	選択
+	Result in	結果の出力先
+	On the Page	ページ上
+	Clean with	クリーニング方法
+	Clean {n}	{n} 個をクリーニング
+	Drag Adds	ドラッグで追加
+	Drag Removes	ドラッグで削除
+	Drag: {shape}	ドラッグ: {shape}
+	Marks every piece with the method in use	すべてのピースを現在の方法でマーク
+	Leaves out what the model doubts	モデルが疑わしいと判断したものを除外
+	Marks the others instead	代わりに他をマーク
+	Takes every piece off	すべてのピースを外す
+	With its options, on everything chosen	オプション付きで、選択したすべてに
+	Flat Color from Around Each Block	各ブロックの周囲の色
+	The color to paint with	塗る色
+	Manga LaMa draws what was behind the letters. The best over drawings, and it takes a while	Manga LaMa が文字の背後を描きます。絵の上では最良で、少し時間がかかります
+	Copies from around each block. Quick, for tones and simple backgrounds	各ブロックの周囲からコピーします。速く、トーンや単純な背景向き
+	Paints each block in the color around it. Instant, for letters on an even balloon	各ブロックを周囲の色で塗ります。一瞬で、均一なフキダシの文字向き
+	Click a block, or drag a box around several	ブロックをクリック、または複数を囲むようにドラッグ
+	Drag a rectangle: a zone of its own	長方形をドラッグ: 独立したゾーン
+	Draw around a zone of its own	独立したゾーンを囲んで描く
+	Paint a zone of its own	独立したゾーンを塗る
+	Click a block or drag a box around several. Ctrl: a single piece. Alt: take away	ブロックをクリック、または複数をドラッグで囲む。Ctrl: 1 ピース。Alt: 外す
+	Tap a block or drag a box around several	ブロックをタップ、または複数をドラッグで囲む
+	Drag a rectangle to add a zone. Alt cuts it out	長方形をドラッグしてゾーンを追加。Alt で切り抜き
+	Drag a rectangle to add a zone	長方形をドラッグしてゾーンを追加
+	Draw around a zone to add it. Alt cuts it out	ゾーンを囲んで追加。Alt で切り抜き
+	Draw around a zone to add it	ゾーンを囲んで追加
+	Paint a zone to add it. Alt cuts it out	ゾーンを塗って追加。Alt で切り抜き
+	Paint a zone to add it	ゾーンを塗って追加
+	Tap a block to clean it	ブロックをタップしてクリーニング
+	Click a block to clean it	ブロックをクリックしてクリーニング
+	Each click cleans that block right away, one at a time	クリックごとにそのブロックをすぐクリーニング(1 つずつ)
+	Finds the text and sound effects on the page, or drag a box to look only there. You choose what to clean	ページの文字と効果音を検出します。ドラッグで範囲を囲むとそこだけ検索。何をクリーニングするかは選べます

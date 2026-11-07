@@ -4816,3 +4816,39 @@ curves	Smooth	Vloeiend maken
 	Reading your fonts: {done} of {total}	Je lettertypen lezen: {done} van {total}
 	Very few fonts are loaded: load yours and the search looks through them	Er zijn heel weinig lettertypen geladen: laad de jouwe en de zoekopdracht doorzoekt ze
 	Among {n} loaded fonts. Click one to use it	Uit {n} geladen lettertypen. Klik op een om het te gebruiken
+	Content Fill	Vulling
+	Flat Color	Kleur
+	Pick	Kiezen
+	Result in	Resultaat in
+	On the Page	Op de pagina
+	Clean with	Opschonen met
+	Clean {n}	{n} opschonen
+	Drag Adds	Slepen voegt toe
+	Drag Removes	Slepen haalt weg
+	Drag: {shape}	Slepen: {shape}
+	Marks every piece with the method in use	Markeert alle stukken met de huidige methode
+	Leaves out what the model doubts	Laat weg waar het model aan twijfelt
+	Marks the others instead	Markeert in plaats daarvan de andere
+	Takes every piece off	Haalt alle stukken weg
+	With its options, on everything chosen	Met opties, op alles wat gekozen is
+	Flat Color from Around Each Block	Kleur rondom elk blok
+	The color to paint with	De kleur om mee te schilderen
+	Manga LaMa draws what was behind the letters. The best over drawings, and it takes a while	Manga LaMa tekent wat achter de letters zat. Het beste op tekeningen, duurt even
+	Copies from around each block. Quick, for tones and simple backgrounds	Kopieert van rondom elk blok. Snel, voor rasters en eenvoudige achtergronden
+	Paints each block in the color around it. Instant, for letters on an even balloon	Schildert elk blok in de kleur eromheen. Direct, voor letters in een egale ballon
+	Click a block, or drag a box around several	Klik op een blok of sleep een kader om meerdere
+	Drag a rectangle: a zone of its own	Sleep een rechthoek: een eigen zone
+	Draw around a zone of its own	Teken rond een eigen zone
+	Paint a zone of its own	Schilder een eigen zone
+	Click a block or drag a box around several. Ctrl: a single piece. Alt: take away	Klik op een blok of sleep een kader om meerdere. Ctrl: één stuk. Alt: weghalen
+	Tap a block or drag a box around several	Tik op een blok of sleep een kader om meerdere
+	Drag a rectangle to add a zone. Alt cuts it out	Sleep een rechthoek om een zone toe te voegen. Alt knipt die uit
+	Drag a rectangle to add a zone	Sleep een rechthoek om een zone toe te voegen
+	Draw around a zone to add it. Alt cuts it out	Teken rond een zone om die toe te voegen. Alt knipt die uit
+	Draw around a zone to add it	Teken rond een zone om die toe te voegen
+	Paint a zone to add it. Alt cuts it out	Schilder een zone om die toe te voegen. Alt knipt die uit
+	Paint a zone to add it	Schilder een zone om die toe te voegen
+	Tap a block to clean it	Tik op een blok om het op te schonen
+	Click a block to clean it	Klik op een blok om het op te schonen
+	Each click cleans that block right away, one at a time	Elke klik schoont dat blok meteen op, één voor één
+	Finds the text and sound effects on the page, or drag a box to look only there. You choose what to clean	Vindt tekst en geluidseffecten op de pagina, of sleep een kader om alleen daar te zoeken. Jij kiest wat wordt opgeschoond

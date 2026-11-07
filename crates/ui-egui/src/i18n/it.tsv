@@ -5167,3 +5167,39 @@ shape	Appearance	Aspetto
 	Reading your fonts: {done} of {total}	Lettura dei tuoi font: {done} di {total}
 	Very few fonts are loaded: load yours and the search looks through them	Sono caricati pochissimi font: carica i tuoi e la ricerca li esaminerà
 	Among {n} loaded fonts. Click one to use it	Tra {n} font caricati. Fai clic su uno per usarlo
+	Content Fill	Riempimento
+	Flat Color	Colore
+	Pick	Scegli
+	Result in	Risultato in
+	On the Page	Sulla pagina
+	Clean with	Pulisci con
+	Clean {n}	Pulisci {n}
+	Drag Adds	Trascina: aggiunge
+	Drag Removes	Trascina: toglie
+	Drag: {shape}	Trascina: {shape}
+	Marks every piece with the method in use	Segna tutti i pezzi con il metodo in uso
+	Leaves out what the model doubts	Esclude ciò di cui il modello dubita
+	Marks the others instead	Segna invece gli altri
+	Takes every piece off	Toglie tutti i pezzi
+	With its options, on everything chosen	Con le sue opzioni, su tutto ciò che è scelto
+	Flat Color from Around Each Block	Colore attorno a ogni blocco
+	The color to paint with	Il colore da usare
+	Manga LaMa draws what was behind the letters. The best over drawings, and it takes a while	Manga LaMa disegna ciò che c’era dietro le lettere. Il migliore sui disegni, richiede un po’
+	Copies from around each block. Quick, for tones and simple backgrounds	Copia attorno a ogni blocco. Veloce, per retini e sfondi semplici
+	Paints each block in the color around it. Instant, for letters on an even balloon	Dipinge ogni blocco del colore attorno. Istantaneo, per lettere in un balloon uniforme
+	Click a block, or drag a box around several	Fai clic su un blocco o trascina un riquadro attorno a più blocchi
+	Drag a rectangle: a zone of its own	Trascina un rettangolo: una zona a sé
+	Draw around a zone of its own	Disegna attorno a una zona a sé
+	Paint a zone of its own	Dipingi una zona a sé
+	Click a block or drag a box around several. Ctrl: a single piece. Alt: take away	Clic su un blocco o trascina un riquadro su più blocchi. Ctrl: un solo pezzo. Alt: togli
+	Tap a block or drag a box around several	Tocca un blocco o trascina un riquadro su più blocchi
+	Drag a rectangle to add a zone. Alt cuts it out	Trascina un rettangolo per aggiungere una zona. Alt la ritaglia
+	Drag a rectangle to add a zone	Trascina un rettangolo per aggiungere una zona
+	Draw around a zone to add it. Alt cuts it out	Disegna attorno a una zona per aggiungerla. Alt la ritaglia
+	Draw around a zone to add it	Disegna attorno a una zona per aggiungerla
+	Paint a zone to add it. Alt cuts it out	Dipingi una zona per aggiungerla. Alt la ritaglia
+	Paint a zone to add it	Dipingi una zona per aggiungerla
+	Tap a block to clean it	Tocca un blocco per pulirlo
+	Click a block to clean it	Fai clic su un blocco per pulirlo
+	Each click cleans that block right away, one at a time	Ogni clic pulisce subito quel blocco, uno alla volta
+	Finds the text and sound effects on the page, or drag a box to look only there. You choose what to clean	Trova testo ed effetti sonori nella pagina, oppure trascina un riquadro per cercare solo lì. Scegli tu cosa pulire

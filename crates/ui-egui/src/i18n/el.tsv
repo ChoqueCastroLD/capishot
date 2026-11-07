@@ -4760,3 +4760,39 @@ curves	Smooth	Εξομάλυνση
 	Reading your fonts: {done} of {total}	Ανάγνωση των γραμματοσειρών σας: {done} από {total}
 	Very few fonts are loaded: load yours and the search looks through them	Έχουν φορτωθεί πολύ λίγες γραμματοσειρές: φορτώστε τις δικές σας και η αναζήτηση θα τις ελέγξει
 	Among {n} loaded fonts. Click one to use it	Ανάμεσα σε {n} φορτωμένες γραμματοσειρές. Κάντε κλικ σε μία για να τη χρησιμοποιήσετε
+	Content Fill	Γέμισμα
+	Flat Color	Χρώμα
+	Pick	Επιλογή
+	Result in	Αποτέλεσμα σε
+	On the Page	Στη σελίδα
+	Clean with	Καθαρισμός με
+	Clean {n}	Καθαρισμός {n}
+	Drag Adds	Το σύρσιμο προσθέτει
+	Drag Removes	Το σύρσιμο αφαιρεί
+	Drag: {shape}	Σύρσιμο: {shape}
+	Marks every piece with the method in use	Σημειώνει όλα τα κομμάτια με την τρέχουσα μέθοδο
+	Leaves out what the model doubts	Παραλείπει ό,τι αμφισβητεί το μοντέλο
+	Marks the others instead	Σημειώνει τα υπόλοιπα
+	Takes every piece off	Αφαιρεί όλα τα κομμάτια
+	With its options, on everything chosen	Με τις επιλογές του, σε όλα τα επιλεγμένα
+	Flat Color from Around Each Block	Χρώμα από γύρω από κάθε μπλοκ
+	The color to paint with	Το χρώμα βαφής
+	Manga LaMa draws what was behind the letters. The best over drawings, and it takes a while	Το Manga LaMa σχεδιάζει ό,τι υπήρχε πίσω από τα γράμματα. Το καλύτερο πάνω σε σχέδια, αργεί λίγο
+	Copies from around each block. Quick, for tones and simple backgrounds	Αντιγράφει από γύρω από κάθε μπλοκ. Γρήγορο, για τόνους και απλά φόντα
+	Paints each block in the color around it. Instant, for letters on an even balloon	Βάφει κάθε μπλοκ με το χρώμα γύρω του. Άμεσο, για γράμματα σε ομοιόμορφο συννεφάκι
+	Click a block, or drag a box around several	Κάντε κλικ σε ένα μπλοκ ή σύρετε πλαίσιο γύρω από πολλά
+	Drag a rectangle: a zone of its own	Σύρετε ορθογώνιο: δική του ζώνη
+	Draw around a zone of its own	Σχεδιάστε γύρω από δική του ζώνη
+	Paint a zone of its own	Βάψτε δική του ζώνη
+	Click a block or drag a box around several. Ctrl: a single piece. Alt: take away	Κλικ σε μπλοκ ή πλαίσιο γύρω από πολλά. Ctrl: ένα κομμάτι. Alt: αφαίρεση
+	Tap a block or drag a box around several	Πατήστε ένα μπλοκ ή σύρετε πλαίσιο γύρω από πολλά
+	Drag a rectangle to add a zone. Alt cuts it out	Σύρετε ορθογώνιο για προσθήκη ζώνης. Το Alt την κόβει
+	Drag a rectangle to add a zone	Σύρετε ορθογώνιο για προσθήκη ζώνης
+	Draw around a zone to add it. Alt cuts it out	Σχεδιάστε γύρω από ζώνη για προσθήκη. Το Alt την κόβει
+	Draw around a zone to add it	Σχεδιάστε γύρω από ζώνη για προσθήκη
+	Paint a zone to add it. Alt cuts it out	Βάψτε ζώνη για προσθήκη. Το Alt την κόβει
+	Paint a zone to add it	Βάψτε ζώνη για προσθήκη
+	Tap a block to clean it	Πατήστε ένα μπλοκ για καθαρισμό
+	Click a block to clean it	Κάντε κλικ σε ένα μπλοκ για καθαρισμό
+	Each click cleans that block right away, one at a time	Κάθε κλικ καθαρίζει αμέσως εκείνο το μπλοκ, ένα κάθε φορά
+	Finds the text and sound effects on the page, or drag a box to look only there. You choose what to clean	Βρίσκει κείμενο και ηχητικά εφέ στη σελίδα, ή σύρετε πλαίσιο για αναζήτηση μόνο εκεί. Εσείς διαλέγετε τι θα καθαριστεί

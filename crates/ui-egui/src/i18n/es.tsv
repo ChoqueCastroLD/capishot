@@ -5537,3 +5537,39 @@ fontTab	Find More	Buscar más
 	Reading your fonts: {done} of {total}	Leyendo tus fuentes: {done} de {total}
 	Very few fonts are loaded: load yours and the search looks through them	Hay muy pocas fuentes cargadas: carga las tuyas y la búsqueda las revisará
 	Among {n} loaded fonts. Click one to use it	Entre {n} fuentes cargadas. Haz clic en una para usarla
+	Content Fill	Relleno
+	Flat Color	Color
+	Pick	Elegir
+	Result in	Resultado en
+	On the Page	En la página
+	Clean with	Limpiar con
+	Clean {n}	Limpiar {n}
+	Drag Adds	Arrastrar agrega
+	Drag Removes	Arrastrar quita
+	Drag: {shape}	Arrastrar: {shape}
+	Marks every piece with the method in use	Marca todas las piezas con el método en uso
+	Leaves out what the model doubts	Deja fuera lo que el modelo duda
+	Marks the others instead	Marca las otras en su lugar
+	Takes every piece off	Quita todas las piezas
+	With its options, on everything chosen	Con sus opciones, sobre todo lo elegido
+	Flat Color from Around Each Block	Color del entorno de cada bloque
+	The color to paint with	El color con el que pintar
+	Manga LaMa draws what was behind the letters. The best over drawings, and it takes a while	Manga LaMa dibuja lo que había detrás de las letras. Lo mejor sobre dibujos, y tarda un poco
+	Copies from around each block. Quick, for tones and simple backgrounds	Copia del entorno de cada bloque. Rápido, para tramas y fondos simples
+	Paints each block in the color around it. Instant, for letters on an even balloon	Pinta cada bloque del color de su entorno. Al instante, para letras en un globo parejo
+	Click a block, or drag a box around several	Haz clic en un bloque o arrastra un rectángulo sobre varios
+	Drag a rectangle: a zone of its own	Arrastra un rectángulo: una zona propia
+	Draw around a zone of its own	Dibuja alrededor de una zona propia
+	Paint a zone of its own	Pinta una zona propia
+	Click a block or drag a box around several. Ctrl: a single piece. Alt: take away	Clic en un bloque o arrastra un rectángulo sobre varios. Ctrl: una sola pieza. Alt: quitar
+	Tap a block or drag a box around several	Toca un bloque o arrastra un rectángulo sobre varios
+	Drag a rectangle to add a zone. Alt cuts it out	Arrastra un rectángulo para agregar una zona. Alt la recorta
+	Drag a rectangle to add a zone	Arrastra un rectángulo para agregar una zona
+	Draw around a zone to add it. Alt cuts it out	Dibuja alrededor de una zona para agregarla. Alt la recorta
+	Draw around a zone to add it	Dibuja alrededor de una zona para agregarla
+	Paint a zone to add it. Alt cuts it out	Pinta una zona para agregarla. Alt la recorta
+	Paint a zone to add it	Pinta una zona para agregarla
+	Tap a block to clean it	Toca un bloque para limpiarlo
+	Click a block to clean it	Haz clic en un bloque para limpiarlo
+	Each click cleans that block right away, one at a time	Cada clic limpia ese bloque al momento, de uno en uno
+	Finds the text and sound effects on the page, or drag a box to look only there. You choose what to clean	Encuentra el texto y las onomatopeyas de la página, o arrastra un rectángulo para buscar solo ahí. Tú eliges qué limpiar

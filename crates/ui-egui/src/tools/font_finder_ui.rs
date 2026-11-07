@@ -188,7 +188,7 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
         let total = app.font_finder.to_read.max(left).max(1);
         let screen = crate::safe_area::rect(ctx);
         let at = egui::pos2((screen.right() - 700.0).max(screen.left() + 8.0), screen.top() + 90.0);
-        egui::Window::new(tl!("Find Font")).id(egui::Id::new("font-finder-reading")).collapsible(false).resizable(false).default_pos(at).show(ctx, |ui| {
+        egui::Window::new(tl!("Find Font")).id(egui::Id::unique("font-finder-reading")).collapsible(false).resizable(false).default_pos(at).show(ctx, |ui| {
             ui.label(crate::i18n::fmt(tl!("Reading your fonts: {done} of {total}"), &[("done", &(total - left).to_string()), ("total", &total.to_string())]));
             ui.add(egui::ProgressBar::new((total - left) as f32 / total as f32));
         });

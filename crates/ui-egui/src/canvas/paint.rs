@@ -601,6 +601,7 @@ pub(super) fn draw_drag_preview(app: &mut PhotocraftApp, painter: &egui::Painter
                 draw_smoothing_string(painter, xf, s);
             }
         }
+        Tool::TextSelection if app.ui.tool_options.text_select_shape != crate::state::ZoneShape::Brush => crate::text_select_ui::draw_drag(app, painter, xf, &d.points, d.modifiers),
         t if t.is_brushlike() || matches!(t, Tool::QuickSelection | Tool::TextSelection) => {
             // Retouching strokes preview as a translucent trail of the brush footprint: a mask,
             // not a brush-wide egui polyline (which zoomed in tessellates into wedges, #189).

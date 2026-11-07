@@ -19,6 +19,8 @@
 //! work: phones, weak machines, CPUs), as `image.upscaleAi` does; `model` names one explicitly. `threads` and `keepLoaded` are Advanced
 //! settings, like `maxSide` and `margin`.
 
+pub mod quick;
+
 use std::sync::Arc;
 
 use photocraft_ai::catalog::{self, ModelInfo};
@@ -519,7 +521,7 @@ pub(crate) fn write_clean(doc: &mut photocraft_doc::Document, id: LayerId, outpu
 }
 
 /// Everything the job needs, checked before it starts.
-struct Plan {
+struct Plan<O = AiOptions> {
     layer: LayerId,
     fmt: PixelFormat,
     region: Rect,
@@ -528,7 +530,7 @@ struct Plan {
     cover: Vec<f32>,
     output: Output,
     keep_active: bool,
-    opts: AiOptions,
+    opts: O,
 }
 
 fn enabled(s: &Session) -> std::result::Result<(), String> {
@@ -547,6 +549,12 @@ fn plan(s: &Session, p: &Value) -> Result<Head> {
     if !p.is_object() && !p.is_null() {
         return Err(bad("params must be a JSON object"));
     }
+    let opts = ai_options(s, p, ID, false)?;
+    head_of(s, p, Output::New(CLEAN_LAYER.to_string()), opts.context_margin(), opts)
+}
+
+/// The layer and the zone a clean works on, with what it reads around the selection.
+fn head_of<O>(s: &Session, p: &Value, default_output: Output, margin: usize, opts: O) -> Result<Head<O>> {
     let id = match p.get("layer").filter(|v| !v.is_null()) {
         Some(v) => {
             let l = v.as_u64().ok_or_else(|| bad("`layer` must be a layer id"))?;
@@ -555,9 +563,8 @@ fn plan(s: &Session, p: &Value) -> Result<Head> {
         None => crate::edit_menu_cmds::pixel_layer(s),
     }
     .map_err(EngineError::Other)?;
-    let output = Output::parse(p, Output::New(CLEAN_LAYER.to_string()))?;
+    let output = Output::parse(p, default_output)?;
     let keep_active = p.get("keepActive").and_then(Value::as_bool).unwrap_or(false);
-    let opts = ai_options(s, p, ID, false)?;
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let doc = &d.doc;
     let id = source_layer(doc, id, &output);
@@ -567,7 +574,7 @@ fn plan(s: &Session, p: &Value) -> Result<Head> {
     if sb.is_empty() {
         return Err(bad("the selection is outside the canvas"));
     }
-    let region = context_region(sb, canvas, opts.context_margin());
+    let region = context_region(sb, canvas, margin);
     let pixels = u64::from(region.width()) * u64::from(region.height());
     if pixels > MAX_PIXELS {
         return Err(bad(format!("the area is too large to clean at once ({pixels} pixels, at most {MAX_PIXELS}); select less")));
@@ -577,20 +584,20 @@ fn plan(s: &Session, p: &Value) -> Result<Head> {
 }
 
 /// What [`plan`] checked on the page's thread; [`Head::read`] reads the pixels.
-struct Head {
+struct Head<O = AiOptions> {
     layer: LayerId,
     region: Rect,
     output: Output,
     keep_active: bool,
-    opts: AiOptions,
+    opts: O,
     doc: std::sync::Arc<photocraft_doc::Document>,
 }
 
-impl Head {
+impl<O: Send + 'static> Head<O> {
     /// The region's layer pixels, their RGB and the selection's coverage (on the browser threads
     /// build's pool, in two parts between frames in the single-threaded one: a large selection
     /// takes a while on a phone).
-    fn read(self) -> Result<crate::jobs::Prep<Plan>> {
+    fn read(self) -> Result<crate::jobs::Prep<Plan<O>>> {
         let Head { layer: id, region, output, keep_active, opts, doc } = self;
         let (w, h) = (region.width() as usize, region.height() as usize);
         let surf = doc.layer(id).and_then(|l| l.surface()).ok_or(EngineError::NoLayer(id))?;
@@ -660,8 +667,8 @@ pub(crate) fn inpaint_ai_labelled(s: &mut Session, p: &Value, label: &'static st
     )
 }
 
-fn apply(s: &mut Session, label: &str, plan: Plan, generated: &[f32], device: String, run: FillRun, ms: u64) -> Result<Value> {
-    let model = run.model;
+/// `generated` where the plan's selection covers, as one history step: the layer, how many pixels.
+fn write_result<O>(s: &mut Session, label: &str, plan: Plan<O>, generated: &[f32]) -> Result<(LayerId, usize, Rect)> {
     let Plan { layer: id, fmt, region, layer_px, cover, output, keep_active, .. } = plan;
     let n = fmt.channels();
     let count = cover.iter().filter(|c| **c > 0.0).count();
@@ -692,6 +699,12 @@ fn apply(s: &mut Session, label: &str, plan: Plan, generated: &[f32], device: St
     if let Some(st) = s.active_mut() {
         st.last_damage = Some(region);
     }
+    Ok((layer, count, region))
+}
+
+fn apply(s: &mut Session, label: &str, plan: Plan, generated: &[f32], device: String, run: FillRun, ms: u64) -> Result<Value> {
+    let model = run.model;
+    let (layer, count, region) = write_result(s, label, plan, generated)?;
     Ok(json!({
         "layer": layer.0,
         "pixels": count,
@@ -707,7 +720,7 @@ fn apply(s: &mut Session, label: &str, plan: Plan, generated: &[f32], device: St
 }
 
 pub fn specs() -> Vec<CommandSpec> {
-    vec![CommandSpec {
+    vec![quick::spec(), CommandSpec {
         id: ID,
         label: "Clean Selected Area with AI",
         menu: &["Edit"],

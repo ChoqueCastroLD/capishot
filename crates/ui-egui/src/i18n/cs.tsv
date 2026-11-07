@@ -4803,3 +4803,39 @@ cameraRaw	Dehaze	Odstranění oparu
 	Reading your fonts: {done} of {total}	Čtení vašich písem: {done} z {total}
 	Very few fonts are loaded: load yours and the search looks through them	Je načteno velmi málo písem: načtěte svá a hledání je prohledá
 	Among {n} loaded fonts. Click one to use it	Mezi {n} načtenými písmy. Kliknutím jedno použijete
+	Content Fill	Výplň
+	Flat Color	Barva
+	Pick	Vybrat
+	Result in	Výsledek do
+	On the Page	Na stránce
+	Clean with	Vyčistit pomocí
+	Clean {n}	Vyčistit {n}
+	Drag Adds	Tažení přidá
+	Drag Removes	Tažení odebere
+	Drag: {shape}	Tažení: {shape}
+	Marks every piece with the method in use	Označí všechny části aktuální metodou
+	Leaves out what the model doubts	Vynechá, o čem model pochybuje
+	Marks the others instead	Místo toho označí ostatní
+	Takes every piece off	Odebere všechny části
+	With its options, on everything chosen	S volbami, na vše vybrané
+	Flat Color from Around Each Block	Barva z okolí každého bloku
+	The color to paint with	Barva pro malování
+	Manga LaMa draws what was behind the letters. The best over drawings, and it takes a while	Manga LaMa dokreslí, co bylo za písmeny. Nejlepší na kresbách, ale chvíli trvá
+	Copies from around each block. Quick, for tones and simple backgrounds	Kopíruje z okolí každého bloku. Rychlé, pro rastry a jednoduchá pozadí
+	Paints each block in the color around it. Instant, for letters on an even balloon	Natře každý blok barvou okolí. Okamžité, pro písmena v rovnoměrné bublině
+	Click a block, or drag a box around several	Klikněte na blok nebo táhněte rámeček kolem více
+	Drag a rectangle: a zone of its own	Táhněte obdélník: vlastní zóna
+	Draw around a zone of its own	Obkreslete vlastní zónu
+	Paint a zone of its own	Namalujte vlastní zónu
+	Click a block or drag a box around several. Ctrl: a single piece. Alt: take away	Klikněte na blok nebo táhněte rámeček kolem více. Ctrl: jedna část. Alt: odebrat
+	Tap a block or drag a box around several	Klepněte na blok nebo táhněte rámeček kolem více
+	Drag a rectangle to add a zone. Alt cuts it out	Tažením obdélníku přidáte zónu. Alt ji vyřízne
+	Drag a rectangle to add a zone	Tažením obdélníku přidáte zónu
+	Draw around a zone to add it. Alt cuts it out	Obkreslením přidáte zónu. Alt ji vyřízne
+	Draw around a zone to add it	Obkreslením přidáte zónu
+	Paint a zone to add it. Alt cuts it out	Namalováním přidáte zónu. Alt ji vyřízne
+	Paint a zone to add it	Namalováním přidáte zónu
+	Tap a block to clean it	Klepnutím na blok jej vyčistíte
+	Click a block to clean it	Kliknutím na blok jej vyčistíte
+	Each click cleans that block right away, one at a time	Každé kliknutí hned vyčistí daný blok, jeden po druhém
+	Finds the text and sound effects on the page, or drag a box to look only there. You choose what to clean	Najde text a zvukové efekty na stránce, nebo tažením rámečku hledá jen tam. Co vyčistit, volíte vy

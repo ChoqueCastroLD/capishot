@@ -5253,3 +5253,39 @@ shape	Appearance	Оформление
 	Reading your fonts: {done} of {total}	Чтение ваших шрифтов: {done} из {total}
 	Very few fonts are loaded: load yours and the search looks through them	Загружено очень мало шрифтов: загрузите свои, и поиск их просмотрит
 	Among {n} loaded fonts. Click one to use it	Среди {n} загруженных шрифтов. Нажмите на шрифт, чтобы использовать его
+	Content Fill	Заливка
+	Flat Color	Цвет
+	Pick	Выбор
+	Result in	Результат в
+	On the Page	На странице
+	Clean with	Очистить через
+	Clean {n}	Очистить {n}
+	Drag Adds	Перетаскивание добавляет
+	Drag Removes	Перетаскивание убирает
+	Drag: {shape}	Перетаскивание: {shape}
+	Marks every piece with the method in use	Отмечает все части текущим методом
+	Leaves out what the model doubts	Пропускает то, в чём модель сомневается
+	Marks the others instead	Отмечает остальные
+	Takes every piece off	Снимает все части
+	With its options, on everything chosen	С параметрами, на всём выбранном
+	Flat Color from Around Each Block	Цвет вокруг каждого блока
+	The color to paint with	Цвет заливки
+	Manga LaMa draws what was behind the letters. The best over drawings, and it takes a while	Manga LaMa дорисовывает то, что было за буквами. Лучше всего на рисунках, занимает время
+	Copies from around each block. Quick, for tones and simple backgrounds	Копирует вокруг каждого блока. Быстро, для растров и простых фонов
+	Paints each block in the color around it. Instant, for letters on an even balloon	Закрашивает каждый блок цветом вокруг. Мгновенно, для букв в ровном пузыре
+	Click a block, or drag a box around several	Нажмите на блок или обведите рамкой несколько
+	Drag a rectangle: a zone of its own	Растяните прямоугольник: отдельная зона
+	Draw around a zone of its own	Обведите отдельную зону
+	Paint a zone of its own	Закрасьте отдельную зону
+	Click a block or drag a box around several. Ctrl: a single piece. Alt: take away	Нажмите на блок или обведите рамкой несколько. Ctrl: одна часть. Alt: убрать
+	Tap a block or drag a box around several	Коснитесь блока или обведите рамкой несколько
+	Drag a rectangle to add a zone. Alt cuts it out	Растяните прямоугольник, чтобы добавить зону. Alt вырезает её
+	Drag a rectangle to add a zone	Растяните прямоугольник, чтобы добавить зону
+	Draw around a zone to add it. Alt cuts it out	Обведите зону, чтобы добавить. Alt вырезает её
+	Draw around a zone to add it	Обведите зону, чтобы добавить
+	Paint a zone to add it. Alt cuts it out	Закрасьте зону, чтобы добавить. Alt вырезает её
+	Paint a zone to add it	Закрасьте зону, чтобы добавить
+	Tap a block to clean it	Коснитесь блока, чтобы очистить
+	Click a block to clean it	Нажмите на блок, чтобы очистить
+	Each click cleans that block right away, one at a time	Каждый клик сразу очищает этот блок, по одному
+	Finds the text and sound effects on the page, or drag a box to look only there. You choose what to clean	Находит текст и звуковые эффекты на странице, или обведите рамкой, чтобы искать только там. Что очищать, выбираете вы

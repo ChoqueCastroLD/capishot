@@ -3634,3 +3634,39 @@ fontWeight	Italic	Itálico
 	Reading your fonts: {done} of {total}	A ler os seus tipos de letra: {done} de {total}
 	Very few fonts are loaded: load yours and the search looks through them	Há muito poucos tipos de letra carregados: carregue os seus e a pesquisa vai vê-los
 	Among {n} loaded fonts. Click one to use it	Entre {n} tipos de letra carregados. Clique num para o usar
+	Content Fill	Preenchimento
+	Flat Color	Cor
+	Pick	Escolher
+	Result in	Resultado em
+	On the Page	Na página
+	Clean with	Limpar com
+	Clean {n}	Limpar {n}
+	Drag Adds	Arrastar adiciona
+	Drag Removes	Arrastar remove
+	Drag: {shape}	Arrastar: {shape}
+	Marks every piece with the method in use	Marca todas as peças com o método em uso
+	Leaves out what the model doubts	Deixa de fora o que o modelo duvida
+	Marks the others instead	Marca as outras em vez destas
+	Takes every piece off	Retira todas as peças
+	With its options, on everything chosen	Com as opções, em tudo o que foi escolhido
+	Flat Color from Around Each Block	Cor à volta de cada bloco
+	The color to paint with	A cor para pintar
+	Manga LaMa draws what was behind the letters. The best over drawings, and it takes a while	O Manga LaMa desenha o que estava atrás das letras. O melhor sobre desenhos, e demora um pouco
+	Copies from around each block. Quick, for tones and simple backgrounds	Copia à volta de cada bloco. Rápido, para tramas e fundos simples
+	Paints each block in the color around it. Instant, for letters on an even balloon	Pinta cada bloco com a cor à volta. Instantâneo, para letras num balão uniforme
+	Click a block, or drag a box around several	Clique num bloco ou arraste um retângulo sobre vários
+	Drag a rectangle: a zone of its own	Arraste um retângulo: uma zona própria
+	Draw around a zone of its own	Desenhe à volta de uma zona própria
+	Paint a zone of its own	Pinte uma zona própria
+	Click a block or drag a box around several. Ctrl: a single piece. Alt: take away	Clique num bloco ou arraste um retângulo sobre vários. Ctrl: uma peça. Alt: retirar
+	Tap a block or drag a box around several	Toque num bloco ou arraste um retângulo sobre vários
+	Drag a rectangle to add a zone. Alt cuts it out	Arraste um retângulo para adicionar uma zona. Alt recorta-a
+	Drag a rectangle to add a zone	Arraste um retângulo para adicionar uma zona
+	Draw around a zone to add it. Alt cuts it out	Desenhe à volta de uma zona para a adicionar. Alt recorta-a
+	Draw around a zone to add it	Desenhe à volta de uma zona para a adicionar
+	Paint a zone to add it. Alt cuts it out	Pinte uma zona para a adicionar. Alt recorta-a
+	Paint a zone to add it	Pinte uma zona para a adicionar
+	Tap a block to clean it	Toque num bloco para o limpar
+	Click a block to clean it	Clique num bloco para o limpar
+	Each click cleans that block right away, one at a time	Cada clique limpa esse bloco de imediato, um de cada vez
+	Finds the text and sound effects on the page, or drag a box to look only there. You choose what to clean	Encontra o texto e as onomatopeias da página, ou arraste um retângulo para procurar só ali. Você escolhe o que limpar
