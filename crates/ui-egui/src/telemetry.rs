@@ -995,6 +995,9 @@ pub fn error_kind(message: &str) -> &'static str {
         "ai.worker_crash"
     } else if has(&["gpu couldn't run", "webgpu", "wgpu"]) {
         "ai.gpu"
+    } else if has(&["still running"]) {
+        // Refused while a job has the document: its message offers to cancel, nothing was.
+        "busy"
     } else if has(&["cancel"]) {
         "cancelled"
     } else if has(&["not available", "disabled"]) {

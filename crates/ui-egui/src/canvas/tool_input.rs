@@ -347,6 +347,12 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
                 app.ui.status_error = true;
                 return;
             }
+            // A stroke can't land while a job has the document: say so at the press, big enough to
+            // see, before a live stroke draws what would be lost. Remove with AI queues its own.
+            if !sets_source && tool.is_brushlike() && tool != Tool::RemoveAi && let Some(job) = app.session.active_job_label() {
+                busy_notice(app, &job);
+                return;
+            }
             if !sets_source && crate::rasterize_prompt::intercept(app, tool, x, y, pressure) {
                 return;
             }
@@ -562,6 +568,19 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
             finish_gesture(app, d);
             crate::move_mods::finish(app);
         }
+    }
+}
+
+/// The notice that a job has the document, one at a time.
+fn busy_notice(app: &mut PhotocraftApp, job: &str) {
+    const TAG: &str = "jobBusy";
+    let why = crate::i18n::fmt(tl!("{job} is still working on this page: wait for it to finish or cancel it (Esc)"), &[("job", crate::i18n::t(job))]);
+    app.ui.status.clone_from(&why);
+    app.ui.status_error = true;
+    app.ui.notices.retain(|n| n.tag.as_deref() != Some(TAG));
+    let id = crate::notices::post(app, why, Vec::new(), true, None);
+    if let Some(n) = app.ui.notices.iter_mut().find(|n| n.id == id) {
+        n.tag = Some(TAG.into());
     }
 }
 

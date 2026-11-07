@@ -1496,6 +1496,11 @@ impl Session {
         }
     }
 
+    /// The name of the job that has the active document busy.
+    pub fn active_job_label(&self) -> Option<String> {
+        self.active_job().map(|j| j.label.clone())
+    }
+
     /// Why command `id` can't run now because of a background job (None = no conflict).
     pub(crate) fn job_conflict(&self, id: &str, journal: bool) -> Option<String> {
         if !journal || independent_of_document(id) {

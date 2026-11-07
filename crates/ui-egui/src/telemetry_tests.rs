@@ -57,6 +57,7 @@ fn errors_carry_a_class_never_the_message() {
     assert_eq!(error_kind("radius must be between 0.1 and 1000"), "invalid_params");
     assert_eq!(error_kind("PSD: unexpected end of data"), "decode");
     assert_eq!(error_kind("the user cancelled"), "cancelled");
+    assert_eq!(error_kind("“Remove with AI” is still running on this document; wait for it to finish or cancel it (Esc)"), "busy");
     assert_eq!(error_kind("¯\\_(ツ)_/¯"), "other");
     // AI on the GPU (the live report: a matmul over the workgroup memory crashed the worker).
     let crash = "Manga LaMa: inference failed: inference failed: the AI worker crashed: panicked at burn-cubecl-0.22.0/src/ops/tensor.rs:150:66: called `Result::unwrap()` on an `Err` value: Unable to launch matmul because a required feature is unavailable: Shared memory budget exceeded: kernel requests 35840 bytes, hardware allows 32768 bytes per cube.";
