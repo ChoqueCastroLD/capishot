@@ -1,5 +1,5 @@
 //! The mask model on burn, for the browser: a ResNet-18 encoder, an ASPP and a U-Net decoder, as
-//! `manga-text-mask.onnx` has them (`packaging/web-ai/convert-textmask.py` writes the weights).
+//! `manga-text-mask-precise.onnx` has them (`packaging/web-ai/convert-textmask.py` writes the weights).
 //! Same results as the ONNX file (`examples/netcheck.rs`).
 
 use burn::tensor::activation::relu;

@@ -1,5 +1,5 @@
 //! Finds the text and sound effects on a manga page with the mask model
-//! (`manga-text-mask.onnx`, a ResNet-18 U-Net), as regions a person chooses from: the model also
+//! (`manga-text-mask-precise.onnx`, a ResNet-18 U-Net), as regions a person chooses from: the model also
 //! marks some art, so nothing here decides what gets removed.
 //!
 //! [`regions`] turns the model's probabilities into regions, with no ML dependency; [`native`]

@@ -550,6 +550,9 @@ fn main() -> eframe::Result {
             // The Text Selection tool: the mask model on this machine (feature `ai`).
             #[cfg(all(feature = "ai", any(windows, target_os = "linux")))]
             {
+                if let Some(dir) = &models {
+                    photocraft_ai_textmask::native::forget_old_file(dir);
+                }
                 let file = std::env::var_os("CAPISHOT_TEXTMASK_MODEL").map(std::path::PathBuf::from).or_else(|| models.as_ref().map(|d| d.join(photocraft_ai_textmask::native::FILE)));
                 if let Some(file) = file {
                     app.session.set_text_masker(Some(std::sync::Arc::new(photocraft_ai_textmask::native::NativeTextMasker::new(file))));

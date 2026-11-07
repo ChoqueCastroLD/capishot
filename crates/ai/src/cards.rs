@@ -88,8 +88,8 @@ pub const CARDS: &[Card] = &[
         quality: 5,
         speed: 5,
         gpu: true,
-        precision: "f32",
-        memory_mb: 5400,
+        precision: "f16",
+        memory_mb: 2400,
     },
     Card {
         id: "migan",

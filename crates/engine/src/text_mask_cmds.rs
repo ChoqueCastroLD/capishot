@@ -246,7 +246,7 @@ mod tests {
             "test".into()
         }
         fn detect(&self, page: Page<'_>, _: &dyn Fn() -> bool) -> std::result::Result<Detection, photocraft_ai_textmask::Error> {
-            let prob: Vec<f32> = page.rgb.chunks_exact(3).map(|c| if c[0] < 128 { 0.95 } else { 0.0 }).collect();
+            let prob: Vec<f32> = page.rgb.chunks_exact(3).map(|c| if c[0] < 128 { 0.995 } else { 0.0 }).collect();
             Ok(find_regions(&prob, page.width, page.height))
         }
     }

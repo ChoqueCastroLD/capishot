@@ -19,7 +19,14 @@ const TILE_ABOVE_AREA: usize = 6_500_000;
 const CPU_TILE_ABOVE_AREA: usize = 2_400_000;
 
 /// The file's name in the models folder.
-pub const FILE: &str = "manga-text-mask.onnx";
+pub const FILE: &str = "manga-text-mask-precise.onnx";
+/// The model it replaced: nothing reads it any more.
+pub const OLD_FILE: &str = "manga-text-mask.onnx";
+
+/// Frees the room of [`OLD_FILE`] in the models folder `dir`.
+pub fn forget_old_file(dir: &Path) {
+    let _ = std::fs::remove_file(dir.join(OLD_FILE));
+}
 
 struct Loaded {
     session: Session,

@@ -6,10 +6,15 @@ use crate::regions::{Detection, fill_hollow, find_regions};
 /// The network works on pages of about this height; other pages are resized for it only.
 pub const MIN_HEIGHT: usize = 1500;
 pub const MAX_HEIGHT: usize = 2600;
+/// Pages at least this wide run at no more than this height: the file's `wide_page_min_width` and
+/// `wide_page_max_height`.
+const WIDE_PAGE_MIN_WIDTH: usize = 1200;
+const WIDE_PAGE_MAX_HEIGHT: usize = 2000;
 
 /// The size a page reaches the network at, and whether that's a resize.
 pub fn net_size(w: usize, h: usize) -> (usize, usize) {
     let scale = if h < MIN_HEIGHT { MIN_HEIGHT as f64 / h as f64 } else if h > MAX_HEIGHT { MAX_HEIGHT as f64 / h as f64 } else { 1.0 };
+    let scale = if w >= WIDE_PAGE_MIN_WIDTH && h as f64 * scale > WIDE_PAGE_MAX_HEIGHT as f64 { WIDE_PAGE_MAX_HEIGHT as f64 / h as f64 } else { scale };
     if scale == 1.0 {
         return (w, h);
     }
@@ -122,6 +127,9 @@ mod tests {
     fn a_page_reaches_the_network_at_its_working_height() {
         assert_eq!(net_size(1284, 1826), (1284, 1826));
         assert_eq!(net_size(500, 1000), (750, 1500));
-        assert_eq!(net_size(2000, 5200), (1000, 2600));
+        assert_eq!(net_size(1000, 5200), (500, 2600));
+        assert_eq!(net_size(1725, 2475), (1394, 2000), "wide pages stop lower");
+        assert_eq!(net_size(2000, 5200), (769, 2000));
+        assert_eq!(net_size(1100, 2400), (1100, 2400), "a narrow one doesn't");
     }
 }

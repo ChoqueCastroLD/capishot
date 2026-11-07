@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""manga-text-mask.onnx -> safetensors for the browser (crates/ai-textmask/src/net.rs).
+"""manga-text-mask*.onnx -> safetensors for the browser (crates/ai-textmask/src/net.rs).
 
-The convolutions in graph order as c00.w, c00.b, ... in fp16, with the one batch norm folded into
+The convolutions in the network's order as c00.w, c00.b, ... in fp16, with the one batch norm folded into
 the convolution before it. Needs onnx, numpy and safetensors.
 
-    convert-textmask.py manga-text-mask.onnx manga-text-mask-f16.safetensors
+    convert-textmask.py manga-text-mask-precise.onnx manga-text-mask-precise-web.safetensors
 """
 import sys
 
@@ -18,7 +18,9 @@ def main(src, dst):
     model = onnx.load(src)
     init = {i.name: numpy_helper.to_array(i) for i in model.graph.initializer}
     nodes = model.graph.node
-    convs = [n for n in nodes if n.op_type == "Conv"]
+    # By the exporter's numbering: a file saved again can list them in another order.
+    number = lambda n: int(n.name.rsplit("_", 1)[1]) if n.name.startswith("node_Conv_") else 1 << 30
+    convs = sorted((n for n in nodes if n.op_type == "Conv"), key=number)
     bn = next(n for n in nodes if n.op_type == "BatchNormalization")
     out = {}
     for k, conv in enumerate(convs):

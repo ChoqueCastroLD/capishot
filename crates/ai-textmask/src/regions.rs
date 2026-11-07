@@ -38,7 +38,8 @@ const FILL_MIN_AREA: f32 = 300.0;
 const FILL_MAX_RATIO: u64 = 3;
 const FILL_MIN_WIDTH: f32 = 4.0;
 const THRESHOLD: f32 = 0.5;
-const CONFIDENT: f32 = 0.8;
+/// A mark needs a pixel this sure: the file's `confident`.
+const CONFIDENT: f32 = 0.99;
 const MIN_AREA: u64 = 12;
 const MIN_REGION_AREA: u64 = 60;
 const GAP: f32 = 0.7;
@@ -586,13 +587,13 @@ mod tests {
     fn regions_are_in_reading_order_and_scored() {
         let (w, h) = (200, 140);
         let mut p = vec![0.0; w * h];
-        blob(&mut p, w, 150, 5, 180, 15, 0.9); // Top right: first.
-        blob(&mut p, w, 10, 5, 40, 15, 0.9); // Top left: second.
-        blob(&mut p, w, 10, 100, 40, 120, 0.9); // Below: third.
+        blob(&mut p, w, 150, 5, 180, 15, 0.995); // Top right: first.
+        blob(&mut p, w, 10, 5, 40, 15, 0.995); // Top left: second.
+        blob(&mut p, w, 10, 100, 40, 120, 0.995); // Below: third.
         let d = find_regions(&p, w, h);
         let boxes: Vec<[u32; 4]> = d.regions.iter().map(|r| r.bbox).collect();
         assert_eq!(boxes, vec![[150, 5, 180, 15], [10, 5, 40, 15], [10, 100, 40, 120]]);
-        assert!((d.regions[0].score - 0.9).abs() < 1e-3);
+        assert!((d.regions[0].score - 0.995).abs() < 1e-3);
         assert_eq!(d.labels[10 * w + 160], 1);
     }
 
@@ -601,7 +602,7 @@ mod tests {
         let (w, h) = (100, 100);
         let mut p = vec![0.0; w * h];
         blob(&mut p, w, 10, 10, 40, 40, 0.6); // Never confident.
-        blob(&mut p, w, 60, 60, 62, 62, 0.95); // Tiny.
+        blob(&mut p, w, 60, 60, 62, 62, 0.995); // Tiny.
         assert!(find_regions(&p, w, h).regions.is_empty());
     }
 
@@ -609,9 +610,9 @@ mod tests {
     fn near_components_join_into_one_region() {
         let (w, h) = (300, 200);
         let mut p = vec![0.0; w * h];
-        blob(&mut p, w, 10, 10, 30, 30, 0.9);
-        blob(&mut p, w, 35, 10, 55, 30, 0.9); // 5 px apart: one word.
-        blob(&mut p, w, 200, 10, 220, 30, 0.9); // Far: its own.
+        blob(&mut p, w, 10, 10, 30, 30, 0.995);
+        blob(&mut p, w, 35, 10, 55, 30, 0.995); // 5 px apart: one word.
+        blob(&mut p, w, 200, 10, 220, 30, 0.995); // Far: its own.
         let d = find_regions(&p, w, h);
         assert_eq!(d.regions.len(), 3, "each piece on its own");
         let group = |x: usize| d.regions[d.labels[20 * w + x] as usize - 1].group;
@@ -629,7 +630,7 @@ mod tests {
         for y in 40..160 {
             for x in 40..160 {
                 if !(52..148).contains(&x) || !(52..148).contains(&y) || (x < 60 && y < 60) {
-                    p[y * w + x] = 0.9;
+                    p[y * w + x] = 0.995;
                     rgb[(y * w + x) * 3..(y * w + x) * 3 + 3].fill(0);
                 }
             }
@@ -643,7 +644,7 @@ mod tests {
         let (w, h) = (200, 200);
         let rgb = vec![40u8; w * h * 3];
         let mut p = vec![0.0; w * h];
-        blob(&mut p, w, 40, 40, 160, 160, 0.9);
+        blob(&mut p, w, 40, 40, 160, 160, 0.995);
         blob(&mut p, w, 60, 60, 140, 140, 0.0);
         fill_hollow(&mut p, &rgb, w, h);
         assert_eq!(p[100 * w + 100], 0.0);
@@ -663,9 +664,9 @@ mod tests {
     fn a_zone_cuts_the_pieces_at_its_edge_and_numbers_what_is_left() {
         let (w, h) = (300, 100);
         let mut p = vec![0.0; w * h];
-        blob(&mut p, w, 10, 10, 50, 30, 0.9);
-        blob(&mut p, w, 100, 10, 140, 30, 0.9);
-        blob(&mut p, w, 200, 10, 240, 30, 0.9);
+        blob(&mut p, w, 10, 10, 50, 30, 0.995);
+        blob(&mut p, w, 100, 10, 140, 30, 0.995);
+        blob(&mut p, w, 200, 10, 240, 30, 0.995);
         let d = find_regions(&p, w, h);
         // The middle one whole, the last one cut in half, the first one out.
         let c = d.clipped(|x, _| (90..220).contains(&x));
@@ -684,7 +685,7 @@ mod tests {
     fn a_detection_crosses_as_numbers() {
         let (w, h) = (100, 50);
         let mut p = vec![0.0; w * h];
-        blob(&mut p, w, 10, 10, 40, 30, 0.9);
+        blob(&mut p, w, 10, 10, 40, 30, 0.995);
         let d = find_regions(&p, w, h);
         assert_eq!(Detection::from_flat(w, h, d.labels.clone(), &d.flat_regions()), d);
     }
@@ -701,7 +702,7 @@ mod tests {
         let (w, h) = (400, 400);
         let ring = |side: usize| {
             let mut p = vec![0.0; w * h];
-            blob(&mut p, w, 100, 100, 130 + side, 130 + side, 0.9);
+            blob(&mut p, w, 100, 100, 130 + side, 130 + side, 0.995);
             blob(&mut p, w, 115, 115, 115 + side, 115 + side, 0.0);
             let d = find_regions(&p, w, h);
             selection_mask(&d, &[1], 1)[(115 + side / 2) * w + 115 + side / 2]
@@ -714,8 +715,8 @@ mod tests {
     fn a_selection_is_only_the_chosen_regions_grown() {
         let (w, h) = (300, 200);
         let mut p = vec![0.0; w * h];
-        blob(&mut p, w, 200, 50, 240, 90, 0.9);
-        blob(&mut p, w, 20, 50, 60, 90, 0.9);
+        blob(&mut p, w, 200, 50, 240, 90, 0.995);
+        blob(&mut p, w, 20, 50, 60, 90, 0.995);
         let d = find_regions(&p, w, h);
         let id = d.labels[70 * w + 30];
         let m = selection_mask(&d, &[id], 0);
