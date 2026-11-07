@@ -3694,3 +3694,43 @@ curves	Smooth	平滑
 	This stroke is outside the page	此笔画在页面之外
 	This stroke covers nothing that can change: check the selection	此笔画未覆盖任何可更改的内容,请检查选区
 	Nothing is left around this stroke to fill it from	此笔画周围没有可用于填充的内容
+	Text Selection Tool	文字选择工具
+	Text Selection	文字选择
+	Detect Text	检测文字
+	Downloading the text model… {percent} %	正在下载文字模型… {percent} %
+	Finding the text…	正在查找文字…
+	Find Text	查找文字
+	Finds the text and sound effects on the page; you choose what to select	查找页面上的文字和拟声词；由你决定选择哪些
+	Find Again	重新查找
+	{on} of {total} pieces	{on}/{total} 个片段
+	Suggested	建议
+	How far the selection reaches past the letters. Too little leaves smudges when cleaning; too much takes the lines around them	选区超出文字的距离。太小清理时会留下污渍；太大会带走周围的线条
+	Click a piece to add or take it; paint to add, Alt to take away	点击片段可添加或移除；涂抹可添加，按 Alt 可移除
+	Leave as Selection	保留为选区
+	Open a page to find its text	打开页面以查找其文字
+	Finds the text and sound effects on a page, to choose what to clean.	查找页面上的文字和拟声词，以便选择要清理的内容。
+	Find Text in Selection	在选区中查找文字
+	Clean on Click	点击即清理
+	Click a piece to clean it	点击片段进行清理
+	{total} pieces	{total} 个片段
+	{n} waiting	{n} 个等待中
+	Looks on the whole page again	再次查看整页
+	Each click cleans that piece right away, one at a time	每次点击立即清理该片段,一次一个
+	Show Pieces	显示片段
+	Hide Pieces	隐藏片段
+	Color of the chosen pieces	已选片段的颜色
+	Color of the other pieces	其他片段的颜色
+	Tap a piece to clean it	轻触片段进行清理
+	Tap a piece to add or take it; paint to add	轻触片段可添加或移除;涂抹可添加
+	Contour {px}	轮廓 {px}
+	Painting Removes	涂抹移除
+	Painting Adds	涂抹添加
+	Less Contour	减小轮廓
+	More Contour	增大轮廓
+	Clean on Tap: On	轻触清理:开
+	Clean on Tap: Off	轻触清理:关
+	Text Selection isn't available in this build	此版本不提供文字选择
+	New Layer Each Time	每次清理新建图层
+	One Cleaning Layer	单个清理图层
+	AI Clean	AI 清理
+	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO	放不下的单词用连字符断开并在下一行继续:HY-PHEN

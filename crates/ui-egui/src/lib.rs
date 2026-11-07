@@ -326,6 +326,7 @@ pub use tools::move_hover;
 pub use tools::move_lock;
 pub use tools::move_mods;
 pub use tools::object_finder;
+pub use tools::text_select_ui;
 pub use tools::perspective_crop_ui;
 pub use tools::perspective_ui;
 pub use tools::puppet_ui;
@@ -434,6 +435,8 @@ pub struct PhotocraftApp {
     pub(crate) move_distance: Option<move_distance::Cache>,
     /// Object Selection › Object Finder: the hover preview (`object_finder`).
     pub(crate) object_finder: Option<object_finder::Finder>,
+    /// The Text Selection tool's pieces (`text_select_ui`).
+    pub(crate) text_select: text_select_ui::State,
     /// A blend mode hovered in the Layers panel, shown live (`blend_preview`).
     pub(crate) blend_preview: Option<blend_preview::BlendPreview>,
     /// Layers panel drag: temporary reordered document displayed until mouse release.

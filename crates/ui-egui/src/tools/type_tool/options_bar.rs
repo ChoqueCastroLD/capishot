@@ -185,6 +185,27 @@ fn touch_leading(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     }
 }
 
+/// The room Hyphenate needs in the bar with Commit and Cancel still in reach. In a window with
+/// less it's in the Paragraph panel.
+const HYPHENATE_ROOM: f32 = 280.0;
+
+/// Hyphenate: what the selected text has, or what the tool's next text will have.
+fn hyphenate_option(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    let bubble = app.ui.tool == crate::state::Tool::BubbleType;
+    let stored = if bubble { app.ui.tool_options.bubble_hyphenate } else { app.ui.tool_options.type_hyphenate };
+    let mut on = styles_at(app).map_or(stored, |(_, p)| p.hyphenate);
+    let tip = tl!("A word that doesn't fit is split with a hyphen and goes on below: PE-RRO");
+    let clicked = crate::widgets::checkbox(ui, &mut on, tl!("Hyphenate")).on_hover_text(tip).clicked();
+    if clicked {
+        if bubble {
+            app.ui.tool_options.bubble_hyphenate = on;
+        } else {
+            app.ui.tool_options.type_hyphenate = on;
+        }
+        apply(app, ui.ctx(), json!({"hyphenate": on}));
+    }
+}
+
 fn bubble_options(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     crate::bubble_type_ui::options(app, ui);
     bubble_target_options(app, ui);
@@ -251,6 +272,9 @@ pub fn phone_form(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             ui.horizontal(|ui| crate::bubble_type_ui::options(app, ui));
             ui.end_row();
         }
+        ui.label("");
+        hyphenate_option(app, ui);
+        ui.end_row();
         ui.label(tl!("Font"));
         if fonts_ready(ui, field) && font_picker(app, ui, &mut fam, field).is_some() {
             app.ui.tool_options.type_font = fam.clone();
@@ -513,6 +537,10 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let shown = app.ui.panels.character;
     if crate::icons::button(ui, "panels-top-left", 24.0, shown, tl!("Toggle the Character and Paragraph panels")).clicked() {
         toggle_type_panels(app, ui.ctx());
+    }
+    if ui.available_width() >= HYPHENATE_ROOM {
+        crate::widgets::vline(ui, 22.0);
+        hyphenate_option(app, ui);
     }
     if app.ui.text_edit.is_some() {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

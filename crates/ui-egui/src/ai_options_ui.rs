@@ -72,6 +72,7 @@ impl Kind {
                 ("maxSide", Dflt::Num(0)),
                 ("threads", Dflt::Num(0)),
                 ("keepLoaded", Dflt::Bool(true)),
+                ("output", Dflt::Text("new")),
             ],
         }
     }
@@ -136,6 +137,13 @@ pub fn with_saved(app: &PhotocraftApp, id: &str, params: &Value) -> Value {
     if let Some(o) = p.as_object_mut() {
         for (k, v) in saved(app, kind) {
             o.entry(k).or_insert(v);
+        }
+        // Only Clean Selected Area with AI says where its result goes; its layers in the user's
+        // language.
+        if id == ai_inpaint_cmds::ID {
+            o.entry("layerName").or_insert(json!(tl!("AI Clean")));
+        } else {
+            o.remove("output");
         }
     }
     p
@@ -328,7 +336,14 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
     let tokens = crate::theme::Tokens::get(ui.ctx());
     ui.label(egui::RichText::new(tl!("Quality and device for Clean Selected Area with AI and the Remove tool's AI mode.")).color(tokens.text_dim));
     ui.add_space(8.0);
-    egui::Grid::new("ai-inpaint-opts").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| simple_rows(ui, f));
+    egui::Grid::new("ai-inpaint-opts").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+        simple_rows(ui, f);
+        let mut output = text_field(f, "output");
+        ui.label(tl!("Result:"));
+        crate::widgets::dropdown(ui, "ai-opts-output", tl!("Result:"), &mut output, &crate::remove_ai_ui::output_options(), 200.0);
+        ui.end_row();
+        f.insert("output".into(), json!(output));
+    });
     ui.add_space(6.0);
     let params = Value::Object(params_of(Kind::Inpaint, f));
     match ai_inpaint_cmds::model_for(&app.session, &params, ai_inpaint_cmds::ID) {

@@ -472,7 +472,12 @@ fn type_sections(app: &mut PhotocraftApp, ui: &mut egui::Ui, character: bool, pa
                 apply(app, ui.ctx(), json!({"spaceAfter": v / u}));
             }
         });
-        // Hyphenate is stored (⌥⇧⌘H / PSD AutoHyphenate) but layout never breaks words (#6710).
+        row(ui, &mut |ui| {
+            let mut on = para.hyphenate;
+            if crate::widgets::checkbox(ui, &mut on, tl!("Hyphenate")).clicked() {
+                apply(app, ui.ctx(), json!({"hyphenate": on}));
+            }
+        });
         ui.add_space(ROW_GAP);
     }
 }

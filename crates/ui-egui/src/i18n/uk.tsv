@@ -4716,3 +4716,43 @@ curves	Smooth	Згладити
 	This stroke is outside the page	Цей штрих розташований за межами сторінки
 	This stroke covers nothing that can change: check the selection	Цей штрих не покриває нічого, що можна змінити: перевірте виділення
 	Nothing is left around this stroke to fill it from	Навколо цього штриха не залишилося нічого, чим його можна заповнити
+	Text Selection Tool	Інструмент «Виділення тексту»
+	Text Selection	Виділення тексту
+	Detect Text	Знайти текст
+	Downloading the text model… {percent} %	Завантаження моделі тексту… {percent} %
+	Finding the text…	Пошук тексту…
+	Find Text	Знайти текст
+	Finds the text and sound effects on the page; you choose what to select	Знаходить текст і звукові ефекти на сторінці; що виділити, обираєте ви
+	Find Again	Шукати знову
+	{on} of {total} pieces	{on} з {total} частин
+	Suggested	Запропоновані
+	How far the selection reaches past the letters. Too little leaves smudges when cleaning; too much takes the lines around them	Наскільки виділення виходить за літери. Замало — під час очищення лишаться плями; забагато — забере лінії навколо
+	Click a piece to add or take it; paint to add, Alt to take away	Клацання по частині додає або прибирає її; малювання додає, з Alt прибирає
+	Leave as Selection	Залишити як виділення
+	Open a page to find its text	Відкрийте сторінку, щоб знайти її текст
+	Finds the text and sound effects on a page, to choose what to clean.	Знаходить текст і звукові ефекти на сторінці, щоб обрати, що очистити.
+	Find Text in Selection	Знайти текст у виділенні
+	Clean on Click	Очищати за клацанням
+	Click a piece to clean it	Клацніть частину, щоб очистити її
+	{total} pieces	Частин: {total}
+	{n} waiting	У черзі: {n}
+	Looks on the whole page again	Знову переглядає всю сторінку
+	Each click cleans that piece right away, one at a time	Кожне клацання одразу очищає цю частину, по одній
+	Show Pieces	Показати частини
+	Hide Pieces	Сховати частини
+	Color of the chosen pieces	Колір вибраних частин
+	Color of the other pieces	Колір інших частин
+	Tap a piece to clean it	Торкніться частини, щоб очистити її
+	Tap a piece to add or take it; paint to add	Дотик додає або прибирає частину; малювання додає
+	Contour {px}	Контур {px}
+	Painting Removes	Малювання прибирає
+	Painting Adds	Малювання додає
+	Less Contour	Менше контуру
+	More Contour	Більше контуру
+	Clean on Tap: On	Очищати дотиком: так
+	Clean on Tap: Off	Очищати дотиком: ні
+	Text Selection isn't available in this build	Виділення тексту недоступне в цій версії
+	New Layer Each Time	Новий шар для кожного очищення
+	One Cleaning Layer	Один шар очищень
+	AI Clean	Очищення ШІ
+	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO	Слово, яке не вміщається, розбивається дефісом і продовжується нижче: СО-БАКА

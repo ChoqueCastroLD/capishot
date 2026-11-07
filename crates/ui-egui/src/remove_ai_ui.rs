@@ -64,8 +64,20 @@ pub fn finish_stroke(app: &mut PhotocraftApp, points: &[[f64; 3]]) {
     request(app, p);
 }
 
+/// The options that say where a clean's result goes, shared by the tools that clean.
+pub(crate) fn output_options() -> [(String, &'static str); 3] {
+    [("current".to_string(), tl!("Current Layer")), ("new".to_string(), tl!("New Layer Each Time")), ("single".to_string(), tl!("One Cleaning Layer"))]
+}
+
+/// The dropdown of where a clean's result goes.
+pub(crate) fn output_dropdown(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    crate::widgets::dropdown(ui, "clean-output", tl!("Result:"), &mut app.ui.tool_options.clean_output, &output_options(), 170.0);
+}
+
 /// Runs `params`, or, the first time, downloads the model first (the modal) and runs them then.
-pub fn request(app: &mut PhotocraftApp, params: Value) {
+pub fn request(app: &mut PhotocraftApp, mut params: Value) {
+    params["output"] = json!(app.ui.tool_options.clean_output);
+    params["layerName"] = json!(tl!("AI Clean"));
     tell_lite_once(app);
     match status(app) {
         Some(Status::Downloaded) | None => run(app, params),
@@ -194,6 +206,8 @@ pub fn retry_download(app: &mut PhotocraftApp) {
 /// mask, then run (with its eraser, Run and Clear mask: `remove_mask_ui`).
 pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     crate::widgets::checkbox(ui, &mut app.ui.tool_options.sample_all.remove_ai, tl!("Sample All Layers"));
+    crate::widgets::vline(ui, 22.0);
+    output_dropdown(app, ui);
     crate::widgets::vline(ui, 22.0);
     crate::remove_mask_ui::options_bar(app, ui, crate::state::Tool::RemoveAi);
 }

@@ -80,6 +80,18 @@ pub const CARDS: &[Card] = &[
         memory_mb: 900,
     },
     Card {
+        id: "manga-text-mask",
+        section: Section::Clean,
+        title: "Manga Text Mask",
+        description: "Finds the text and sound effects on a page, to choose what to clean.",
+        files: &[catalog::TEXTMASK_ID],
+        quality: 5,
+        speed: 5,
+        gpu: true,
+        precision: "f32",
+        memory_mb: 5400,
+    },
+    Card {
         id: "migan",
         section: Section::Clean,
         title: "MI-GAN (lite)",

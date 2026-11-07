@@ -150,6 +150,7 @@ pub fn start() {
             Some("inpaint") => wasm_bindgen_futures::spawn_local(inpaint(data)),
             Some("download") => wasm_bindgen_futures::spawn_local(download(data)),
             Some("genfill") => wasm_bindgen_futures::spawn_local(genfill(data)),
+            Some("textmask") => wasm_bindgen_futures::spawn_local(textmask(data)),
             _ => {}
         }
     });
@@ -755,6 +756,69 @@ async fn inpaint_inner(msg: &JsValue, id: f64) -> std::result::Result<(Vec<f32>,
         STATE.with(|s| s.borrow_mut().inpaint = None);
     }
     Ok((out?, w, h, p.device))
+}
+
+// ------------------------------------------------------------------ The text mask model
+
+/// `{type: "textmask", id, base, download, cpu, width, height, rgb: Uint8Array, tile, overlap}` →
+/// `{type: "tm-done", id, width, height, labels: Uint32Array, regions: Float64Array, device}`
+/// (see `Detection::flat_regions`) or `error`. The model doesn't stay loaded: a phone needs that
+/// memory for the cleaning that comes next.
+async fn textmask(msg: JsValue) {
+    let id = get(&msg, "id").as_f64().unwrap_or(0.0);
+    match textmask_inner(&msg, id).await {
+        Ok((d, device)) => {
+            let labels = js_sys::Uint32Array::from(d.labels.as_slice());
+            let regions = js_sys::Float64Array::from(d.flat_regions().as_slice());
+            let buffer: JsValue = labels.buffer().into();
+            post(
+                &obj(&[
+                    ("type", "tm-done".into()),
+                    ("id", id.into()),
+                    ("width", (d.width as f64).into()),
+                    ("height", (d.height as f64).into()),
+                    ("labels", labels.into()),
+                    ("regions", regions.into()),
+                    ("device", device.into()),
+                ]),
+                Some(&buffer),
+            );
+        }
+        Err((e, gpu)) => post(&obj(&[("type", "error".into()), ("id", id.into()), ("message", e.into()), ("gpu", gpu.into())]), None),
+    }
+}
+
+async fn textmask_inner(msg: &JsValue, id: f64) -> std::result::Result<(photocraft_ai_textmask::Detection, String), (String, bool)> {
+    use photocraft_ai_textmask::Error;
+    let plain = |e: String| (e, false);
+    let model = catalog::model(catalog::TEXTMASK_ID).ok_or_else(|| plain("the text model isn't in the catalog".into()))?;
+    let base = get(msg, "base").as_string().unwrap_or_default();
+    let download = get(msg, "download").as_bool().unwrap_or(false);
+    let cpu = get(msg, "cpu").as_bool().unwrap_or(false);
+    let dim = |k: &str| get(msg, k).as_f64().filter(|v| v.is_finite() && *v >= 1.0).map(|v| v as usize).ok_or_else(|| plain(format!("no {k}")));
+    let (w, h, tile, overlap) = (dim("width")?, dim("height")?, dim("tile")?, dim("overlap")?);
+    let rgb = get(msg, "rgb").dyn_into::<Uint8Array>().map(|a| a.to_vec()).map_err(|_| plain("no rgb".into()))?;
+    let mut p = Posting::new(id);
+    let bytes = weights(model, &base, download, &p).await.map_err(|e| plain(e.to_string()))?;
+    p.send(0.1, "Preparing the model");
+    let rt = runtime(cpu).await.map_err(|e| plain(e.to_string()))?;
+    let gpu = rt.accel() == Accel::Gpu;
+    let net = photocraft_ai_textmask::net::Net::from_safetensors(&bytes, rt.device()).map_err(|e| plain(e.to_string()))?;
+    drop(bytes);
+    p.device = STATE.with(|s| s.borrow().device.clone());
+    first_gpu_run(model.id, gpu, &p, 0.15);
+    let status = format!("Finding the text ({})", p.device);
+    p.send(0.15, &status);
+    let found = {
+        let posting = &p;
+        let mut step = |f: f32| posting.send(0.15 + 0.85 * f, &status);
+        net.detect_async(&rgb, w, h, tile, overlap, &mut step).await
+    };
+    let device = p.device.clone();
+    found.map(|d| (d, device)).map_err(|e| {
+        let on_gpu = gpu && matches!(e, Error::Device(_) | Error::Gpu(_));
+        (e.to_string(), on_gpu)
+    })
 }
 
 // ------------------------------------------------------------------ Generative Fill

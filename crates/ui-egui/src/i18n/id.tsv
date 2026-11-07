@@ -4025,3 +4025,43 @@ curves	Smooth	Haluskan
 	This stroke is outside the page	Goresan ini berada di luar halaman
 	This stroke covers nothing that can change: check the selection	Goresan ini tidak mencakup apa pun yang dapat diubah: periksa seleksi
 	Nothing is left around this stroke to fill it from	Tidak ada yang tersisa di sekitar goresan ini untuk mengisinya
+	Text Selection Tool	Alat Pilih Teks
+	Text Selection	Pilih Teks
+	Detect Text	Deteksi Teks
+	Downloading the text model… {percent} %	Mengunduh model teks… {percent} %
+	Finding the text…	Mencari teks…
+	Find Text	Cari Teks
+	Finds the text and sound effects on the page; you choose what to select	Menemukan teks dan efek suara di halaman; Anda memilih apa yang diseleksi
+	Find Again	Cari Lagi
+	{on} of {total} pieces	Bagian: {on} dari {total}
+	Suggested	Disarankan
+	How far the selection reaches past the letters. Too little leaves smudges when cleaning; too much takes the lines around them	Seberapa jauh seleksi melewati huruf. Terlalu sedikit meninggalkan noda saat dibersihkan; terlalu banyak mengambil garis di sekitarnya
+	Click a piece to add or take it; paint to add, Alt to take away	Klik bagian untuk menambah atau mengambilnya; lukis untuk menambah, Alt untuk mengurangi
+	Leave as Selection	Biarkan sebagai Seleksi
+	Open a page to find its text	Buka halaman untuk mencari teksnya
+	Finds the text and sound effects on a page, to choose what to clean.	Menemukan teks dan efek suara di halaman, untuk memilih apa yang dibersihkan.
+	Find Text in Selection	Cari Teks dalam Seleksi
+	Clean on Click	Bersihkan saat Diklik
+	Click a piece to clean it	Klik bagian untuk membersihkannya
+	{total} pieces	Bagian: {total}
+	{n} waiting	{n} menunggu
+	Looks on the whole page again	Melihat seluruh halaman lagi
+	Each click cleans that piece right away, one at a time	Setiap klik langsung membersihkan bagian itu, satu per satu
+	Show Pieces	Tampilkan Bagian
+	Hide Pieces	Sembunyikan Bagian
+	Color of the chosen pieces	Warna bagian yang dipilih
+	Color of the other pieces	Warna bagian lainnya
+	Tap a piece to clean it	Ketuk bagian untuk membersihkannya
+	Tap a piece to add or take it; paint to add	Ketuk bagian untuk menambah atau mengambilnya; lukis untuk menambah
+	Contour {px}	Kontur {px}
+	Painting Removes	Melukis Mengurangi
+	Painting Adds	Melukis Menambah
+	Less Contour	Kurangi Kontur
+	More Contour	Tambah Kontur
+	Clean on Tap: On	Bersihkan saat Diketuk: Ya
+	Clean on Tap: Off	Bersihkan saat Diketuk: Tidak
+	Text Selection isn't available in this build	Pilih Teks tidak tersedia di versi ini
+	New Layer Each Time	Lapisan Baru Tiap Pembersihan
+	One Cleaning Layer	Satu Lapisan Pembersihan
+	AI Clean	Pembersihan AI
+	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO	Kata yang tidak muat dipisah dengan tanda hubung dan berlanjut di bawah: AN-JING

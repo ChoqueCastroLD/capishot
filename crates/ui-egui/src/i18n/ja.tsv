@@ -4675,3 +4675,43 @@ curves	Smooth	スムーズ
 	This stroke is outside the page	このストロークはページの外にあります
 	This stroke covers nothing that can change: check the selection	このストロークには変更できる部分がありません。選択範囲を確認してください
 	Nothing is left around this stroke to fill it from	このストロークの周囲に塗りつぶしの元になる部分がありません
+	Text Selection Tool	テキスト選択ツール
+	Text Selection	テキスト選択
+	Detect Text	テキストを検出
+	Downloading the text model… {percent} %	テキストモデルをダウンロード中… {percent} %
+	Finding the text…	テキストを検索中…
+	Find Text	テキストを検索
+	Finds the text and sound effects on the page; you choose what to select	ページのテキストと効果音を見つけます。選択するものはあなたが決めます
+	Find Again	再検索
+	{on} of {total} pieces	{total} 個中 {on} 個
+	Suggested	おすすめ
+	How far the selection reaches past the letters. Too little leaves smudges when cleaning; too much takes the lines around them	選択範囲が文字の外側にどこまで広がるか。少なすぎるとクリーニングでしみが残り、多すぎると周囲の線まで消えます
+	Click a piece to add or take it; paint to add, Alt to take away	ピースをクリックして追加または解除。ペイントで追加、Alt で削除
+	Leave as Selection	選択範囲のままにする
+	Open a page to find its text	ページを開いてテキストを検索してください
+	Finds the text and sound effects on a page, to choose what to clean.	ページのテキストと効果音を見つけ、クリーニングする対象を選べるようにします。
+	Find Text in Selection	選択範囲内のテキストを検索
+	Clean on Click	クリックでクリーニング
+	Click a piece to clean it	ピースをクリックしてクリーニング
+	{total} pieces	{total} 個のピース
+	{n} waiting	{n} 件待機中
+	Looks on the whole page again	ページ全体をもう一度調べます
+	Each click cleans that piece right away, one at a time	クリックするたびにそのピースをすぐにクリーニングします(1 つずつ)
+	Show Pieces	ピースを表示
+	Hide Pieces	ピースを隠す
+	Color of the chosen pieces	選択したピースの色
+	Color of the other pieces	その他のピースの色
+	Tap a piece to clean it	ピースをタップしてクリーニング
+	Tap a piece to add or take it; paint to add	ピースをタップして追加または解除。ペイントで追加
+	Contour {px}	輪郭 {px}
+	Painting Removes	ペイントで削除
+	Painting Adds	ペイントで追加
+	Less Contour	輪郭を減らす
+	More Contour	輪郭を増やす
+	Clean on Tap: On	タップでクリーニング: オン
+	Clean on Tap: Off	タップでクリーニング: オフ
+	Text Selection isn't available in this build	このビルドではテキスト選択を使用できません
+	New Layer Each Time	クリーニングごとに新規レイヤー
+	One Cleaning Layer	クリーニング用レイヤー 1 枚
+	AI Clean	AI クリーニング
+	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO	収まらない単語をハイフンで分割して次の行に続けます: HY-PHEN

@@ -16,7 +16,7 @@ heif = ["photocraft-codecs/heif"]
 # (photocraft-ai/directml, photocraft-ai-lama/directml; loaded at run time, nothing is linked).
 # Weights: the AI Model Manager downloads them (%LOCALAPPDATA%\Capishot\models on Windows,
 # <config dir>/ai-models elsewhere); CAPISHOT_LAMA_WEIGHTS points LaMa at another file.
-ai = ["dep:photocraft-ai", "photocraft-ai/gpu", "photocraft-ai/cpu", "photocraft-ai/download", "photocraft-ai/directml", "dep:photocraft-ai-lama", "photocraft-ai-lama/directml", "dep:photocraft-ai-sd"]
+ai = ["dep:photocraft-ai", "photocraft-ai/gpu", "photocraft-ai/cpu", "photocraft-ai/download", "photocraft-ai/directml", "dep:photocraft-ai-lama", "photocraft-ai-lama/directml", "dep:photocraft-ai-sd", "dep:photocraft-ai-textmask"]
 
 [lints]
 workspace = true
@@ -32,6 +32,7 @@ path = "src/main.rs"
 [dependencies]
 photocraft-ai = { workspace = true, optional = true }
 photocraft-ai-lama = { workspace = true, optional = true, features = ["flex", "wgpu", "rayon"] }
+photocraft-ai-textmask = { workspace = true, optional = true, features = ["native"] }
 photocraft-ai-sd = { workspace = true, optional = true, features = ["flex", "wgpu", "rayon", "native"] }
 photocraft-automation = { path = "../../crates/automation" }
 photocraft-engine = { workspace = true, features = ["plugins"] }

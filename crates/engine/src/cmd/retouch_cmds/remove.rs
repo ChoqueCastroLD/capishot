@@ -704,14 +704,37 @@ impl AiRun {
     }
 }
 
+/// A filled window as interleaved RGB, and the hole as coverage.
+fn fill_as_rgb(doc: &Document, out: &Region, hole: &[bool]) -> (Vec<f32>, Vec<f32>) {
+    let base = doc.pixel_format();
+    let with_alpha = PixelFormat::new(base.mode, base.sample, true);
+    let fmt = if out.ch == with_alpha.channels() { with_alpha } else { PixelFormat::new(base.mode, base.sample, false) };
+    let mut rgb = Vec::with_capacity(hole.len() * 3);
+    for p in out.data.chunks_exact(out.ch.max(1)) {
+        rgb.extend_from_slice(&to_rgba(&fmt, p)[..3]);
+    }
+    (rgb, hole.iter().map(|h| if *h { 1.0 } else { 0.0 }).collect())
+}
+
 /// Applies a filled window to the live document as one undo step (into the target, or onto a new
 /// layer above it with `new_layer`).
 fn apply_fill(s: &mut Session, label: &'static str, id: Option<LayerId>, p: &Value, new_layer: bool, filled: Option<(Region, Vec<bool>)>) -> Result<Value> {
     let Some((out, hole)) = filled else { return Ok(json!({"changed": false})) };
     if new_layer {
+        let keep_active = p.get("keepActive").and_then(Value::as_bool).unwrap_or(false);
+        let output = crate::ai_inpaint_cmds::Output::parse(p, crate::ai_inpaint_cmds::Output::Current)?;
         let (damage, nid) = s.edit(label, |doc, active| {
-            let r = fill_to_new_layer(doc, id, &out, &hole)?;
-            *active = Some(r.1);
+            // Remove with AI's layers of cleans; the Remove tool's is a plain new layer.
+            let r = match (&output, id) {
+                (crate::ai_inpaint_cmds::Output::Current, _) | (_, None) => fill_to_new_layer(doc, id, &out, &hole)?,
+                (output, Some(id)) => {
+                    let (rgb, cover) = fill_as_rgb(doc, &out, &hole);
+                    (out.rect, crate::ai_inpaint_cmds::write_clean(doc, id, output, out.rect, &rgb, &cover)?)
+                }
+            };
+            if !keep_active {
+                *active = Some(r.1);
+            }
             Ok(r)
         })?;
         s.hint_damage(damage);

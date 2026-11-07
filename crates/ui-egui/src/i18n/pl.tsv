@@ -4623,3 +4623,43 @@ curves	Smooth	Wygładź
 	This stroke is outside the page	To pociągnięcie jest poza stroną
 	This stroke covers nothing that can change: check the selection	To pociągnięcie nie obejmuje niczego, co można zmienić: sprawdź zaznaczenie
 	Nothing is left around this stroke to fill it from	Wokół tego pociągnięcia nie ma nic, czym można by je wypełnić
+	Text Selection Tool	Narzędzie Zaznaczanie tekstu
+	Text Selection	Zaznaczanie tekstu
+	Detect Text	Wykryj tekst
+	Downloading the text model… {percent} %	Pobieranie modelu tekstu… {percent} %
+	Finding the text…	Szukanie tekstu…
+	Find Text	Znajdź tekst
+	Finds the text and sound effects on the page; you choose what to select	Znajduje tekst i onomatopeje na stronie; ty wybierasz, co zaznaczyć
+	Find Again	Szukaj ponownie
+	{on} of {total} pieces	{on} z {total} fragmentów
+	Suggested	Sugerowane
+	How far the selection reaches past the letters. Too little leaves smudges when cleaning; too much takes the lines around them	Jak daleko zaznaczenie wykracza poza litery. Za mało zostawia plamy przy czyszczeniu; za dużo zabiera linie wokół
+	Click a piece to add or take it; paint to add, Alt to take away	Kliknij fragment, aby go dodać lub usunąć; maluj, aby dodać, Alt, aby usunąć
+	Leave as Selection	Zostaw jako zaznaczenie
+	Open a page to find its text	Otwórz stronę, aby znaleźć jej tekst
+	Finds the text and sound effects on a page, to choose what to clean.	Znajduje tekst i onomatopeje na stronie, aby wybrać, co wyczyścić.
+	Find Text in Selection	Znajdź tekst w zaznaczeniu
+	Clean on Click	Czyść po kliknięciu
+	Click a piece to clean it	Kliknij fragment, aby go wyczyścić
+	{total} pieces	Fragmenty: {total}
+	{n} waiting	W kolejce: {n}
+	Looks on the whole page again	Sprawdza ponownie całą stronę
+	Each click cleans that piece right away, one at a time	Każde kliknięcie od razu czyści ten fragment, jeden naraz
+	Show Pieces	Pokaż fragmenty
+	Hide Pieces	Ukryj fragmenty
+	Color of the chosen pieces	Kolor wybranych fragmentów
+	Color of the other pieces	Kolor pozostałych fragmentów
+	Tap a piece to clean it	Dotknij fragmentu, aby go wyczyścić
+	Tap a piece to add or take it; paint to add	Dotknij fragmentu, aby go dodać lub usunąć; maluj, aby dodać
+	Contour {px}	Kontur {px}
+	Painting Removes	Malowanie usuwa
+	Painting Adds	Malowanie dodaje
+	Less Contour	Mniejszy kontur
+	More Contour	Większy kontur
+	Clean on Tap: On	Czyść po dotknięciu: tak
+	Clean on Tap: Off	Czyść po dotknięciu: nie
+	Text Selection isn't available in this build	Zaznaczanie tekstu nie jest dostępne w tej wersji
+	New Layer Each Time	Nowa warstwa na czyszczenie
+	One Cleaning Layer	Jedna warstwa czyszczeń
+	AI Clean	Czyszczenie AI
+	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO	Wyraz, który się nie mieści, jest dzielony łącznikiem i idzie dalej niżej: PIE-SEK

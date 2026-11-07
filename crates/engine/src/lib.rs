@@ -65,6 +65,7 @@ pub mod lut_library_cmds;
 pub mod package;
 pub mod ai_warm_cmds;
 pub mod remove_ai_cmds;
+pub mod text_mask_cmds;
 pub mod theme_cmds;
 pub mod type_bubble_cmds;
 pub mod type_format_cmds;
@@ -339,6 +340,9 @@ pub struct Session {
     /// Runs Manga LaMa for `edit.inpaintAi` and the Remove tool's AI mode, injected by the shell;
     /// `None` where it is unavailable (see `ai_inpaint_cmds`).
     inpainter: Option<std::sync::Arc<dyn photocraft_ai_lama::service::Inpainter>>,
+    text_masker: Option<std::sync::Arc<dyn photocraft_ai_textmask::TextMasker>>,
+    /// The last `select.detectText` of each document.
+    text_detections: Vec<(photocraft_doc::DocId, std::sync::Arc<photocraft_ai_textmask::Detection>)>,
     /// Downloads and deletes AI model weights (`ai.models.*`, the AI Model Manager), injected by
     /// the shell; `None` where downloads are unavailable (see `ai_models_cmds`).
     ai_models: Option<Arc<dyn photocraft_ai::models::ModelStore>>,

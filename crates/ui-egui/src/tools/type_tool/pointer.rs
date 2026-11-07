@@ -366,6 +366,7 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
         p["y"] = json!(start[1]);
         p["style"] = json!(o.bubble_pick);
         p["styles"] = crate::font_projects_ui::bubble_styles(app, &o.bubble_styles);
+        p["hyphenate"] = json!(o.bubble_hyphenate);
         if let Some(map) = crate::bubble_type_ui::shape_styles_param(app) {
             p["shapeStyles"] = map;
         }

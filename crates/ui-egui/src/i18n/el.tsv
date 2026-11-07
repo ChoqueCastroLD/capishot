@@ -4695,3 +4695,43 @@ curves	Smooth	Εξομάλυνση
 	This stroke is outside the page	Αυτή η πινελιά είναι εκτός σελίδας
 	This stroke covers nothing that can change: check the selection	Αυτή η πινελιά δεν καλύπτει τίποτα που μπορεί να αλλάξει: ελέγξτε την επιλογή
 	Nothing is left around this stroke to fill it from	Δεν έχει απομείνει τίποτα γύρω από αυτή την πινελιά για να γεμίσει
+	Text Selection Tool	Εργαλείο Επιλογή κειμένου
+	Text Selection	Επιλογή κειμένου
+	Detect Text	Ανίχνευση κειμένου
+	Downloading the text model… {percent} %	Λήψη του μοντέλου κειμένου… {percent} %
+	Finding the text…	Αναζήτηση κειμένου…
+	Find Text	Εύρεση κειμένου
+	Finds the text and sound effects on the page; you choose what to select	Βρίσκει το κείμενο και τα ηχητικά εφέ της σελίδας· εσείς επιλέγετε τι θα επιλεγεί
+	Find Again	Νέα αναζήτηση
+	{on} of {total} pieces	Κομμάτια: {on} από {total}
+	Suggested	Προτεινόμενα
+	How far the selection reaches past the letters. Too little leaves smudges when cleaning; too much takes the lines around them	Πόσο εκτείνεται η επιλογή πέρα από τα γράμματα. Λίγο αφήνει κηλίδες στον καθαρισμό· πολύ παίρνει τις γραμμές γύρω
+	Click a piece to add or take it; paint to add, Alt to take away	Κάντε κλικ σε ένα κομμάτι για προσθήκη ή αφαίρεση· βάψτε για προσθήκη, Alt για αφαίρεση
+	Leave as Selection	Διατήρηση ως επιλογή
+	Open a page to find its text	Ανοίξτε μια σελίδα για να βρείτε το κείμενό της
+	Finds the text and sound effects on a page, to choose what to clean.	Βρίσκει το κείμενο και τα ηχητικά εφέ μιας σελίδας, για να επιλέξετε τι θα καθαρίσετε.
+	Find Text in Selection	Εύρεση κειμένου στην επιλογή
+	Clean on Click	Καθαρισμός με κλικ
+	Click a piece to clean it	Κάντε κλικ σε ένα κομμάτι για να το καθαρίσετε
+	{total} pieces	Κομμάτια: {total}
+	{n} waiting	{n} σε αναμονή
+	Looks on the whole page again	Ξανακοιτά όλη τη σελίδα
+	Each click cleans that piece right away, one at a time	Κάθε κλικ καθαρίζει αμέσως αυτό το κομμάτι, ένα τη φορά
+	Show Pieces	Εμφάνιση κομματιών
+	Hide Pieces	Απόκρυψη κομματιών
+	Color of the chosen pieces	Χρώμα των επιλεγμένων κομματιών
+	Color of the other pieces	Χρώμα των άλλων κομματιών
+	Tap a piece to clean it	Πατήστε ένα κομμάτι για να το καθαρίσετε
+	Tap a piece to add or take it; paint to add	Πατήστε ένα κομμάτι για προσθήκη ή αφαίρεση· βάψτε για προσθήκη
+	Contour {px}	Περίγραμμα {px}
+	Painting Removes	Το βάψιμο αφαιρεί
+	Painting Adds	Το βάψιμο προσθέτει
+	Less Contour	Λιγότερο περίγραμμα
+	More Contour	Περισσότερο περίγραμμα
+	Clean on Tap: On	Καθαρισμός με πάτημα: ναι
+	Clean on Tap: Off	Καθαρισμός με πάτημα: όχι
+	Text Selection isn't available in this build	Η επιλογή κειμένου δεν είναι διαθέσιμη σε αυτή την έκδοση
+	New Layer Each Time	Νέο επίπεδο για κάθε καθαρισμό
+	One Cleaning Layer	Ένα επίπεδο καθαρισμών
+	AI Clean	Καθαρισμός AI
+	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO	Μια λέξη που δεν χωρά χωρίζεται με ενωτικό και συνεχίζει από κάτω: ΣΚΥ-ΛΟΣ

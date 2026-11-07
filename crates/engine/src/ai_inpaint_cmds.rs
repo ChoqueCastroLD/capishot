@@ -403,6 +403,120 @@ pub(crate) fn to_rgb(fmt: &PixelFormat, px: &[f32]) -> Vec<f32> {
 
 // ------------------------------------------------------------------ edit.inpaintAi
 
+/// Where a clean's result goes.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Output {
+    /// Into the layer.
+    Current,
+    /// On a new layer above it, named after this, for each clean. Only what was generated.
+    New(String),
+    /// On one layer above it with this name, all the cleans together.
+    Single(String),
+}
+
+/// What a layer of cleans is called when the caller doesn't say.
+pub(crate) const CLEAN_LAYER: &str = "AI Clean";
+
+impl Output {
+    /// `output` and `layerName`; `default` without `output`.
+    pub(crate) fn parse(p: &Value, default: Output) -> Result<Output> {
+        let name = p.get("layerName").and_then(Value::as_str).filter(|n| !n.is_empty()).unwrap_or(CLEAN_LAYER).to_string();
+        match p.get("output") {
+            None | Some(Value::Null) => Ok(default),
+            Some(Value::String(o)) => match o.as_str() {
+                "new" => Ok(Output::New(name)),
+                "single" => Ok(Output::Single(name)),
+                "current" => Ok(Output::Current),
+                o => Err(bad(format!("unknown `output` {o:?} (new|single|current)"))),
+            },
+            Some(_) => Err(bad("`output` must be \"new\", \"single\" or \"current\"")),
+        }
+    }
+
+    fn name(&self) -> Option<&str> {
+        match self {
+            Output::Current => None,
+            Output::New(n) | Output::Single(n) => Some(n),
+        }
+    }
+}
+
+fn find_layer(list: &[Layer], wanted: &dyn Fn(&Layer) -> bool) -> Option<LayerId> {
+    list.iter().rev().find_map(|l| if wanted(l) { Some(l.id) } else { l.children().and_then(|c| find_layer(c, wanted)) })
+}
+
+/// The layer of cleans called `name`, if the document has one.
+pub(crate) fn clean_layer(doc: &photocraft_doc::Document, name: &str) -> Option<LayerId> {
+    find_layer(&doc.layers, &|l| l.name == name && l.surface().is_some())
+}
+
+/// The layer under `id` among its siblings.
+fn below(list: &[Layer], id: LayerId) -> Option<LayerId> {
+    if let Some(at) = list.iter().position(|l| l.id == id) {
+        return at.checked_sub(1).map(|k| list[k].id);
+    }
+    list.iter().find_map(|l| l.children().and_then(|c| below(c, id)))
+}
+
+/// What a clean reads: with the layer of cleans active, the page under it. A layer of cleans holds
+/// only what was generated, so there'd be nothing to fill from.
+pub(crate) fn source_layer(doc: &photocraft_doc::Document, id: LayerId, output: &Output) -> LayerId {
+    let Some(name) = output.name() else { return id };
+    let is_clean = doc.layer(id).is_some_and(|l| l.name.starts_with(name));
+    if is_clean { below(&doc.layers, id).unwrap_or(id) } else { id }
+}
+
+/// `rgb` (interleaved, of `region`) under the layer of cleans, so a clean sees the ones before it.
+pub(crate) fn under_cleans(rgb: &mut [f32], doc: &photocraft_doc::Document, region: Rect, output: &Output) {
+    let Output::Single(name) = output else { return };
+    let Some(surf) = clean_layer(doc, name).and_then(|id| doc.layer(id)).and_then(|l| l.surface()) else { return };
+    let fmt = surf.format();
+    let px = surf.read_region(region);
+    for (dst, p) in rgb.chunks_exact_mut(3).zip(px.chunks_exact(fmt.channels().max(1))) {
+        let c = to_rgba(&fmt, p);
+        if c[3] > 0.0 {
+            for k in 0..3 {
+                dst[k] += (c[k] - dst[k]) * c[3];
+            }
+        }
+    }
+}
+
+/// `generated` (interleaved RGB of `region`) where `cover` says, on a layer of its own above `id`
+/// or over what the layer of cleans already has. The layer.
+pub(crate) fn write_clean(doc: &mut photocraft_doc::Document, id: LayerId, output: &Output, region: Rect, generated: &[f32], cover: &[f32]) -> Result<LayerId> {
+    let name = output.name().unwrap_or(CLEAN_LAYER).to_string();
+    let existing = if matches!(output, Output::Single(_)) { clean_layer(doc, &name) } else { None };
+    let base = doc.pixel_format();
+    let nid = match existing {
+        Some(l) => l,
+        None => {
+            let layer_name = if matches!(output, Output::Single(_)) { name } else { doc.next_layer_name(&name) };
+            doc.insert_above(Some(id), Layer::raster(layer_name, PixelFormat { alpha: true, ..base }))
+        }
+    };
+    let surf = crate::edit_menu_cmds::writable_surface(doc, nid)?;
+    let lf = surf.format();
+    let n = lf.channels();
+    let mut px = surf.read_region(region);
+    px.resize(cover.len() * n, 0.0);
+    let mut enc = [0.0f32; 8];
+    for (i, &c) in cover.iter().enumerate() {
+        if c > 0.0 {
+            let o = to_rgba(&lf, &px[i * n..(i + 1) * n]);
+            let g = &generated[i * 3..i * 3 + 3];
+            // Over what's there: a soft edge over an earlier clean.
+            let a = c + o[3] * (1.0 - c);
+            let mix = |k: usize| if a > 0.0 { (g[k] * c + o[k] * o[3] * (1.0 - c)) / a } else { g[k] };
+            from_rgba_into(&lf, [mix(0), mix(1), mix(2), a], &mut enc);
+            px[i * n..(i + 1) * n].copy_from_slice(&enc[..n]);
+        }
+    }
+    surf.write_region(region, &px);
+    surf.prune();
+    Ok(nid)
+}
+
 /// Everything the job needs, checked before it starts.
 struct Plan {
     layer: LayerId,
@@ -411,7 +525,8 @@ struct Plan {
     layer_px: Vec<f32>,
     rgb: Vec<f32>,
     cover: Vec<f32>,
-    new_layer: bool,
+    output: Output,
+    keep_active: bool,
     opts: AiOptions,
 }
 
@@ -439,18 +554,12 @@ fn plan(s: &Session, p: &Value) -> Result<Head> {
         None => crate::edit_menu_cmds::pixel_layer(s),
     }
     .map_err(EngineError::Other)?;
-    let new_layer = match p.get("output").and_then(Value::as_str) {
-        None => match p.get("output") {
-            None | Some(Value::Null) => true,
-            Some(_) => return Err(bad("`output` must be \"new\" or \"current\"")),
-        },
-        Some("new") => true,
-        Some("current") => false,
-        Some(o) => return Err(bad(format!("unknown `output` {o:?} (new|current)"))),
-    };
+    let output = Output::parse(p, Output::New(CLEAN_LAYER.to_string()))?;
+    let keep_active = p.get("keepActive").and_then(Value::as_bool).unwrap_or(false);
     let opts = ai_options(s, p, ID, false)?;
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let doc = &d.doc;
+    let id = source_layer(doc, id, &output);
     let canvas = doc.bounds();
     let sel = doc.selection.as_ref().ok_or_else(|| bad("make a selection around what to clean"))?;
     let sb = sel.content_bounds().intersect(&canvas);
@@ -463,14 +572,15 @@ fn plan(s: &Session, p: &Value) -> Result<Head> {
         return Err(bad(format!("the area is too large to clean at once ({pixels} pixels, at most {MAX_PIXELS}); select less")));
     }
     doc.layer(id).and_then(|l| l.surface()).ok_or(EngineError::NoLayer(id))?;
-    Ok(Head { layer: id, region, new_layer, opts, doc: doc.clone() })
+    Ok(Head { layer: id, region, output, keep_active, opts, doc: doc.clone() })
 }
 
 /// What [`plan`] checked on the page's thread; [`Head::read`] reads the pixels.
 struct Head {
     layer: LayerId,
     region: Rect,
-    new_layer: bool,
+    output: Output,
+    keep_active: bool,
     opts: AiOptions,
     doc: std::sync::Arc<photocraft_doc::Document>,
 }
@@ -480,7 +590,7 @@ impl Head {
     /// build's pool, in two parts between frames in the single-threaded one: a large selection
     /// takes a while on a phone).
     fn read(self) -> Result<crate::jobs::Prep<Plan>> {
-        let Head { layer: id, region, new_layer, opts, doc } = self;
+        let Head { layer: id, region, output, keep_active, opts, doc } = self;
         let (w, h) = (region.width() as usize, region.height() as usize);
         let surf = doc.layer(id).and_then(|l| l.surface()).ok_or(EngineError::NoLayer(id))?;
         let sel = doc.selection.as_ref().ok_or_else(|| bad("make a selection around what to clean"))?;
@@ -496,8 +606,9 @@ impl Head {
             return Err(bad("the selection doesn't cover any pixel"));
         }
         Ok(crate::jobs::Prep::then(move |_| {
-            let rgb = to_rgb(&fmt, &layer_px);
-            Ok(crate::jobs::Prep::Done(Plan { layer: id, fmt, region, layer_px, rgb, cover, new_layer, opts }))
+            let mut rgb = to_rgb(&fmt, &layer_px);
+            under_cleans(&mut rgb, &doc, region, &output);
+            Ok(crate::jobs::Prep::Done(Plan { layer: id, fmt, region, layer_px, rgb, cover, output, keep_active, opts }))
         }))
     }
 }
@@ -550,29 +661,15 @@ pub(crate) fn inpaint_ai_labelled(s: &mut Session, p: &Value, label: &'static st
 
 fn apply(s: &mut Session, label: &str, plan: Plan, generated: &[f32], device: String, run: FillRun, ms: u64) -> Result<Value> {
     let model = run.model;
-    let Plan { layer: id, fmt, region, layer_px, cover, new_layer, .. } = plan;
+    let Plan { layer: id, fmt, region, layer_px, cover, output, keep_active, .. } = plan;
     let n = fmt.channels();
     let count = cover.iter().filter(|c| **c > 0.0).count();
     let layer = s.edit(label, |doc, active| {
-        if new_layer {
-            let mut l = Layer::raster(doc.next_layer_name("AI Clean"), PixelFormat { alpha: true, ..fmt });
-            let lf = l.surface().map(|s| s.format()).unwrap_or(PixelFormat { alpha: true, ..fmt });
-            let ln = lf.channels();
-            let mut px = vec![0.0f32; cover.len() * ln];
-            let mut enc = [0.0f32; 8];
-            for (i, &c) in cover.iter().enumerate() {
-                if c > 0.0 {
-                    let g = &generated[i * 3..i * 3 + 3];
-                    from_rgba_into(&lf, [g[0], g[1], g[2], c], &mut enc);
-                    px[i * ln..(i + 1) * ln].copy_from_slice(&enc[..ln]);
-                }
+        if output != Output::Current {
+            let nid = write_clean(doc, id, &output, region, generated, &cover)?;
+            if !keep_active {
+                *active = Some(nid);
             }
-            if let Some(surf) = l.surface_mut() {
-                surf.write_region(region, &px);
-                surf.prune();
-            }
-            let nid = doc.insert_above(Some(id), l);
-            *active = Some(nid);
             return Ok(nid);
         }
         let surf = crate::edit_menu_cmds::writable_surface(doc, id)?;
@@ -614,7 +711,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: "Clean Selected Area with AI",
         menu: &["Edit"],
         shortcut: None,
-        params: r#"{"output"?: "new" (default: the result on a new layer above, alpha = selection coverage) | "current" (paint it into the layer), "layer"?: layer id (default: the active pixel layer), "maxSide"?: 0 or 64..2048, multiple of 8 (default 512: larger crops are downscaled to this working size; 0: full resolution, larger crops split into overlapping 512 px tiles feathered at their seams), "margin"?: 0..1024 px of context around each masked blob (default 64), "allowDownload"?: bool (fetch the model's weights when not cached: Manga LaMa about 100 MB, MI-GAN 13 MB; default false), "quality"?: "auto"|"fast"|"best" (fast: the lite MI-GAN, at most 512 px tiles; auto: Manga LaMa on a capable GPU, MI-GAN on the CPU, phones and weak machines), "device"?: "auto"|"gpu"|"cpu"|"directml"|"wgpu" (directml, wgpu: natively, that GPU runtime; auto picks DirectML on Windows for Manga LaMa when ONNX Runtime is installed), "model"?: "auto"|"manga-lama"|"migan-512", "threads"?: 0..64 (CPU threads, 0 = one per core), "keepLoaded"?: bool (default true)} -> {"layer", "pixels", "region": [x,y,w,h], "device", "model", "lite", "cpu" (it ran on the CPU, also when an automatic run found no usable GPU), "fellBack" (it left where it was headed: the GPU failed mid-run and the CPU finished it, DirectML couldn't run it, or there was no usable GPU; then "notices" say which: ai.gpuFallback, ai.directmlFallback, ai.cpuFallback), "ms" (the run's wall time)}. Erases what the selection covers (text, SFX) and fills it with Manga LaMa (or MI-GAN). Background job, one undo step."#,
+        params: r#"{"output"?: "new" (default: the result on a new layer above, alpha = selection coverage) | "single" (on one layer above that gathers every clean, which it also reads) | "current" (paint it into the layer), "layerName"?: str (what those layers are called), "keepActive"?: bool (the active layer stays), "layer"?: layer id (default: the active pixel layer), "maxSide"?: 0 or 64..2048, multiple of 8 (default 512: larger crops are downscaled to this working size; 0: full resolution, larger crops split into overlapping 512 px tiles feathered at their seams), "margin"?: 0..1024 px of context around each masked blob (default 64), "allowDownload"?: bool (fetch the model's weights when not cached: Manga LaMa about 100 MB, MI-GAN 13 MB; default false), "quality"?: "auto"|"fast"|"best" (fast: the lite MI-GAN, at most 512 px tiles; auto: Manga LaMa on a capable GPU, MI-GAN on the CPU, phones and weak machines), "device"?: "auto"|"gpu"|"cpu"|"directml"|"wgpu" (directml, wgpu: natively, that GPU runtime; auto picks DirectML on Windows for Manga LaMa when ONNX Runtime is installed), "model"?: "auto"|"manga-lama"|"migan-512", "threads"?: 0..64 (CPU threads, 0 = one per core), "keepLoaded"?: bool (default true)} -> {"layer", "pixels", "region": [x,y,w,h], "device", "model", "lite", "cpu" (it ran on the CPU, also when an automatic run found no usable GPU), "fellBack" (it left where it was headed: the GPU failed mid-run and the CPU finished it, DirectML couldn't run it, or there was no usable GPU; then "notices" say which: ai.gpuFallback, ai.directmlFallback, ai.cpuFallback), "ms" (the run's wall time)}. Erases what the selection covers (text, SFX) and fills it with Manga LaMa (or MI-GAN). Background job, one undo step."#,
         enabled,
         run: inpaint_ai,
         journal: true,

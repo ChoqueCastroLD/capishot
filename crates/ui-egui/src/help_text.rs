@@ -99,6 +99,7 @@ pub const HELP: &[Help] = &[
     h("tool:Burn", "Paint to darken areas", "Pinta para oscurecer zonas", "Pinte para escurecer áreas"),
     h("tool:Sponge", "Paint to make colors more or less saturated", "Pinta para saturar o desaturar los colores", "Pinte para saturar ou dessaturar as cores"),
     h("tool:QuickSelection", "Paint over an object and the selection grows to its edges", "Pinta sobre un objeto y la selección crece hasta sus bordes", "Pinte sobre um objeto e a seleção cresce até as bordas"),
+    h("tool:TextSelection", "Finds the text on the page: choose the pieces to select, then clean them", "Encuentra el texto de la página: elige las piezas a seleccionar y luego límpialas", "Encontra o texto da página: escolha as peças a selecionar e depois limpe-as"),
     h("tool:ObjectSelection", "Draw a box around an object and it is selected for you", "Dibuja un recuadro alrededor de un objeto y se selecciona solo", "Desenhe um retângulo ao redor de um objeto e ele é selecionado sozinho"),
     h("tool:Pen", "Click points to draw precise paths and curves", "Haz clic en puntos para trazar líneas y curvas precisas", "Clique em pontos para traçar caminhos e curvas precisos"),
     h("tool:FreeformPen", "Draw a path freehand", "Dibuja un trazado a mano alzada", "Desenhe um traçado à mão livre"),
@@ -413,7 +414,7 @@ pub const WHICH: &[Which] = &[
         pt: "Remover com IA: pinte sobre textos ou objetos, o melhor resultado. Remover texto do balão: toque um balão liso e o texto some, sem IA, na hora. Limpar área selecionada com IA: o mesmo que Remover com IA sobre uma seleção. Ferramenta Remover: sem IA, rápida, para fundos simples. Pincel de recuperação para manchas: manchas e pontinhos pequenos.",
     },
     Which {
-        members: &["tool:QuickSelection", "tool:MagicWand", "tool:ObjectSelection", "select.subject", "tool:Lasso", "select.colorRange"],
+        members: &["tool:QuickSelection", "tool:MagicWand", "tool:ObjectSelection", "tool:TextSelection", "select.subject", "tool:Lasso", "select.colorRange"],
         en: "Quick Selection: paint over the object. Magic Wand: one flat color. Object Selection: a box around it. Lasso: by hand.",
         es: "Selección rápida: pinta sobre el objeto. Varita mágica: un color plano. Selección de objetos: un recuadro alrededor. Lazo: a mano.",
         pt: "Seleção rápida: pinte sobre o objeto. Varinha mágica: uma cor chapada. Seleção de objeto: um retângulo ao redor. Laço: à mão.",

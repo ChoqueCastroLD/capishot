@@ -2321,11 +2321,37 @@ mod multi_layer_formatting {
     }
 
     #[test]
-    fn hyphenate_is_not_shown_while_layout_does_not_hyphenate() {
-        // #6710: layout never hyphenates; the control must stay hidden until it does.
+    fn hyphenate_is_in_the_paragraph_controls() {
         let (app, _) = fixture();
         let h = controls(app, true);
-        assert!(h.query_by_label("Hyphenate").is_none());
+        assert!(h.query_by_label("Hyphenate").is_some());
+    }
+
+    /// The tool's real bar (Bubble Type's was empty: the bar didn't know the tool).
+    #[test]
+    fn hyphenate_is_in_the_options_bar_of_both_type_tools() {
+        for tool in [crate::state::Tool::Type, crate::state::Tool::BubbleType] {
+            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+            app.session.execute("file.new", json!({"width": 64, "height": 64})).unwrap();
+            app.ui.tool = tool;
+            let mut h = Harness::builder().with_size(vec2(2000.0, 60.0)).with_max_steps(32).build_ui_state(
+                |ui, app: &mut PhotocraftApp| {
+                    if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                        crate::panels::options_bar(app, ui);
+                    }
+                },
+                app,
+            );
+            PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::Studio);
+            h.run_steps(6);
+            assert!(h.query_by_label("Hyphenate").is_some(), "{tool:?}");
+        }
+    }
+
+    #[test]
+    fn hyphenate_starts_on_for_bubbles_and_off_for_type() {
+        let o = crate::state::ToolOptions::default();
+        assert!(o.bubble_hyphenate && !o.type_hyphenate);
     }
 
     #[test]

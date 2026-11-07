@@ -74,7 +74,7 @@ fn sample_pixels(s: &Session, all_layers: bool, window: Option<Rect>) -> Result<
     }
 }
 
-fn set_selection(s: &mut Session, label: &str, area: Rect, mask: Vec<f32>, m: SelectionMode) -> Result<Value> {
+pub(crate) fn set_selection(s: &mut Session, label: &str, area: Rect, mask: Vec<f32>, m: SelectionMode) -> Result<Value> {
     let selected = s.edit(label, |doc, _| {
         doc.selection = sel::combine(doc.selection.as_ref(), &mask, area, m);
         Ok(doc.selection.is_some())

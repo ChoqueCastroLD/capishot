@@ -4222,3 +4222,43 @@ curves	Smooth	매끄럽게
 	This stroke is outside the page	이 획은 페이지 밖에 있습니다
 	This stroke covers nothing that can change: check the selection	이 획에는 변경할 수 있는 부분이 없습니다. 선택 영역을 확인하세요
 	Nothing is left around this stroke to fill it from	이 획 주변에 채울 때 참고할 부분이 없습니다
+	Text Selection Tool	텍스트 선택 도구
+	Text Selection	텍스트 선택
+	Detect Text	텍스트 감지
+	Downloading the text model… {percent} %	텍스트 모델 다운로드 중… {percent} %
+	Finding the text…	텍스트 찾는 중…
+	Find Text	텍스트 찾기
+	Finds the text and sound effects on the page; you choose what to select	페이지의 텍스트와 효과음을 찾습니다. 선택할 대상은 사용자가 고릅니다
+	Find Again	다시 찾기
+	{on} of {total} pieces	{total}개 중 {on}개
+	Suggested	추천
+	How far the selection reaches past the letters. Too little leaves smudges when cleaning; too much takes the lines around them	선택 영역이 글자 바깥으로 얼마나 넓어지는지입니다. 너무 적으면 정리할 때 얼룩이 남고, 너무 많으면 주변 선까지 지워집니다
+	Click a piece to add or take it; paint to add, Alt to take away	조각을 클릭해 추가하거나 빼세요. 칠하면 추가, Alt로 제거
+	Leave as Selection	선택 영역으로 두기
+	Open a page to find its text	페이지를 열어 텍스트를 찾으세요
+	Finds the text and sound effects on a page, to choose what to clean.	페이지의 텍스트와 효과음을 찾아 정리할 대상을 고를 수 있게 합니다.
+	Find Text in Selection	선택 영역에서 텍스트 찾기
+	Clean on Click	클릭하여 정리
+	Click a piece to clean it	조각을 클릭해 정리하세요
+	{total} pieces	조각 {total}개
+	{n} waiting	{n}개 대기 중
+	Looks on the whole page again	페이지 전체를 다시 살펴봅니다
+	Each click cleans that piece right away, one at a time	클릭할 때마다 해당 조각을 바로 정리합니다(한 번에 하나씩)
+	Show Pieces	조각 표시
+	Hide Pieces	조각 숨기기
+	Color of the chosen pieces	선택한 조각의 색
+	Color of the other pieces	나머지 조각의 색
+	Tap a piece to clean it	조각을 탭해 정리하세요
+	Tap a piece to add or take it; paint to add	조각을 탭해 추가하거나 빼세요. 칠하면 추가
+	Contour {px}	윤곽 {px}
+	Painting Removes	칠하면 제거
+	Painting Adds	칠하면 추가
+	Less Contour	윤곽 줄이기
+	More Contour	윤곽 늘리기
+	Clean on Tap: On	탭하여 정리: 켬
+	Clean on Tap: Off	탭하여 정리: 끔
+	Text Selection isn't available in this build	이 버전에서는 텍스트 선택을 사용할 수 없습니다
+	New Layer Each Time	정리마다 새 레이어
+	One Cleaning Layer	정리 레이어 하나
+	AI Clean	AI 정리
+	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO	들어가지 않는 단어를 하이픈으로 나눠 아래로 이어 갑니다: HY-PHEN

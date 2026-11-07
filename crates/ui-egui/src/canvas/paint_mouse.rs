@@ -96,7 +96,7 @@ pub struct Buttons {
 
 /// Tools with the options-bar brush chip, which opens the Brush Preset picker.
 pub fn has_brush_picker(tool: Tool) -> bool {
-    tool.is_brushlike() || tool == Tool::QuickSelection
+    tool.is_brushlike() || matches!(tool, Tool::QuickSelection | Tool::TextSelection)
 }
 
 /// Tools whose canvas right-click opens the Brush Preset picker: the painting tools. The Quick

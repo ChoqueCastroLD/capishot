@@ -16,6 +16,7 @@ Input → `crates/ui-egui` (tools and panels call engine commands) → `crates/e
 | `psd`, `io`, `format`, `codecs`, `raw`, `affinity`, `heif` | File formats |
 | `text`, `typer` | Type layout; TypeR, bubble finding (`typer/src/bubble_find.rs`) |
 | `ai`, `ai-lama`, `ai-ort`, `ai-web` | Upscalers; Manga LaMa and tiles (`ai-lama/src/tiles.rs`); ONNX Runtime; browser AI bridge |
+| `ai-textmask` | The text mask model behind the Text Selection tool: regions, ONNX on a desktop (`native`), burn in the browser (`net`) |
 | `host` | `capishot-host`: Capishot as a library for host apps (`src/view/*`: the widget) |
 | `automation` | CLI session and MCP server |
 
@@ -34,7 +35,7 @@ Input → `crates/ui-egui` (tools and panels call engine commands) → `crates/e
 |---|---|
 | A frame, what runs when | `app/frame.rs`, `chrome_freeze.rs` (repaints the chrome during a drag) |
 | Canvas drawing and pointer | `canvas.rs`, `canvas/tool_input.rs`, `canvas/press_watch.rs`, `canvas/gpu_canvas/` |
-| A tool's behaviour | `tools/<tool>_ui*`, `tools/remove_mask_ui.rs`, `remove_ai_ui.rs`, `tools/bubble_text_ui.rs`, `tools/tool_options` in `state/tool_options.rs` |
+| A tool's behaviour | `tools/<tool>_ui*`, `tools/remove_mask_ui.rs`, `remove_ai_ui.rs`, `tools/bubble_text_ui.rs`, `tools/text_select_ui.rs`, `tools/tool_options` in `state/tool_options.rs` |
 | Tool letters and held keys | `input/tool_shortcuts.rs`, `input/hold_keys.rs`, `input/spring_tools.rs`, `input/shortcuts.rs` |
 | Menus | `menus/items.rs` (tree), `menus/invoke.rs` (actions), `menu_catalog.rs` |
 | Phone UI | `simple_ui.rs`, `touch_ui.rs`, `touch_locks.rs`, `mobile_sheet.rs`, `menus/mobile_menu.rs` |

@@ -325,6 +325,23 @@ pub struct ToolOptions {
     /// difference, 1–255; 0 = automatic, from the bubble's noise).
     #[serde(default)]
     pub bubble_text_new_layer: bool,
+    /// Text Selection: a click on a piece cleans it, instead of choosing it.
+    pub text_select_clean_click: bool,
+    /// Type: long words that don't fit are split with a hyphen. Off, as in Photoshop.
+    pub type_hyphenate: bool,
+    /// Bubble Type: the same, on: it's how manga is lettered.
+    pub bubble_hyphenate: bool,
+    /// Where a clean's result goes (Remove with AI, Text Selection): "current", "new", "single".
+    pub clean_output: String,
+    /// Text Selection: the pieces show on the canvas.
+    pub text_select_show: bool,
+    /// Text Selection: the colour of the pieces chosen, and of the others.
+    pub text_select_on: [u8; 3],
+    pub text_select_off: [u8; 3],
+    /// Text Selection: how strong the pieces' colours are, in percent.
+    pub text_select_opacity: f32,
+    /// Text Selection: what a person added to the page's contour, kept for the next page.
+    pub text_select_contour: f32,
     #[serde(default)]
     pub bubble_text_tolerance: f32,
     /// Red Eye: pupil search size (1–100) and how far corrected pixels darken (0–100).
@@ -578,6 +595,15 @@ impl Default for ToolOptions {
             magnetic_frequency: 57.0,
             magnetic_pressure: false,
             bubble_text_new_layer: false,
+            text_select_clean_click: false,
+            type_hyphenate: false,
+            bubble_hyphenate: true,
+            clean_output: "current".into(),
+            text_select_show: true,
+            text_select_on: [66, 133, 244],
+            text_select_off: [255, 140, 0],
+            text_select_opacity: 45.0,
+            text_select_contour: 0.0,
             bubble_text_tolerance: 0.0,
             red_eye_pupil_size: 50.0,
             red_eye_darken: 50.0,

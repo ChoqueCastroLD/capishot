@@ -1,0 +1,39 @@
+[package]
+name = "photocraft-ai-textmask"
+description = "Finds the text and sound effects on a manga page: the mask model's run and the regions from its output"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "photocraft_ai_textmask"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# ONNX Runtime: DirectML then the CPU on Windows, the CPU on Linux (`native`).
+native = ["dep:photocraft-ai-ort", "dep:ort"]
+# The network on burn (`net`), for the browser's worker; pick a backend below.
+model = ["dep:burn", "dep:safetensors", "dep:half"]
+flex = ["model", "burn/flex", "burn/simd"]
+wgpu = ["model", "burn/wgpu"]
+
+[dependencies]
+photocraft-ai-ort = { workspace = true, optional = true }
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic", "directml"], optional = true }
+burn = { version = "0.22.0", default-features = false, features = ["std"], optional = true }
+safetensors = { version = "0.8", default-features = false, features = ["alloc"], optional = true }
+half = { version = "2", optional = true }
+
+[[example]]
+name = "textmask"
+required-features = ["native"]
+
+[[example]]
+name = "netcheck"
+required-features = ["flex"]

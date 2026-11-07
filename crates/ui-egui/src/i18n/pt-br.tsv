@@ -5440,3 +5440,43 @@ fontTab	Find More	Encontrar mais
 	This stroke is outside the page	Este traço está fora da página
 	This stroke covers nothing that can change: check the selection	Este traço não cobre nada que possa mudar: verifique a seleção
 	Nothing is left around this stroke to fill it from	Não sobrou nada ao redor deste traço para preenchê-lo
+	Text Selection Tool	Ferramenta Seleção de texto
+	Text Selection	Seleção de texto
+	Detect Text	Detectar texto
+	Downloading the text model… {percent} %	Baixando o modelo de texto… {percent} %
+	Finding the text…	Procurando o texto…
+	Find Text	Procurar texto
+	Finds the text and sound effects on the page; you choose what to select	Encontra o texto e as onomatopeias da página; você escolhe o que selecionar
+	Find Again	Procurar de novo
+	{on} of {total} pieces	Peças: {on} de {total}
+	Suggested	Sugeridas
+	How far the selection reaches past the letters. Too little leaves smudges when cleaning; too much takes the lines around them	Até onde a seleção vai além das letras. Pouco deixa manchas ao limpar; demais leva as linhas em volta
+	Click a piece to add or take it; paint to add, Alt to take away	Clique em uma peça para adicioná-la ou tirá-la; pinte para adicionar, Alt para tirar
+	Leave as Selection	Deixar como seleção
+	Open a page to find its text	Abra uma página para procurar o texto
+	Finds the text and sound effects on a page, to choose what to clean.	Encontra o texto e as onomatopeias de uma página, para escolher o que limpar.
+	Find Text in Selection	Procurar texto na seleção
+	Clean on Click	Limpar ao clicar
+	Click a piece to clean it	Clique em uma peça para limpá-la
+	{total} pieces	Peças: {total}
+	{n} waiting	{n} na fila
+	Looks on the whole page again	Olha a página inteira de novo
+	Each click cleans that piece right away, one at a time	Cada clique limpa essa peça na hora, uma de cada vez
+	Show Pieces	Ver peças
+	Hide Pieces	Ocultar peças
+	Color of the chosen pieces	Cor das peças escolhidas
+	Color of the other pieces	Cor das outras peças
+	Tap a piece to clean it	Toque em uma peça para limpá-la
+	Tap a piece to add or take it; paint to add	Toque em uma peça para adicioná-la ou tirá-la; pinte para adicionar
+	Contour {px}	Contorno {px}
+	Painting Removes	Pintar tira
+	Painting Adds	Pintar adiciona
+	Less Contour	Menos contorno
+	More Contour	Mais contorno
+	Clean on Tap: On	Limpar ao tocar: sim
+	Clean on Tap: Off	Limpar ao tocar: não
+	Text Selection isn't available in this build	A seleção de texto não está disponível nesta versão
+	New Layer Each Time	Uma camada nova por limpeza
+	One Cleaning Layer	Uma só camada de limpezas
+	AI Clean	Limpeza IA
+	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO	A palavra que não cabe é separada com hífen e continua abaixo: CA-CHORRO

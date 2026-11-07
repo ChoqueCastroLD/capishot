@@ -63,6 +63,8 @@ pub enum Tool {
     Sponge,
     QuickSelection,
     ObjectSelection,
+    /// Text Selection: the mask model finds the page's text, a person chooses the pieces.
+    TextSelection,
     Pen,
     FreeformPen,
     CurvaturePen,
@@ -85,7 +87,7 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Tool; 71] = [
+    pub const ALL: [Tool; 72] = [
         Tool::Move,
         Tool::Artboard,
         Tool::RectMarquee,
@@ -140,6 +142,7 @@ impl Tool {
         Tool::Sponge,
         Tool::QuickSelection,
         Tool::ObjectSelection,
+        Tool::TextSelection,
         Tool::Pen,
         Tool::FreeformPen,
         Tool::CurvaturePen,
@@ -218,6 +221,7 @@ impl Tool {
             Tool::Sponge => "Sponge Tool",
             Tool::QuickSelection => "Quick Selection Tool",
             Tool::ObjectSelection => "Object Selection Tool",
+            Tool::TextSelection => "Text Selection Tool",
             Tool::Pen => "Pen Tool",
             Tool::FreeformPen => "Freeform Pen Tool",
             Tool::CurvaturePen => "Curvature Pen Tool",
@@ -303,7 +307,7 @@ impl Tool {
             // In the Marquee flyout, but M cycles only the Rectangular and Elliptical Marquee.
             Tool::SingleRowMarquee | Tool::SingleColumnMarquee => '\0',
             Tool::Dodge | Tool::Burn | Tool::Sponge => 'O',
-            Tool::QuickSelection | Tool::ObjectSelection => 'W',
+            Tool::QuickSelection | Tool::ObjectSelection | Tool::TextSelection => 'W',
             Tool::Pen | Tool::FreeformPen | Tool::CurvaturePen | Tool::AddAnchorPoint | Tool::DeleteAnchorPoint | Tool::ConvertPoint => 'P',
             Tool::PathSelection | Tool::DirectSelection => 'A',
             Tool::Rectangle | Tool::EllipseShape | Tool::Triangle | Tool::Polygon | Tool::Line | Tool::CustomShape => 'U',

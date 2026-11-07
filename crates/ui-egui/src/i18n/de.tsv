@@ -4027,3 +4027,43 @@ curves	Smooth	Glätten
 	This stroke is outside the page	Dieser Strich liegt außerhalb der Seite
 	This stroke covers nothing that can change: check the selection	Dieser Strich deckt nichts ab, was sich ändern lässt: Prüfe die Auswahl
 	Nothing is left around this stroke to fill it from	Um diesen Strich herum ist nichts übrig, womit er gefüllt werden könnte
+	Text Selection Tool	Textauswahl-Werkzeug
+	Text Selection	Textauswahl
+	Detect Text	Text erkennen
+	Downloading the text model… {percent} %	Textmodell wird geladen… {percent} %
+	Finding the text…	Text wird gesucht…
+	Find Text	Text finden
+	Finds the text and sound effects on the page; you choose what to select	Findet Text und Soundeffekte auf der Seite; du wählst aus, was ausgewählt wird
+	Find Again	Erneut suchen
+	{on} of {total} pieces	Teile: {on} von {total}
+	Suggested	Vorgeschlagen
+	How far the selection reaches past the letters. Too little leaves smudges when cleaning; too much takes the lines around them	Wie weit die Auswahl über die Buchstaben hinausreicht. Zu wenig hinterlässt beim Bereinigen Flecken, zu viel nimmt die Linien drumherum mit
+	Click a piece to add or take it; paint to add, Alt to take away	Klicke auf ein Teil, um es hinzuzufügen oder zu entfernen; male zum Hinzufügen, Alt zum Entfernen
+	Leave as Selection	Als Auswahl belassen
+	Open a page to find its text	Öffne eine Seite, um ihren Text zu finden
+	Finds the text and sound effects on a page, to choose what to clean.	Findet Text und Soundeffekte auf einer Seite, um auszuwählen, was bereinigt wird.
+	Find Text in Selection	Text in der Auswahl finden
+	Clean on Click	Beim Klicken bereinigen
+	Click a piece to clean it	Klicke auf ein Teil, um es zu bereinigen
+	{total} pieces	Teile: {total}
+	{n} waiting	{n} wartend
+	Looks on the whole page again	Sucht wieder auf der ganzen Seite
+	Each click cleans that piece right away, one at a time	Jeder Klick bereinigt dieses Teil sofort, eines nach dem anderen
+	Show Pieces	Teile anzeigen
+	Hide Pieces	Teile ausblenden
+	Color of the chosen pieces	Farbe der gewählten Teile
+	Color of the other pieces	Farbe der anderen Teile
+	Tap a piece to clean it	Tippe auf ein Teil, um es zu bereinigen
+	Tap a piece to add or take it; paint to add	Tippe auf ein Teil, um es hinzuzufügen oder zu entfernen; male zum Hinzufügen
+	Contour {px}	Kontur {px}
+	Painting Removes	Malen entfernt
+	Painting Adds	Malen fügt hinzu
+	Less Contour	Weniger Kontur
+	More Contour	Mehr Kontur
+	Clean on Tap: On	Beim Tippen bereinigen: an
+	Clean on Tap: Off	Beim Tippen bereinigen: aus
+	Text Selection isn't available in this build	Die Textauswahl ist in dieser Version nicht verfügbar
+	New Layer Each Time	Neue Ebene pro Bereinigung
+	One Cleaning Layer	Eine Ebene für alle Bereinigungen
+	AI Clean	KI-Bereinigung
+	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO	Ein Wort, das nicht passt, wird getrennt und unten fortgesetzt: HUN-DE

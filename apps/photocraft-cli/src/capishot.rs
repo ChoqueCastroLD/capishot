@@ -40,6 +40,14 @@ pub(crate) fn with_fonts_in(mut h: Headless, allow_online: bool, config_dir: Opt
         }
         h.session.set_inpainter(Some(std::sync::Arc::new(i)));
     }
+    // `select.detectText`: the mask model, from the models folder or CAPISHOT_TEXTMASK_MODEL.
+    #[cfg(all(feature = "ai", any(windows, target_os = "linux")))]
+    {
+        let file = std::env::var_os("CAPISHOT_TEXTMASK_MODEL").map(PathBuf::from).or_else(|| models.as_ref().map(|d| d.join(photocraft_ai_textmask::native::FILE)));
+        if let Some(file) = file {
+            h.session.set_text_masker(Some(std::sync::Arc::new(photocraft_ai_textmask::native::NativeTextMasker::new(file))));
+        }
+    }
     // `edit.generativeFill`: Stable Diffusion inpainting on this machine (feature `ai`), files from
     // the models folder or CAPISHOT_SD_DIR.
     #[cfg(feature = "ai")]

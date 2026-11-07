@@ -80,7 +80,7 @@ impl Loaded {
             Arch::Esrgan => Net::Esrgan(Esrgan::load(rt, &w, grayscale)?),
             Arch::Compact => Net::Compact(Compact::load(rt, &w, model.scale as usize, grayscale)?),
             Arch::Fdat => Net::Fdat(Fdat::load(rt, &w)?),
-            Arch::Lama | Arch::Migan | Arch::Generative => return Err(crate::AiError::UnknownModel(format!("{} is not an upscaler", model.id))),
+            Arch::Lama | Arch::Migan | Arch::TextMask | Arch::Generative => return Err(crate::AiError::UnknownModel(format!("{} is not an upscaler", model.id))),
         };
         Ok(Self { id: model.id, grayscale, backend: Backend::Burn(Box::new(net)) })
     }

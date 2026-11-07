@@ -108,6 +108,7 @@ fn is_selection_tool(tool: Tool) -> bool {
             | Tool::MagneticLasso
             | Tool::MagicWand
             | Tool::QuickSelection
+            | Tool::TextSelection
             | Tool::ObjectSelection
     )
 }
@@ -165,6 +166,7 @@ pub fn option_keys(tool: Tool) -> &'static [&'static str] {
         Tool::MagicWand => reset!(tolerance, anti_alias, contiguous, wand_sample_size),
         Tool::QuickSelection => reset!(enhance_edge),
         Tool::ObjectSelection => reset!(enhance_edge, object_finder),
+        Tool::TextSelection => reset!(text_select_clean_click, clean_output, text_select_show, text_select_on, text_select_off, text_select_opacity, text_select_contour),
         Tool::Crop => reset!(
             crop_ratio,
             crop_delete,
@@ -194,9 +196,9 @@ pub fn option_keys(tool: Tool) -> &'static [&'static str] {
         Tool::Gradient => reset!(gradient_style, gradient_reverse, gradient_dither, gradient_classic, gradient_blend_mode, fill_opacity),
         Tool::PaintBucket => reset!(bucket_fill_pattern, bucket_blend_mode, bucket_clear, fill_opacity, tolerance, anti_alias, contiguous),
         Tool::Type | Tool::VerticalType | Tool::HorizontalTypeMask | Tool::VerticalTypeMask => {
-            reset!(type_font, type_style, type_size, type_aa, type_align, type_leading, type_direction, type_style_defaults)
+            reset!(type_font, type_style, type_size, type_aa, type_align, type_leading, type_direction, type_style_defaults, type_hyphenate)
         }
-        Tool::BubbleType => reset!(type_aa, bubble_styles, bubble_pick, bubble_recent, bubble_shape_styles),
+        Tool::BubbleType => reset!(type_aa, bubble_styles, bubble_pick, bubble_recent, bubble_shape_styles, bubble_hyphenate),
         Tool::Zoom => reset!(zoom_scrubby),
         Tool::SpotHealing => reset!(spot_type, spot_mode),
         Tool::Healing => reset!(clone_aligned, clone_sample),

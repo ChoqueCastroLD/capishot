@@ -155,7 +155,7 @@ pub enum Group {
 /// Which group `model` belongs to.
 pub fn group(model: &ModelInfo) -> Group {
     match model.content {
-        Content::Inpaint => Group::Cleaning,
+        Content::Inpaint | Content::TextMask => Group::Cleaning,
         Content::Generative => Group::Generative,
         _ => Group::Upscaling,
     }
@@ -166,6 +166,7 @@ pub fn tools(model: &ModelInfo) -> &'static [&'static str] {
     match model.arch {
         Arch::Lama | Arch::Migan => &["edit.inpaintAi", "paint.remove"],
         Arch::Esrgan | Arch::Compact | Arch::Fdat => &["image.upscaleAi"],
+        Arch::TextMask => &["select.detectText"],
         Arch::Generative => &["edit.generativeFill"],
     }
 }

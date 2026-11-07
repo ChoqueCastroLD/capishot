@@ -177,6 +177,10 @@ pub fn finish_stroke(app: &mut PhotocraftApp, tool: Tool, points: &[[f64; 3]], m
             report_smart_result(app, r, tl!("Quick Selection found nothing there"));
             return true;
         }
+        Tool::TextSelection => {
+            crate::text_select_ui::finish_stroke(app, points, mods);
+            return true;
+        }
         _ => return false,
     };
     p["points"] = pts;
@@ -474,7 +478,7 @@ fn clean_selection_button(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 /// Options bar for the retouching and smart-selection tools. Returns false for other tools.
 pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bool {
     if !tool.is_brushlike()
-        && !matches!(tool, Tool::QuickSelection | Tool::ObjectSelection | Tool::Patch | Tool::ContentAwareMove | Tool::RedEye | Tool::BubbleTextRemover)
+        && !matches!(tool, Tool::QuickSelection | Tool::ObjectSelection | Tool::TextSelection | Tool::Patch | Tool::ContentAwareMove | Tool::RedEye | Tool::BubbleTextRemover)
         || matches!(tool, Tool::Brush | Tool::Pencil | Tool::MixerBrush | Tool::Eraser)
     {
         return false;
@@ -688,6 +692,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bo
                 report_smart_result(app, r, tl!("No subject found — try a rectangle around the object"));
             }
         }
+        Tool::TextSelection => crate::text_select_ui::options_bar(app, ui),
         Tool::RedEye => {
             opt(ui, tl!("Pupil Size"));
             crate::widgets::value_field(ui, &mut o.red_eye_pupil_size, 1.0..=100.0, "", 50.0);

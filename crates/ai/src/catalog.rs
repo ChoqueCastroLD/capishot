@@ -21,6 +21,8 @@ pub enum Arch {
     Fdat,
     /// MI-GAN: the lite inpainter, run by `photocraft-ai-lama`.
     Migan,
+    /// The text mask model (a ResNet-18 U-Net on ONNX), run by `photocraft-ai-textmask`.
+    TextMask,
     /// A Generative Fill file (Stable Diffusion 1.5 inpainting parts, TAESD, few-step LoRA), run
     /// by `photocraft-ai-sd`.
     Generative,
@@ -38,6 +40,8 @@ pub enum Content {
     Inpaint,
     /// Upscaling of any page, grayscale or colour (the lite upscaler).
     Any,
+    /// Finds text and sound effects on a page.
+    TextMask,
     /// Generative Fill: creates new content from a prompt.
     Generative,
 }
@@ -356,6 +360,22 @@ pub const MODELS: &[ModelInfo] = &[
         source: "https://huggingface.co/dreMaz/AnimeMangaInpainting",
         lite: false,
     },
+    ModelInfo {
+        id: TEXTMASK_ID,
+        title: "Manga Text Mask",
+        // On ONNX Runtime on a desktop, on burn in the browser: the same network.
+        file: if cfg!(target_arch = "wasm32") { "manga-text-mask-f16.safetensors" } else { "manga-text-mask.onnx" },
+        arch: Arch::TextMask,
+        scale: 1,
+        content: Content::TextMask,
+        height: None,
+        bytes: if cfg!(target_arch = "wasm32") { 30_776_898 } else { 61_574_601 },
+        sha256: if cfg!(target_arch = "wasm32") { "9a61c33abaa6b77e4b1e655d4b989b84c9c56720f25a47552e719f484307dc93" } else { "fd19f7fcb5e940ec29344b1ebcd81b10929386643d4bc6ed8b1abdd652e2209f" },
+        license: "Apache-2.0",
+        author: "manga-text-mask-model",
+        source: "https://github.com/ChoqueCastroLD/manga-text-mask-model",
+        lite: false,
+    },
     compact!(COMPACT_4X_ID, "Real-ESRGAN Compact 4x", 4),
     compact!(COMPACT_2X_ID, "Real-ESRGAN Compact 2x", 2),
     ModelInfo {
@@ -550,6 +570,7 @@ pub const GENFILL_FAST: &[&str] = &["genfill-text-q8", "genfill-taesd", "genfill
 
 /// The id of the Manga LaMa inpainting model.
 pub const LAMA_ID: &str = "manga-lama";
+pub const TEXTMASK_ID: &str = "manga-text-mask";
 
 /// The model with this id.
 pub fn model(id: &str) -> Option<&'static ModelInfo> {

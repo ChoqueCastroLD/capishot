@@ -1442,11 +1442,13 @@ fn paint_primary_overlays(app: &mut PhotocraftApp, ui: &mut egui::Ui, view: &mut
     draw_transform_controls(app, painter, xf);
     crate::move_hover::draw(app, painter, xf, idx, response.hover_pos());
     crate::object_finder::draw(app, painter, xf, idx, response.hover_pos());
+    crate::text_select_ui::draw(app, painter, xf, idx, response.hover_pos());
     crate::layer_pick_ui::show(app, ctx);
     let shown = app.ui.views.get(idx).cloned();
     crate::canvas_tool_menu::show(app, ctx);
     if app.session.active_index() == Some(idx) {
         crate::genfill_ui::prompt_bar(app, ctx);
+        crate::text_select_ui::bar(app, ctx);
     }
     // A view menu row (Zoom In, Fit on Screen…) changed the camera: it wins over this
     // frame's copy, which is written back at the end.
@@ -1623,7 +1625,7 @@ fn draw_default_tool_cursor(app: &mut PhotocraftApp, ui: &mut egui::Ui, input: &
         }
         // ⌥ with the Clone Stamp or Healing Brush: the target that sets the source.
         t if crate::clone_overlay::wants_target_cursor(t, alt || app.ui.shell.sticky_alt, app.drag.is_some()) => crate::clone_overlay::draw_target(painter, p),
-        t if t.is_brushlike() || t == Tool::QuickSelection => {
+        t if t.is_brushlike() || matches!(t, Tool::QuickSelection | Tool::TextSelection) => {
             // Preferences › Cursors: brush tip outline (normal = the 50% contour, or
             // full size), precise crosshair, or the standard pointer.
             use photocraft_engine::prefs::PaintingCursor;
@@ -1758,7 +1760,7 @@ fn draw_default_tool_cursor(app: &mut PhotocraftApp, ui: &mut egui::Ui, input: &
     let held = crate::workspace_ui::sticky_mods(app, ui.input(|i| i.modifiers));
     let mods = app.drag.as_ref().map_or(held, |d| d.modifiers);
     if let Some(b) = crate::tool_feedback::badge(app, tool, mods) {
-        crate::tool_feedback::draw_badge(painter, p, b, tool == Tool::QuickSelection);
+        crate::tool_feedback::draw_badge(painter, p, b, matches!(tool, Tool::QuickSelection | Tool::TextSelection));
     }
     // ⇧ after a stroke: the straight line a click would paint (#257).
     crate::stroke_constraint::draw_line_preview(app, painter, xf, p, tool, held.shift);

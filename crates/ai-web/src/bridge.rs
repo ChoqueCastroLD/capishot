@@ -97,11 +97,18 @@ pub struct WebGenFill {
     up: WebUpscaler,
 }
 
+/// The Text Selection tool's model (`select.detectText`) through the same worker.
+#[derive(Clone)]
+pub struct WebTextMasker {
+    shared: Arc<Mutex<Shared>>,
+}
+
 /// The AI services this page offers.
 pub struct Services {
     pub upscaler: Arc<dyn Upscaler>,
     pub inpainter: Arc<dyn photocraft_ai_lama::service::Inpainter>,
     pub genfill: Arc<dyn photocraft_ai_sd::service::GenFill>,
+    pub text_masker: Arc<dyn photocraft_ai_textmask::TextMasker>,
     pub models: Arc<dyn ModelStore>,
 }
 
@@ -144,6 +151,7 @@ pub fn from_config(config: &WebAiConfig) -> Option<Services> {
         upscaler: Arc::new(WebUpscaler { shared: shared.clone() }),
         inpainter: Arc::new(WebInpainter { up: WebUpscaler { shared: shared.clone() } }),
         genfill: Arc::new(WebGenFill { up: WebUpscaler { shared: shared.clone() } }),
+        text_masker: Arc::new(WebTextMasker { shared: shared.clone() }),
         models: Arc::new(WebModelStore { shared }),
     })
 }
@@ -561,6 +569,90 @@ impl photocraft_ai_lama::service::Inpainter for WebInpainter {
     }
 }
 
+/// Tiles for the text model, and their overlap: small enough for a phone's memory. Masks measured
+/// against a whole page: IoU 0.95 at 512/64, 0.96 at 768/128.
+fn textmask_tiles(profile: &DeviceProfile, cpu: bool) -> (usize, usize) {
+    if cpu || profile.weak() { (512, 64) } else { (768, 128) }
+}
+
+impl WebTextMasker {
+    fn up(&self) -> WebUpscaler {
+        WebUpscaler { shared: self.shared.clone() }
+    }
+
+    /// A run on the worker; a GPU failure runs it once more on the CPU.
+    fn start_run(&self, rgb: Arc<Vec<u8>>, w: usize, h: usize, hooks: photocraft_ai_textmask::Hooks, done: photocraft_ai_textmask::DetectDone, on_cpu: bool) {
+        use photocraft_ai_textmask::Error;
+        let up = self.up();
+        let Some(target) = up.target(on_cpu, 0) else { return done(Err(Error::Unavailable(NO_WORKER.into()))) };
+        let (tile, overlap) = textmask_tiles(&up.lock().profile, target.cpu);
+        let (base, cpu, gpu) = (target.base.clone(), target.cpu, !target.cpu && !target.threads);
+        let pixels = js_sys::Uint8Array::from(rgb.as_slice());
+        let o = Object::new();
+        for (k, v) in [
+            ("type", JsValue::from("textmask")),
+            ("id", 1.into()),
+            ("base", base.into()),
+            ("download", false.into()),
+            ("cpu", cpu.into()),
+            ("width", (w as f64).into()),
+            ("height", (h as f64).into()),
+            ("tile", (tile as f64).into()),
+            ("overlap", (overlap as f64).into()),
+        ] {
+            let _ = Reflect::set(&o, &k.into(), &v);
+        }
+        let buffer: JsValue = pixels.buffer().into();
+        let _ = Reflect::set(&o, &"rgb".into(), &pixels.into());
+        let me = self.clone();
+        let (h2, h3, again) = (hooks.clone(), hooks.clone(), hooks);
+        let reply = Box::new(move |r: Result<photocraft_ai_textmask::Detection, Error>| match r {
+            Err(Error::Gpu(why)) if !on_cpu => {
+                log::warn!("text model: the GPU failed ({why}); on the CPU");
+                me.start_run(rgb, w, h, again, done, true);
+            }
+            r => done(r),
+        });
+        let run = Run {
+            model: photocraft_ai::catalog::TEXTMASK_ID,
+            reply: Some(Reply::TextMask(reply)),
+            progress: Box::new(move |f, _| (h2.progress)(f)),
+            cancelled: Box::new(move || (h3.cancelled)()),
+            shared: self.shared.clone(),
+            started_gpu: false,
+            gpu,
+        };
+        if let Err(e) = start(&target, (o, buffer), run) {
+            log::error!("AI worker: {e}");
+        }
+    }
+}
+
+impl photocraft_ai_textmask::TextMasker for WebTextMasker {
+    fn model_state(&self) -> photocraft_ai_textmask::ModelState {
+        use photocraft_ai_textmask::ModelState as M;
+        let Some(m) = photocraft_ai::catalog::model(photocraft_ai::catalog::TEXTMASK_ID) else { return M::Unavailable("the text model isn't in the catalog".into()) };
+        match self.up().model_state(m) {
+            ModelState::Ready => M::Ready,
+            ModelState::NeedsDownload => M::NeedsDownload,
+            ModelState::Checking => M::Checking,
+            ModelState::Unavailable(why) => M::Unavailable(why),
+        }
+    }
+
+    fn device(&self) -> String {
+        self.up().device()
+    }
+
+    fn detect(&self, _: photocraft_ai_textmask::Page<'_>, _: &dyn Fn() -> bool) -> Result<photocraft_ai_textmask::Detection, photocraft_ai_textmask::Error> {
+        Err(photocraft_ai_textmask::Error::Unavailable("a page can't wait for its worker".into()))
+    }
+
+    fn detect_then(&self, rgb: Vec<u8>, width: usize, height: usize, hooks: photocraft_ai_textmask::Hooks, done: photocraft_ai_textmask::DetectDone) {
+        self.start_run(Arc::new(rgb), width, height, hooks, done, false);
+    }
+}
+
 impl photocraft_ai_sd::service::GenFill for WebGenFill {
     fn model_state(&self, tier: photocraft_ai_sd::service::Tier) -> photocraft_ai_sd::service::ModelState {
         use photocraft_ai_sd::service::ModelState as M;
@@ -678,6 +770,7 @@ enum Reply {
     Upscale(Done),
     Inpaint(photocraft_ai_lama::service::Done),
     GenFill(photocraft_ai_sd::service::Done),
+    TextMask(photocraft_ai_textmask::DetectDone),
 }
 
 fn sd_err(e: AiError) -> photocraft_ai_sd::SdError {
@@ -723,6 +816,27 @@ impl Run {
                 Ok(p) => Ok(vec![p.data]),
                 Err(e) => Err(sd_err(e)),
             }),
+            Some(Reply::TextMask(done)) => {
+                use photocraft_ai_textmask::Error;
+                done(Err(match r {
+                    Err(AiError::Cancelled) => Error::Cancelled,
+                    Err(AiError::Gpu(e)) => Error::Gpu(e),
+                    Err(e) => Error::Device(e.to_string()),
+                    Ok(_) => Error::Device("unexpected text model reply".into()),
+                }));
+            }
+            None => {}
+        }
+    }
+
+    /// The text model's answer.
+    fn finish_detection(&mut self, d: photocraft_ai_textmask::Detection) {
+        match self.reply.take() {
+            Some(Reply::TextMask(done)) => done(Ok(d)),
+            Some(other) => {
+                self.reply = Some(other);
+                self.finish(Err(AiError::Inference("unexpected text model reply".into())));
+            }
             None => {}
         }
     }
@@ -953,6 +1067,23 @@ fn on_message(data: JsValue) {
                     run.shared.lock().unwrap_or_else(PoisonError::into_inner).cached.insert(run.model, true);
                 }
                 run.finish(result);
+            });
+        }
+        "tm-done" => {
+            let dim = |k: &str| get(&data, k).as_f64().unwrap_or(0.0) as usize;
+            let labels = get(&data, "labels").dyn_into::<js_sys::Uint32Array>().map(|a| a.to_vec()).unwrap_or_default();
+            let regions = get(&data, "regions").dyn_into::<js_sys::Float64Array>().map(|a| a.to_vec()).unwrap_or_default();
+            let found = photocraft_ai_textmask::Detection::from_flat(dim("width"), dim("height"), labels, &regions);
+            let device = get(&data, "device").as_string().unwrap_or_default();
+            end_run(|run| {
+                {
+                    let mut s = run.shared.lock().unwrap_or_else(PoisonError::into_inner);
+                    s.cached.insert(run.model, true);
+                    if !device.is_empty() {
+                        s.device = device.clone();
+                    }
+                }
+                run.finish_detection(found);
             });
         }
         "gf-done" => {

@@ -225,7 +225,11 @@ pub fn overlays(app: &mut PhotocraftApp, ctx: &egui::Context) {
         if !busy && crate::simple_ui::sheet(ctx) == crate::simple_ui::Sheet::Closed && !app.ui.palette_open && crate::remove_mask_ui::live(app) {
             remove_mask_bar(app, ctx);
         }
-        if !busy && has_selection(app) && crate::simple_ui::sheet(ctx) == crate::simple_ui::Sheet::Closed && !app.ui.palette_open {
+        if app.ui.tool == crate::state::Tool::TextSelection {
+            if !busy && crate::simple_ui::sheet(ctx) == crate::simple_ui::Sheet::Closed && !app.ui.palette_open {
+                crate::text_select_ui::touch_bar(app, ctx);
+            }
+        } else if !busy && has_selection(app) && crate::simple_ui::sheet(ctx) == crate::simple_ui::Sheet::Closed && !app.ui.palette_open {
             selection_bar(app, ctx);
         } else if !busy && app.ui.tool == crate::state::Tool::Move && crate::simple_ui::sheet(ctx) == crate::simple_ui::Sheet::Closed && !app.ui.palette_open {
             layer_bar(app, ctx);
@@ -253,14 +257,14 @@ pub fn quick_slider_tool(app: &PhotocraftApp) -> bool {
 }
 
 /// The canvas's free area: below the top bar and options row, above the floating bars.
-fn canvas_area(app: &PhotocraftApp, ctx: &egui::Context) -> Rect {
+pub(crate) fn canvas_area(app: &PhotocraftApp, ctx: &egui::Context) -> Rect {
     let screen = crate::safe_area::rect(ctx);
     let top = if app.simple { 44.0 + if app.ui.panels.options_bar { 44.0 } else { 0.0 } } else { 80.0 };
     Rect::from_min_max(pos2(screen.left(), screen.top() + top), pos2(screen.right(), screen.bottom() - bottom_reserve(app)))
 }
 
 /// A touch-sized round button with an icon (or text), drawn at `rect`.
-fn round_button(ui: &mut egui::Ui, rect: Rect, icon: Option<&str>, text: &str, selected: bool) -> egui::Response {
+pub(crate) fn round_button(ui: &mut egui::Ui, rect: Rect, icon: Option<&str>, text: &str, selected: bool) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let resp = ui.allocate_rect(rect, Sense::click());
     let fill = if selected {
@@ -338,7 +342,7 @@ fn layer_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
 /// A row of actions over the top of the canvas `area`, scrolling sideways when it doesn't fit
 /// (with a fade at the edge that has more): each an icon in a circle over its name. Returns the
 /// command tapped. Each button is noted as `{key}:{command}`.
-fn action_bar<'a>(ctx: &egui::Context, area: Rect, id: &str, key: &str, items: &[(&'a str, &str, &str)]) -> Option<&'a str> {
+pub(crate) fn action_bar<'a>(ctx: &egui::Context, area: Rect, id: &str, key: &str, items: &[(&'a str, &str, &str)]) -> Option<&'a str> {
     let t = Tokens::get(ctx);
     let gap = 2.0;
     let n = items.len() as f32;

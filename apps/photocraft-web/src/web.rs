@@ -345,6 +345,7 @@ impl Boot {
             app.session.set_ai_upscaler(Some(ai.upscaler));
             app.session.set_inpainter(Some(ai.inpainter));
             app.session.set_genfill(Some(ai.genfill));
+            app.session.set_text_masker(Some(ai.text_masker));
             app.session.set_ai_models(Some(ai.models));
         }
         crate::startup::mark("app");

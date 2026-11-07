@@ -4738,3 +4738,43 @@ cameraRaw	Dehaze	Odstranění oparu
 	This stroke is outside the page	Tento tah je mimo stránku
 	This stroke covers nothing that can change: check the selection	Tento tah nepokrývá nic, co lze změnit: zkontrolujte výběr
 	Nothing is left around this stroke to fill it from	Kolem tohoto tahu nezbylo nic, čím by se dal vyplnit
+	Text Selection Tool	Nástroj Výběr textu
+	Text Selection	Výběr textu
+	Detect Text	Rozpoznat text
+	Downloading the text model… {percent} %	Stahování modelu textu… {percent} %
+	Finding the text…	Hledání textu…
+	Find Text	Najít text
+	Finds the text and sound effects on the page; you choose what to select	Najde text a zvukové efekty na stránce; vy zvolíte, co vybrat
+	Find Again	Hledat znovu
+	{on} of {total} pieces	{on} z {total} částí
+	Suggested	Navržené
+	How far the selection reaches past the letters. Too little leaves smudges when cleaning; too much takes the lines around them	Jak daleko výběr sahá za písmena. Málo zanechá při čištění skvrny; moc vezme i okolní linky
+	Click a piece to add or take it; paint to add, Alt to take away	Kliknutím na část ji přidáte nebo odeberete; malováním přidáte, s Alt odeberete
+	Leave as Selection	Ponechat jako výběr
+	Open a page to find its text	Otevřete stránku a najděte její text
+	Finds the text and sound effects on a page, to choose what to clean.	Najde text a zvukové efekty na stránce, abyste zvolili, co vyčistit.
+	Find Text in Selection	Najít text ve výběru
+	Clean on Click	Vyčistit kliknutím
+	Click a piece to clean it	Kliknutím na část ji vyčistíte
+	{total} pieces	Části: {total}
+	{n} waiting	Ve frontě: {n}
+	Looks on the whole page again	Znovu projde celou stránku
+	Each click cleans that piece right away, one at a time	Každé kliknutí tuto část hned vyčistí, po jedné
+	Show Pieces	Zobrazit části
+	Hide Pieces	Skrýt části
+	Color of the chosen pieces	Barva zvolených částí
+	Color of the other pieces	Barva ostatních částí
+	Tap a piece to clean it	Klepnutím na část ji vyčistíte
+	Tap a piece to add or take it; paint to add	Klepnutím na část ji přidáte nebo odeberete; malováním přidáte
+	Contour {px}	Obrys {px}
+	Painting Removes	Malování odebírá
+	Painting Adds	Malování přidává
+	Less Contour	Menší obrys
+	More Contour	Větší obrys
+	Clean on Tap: On	Čistit klepnutím: ano
+	Clean on Tap: Off	Čistit klepnutím: ne
+	Text Selection isn't available in this build	Výběr textu v této verzi není k dispozici
+	New Layer Each Time	Nová vrstva pro každé čištění
+	One Cleaning Layer	Jedna vrstva čištění
+	AI Clean	Čištění AI
+	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO	Slovo, které se nevejde, se rozdělí spojovníkem a pokračuje níže: PE-SAN

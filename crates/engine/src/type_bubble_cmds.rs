@@ -343,7 +343,7 @@ fn create_in_bubble(s: &mut Session, p: &Value) -> Result<Value> {
     };
     // A zone the person drew is a bubble's text unless a style says otherwise.
     let kind = if area.is_some() { want.unwrap_or(Kind::Bubble) } else { region.as_ref().map_or(Kind::Floating, |r| r.0) };
-    let Chosen { mut q, typer, used, fallback } = chosen_style(s, p, kind, picked, want)?;
+    let Chosen { q, typer, used, fallback } = chosen_style(s, p, kind, picked, want)?;
     let mut stroke = stroke_param(&q)?;
     let (inset, valign) = crate::type_cmds::in_path_props(&q).map_err(bad)?;
     let mut base = q.clone();
@@ -940,6 +940,17 @@ mod tests {
 
     /// Real pages (never committed): `CAPISHOT_BUBBLE_PAGES=<folder>` holding `<name>.png` (or any
     /// image Capishot opens) with `<name>.txt`, one `x y` click inside a bubble per line.
+    #[test]
+    fn bubble_text_hyphenates_when_asked() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 400, "height": 300, "background": "white"})).unwrap();
+        let r = s.execute("type.createInBubble", json!({"x": 100, "y": 100, "area": [50, 50, 90, 200], "text": "ESTERNOCLEIDOMASTOIDEO", "style": "bubble", "size": 24, "hyphenate": true})).unwrap();
+        let t = text_of(&s, r["layer"].as_u64().unwrap());
+        assert!(t.paragraphs[0].style.hyphenate);
+        let lines = s.execute("type.info", json!({"layer": r["layer"]})).unwrap()["lines"].as_array().unwrap().clone();
+        assert!(lines.len() > 1, "split: {lines:?}");
+    }
+
     #[test]
     fn real_pages_from_the_environment() {
         let Ok(dir) = std::env::var("CAPISHOT_BUBBLE_PAGES") else { return };

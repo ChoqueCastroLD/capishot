@@ -8,7 +8,8 @@
 //! Options dialog doesn't apply. The GPU runs it when there is one, the CPU otherwise or when the GPU fails
 //! mid-run (still Manga LaMa). A stroke's hole grows first so nothing of what it touched is left for the
 //! model to rebuild from (`retouch_cmds::ink_mask`). One undo step, "Remove with AI", on the
-//! target layer. A background job, cancellable.
+//! target layer, or with `output` on a layer of its own or one for all the cleans. A background
+//! job, cancellable.
 
 use serde_json::{Value, json};
 
@@ -45,7 +46,7 @@ pub fn run_params(s: &Session, p: &Value) -> Result<serde_json::Map<String, Valu
         Value::Null => serde_json::Map::new(),
         _ => return Err(EngineError::BadParams { cmd: ID.into(), msg: "params must be a JSON object".into() }),
     };
-    for k in FIXED.iter().chain(&["ai", "output", "newLayer"]) {
+    for k in FIXED.iter().chain(&["ai", "output", "newLayer", "keepActive"]) {
         q.remove(*k);
     }
     let lite = lite(s);
@@ -62,14 +63,28 @@ pub fn model_state(s: &Session) -> Option<photocraft_ai_lama::service::ModelStat
 }
 
 fn remove_ai(s: &mut Session, p: &Value) -> Result<Value> {
+    use crate::ai_inpaint_cmds::Output;
+    let output = Output::parse(p, Output::Current)?;
     let mut q = run_params(s, p)?;
+    // The page stays the active layer: the next clean reads it.
+    q.insert("keepActive".into(), json!(true));
     if q.contains_key("strokes") || q.contains_key("points") {
         q.insert("ai".into(), json!(true));
-        q.insert("newLayer".into(), json!(false));
+        q.insert("newLayer".into(), json!(output != Output::Current));
+        q.insert("output".into(), p.get("output").cloned().unwrap_or(Value::Null));
+        if output != Output::Current
+            && !q.contains_key("layer")
+            && let Some((doc, id)) = s.active().and_then(|st| Some((st.doc.clone(), st.active_layer?)))
+        {
+            q.insert("layer".into(), json!(crate::ai_inpaint_cmds::source_layer(&doc, id, &output).0));
+        }
         q.entry("closeLoops").or_insert(json!(true));
         return crate::retouch_cmds::remove::remove_ink_labelled(s, &Value::Object(q), LABEL);
     }
-    q.insert("output".into(), json!("current"));
+    q.entry("output").or_insert(json!("current"));
+    if let Some(o) = p.get("output") {
+        q.insert("output".into(), o.clone());
+    }
     crate::ai_inpaint_cmds::inpaint_ai_labelled(s, &Value::Object(q), LABEL)
 }
 
@@ -86,7 +101,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: LABEL,
         menu: &[],
         shortcut: None,
-        params: r#"{"strokes"?: [[[x,y,pressure?],…] or {"points", "size"?, "hardness"?, "spacing"?, "erase"?: bool},…] or "points"?: [[x,y],…] (what was painted, with "size": px, as paint.remove; a stroke around an object removes what it encloses; a whole mask at once: its strokes in order, "erase" ones taking theirs back out), else the selection, "sampleAllLayers"?: bool, "layer"?: id, "maxSide"?: 0 (default: full resolution, a hole larger than 512 px split into overlapping tiles feathered at their seams) or 64..2048, multiple of 8 (larger crops downscaled to it, as before), "allowDownload"?: bool (fetch Manga LaMa, about 100 MB, when it isn't on this device)} -> {"damage"|"region", "device", "model", "lite", "cpu", "fellBack", "ms", …}. Erases it and fills it as edit.inpaintAi fills a selection, with fixed options (Manga LaMa at best quality, or MI-GAN on a device with 2 GB of memory or less, its default working side and margin, at full resolution; model, quality, device, margin, threads and keepLoaded params are ignored), on the target layer, as one undo step ("Remove with AI"). A background job; the GPU's failure retries on the CPU."#,
+        params: r#"{"strokes"?: [[[x,y,pressure?],…] or {"points", "size"?, "hardness"?, "spacing"?, "erase"?: bool},…] or "points"?: [[x,y],…] (what was painted, with "size": px, as paint.remove; a stroke around an object removes what it encloses; a whole mask at once: its strokes in order, "erase" ones taking theirs back out), else the selection, "sampleAllLayers"?: bool, "layer"?: id, "maxSide"?: 0 (default: full resolution, a hole larger than 512 px split into overlapping tiles feathered at their seams) or 64..2048, multiple of 8 (larger crops downscaled to it, as before), "allowDownload"?: bool (fetch Manga LaMa, about 100 MB, when it isn't on this device), "output"?: "current" (default, into the layer) | "new" (each clean on a new layer above, only what was generated) | "single" (one layer above for all the cleans), "layerName"?: str (what those layers are called)} -> {"damage"|"region", "device", "model", "lite", "cpu", "fellBack", "ms", …}. Erases it and fills it as edit.inpaintAi fills a selection, with fixed options (Manga LaMa at best quality, or MI-GAN on a device with 2 GB of memory or less, its default working side and margin, at full resolution; model, quality, device, margin, threads and keepLoaded params are ignored), on the target layer, as one undo step ("Remove with AI"). A background job; the GPU's failure retries on the CPU."#,
         enabled,
         run: remove_ai,
         journal: true,
@@ -111,6 +126,49 @@ mod tests {
         q.insert("maxSide".into(), json!(0));
         assert_eq!(run_params(&Session::new(), &json!({})).unwrap(), q.into_iter().filter(|(k, _)| k != "strokes").collect());
         assert!(run_params(&Session::new(), &json!([1])).is_err());
+    }
+
+    fn layers(s: &Session) -> Vec<String> {
+        s.active().unwrap().doc.layers.iter().map(|l| l.name.clone()).collect()
+    }
+
+    #[test]
+    fn a_clean_can_go_into_the_layer_on_one_of_its_own_or_on_one_for_all() {
+        let select = |s: &mut Session, x: i32| s.execute("select.rect", json!({"x": x, "y": 10, "width": 10, "height": 10})).unwrap();
+        // Into the layer, by default.
+        let mut s = page(Arc::new(FakeInpainter::default()), true);
+        select(&mut s, 5);
+        s.execute(ID, json!({})).unwrap();
+        assert_eq!(layers(&s).len(), 1);
+        // A layer each.
+        let mut s = page(Arc::new(FakeInpainter::default()), true);
+        let page_layer = s.active().unwrap().active_layer;
+        for x in [5, 30] {
+            select(&mut s, x);
+            s.execute(ID, json!({"output": "new", "layerName": "Limpieza"})).unwrap();
+            assert_eq!(s.active().unwrap().active_layer, page_layer, "the page stays active: the next clean reads it");
+        }
+        assert_eq!(layers(&s).len(), 3, "{:?}", layers(&s));
+        // One for all.
+        let mut s = page(Arc::new(FakeInpainter::default()), true);
+        for x in [5, 30] {
+            select(&mut s, x);
+            s.execute(ID, json!({"output": "single", "layerName": "Limpieza"})).unwrap();
+        }
+        assert_eq!(layers(&s).len(), 2, "{:?}", layers(&s));
+        assert_eq!(layers(&s)[1], "Limpieza");
+        let st = s.active().unwrap();
+        let surf = st.doc.layers[1].surface().unwrap();
+        assert!(surf.pixel(8, 12)[3] > 0.5 && surf.pixel(33, 12)[3] > 0.5, "both cleans on it");
+        assert!(surf.pixel(60, 40)[3] < 0.5, "and nothing else");
+        // With that layer active, the next clean still reads the page.
+        let clean = st.doc.layers[1].id;
+        s.active_mut().unwrap().active_layer = Some(clean);
+        select(&mut s, 45);
+        s.execute(ID, json!({"output": "single", "layerName": "Limpieza"})).unwrap();
+        assert_eq!(layers(&s).len(), 2);
+        assert!(s.active().unwrap().doc.layers[1].surface().unwrap().pixel(48, 12)[3] > 0.5);
+        assert!(s.execute(ID, json!({"output": "elsewhere"})).is_err());
     }
 
     use std::sync::Arc;

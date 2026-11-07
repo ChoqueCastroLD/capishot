@@ -7635,6 +7635,7 @@ dependencies = [
  "photocraft-ai",
  "photocraft-ai-lama",
  "photocraft-ai-sd",
+ "photocraft-ai-textmask",
  "photocraft-automation",
  "photocraft-cms",
  "photocraft-codecs",
@@ -7742,6 +7743,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "photocraft-ai-textmask"
+version = "0.13.12"
+dependencies = [
+ "burn",
+ "half",
+ "ort",
+ "photocraft-ai-ort",
+ "safetensors 0.8.0",
+]
+
+[[package]]
 name = "photocraft-ai-web"
 version = "0.13.12"
 dependencies = [
@@ -7750,6 +7762,7 @@ dependencies = [
  "photocraft-ai",
  "photocraft-ai-lama",
  "photocraft-ai-sd",
+ "photocraft-ai-textmask",
  "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -7765,6 +7778,7 @@ dependencies = [
  "photocraft-ai",
  "photocraft-ai-lama",
  "photocraft-ai-sd",
+ "photocraft-ai-textmask",
  "rayon",
  "sha2",
  "wasm-bindgen",
@@ -7824,6 +7838,7 @@ dependencies = [
  "photocraft-ai",
  "photocraft-ai-lama",
  "photocraft-ai-sd",
+ "photocraft-ai-textmask",
  "photocraft-automation",
  "photocraft-codecs",
  "photocraft-engine",
@@ -7917,6 +7932,7 @@ dependencies = [
  "photocraft-ai",
  "photocraft-ai-lama",
  "photocraft-ai-sd",
+ "photocraft-ai-textmask",
  "photocraft-algo",
  "photocraft-cms",
  "photocraft-codecs",
@@ -8213,6 +8229,7 @@ dependencies = [
  "photocraft-ai",
  "photocraft-ai-lama",
  "photocraft-ai-sd",
+ "photocraft-ai-textmask",
  "photocraft-algo",
  "photocraft-cms",
  "photocraft-codecs",

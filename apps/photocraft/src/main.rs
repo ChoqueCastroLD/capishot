@@ -547,6 +547,14 @@ fn main() -> eframe::Result {
                 }
                 app.session.set_inpainter(Some(std::sync::Arc::new(i)));
             }
+            // The Text Selection tool: the mask model on this machine (feature `ai`).
+            #[cfg(all(feature = "ai", any(windows, target_os = "linux")))]
+            {
+                let file = std::env::var_os("CAPISHOT_TEXTMASK_MODEL").map(std::path::PathBuf::from).or_else(|| models.as_ref().map(|d| d.join(photocraft_ai_textmask::native::FILE)));
+                if let Some(file) = file {
+                    app.session.set_text_masker(Some(std::sync::Arc::new(photocraft_ai_textmask::native::NativeTextMasker::new(file))));
+                }
+            }
             app.prepare_first_frame(&cc.egui_ctx);
             app.min_frame_ms = uncapped.then_some(1000.0 / 240.0);
             // Edit › Generative Fill: Stable Diffusion inpainting on this machine (feature `ai`).

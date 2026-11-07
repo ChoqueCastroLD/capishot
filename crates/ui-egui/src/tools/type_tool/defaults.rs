@@ -107,6 +107,7 @@ pub(super) fn default_style_params(app: &PhotocraftApp) -> serde_json::Value {
     p["size"] = json!(o.type_size);
     p["align"] = json!(o.type_align);
     p["direction"] = json!(o.type_direction);
+    p["hyphenate"] = json!(o.type_hyphenate);
     p["color"] = json!(hex(app.session.tools.foreground));
     p
 }

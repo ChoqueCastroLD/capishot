@@ -4751,3 +4751,43 @@ curves	Smooth	Vloeiend maken
 	This stroke is outside the page	Deze streek valt buiten de pagina
 	This stroke covers nothing that can change: check the selection	Deze streek bedekt niets wat kan veranderen: controleer de selectie
 	Nothing is left around this stroke to fill it from	Rond deze streek is niets over om hem mee te vullen
+	Text Selection Tool	Gereedschap Tekstselectie
+	Text Selection	Tekstselectie
+	Detect Text	Tekst detecteren
+	Downloading the text model… {percent} %	Tekstmodel downloaden… {percent} %
+	Finding the text…	Tekst zoeken…
+	Find Text	Tekst zoeken
+	Finds the text and sound effects on the page; you choose what to select	Vindt de tekst en geluidseffecten op de pagina; jij kiest wat je selecteert
+	Find Again	Opnieuw zoeken
+	{on} of {total} pieces	Stukken: {on} van {total}
+	Suggested	Voorgesteld
+	How far the selection reaches past the letters. Too little leaves smudges when cleaning; too much takes the lines around them	Hoe ver de selectie voorbij de letters reikt. Te weinig laat vlekken achter bij het opschonen; te veel neemt de lijnen eromheen mee
+	Click a piece to add or take it; paint to add, Alt to take away	Klik op een stuk om het toe te voegen of weg te halen; schilder om toe te voegen, Alt om weg te halen
+	Leave as Selection	Als selectie laten
+	Open a page to find its text	Open een pagina om de tekst te vinden
+	Finds the text and sound effects on a page, to choose what to clean.	Vindt de tekst en geluidseffecten op een pagina, om te kiezen wat je opschoont.
+	Find Text in Selection	Tekst in selectie zoeken
+	Clean on Click	Opschonen bij klikken
+	Click a piece to clean it	Klik op een stuk om het op te schonen
+	{total} pieces	Stukken: {total}
+	{n} waiting	{n} wachtend
+	Looks on the whole page again	Kijkt opnieuw op de hele pagina
+	Each click cleans that piece right away, one at a time	Elke klik schoont dat stuk meteen op, één tegelijk
+	Show Pieces	Stukken tonen
+	Hide Pieces	Stukken verbergen
+	Color of the chosen pieces	Kleur van de gekozen stukken
+	Color of the other pieces	Kleur van de andere stukken
+	Tap a piece to clean it	Tik op een stuk om het op te schonen
+	Tap a piece to add or take it; paint to add	Tik op een stuk om het toe te voegen of weg te halen; schilder om toe te voegen
+	Contour {px}	Contour {px}
+	Painting Removes	Schilderen haalt weg
+	Painting Adds	Schilderen voegt toe
+	Less Contour	Minder contour
+	More Contour	Meer contour
+	Clean on Tap: On	Opschonen bij tikken: aan
+	Clean on Tap: Off	Opschonen bij tikken: uit
+	Text Selection isn't available in this build	Tekstselectie is niet beschikbaar in deze versie
+	New Layer Each Time	Nieuwe laag per opschoning
+	One Cleaning Layer	Eén laag voor alle opschoningen
+	AI Clean	AI-opschoning
+	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO	Een woord dat niet past, wordt afgebroken en gaat eronder verder: HON-DEN
