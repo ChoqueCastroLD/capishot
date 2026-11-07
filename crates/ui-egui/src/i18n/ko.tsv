@@ -4323,3 +4323,10 @@ curves	Smooth	매끄럽게
 	Click a block to clean it	블록을 클릭해 정리
 	Each click cleans that block right away, one at a time	클릭할 때마다 그 블록을 바로 정리합니다(하나씩)
 	Finds the text and sound effects on the page, or drag a box to look only there. You choose what to clean	페이지의 글자와 효과음을 찾습니다. 드래그로 범위를 지정하면 그곳만 찾습니다. 정리할 대상은 직접 고릅니다
+	What's Chosen	선택 항목
+	This block: {n} pieces	이 블록: {n}개 조각
+	Take Off the Selection	선택에서 제거
+	Add to the Selection	선택에 추가
+	Clean Now	지금 정리
+	In the Next Clean	다음 정리 때
+	As the Rest	나머지와 같게

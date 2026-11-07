@@ -4128,3 +4128,10 @@ curves	Smooth	Glätten
 	Click a block to clean it	Klicke auf einen Block, um ihn zu bereinigen
 	Each click cleans that block right away, one at a time	Jeder Klick bereinigt den Block sofort, einen nach dem anderen
 	Finds the text and sound effects on the page, or drag a box to look only there. You choose what to clean	Findet Text und Soundeffekte auf der Seite, oder ziehe einen Rahmen, um nur dort zu suchen. Du wählst, was bereinigt wird
+	What's Chosen	Auswahl
+	This block: {n} pieces	Dieser Block: {n} Teile
+	Take Off the Selection	Aus der Auswahl nehmen
+	Add to the Selection	Zur Auswahl hinzufügen
+	Clean Now	Jetzt bereinigen
+	In the Next Clean	Beim nächsten Bereinigen
+	As the Rest	Wie die anderen

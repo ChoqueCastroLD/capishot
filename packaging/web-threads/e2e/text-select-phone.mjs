@@ -16,6 +16,11 @@ await ctx.addInitScript(() => Object.defineProperty(navigator, 'deviceMemory', {
 const origin = new URL(url).origin;
 await ctx.route('**/*', async (route) => {
   const r = route.request();
+  // A test site may not have the weights.
+  if (r.url().includes('/models/') && process.env.MODELS) {
+    const w = await fetch(process.env.MODELS + r.url().split('/').pop());
+    return route.fulfill({ status: w.status, headers: { 'access-control-allow-origin': '*', 'cross-origin-resource-policy': 'cross-origin', 'content-type': 'application/octet-stream' }, body: Buffer.from(await w.arrayBuffer()) });
+  }
   if (!r.url().startsWith(origin)) return route.abort();
   if (r.resourceType() === 'document') {
     const res = await route.fetch();

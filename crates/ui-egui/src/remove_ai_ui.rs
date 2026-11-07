@@ -76,7 +76,9 @@ pub(crate) fn output_dropdown(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 
 /// Runs `params`, or, the first time, downloads the model first (the modal) and runs them then.
 pub fn request(app: &mut PhotocraftApp, mut params: Value) {
-    params["output"] = json!(app.ui.tool_options.clean_output);
+    if params.get("output").is_none() {
+        params["output"] = json!(app.ui.tool_options.clean_output);
+    }
     params["layerName"] = json!(tl!("AI Clean"));
     tell_lite_once(app);
     match status(app) {

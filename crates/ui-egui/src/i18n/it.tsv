@@ -5203,3 +5203,10 @@ shape	Appearance	Aspetto
 	Click a block to clean it	Fai clic su un blocco per pulirlo
 	Each click cleans that block right away, one at a time	Ogni clic pulisce subito quel blocco, uno alla volta
 	Finds the text and sound effects on the page, or drag a box to look only there. You choose what to clean	Trova testo ed effetti sonori nella pagina, oppure trascina un riquadro per cercare solo lì. Scegli tu cosa pulire
+	What's Chosen	Scelti
+	This block: {n} pieces	Questo blocco: {n} pezzi
+	Take Off the Selection	Togli dalla selezione
+	Add to the Selection	Aggiungi alla selezione
+	Clean Now	Pulisci ora
+	In the Next Clean	Alla prossima pulizia
+	As the Rest	Come il resto

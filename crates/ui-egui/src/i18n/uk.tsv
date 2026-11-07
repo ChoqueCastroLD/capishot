@@ -4817,3 +4817,10 @@ curves	Smooth	Згладити
 	Click a block to clean it	Натисніть на блок, щоб очистити
 	Each click cleans that block right away, one at a time	Кожен клік одразу очищає цей блок, по одному
 	Finds the text and sound effects on the page, or drag a box to look only there. You choose what to clean	Знаходить текст і звукові ефекти на сторінці, або обведіть рамкою, щоб шукати лише там. Що очищати, вибираєте ви
+	What's Chosen	Вибране
+	This block: {n} pieces	Цей блок: {n} частин
+	Take Off the Selection	Прибрати з виділення
+	Add to the Selection	Додати до виділення
+	Clean Now	Очистити зараз
+	In the Next Clean	Під час наступного очищення
+	As the Rest	Як решта

@@ -4724,3 +4724,10 @@ curves	Smooth	Wygładź
 	Click a block to clean it	Kliknij blok, aby go wyczyścić
 	Each click cleans that block right away, one at a time	Każde kliknięcie od razu czyści ten blok, po jednym
 	Finds the text and sound effects on the page, or drag a box to look only there. You choose what to clean	Znajduje tekst i efekty dźwiękowe na stronie, albo przeciągnij ramkę, by szukać tylko tam. Ty wybierasz, co wyczyścić
+	What's Chosen	Wybrane
+	This block: {n} pieces	Ten blok: {n} elem.
+	Take Off the Selection	Usuń z zaznaczenia
+	Add to the Selection	Dodaj do zaznaczenia
+	Clean Now	Wyczyść teraz
+	In the Next Clean	Przy następnym czyszczeniu
+	As the Rest	Jak pozostałe

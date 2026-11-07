@@ -5131,3 +5131,10 @@ shape	Appearance	Apparence
 	Click a block to clean it	Cliquez sur un bloc pour le nettoyer
 	Each click cleans that block right away, one at a time	Chaque clic nettoie ce bloc aussitôt, un à la fois
 	Finds the text and sound effects on the page, or drag a box to look only there. You choose what to clean	Trouve le texte et les onomatopées de la page, ou tracez un cadre pour chercher seulement là. Vous choisissez quoi nettoyer
+	What's Chosen	Sélection
+	This block: {n} pieces	Ce bloc : {n} pièces
+	Take Off the Selection	Retirer de la sélection
+	Add to the Selection	Ajouter à la sélection
+	Clean Now	Nettoyer maintenant
+	In the Next Clean	Au prochain nettoyage
+	As the Rest	Comme le reste

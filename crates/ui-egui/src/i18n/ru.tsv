@@ -5289,3 +5289,10 @@ shape	Appearance	Оформление
 	Click a block to clean it	Нажмите на блок, чтобы очистить
 	Each click cleans that block right away, one at a time	Каждый клик сразу очищает этот блок, по одному
 	Finds the text and sound effects on the page, or drag a box to look only there. You choose what to clean	Находит текст и звуковые эффекты на странице, или обведите рамкой, чтобы искать только там. Что очищать, выбираете вы
+	What's Chosen	Выбранное
+	This block: {n} pieces	Этот блок: {n} частей
+	Take Off the Selection	Убрать из выделения
+	Add to the Selection	Добавить к выделению
+	Clean Now	Очистить сейчас
+	In the Next Clean	При следующей очистке
+	As the Rest	Как остальные

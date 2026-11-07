@@ -4839,3 +4839,10 @@ cameraRaw	Dehaze	Odstranění oparu
 	Click a block to clean it	Kliknutím na blok jej vyčistíte
 	Each click cleans that block right away, one at a time	Každé kliknutí hned vyčistí daný blok, jeden po druhém
 	Finds the text and sound effects on the page, or drag a box to look only there. You choose what to clean	Najde text a zvukové efekty na stránce, nebo tažením rámečku hledá jen tam. Co vyčistit, volíte vy
+	What's Chosen	Vybrané
+	This block: {n} pieces	Tento blok: {n} částí
+	Take Off the Selection	Odebrat z výběru
+	Add to the Selection	Přidat do výběru
+	Clean Now	Vyčistit teď
+	In the Next Clean	Při dalším čištění
+	As the Rest	Jako ostatní

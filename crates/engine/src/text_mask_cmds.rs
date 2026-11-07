@@ -16,6 +16,7 @@ pub const DETECT: &str = "select.detectText";
 pub const PIECES: &str = "select.textPieces";
 pub const STROKE: &str = "select.brushStroke";
 pub const ZONE: &str = "select.textZone";
+pub const CLEAN: &str = "select.cleanPieces";
 const LABEL: &str = "Detect Text";
 const UNAVAILABLE: &str = "text detection isn't available in this build";
 
@@ -111,16 +112,70 @@ fn detect(s: &mut Session, p: &Value) -> Result<Value> {
     )
 }
 
+/// The pieces `p` names in `pieces`.
+fn piece_ids(d: &Detection, p: &Value) -> Option<Vec<u32>> {
+    match p.get("pieces") {
+        Some(Value::String(a)) if a == "all" => Some(d.regions.iter().map(|r| r.id).collect()),
+        Some(Value::String(a)) if a == "suggested" => Some(d.regions.iter().filter(|r| r.suggested()).map(|r| r.id).collect()),
+        Some(Value::Array(a)) => Some(a.iter().filter_map(Value::as_u64).filter_map(|v| u32::try_from(v).ok()).collect()),
+        _ => None,
+    }
+}
+
+/// `select.cleanPieces`: each step cleans its pieces in its own way, as the tool's Clean does. What
+/// was cleaned leaves the pieces; the answer has those left, with new ids.
+fn clean_pieces(s: &mut Session, p: &Value) -> Result<Value> {
+    let bad = |m: &str| EngineError::BadParams { cmd: CLEAN.into(), msg: m.into() };
+    if cfg!(target_arch = "wasm32") {
+        return Err(bad("in the browser, run select.textPieces and the clean of each step and wait for it"));
+    }
+    let d = s.text_detection().ok_or_else(|| bad("detect the text first (select.detectText)"))?;
+    let steps = p.get("steps").and_then(Value::as_array).filter(|a| !a.is_empty()).ok_or_else(|| bad("\"steps\" must be a list of what to clean and how"))?;
+    let area = Rect::new(0, 0, i32::try_from(d.width).unwrap_or(i32::MAX), i32::try_from(d.height).unwrap_or(i32::MAX));
+    let px = |v: &Value, key: &str| v.get(key).and_then(Value::as_f64).map(|v| v.round().max(0.0) as usize);
+    let default = px(p, "grow").unwrap_or_else(|| default_grow(d.width, d.height));
+    let mut gone = vec![false; d.width * d.height];
+    let mut done = Vec::with_capacity(steps.len());
+    for step in steps {
+        let ids = piece_ids(&d, step).ok_or_else(|| bad("a step's \"pieces\" must be a list of ids, \"all\" or \"suggested\""))?;
+        let (command, method) = match step.get("method").and_then(Value::as_str) {
+            Some("ai") => (crate::remove_ai_cmds::ID, None),
+            Some(m @ ("fill" | "color")) => (crate::ai_inpaint_cmds::quick::ID, Some(m)),
+            _ => return Err(bad("a step's \"method\" must be \"ai\", \"fill\" or \"color\"")),
+        };
+        let reach = selection_mask(&d, &ids, px(step, "grow").unwrap_or(default));
+        let mask: Vec<f32> = reach.iter().map(|v| if *v { 1.0 } else { 0.0 }).collect();
+        crate::selection_cmds::set_selection(s, "Text Selection", area, mask, sel::SelectionMode::Replace)?;
+        let mut params = json!({"output": step.get("output").or(p.get("output")).cloned().unwrap_or_else(|| json!("current"))});
+        for key in ["layerName", "keepActive", "color", "byBlocks", "sampleAllLayers", "allowDownload"] {
+            if let Some(v) = step.get(key).or(p.get(key)) {
+                params[key] = v.clone();
+            }
+        }
+        if let Some(m) = method {
+            params["method"] = json!(m);
+        }
+        done.push(s.execute(command, params)?);
+        for (g, r) in gone.iter_mut().zip(&reach) {
+            *g |= *r;
+        }
+    }
+    s.execute("select.deselect", json!({}))?;
+    let left = d.clipped(|x, y| !gone[y * d.width + x]);
+    let pieces = pieces_json(&left);
+    if left.regions.is_empty() {
+        s.forget_text_detection();
+    } else {
+        s.set_text_detection(Arc::new(left));
+    }
+    Ok(json!({"steps": done, "pieces": pieces}))
+}
+
 /// `select.textPieces`: a selection of the chosen pieces.
 fn pieces(s: &mut Session, p: &Value) -> Result<Value> {
     let bad = |m: &str| EngineError::BadParams { cmd: PIECES.into(), msg: m.into() };
     let d = s.text_detection().ok_or_else(|| bad("detect the text first (select.detectText)"))?;
-    let ids: Vec<u32> = match p.get("pieces") {
-        Some(Value::String(a)) if a == "all" => d.regions.iter().map(|r| r.id).collect(),
-        Some(Value::String(a)) if a == "suggested" => d.regions.iter().filter(|r| r.suggested()).map(|r| r.id).collect(),
-        Some(Value::Array(a)) => a.iter().filter_map(Value::as_u64).filter_map(|v| u32::try_from(v).ok()).collect(),
-        _ => return Err(bad("\"pieces\" must be a list of ids, \"all\" or \"suggested\"")),
-    };
+    let ids = piece_ids(&d, p).ok_or_else(|| bad("\"pieces\" must be a list of ids, \"all\" or \"suggested\""))?;
     let px = |key: &str| p.get(key).and_then(Value::as_f64).map(|v| v.round().max(0.0) as usize);
     let grow = px("grow").unwrap_or_else(|| default_grow(d.width, d.height));
     let area = Rect::new(0, 0, i32::try_from(d.width).unwrap_or(i32::MAX), i32::try_from(d.height).unwrap_or(i32::MAX));
@@ -289,6 +344,16 @@ pub fn specs() -> Vec<CommandSpec> {
             journal: true,
             run: zone,
         },
+        CommandSpec {
+            id: CLEAN,
+            label: "Clean Text",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"steps": [{"pieces": [id, …] | "all" | "suggested", "method": "ai" (Manga LaMa, edit.removeAi) | "fill" (content-aware) | "color" (flat), "grow"?: px, "output"?: "current" (default) | "new" | "single", "layerName"?, "color"?: "#rrggbb" (default: the colour around each blob)}, …], "grow"?: px, "output"?, "layerName"?}: cleans the pieces found by select.detectText, each step in its own way and in order; what's cleaned leaves the pieces and the answer lists those left, with new ids. Not in the browser: there, select.textPieces and then edit.removeAi or edit.cleanQuick, waiting for each"##,
+            enabled: has_masker,
+            journal: false,
+            run: clean_pieces,
+        },
     ]
 }
 
@@ -400,6 +465,27 @@ mod tests {
         s.execute(ZONE, json!({"points": [[100, 150], [150, 150], [125, 190]]})).unwrap();
         assert!(covered(&s, 125, 160) && !covered(&s, 102, 185), "a lasso");
         assert!(s.execute(ZONE, json!({})).is_err());
+    }
+
+    #[test]
+    fn each_step_cleans_its_pieces_in_its_own_way() {
+        let mut s = page();
+        let r = s.execute(DETECT, json!({})).unwrap();
+        let id = |x: i64| r["pieces"].as_array().unwrap().iter().find(|p| p["box"][0] == x).unwrap()["id"].clone();
+        let px = |s: &Session, x, y| photocraft_compose::render(&s.active().unwrap().doc, Rect::from_xywh(x, y, 1, 1)).px[0];
+        let layers = s.active().unwrap().doc.layers.len();
+        let out = s.execute(CLEAN, json!({"steps": [{"pieces": [id(20)], "method": "color", "color": "#00ff00", "grow": 2}]})).unwrap();
+        assert_eq!(px(&s, 30, 30)[1], 1.0, "painted");
+        assert_eq!(px(&s, 30, 30)[0], 0.0);
+        assert_eq!(out["pieces"].as_array().unwrap().len(), 1, "the other is left, renumbered");
+        assert_eq!(out["pieces"][0]["id"], 1);
+        assert!(s.active().unwrap().doc.selection.is_none());
+        let out = s.execute(CLEAN, json!({"steps": [{"pieces": "all", "method": "fill", "output": "new", "layerName": "Limpieza"}]})).unwrap();
+        assert!(px(&s, 210, 130)[0] > 0.9, "filled");
+        assert_eq!(s.active().unwrap().doc.layers.len(), layers + 1, "on a layer of its own");
+        assert_eq!(out["pieces"], json!([]));
+        assert!(s.text_detection().is_none());
+        assert!(s.execute(CLEAN, json!({"steps": [{"pieces": "all", "method": "fill"}]})).is_err(), "nothing found");
     }
 
     #[test]

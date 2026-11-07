@@ -1051,7 +1051,8 @@ fn handle_canvas_tool_menus(app: &mut PhotocraftApp, input: &CanvasToolInput<'_>
             && !response.long_touched()
             && (app.crop.drag.is_some() || app.crop.straighten.line.is_some())
             && ctx.input(|i| i.pointer.primary_down());
-        if crop_gesture || crate::canvas_tool_menu::open_crop(app, ctx, tool, [p.x, p.y]) {
+        if crate::text_select_ui::open_menu(app, tool, xf.to_doc(p), [p.x, p.y]) {
+        } else if crop_gesture || crate::canvas_tool_menu::open_crop(app, ctx, tool, [p.x, p.y]) {
         } else if crate::canvas_tool_menu::pasteboard_at(app, tool, xf.to_doc(p)) {
             crate::canvas_tool_menu::open_pasteboard(app, ctx, tool, [p.x, p.y]);
         } else if crate::canvas_tool_menu::is_view_tool(tool) {

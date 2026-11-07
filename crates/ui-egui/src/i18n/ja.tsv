@@ -4776,3 +4776,10 @@ curves	Smooth	スムーズ
 	Click a block to clean it	ブロックをクリックしてクリーニング
 	Each click cleans that block right away, one at a time	クリックごとにそのブロックをすぐクリーニング(1 つずつ)
 	Finds the text and sound effects on the page, or drag a box to look only there. You choose what to clean	ページの文字と効果音を検出します。ドラッグで範囲を囲むとそこだけ検索。何をクリーニングするかは選べます
+	What's Chosen	選択したもの
+	This block: {n} pieces	このブロック: {n} ピース
+	Take Off the Selection	選択から外す
+	Add to the Selection	選択に追加
+	Clean Now	今すぐクリーニング
+	In the Next Clean	次のクリーニングで
+	As the Rest	他と同じ

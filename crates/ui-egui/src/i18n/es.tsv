@@ -5573,3 +5573,10 @@ fontTab	Find More	Buscar más
 	Click a block to clean it	Haz clic en un bloque para limpiarlo
 	Each click cleans that block right away, one at a time	Cada clic limpia ese bloque al momento, de uno en uno
 	Finds the text and sound effects on the page, or drag a box to look only there. You choose what to clean	Encuentra el texto y las onomatopeyas de la página, o arrastra un rectángulo para buscar solo ahí. Tú eliges qué limpiar
+	What's Chosen	Lo elegido
+	This block: {n} pieces	Este bloque: {n} piezas
+	Take Off the Selection	Quitar de la selección
+	Add to the Selection	Agregar a la selección
+	Clean Now	Limpiar ahora
+	In the Next Clean	En la próxima limpieza
+	As the Rest	Como el resto

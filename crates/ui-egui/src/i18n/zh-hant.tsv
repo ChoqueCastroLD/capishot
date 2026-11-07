@@ -3751,3 +3751,10 @@ curves	Smooth	平滑
 	Click a block to clean it	點擊一塊即可清理
 	Each click cleans that block right away, one at a time	每次點擊立即清理該塊,一次一塊
 	Finds the text and sound effects on the page, or drag a box to look only there. You choose what to clean	尋找頁面上的文字和擬聲詞,或拖框只在該處尋找。清理內容由你選擇
+	What's Chosen	所選內容
+	This block: {n} pieces	此塊: {n} 個片段
+	Take Off the Selection	從選取範圍移除
+	Add to the Selection	新增到選取範圍
+	Clean Now	立即清理
+	In the Next Clean	下次清理時
+	As the Rest	與其餘相同

@@ -868,6 +868,7 @@ fn handle_escape_and_view_keys(app: &mut PhotocraftApp, ctx: &egui::Context) {
     // Rotate View, Adaptive Wide Angle, the Filter Gallery, the TIFF prompt, any open egui popup
     // and the toolbar tool flyout. A canvas drag in progress (a marquee being drawn) keeps it too.
     let esc_taken = app.drag.is_some()
+        || crate::text_select_ui::menu_open(app)
         || app.ui.palette_open
         || app.ui.canvas_tool_menu.is_some()
         || app.ui.layer_menu.is_some()
