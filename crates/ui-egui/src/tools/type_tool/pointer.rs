@@ -147,6 +147,12 @@ pub fn pointer_down(app: &mut PhotocraftApp, x: f64, y: f64, mods: egui::Modifie
         }
         // ⇧/⌥ on that click combine a Type Mask with the selection.
         commit_with(app, mods);
+        // Bubble Type goes page by page: a drag from here also draws the next zone, so a person
+        // needn't end one text first. A click only ends it.
+        if app.ui.tool == crate::state::Tool::BubbleType {
+            app.bubble_press_committed = true;
+            return false;
+        }
         return true; // Photoshop: a click outside commits without starting new text
     }
     app.ui.type_insertion_style = None;
@@ -335,6 +341,9 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
     }
     let (w, h) = ((end[0] - start[0]).abs(), (end[1] - start[1]).abs());
     let min = 4.0 / app.point_zoom().max(0.01) as f64;
+    if std::mem::take(&mut app.bubble_press_committed) && !(w >= min && h >= min) {
+        return;
+    }
     let o = app.ui.tool_options.clone();
     let mask = app.ui.tool.is_type_mask();
     // A click (not a drag) with the Type tool on a path: area type inside a closed path, type

@@ -357,6 +357,16 @@ fn fit_size_of(s: &mut Session, id: photocraft_doc::LayerId, least: f32) -> Resu
     Ok((first * k, fits))
 }
 
+/// What a new text of this style gets with no size of its own and no lettering to go by (pt).
+pub fn auto_size_preview(s: &Session, kind: &str) -> Option<f32> {
+    let kind = match kind {
+        "narration" => Kind::Narration,
+        "floating" => Kind::Floating,
+        _ => Kind::Bubble,
+    };
+    auto_size(s, kind, None).map(|v| v as f32)
+}
+
 fn fit_size(s: &mut Session, p: &Value) -> Result<Value> {
     let id = photocraft_doc::LayerId(p.get("layer").and_then(Value::as_u64).ok_or_else(|| bad("\"layer\" is required"))?);
     let least = p.get("least").and_then(Value::as_f64).map_or(LEAST_FIT, |v| v.clamp(0.1, 1.0) as f32);
@@ -365,7 +375,7 @@ fn fit_size(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Text at this share of the page's height on a page, of its width on a long strip.
-const PAGE_TEXT: f64 = 1.0 / 65.0;
+const PAGE_TEXT: f64 = 1.0 / 58.0;
 const STRIP_TEXT: f64 = 1.0 / 28.0;
 /// A strip: a page this many times taller than wide.
 const STRIP: f64 = 2.2;
@@ -381,7 +391,7 @@ fn auto_size(s: &Session, kind: Kind, lettering: Option<f64>) -> Option<f64> {
     let base = if h > STRIP * w { w * STRIP_TEXT } else { h.min(1.5 * w) * PAGE_TEXT };
     let px = match (kind, lettering) {
         (Kind::Floating, _) => base * 1.25,
-        (_, Some(l)) => (l / CAP_OVER_SIZE).clamp(base * 0.6, base * 1.6),
+        (_, Some(l)) => (l / CAP_OVER_SIZE).clamp(base * 0.8, base * 1.6),
         (Kind::Narration, None) => base * 0.9,
         (_, None) => base,
     };
@@ -445,7 +455,10 @@ fn create_in_bubble(s: &mut Session, p: &Value) -> Result<Value> {
         stroke = apply_typer(s, &mut t, style)?;
     }
     if let Some([x, y, width, height]) = area {
-        t.shape = TextShape::Box { x, y, width, height };
+        // Type in the rectangle as a path: its lines centred like a balloon's, not from the top.
+        let corners = [(x, y), (x + width, y), (x + width, y + height), (x, y + height)];
+        let knots = corners.iter().map(|&(cx, cy)| photocraft_doc::vector::Knot::corner(f64::from(cx), f64::from(cy))).collect();
+        t.shape = TextShape::InPath { path: Subpath { closed: true, knots, op: Default::default() }, inset: inset.flatten(), valign: valign.unwrap_or(InPathAlign::Center) };
         t.transform = Affine::IDENTITY;
         t.sync_summary();
         let effects = role_effects(&q);
@@ -740,7 +753,7 @@ mod lobe_and_size_tests {
             f64::from(t.char_runs()[0].style.size_pt)
         };
         let (at_72, at_300) = (size_at(72.0), size_at(300.0));
-        assert!((20.0..=24.0).contains(&at_72), "1400 / 65: {at_72}");
+        assert!((22.0..=26.0).contains(&at_72), "1400 / 58: {at_72}");
         assert!((4.0..=7.0).contains(&at_300), "the same pixels: {at_300}");
     }
 }
@@ -766,7 +779,10 @@ mod tests {
             photocraft_doc::LayerContent::Text(t) => t.clone(),
             _ => panic!("type"),
         };
-        assert!(matches!(text(&s).shape, TextShape::Box { x: 40.0, y: 50.0, width: 120.0, height: 80.0 }));
+        let photocraft_doc::text::TextShape::InPath { path, valign, .. } = &text(&s).shape else { panic!("in a path") };
+        assert_eq!(*valign, InPathAlign::Center, "centred, as in a balloon");
+        let xs: Vec<f64> = path.knots.iter().map(|k| k.anchor.x).collect();
+        assert_eq!((xs.iter().copied().fold(f64::MAX, f64::min), xs.iter().copied().fold(f64::MIN, f64::max)), (40.0, 160.0));
         assert_eq!(text(&s).size_pt, 20.0);
         let before = text(&s).shape;
         let past = s.active().unwrap().history.past_len();

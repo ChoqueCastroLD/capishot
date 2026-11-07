@@ -38,6 +38,18 @@
     // The glue, the module and the glue's snippets of this build live in v/<version>/: a page
     // from an earlier deploy keeps loading its own pair (deploy.sh keeps the previous builds).
     const dir = `./v/${version}/`;
+    // A phone restoring a tab it dropped takes this page from its cache, however old, and with it
+    // the build of that deploy: a person sees fixes they don't have. The page as it is now says
+    // which build is current; once per build, a page of another one loads again. Never in the way:
+    // nothing waits for this, and with no network nothing happens.
+    fetch(location.pathname + location.search, { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
+      const now = (html.match(/const version = '([^']+)'/) || [])[1];
+      const tried = 'capishot.freshBuild';
+      if (now && now !== version && sessionStorage.getItem(tried) !== now) {
+        sessionStorage.setItem(tried, now);
+        location.reload();
+      }
+    }).catch(() => {});
     const boot = self.capishotBoot;
     const loading = document.getElementById('photocraft_loading');
     const status = document.getElementById('photocraft_status');

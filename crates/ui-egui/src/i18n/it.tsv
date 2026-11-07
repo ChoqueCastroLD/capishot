@@ -5220,3 +5220,4 @@ shape	Appearance	Aspetto
 	The size of the lettering that was in the balloon, else in proportion to the page	La dimensione delle lettere nel balloon, altrimenti in proporzione alla pagina
 	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO. In a text box or a balloon: text from a click is one line	Una parola che non entra viene divisa con un trattino: PE-RRO. In una casella di testo o un balloon: il testo da un clic è una sola riga
 	Hyphenation needs a text box: drag a rectangle with the tool	La sillabazione richiede una casella di testo: trascina un rettangolo con lo strumento
+	Automatic Size	Dimensione automatica

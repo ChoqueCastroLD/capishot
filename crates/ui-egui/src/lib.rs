@@ -699,6 +699,8 @@ pub struct PhotocraftApp {
     pub(crate) bubble_flash: Option<(String, [f64; 2], f64)>,
     /// A new bubble text whose size follows the page: fitted to its balloon when it's done.
     pub(crate) bubble_autofit: Option<u64>,
+    /// The press under way ended a text (Bubble Type): only a drag from it starts another.
+    pub(crate) bubble_press_committed: bool,
     /// Remove with AI: a run waiting for its first-use model download (`remove_ai_ui`).
     pub(crate) remove_ai: remove_ai_ui::Pending,
     /// Window › Font Projects and the font menus' project sections (`font_projects_ui`).

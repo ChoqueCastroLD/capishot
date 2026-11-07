@@ -5148,3 +5148,4 @@ shape	Appearance	Apparence
 	The size of the lettering that was in the balloon, else in proportion to the page	La taille du lettrage dans la bulle, sinon proportionnelle à la page
 	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO. In a text box or a balloon: text from a click is one line	Un mot qui ne tient pas est coupé par un trait d’union : PE-RRO. Dans un cadre de texte ou une bulle : le texte d’un clic tient sur une ligne
 	Hyphenation needs a text box: drag a rectangle with the tool	La césure nécessite un cadre de texte : tracez un rectangle avec l’outil
+	Automatic Size	Taille automatique

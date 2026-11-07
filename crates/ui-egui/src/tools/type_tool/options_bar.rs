@@ -257,7 +257,67 @@ fn bubble_target_options(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 
 /// The Type tools' options on a phone (the simple interface's options popover): a labelled form,
 /// each control on its row, alignment as one segmented row, the colour inline.
+/// Bubble Type with no text in use: the bar's font, size and alignment are those of the style a
+/// click writes with, not the Type tool's, which it doesn't read. An automatic size shows what it
+/// would be on this page; a size set here is chosen, and stays.
+fn with_bubble_style(app: &mut PhotocraftApp, f: impl FnOnce(&mut PhotocraftApp)) {
+    if app.ui.tool != crate::state::Tool::BubbleType || target(app).is_some() {
+        return f(app);
+    }
+    let o = &app.ui.tool_options;
+    let kind = o.bubble_pick.clone();
+    let of = |o: &crate::state::ToolOptions| match kind.as_str() {
+        "narration" => o.bubble_styles.narration.clone(),
+        "floating" => o.bubble_styles.floating.clone(),
+        _ => o.bubble_styles.bubble.clone(),
+    };
+    let st = of(o);
+    let auto = crate::bubble_type_ui::style_params(&st)["size"] == "auto";
+    let shown = if auto { photocraft_engine::type_bubble_cmds::auto_size_preview(&app.session, &kind).unwrap_or(st.size) } else { st.size };
+    let own = (o.type_font.clone(), o.type_style.clone(), o.type_size, o.type_align.clone());
+    let o = &mut app.ui.tool_options;
+    (o.type_font, o.type_style, o.type_size, o.type_align) = (st.font.clone(), st.style.clone(), shown, st.align.clone());
+    f(app);
+    let o = &mut app.ui.tool_options;
+    let (font, style, size, align) = (o.type_font.clone(), o.type_style.clone(), o.type_size, o.type_align.clone());
+    (o.type_font, o.type_style, o.type_size, o.type_align) = own;
+    let target = match kind.as_str() {
+        "narration" => &mut o.bubble_styles.narration,
+        "floating" => &mut o.bubble_styles.floating,
+        _ => &mut o.bubble_styles.bubble,
+    };
+    (target.font, target.style, target.align) = (font, style, align);
+    if (size - shown).abs() > 0.001 {
+        target.size = size;
+        target.auto_size = false;
+    }
+}
+
+/// The size of new bubble text: automatic, or the one in the field.
+fn auto_size_option(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    if app.ui.tool != crate::state::Tool::BubbleType || target(app).is_some() {
+        return;
+    }
+    let o = &mut app.ui.tool_options;
+    let st = match o.bubble_pick.as_str() {
+        "narration" => &mut o.bubble_styles.narration,
+        "floating" => &mut o.bubble_styles.floating,
+        _ => &mut o.bubble_styles.bubble,
+    };
+    let mut auto = crate::bubble_type_ui::style_params(st)["size"] == "auto";
+    if crate::widgets::checkbox(ui, &mut auto, tl!("Automatic Size")).on_hover_text(tl!("The size of the lettering that was in the balloon, else in proportion to the page")).clicked() {
+        st.auto_size = auto;
+        if auto {
+            st.size = 30.0;
+        }
+    }
+}
+
 pub fn phone_form(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    with_bubble_style(app, |app| phone_form_inner(app, ui));
+}
+
+fn phone_form_inner(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = crate::theme::Tokens::get(ui.ctx());
     let shown = target(app).and_then(|(id, _)| {
         let st = app.session.active()?;
@@ -282,6 +342,7 @@ pub fn phone_form(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         }
         ui.label("");
         hyphenate_option(app, ui);
+        auto_size_option(app, ui);
         ui.end_row();
         ui.label(tl!("Font"));
         if fonts_ready(ui, field) && font_picker(app, ui, &mut fam, field).is_some() {
@@ -394,6 +455,10 @@ pub fn phone_form(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 }
 
 pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    with_bubble_style(app, |app| options_bar_inner(app, ui));
+}
+
+fn options_bar_inner(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = crate::theme::Tokens::get(ui.ctx());
     // Both Type controls describe the selected characters, or the caret's typing style.
     let shown = styles_at(app).map(|(c, _)| (shown_family(app, &c), selected_style(&c), c.size_pt * shown_scale(app), c.color));
@@ -549,6 +614,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     if ui.available_width() >= HYPHENATE_ROOM {
         crate::widgets::vline(ui, 22.0);
         hyphenate_option(app, ui);
+        auto_size_option(app, ui);
     }
     if app.ui.text_edit.is_some() {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1037,4 +1103,38 @@ pub(super) fn toggle_cell(ui: &mut egui::Ui, w: f32, on: bool, tip: &str, paint:
     let tip = tip.to_string();
     resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, enabled, on, &tip));
     resp.on_hover_text(tl!(&tip)).clicked()
+}
+
+#[cfg(test)]
+mod bubble_style_bar_tests {
+    use super::*;
+
+    #[test]
+    fn with_no_text_in_use_the_bar_edits_the_style_a_click_writes_with() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 1200, "height": 1740, "background": "white"})).unwrap();
+        app.ui.tool = crate::state::Tool::BubbleType;
+        let own = app.ui.tool_options.type_size;
+        let mut seen = 0.0;
+        with_bubble_style(&mut app, |app| seen = app.ui.tool_options.type_size);
+        assert_eq!(seen, 30.0, "1740 / 58: what a click would write here, 30 by chance");
+        assert!(app.ui.tool_options.bubble_styles.bubble.auto_size, "only looking changes nothing");
+        with_bubble_style(&mut app, |app| {
+            app.ui.tool_options.type_size = 44.0;
+            app.ui.tool_options.type_font = "JetBrains Mono".into();
+        });
+        let st = &app.ui.tool_options.bubble_styles.bubble;
+        assert_eq!((st.size, st.auto_size, st.font.as_str()), (44.0, false, "JetBrains Mono"), "chosen, and it stays");
+        assert_eq!(app.ui.tool_options.type_size, own, "the Type tool's own is left alone");
+        assert_ne!(app.ui.tool_options.type_font, "JetBrains Mono");
+    }
+
+    #[test]
+    fn on_another_tool_it_does_nothing() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.ui.tool = crate::state::Tool::Type;
+        with_bubble_style(&mut app, |app| app.ui.tool_options.type_size = 44.0);
+        assert_eq!(app.ui.tool_options.type_size, 44.0);
+        assert!(app.ui.tool_options.bubble_styles.bubble.auto_size);
+    }
 }

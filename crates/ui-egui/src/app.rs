@@ -165,6 +165,7 @@ impl PhotocraftApp {
             type_font_preview: None,
             bubble_flash: None,
             bubble_autofit: None,
+            bubble_press_committed: false,
             remove_ai: Default::default(),
             font_projects: crate::font_projects_ui::State::new(),
             zip_export: crate::zip_export_ui::State::default(),

@@ -3636,6 +3636,34 @@ fn bubble_type_styles_popover_edits_each_style() {
     assert_eq!(crate::bubble_type_ui::style_params(&older)["size"].as_f64(), Some(44.0), "as in older settings, with no switch");
 }
 
+#[test]
+fn bubble_type_a_drag_while_typing_ends_that_text_and_draws_the_next_zone() {
+    use crate::canvas::{ToolEvent, tool_event};
+    use egui::Modifiers;
+    let mut app = bubble_page();
+    tool_event(&mut app, ToolEvent::Down { x: 750.0, y: 350.0, pressure: 1.0 }, Modifiers::NONE);
+    tool_event(&mut app, ToolEvent::Up { x: 750.0, y: 350.0 }, Modifiers::NONE);
+    let first = app.ui.text_edit.clone().expect("editing the bubble's text");
+    super::insert(&mut app, "Hola");
+    let layers = app.session.active().unwrap().doc.walk().len();
+    // A click outside only ends it, as in Photoshop.
+    tool_event(&mut app, ToolEvent::Down { x: 100.0, y: 700.0, pressure: 1.0 }, Modifiers::NONE);
+    tool_event(&mut app, ToolEvent::Up { x: 100.0, y: 700.0 }, Modifiers::NONE);
+    assert!(app.ui.text_edit.is_none());
+    assert_eq!(app.session.active().unwrap().doc.walk().len(), layers, "no new text");
+    // Again, and this time a drag.
+    tool_event(&mut app, ToolEvent::Down { x: 750.0, y: 350.0, pressure: 1.0 }, Modifiers::NONE);
+    tool_event(&mut app, ToolEvent::Up { x: 750.0, y: 350.0 }, Modifiers::NONE);
+    assert_eq!(app.ui.text_edit.as_ref().map(|e| e.layer), Some(first.layer), "back in the same text");
+    tool_event(&mut app, ToolEvent::Down { x: 100.0, y: 600.0, pressure: 1.0 }, Modifiers::NONE);
+    tool_event(&mut app, ToolEvent::Move { x: 300.0, y: 800.0, pressure: 1.0 }, Modifiers::NONE);
+    tool_event(&mut app, ToolEvent::Up { x: 300.0, y: 800.0 }, Modifiers::NONE);
+    let zone = app.ui.text_edit.clone().expect("typing in the new zone");
+    assert_ne!(zone.layer, first.layer);
+    assert_eq!(app.session.active().unwrap().doc.walk().len(), layers + 1);
+    assert!(matches!(text(&app, LayerId(zone.layer)).shape, photocraft_doc::text::TextShape::InPath { .. }));
+}
+
 fn leading_of(app: &PhotocraftApp, id: u64) -> Option<f32> {
     text(app, LayerId(id)).char_runs().first().and_then(|r| r.style.leading_pt)
 }

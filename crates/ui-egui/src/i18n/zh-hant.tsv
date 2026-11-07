@@ -3782,3 +3782,4 @@ curves	Smooth	平滑
 	The size of the lettering that was in the balloon, else in proportion to the page	氣泡內原有文字的大小,否則按頁面比例
 	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO. In a text box or a balloon: text from a click is one line	放不下的單字用連字號拆分並換行: PE-RRO。適用於文字框或氣泡,點擊建立的文字只有一行
 	Hyphenation needs a text box: drag a rectangle with the tool	斷字需要文字框: 用工具拖出矩形
+	Automatic Size	自動大小
