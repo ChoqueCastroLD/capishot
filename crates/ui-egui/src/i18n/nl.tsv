@@ -4859,3 +4859,9 @@ curves	Smooth	Vloeiend maken
 	Clean Now	Nu opschonen
 	In the Next Clean	Bij de volgende opschoning
 	As the Rest	Zoals de rest
+	Also Google Fonts	Ook Google Fonts
+	Also looks through Google Fonts, not only your fonts: downloads an index of {mb} MB, and from jsDelivr the fonts it shows you	Zoekt ook in Google Fonts, niet alleen in je lettertypen: downloadt een index van {mb} MB en via jsDelivr de getoonde lettertypen
+	Downloading its index…	Index downloaden…
+	Couldn't get Google Fonts: {why}	Google Fonts ophalen mislukt: {why}
+	Among {n} fonts, yours and Google Fonts. Click one to use it	Uit {n} lettertypen, van jou en Google Fonts. Klik op een om het te gebruiken
+	Not available in this build	Niet beschikbaar in deze versie

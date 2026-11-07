@@ -735,6 +735,9 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
         })),
         inbox: None,
         open_url: Some(Box::new(|url: &str| open::that(url).map_err(|e| e.to_string()))),
+        fetch: Some(Box::new(|url, max, done| {
+            std::thread::spawn(move || done(fetch_keeping_packs(&url, max)));
+        })),
         beep: Some(platform_beep),
         check_updates: update_transport(std::env::var_os("FLATPAK_ID").as_deref()),
         clipboard_set_image: Some({
@@ -832,3 +835,16 @@ fn platform_beep() {
 
 #[cfg(test)]
 mod tests;
+
+/// A URL's bytes. A catalog pack is large and never changes under its name: it's kept with the models.
+fn fetch_keeping_packs(url: &str, max: u64) -> Result<Vec<u8>, String> {
+    let kept = url.ends_with(".bin.gz").then(crate::app_dirs::models_dir).flatten().zip(url.rsplit('/').next()).map(|(dir, name)| dir.join(name));
+    if let Some(bytes) = kept.as_ref().and_then(|p| std::fs::read(p).ok()) {
+        return Ok(bytes);
+    }
+    let bytes = photocraft_fontfetch::get_large(url, max)?;
+    if let Some(path) = &kept {
+        let _ = std::fs::write(path, &bytes);
+    }
+    Ok(bytes)
+}

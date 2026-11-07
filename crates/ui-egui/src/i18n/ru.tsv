@@ -5296,3 +5296,9 @@ shape	Appearance	Оформление
 	Clean Now	Очистить сейчас
 	In the Next Clean	При следующей очистке
 	As the Rest	Как остальные
+	Also Google Fonts	Также Google Fonts
+	Also looks through Google Fonts, not only your fonts: downloads an index of {mb} MB, and from jsDelivr the fonts it shows you	Ищет также в Google Fonts, а не только в ваших шрифтах: загружает индекс {mb} МБ и с jsDelivr показанные шрифты
+	Downloading its index…	Загрузка индекса…
+	Couldn't get Google Fonts: {why}	Не удалось получить Google Fonts: {why}
+	Among {n} fonts, yours and Google Fonts. Click one to use it	Среди {n} шрифтов, ваших и Google Fonts. Нажмите на шрифт, чтобы использовать его
+	Not available in this build	Недоступно в этой версии

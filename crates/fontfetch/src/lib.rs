@@ -34,7 +34,7 @@ mod fetcher;
 mod store;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use fetcher::{Timeouts, UreqFetcher, get_small, post_json, user_agent};
+pub use fetcher::{Timeouts, UreqFetcher, get_large, get_small, post_json, user_agent};
 #[cfg(not(target_arch = "wasm32"))]
 pub use store::DirStore;
 

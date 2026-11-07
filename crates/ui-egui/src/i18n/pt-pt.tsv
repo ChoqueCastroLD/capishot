@@ -3677,3 +3677,9 @@ fontWeight	Italic	Itálico
 	Clean Now	Limpar agora
 	In the Next Clean	Na próxima limpeza
 	As the Rest	Como o resto
+	Also Google Fonts	Também Google Fonts
+	Also looks through Google Fonts, not only your fonts: downloads an index of {mb} MB, and from jsDelivr the fonts it shows you	Também procura no Google Fonts, não só nos seus tipos de letra: transfere um índice de {mb} MB e, do jsDelivr, os tipos de letra mostrados
+	Downloading its index…	A transferir o índice…
+	Couldn't get Google Fonts: {why}	Não foi possível obter o Google Fonts: {why}
+	Among {n} fonts, yours and Google Fonts. Click one to use it	Entre {n} tipos de letra, seus e do Google Fonts. Clique num para o usar
+	Not available in this build	Não disponível nesta versão

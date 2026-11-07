@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-pub use photocraft_fontmatch::Face;
+pub use photocraft_fontmatch::{Face, pack};
 use photocraft_fontmatch::{Candidate, FaceSource, Library, Scope, Zone, find_in};
 use photocraft_geom::Rect;
 use serde_json::{Value, json};
@@ -35,6 +35,16 @@ impl Session {
     /// Was this stored font file already read for the search?
     pub fn font_file_known(&self, id: &str) -> bool {
         self.font_files.contains_key(id)
+    }
+
+    /// The search also covers a catalog whose fonts aren't here; an answer from it says where the
+    /// font's file is (`url`). `None`: only what's loaded.
+    pub fn set_font_pack(&mut self, pack: Option<pack::Pack>) {
+        self.font_pack = pack.map(Arc::new);
+    }
+
+    pub fn has_font_pack(&self) -> bool {
+        self.font_pack.is_some()
     }
 
     /// The search also covers `faces`, of the stored file `id`, though it isn't loaded.
@@ -127,10 +137,11 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
         s.font_files.retain(|id, _| store.entry(id).is_some());
     }
     let generation = photocraft_text::fonts::generation();
-    let files = s.font_files.len();
+    let pack = s.font_pack.clone();
+    let files = s.font_files.len() + pack.as_ref().map_or(0, |p| p.faces.len() + 1);
     let cached = s.font_library.as_ref().filter(|(g, n, _)| *g == generation && *n == files).map(|(_, _, l)| l.clone());
     let known = s.font_library.as_ref().map(|(_, _, l)| l.clone());
-    let extra: Vec<Face> = if cached.is_some() { Vec::new() } else { s.font_files.values().flatten().cloned().collect() };
+    let extra: Vec<Face> = if cached.is_some() { Vec::new() } else { s.font_files.values().flatten().chain(pack.iter().flat_map(|p| p.faces.iter())).cloned().collect() };
     crate::jobs::run_async(
         s,
         LABEL,
@@ -157,6 +168,17 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
         },
         move |s, (library, generation, mut out): (Arc<Library>, u64, Value)| {
             out["faces"] = json!(library.faces.len());
+            if let Some(pack) = &pack {
+                let mut fonts = photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner());
+                for o in out["options"].as_array_mut().into_iter().flatten() {
+                    let (family, style) = (o["family"].as_str().unwrap_or_default().to_string(), o["style"].as_str().unwrap_or_default().to_string());
+                    if !fonts.fonts.has_family(&family)
+                        && let Some(url) = pack.url(&family, &style)
+                    {
+                        o["url"] = json!(url);
+                    }
+                }
+            }
             s.font_library = Some((generation, files, library));
             s.font_found = Some(Arc::new(out.clone()));
             Ok(out)
@@ -170,7 +192,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: LABEL,
         menu: &[],
         shortcut: None,
-        params: r#"{"rect": [x, y, width, height], "k"?: 1..20 = 5, "scope"?: "all"|"document" (the fonts the document's type uses), "families"?: [family, …] (only these), "prefer"?: [family, …] (these count as a little closer)}: the fonts closest to the lettering in the rectangle, by shapes alone (no model, no OCR; deterministic), as a job; answers {options: [{family, style, distance, rotation, ground, gradient: null|{top, bottom}, shadow: null|{color, offset}, mixed: bool (other lettering in the zone: this is the largest), params: {font, fontStyle, size, color, stroke}}], rect, faces}; five that differ, not weights or copies of one design. Empty options: nothing there reads as letters"#,
+        params: r#"{"rect": [x, y, width, height], "k"?: 1..20 = 5, "scope"?: "all"|"document" (the fonts the document's type uses), "families"?: [family, …] (only these), "prefer"?: [family, …] (these count as a little closer)}: the fonts closest to the lettering in the rectangle, by shapes alone (no model, no OCR; deterministic), as a job; answers {options: [{family, style, distance, rotation, ground, gradient: null|{top, bottom}, shadow: null|{color, offset}, url?: where the font's file is, when it's from a catalog (Session::set_font_pack) and not here, mixed: bool (other lettering in the zone: this is the largest), params: {font, fontStyle, size, color, stroke}}], rect, faces}; five that differ, not weights or copies of one design. Empty options: nothing there reads as letters"#,
         enabled: |s| s.active().map(|_| ()).ok_or_else(|| "no document".to_string()),
         journal: false,
         run,
@@ -222,6 +244,26 @@ mod tests {
         assert_eq!(found["options"][0]["family"], "Only Stored", "{found}");
         photocraft_text::user_fonts::store().remove(&id);
         assert_eq!(s.execute(ID, scoped).unwrap()["options"], json!([]), "gone with the store");
+    }
+
+    #[test]
+    fn a_catalog_answers_with_where_its_font_is() {
+        let mut s = page();
+        let inter = photocraft_text::shared().lock().unwrap().fonts.face_blobs("Inter").into_iter().find(|f| f.style == "Regular").expect("Inter");
+        let faces: Vec<(Face, String, u32)> = read_font_file(inter.bytes())
+            .into_iter()
+            .map(|mut f| {
+                (f.family, f.key) = ("Only Catalog".to_string(), 2);
+                (f, "ofl/only/Only.ttf".to_string(), 0)
+            })
+            .collect();
+        s.set_font_pack(pack::read(&pack::write("https://x/", &faces).unwrap()));
+        assert!(s.has_font_pack());
+        let scoped = json!({"rect": [10, 40, 580, 120], "families": ["Only Catalog"]});
+        let found = s.execute(ID, scoped.clone()).unwrap();
+        assert_eq!(found["options"][0]["url"], "https://x/ofl/only/Only.ttf", "{found}");
+        s.set_font_pack(None);
+        assert_eq!(s.execute(ID, scoped).unwrap()["options"], json!([]), "gone with the catalog");
     }
 
     #[test]

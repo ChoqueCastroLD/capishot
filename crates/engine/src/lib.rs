@@ -348,6 +348,8 @@ pub struct Session {
     font_library: Option<(u64, usize, std::sync::Arc<photocraft_fontmatch::Library>)>,
     /// Stored font files read only to be searched, by id (`font.find`).
     font_files: std::collections::BTreeMap<String, Vec<photocraft_fontmatch::Face>>,
+    /// A catalog of faces whose files aren't here, for the search too (`font.find`).
+    font_pack: Option<std::sync::Arc<photocraft_fontmatch::pack::Pack>>,
     font_found: Option<std::sync::Arc<serde_json::Value>>,
     /// Downloads and deletes AI model weights (`ai.models.*`, the AI Model Manager), injected by
     /// the shell; `None` where downloads are unavailable (see `ai_models_cmds`).

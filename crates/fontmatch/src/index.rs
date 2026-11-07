@@ -34,12 +34,26 @@ pub struct Packed {
 }
 
 impl Packed {
-    fn new(b: &Bitmap) -> Packed {
+    pub(crate) fn new(b: &Bitmap) -> Packed {
         let mut bits = vec![0u64; b.data.len().div_ceil(64)];
         for (i, _) in b.data.iter().enumerate().filter(|(_, on)| **on) {
             bits[i / 64] |= 1 << (i % 64);
         }
         Packed { width: b.width, height: b.height, bits: bits.into() }
+    }
+
+    /// Its bits, a byte for every 8 pixels.
+    pub(crate) fn to_bytes(&self) -> Vec<u8> {
+        let n = (self.width * self.height).div_ceil(8);
+        self.bits.iter().flat_map(|w| w.to_le_bytes()).take(n).collect()
+    }
+
+    pub(crate) fn from_bytes(width: usize, height: usize, bytes: &[u8]) -> Packed {
+        let mut bits = vec![0u64; (width * height).div_ceil(64)];
+        for (i, b) in bytes.iter().enumerate() {
+            bits[i / 8] |= u64::from(*b) << ((i % 8) * 8);
+        }
+        Packed { width, height, bits: bits.into() }
     }
 
     pub fn unpack(&self) -> Bitmap {
@@ -173,14 +187,19 @@ impl Face {
         if shapes.len() * 10 < drawn.len() * 7 {
             return None;
         }
+        let glyphs = drawn.iter().map(|(ch, b)| Glyph { ch: *ch, bitmap: Packed::new(b) }).collect();
+        Some(Face::from_glyphs(s.family.to_string(), s.style.to_string(), size, glyphs, key_of(s)))
+    }
+
+    /// A face from its drawn alphabet.
+    pub(crate) fn from_glyphs(family: String, style: String, size_for_cap: f32, glyphs: Vec<Glyph>, key: u64) -> Face {
         let mut capitals = Vec::new();
-        for (_, b) in drawn.iter().filter(|(ch, _)| ch.is_ascii_uppercase()) {
-            coarse(b, &mut capitals);
+        for g in glyphs.iter().filter(|g| g.ch.is_ascii_uppercase()) {
+            coarse(&g.bitmap.unpack(), &mut capitals);
         }
         // Rounded: drawings that differ by a pixel are one look.
         let look = hash(capitals.iter().map(|v| v / 32));
-        let glyphs = drawn.iter().map(|(ch, b)| Glyph { ch: *ch, bitmap: Packed::new(b) }).collect();
-        Some(Face { family: s.family.to_string(), style: s.style.to_string(), size_for_cap: size, glyphs, look, capitals: capitals.into(), key: key_of(s) })
+        Face { family, style, size_for_cap, glyphs: glyphs.into(), look, capitals: capitals.into(), key }
     }
 }
 

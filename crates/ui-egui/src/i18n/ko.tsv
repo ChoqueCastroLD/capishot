@@ -4330,3 +4330,9 @@ curves	Smooth	매끄럽게
 	Clean Now	지금 정리
 	In the Next Clean	다음 정리 때
 	As the Rest	나머지와 같게
+	Also Google Fonts	Google Fonts 포함
+	Also looks through Google Fonts, not only your fonts: downloads an index of {mb} MB, and from jsDelivr the fonts it shows you	내 글꼴뿐 아니라 Google Fonts도 찾습니다. {mb} MB 색인과 표시되는 글꼴을 jsDelivr에서 내려받습니다
+	Downloading its index…	색인 내려받는 중…
+	Couldn't get Google Fonts: {why}	Google Fonts를 가져올 수 없습니다: {why}
+	Among {n} fonts, yours and Google Fonts. Click one to use it	내 글꼴과 Google Fonts {n}개 중에서. 클릭하면 사용합니다
+	Not available in this build	이 버전에서는 사용할 수 없습니다

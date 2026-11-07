@@ -4783,3 +4783,9 @@ curves	Smooth	スムーズ
 	Clean Now	今すぐクリーニング
 	In the Next Clean	次のクリーニングで
 	As the Rest	他と同じ
+	Also Google Fonts	Google Fonts も
+	Also looks through Google Fonts, not only your fonts: downloads an index of {mb} MB, and from jsDelivr the fonts it shows you	自分のフォントに加えて Google Fonts も検索します。{mb} MB のインデックスと、表示するフォントを jsDelivr からダウンロードします
+	Downloading its index…	インデックスをダウンロード中…
+	Couldn't get Google Fonts: {why}	Google Fonts を取得できません: {why}
+	Among {n} fonts, yours and Google Fonts. Click one to use it	自分のフォントと Google Fonts の {n} フォントから。クリックして使用
+	Not available in this build	このビルドでは利用できません

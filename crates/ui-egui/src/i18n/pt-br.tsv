@@ -5548,3 +5548,9 @@ fontTab	Find More	Encontrar mais
 	Clean Now	Limpar agora
 	In the Next Clean	Na próxima limpeza
 	As the Rest	Como o resto
+	Also Google Fonts	Também Google Fonts
+	Also looks through Google Fonts, not only your fonts: downloads an index of {mb} MB, and from jsDelivr the fonts it shows you	Também procura no Google Fonts, não só nas suas fontes: baixa um índice de {mb} MB e, do jsDelivr, as fontes que mostra
+	Downloading its index…	Baixando o índice…
+	Couldn't get Google Fonts: {why}	Não foi possível obter o Google Fonts: {why}
+	Among {n} fonts, yours and Google Fonts. Click one to use it	Entre {n} fontes, suas e do Google Fonts. Clique em uma para usá-la
+	Not available in this build	Não disponível nesta versão

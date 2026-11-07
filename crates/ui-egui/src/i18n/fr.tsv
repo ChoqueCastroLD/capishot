@@ -5138,3 +5138,9 @@ shape	Appearance	Apparence
 	Clean Now	Nettoyer maintenant
 	In the Next Clean	Au prochain nettoyage
 	As the Rest	Comme le reste
+	Also Google Fonts	Aussi Google Fonts
+	Also looks through Google Fonts, not only your fonts: downloads an index of {mb} MB, and from jsDelivr the fonts it shows you	Cherche aussi dans Google Fonts, pas seulement vos polices : télécharge un index de {mb} Mo et, depuis jsDelivr, les polices affichées
+	Downloading its index…	Téléchargement de l’index…
+	Couldn't get Google Fonts: {why}	Impossible d’obtenir Google Fonts : {why}
+	Among {n} fonts, yours and Google Fonts. Click one to use it	Parmi {n} polices, les vôtres et Google Fonts. Cliquez sur une pour l’utiliser
+	Not available in this build	Non disponible dans cette version

@@ -123,6 +123,12 @@ pub fn get_small(url: &str, max: u64) -> std::result::Result<Vec<u8>, String> {
     download(&f.agent, url, max, &AtomicBool::new(false)).map_err(|e| e.to_string())
 }
 
+/// [`get_small`] for something larger: a few minutes to arrive.
+pub fn get_large(url: &str, max: u64) -> std::result::Result<Vec<u8>, String> {
+    let f = UreqFetcher::build(Timeouts { connect: Duration::from_secs(10), overall: Duration::from_secs(300) }, true);
+    download(&f.agent, url, max, &AtomicBool::new(false)).map_err(|e| e.to_string())
+}
+
 /// One small POST of JSON (the desktop app's usage statistics) on the calling thread: short
 /// timeouts, HTTPS except to this machine, the response ignored. Sends no cookies; the only
 /// headers are the content type and [`user_agent`].

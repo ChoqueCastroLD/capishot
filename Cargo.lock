@@ -7986,6 +7986,7 @@ dependencies = [
 name = "photocraft-fontmatch"
 version = "0.13.14"
 dependencies = [
+ "flate2",
  "skrifa",
 ]
 

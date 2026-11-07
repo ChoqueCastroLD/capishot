@@ -4731,3 +4731,9 @@ curves	Smooth	Wygładź
 	Clean Now	Wyczyść teraz
 	In the Next Clean	Przy następnym czyszczeniu
 	As the Rest	Jak pozostałe
+	Also Google Fonts	Także Google Fonts
+	Also looks through Google Fonts, not only your fonts: downloads an index of {mb} MB, and from jsDelivr the fonts it shows you	Przeszukuje też Google Fonts, nie tylko Twoje czcionki: pobiera indeks {mb} MB i z jsDelivr pokazywane czcionki
+	Downloading its index…	Pobieranie indeksu…
+	Couldn't get Google Fonts: {why}	Nie można pobrać Google Fonts: {why}
+	Among {n} fonts, yours and Google Fonts. Click one to use it	Spośród {n} czcionek, Twoich i Google Fonts. Kliknij jedną, aby jej użyć
+	Not available in this build	Niedostępne w tej wersji

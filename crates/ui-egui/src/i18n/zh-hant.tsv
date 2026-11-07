@@ -3758,3 +3758,9 @@ curves	Smooth	平滑
 	Clean Now	立即清理
 	In the Next Clean	下次清理時
 	As the Rest	與其餘相同
+	Also Google Fonts	同時搜尋 Google Fonts
+	Also looks through Google Fonts, not only your fonts: downloads an index of {mb} MB, and from jsDelivr the fonts it shows you	除了你的字型,也搜尋 Google Fonts: 下載 {mb} MB 索引,並從 jsDelivr 下載顯示的字型
+	Downloading its index…	正在下載索引…
+	Couldn't get Google Fonts: {why}	無法取得 Google Fonts: {why}
+	Among {n} fonts, yours and Google Fonts. Click one to use it	在你的字型和 Google Fonts 的 {n} 個字型中。點擊一個即可使用
+	Not available in this build	此版本不可用

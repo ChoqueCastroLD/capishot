@@ -1081,6 +1081,22 @@ async fn fetch_bytes(url: &str, integrity: Option<&str>) -> Result<Vec<u8>, Stri
     Ok(js_sys::Uint8Array::new(&body).to_vec())
 }
 
+/// A file from another site that lets this one read it.
+async fn fetch_cross(url: &str) -> Result<Vec<u8>, String> {
+    use wasm_bindgen_futures::JsFuture;
+    let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
+    let window = web_sys::window().ok_or("no window")?;
+    let init = web_sys::RequestInit::new();
+    init.set_mode(web_sys::RequestMode::Cors);
+    let request = window.fetch_with_str_and_init(url, &init);
+    let resp: web_sys::Response = JsFuture::from(request).await.map_err(js)?.dyn_into().map_err(|_| "not a Response")?;
+    if !resp.ok() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+    let body = JsFuture::from(resp.array_buffer().map_err(js)?).await.map_err(js)?;
+    Ok(js_sys::Uint8Array::new(&body).to_vec())
+}
+
 /// Wraps the app to read dropped files asynchronously (browsers can't read them synchronously,
 /// so the app's own drop path can't handle them) and feed them through the inboxes.
 struct WebShell {
@@ -1825,6 +1841,9 @@ fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig
         // Preferences live in the browser's localStorage.
         // Type › Load Fonts…: the page's own pickers (files, or a whole folder).
         pick_fonts: Some(Box::new(crate::font_files::pick)),
+        fetch: Some(Box::new(|url, _max, done| {
+            wasm_bindgen_futures::spawn_local(async move { done(fetch_cross(&url).await) });
+        })),
         load_prefs: Some(Box::new(|| local_storage()?.get_item(PREFS_KEY).ok().flatten())),
         save_prefs: Some(Box::new(|text: &str| local_storage().ok_or("no localStorage")?.set_item(PREFS_KEY, text).map_err(|e| format!("{e:?}")))),
         // localStorage writes block the page: a burst of changes is written once, compact, and

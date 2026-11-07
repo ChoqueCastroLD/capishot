@@ -271,6 +271,8 @@ pub type AutomationCommandFn = Box<dyn Fn(&str, &Value) -> Result<(), String>>;
 
 /// Open a URL in the system browser (native) — reliable cross-platform, unlike `ctx.open_url`.
 pub type OpenUrlFn = Box<dyn Fn(&str) -> Result<(), String>>;
+/// Fetches a URL (at most so many bytes), off the UI's thread, and calls back with its bytes.
+pub type FetchFn = Box<dyn Fn(String, u64, Box<dyn FnOnce(Result<Vec<u8>, String>) + Send>)>;
 
 pub type EncodePngFn = Box<dyn Fn(u32, u32, &[u8]) -> Result<Vec<u8>, String>>;
 
@@ -417,6 +419,8 @@ pub struct Services {
     pub encode_png: Option<EncodePngFn>,
     /// Open a URL in the system browser (native). Falls back to `ctx.open_url` (web) when unset.
     pub open_url: Option<OpenUrlFn>,
+    /// Gets a file from the internet, for what a person turned on (Font Finder's catalog).
+    pub fetch: Option<FetchFn>,
     /// The desktop's launch-time update check (`update_notice`): the shell fills in the manifest.
     pub update_check: Option<crate::update_notice::UpdateCheck>,
     /// Preferences ▸ General ▸ Beep When Done: the platform's default beep, played when a

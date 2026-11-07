@@ -4846,3 +4846,9 @@ cameraRaw	Dehaze	Odstranění oparu
 	Clean Now	Vyčistit teď
 	In the Next Clean	Při dalším čištění
 	As the Rest	Jako ostatní
+	Also Google Fonts	I Google Fonts
+	Also looks through Google Fonts, not only your fonts: downloads an index of {mb} MB, and from jsDelivr the fonts it shows you	Prohledá i Google Fonts, nejen vaše písma: stáhne index o velikosti {mb} MB a z jsDelivr písma, která vám ukáže
+	Downloading its index…	Stahování indexu…
+	Couldn't get Google Fonts: {why}	Google Fonts nelze získat: {why}
+	Among {n} fonts, yours and Google Fonts. Click one to use it	Mezi {n} písmy, vašimi a z Google Fonts. Kliknutím jedno použijete
+	Not available in this build	V této verzi není k dispozici

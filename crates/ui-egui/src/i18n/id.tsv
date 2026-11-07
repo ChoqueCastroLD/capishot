@@ -4133,3 +4133,9 @@ curves	Smooth	Haluskan
 	Clean Now	Bersihkan sekarang
 	In the Next Clean	Pada pembersihan berikutnya
 	As the Rest	Seperti yang lain
+	Also Google Fonts	Juga Google Fonts
+	Also looks through Google Fonts, not only your fonts: downloads an index of {mb} MB, and from jsDelivr the fonts it shows you	Juga mencari di Google Fonts, bukan hanya font Anda: mengunduh indeks {mb} MB dan, dari jsDelivr, font yang ditampilkan
+	Downloading its index…	Mengunduh indeks…
+	Couldn't get Google Fonts: {why}	Tidak bisa mengambil Google Fonts: {why}
+	Among {n} fonts, yours and Google Fonts. Click one to use it	Di antara {n} font, milik Anda dan Google Fonts. Klik salah satu untuk memakainya
+	Not available in this build	Tidak tersedia di versi ini

@@ -4803,3 +4803,9 @@ curves	Smooth	Εξομάλυνση
 	Clean Now	Καθαρισμός τώρα
 	In the Next Clean	Στον επόμενο καθαρισμό
 	As the Rest	Όπως τα υπόλοιπα
+	Also Google Fonts	Και Google Fonts
+	Also looks through Google Fonts, not only your fonts: downloads an index of {mb} MB, and from jsDelivr the fonts it shows you	Ψάχνει και στο Google Fonts, όχι μόνο στις δικές σας: κατεβάζει ευρετήριο {mb} MB και από το jsDelivr τις γραμματοσειρές που σας δείχνει
+	Downloading its index…	Λήψη ευρετηρίου…
+	Couldn't get Google Fonts: {why}	Δεν ήταν δυνατή η λήψη του Google Fonts: {why}
+	Among {n} fonts, yours and Google Fonts. Click one to use it	Ανάμεσα σε {n} γραμματοσειρές, δικές σας και Google Fonts. Κάντε κλικ σε μία
+	Not available in this build	Δεν διατίθεται σε αυτή την έκδοση

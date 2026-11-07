@@ -5,10 +5,14 @@
 //!
 //! It searches every font loaded in the app. In the browser those include the stored ones the
 //! session hasn't read yet: they're read first, one by one and let go, however many there are.
+//!
+//! Google Fonts is optional and starts off. Turned on, the app fetches an index of the catalog's
+//! shapes and, for each answer from it, that font's file, to draw it; choosing one keeps it.
 
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use photocraft_engine::font_find_cmds::{Face, ID, read_font_file};
+use photocraft_engine::font_find_cmds::{Face, ID, pack, read_font_file};
 use photocraft_text::user_fonts;
 use serde_json::{Value, json};
 
@@ -46,6 +50,108 @@ pub(crate) struct State {
     to_read: usize,
     /// Stored files read off the UI's thread.
     read: Arc<Mutex<Vec<(String, Vec<Face>)>>>,
+    /// The Google Fonts index on its way, what came of it, and why it failed.
+    pack_fetching: bool,
+    pack_arrived: Arc<Mutex<Option<Result<pack::Pack, String>>>>,
+    pack_error: Option<String>,
+    /// An answer's fonts from the catalog: on their way, arrived and not yet handled, and here. The
+    /// one chosen before it came.
+    font_fetching: HashSet<String>,
+    font_arrived: Arc<Mutex<Vec<(String, Result<Vec<u8>, String>)>>>,
+    catalog_fonts: HashMap<String, Arc<Vec<u8>>>,
+    keep: HashSet<String>,
+}
+
+/// Google Fonts on or off.
+fn set_google(app: &mut PhotocraftApp, on: bool) {
+    app.ui.tool_options.font_find_google = on;
+    app.font_finder.pack_error = None;
+    if !on {
+        app.session.set_font_pack(None);
+    }
+}
+
+/// The index is fetched when it's wanted, and joins the search when it's read.
+fn pump_pack(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let arrived = app.font_finder.pack_arrived.lock().unwrap_or_else(PoisonError::into_inner).take();
+    if let Some(r) = arrived {
+        app.font_finder.pack_fetching = false;
+        match r {
+            Ok(p) if app.ui.tool_options.font_find_google => app.session.set_font_pack(Some(p)),
+            Ok(_) => {}
+            Err(why) => {
+                app.font_finder.pack_error = Some(why);
+                app.ui.tool_options.font_find_google = false;
+            }
+        }
+    }
+    if !app.ui.tool_options.font_find_google || app.session.has_font_pack() || app.font_finder.pack_fetching {
+        return;
+    }
+    let Some(fetch) = &app.services.fetch else {
+        app.font_finder.pack_error = Some(tl!("Not available in this build").to_string());
+        app.ui.tool_options.font_find_google = false;
+        return;
+    };
+    app.font_finder.pack_fetching = true;
+    let (slot, wake) = (app.font_finder.pack_arrived.clone(), ctx.clone());
+    fetch(pack::URL.to_string(), pack::BYTES.saturating_mul(2).max(1 << 20), Box::new(move |r| {
+        let work = move || {
+            let read = r.and_then(|bytes| {
+                if photocraft_text::sha256::sha256_hex(&bytes) != pack::SHA256 {
+                    return Err("the file isn't the expected one".to_string());
+                }
+                pack::read(&bytes).ok_or_else(|| "the file can't be read".to_string())
+            });
+            *slot.lock().unwrap_or_else(PoisonError::into_inner) = Some(read);
+            wake.request_repaint();
+        };
+        if crate::jobs_ui::OFF_THREAD { crate::jobs_ui::off_thread(work) } else { work() }
+    }));
+}
+
+/// The name a catalog font's file goes by.
+fn file_of(url: &str) -> String {
+    url.rsplit('/').next().unwrap_or("font.ttf").to_string()
+}
+
+/// Keeps a catalog font among the person's own.
+fn keep_font(app: &mut PhotocraftApp, url: &str, bytes: &[u8]) {
+    app.font_sink(None).send(crate::user_fonts_ui::Delivery::File(file_of(url), bytes.to_vec()));
+}
+
+/// An answer's fonts from the catalog come, to be drawn.
+fn pump_fonts(app: &mut PhotocraftApp, ctx: &egui::Context, options: &[Value]) {
+    let arrived = std::mem::take(&mut *app.font_finder.font_arrived.lock().unwrap_or_else(PoisonError::into_inner));
+    for (url, r) in arrived {
+        app.font_finder.font_fetching.remove(&url);
+        match r {
+            Ok(bytes) => {
+                photocraft_text::shared().lock().unwrap_or_else(PoisonError::into_inner).fonts.register_font_data(bytes.clone());
+                if app.font_finder.keep.remove(&url) {
+                    keep_font(app, &url, &bytes);
+                }
+                app.font_finder.catalog_fonts.insert(url, Arc::new(bytes));
+                app.font_finder.cards.clear();
+            }
+            Err(why) => {
+                app.ui.status = why;
+                app.ui.status_error = true;
+            }
+        }
+    }
+    for url in options.iter().filter_map(|o| o["url"].as_str()) {
+        if app.font_finder.catalog_fonts.contains_key(url) || app.font_finder.font_fetching.contains(url) {
+            continue;
+        }
+        let Some(fetch) = &app.services.fetch else { return };
+        app.font_finder.font_fetching.insert(url.to_string());
+        let (slot, wake, url) = (app.font_finder.font_arrived.clone(), ctx.clone(), url.to_string());
+        fetch(url.clone(), 64 << 20, Box::new(move |r| {
+            slot.lock().unwrap_or_else(PoisonError::into_inner).push((url, r));
+            wake.request_repaint();
+        }));
+    }
 }
 
 fn search(app: &mut PhotocraftApp, rect: [f64; 4]) {
@@ -101,8 +207,20 @@ pub fn finish(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
     }
 }
 
-pub fn options_bar(_app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     ui.label(tl!("Click on lettering or drag a rectangle around it to find its font"));
+    crate::widgets::vline(ui, 22.0);
+    let mut on = app.ui.tool_options.font_find_google;
+    let tip = crate::i18n::fmt(tl!("Also looks through Google Fonts, not only your fonts: downloads an index of {mb} MB, and from jsDelivr the fonts it shows you"), &[("mb", &(pack::BYTES >> 20).to_string())]);
+    if crate::widgets::checkbox(ui, &mut on, tl!("Also Google Fonts")).on_hover_text(tip).clicked() {
+        set_google(app, on);
+    }
+    if app.font_finder.pack_fetching {
+        ui.label(tl!("Downloading its index…"));
+    } else if let Some(why) = &app.font_finder.pack_error {
+        let line = crate::i18n::fmt(tl!("Couldn't get Google Fonts: {why}"), &[("why", why)]);
+        ui.label(egui::RichText::new(line).color(Tokens::get(ui.ctx()).warning));
+    }
 }
 
 fn style_of(o: &Value) -> BubbleTextStyle {
@@ -143,6 +261,15 @@ fn choose(app: &mut PhotocraftApp, o: &Value) {
     let bubble = &mut tools.bubble_styles.bubble;
     (bubble.font, bubble.style, bubble.size, bubble.color) = (st.font.clone(), st.style.clone(), st.size, st.color.clone());
     (bubble.stroke, bubble.stroke_color, bubble.stroke_width) = (st.stroke, st.stroke_color.clone(), st.stroke_width);
+    // From the catalog: it stays, among the person's fonts.
+    if let Some(url) = o["url"].as_str() {
+        match app.font_finder.catalog_fonts.get(url).cloned() {
+            Some(bytes) => keep_font(app, url, &bytes),
+            None => {
+                app.font_finder.keep.insert(url.to_string());
+            }
+        }
+    }
     let name = o["family"].as_str().unwrap_or_default().to_string();
     let layer = app.session.active().and_then(|d| d.active_layer).filter(|id| {
         app.session.active().is_some_and(|d| matches!(d.doc.layer(*id).map(|l| &l.content), Some(photocraft_doc::LayerContent::Text(_))))
@@ -162,6 +289,9 @@ fn choose(app: &mut PhotocraftApp, o: &Value) {
 /// The window with the answer, each option drawn with its look.
 pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     collect(app);
+    if app.ui.tool == Tool::FontFinder {
+        pump_pack(app, ctx);
+    }
     let found = app.session.font_found();
     if !app.font_finder.shown.as_ref().zip(found.as_ref()).is_some_and(|(a, b)| Arc::ptr_eq(a, b)) {
         app.font_finder.shown.clone_from(&found);
@@ -197,6 +327,7 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
     let Some(answer) = app.font_finder.shown.clone() else { return };
     let options = answer["options"].as_array().cloned().unwrap_or_default();
+    pump_fonts(app, ctx, &options);
     // A drawing a frame: five at once would hold the page.
     if app.font_finder.cards.len() < options.len() {
         let option = &options[app.font_finder.cards.len()];
@@ -233,11 +364,14 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
         if options[0]["mixed"].as_bool() == Some(true) {
             ui.label(egui::RichText::new(tl!("This zone has several sizes of lettering: these match the largest")).color(t.warning));
         }
-        let among = crate::i18n::fmt(tl!("Among {n} loaded fonts. Click one to use it"), &[("n", &faces.to_string())]);
+        let among = crate::i18n::fmt(if app.session.has_font_pack() { tl!("Among {n} fonts, yours and Google Fonts. Click one to use it") } else { tl!("Among {n} loaded fonts. Click one to use it") }, &[("n", &faces.to_string())]);
         ui.label(egui::RichText::new(among).color(t.text_dim));
         egui::ScrollArea::vertical().show(ui, |ui| {
             for (i, o) in options.iter().enumerate() {
-                let name = format!("{}  {}", o["family"].as_str().unwrap_or_default(), o["style"].as_str().unwrap_or_default());
+                let mut name = format!("{}  {}", o["family"].as_str().unwrap_or_default(), o["style"].as_str().unwrap_or_default());
+                if o["url"].is_string() {
+                    name.push_str("  ·  Google Fonts");
+                }
                 let size = o["params"]["size"].as_f64().unwrap_or(0.0);
                 let r = ui.scope_builder(egui::UiBuilder::new().sense(egui::Sense::click()), |ui| {
                     ui.label(egui::RichText::new(format!("{name}  ·  {size:.0} pt")).strong());
@@ -284,6 +418,30 @@ mod tests {
         finish(&mut app, [300.0, 100.0], [300.0, 100.0]);
         let answer = app.session.font_found().expect("an answer");
         assert_eq!(answer["rect"], json!([172, 0, 256, 200]), "256 px around the click, inside the page");
+    }
+
+    #[test]
+    fn google_fonts_starts_off_and_fetches_nothing_until_turned_on() {
+        let asked = Arc::new(Mutex::new(Vec::<String>::new()));
+        let mut services = crate::Services::default();
+        let seen = asked.clone();
+        services.fetch = Some(Box::new(move |url, _, done| {
+            seen.lock().unwrap().push(url);
+            done(Err("no network here".to_string()));
+        }));
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);
+        app.ui.tool = Tool::FontFinder;
+        let ctx = egui::Context::default();
+        assert!(!app.ui.tool_options.font_find_google, "off by default");
+        pump_pack(&mut app, &ctx);
+        assert!(asked.lock().unwrap().is_empty(), "nothing goes out");
+        set_google(&mut app, true);
+        pump_pack(&mut app, &ctx);
+        assert_eq!(asked.lock().unwrap().as_slice(), [pack::URL.to_string()]);
+        pump_pack(&mut app, &ctx);
+        assert!(!app.ui.tool_options.font_find_google, "a failure turns it off");
+        assert!(app.font_finder.pack_error.is_some(), "and says so");
+        assert_eq!(asked.lock().unwrap().len(), 1, "and doesn't ask again");
     }
 
     #[test]

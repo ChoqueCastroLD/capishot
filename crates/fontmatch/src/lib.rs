@@ -10,6 +10,7 @@ pub mod glyph;
 pub mod index;
 pub mod look;
 pub mod matcher;
+pub mod pack;
 pub mod segment;
 
 pub use index::{Face, FaceSource, Library};

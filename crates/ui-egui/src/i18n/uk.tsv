@@ -4824,3 +4824,9 @@ curves	Smooth	Згладити
 	Clean Now	Очистити зараз
 	In the Next Clean	Під час наступного очищення
 	As the Rest	Як решта
+	Also Google Fonts	Також Google Fonts
+	Also looks through Google Fonts, not only your fonts: downloads an index of {mb} MB, and from jsDelivr the fonts it shows you	Шукає також у Google Fonts, а не лише у ваших шрифтах: завантажує індекс {mb} МБ і з jsDelivr показані шрифти
+	Downloading its index…	Завантаження індексу…
+	Couldn't get Google Fonts: {why}	Не вдалося отримати Google Fonts: {why}
+	Among {n} fonts, yours and Google Fonts. Click one to use it	Серед {n} шрифтів, ваших і Google Fonts. Натисніть на шрифт, щоб використати його
+	Not available in this build	Недоступно в цій версії

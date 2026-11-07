@@ -345,6 +345,8 @@ pub struct ToolOptions {
     /// difference, 1–255; 0 = automatic, from the bubble's noise).
     #[serde(default)]
     pub bubble_text_new_layer: bool,
+    /// Font Finder: also looks through the Google Fonts catalog.
+    pub font_find_google: bool,
     /// Text Selection: what the pieces chosen now are cleaned with.
     pub text_select_method: CleanMethod,
     /// Text Selection: what a drag on the page does.
@@ -627,6 +629,7 @@ impl Default for ToolOptions {
             magnetic_frequency: 57.0,
             magnetic_pressure: false,
             bubble_text_new_layer: false,
+            font_find_google: false,
             text_select_method: CleanMethod::Ai,
             text_select_shape: ZoneShape::Pick,
             text_select_fill_tint: [46, 170, 90],

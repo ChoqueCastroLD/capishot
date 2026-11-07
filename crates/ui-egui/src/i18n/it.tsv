@@ -5210,3 +5210,9 @@ shape	Appearance	Aspetto
 	Clean Now	Pulisci ora
 	In the Next Clean	Alla prossima pulizia
 	As the Rest	Come il resto
+	Also Google Fonts	Anche Google Fonts
+	Also looks through Google Fonts, not only your fonts: downloads an index of {mb} MB, and from jsDelivr the fonts it shows you	Cerca anche in Google Fonts, non solo tra i tuoi font: scarica un indice di {mb} MB e, da jsDelivr, i font che ti mostra
+	Downloading its index…	Download dell’indice…
+	Couldn't get Google Fonts: {why}	Impossibile ottenere Google Fonts: {why}
+	Among {n} fonts, yours and Google Fonts. Click one to use it	Tra {n} font, tuoi e di Google Fonts. Fai clic su uno per usarlo
+	Not available in this build	Non disponibile in questa versione

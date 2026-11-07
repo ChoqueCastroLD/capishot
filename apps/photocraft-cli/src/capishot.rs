@@ -62,6 +62,10 @@ pub(crate) fn with_fonts_in(mut h: Headless, allow_online: bool, config_dir: Opt
         h.session.set_ai_upscaler(Some(std::sync::Arc::new(photocraft_ai::native::NativeUpscaler::from_env(dir))));
         h.session.set_ai_models(Some(std::sync::Arc::new(photocraft_ai::native_store::NativeModelStore::from_env(dir))));
     }
+    // `font.find` also looks through a catalog pack, here its file.
+    if let Some(pack) = std::env::var_os("CAPISHOT_FONT_PACK").and_then(|p| std::fs::read(p).ok()) {
+        h.session.set_font_pack(photocraft_engine::font_find_cmds::pack::read(&pack));
+    }
     if allow_online {
         h.session.edit_prefs(|p| p.type_.allow_online_fonts = true);
     }
