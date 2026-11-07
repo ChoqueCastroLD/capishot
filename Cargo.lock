@@ -7940,6 +7940,7 @@ dependencies = [
  "photocraft-color",
  "photocraft-compose",
  "photocraft-doc",
+ "photocraft-fontmatch",
  "photocraft-format",
  "photocraft-geom",
  "photocraft-io",
@@ -7979,6 +7980,13 @@ dependencies = [
  "serde",
  "serde_json",
  "ureq 3.5.0",
+]
+
+[[package]]
+name = "photocraft-fontmatch"
+version = "0.13.13"
+dependencies = [
+ "skrifa",
 ]
 
 [[package]]
