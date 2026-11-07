@@ -136,8 +136,15 @@ fn clean_pieces(s: &mut Session, p: &Value) -> Result<Value> {
     let default = px(p, "grow").unwrap_or_else(|| default_grow(d.width, d.height));
     let mut gone = vec![false; d.width * d.height];
     let mut done = Vec::with_capacity(steps.len());
+    let mut taken = std::collections::HashSet::new();
     for step in steps {
         let ids = piece_ids(&d, step).ok_or_else(|| bad("a step's \"pieces\" must be a list of ids, \"all\" or \"suggested\""))?;
+        // "all" and "suggested" mean those no earlier step took; ids are taken as they're given.
+        let ids: Vec<u32> = if step["pieces"].is_string() { ids.into_iter().filter(|id| !taken.contains(id)).collect() } else { ids };
+        taken.extend(ids.iter().copied());
+        if ids.is_empty() {
+            continue;
+        }
         let (command, method) = match step.get("method").and_then(Value::as_str) {
             Some("ai") => (crate::remove_ai_cmds::ID, None),
             Some(m @ ("fill" | "color")) => (crate::ai_inpaint_cmds::quick::ID, Some(m)),
@@ -349,7 +356,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Clean Text",
             menu: &[],
             shortcut: None,
-            params: r##"{"steps": [{"pieces": [id, …] | "all" | "suggested", "method": "ai" (Manga LaMa, edit.removeAi) | "fill" (content-aware) | "color" (flat), "grow"?: px, "output"?: "current" (default) | "new" | "single", "layerName"?, "color"?: "#rrggbb" (default: the colour around each blob)}, …], "grow"?: px, "output"?, "layerName"?}: cleans the pieces found by select.detectText, each step in its own way and in order; what's cleaned leaves the pieces and the answer lists those left, with new ids. Not in the browser: there, select.textPieces and then edit.removeAi or edit.cleanQuick, waiting for each"##,
+            params: r##"{"steps": [{"pieces": [id, …] | "all" | "suggested", "method": "ai" (Manga LaMa, edit.removeAi) | "fill" (content-aware) | "color" (flat), "grow"?: px, "output"?: "current" (default) | "new" | "single", "layerName"?, "color"?: "#rrggbb" (default: the colour around each blob)}, …], "grow"?: px, "output"?, "layerName"?}: cleans the pieces found by select.detectText, each step in its own way and in order ("all" and "suggested": those no earlier step took); what's cleaned leaves the pieces and the answer lists those left, with new ids. Not in the browser: there, select.textPieces and then edit.removeAi or edit.cleanQuick, waiting for each"##,
             enabled: has_masker,
             journal: false,
             run: clean_pieces,
@@ -484,6 +491,11 @@ mod tests {
         assert!(px(&s, 210, 130)[0] > 0.9, "filled");
         assert_eq!(s.active().unwrap().doc.layers.len(), layers + 1, "on a layer of its own");
         assert_eq!(out["pieces"], json!([]));
+        // "all" after a first step: what's left, once.
+        let mut s = page();
+        s.execute(DETECT, json!({})).unwrap();
+        let out = s.execute(CLEAN, json!({"steps": [{"pieces": "suggested", "method": "color"}, {"pieces": "all", "method": "fill"}]})).unwrap();
+        assert_eq!(out["steps"].as_array().unwrap().len(), 1, "nothing was left for the second");
         assert!(s.text_detection().is_none());
         assert!(s.execute(CLEAN, json!({"steps": [{"pieces": "all", "method": "fill"}]})).is_err(), "nothing found");
     }
