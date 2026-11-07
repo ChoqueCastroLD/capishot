@@ -147,6 +147,9 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
             let k = (ui.available_width() / s.x).min(CROP_HEIGHT / s.y);
             ui.add(egui::Image::new((tex.id(), s * k)));
         }
+        if options[0]["mixed"].as_bool() == Some(true) {
+            ui.label(egui::RichText::new(tl!("This zone has several sizes of lettering: these match the largest")).color(t.warning));
+        }
         ui.label(egui::RichText::new(tl!("Click one to use it")).color(t.text_dim));
         egui::ScrollArea::vertical().show(ui, |ui| {
             for (i, o) in options.iter().enumerate() {

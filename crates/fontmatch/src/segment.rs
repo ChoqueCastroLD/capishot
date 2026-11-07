@@ -17,6 +17,8 @@ pub struct Letters {
     pub tilt: f32,
     /// The letter bodies were hollow: this ring around them, in pixels, is an outline.
     pub ring: Option<f32>,
+    /// The zone held lettering of other sizes too; these are the largest.
+    pub mixed: bool,
 }
 
 /// At most this many letters are compared.
@@ -322,6 +324,53 @@ fn cleaned(ink: &Bitmap) -> Bitmap {
     out
 }
 
+/// Sizes this far apart are different lettering.
+const OTHER_SIZE: f32 = 1.5;
+/// So many shapes make a size lettering, and not one mark or a piece of the drawing.
+const SHAPES_OF_A_SIZE: usize = 2;
+
+/// Only the largest lettering in `ink`, and whether there was other: someone who drags over a big
+/// title and a small line means the title. Dots and accents are too small to count as other.
+fn largest_lettering(ink: Bitmap) -> (Bitmap, bool) {
+    let (labels, comps) = components(&ink, true);
+    let mut order: Vec<usize> = (0..comps.len()).collect();
+    order.sort_by_key(|i| comps[*i].y1 - comps[*i].y0);
+    // Runs of similar heights, smallest first.
+    let mut runs: Vec<Vec<usize>> = Vec::new();
+    let mut last = 0usize;
+    for i in order {
+        let h = comps[i].y1 - comps[i].y0;
+        match runs.last_mut() {
+            Some(run) if (h as f32) < last as f32 * OTHER_SIZE => run.push(i),
+            _ => runs.push(vec![i]),
+        }
+        last = h;
+    }
+    let Some(top) = runs.iter().rposition(|r| r.len() >= SHAPES_OF_A_SIZE) else { return (ink, false) };
+    let cap = runs[top].iter().map(|i| comps[*i].y1 - comps[*i].y0).max().unwrap_or(0);
+    // Below it, a run of several shapes tall enough to be letters is other lettering.
+    let letter_like = |i: &usize| {
+        let (w, h) = (comps[*i].x1 - comps[*i].x0, comps[*i].y1 - comps[*i].y0);
+        // Tall enough, and not the round marks of dots and ellipses.
+        h * 5 >= cap && w.abs_diff(h) * 4 > h
+    };
+    let other = runs[..top].iter().any(|r| r.len() >= 3 && r.iter().any(letter_like));
+    if !other {
+        return (ink, false);
+    }
+    let mut keep = vec![false; comps.len()];
+    for i in &runs[top] {
+        keep[*i] = true;
+    }
+    let mut out = Bitmap::new(ink.width, ink.height);
+    for (i, l) in labels.iter().enumerate() {
+        if *l != 0 && keep[*l as usize - 1] {
+            out.data[i] = true;
+        }
+    }
+    (out, true)
+}
+
 /// Degrees the lines of `m` are turned: where its rows of ink are sharpest. A line through the
 /// ink's middle would read lines of different lengths as a tilt.
 fn tilt_of(m: &Bitmap) -> f32 {
@@ -428,7 +477,7 @@ fn letters_of(raw: Bitmap) -> Option<Letters> {
         Some((body, ring)) => (body, Some(ring)),
         None => (raw, None),
     };
-    let ink = cleaned(&ink);
+    let (ink, mixed) = largest_lettering(cleaned(&ink));
     let tilt = tilt_of(&ink);
     let level = if tilt == 0.0 { ink.clone() } else { rotated(&ink, tilt) };
     let (labels, comps) = components(&level, true);
@@ -463,7 +512,7 @@ fn letters_of(raw: Bitmap) -> Option<Letters> {
             break;
         }
     }
-    (!out.is_empty()).then_some(Letters { letters: out, cap, ink, tilt, ring })
+    (!out.is_empty()).then_some(Letters { letters: out, cap, ink, tilt, ring, mixed })
 }
 
 #[cfg(test)]
@@ -522,6 +571,49 @@ mod tests {
         }
         let found = letters(&Zone { rgb: &rgb, width: w, height: h }).unwrap();
         assert!(found.letters.len() >= 5, "{}", found.letters.len());
+    }
+
+    #[test]
+    fn with_a_big_title_and_a_small_line_it_takes_the_title_and_says_so() {
+        let (w, h) = (300, 140);
+        let mut rgb = vec![255u8; w * h * 3];
+        let mut bar = |x0: usize, y0: usize, bw: usize, bh: usize| {
+            for y in y0..y0 + bh {
+                for x in x0..x0 + bw {
+                    rgb[(y * w + x) * 3..(y * w + x) * 3 + 3].fill(0);
+                }
+            }
+        };
+        for k in 0..12 {
+            bar(20 + k * 14, 10, 4, 14); // A small line, most of the shapes.
+        }
+        for k in 0..4 {
+            bar(20 + k * 60, 50, 30, 70); // The title.
+        }
+        let found = letters(&Zone { rgb: &rgb, width: w, height: h }).unwrap();
+        assert!(found.mixed);
+        assert_eq!(found.letters.len(), 4, "the title's");
+        assert!((found.cap - 70.0).abs() < 4.0, "{}", found.cap);
+    }
+
+    #[test]
+    fn dots_and_lower_case_are_one_lettering() {
+        let (w, h) = (300, 80);
+        let mut rgb = vec![255u8; w * h * 3];
+        let mut bar = |x0: usize, y0: usize, bh: usize| {
+            for y in y0..y0 + bh {
+                for x in x0..x0 + 6 {
+                    rgb[(y * w + x) * 3..(y * w + x) * 3 + 3].fill(0);
+                }
+            }
+        };
+        for k in 0..8 {
+            bar(20 + k * 20, if k % 2 == 0 { 20 } else { 28 }, if k % 2 == 0 { 30 } else { 22 });
+        }
+        for k in 0..3 {
+            bar(200 + k * 14, 44, 6); // Three dots.
+        }
+        assert!(!letters(&Zone { rgb: &rgb, width: w, height: h }).unwrap().mixed);
     }
 
     #[test]

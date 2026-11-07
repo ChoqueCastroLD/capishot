@@ -36,10 +36,20 @@ fn option(c: &Candidate, dpi: f64) -> Value {
     let stroke = c.look.outline.map_or(Value::Null, |(color, width)| json!({"color": hex(color), "width": width.round()}));
     let gradient = c.look.gradient.map_or(Value::Null, |(top, bottom)| json!({"top": hex(top), "bottom": hex(bottom)}));
     let mut params = json!({"font": c.family, "fontStyle": c.style, "size": pt, "color": hex(c.look.fill), "stroke": stroke});
+    let mut effects = Vec::new();
     if let Some((top, bottom)) = c.look.gradient {
         // Photoshop's angle 90 runs up the layer: its first colour is at the bottom.
-        params[crate::type_bubble_cmds::ROLE_EFFECTS] = json!([["gradientOverlay", {"from": hex(bottom), "to": hex(top), "angle": 90}]]);
+        effects.push(json!(["gradientOverlay", {"from": hex(bottom), "to": hex(top), "angle": 90}]));
     }
+    if let Some((color, [dx, dy])) = c.look.shadow {
+        // The angle is where the light comes from: the shadow falls the other way.
+        let angle = f64::from(dy).atan2(f64::from(-dx)).to_degrees().round();
+        effects.push(json!(["dropShadow", {"color": hex(color), "distance": f64::from(dx.hypot(dy)).round(), "angle": angle, "size": 0, "spread": 0, "opacity": 100, "blend": "Normal", "useGlobalLight": false}]));
+    }
+    if !effects.is_empty() {
+        params[crate::type_bubble_cmds::ROLE_EFFECTS] = json!(effects);
+    }
+    let shadow = c.look.shadow.map_or(Value::Null, |(color, at)| json!({"color": hex(color), "offset": at}));
     json!({
         "family": c.family,
         "style": c.style,
@@ -47,6 +57,8 @@ fn option(c: &Candidate, dpi: f64) -> Value {
         "rotation": c.look.tilt,
         "ground": hex(c.look.ground),
         "gradient": gradient,
+        "shadow": shadow,
+        "mixed": c.look.mixed,
         // What the type commands take.
         "params": params,
     })
@@ -127,7 +139,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: LABEL,
         menu: &[],
         shortcut: None,
-        params: r#"{"rect": [x, y, width, height], "k"?: 1..20 = 5, "scope"?: "all"|"document" (the fonts the document's type uses), "families"?: [family, …] (only these), "prefer"?: [family, …] (these count as a little closer)}: the fonts closest to the lettering in the rectangle, by shapes alone (no model, no OCR; deterministic), as a job; answers {options: [{family, style, distance, rotation, ground, gradient: null|{top, bottom}, params: {font, fontStyle, size, color, stroke}}], rect, faces}; five that differ, not weights or copies of one design. Empty options: nothing there reads as letters"#,
+        params: r#"{"rect": [x, y, width, height], "k"?: 1..20 = 5, "scope"?: "all"|"document" (the fonts the document's type uses), "families"?: [family, …] (only these), "prefer"?: [family, …] (these count as a little closer)}: the fonts closest to the lettering in the rectangle, by shapes alone (no model, no OCR; deterministic), as a job; answers {options: [{family, style, distance, rotation, ground, gradient: null|{top, bottom}, shadow: null|{color, offset}, mixed: bool (other lettering in the zone: this is the largest), params: {font, fontStyle, size, color, stroke}}], rect, faces}; five that differ, not weights or copies of one design. Empty options: nothing there reads as letters"#,
         enabled: |s| s.active().map(|_| ()).ok_or_else(|| "no document".to_string()),
         journal: false,
         run,
@@ -172,7 +184,7 @@ mod tests {
                 family: "Inter".into(),
                 style: "Regular".into(),
                 distance: 0.0,
-                look: photocraft_fontmatch::Look { fill: [0, 0, 0], ground: [255, 255, 255], outline: None, gradient: Some(([255, 0, 0], [0, 0, 255])), tilt: 0.0, cap: 80.0, size: 110.0 },
+                look: photocraft_fontmatch::Look { fill: [0, 0, 0], ground: [255, 255, 255], outline: None, gradient: Some(([255, 0, 0], [0, 0, 255])), shadow: None, mixed: false, tilt: 0.0, cap: 80.0, size: 110.0 },
             },
             72.0,
         );
@@ -184,6 +196,45 @@ mod tests {
         let last = top(&s, b[3] as i32 - 12).expect("ink near the bottom");
         assert!(first[0] > first[1], "red on top: {first:?}");
         assert!(last[1] > last[0], "blue below: {last:?}");
+    }
+
+    #[test]
+    fn a_measured_shadow_falls_the_same_way_when_applied() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 600, "height": 240, "background": "#000000"})).unwrap();
+        let r = s.execute("type.create", json!({"x": 60, "y": 170, "text": "HIT", "font": "Inter", "size": 120, "color": "#ffffff"})).unwrap();
+        let layer = r["layer"].clone();
+        let o = option(
+            &Candidate {
+                family: "Inter".into(),
+                style: "Regular".into(),
+                distance: 0.0,
+                look: photocraft_fontmatch::Look { fill: [255, 255, 255], ground: [0, 0, 0], outline: None, gradient: None, shadow: Some(([120, 120, 120], [6.0, 6.0])), mixed: false, tilt: 0.0, cap: 90.0, size: 120.0 },
+            },
+            72.0,
+        );
+        let styles = json!({"floating": o["params"], "bubble": o["params"], "narration": o["params"]});
+        s.execute("type.setBubbleStyle", json!({"layer": layer, "styles": styles})).unwrap();
+        let doc = &s.active().unwrap().doc;
+        let info_bounds = doc.bounds();
+        let b = photocraft_compose::render(doc, info_bounds);
+        let (w, px) = (b.rect.width() as usize, &b.px);
+        // Grey pixels: their middle lies down and right of the white ones'.
+        let mid = |pick: &dyn Fn(&[f32; 4]) -> bool| {
+            let (mut sx, mut sy, mut n) = (0f64, 0f64, 0f64);
+            for (i, p) in px.iter().enumerate() {
+                if pick(p) {
+                    sx += (i % w) as f64;
+                    sy += (i / w) as f64;
+                    n += 1.0;
+                }
+            }
+            (sx / n.max(1.0), sy / n.max(1.0), n)
+        };
+        let white = mid(&|p| p[0] > 0.9);
+        let grey = mid(&|p| (0.35..0.6).contains(&p[0]));
+        assert!(grey.2 > 50.0, "a shadow shows: {}", grey.2);
+        assert!(grey.0 > white.0 && grey.1 > white.1, "down and to the right: {grey:?} {white:?}");
     }
 
     #[test]
