@@ -29,13 +29,21 @@ struct Loaded {
 /// The mask model, loaded on first use.
 pub struct NativeTextMasker {
     path: PathBuf,
+    /// Never the GPU.
+    cpu: bool,
     loaded: Mutex<Option<Loaded>>,
     device: Mutex<String>,
 }
 
 impl NativeTextMasker {
     pub fn new(path: PathBuf) -> Self {
-        NativeTextMasker { path, loaded: Mutex::new(None), device: Mutex::new(String::new()) }
+        NativeTextMasker { path, cpu: false, loaded: Mutex::new(None), device: Mutex::new(String::new()) }
+    }
+
+    /// Only on the CPU, for a host that asked for that.
+    pub fn cpu_only(mut self, cpu: bool) -> Self {
+        self.cpu = cpu;
+        self
     }
 
     fn build(path: &Path, cpu: bool) -> Result<Session, String> {
@@ -61,7 +69,7 @@ impl NativeTextMasker {
     fn load(&self) -> Result<std::sync::MutexGuard<'_, Option<Loaded>>, Error> {
         let mut slot = self.loaded.lock().unwrap_or_else(PoisonError::into_inner);
         if slot.is_none() {
-            let gpu = if cfg!(windows) && std::env::var("CAPISHOT_AI_DEVICE").map_or(true, |v| !v.eq_ignore_ascii_case("cpu")) {
+            let gpu = if !self.cpu && cfg!(windows) && std::env::var("CAPISHOT_AI_DEVICE").map_or(true, |v| !v.eq_ignore_ascii_case("cpu")) {
                 Self::build(&self.path, false).ok()
             } else {
                 None

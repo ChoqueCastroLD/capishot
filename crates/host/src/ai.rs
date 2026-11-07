@@ -151,6 +151,7 @@ fn uninstall(session: &mut Session) {
     session.set_inpainter(None);
     session.set_ai_upscaler(None);
     session.set_genfill(None);
+    session.set_text_masker(None);
     session.set_ai_models(None);
 }
 
@@ -193,6 +194,8 @@ fn install_impl(session: &mut Session, config: &AiConfig) -> AiAvailability {
         inpainter = inpainter.with_fetch(Arc::new(model_fetcher(DiskCache::in_dir(dir), base)));
     }
     session.set_inpainter(Some(cpu_inpainter(Arc::new(inpainter), cpu)));
+    #[cfg(any(windows, target_os = "linux"))]
+    session.set_text_masker(Some(Arc::new(photocraft_ai_textmask::native::NativeTextMasker::new(dir.join(photocraft_ai_textmask::native::FILE)).cpu_only(cpu))));
     if config.generative_fill {
         let genfill = photocraft_ai_sd::native::NativeGenFill::new(vec![dir.to_path_buf()], true);
         session.set_genfill(Some(cpu_genfill(Arc::new(genfill), cpu)));
@@ -215,6 +218,7 @@ fn install_impl(session: &mut Session, config: &AiConfig) -> AiAvailability {
     session.set_ai_upscaler(Some(cpu_upscaler(ai.upscaler, cpu)));
     session.set_inpainter(Some(cpu_inpainter(ai.inpainter, cpu)));
     session.set_genfill(config.generative_fill.then(|| cpu_genfill(ai.genfill, cpu)));
+    session.set_text_masker(Some(ai.text_masker));
     session.set_ai_models(Some(ai.models));
     AiAvailability { inpaint: true, upscale: true, generative_fill: config.generative_fill, models: true, reason: None }
 }

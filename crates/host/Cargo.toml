@@ -31,6 +31,7 @@ plugins = ["photocraft-engine/plugins", "photocraft-ui-egui?/plugins"]
 # AI natively (desktop): burn on wgpu/CPU, DirectML on Windows (ONNX Runtime loaded at run time).
 # Enable it for native targets only (see `ai`'s docs): never in a wasm build.
 ai-native = [
+    "dep:photocraft-ai-textmask",
     "photocraft-ai/gpu", "photocraft-ai/cpu", "photocraft-ai/download", "photocraft-ai/directml",
     "photocraft-ai-lama/flex", "photocraft-ai-lama/wgpu", "photocraft-ai-lama/rayon", "photocraft-ai-lama/directml",
     "photocraft-ai-sd/flex", "photocraft-ai-sd/wgpu", "photocraft-ai-sd/rayon", "photocraft-ai-sd/native",
@@ -52,6 +53,7 @@ photocraft-geom = { workspace = true }
 photocraft-text = { workspace = true }
 photocraft-ai = { workspace = true }
 photocraft-ai-lama = { workspace = true }
+photocraft-ai-textmask = { workspace = true, optional = true, features = ["native"] }
 photocraft-ai-sd = { workspace = true }
 photocraft-ai-web = { workspace = true, optional = true }
 photocraft-ui-egui = { workspace = true, optional = true }
