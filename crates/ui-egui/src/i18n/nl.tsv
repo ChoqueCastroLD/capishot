@@ -4868,3 +4868,6 @@ curves	Smooth	Vloeiend maken
 	Arc Lower	Boog onder
 	Arc Upper	Boog boven
 	Cylinder	Cilinder
+	The size of the lettering that was in the balloon, else in proportion to the page	De grootte van de letters in de ballon, anders in verhouding tot de pagina
+	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO. In a text box or a balloon: text from a click is one line	Een woord dat niet past wordt afgebroken: PE-RRO. In een tekstvak of ballon: tekst via een klik is één regel
+	Hyphenation needs a text box: drag a rectangle with the tool	Afbreken vereist een tekstvak: sleep een rechthoek met het gereedschap

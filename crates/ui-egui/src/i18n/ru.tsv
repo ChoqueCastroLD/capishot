@@ -5303,3 +5303,6 @@ shape	Appearance	Оформление
 	Among {n} fonts, yours and Google Fonts. Click one to use it	Среди {n} шрифтов, ваших и Google Fonts. Нажмите на шрифт, чтобы использовать его
 	Not available in this build	Недоступно в этой версии
 	Cylinder	Цилиндр
+	The size of the lettering that was in the balloon, else in proportion to the page	Размер букв, которые были в пузыре, иначе пропорционально странице
+	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO. In a text box or a balloon: text from a click is one line	Слово, которое не помещается, переносится с дефисом: PE-RRO. В текстовом блоке или пузыре: текст по клику идёт одной строкой
+	Hyphenation needs a text box: drag a rectangle with the tool	Для переносов нужен текстовый блок: растяните прямоугольник инструментом

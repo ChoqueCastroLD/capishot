@@ -4792,3 +4792,6 @@ curves	Smooth	スムーズ
 	Arc Lower	円弧 (下)
 	Arc Upper	円弧 (上)
 	Cylinder	円柱
+	The size of the lettering that was in the balloon, else in proportion to the page	フキダシにあった文字のサイズ、なければページに合わせたサイズ
+	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO. In a text box or a balloon: text from a click is one line	入らない単語はハイフンで分割して次の行へ: PE-RRO。テキストボックスかフキダシで有効。クリックで作るテキストは 1 行です
+	Hyphenation needs a text box: drag a rectangle with the tool	ハイフネーションにはテキストボックスが必要です: ツールで長方形をドラッグしてください

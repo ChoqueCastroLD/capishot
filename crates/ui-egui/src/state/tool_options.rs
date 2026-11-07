@@ -31,6 +31,8 @@ pub struct BubbleTextStyle {
     pub style: String,
     /// Points.
     pub size: f32,
+    /// The size of the lettering in the balloon, or in proportion to the page, not `size`.
+    pub auto_size: bool,
     /// Points; `None`: auto.
     pub leading: Option<f32>,
     /// 1/1000 em.
@@ -59,6 +61,7 @@ impl Default for BubbleTextStyle {
             font: "Inter".into(),
             style: "Regular".into(),
             size: 30.0,
+            auto_size: true,
             leading: None,
             tracking: 0.0,
             color: "#000000".into(),

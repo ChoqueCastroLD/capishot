@@ -3548,7 +3548,7 @@ fn bubble_type_click_makes_type_in_the_bubble() {
     super::commit(&mut app);
     let ft = text(&app, LayerId(fl.layer));
     assert!(matches!(ft.shape, photocraft_doc::text::TextShape::Point));
-    assert_eq!(ft.char_runs()[0].style.size_pt, 36.0, "the floating style");
+    assert!((10.0..=60.0).contains(&ft.char_runs()[0].style.size_pt), "in proportion to the page: {}", ft.char_runs()[0].style.size_pt);
     assert!(app.ui.notices.iter().any(|n| n.title == "Floating text"));
     assert_eq!(crate::bubble_type_ui::flashing(&app).map(|f| f.0), Some("floating".into()), "shown by the cursor");
     // Forced to Bubble, a miss makes nothing and says so (once for two misses).
@@ -3629,7 +3629,11 @@ fn bubble_type_styles_popover_edits_each_style() {
         assert_eq!(n["fauxItalic"], true);
     }
     let f = crate::bubble_type_ui::style_params(&st.floating);
-    assert_eq!((f["size"].as_f64(), f["stroke"]["width"].as_f64(), f["stroke"]["color"].as_str()), (Some(36.0), Some(4.0), Some("#ffffff")));
+    assert_eq!((f["size"].as_str(), f["stroke"]["width"].as_f64(), f["stroke"]["color"].as_str()), (Some("auto"), Some(4.0), Some("#ffffff")));
+    let chosen = crate::state::BubbleTextStyle { size: 40.0, auto_size: false, ..st.floating.clone() };
+    assert_eq!(crate::bubble_type_ui::style_params(&chosen)["size"].as_f64(), Some(40.0), "a size someone chose stays");
+    let older = crate::state::BubbleTextStyle { size: 44.0, ..st.floating.clone() };
+    assert_eq!(crate::bubble_type_ui::style_params(&older)["size"].as_f64(), Some(44.0), "as in older settings, with no switch");
 }
 
 fn leading_of(app: &PhotocraftApp, id: u64) -> Option<f32> {

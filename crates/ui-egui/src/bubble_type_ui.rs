@@ -30,6 +30,9 @@ fn pick_label(kind: &str) -> &'static str {
     }
 }
 
+/// The sizes the styles came with: older settings hold one of these without anyone choosing it.
+const FIRST_SIZES: [f32; 3] = [30.0, 26.0, 36.0];
+
 /// `type.createInBubble`'s keys for one style. A face the family lacks is faked.
 pub fn style_params(st: &BubbleTextStyle) -> Value {
     let faces = crate::type_tool::styles(&st.font);
@@ -41,7 +44,7 @@ pub fn style_params(st: &BubbleTextStyle) -> Value {
     let mut v = json!({
         "font": st.font,
         "fontStyle": face,
-        "size": st.size,
+        "size": if st.auto_size && FIRST_SIZES.contains(&st.size) { json!("auto") } else { json!(st.size) },
         "leading": st.leading.map_or(json!("auto"), |l| json!(l)),
         "tracking": st.tracking,
         "color": st.color,
@@ -216,7 +219,16 @@ fn style_fields(app: &mut PhotocraftApp, ui: &mut egui::Ui, tab: &str, st: &mut 
         }
     });
     row(ui, tl!("Size"), |ui| {
-        crate::widgets::value_field(ui, &mut st.size, 1.0..=400.0, "pt", 64.0).accessible_name(tl!("Size"));
+        let mut auto = st.auto_size && FIRST_SIZES.contains(&st.size);
+        if crate::widgets::checkbox(ui, &mut auto, tl!("Auto")).on_hover_text(tl!("The size of the lettering that was in the balloon, else in proportion to the page")).clicked() {
+            st.auto_size = auto;
+            if auto && !FIRST_SIZES.contains(&st.size) {
+                st.size = FIRST_SIZES[0];
+            }
+        }
+        if !auto {
+            crate::widgets::value_field(ui, &mut st.size, 1.0..=400.0, "pt", 64.0).accessible_name(tl!("Size"));
+        }
     });
     row(ui, tl!("Leading"), |ui| {
         let mut auto = st.leading.is_none();

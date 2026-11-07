@@ -38,7 +38,7 @@ use defaults::apply;
 #[cfg(test)]
 use defaults::{default_style_params, default_styles, shown_scale};
 pub use defaults::{foreground_changed, open_color_picker};
-pub(crate) use defaults::{formatting_params, target, target_text, type_unit, with_target};
+pub(crate) use defaults::{formatting_params, hyphen_rules, target, target_text, type_unit, with_target};
 #[cfg(test)]
 pub(crate) use editing::insert;
 use editing::selected_styles;

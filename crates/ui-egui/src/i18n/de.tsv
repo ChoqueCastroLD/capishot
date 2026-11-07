@@ -4142,3 +4142,6 @@ curves	Smooth	Glätten
 	Among {n} fonts, yours and Google Fonts. Click one to use it	Unter {n} Schriften, deinen und Google Fonts. Klicke auf eine, um sie zu verwenden
 	Not available in this build	In dieser Version nicht verfügbar
 	Cylinder	Zylinder
+	The size of the lettering that was in the balloon, else in proportion to the page	Die Größe der Schrift in der Blase, sonst passend zur Seite
+	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO. In a text box or a balloon: text from a click is one line	Ein Wort, das nicht passt, wird mit Bindestrich getrennt: PE-RRO. In einem Textrahmen oder einer Blase: Text per Klick ist eine Zeile
+	Hyphenation needs a text box: drag a rectangle with the tool	Silbentrennung braucht einen Textrahmen: Ziehe mit dem Werkzeug ein Rechteck

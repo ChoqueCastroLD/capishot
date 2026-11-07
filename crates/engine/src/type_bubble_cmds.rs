@@ -40,6 +40,7 @@ pub fn no_bubble(miss: Miss) -> EngineError {
 pub fn bubble_path(s: &mut Session, x: i32, y: i32) -> Result<Subpath> {
     let page = crate::typer_place_cmds::page_image(s)?;
     let found = bubble_find::find(&page.img, page.area, (x, y)).map_err(no_bubble)?;
+    let found = photocraft_typer::bubble_lobes::lobe_at(found, &page.img, page.area, (x, y));
     traced(&found.body)
 }
 
@@ -289,7 +290,7 @@ pub(crate) fn open_bubble(page: &crate::typer_place_cmds::support::PageImage, x:
 
 /// The bubble's path and kind at `(x, y)`: a box (rectangularity above
 /// [`bubble_find::BOX_RECTANGULARITY`]) is narration, anything else a bubble. `want` forces one.
-fn region_at(s: &mut Session, x: i32, y: i32, want: Option<Kind>) -> Result<(Kind, Subpath, f64)> {
+fn region_at(s: &mut Session, x: i32, y: i32, want: Option<Kind>) -> Result<(Kind, Subpath, f64, Option<f64>)> {
     let page = crate::typer_place_cmds::page_image(s)?;
     let found = match bubble_find::find(&page.img, page.area, (x, y)) {
         Ok(f) => f,
@@ -301,10 +302,37 @@ fn region_at(s: &mut Session, x: i32, y: i32, want: Option<Kind>) -> Result<(Kin
             Err(_) => open_bubble(&page, x, y).ok_or_else(|| no_bubble(miss))?,
         },
     };
+    // Two balloons drawn into one: the one clicked.
+    let found = photocraft_typer::bubble_lobes::lobe_at(found, &page.img, page.area, (x, y));
+    let lettering = photocraft_typer::bubble_lobes::lettering_height(&found.interior, &page.img, page.area);
     let rect = bubble_find::rectangularity(&found.interior).map_or(0.0, |(r, _)| r);
     let kind = want.unwrap_or(if rect > bubble_find::BOX_RECTANGULARITY { Kind::Narration } else { Kind::Bubble });
     let path = if kind == Kind::Narration { box_path(&found.interior)? } else { traced(&found.body)? };
-    Ok((kind, path, rect))
+    Ok((kind, path, rect, lettering))
+}
+
+/// Text at this share of the page's height on a page, of its width on a long strip.
+const PAGE_TEXT: f64 = 1.0 / 65.0;
+const STRIP_TEXT: f64 = 1.0 / 28.0;
+/// A strip: a page this many times taller than wide.
+const STRIP: f64 = 2.2;
+/// A capital's height over the font's size.
+const CAP_OVER_SIZE: f64 = 0.72;
+
+/// The size (pt) a new text has with no size of its own: that of the lettering in its balloon, if
+/// it has some and it's not far off, else in proportion to the page. Points depend on the page's
+/// resolution: a fixed number would be huge at 300 ppi and tiny on a large page at 72.
+fn auto_size(s: &Session, kind: Kind, lettering: Option<f64>) -> Option<f64> {
+    let doc = &s.active()?.doc;
+    let (w, h) = (f64::from(doc.size.width), f64::from(doc.size.height));
+    let base = if h > STRIP * w { w * STRIP_TEXT } else { h.min(1.5 * w) * PAGE_TEXT };
+    let px = match (kind, lettering) {
+        (Kind::Floating, _) => base * 1.25,
+        (_, Some(l)) => (l / CAP_OVER_SIZE).clamp(base * 0.6, base * 1.6),
+        (Kind::Narration, None) => base * 0.9,
+        (_, None) => base,
+    };
+    Some((px * 72.0 / f64::from(doc.resolution_dpi).max(1.0)).max(4.0).round())
 }
 
 fn create_in_bubble(s: &mut Session, p: &Value) -> Result<Value> {
@@ -343,7 +371,11 @@ fn create_in_bubble(s: &mut Session, p: &Value) -> Result<Value> {
     };
     // A zone the person drew is a bubble's text unless a style says otherwise.
     let kind = if area.is_some() { want.unwrap_or(Kind::Bubble) } else { region.as_ref().map_or(Kind::Floating, |r| r.0) };
-    let Chosen { q, typer, used, fallback } = chosen_style(s, p, kind, picked, want)?;
+    let Chosen { mut q, typer, used, fallback } = chosen_style(s, p, kind, picked, want)?;
+    if q.get("size").and_then(Value::as_str) == Some("auto") {
+        let size = auto_size(s, kind, region.as_ref().and_then(|r| r.3));
+        q["size"] = size.map_or(Value::Null, |v| json!(v));
+    }
     let mut stroke = stroke_param(&q)?;
     let (inset, valign) = crate::type_cmds::in_path_props(&q).map_err(bad)?;
     let mut base = q.clone();
@@ -375,7 +407,7 @@ fn create_in_bubble(s: &mut Session, p: &Value) -> Result<Value> {
         return Ok(out);
     }
     match &region {
-        Some((_, path, _)) => {
+        Some((_, path, _, _)) => {
             t.shape = TextShape::InPath { path: path.clone(), inset: inset.flatten(), valign: valign.unwrap_or(InPathAlign::Center) };
             t.transform = Affine::IDENTITY;
         }
@@ -402,7 +434,7 @@ fn create_in_bubble(s: &mut Session, p: &Value) -> Result<Value> {
         // Said, not an error: the text still goes in, in the shape's own style.
         out["fallback"] = json!(missing);
     }
-    if let Some((_, path, rect)) = region {
+    if let Some((_, path, rect, _)) = region {
         out["path"] = crate::vector_cmds::path_json(&photocraft_doc::vector::Path::new(vec![path]));
         out["rectangularity"] = json!((rect * 1000.0).round() / 1000.0);
     }
@@ -494,6 +526,10 @@ fn set_bubble_style(s: &mut Session, p: &Value) -> Result<Value> {
         _ => Kind::Floating,
     });
     let Chosen { mut q, typer, used, .. } = chosen_style(s, p, kind, picked, want.or(Some(kind)))?;
+    if q.get("size").and_then(Value::as_str) == Some("auto") {
+        let size = auto_size(s, kind, None);
+        q["size"] = size.map_or(Value::Null, |v| json!(v));
+    }
     let mut stroke = stroke_param(&q)?;
     let (inset, valign) = crate::type_cmds::in_path_props(&q).map_err(bad)?;
     let effects = role_effects(&q);
@@ -561,6 +597,66 @@ fn bubble_specs() -> Vec<CommandSpec> {
         journal: true,
         run: create_in_bubble,
     }]
+}
+
+#[cfg(test)]
+mod lobe_and_size_tests {
+    use super::*;
+
+    /// Two circles of paper joined, with a black outline, on a grey page.
+    fn joined(dpi: f64) -> Session {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 900, "height": 1400, "background": "#808080", "resolution": dpi})).unwrap();
+        for (r, color) in [(156.0, "#000000"), (150.0, "#ffffff")] {
+            for cx in [320.0, 560.0] {
+                let points: Vec<[f64; 2]> = (0..96).map(|k| f64::from(k) * std::f64::consts::TAU / 96.0).map(|a: f64| [cx + r * a.cos(), 400.0 + r * a.sin()]).collect();
+                s.execute("select.lasso", json!({"points": points, "mode": "add"})).unwrap();
+            }
+            s.execute("edit.fill", json!({"color": color})).unwrap();
+            s.execute("select.deselect", json!({})).unwrap();
+        }
+        s
+    }
+
+    fn bounds(r: &Value) -> [f64; 2] {
+        fn xs(v: &Value, out: &mut Vec<f64>) {
+            match v {
+                Value::Array(a) if a.len() == 2 && a[0].is_number() && a[1].is_number() => out.extend(a[0].as_f64()),
+                Value::Array(a) => a.iter().for_each(|v| xs(v, out)),
+                Value::Object(m) => m.values().for_each(|v| xs(v, out)),
+                _ => {}
+            }
+        }
+        let mut found = Vec::new();
+        xs(&r["path"], &mut found);
+        [found.iter().copied().fold(f64::MAX, f64::min), found.iter().copied().fold(f64::MIN, f64::max)]
+    }
+
+    #[test]
+    fn a_click_in_one_of_two_joined_balloons_is_in_that_one() {
+        let mut s = joined(72.0);
+        let left = s.execute(CMD, json!({"x": 300, "y": 400, "text": "A", "size": 20})).unwrap();
+        let right = s.execute(CMD, json!({"x": 600, "y": 400, "text": "B", "size": 20})).unwrap();
+        assert_eq!(left["style"], "bubble");
+        let (l, r) = (bounds(&left), bounds(&right));
+        assert!(l[1] <= 460.0, "the left one stops at the neck: {l:?} {left}");
+        assert!(r[0] >= 420.0, "the right one starts there: {r:?}");
+    }
+
+    #[test]
+    fn with_no_size_of_its_own_text_follows_the_page_whatever_its_resolution() {
+        let size_at = |dpi: f64| {
+            let mut s = joined(dpi);
+            let r = s.execute(CMD, json!({"x": 300, "y": 400, "text": "A", "styles": {"bubble": {"size": "auto"}}})).unwrap();
+            let st = s.active().unwrap();
+            let layer = st.doc.layer(photocraft_doc::LayerId(r["layer"].as_u64().unwrap())).unwrap();
+            let photocraft_doc::LayerContent::Text(t) = &layer.content else { panic!("type") };
+            f64::from(t.char_runs()[0].style.size_pt)
+        };
+        let (at_72, at_300) = (size_at(72.0), size_at(300.0));
+        assert!((20.0..=24.0).contains(&at_72), "1400 / 65: {at_72}");
+        assert!((4.0..=7.0).contains(&at_300), "the same pixels: {at_300}");
+    }
 }
 
 #[cfg(test)]

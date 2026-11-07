@@ -4350,3 +4350,6 @@ curves	Smooth	매끄럽게
 	Inflate	부풀리기
 	Squeeze	쥐어짜기
 	Twist	비틀기
+	The size of the lettering that was in the balloon, else in proportion to the page	말풍선에 있던 글자 크기, 없으면 페이지에 맞춘 크기
+	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO. In a text box or a balloon: text from a click is one line	맞지 않는 단어는 하이픈으로 나누어 아래로 이어집니다: PE-RRO. 텍스트 상자나 말풍선에서 적용되며 클릭으로 만든 텍스트는 한 줄입니다
+	Hyphenation needs a text box: drag a rectangle with the tool	하이픈 넣기에는 텍스트 상자가 필요합니다: 도구로 사각형을 드래그하세요

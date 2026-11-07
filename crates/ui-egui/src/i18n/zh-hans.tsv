@@ -3823,3 +3823,6 @@ curves	Smooth	平滑
 	Inflate	膨胀
 	Squeeze	挤压
 	Twist	扭转
+	The size of the lettering that was in the balloon, else in proportion to the page	气泡内原有文字的大小,否则按页面比例
+	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO. In a text box or a balloon: text from a click is one line	放不下的单词用连字符拆分并换行: PE-RRO。适用于文本框或气泡,点击创建的文字只有一行
+	Hyphenation needs a text box: drag a rectangle with the tool	断字需要文本框: 用工具拖出矩形

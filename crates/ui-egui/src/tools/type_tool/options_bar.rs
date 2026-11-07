@@ -194,7 +194,7 @@ fn hyphenate_option(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let bubble = app.ui.tool == crate::state::Tool::BubbleType;
     let stored = if bubble { app.ui.tool_options.bubble_hyphenate } else { app.ui.tool_options.type_hyphenate };
     let mut on = styles_at(app).map_or(stored, |(_, p)| p.hyphenate);
-    let tip = tl!("A word that doesn't fit is split with a hyphen and goes on below: PE-RRO");
+    let tip = tl!("A word that doesn't fit is split with a hyphen and goes on below: PE-RRO. In a text box or a balloon: text from a click is one line");
     let clicked = crate::widgets::checkbox(ui, &mut on, tl!("Hyphenate")).on_hover_text(tip).clicked();
     if clicked {
         if bubble {
@@ -202,7 +202,15 @@ fn hyphenate_option(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         } else {
             app.ui.tool_options.type_hyphenate = on;
         }
-        apply(app, ui.ctx(), json!({"hyphenate": on}));
+        let mut props = json!({"hyphenate": on});
+        crate::type_tool::hyphen_rules(&mut props, on);
+        apply(app, ui.ctx(), props);
+        // Type from a click is one line: nothing wraps, so nothing to split.
+        let point = app.session.active().and_then(|st| st.active_layer.and_then(|id| st.doc.layer(id))).is_some_and(|l| matches!(&l.content, photocraft_doc::LayerContent::Text(t) if matches!(t.shape, photocraft_doc::text::TextShape::Point)));
+        if on && !bubble && point {
+            app.ui.status = tl!("Hyphenation needs a text box: drag a rectangle with the tool").to_string();
+            app.ui.status_error = false;
+        }
     }
 }
 

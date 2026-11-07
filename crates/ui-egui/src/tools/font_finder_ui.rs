@@ -266,6 +266,7 @@ fn choose(app: &mut PhotocraftApp, o: &Value) {
     tools.type_size = st.size;
     let bubble = &mut tools.bubble_styles.bubble;
     (bubble.font, bubble.style, bubble.size, bubble.color) = (st.font.clone(), st.style.clone(), st.size, st.color.clone());
+    bubble.auto_size = false;
     (bubble.stroke, bubble.stroke_color, bubble.stroke_width) = (st.stroke, st.stroke_color.clone(), st.stroke_width);
     // From the catalog: it stays, among the person's fonts.
     if let Some(url) = o["url"].as_str() {

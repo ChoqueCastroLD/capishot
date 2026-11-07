@@ -4740,3 +4740,6 @@ curves	Smooth	Wygładź
 	Arc Lower	Łuk dolny
 	Arc Upper	Łuk górny
 	Cylinder	Walec
+	The size of the lettering that was in the balloon, else in proportion to the page	Rozmiar liter, które były w dymku, a jeśli ich nie ma, proporcjonalny do strony
+	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO. In a text box or a balloon: text from a click is one line	Słowo, które się nie mieści, jest dzielone łącznikiem: PE-RRO. W polu tekstowym lub dymku: tekst z kliknięcia to jedna linia
+	Hyphenation needs a text box: drag a rectangle with the tool	Dzielenie wyrazów wymaga pola tekstowego: przeciągnij prostokąt narzędziem

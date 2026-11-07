@@ -5557,3 +5557,6 @@ fontTab	Find More	Encontrar mais
 	Arc Lower	Arco inferior
 	Arc Upper	Arco superior
 	Cylinder	Cilindro
+	The size of the lettering that was in the balloon, else in proportion to the page	O tamanho das letras que havia no balão; senão, proporcional à página
+	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO. In a text box or a balloon: text from a click is one line	Uma palavra que não cabe é separada com hífen e continua abaixo: PE-RRO. Em caixa de texto ou balão: texto de um clique é uma linha só
+	Hyphenation needs a text box: drag a rectangle with the tool	A separação precisa de uma caixa de texto: arraste um retângulo com a ferramenta

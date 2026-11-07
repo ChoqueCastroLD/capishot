@@ -13,6 +13,7 @@
 
 pub mod bubble;
 pub mod bubble_find;
+pub mod bubble_lobes;
 pub mod exchange;
 pub mod fontscan;
 pub mod id;

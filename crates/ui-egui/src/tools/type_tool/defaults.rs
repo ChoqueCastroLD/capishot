@@ -108,8 +108,19 @@ pub(super) fn default_style_params(app: &PhotocraftApp) -> serde_json::Value {
     p["align"] = json!(o.type_align);
     p["direction"] = json!(o.type_direction);
     p["hyphenate"] = json!(o.type_hyphenate);
+    hyphen_rules(&mut p, o.type_hyphenate);
     p["color"] = json!(hex(app.session.tools.foreground));
     p
+}
+
+/// Hyphenation as manga is lettered: a word of four letters may split, and whenever one doesn't
+/// fit. Photoshop's defaults stay for what comes from a PSD: words of six or more, and only when
+/// three picas are left on the line, which in a narrow box is almost never.
+pub(crate) fn hyphen_rules(p: &mut serde_json::Value, on: bool) {
+    if on {
+        p["hyphenateMinWord"] = json!(4);
+        p["hyphenateZone"] = json!(0);
+    }
 }
 
 /// Style numbers become f32 in the engine. JSON itself permits finite f64 values too large
@@ -256,4 +267,33 @@ pub(crate) fn with_target(app: &PhotocraftApp, mut props: serde_json::Value) -> 
         props["coalesce"] = serde_json::json!(key);
     }
     Some(props)
+}
+
+#[cfg(test)]
+mod hyphen_rule_tests {
+    use serde_json::json;
+
+    /// With the Type tool's Hyphenate on, a text box splits short words whenever one doesn't fit,
+    /// as manga is lettered: Photoshop's limits would leave `PERRO` whole.
+    #[test]
+    fn hyphenate_splits_short_words_in_a_text_box() {
+        let mut s = photocraft_engine::Session::new();
+        s.execute("file.new", json!({"width": 600, "height": 400})).unwrap();
+        let mut p = json!({"text": "CASA PERO CASA PERO", "box": [10, 10, 120, 300], "size": 20, "font": "Inter", "hyphenate": true, "language": "es"});
+        super::hyphen_rules(&mut p, true);
+        let r = s.execute("type.create", p).unwrap();
+        let st = s.active().unwrap();
+        let layer = st.doc.layer(photocraft_doc::LayerId(r["layer"].as_u64().unwrap())).unwrap();
+        let photocraft_doc::LayerContent::Text(t) = &layer.content else { panic!("type") };
+        let para = &t.paragraphs[0].style;
+        assert!(para.hyphenate);
+        assert_eq!((para.hyphenate_min_word, para.hyphenate_zone_pt), (Some(4), Some(0.0)));
+    }
+
+    #[test]
+    fn off_leaves_the_limits_alone() {
+        let mut p = json!({});
+        super::hyphen_rules(&mut p, false);
+        assert_eq!(p, json!({}));
+    }
 }

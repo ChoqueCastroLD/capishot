@@ -612,15 +612,19 @@ fn judge(img: &[[u8; 4]], area: Rect, page: Rect, interior: Mask, walls: bool, s
     if fill < bubble::MIN_FILL || dark < bubble::MIN_OUTLINE_DARK {
         return Err(Miss::NotBubble);
     }
+    let body = body_of(&interior).ok_or(Miss::TooSmall)?;
+    Ok(Found { interior, body })
+}
+
+/// The body the text goes in: `interior` without its tail.
+pub(crate) fn body_of(interior: &Mask) -> Option<Mask> {
+    let b = interior.bounds()?;
     let radius = bubble::opening_radius(f64::from(b.width()), f64::from(b.height()));
     let mut body = if radius > 0 { interior.opened(radius as f32).unwrap_or_else(|| interior.clone()) } else { interior.clone() };
     // The opening can split a body pinched in the middle: keep the larger piece.
     body = largest_piece(&body);
-    let bb = body.bounds().ok_or(Miss::TooSmall)?;
-    if f64::from(bb.width().min(bb.height())) < bubble::MIN_SIDE {
-        return Err(Miss::TooSmall);
-    }
-    Ok(Found { interior, body })
+    let bb = body.bounds()?;
+    (f64::from(bb.width().min(bb.height())) >= bubble::MIN_SIDE).then_some(body)
 }
 
 /// A region at least this rectangular (its area over its minimum-area bounding rectangle's) is a
@@ -669,7 +673,7 @@ pub fn rectangularity(m: &Mask) -> Option<(f64, [(f64, f64); 4])> {
 }
 
 /// Andrew's monotone chain: the convex hull, counter-clockwise, without collinear points.
-fn convex_hull(mut pts: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
+pub(crate) fn convex_hull(mut pts: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
     pts.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
     pts.dedup();
     if pts.len() < 3 {
