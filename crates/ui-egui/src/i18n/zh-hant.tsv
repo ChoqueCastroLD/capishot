@@ -3764,3 +3764,18 @@ curves	Smooth	平滑
 	Couldn't get Google Fonts: {why}	無法取得 Google Fonts: {why}
 	Among {n} fonts, yours and Google Fonts. Click one to use it	在你的字型和 Google Fonts 的 {n} 個字型中。點擊一個即可使用
 	Not available in this build	此版本不可用
+	Arc Lower	下弧
+	Arc Upper	上弧
+	Cylinder	圓柱
+	Arc	弧形
+	Arch	拱形
+	Bulge	凸起
+	Shell Lower	下貝殼
+	Shell Upper	上貝殼
+	Flag	旗幟
+	Wave	波浪
+	Fish	魚形
+	Rise	上升
+	Inflate	膨脹
+	Squeeze	擠壓
+	Twist	扭轉

@@ -4789,3 +4789,6 @@ curves	Smooth	スムーズ
 	Couldn't get Google Fonts: {why}	Google Fonts を取得できません: {why}
 	Among {n} fonts, yours and Google Fonts. Click one to use it	自分のフォントと Google Fonts の {n} フォントから。クリックして使用
 	Not available in this build	このビルドでは利用できません
+	Arc Lower	円弧 (下)
+	Arc Upper	円弧 (上)
+	Cylinder	円柱

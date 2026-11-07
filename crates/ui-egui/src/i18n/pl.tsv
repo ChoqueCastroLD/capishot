@@ -4737,3 +4737,6 @@ curves	Smooth	Wygładź
 	Couldn't get Google Fonts: {why}	Nie można pobrać Google Fonts: {why}
 	Among {n} fonts, yours and Google Fonts. Click one to use it	Spośród {n} czcionek, Twoich i Google Fonts. Kliknij jedną, aby jej użyć
 	Not available in this build	Niedostępne w tej wersji
+	Arc Lower	Łuk dolny
+	Arc Upper	Łuk górny
+	Cylinder	Walec

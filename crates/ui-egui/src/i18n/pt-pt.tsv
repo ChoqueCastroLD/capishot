@@ -3683,3 +3683,6 @@ fontWeight	Italic	Itálico
 	Couldn't get Google Fonts: {why}	Não foi possível obter o Google Fonts: {why}
 	Among {n} fonts, yours and Google Fonts. Click one to use it	Entre {n} tipos de letra, seus e do Google Fonts. Clique num para o usar
 	Not available in this build	Não disponível nesta versão
+	Arc Lower	Arco inferior
+	Arc Upper	Arco superior
+	Cylinder	Cilindro

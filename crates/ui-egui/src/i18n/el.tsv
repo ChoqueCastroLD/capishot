@@ -4809,3 +4809,6 @@ curves	Smooth	Εξομάλυνση
 	Couldn't get Google Fonts: {why}	Δεν ήταν δυνατή η λήψη του Google Fonts: {why}
 	Among {n} fonts, yours and Google Fonts. Click one to use it	Ανάμεσα σε {n} γραμματοσειρές, δικές σας και Google Fonts. Κάντε κλικ σε μία
 	Not available in this build	Δεν διατίθεται σε αυτή την έκδοση
+	Arc Lower	Κάτω τόξο
+	Arc Upper	Πάνω τόξο
+	Cylinder	Κύλινδρος

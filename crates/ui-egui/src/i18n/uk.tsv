@@ -4830,3 +4830,6 @@ curves	Smooth	Згладити
 	Couldn't get Google Fonts: {why}	Не вдалося отримати Google Fonts: {why}
 	Among {n} fonts, yours and Google Fonts. Click one to use it	Серед {n} шрифтів, ваших і Google Fonts. Натисніть на шрифт, щоб використати його
 	Not available in this build	Недоступно в цій версії
+	Arc Lower	Нижня дуга
+	Arc Upper	Верхня дуга
+	Cylinder	Циліндр

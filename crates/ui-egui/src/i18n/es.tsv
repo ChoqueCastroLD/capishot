@@ -5586,3 +5586,6 @@ fontTab	Find More	Buscar más
 	Couldn't get Google Fonts: {why}	No se pudo obtener Google Fonts: {why}
 	Among {n} fonts, yours and Google Fonts. Click one to use it	Entre {n} fuentes, tuyas y de Google Fonts. Haz clic en una para usarla
 	Not available in this build	No está disponible en esta versión
+	Arc Lower	Arco inferior
+	Arc Upper	Arco superior
+	Cylinder	Cilindro
