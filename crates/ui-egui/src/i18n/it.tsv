@@ -5149,3 +5149,10 @@ shape	Appearance	Aspetto
 	Keep size needs a type layer selected to take the size from	Mantieni dimensione richiede un livello di testo selezionato
 	No bubble around this text	Nessun fumetto attorno a questo testo
 	There's no path here: draw one with the Pen tool	Nessun tracciato qui: disegnane uno con la Penna
+	Block by Block	A blocchi
+	Cleans each block of text on its own, one after another, not those close together at once	Pulisce ogni blocco di testo separatamente, uno dopo l’altro, non quelli vicini insieme
+	Block by Block: On	A blocchi: sì
+	Block by Block: Off	A blocchi: no
+	Brush {px}	Pennello {px}
+	Smaller Brush	Pennello più piccolo
+	Bigger Brush	Pennello più grande

@@ -5077,3 +5077,10 @@ shape	Appearance	Apparence
 	Keep size needs a type layer selected to take the size from	Garder la taille demande un calque de texte sélectionné
 	No bubble around this text	Aucune bulle autour de ce texte
 	There's no path here: draw one with the Pen tool	Aucun tracé ici : dessinez-en un avec la Plume
+	Block by Block	Bloc par bloc
+	Cleans each block of text on its own, one after another, not those close together at once	Nettoie chaque bloc de texte séparément, l’un après l’autre, pas les voisins d’un coup
+	Block by Block: On	Bloc par bloc : oui
+	Block by Block: Off	Bloc par bloc : non
+	Brush {px}	Pinceau {px}
+	Smaller Brush	Pinceau plus petit
+	Bigger Brush	Pinceau plus grand

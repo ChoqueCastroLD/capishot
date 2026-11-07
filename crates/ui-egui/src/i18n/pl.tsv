@@ -4670,3 +4670,10 @@ curves	Smooth	Wygładź
 	Keep size needs a type layer selected to take the size from	Zachowanie rozmiaru wymaga zaznaczonej warstwy tekstowej
 	No bubble around this text	Wokół tego tekstu nie ma dymka
 	There's no path here: draw one with the Pen tool	Nie ma tu ścieżki: narysuj ją Piórem
+	Block by Block	Blok po bloku
+	Cleans each block of text on its own, one after another, not those close together at once	Czyści każdy blok tekstu osobno, jeden po drugim, a nie bliskie naraz
+	Block by Block: On	Blok po bloku: tak
+	Block by Block: Off	Blok po bloku: nie
+	Brush {px}	Pędzel {px}
+	Smaller Brush	Mniejszy pędzel
+	Bigger Brush	Większy pędzel

@@ -72,11 +72,17 @@ pub struct TileOptions {
     /// Work at the [`FIXED_SIDES`] that fit `max_side`, with real pixels as the extra context: a
     /// runtime that re-specialises for each new size (DirectML) stays fast.
     pub fixed_sizes: bool,
+    /// A run for each block of the hole: blobs join only when they nearly touch, not because
+    /// their crops overlap. Neighbours' holes stay masked in a crop, so none is copied.
+    pub blocks: bool,
 }
+
+/// Blobs this close are one block of text.
+const BLOCK_GAP: usize = 16;
 
 impl Default for TileOptions {
     fn default() -> Self {
-        Self { max_side: 512, margin: 64, full_res: false, fixed_sizes: false }
+        Self { max_side: 512, margin: 64, full_res: false, fixed_sizes: false, blocks: false }
     }
 }
 
@@ -208,7 +214,8 @@ pub fn plan(mask: &[f32], w: usize, h: usize, opts: &TileOptions) -> Result<Vec<
             while j < groups.len() {
                 let (a, b) = (&groups[i], &groups[j]);
                 let u = a.1.union(&b.1);
-                if a.0.overlaps(&b.0) || (a.1.overlaps(&b.1) && u.w.max(u.h) <= opts.max_side) {
+                let joined = if opts.blocks { expand(&a.0, BLOCK_GAP, w, h).overlaps(&b.0) } else { a.1.overlaps(&b.1) && u.w.max(u.h) <= opts.max_side };
+                if a.0.overlaps(&b.0) || joined {
                     let (core, crop) = groups.swap_remove(j);
                     groups[i] = (groups[i].0.union(&core), groups[i].1.union(&crop));
                     merged = true;
@@ -769,8 +776,8 @@ mod tests {
     fn bad_inputs_are_errors() {
         let o = TileOptions::default();
         assert!(plan(&[1.0; 10], 4, 4, &o).is_err());
-        assert!(plan(&[1.0; 16], 4, 4, &TileOptions { max_side: 500, margin: 0, full_res: false, fixed_sizes: false }).is_err());
-        assert!(plan(&[1.0; 16], 4, 4, &TileOptions { max_side: 8, margin: 0, full_res: true, fixed_sizes: false }).is_err());
+        assert!(plan(&[1.0; 16], 4, 4, &TileOptions { max_side: 500, margin: 0, full_res: false, fixed_sizes: false, blocks: false }).is_err());
+        assert!(plan(&[1.0; 16], 4, 4, &TileOptions { max_side: 8, margin: 0, full_res: true, fixed_sizes: false, blocks: false }).is_err());
         assert!(plan(&[], 0, 0, &o).is_err());
         let t = Tile { rect: Rect { x: 0, y: 0, w: 10, h: 10 }, core: Rect { x: 0, y: 0, w: 10, h: 10 }, work_w: 64, work_h: 64, fit: Fit::Pad, split: false };
         let (img, m) = (rgb(8, 8), vec![1.0; 64]);
@@ -922,6 +929,23 @@ mod tests {
     /// #21: a hole far larger than the working side, over screentone and a window grid. Downscaled,
     /// the fill loses the pattern; split into full-resolution tiles it keeps it, and the seams
     /// between tiles are no more visible than the fill's own variation.
+    #[test]
+    fn blocks_keep_neighbouring_holes_apart_and_near_blobs_together() {
+        let (w, h) = (400, 200);
+        let mut mask = vec![0f32; w * h];
+        let mut blob = |x0: usize, x1: usize| {
+            for y in 80..100 {
+                mask[y * w + x0..y * w + x1].fill(1.0);
+            }
+        };
+        blob(20, 60);
+        blob(70, 110); // 10 px away: the same block.
+        blob(180, 220); // 70 px away: its crop overlaps, but it's another block.
+        let opts = TileOptions { blocks: true, ..TileOptions::default() };
+        assert_eq!(plan(&mask, w, h, &opts).unwrap().len(), 2);
+        assert_eq!(plan(&mask, w, h, &TileOptions::default()).unwrap().len(), 1, "by default overlapping crops join");
+    }
+
     #[test]
     fn full_res_tiles_keep_screentone_sharp_without_seams() {
         let (w, h) = (1400, 1000);

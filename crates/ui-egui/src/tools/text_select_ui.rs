@@ -234,7 +234,8 @@ fn clean(app: &mut PhotocraftApp) {
     let Some(zone) = st.doc.selection.clone() else { return };
     app.text_select.cleaning = Some((doc, revision, zone));
     let all = app.ui.tool_options.sample_all.remove_ai;
-    crate::remove_ai_ui::request(app, json!({"sampleAllLayers": all}));
+    let by_blocks = app.ui.tool_options.text_select_by_blocks;
+    crate::remove_ai_ui::request(app, json!({"sampleAllLayers": all, "byBlocks": by_blocks}));
 }
 
 /// The next click waiting to clean its piece.
@@ -407,6 +408,8 @@ enum Act {
     ToggleClick,
     ToggleShow,
     ToggleErase,
+    ToggleBlocks,
+    Brush(f32),
     Clean,
     Fill,
     Keep,
@@ -452,6 +455,15 @@ fn act(app: &mut PhotocraftApp, ctx: &egui::Context, what: Act) {
         }
         Act::ToggleErase => {
             app.text_select.erase = !app.text_select.erase;
+            return;
+        }
+        Act::ToggleBlocks => {
+            app.ui.tool_options.text_select_by_blocks = !app.ui.tool_options.text_select_by_blocks;
+            return;
+        }
+        Act::Brush(by) => {
+            let size = (app.session.tools.brush.size * by).clamp(4.0, 500.0);
+            app.session.tools.brush.size = size;
             return;
         }
         Act::Clean => {
@@ -598,6 +610,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     if crate::widgets::checkbox(ui, &mut by_click_box, tl!("Clean on Click")).on_hover_text(tl!("Each click cleans that piece right away, one at a time")).clicked() {
         todo = Some(Act::ToggleClick);
     }
+    crate::widgets::checkbox(ui, &mut app.ui.tool_options.text_select_by_blocks, tl!("Block by Block")).on_hover_text(tl!("Cleans each block of text on its own, one after another, not those close together at once"));
     crate::widgets::vline(ui, 22.0);
     crate::remove_ai_ui::output_dropdown(app, ui);
     crate::widgets::vline(ui, 22.0);
@@ -691,7 +704,7 @@ pub fn bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
 pub fn touch_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let Some(doc) = app.session.active().map(|st| st.doc.id) else { return };
     let area = crate::touch_ui::canvas_area(app, ctx);
-    let (h, gap) = (44.0, 8.0);
+    let (h, gap) = (48.0, 8.0);
     let top = area.bottom() - 8.0 - h;
     let mut todo = None;
     let id = egui::Id::unique("text-select-touch");
@@ -703,7 +716,7 @@ pub fn touch_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
         let r = egui::Rect::from_center_size(pos2(area.center().x, top + h / 2.0), egui::vec2(w, h));
         let label = working.unwrap_or_else(|| find_label(app).to_string());
         let idle = !app.session.has_jobs() && app.text_select.waiting.is_none();
-        egui::Area::new(id).order(egui::Order::Foreground).fixed_pos(area.min).show(ctx, |ui| {
+        egui::Area::new(id).order(egui::Order::Foreground).fixed_pos(r.min).show(ctx, |ui| {
             ui.set_min_size(egui::Vec2::ZERO);
             if crate::touch_ui::round_button(ui, r, None, &label, idle).clicked() && idle {
                 todo = Some(Act::Find);
@@ -715,72 +728,94 @@ pub fn touch_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
         }
         return;
     };
-    let by_click = app.ui.tool_options.text_select_clean_click;
+    let o = &app.ui.tool_options;
+    let by_click = o.text_select_clean_click;
     let contour = crate::i18n::fmt(tl!("Contour {px}"), &[("px", &format!("{:.0}", p.applied))]);
+    let brush = crate::i18n::fmt(tl!("Brush {px}"), &[("px", &format!("{:.0}", app.session.tools.brush.size))]);
     let line = status_line(app, p);
-    let mut items: Vec<(&str, &str, &str)> = Vec::new();
+    let output = crate::remove_ai_ui::output_options().into_iter().find(|(k, _)| *k == o.clean_output).map_or(tl!("Current Layer"), |(_, l)| l);
+    let mut items: Vec<(&str, &str, &str)> = vec![("click", if by_click { tl!("Clean on Tap: On") } else { tl!("Clean on Tap: Off") }, "sparkles")];
     if !by_click {
-        let erase = if app.text_select.erase { tl!("Painting Removes") } else { tl!("Painting Adds") };
         items.extend([
-            ("erase", erase, if app.text_select.erase { "eraser" } else { "brush" }),
             ("all", tl!("All"), "check"),
             ("suggested", tl!("Suggested"), "text-select"),
             ("invert", tl!("Invert"), "contrast"),
             ("none", tl!("None"), "x"),
         ]);
     }
-    let output = crate::remove_ai_ui::output_options().into_iter().find(|(k, _)| *k == app.ui.tool_options.clean_output).map_or(tl!("Current Layer"), |(_, l)| l);
-    items.push(("output", output, "layers"));
     items.extend([
         ("less", tl!("Less Contour"), "minus"),
         ("contour", contour.as_str(), "circle-dashed"),
         ("more", tl!("More Contour"), "plus"),
-        ("click", if by_click { tl!("Clean on Tap: On") } else { tl!("Clean on Tap: Off") }, "sparkles"),
-        ("show", if app.ui.tool_options.text_select_show { tl!("Hide Pieces") } else { tl!("Show Pieces") }, if app.ui.tool_options.text_select_show { "eye-off" } else { "eye" }),
+    ]);
+    if !by_click {
+        items.extend([
+            ("smaller", tl!("Smaller Brush"), "minus"),
+            ("brush", brush.as_str(), "brush"),
+            ("bigger", tl!("Bigger Brush"), "plus"),
+        ]);
+    }
+    items.extend([
+        ("blocks", if o.text_select_by_blocks { tl!("Block by Block: On") } else { tl!("Block by Block: Off") }, "layers"),
+        ("output", output, "layers"),
+        ("show", if o.text_select_show { tl!("Hide Pieces") } else { tl!("Show Pieces") }, if o.text_select_show { "eye-off" } else { "eye" }),
         ("again", tl!("Find Again"), "search"),
     ]);
     if !by_click {
         items.extend([("fill", tl!("Content-Aware Fill"), "paint-bucket"), ("keep", tl!("Leave as Selection"), "square-dashed")]);
     }
     let picked = crate::touch_ui::action_bar(ctx, area, "text-select-actions", "textSelect", &items);
-    todo = picked.map(|cmd| match cmd {
-        "erase" => Act::ToggleErase,
-        "all" => Act::All,
-        "suggested" => Act::Suggested,
-        "invert" => Act::Invert,
-        "none" => Act::None,
-        "less" => Act::Grow(-2.0),
-        "more" => Act::Grow(2.0),
-        "click" => Act::ToggleClick,
-        "show" => Act::ToggleShow,
-        "again" => Act::FindAgain,
-        "fill" => Act::Fill,
-        "keep" => Act::Keep,
-        "output" => Act::NextOutput,
-        _ => Act::Grow(0.0),
+    todo = picked.and_then(|cmd| {
+        Some(match cmd {
+            "all" => Act::All,
+            "suggested" => Act::Suggested,
+            "invert" => Act::Invert,
+            "none" => Act::None,
+            "less" => Act::Grow(-2.0),
+            "more" => Act::Grow(2.0),
+            "smaller" => Act::Brush(0.75),
+            "bigger" => Act::Brush(1.34),
+            "click" => Act::ToggleClick,
+            "blocks" => Act::ToggleBlocks,
+            "show" => Act::ToggleShow,
+            "again" => Act::FindAgain,
+            "fill" => Act::Fill,
+            "keep" => Act::Keep,
+            "output" => Act::NextOutput,
+            _ => return None,
+        })
     });
     let can_clean = has_selection(app) && !by_click && !app.session.has_jobs();
-    let done_w = 96.0;
-    let main_w = (area.width() - 24.0 - done_w - gap).min(240.0);
-    let x0 = area.center().x - (done_w + gap + main_w) / 2.0;
+    let (done_w, paint_w) = (84.0, 96.0);
+    let main_w = (area.width() - 16.0 - done_w - paint_w - 2.0 * gap).min(220.0);
+    let row_w = done_w + gap + main_w + if by_click { 0.0 } else { paint_w + gap };
+    let x0 = area.center().x - row_w / 2.0;
     let done = egui::Rect::from_min_size(pos2(x0, top), egui::vec2(done_w, h));
-    let main = egui::Rect::from_min_size(pos2(done.right() + gap, top), egui::vec2(main_w, h));
+    let paint = egui::Rect::from_min_size(pos2(done.right() + gap, top), egui::vec2(paint_w, h));
+    let main = egui::Rect::from_min_size(pos2(if by_click { done.right() + gap } else { paint.right() + gap }, top), egui::vec2(main_w, h));
+    let erasing = app.text_select.erase;
     let t = Tokens::get(ctx);
-    egui::Area::new(id).order(egui::Order::Foreground).fixed_pos(area.min).show(ctx, |ui| {
+    let g = ctx.fonts_mut(|f| f.layout(line.clone(), crate::theme::medium(11.0), t.text, area.width() - 32.0));
+    let back = egui::Rect::from_center_size(pos2(area.center().x, top - 8.0 - (g.size().y + 8.0) / 2.0), g.size() + egui::vec2(16.0, 8.0));
+    // The area starts here, not at the canvas's top: it would lie over the bar up there and take
+    // its touches.
+    egui::Area::new(id).order(egui::Order::Foreground).fixed_pos(pos2(area.left(), back.top())).show(ctx, |ui| {
         ui.set_min_size(egui::Vec2::ZERO);
-        let text = pos2(area.center().x, top - 14.0);
-        let g = ui.painter().layout(line.clone(), crate::theme::medium(11.0), t.text, area.width() - 32.0);
-        let back = egui::Rect::from_center_size(text, g.size() + egui::vec2(16.0, 8.0));
         ui.painter().rect_filled(back, 8.0, t.card);
         ui.painter().galley(back.min + egui::vec2(8.0, 4.0), g, t.text);
         if crate::touch_ui::round_button(ui, done, None, tl!("Done"), false).clicked() {
             todo = Some(Act::Done);
+        }
+        // What a drag does: the big switch to take zones away, as ⌥ does with a keyboard.
+        if !by_click && crate::touch_ui::round_button(ui, paint, None, if erasing { tl!("Painting Removes") } else { tl!("Painting Adds") }, erasing).clicked() {
+            todo = Some(Act::ToggleErase);
         }
         if can_clean && crate::touch_ui::round_button(ui, main, None, tl!("Remove with AI"), true).clicked() {
             todo = Some(Act::Clean);
         }
     });
     crate::touch_ui::note_rect(ctx, "textSelectDone", done);
+    crate::touch_ui::note_rect(ctx, "textSelectPaint", paint);
     crate::touch_ui::note_rect(ctx, "textSelectClean", main);
     if let Some(what) = todo {
         act(app, ctx, what);

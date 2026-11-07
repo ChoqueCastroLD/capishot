@@ -4072,3 +4072,10 @@ curves	Smooth	Haluskan
 	Keep size needs a type layer selected to take the size from	Pertahankan ukuran perlu lapisan teks yang dipilih
 	No bubble around this text	Tidak ada balon di sekitar teks ini
 	There's no path here: draw one with the Pen tool	Tidak ada jalur di sini: gambar dengan Pena
+	Block by Block	Per Blok
+	Cleans each block of text on its own, one after another, not those close together at once	Membersihkan tiap blok teks sendiri-sendiri, satu per satu, bukan yang berdekatan sekaligus
+	Block by Block: On	Per Blok: Ya
+	Block by Block: Off	Per Blok: Tidak
+	Brush {px}	Kuas {px}
+	Smaller Brush	Kuas Lebih Kecil
+	Bigger Brush	Kuas Lebih Besar

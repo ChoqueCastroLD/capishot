@@ -4763,3 +4763,10 @@ curves	Smooth	Згладити
 	Keep size needs a type layer selected to take the size from	Для збереження розміру потрібен вибраний текстовий шар
 	No bubble around this text	Навколо цього тексту немає бульбашки
 	There's no path here: draw one with the Pen tool	Тут немає контуру: намалюйте його Пером
+	Block by Block	По блоках
+	Cleans each block of text on its own, one after another, not those close together at once	Очищає кожен блок тексту окремо, один за одним, а не сусідні разом
+	Block by Block: On	По блоках: так
+	Block by Block: Off	По блоках: ні
+	Brush {px}	Пензель {px}
+	Smaller Brush	Менший пензель
+	Bigger Brush	Більший пензель

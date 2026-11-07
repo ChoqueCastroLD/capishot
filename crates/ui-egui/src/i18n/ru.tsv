@@ -5235,3 +5235,10 @@ shape	Appearance	Оформление
 	Keep size needs a type layer selected to take the size from	Для сохранения размера нужен выбранный текстовый слой
 	No bubble around this text	Вокруг этого текста нет пузыря
 	There's no path here: draw one with the Pen tool	Здесь нет контура: нарисуйте его Пером
+	Block by Block	По блокам
+	Cleans each block of text on its own, one after another, not those close together at once	Очищает каждый блок текста отдельно, один за другим, а не соседние сразу
+	Block by Block: On	По блокам: да
+	Block by Block: Off	По блокам: нет
+	Brush {px}	Кисть {px}
+	Smaller Brush	Кисть меньше
+	Bigger Brush	Кисть больше

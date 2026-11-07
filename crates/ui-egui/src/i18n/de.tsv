@@ -4074,3 +4074,10 @@ curves	Smooth	Glätten
 	Keep size needs a type layer selected to take the size from	Größe beibehalten braucht eine ausgewählte Textebene
 	No bubble around this text	Keine Sprechblase um diesen Text
 	There's no path here: draw one with the Pen tool	Hier ist kein Pfad: zeichne einen mit dem Zeichenstift
+	Block by Block	Blockweise
+	Cleans each block of text on its own, one after another, not those close together at once	Bereinigt jeden Textblock einzeln nacheinander, nicht benachbarte auf einmal
+	Block by Block: On	Blockweise: an
+	Block by Block: Off	Blockweise: aus
+	Brush {px}	Pinsel {px}
+	Smaller Brush	Kleinerer Pinsel
+	Bigger Brush	Größerer Pinsel

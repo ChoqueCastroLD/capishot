@@ -4269,3 +4269,10 @@ curves	Smooth	매끄럽게
 	Keep size needs a type layer selected to take the size from	크기 유지에는 선택된 텍스트 레이어가 필요합니다
 	No bubble around this text	이 텍스트 주위에 말풍선이 없습니다
 	There's no path here: draw one with the Pen tool	여기에는 패스가 없습니다: 펜으로 그리세요
+	Block by Block	블록별
+	Cleans each block of text on its own, one after another, not those close together at once	가까운 것을 한꺼번에 하지 않고 텍스트 블록을 하나씩 차례로 정리합니다
+	Block by Block: On	블록별: 켬
+	Block by Block: Off	블록별: 끔
+	Brush {px}	브러시 {px}
+	Smaller Brush	브러시 작게
+	Bigger Brush	브러시 크게

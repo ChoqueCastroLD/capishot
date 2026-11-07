@@ -4798,3 +4798,10 @@ curves	Smooth	Vloeiend maken
 	Keep size needs a type layer selected to take the size from	Grootte behouden vereist een geselecteerde tekstlaag
 	No bubble around this text	Geen tekstballon rond deze tekst
 	There's no path here: draw one with the Pen tool	Hier is geen pad: teken er een met de Pen
+	Block by Block	Per blok
+	Cleans each block of text on its own, one after another, not those close together at once	Schoont elk tekstblok apart op, na elkaar, niet nabije blokken tegelijk
+	Block by Block: On	Per blok: aan
+	Block by Block: Off	Per blok: uit
+	Brush {px}	Penseel {px}
+	Smaller Brush	Kleiner penseel
+	Bigger Brush	Groter penseel

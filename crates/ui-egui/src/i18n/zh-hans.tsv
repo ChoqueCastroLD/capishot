@@ -3741,3 +3741,10 @@ curves	Smooth	平滑
 	Keep size needs a type layer selected to take the size from	保持大小需要选中文字图层
 	No bubble around this text	此文字周围没有气泡
 	There's no path here: draw one with the Pen tool	这里没有路径:请用钢笔工具绘制
+	Block by Block	逐块
+	Cleans each block of text on its own, one after another, not those close together at once	逐个单独清理每个文字块,而不是同时清理相邻的
+	Block by Block: On	逐块:开
+	Block by Block: Off	逐块:关
+	Brush {px}	画笔 {px}
+	Smaller Brush	缩小画笔
+	Bigger Brush	放大画笔

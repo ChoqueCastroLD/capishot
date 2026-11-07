@@ -3616,3 +3616,10 @@ fontWeight	Italic	Itálico
 	Keep size needs a type layer selected to take the size from	Manter o tamanho precisa de uma camada de texto selecionada
 	No bubble around this text	Não há balão à volta deste texto
 	There's no path here: draw one with the Pen tool	Não há traçado aqui: desenhe um com a Caneta
+	Block by Block	Por blocos
+	Cleans each block of text on its own, one after another, not those close together at once	Limpa cada bloco de texto separadamente, um após o outro, não os próximos de uma vez
+	Block by Block: On	Por blocos: sim
+	Block by Block: Off	Por blocos: não
+	Brush {px}	Pincel {px}
+	Smaller Brush	Pincel menor
+	Bigger Brush	Pincel maior

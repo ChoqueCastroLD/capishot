@@ -4722,3 +4722,10 @@ curves	Smooth	スムーズ
 	Keep size needs a type layer selected to take the size from	サイズの維持にはテキストレイヤーの選択が必要です
 	No bubble around this text	このテキストの周りにフキダシがありません
 	There's no path here: draw one with the Pen tool	ここにパスはありません: ペンツールで描いてください
+	Block by Block	ブロックごと
+	Cleans each block of text on its own, one after another, not those close together at once	近いものをまとめず、テキストのブロックごとに順番にクリーニングします
+	Block by Block: On	ブロックごと: オン
+	Block by Block: Off	ブロックごと: オフ
+	Brush {px}	ブラシ {px}
+	Smaller Brush	ブラシを小さく
+	Bigger Brush	ブラシを大きく

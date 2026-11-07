@@ -5519,3 +5519,10 @@ fontTab	Find More	Buscar más
 	Keep size needs a type layer selected to take the size from	Mantener el tamaño necesita una capa de texto seleccionada
 	No bubble around this text	No hay un globo alrededor de este texto
 	There's no path here: draw one with the Pen tool	No hay ningún trazado aquí: dibuja uno con la Pluma
+	Block by Block	Por bloques
+	Cleans each block of text on its own, one after another, not those close together at once	Limpia cada bloque de texto por separado, uno tras otro, no los cercanos a la vez
+	Block by Block: On	Por bloques: sí
+	Block by Block: Off	Por bloques: no
+	Brush {px}	Pincel {px}
+	Smaller Brush	Pincel más chico
+	Bigger Brush	Pincel más grande

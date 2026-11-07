@@ -4742,3 +4742,10 @@ curves	Smooth	Εξομάλυνση
 	Keep size needs a type layer selected to take the size from	Η διατήρηση μεγέθους χρειάζεται επιλεγμένο επίπεδο κειμένου
 	No bubble around this text	Δεν υπάρχει συννεφάκι γύρω από αυτό το κείμενο
 	There's no path here: draw one with the Pen tool	Δεν υπάρχει διαδρομή εδώ: σχεδιάστε μία με την Πένα
+	Block by Block	Ανά τμήμα
+	Cleans each block of text on its own, one after another, not those close together at once	Καθαρίζει κάθε τμήμα κειμένου χωριστά, το ένα μετά το άλλο, όχι τα κοντινά μαζί
+	Block by Block: On	Ανά τμήμα: ναι
+	Block by Block: Off	Ανά τμήμα: όχι
+	Brush {px}	Πινέλο {px}
+	Smaller Brush	Μικρότερο πινέλο
+	Bigger Brush	Μεγαλύτερο πινέλο

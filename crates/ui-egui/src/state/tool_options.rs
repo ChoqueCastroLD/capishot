@@ -333,6 +333,8 @@ pub struct ToolOptions {
     pub bubble_hyphenate: bool,
     /// Where a clean's result goes (Remove with AI, Text Selection): "current", "new", "single".
     pub clean_output: String,
+    /// Text Selection: a run of Remove with AI for each block, not one for those close together.
+    pub text_select_by_blocks: bool,
     /// Text Selection: the pieces show on the canvas.
     pub text_select_show: bool,
     /// Text Selection: the colour of the pieces chosen, and of the others.
@@ -599,6 +601,7 @@ impl Default for ToolOptions {
             type_hyphenate: false,
             bubble_hyphenate: true,
             clean_output: "current".into(),
+            text_select_by_blocks: true,
             text_select_show: true,
             text_select_on: [66, 133, 244],
             text_select_off: [255, 140, 0],

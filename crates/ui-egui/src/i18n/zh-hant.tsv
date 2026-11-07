@@ -3697,3 +3697,10 @@ curves	Smooth	平滑
 	Keep size needs a type layer selected to take the size from	保持大小需要選取文字圖層
 	No bubble around this text	此文字周圍沒有對話框
 	There's no path here: draw one with the Pen tool	這裡沒有路徑:請用鋼筆工具繪製
+	Block by Block	逐塊
+	Cleans each block of text on its own, one after another, not those close together at once	逐一單獨清理每個文字塊,而不是同時清理相鄰的
+	Block by Block: On	逐塊:開
+	Block by Block: Off	逐塊:關
+	Brush {px}	筆刷 {px}
+	Smaller Brush	縮小筆刷
+	Bigger Brush	放大筆刷

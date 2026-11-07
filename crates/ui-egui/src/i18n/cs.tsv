@@ -4785,3 +4785,10 @@ cameraRaw	Dehaze	Odstranění oparu
 	Keep size needs a type layer selected to take the size from	Zachování velikosti vyžaduje vybranou textovou vrstvu
 	No bubble around this text	Kolem tohoto textu není bublina
 	There's no path here: draw one with the Pen tool	Není tu cesta: nakreslete ji Perem
+	Block by Block	Po blocích
+	Cleans each block of text on its own, one after another, not those close together at once	Čistí každý blok textu zvlášť, jeden po druhém, ne blízké najednou
+	Block by Block: On	Po blocích: ano
+	Block by Block: Off	Po blocích: ne
+	Brush {px}	Štětec {px}
+	Smaller Brush	Menší štětec
+	Bigger Brush	Větší štětec
