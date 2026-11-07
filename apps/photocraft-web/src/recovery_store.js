@@ -270,6 +270,11 @@ export async function rcv_persist() {
   return false;
 }
 
+const ALIVE = 'capishot-recovery-alive';
+// A page busy for longer than this reads as frozen: it's asked again before anything is offered,
+// and what's offered is only a copy of its last checkpoint.
+const ANSWER_MS = 4000;
+
 function readClean() {
   try {
     const v = JSON.parse(localStorage.getItem(CLEAN) || '[]');
@@ -290,6 +295,12 @@ function markClean(id, on) {
 // Starts this page's session: holds its lock while the page lives, and marks it closed cleanly
 // when the page goes away with nothing unsaved (not after a crash: `rcv_mark_crashed`).
 export function rcv_session_start(id) {
+  // A page answers while its thread runs: a frozen one holds its lock and says nothing.
+  if (self.BroadcastChannel) {
+    const answers = new BroadcastChannel(ALIVE);
+    answers.onmessage = (e) => { if (e.data && e.data.ask) answers.postMessage({ alive: id }); };
+    self.__capishotAnswers = answers;
+  }
   if (navigator.locks && navigator.locks.request) navigator.locks.request(LOCK + id, () => new Promise(() => {})).catch(() => {});
   addEventListener('pagehide', () => { if (!self.__capishotCrashed && !self.__capishotUnsaved) markClean(id, true); });
   addEventListener('pageshow', (e) => { if (e.persisted) markClean(id, false); });
@@ -314,9 +325,28 @@ export function rcv_set_clean_sessions(list) {
   try { localStorage.setItem(CLEAN, JSON.stringify(list)); } catch (e) { /* ignore */ }
 }
 
-// Sessions whose page is alive (in any tab), or null when the browser can't tell.
-export async function rcv_live_sessions() {
+// Sessions whose page holds its lock (in any tab), or null when the browser can't tell.
+export async function rcv_held_sessions() {
   if (!navigator.locks || !navigator.locks.query) return null;
   const q = await navigator.locks.query();
   return (q.held || []).map((l) => l.name).filter((n) => n && n.startsWith(LOCK)).map((n) => n.slice(LOCK.length));
+}
+
+// Sessions whose page is alive (in any tab), or null when the browser can't tell: those that hold
+// their lock and answer. A tab frozen for good holds its lock until someone kills it, and its
+// work must not wait for that. `own` needs no asking; with no other page nothing is waited for.
+export async function rcv_live_sessions(own) {
+  const held = await rcv_held_sessions();
+  if (!held || !self.BroadcastChannel || !held.some((s) => s !== own)) return held;
+  const ask = new BroadcastChannel(ALIVE);
+  const answered = new Set([own]);
+  ask.onmessage = (e) => { if (e.data && e.data.alive) answered.add(e.data.alive); };
+  ask.postMessage({ ask: true });
+  await new Promise((r) => setTimeout(r, ANSWER_MS));
+  ask.close();
+  return held.filter((s) => answered.has(s));
+}
+
+export function rcv_sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
 }

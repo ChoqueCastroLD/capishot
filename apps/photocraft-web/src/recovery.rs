@@ -11,7 +11,7 @@
 //!   on the page's thread in the single-threaded build), then written by the browser
 //!   asynchronously, so the page never waits on storage. Saving or closing a document removes its
 //!   checkpoint (`Services::discard_autosave`).
-//! * **Rescue**: each page holds a Web Lock for its session and marks it closed cleanly on
+//! * **Rescue**: each page holds a Web Lock for its session, answers other tabs while its thread runs (a frozen tab counts as gone), and marks it closed cleanly on
 //!   `pagehide` when nothing is unsaved ([`Recovery::set_unsaved`]; a phone runs `pagehide` when
 //!   it closes a frozen tab too). On load, checkpoints of a session that is neither alive nor closed cleanly are
 //!   offered in the "Recover N documents" dialog (`photocraft_ui_egui::recovery_ui`); File ›
@@ -59,7 +59,10 @@ extern "C" {
     fn rcv_clean_sessions() -> js_sys::Array;
     fn rcv_set_clean_sessions(list: js_sys::Array);
     #[wasm_bindgen(catch)]
-    async fn rcv_live_sessions() -> Result<JsValue, JsValue>;
+    async fn rcv_held_sessions() -> Result<JsValue, JsValue>;
+    async fn rcv_sleep(ms: f64);
+    #[wasm_bindgen(catch)]
+    async fn rcv_live_sessions(own: &str) -> Result<JsValue, JsValue>;
 }
 
 /// Longest side of the dialog's thumbnails, in pixels.
@@ -114,6 +117,19 @@ struct Inner {
     auto_accept: bool,
     /// The unsaved flag as last handed to the page (`set_unsaved`).
     unsaved: Option<bool>,
+    /// What the last offer listed, and what a person already answered: a tab that stops or
+    /// freezes later doesn't ask again about those.
+    offered: Vec<String>,
+    answered: std::collections::HashSet<String>,
+    /// Wakes the page when something is to be offered with nothing else going on.
+    ctx: Option<egui::Context>,
+}
+
+/// How often the other tabs are looked at (ms).
+const WATCH_MS: f64 = 15_000.0;
+
+fn sessions(v: Result<JsValue, JsValue>) -> Option<std::collections::HashSet<String>> {
+    v.ok().filter(|v| !v.is_null()).map(|v| js_sys::Array::from(&v).iter().filter_map(|s| s.as_string()).collect())
 }
 
 /// The browser's recovery manager, shared by the services and the shell.
@@ -181,6 +197,42 @@ impl Recovery {
         let me = Recovery(Rc::new(RefCell::new(inner)));
         CURRENT.with(|c| *c.borrow_mut() = Some(Rc::downgrade(&me.0)));
         me
+    }
+
+    /// Another tab that dies or freezes for good while this one is open: its work is offered here,
+    /// not only the next time the site loads. A person who opens another tab because the first one
+    /// froze has no other load to wait for.
+    pub fn watch_other_tabs(&self, ctx: egui::Context) {
+        self.0.borrow_mut().ctx = Some(ctx);
+        let me = self.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let own = me.0.borrow().session.clone();
+            let mut held = std::collections::HashSet::new();
+            let mut quiet = std::collections::HashSet::new();
+            let mut told = std::collections::HashSet::new();
+            loop {
+                rcv_sleep(WATCH_MS).await;
+                let Some(mut now) = sessions(rcv_held_sessions().await) else { return };
+                now.remove(&own);
+                let gone = held.iter().any(|s| !now.contains(s));
+                held = now;
+                let mut frozen = false;
+                if held.is_empty() {
+                    quiet.clear();
+                } else if let Some(live) = sessions(rcv_live_sessions(&own).await) {
+                    let silent: std::collections::HashSet<String> = held.difference(&live).cloned().collect();
+                    // Silent twice in a row, and not a tab already offered as frozen.
+                    frozen = silent.iter().any(|s| quiet.contains(s) && !told.contains(s));
+                    if frozen {
+                        told.extend(silent.iter().cloned());
+                    }
+                    quiet = silent;
+                }
+                if gone || frozen {
+                    me.discover(true);
+                }
+            }
+        });
     }
 
     /// This page is leaving without closing cleanly (its graphics context was lost and it
@@ -422,8 +474,8 @@ impl Recovery {
                     return;
                 }
             };
-            let live: Option<Vec<String>> =
-                rcv_live_sessions().await.ok().filter(|v| !v.is_null()).map(|v| js_sys::Array::from(&v).iter().filter_map(|s| s.as_string()).collect());
+            let own_session = me.0.borrow().session.clone();
+            let live = sessions(rcv_live_sessions(&own_session).await);
             let clean: Vec<String> = rcv_clean_sessions().iter().filter_map(|s| s.as_string()).collect();
             let (own, owned): (String, Vec<String>) = {
                 let inner = me.0.borrow();
@@ -449,7 +501,7 @@ impl Recovery {
                         continue;
                     }
                 }
-                if crashed && clean.contains(&session) {
+                if crashed && (clean.contains(&session) || me.0.borrow().answered.contains(&key)) {
                     continue;
                 }
                 // A checkpoint with nothing whole left isn't offered after a crash; File ›
@@ -475,7 +527,11 @@ impl Recovery {
             let kept: js_sys::Array = clean.iter().filter(|s| sessions_with_checkpoints.contains(*s)).map(|s| JsValue::from_str(s)).collect();
             rcv_set_clean_sessions(kept);
             entries.sort_by(|a, b| b.saved_at_ms.total_cmp(&a.saved_at_ms));
-            me.0.borrow_mut().offer = Some((entries, crashed));
+            let mut inner = me.0.borrow_mut();
+            inner.offer = Some((entries, crashed));
+            if let Some(ctx) = &inner.ctx {
+                ctx.request_repaint();
+            }
         });
     }
 
@@ -532,6 +588,11 @@ impl Recovery {
             self.discover(false);
         }
         if let Some(answer) = app.take_recovery_answer() {
+            {
+                let mut inner = self.0.borrow_mut();
+                let offered = std::mem::take(&mut inner.offered);
+                inner.answered.extend(offered);
+            }
             match answer {
                 RecoveryAnswer::Recover(keys) => self.read(keys),
                 RecoveryAnswer::Discard(keys) => {
@@ -551,7 +612,9 @@ impl Recovery {
             let mut inner = self.0.borrow_mut();
             (inner.offer.take(), std::mem::take(&mut inner.recovered), std::mem::take(&mut inner.errors))
         };
-        if let Some((entries, crashed)) = offer {
+        // A dialog already open stays: a person may be choosing in it.
+        if let Some((entries, crashed)) = offer.filter(|(e, crashed)| !(*crashed && (e.is_empty() || app.recovery_open()))) {
+            self.0.borrow_mut().offered = entries.iter().map(|e| e.key.clone()).collect();
             app.offer_recovery(entries, crashed);
             if std::mem::take(&mut self.0.borrow_mut().auto_accept) {
                 app.accept_recovery_offer();

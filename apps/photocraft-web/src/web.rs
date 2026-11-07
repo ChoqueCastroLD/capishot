@@ -338,6 +338,7 @@ impl Boot {
                 recovery.auto_accept();
             }
             recovery.discover(true);
+            recovery.watch_other_tabs(ctx.clone());
         }
         // Image › Upscale with AI…: the AI worker module, loaded on first use (photocraft-ai-web).
         // Window › AI Models… (`ai.models.*`): downloads through a second worker instance.

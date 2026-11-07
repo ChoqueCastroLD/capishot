@@ -77,6 +77,11 @@ impl PhotocraftApp {
         self.recovery.dialog = Some(RecoveryDialog { entries, skipped: HashSet::new(), crashed, textures, buttons: Vec::new() });
     }
 
+    /// The recovery dialog is open.
+    pub fn recovery_open(&self) -> bool {
+        self.recovery.dialog.is_some()
+    }
+
     /// Answer the open recovery dialog with every document it lists (the page reloaded on purpose
     /// after its graphics context was lost).
     pub fn accept_recovery_offer(&mut self) {
