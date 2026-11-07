@@ -335,7 +335,8 @@ fn fill_step(mut st: FillState) {
         Box::new(move |r| {
             let out = match r {
                 Ok(out) => out,
-                Err(LamaError::Gpu(why)) if !st.opts.run.choice.cpu => return gpu_fallback(st, &why),
+                // Once more on the CPU; a CPU run that failed this way only got there on threads.
+                Err(LamaError::Gpu(why)) if !st.opts.run.choice.cpu || !st.fell_back => return gpu_fallback(st, &why),
                 Err(e) => return (st.finish)(Err(lama_err(e))),
             };
             let pasted = match (weights, st.split.as_mut()) {

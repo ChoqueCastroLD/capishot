@@ -559,7 +559,9 @@ fn main() -> eframe::Result {
             app.min_frame_ms = uncapped.then_some(1000.0 / 240.0);
             // Edit › Generative Fill: Stable Diffusion inpainting on this machine (feature `ai`).
             #[cfg(feature = "ai")]
-            app.session.set_genfill(Some(std::sync::Arc::new(photocraft_ai_sd::native::NativeGenFill::locate(models.as_deref()))));
+            if photocraft_ai::catalog::GENERATIVE_FILL {
+                app.session.set_genfill(Some(std::sync::Arc::new(photocraft_ai_sd::native::NativeGenFill::locate(models.as_deref()))));
+            }
             app.integrated_titlebar = cfg!(target_os = "macos");
             app.custom_titlebar = custom_titlebar;
             // Only the title bar's free gap drags the window, never the menus (mac_window.rs).

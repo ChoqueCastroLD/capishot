@@ -3690,3 +3690,10 @@ curves	Smooth	平滑
 	One Cleaning Layer	單一清理圖層
 	AI Clean	AI 清理
 	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO	放不下的單字用連字號斷開並在下一行繼續:HY-PHEN
+	Select a bubble first, with the Magic Wand, the Lasso or a Marquee	請先用魔術棒、套索或選取畫面選擇對話框
+	The selected area is too small for text	所選區域太小,放不下文字
+	Select a type layer	請選擇文字圖層
+	No line to paste: load a script or write one	沒有可貼上的行:請載入腳本或輸入一行
+	Keep size needs a type layer selected to take the size from	保持大小需要選取文字圖層
+	No bubble around this text	此文字周圍沒有對話框
+	There's no path here: draw one with the Pen tool	這裡沒有路徑:請用鋼筆工具繪製

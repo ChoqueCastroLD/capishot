@@ -5070,3 +5070,10 @@ shape	Appearance	Apparence
 	One Cleaning Layer	Un seul calque de nettoyages
 	AI Clean	Nettoyage IA
 	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO	Un mot qui ne tient pas est coupé par un trait d’union et continue dessous : CHI-EN
+	Select a bubble first, with the Magic Wand, the Lasso or a Marquee	Sélectionnez d’abord une bulle, avec la Baguette, le Lasso ou un Rectangle
+	The selected area is too small for text	La zone sélectionnée est trop petite pour le texte
+	Select a type layer	Sélectionnez un calque de texte
+	No line to paste: load a script or write one	Aucune ligne à coller : chargez un script ou écrivez-en une
+	Keep size needs a type layer selected to take the size from	Garder la taille demande un calque de texte sélectionné
+	No bubble around this text	Aucune bulle autour de ce texte
+	There's no path here: draw one with the Pen tool	Aucun tracé ici : dessinez-en un avec la Plume

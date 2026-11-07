@@ -4067,3 +4067,10 @@ curves	Smooth	Glätten
 	One Cleaning Layer	Eine Ebene für alle Bereinigungen
 	AI Clean	KI-Bereinigung
 	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO	Ein Wort, das nicht passt, wird getrennt und unten fortgesetzt: HUN-DE
+	Select a bubble first, with the Magic Wand, the Lasso or a Marquee	Wähle zuerst eine Sprechblase aus, mit Zauberstab, Lasso oder Auswahlrechteck
+	The selected area is too small for text	Der ausgewählte Bereich ist zu klein für Text
+	Select a type layer	Wähle eine Textebene aus
+	No line to paste: load a script or write one	Keine Zeile zum Einfügen: lade ein Skript oder schreibe eine
+	Keep size needs a type layer selected to take the size from	Größe beibehalten braucht eine ausgewählte Textebene
+	No bubble around this text	Keine Sprechblase um diesen Text
+	There's no path here: draw one with the Pen tool	Hier ist kein Pfad: zeichne einen mit dem Zeichenstift

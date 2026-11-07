@@ -569,6 +569,9 @@ pub const GENFILL_HIGH: &[&str] =
 pub const GENFILL_FAST: &[&str] = &["genfill-text-q8", "genfill-taesd", "genfill-fast-unet-1", "genfill-fast-unet-2"];
 
 /// The id of the Manga LaMa inpainting model.
+/// Generative Fill is off: no menu, no service, and its models can't be downloaded. Files already
+/// on a device can still be deleted from the AI Models window.
+pub const GENERATIVE_FILL: bool = false;
 pub const LAMA_ID: &str = "manga-lama";
 pub const TEXTMASK_ID: &str = "manga-text-mask";
 

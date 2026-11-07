@@ -4262,3 +4262,10 @@ curves	Smooth	매끄럽게
 	One Cleaning Layer	정리 레이어 하나
 	AI Clean	AI 정리
 	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO	들어가지 않는 단어를 하이픈으로 나눠 아래로 이어 갑니다: HY-PHEN
+	Select a bubble first, with the Magic Wand, the Lasso or a Marquee	먼저 자동 선택, 올가미 또는 선택 윤곽으로 말풍선을 선택하세요
+	The selected area is too small for text	선택 영역이 텍스트에 비해 너무 작습니다
+	Select a type layer	텍스트 레이어를 선택하세요
+	No line to paste: load a script or write one	붙여 넣을 줄이 없습니다: 대본을 불러오거나 입력하세요
+	Keep size needs a type layer selected to take the size from	크기 유지에는 선택된 텍스트 레이어가 필요합니다
+	No bubble around this text	이 텍스트 주위에 말풍선이 없습니다
+	There's no path here: draw one with the Pen tool	여기에는 패스가 없습니다: 펜으로 그리세요

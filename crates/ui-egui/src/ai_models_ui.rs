@@ -593,6 +593,12 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
             };
             let card_w = (width - 10.0 * (cols as f32 - 1.0)) / cols as f32;
             for section in [Section::Clean, Section::Upscale, Section::Generative] {
+                // Generative Fill is off: only what's on this device shows, to delete it.
+                let hidden = |c: &Card| section == Section::Generative && !photocraft_ai::catalog::GENERATIVE_FILL && !c.models().iter().any(|m| app.session.ai_models().is_some_and(|st| st.status(m) == photocraft_ai::models::Status::Downloaded));
+                let list: Vec<&'static Card> = cards::CARDS.iter().filter(|c| c.section == section && !hidden(c)).collect();
+                if list.is_empty() {
+                    continue;
+                }
                 crate::widgets::hairline(ui);
                 ui.add_space(6.0);
                 let (title, purpose) = section_text(section);
@@ -602,7 +608,6 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     ui.label(egui::RichText::new(purpose).color(t.text_dim).size(12.0));
                 });
                 ui.add_space(4.0);
-                let list: Vec<&'static Card> = cards::CARDS.iter().filter(|c| c.section == section).collect();
                 for chunk in list.chunks(cols) {
                     ui.horizontal_top(|ui| {
                         for c in chunk {

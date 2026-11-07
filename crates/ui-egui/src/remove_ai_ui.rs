@@ -130,8 +130,15 @@ fn run(app: &mut PhotocraftApp, mut params: Value) {
     }
     app.ui.status.clear();
     if let Err(e) = app.run(photocraft_engine::remove_ai_cmds::ID, params) {
-        app.ui.status = crate::tools::retouch_ui::remove_refusal(e);
+        let why = crate::tools::retouch_ui::remove_refusal(e);
+        app.ui.status = why.clone();
         app.ui.status_error = true;
+        // A notice too: people paint again and again when it's only in the status line.
+        app.ui.notices.retain(|n| n.tag.as_deref() != Some("removeAiRefused"));
+        let id = crate::notices::post(app, why, Vec::new(), true, None);
+        if let Some(n) = app.ui.notices.iter_mut().find(|n| n.id == id) {
+            n.tag = Some("removeAiRefused".into());
+        }
     }
 }
 

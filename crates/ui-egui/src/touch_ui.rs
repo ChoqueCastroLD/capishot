@@ -458,7 +458,7 @@ fn type_layer_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
 
 /// The selection's action bar: what a phone does next with a selection, one tap away. Each
 /// button has its name (short) under the icon; the full name is its accessible label.
-const SELECTION_ACTIONS: [(&str, &str, &str, &str); 9] = [
+const SELECTION_ACTIONS: [(&str, &str, &str, &str); 8] = [
     ("select.deselect", "Deselect", "Deselect", "x"),
     ("select.inverse", "Invert", "Invert", "contrast"),
     ("edit.fill", "Fill", "Fill", "paint-bucket"),
@@ -467,7 +467,6 @@ const SELECTION_ACTIONS: [(&str, &str, &str, &str); 9] = [
     ("edit.cut", "Cut", "Cut", "scissors"),
     ("edit.freeTransform", "Transform", "Transform", "scaling"),
     ("select.modify.feather", "Feather", "Feather", "circle-dashed"),
-    ("edit.generativeFill", "Generative Fill", "Gen. Fill", "wand-sparkles"),
 ];
 
 /// A selection bar button: the icon in a circle over its name (two short lines at most).

@@ -8,19 +8,31 @@ pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if !app.prefs_rt.loaded {
         load(app);
     }
-    recovery(app);
+    {
+        let _s = crate::perf_span::span("prefs.recovery");
+        recovery(app);
+    }
     sync_rulers(app);
     sync_display_scale(app, ctx);
     sync_appearance(app, ctx);
     crate::theme::set_ui_font_size(ctx, app.session.prefs().interface.ui_font_size);
-    presets_store(app);
+    {
+        let _s = crate::perf_span::span("prefs.presets");
+        presets_store(app);
+    }
     sync_tooltips(app, ctx);
     sync_animations(app, ctx);
-    app.sync_recent();
+    {
+        let _s = crate::perf_span::span("prefs.recent");
+        app.sync_recent();
+    }
     // Monotonic, not `ctx.input(|i| i.time)`: logic also runs on hidden ticks, where egui's input
     // time is that of the last UI pass.
-    if let Some(wait) = persist(app, crate::gpu_canvas::now_ms() / 1000.0) {
-        ctx.request_repaint_after(std::time::Duration::try_from_secs_f64(wait).unwrap_or_default());
+    {
+        let _s = crate::perf_span::span("prefs.persist");
+        if let Some(wait) = persist(app, crate::gpu_canvas::now_ms() / 1000.0) {
+            ctx.request_repaint_after(std::time::Duration::try_from_secs_f64(wait).unwrap_or_default());
+        }
     }
     let style = canvas_style(app);
     if let Some(gpu) = app.gpu.as_ref()
@@ -29,7 +41,10 @@ pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
         gpu.set_style(style);
         app.prefs_rt.gpu_style = Some(style);
     }
-    autosave(app);
+    {
+        let _s = crate::perf_span::span("prefs.autosave");
+        autosave(app);
+    }
     if let Some(error) = &app.prefs_rt.recovery_error {
         app.ui.status.clone_from(error);
         app.ui.status_error = true;

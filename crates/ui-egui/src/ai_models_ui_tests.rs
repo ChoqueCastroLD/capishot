@@ -55,25 +55,22 @@ fn it_shows_one_card_per_model_or_tier_in_sections() {
     for want in [
         "Clean",
         "Upscale",
-        "Generative Fill",
         "Manga LaMa",
         "MI-GAN (lite)",
         "MangaJaNai",
         "IllustrationJaNai",
         "IllustrationJaNai V3 detail",
-        "Ultra-light",
-        "Standard",
         "Ready",
         "Not downloaded",
         "Recommended for this device",
-        "No GPU needed",
         "Models on this device: 13 MB",
         "Download recommended for this device",
     ] {
         assert!(h.query_all_by_label_contains(want).next().is_some(), "{want}");
     }
-    // Parts never show as their own rows.
-    assert!(h.query_all_by_label_contains("part 1 of 4").next().is_none());
+    // Generative Fill is off: nothing on the device, so no section.
+    assert!(h.query_all_by_label_contains("Generative Fill").next().is_none());
+    assert!(h.query_all_by_label_contains("Ultra-light").next().is_none());
 }
 
 #[test]
@@ -119,20 +116,16 @@ fn download_pause_resume_cancel_and_delete_a_card() {
 }
 
 #[test]
-fn a_tier_downloads_all_its_parts_and_delete_all_asks_first() {
+fn delete_all_asks_first() {
     let _lang = crate::i18n::language_scope(crate::i18n::Lang::EN);
     let store = Arc::new(FakeStore::default());
     let mut h = harness(&store);
     open(h.state_mut(), None);
     h.run_steps(4);
-    let card = photocraft_ai::cards::card(photocraft_ai::cards::GENFILL_STANDARD_CARD).unwrap();
+    let card = photocraft_ai::cards::card("manga-lama").unwrap();
     h.state_mut().run(ai_models_cmds::DOWNLOAD, json!({"card": card.id})).unwrap();
     h.run_steps(4);
     let files = card.models();
-    let downloading = files.iter().filter(|m| matches!(store.status(m), Status::Downloading { .. })).count();
-    let queued = files.iter().filter(|m| store.status(m) == Status::Queued).count();
-    assert_eq!((downloading, queued), (1, files.len() - 1), "one at a time");
-    assert!(h.query_by_label_contains("more queued").is_some());
     while store.step() {}
     h.run_steps(4);
     assert!(files.iter().all(|m| store.status(m) == Status::Downloaded));
@@ -143,6 +136,21 @@ fn a_tier_downloads_all_its_parts_and_delete_all_asks_first() {
     h.query_all_by_label("Delete all").next().unwrap().click();
     h.run_steps(4);
     assert!(files.iter().all(|m| store.status(m) == Status::NotDownloaded));
+}
+
+/// Generative Fill's files already on a device can still be deleted.
+#[test]
+fn generative_fill_files_on_the_device_show_to_be_deleted() {
+    let _lang = crate::i18n::language_scope(crate::i18n::Lang::EN);
+    let store = Arc::new(FakeStore::default());
+    let card = photocraft_ai::cards::card(photocraft_ai::cards::GENFILL_ULTRA_CARD).unwrap();
+    for m in card.models() {
+        store.put(m);
+    }
+    let mut h = harness(&store);
+    open(h.state_mut(), None);
+    h.run_steps(4);
+    assert!(h.query_all_by_label_contains("Generative Fill").next().is_some());
 }
 
 #[test]

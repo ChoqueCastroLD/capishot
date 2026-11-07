@@ -123,7 +123,6 @@ downloads, and Capishot picks the tier that fits your device.
 |---|---|---|
 | Edit › Clean Selected Area with AI | Manga LaMa, MI-GAN (lite) | Erase text and SFX, redraw screentone and lines |
 | Image › Upscale with AI | MangaJaNai, IllustrationJaNai, Real-ESRGAN Compact (lite) | 2× and 4× |
-| Edit › Generative Fill | DreamShaper-8 inpainting (+ TCD), SDXS-512 | Four tiers: Ultra-light (277 MB, no GPU needed), Fast, Standard, High |
 
 The inference engine is [burn](https://github.com/tracel-ai/burn) (WebGPU / wgpu, with a CPU
 fallback). Model weights are not in this repository and keep their own licences (MangaJaNai and

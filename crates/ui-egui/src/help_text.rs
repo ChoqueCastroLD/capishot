@@ -120,7 +120,6 @@ pub const HELP: &[Help] = &[
     h("tool:Frame", "Draw a frame that crops the image you put inside it", "Dibuja un marco que recorta la imagen que pongas dentro", "Desenhe um quadro que recorta a imagem colocada dentro dele"),
     // ---------------------------------------------------------------- AI
     h("edit.inpaintAi", "Select text or objects and the AI erases them, rebuilding the background", "Selecciona texto u objetos y la IA los borra reconstruyendo el fondo", "Selecione texto ou objetos e a IA os apaga reconstruindo o fundo"),
-    h("edit.generativeFill", "Select an area, describe what goes there and the AI draws it", "Selecciona una zona, describe qué poner y la IA lo dibuja", "Selecione uma área, descreva o que colocar e a IA desenha"),
     h("image.upscaleAi", "Make the image bigger and sharper with AI (2x or 4x)", "Agranda la imagen y la hace más nítida con IA (2x o 4x)", "Aumenta a imagem e a deixa mais nítida com IA (2x ou 4x)"),
     h("window.aiModels", "Download, update or delete the AI models on this device", "Descarga, actualiza o borra los modelos de IA de este dispositivo", "Baixe, atualize ou apague os modelos de IA deste dispositivo"),
     // ---------------------------------------------------------------- File

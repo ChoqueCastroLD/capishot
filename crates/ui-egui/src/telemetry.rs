@@ -594,6 +594,9 @@ impl Recorder {
         if let Some(lite) = run.lite {
             e["lite"] = json!(lite);
         }
+        if let Some(why) = run.fallback {
+            e["reason"] = json!(why);
+        }
         self.event(e);
     }
 
@@ -1477,6 +1480,25 @@ pub struct AiRun<'a> {
     pub ok: bool,
     pub fell_back: Option<bool>,
     pub lite: Option<bool>,
+    /// Why it left the GPU, as a class: never the message.
+    pub fallback: Option<&'static str>,
+}
+
+/// The class of a GPU failure's message, for [`AiRun::fallback`].
+fn fallback_class(message: &str) -> &'static str {
+    let m = message.to_lowercase();
+    let has = |words: &[&str]| words.iter().any(|w| m.contains(w));
+    if has(&["out of memory", "not enough memory", "e_outofmemory", "0x8007000e", "allocation"]) {
+        "oom"
+    } else if has(&["device lost", "device was lost", "removed", "hung", "0x887a00"]) {
+        "lost"
+    } else if has(&["loadlibrary", "couldn't load", "could not load", "dll", "not found", "onnxruntime"]) {
+        "library"
+    } else if has(&["session", "operator", "not implemented", "unsupported"]) {
+        "model"
+    } else {
+        "other"
+    }
 }
 
 /// The jobs that are AI runs.
@@ -1530,6 +1552,7 @@ pub fn record_ai_job(command: &str, reply: Option<&Value>, doc_mp: Option<f64>, 
         ok: reply.is_some(),
         fell_back: flag("fellBack"),
         lite: flag("lite"),
+        fallback: reply.and_then(|r| r.get("notices")).map(|n| fallback_class(&n.to_string())),
     };
     with(|r| r.ai_run(&run));
 }

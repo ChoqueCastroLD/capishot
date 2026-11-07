@@ -1187,11 +1187,13 @@ fn crashed(message: &str) {
     log::error!("{message}");
     // The threads variant didn't come up (no nested workers, no memory): plain worker from now on.
     let mt = LIVE.with(|l| l.borrow().as_ref().map(|l| (l.threads, l.ready)));
+    let mut threads_failed = false;
     if let Some((true, ready)) = mt {
         with_run(|run| {
             let mut s = run.shared.lock().unwrap_or_else(PoisonError::into_inner);
             if !ready || s.device.is_empty() {
                 s.mt_broken = true;
+                threads_failed = true;
             }
         });
     }
@@ -1205,7 +1207,9 @@ fn crashed(message: &str) {
             gpu_failed(&run.shared);
         }
     });
-    kill(if on_gpu { AiError::Gpu(message.to_string()) } else { AiError::Inference(message.to_string()) });
+    // A failure to come up on threads runs again too, on the plain worker: a run can't wait for
+    // a person to click twice.
+    kill(if on_gpu || threads_failed { AiError::Gpu(message.to_string()) } else { AiError::Inference(message.to_string()) });
 }
 
 fn poll_cancel() {

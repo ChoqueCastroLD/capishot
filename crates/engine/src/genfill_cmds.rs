@@ -536,7 +536,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec {
             id: ID,
             label: "Generative Fill…",
-            menu: &["Edit"],
+            menu: &[],
             shortcut: None,
             params: r#"{"prompt"?: text (English, Spanish or Portuguese; empty = fill with background), "negative"?: text, "variants"?: 1..4 (default 3), "seed"?: 0..4294967295 (default: new each run), "steps"?: 1..50 (default: the tier's), "strength"?: 0.05..1 (1 = ignore what is under the selection), "guidance"?: 0..30 (0 = the tier's), "quality"?: "auto"|"ultra"|"fast"|"standard"|"high", "device"?: "auto"|"gpu"|"cpu", "side"?: 256..1024 working size (multiple of 64), "layer"?: layer id, "allowDownload"?: bool (queue the missing model files, about 2.3 GB, in the AI Model Manager; run again when done), "keepLoaded"?: bool, "threads"?: 0..64, "precision"?: "auto"|"f32" (f32: run without GPU 16-bit float support, about 4.5 GB of GPU memory)} -> {"layer", "variants", "selected", "region": [x,y,w,h], "prompt", "english", "seed", "tier", "device"}. Fills the selection with new content on a new masked layer. Background job, one undo step. Refuses sexual content involving minors and clearly illegal requests."#,
             enabled,

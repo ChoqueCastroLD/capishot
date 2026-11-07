@@ -4778,3 +4778,10 @@ cameraRaw	Dehaze	Odstranění oparu
 	One Cleaning Layer	Jedna vrstva čištění
 	AI Clean	Čištění AI
 	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO	Slovo, které se nevejde, se rozdělí spojovníkem a pokračuje níže: PE-SAN
+	Select a bubble first, with the Magic Wand, the Lasso or a Marquee	Nejprve vyberte bublinu, Kouzelnou hůlkou, Lasem nebo Výběrem
+	The selected area is too small for text	Vybraná oblast je pro text příliš malá
+	Select a type layer	Vyberte textovou vrstvu
+	No line to paste: load a script or write one	Není co vložit: načtěte scénář nebo napište řádek
+	Keep size needs a type layer selected to take the size from	Zachování velikosti vyžaduje vybranou textovou vrstvu
+	No bubble around this text	Kolem tohoto textu není bublina
+	There's no path here: draw one with the Pen tool	Není tu cesta: nakreslete ji Perem

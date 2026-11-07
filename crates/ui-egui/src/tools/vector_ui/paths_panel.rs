@@ -388,7 +388,7 @@ pub fn paths_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 }
             }
             Err(e) => {
-                app.ui.status = e;
+                app.ui.status = if e.contains("no work path") || e.contains("no shape path") { tl!("There's no path here: draw one with the Pen tool").to_string() } else { e };
                 app.ui.status_error = true;
             }
         }

@@ -158,9 +158,30 @@ pub(crate) fn run(app: &mut PhotocraftApp, id: &str, params: Value) -> Result<Va
     let r = app.run(id, params);
     match &r {
         Ok(_) => app.ui.typer.message.clear(),
-        Err(e) => app.ui.typer.message = e.clone(),
+        Err(e) => app.ui.typer.message = refusal(e),
     }
     r
+}
+
+/// What a refusal tells the user: the engine's `noSelection: …` codes in their language.
+pub(crate) fn refusal(e: &str) -> String {
+    let code = |c: &str| e.contains(&format!("{c}:")) || e.ends_with(c);
+    let text = if code("noSelection") {
+        tl!("Select a bubble first, with the Magic Wand, the Lasso or a Marquee")
+    } else if code("smallSelection") {
+        tl!("The selected area is too small for text")
+    } else if code("noTextLayer") {
+        tl!("Select a type layer")
+    } else if code("noText") {
+        tl!("No line to paste: load a script or write one")
+    } else if code("sizeSource") {
+        tl!("Keep size needs a type layer selected to take the size from")
+    } else if code("noBubble") {
+        tl!("No bubble around this text")
+    } else {
+        return e.to_string();
+    };
+    text.to_string()
 }
 
 /// [`run`] for buttons, whose result is only the message.
@@ -596,4 +617,15 @@ fn capture_bubbles(app: &mut PhotocraftApp, ctx: &egui::Context) {
         return;
     }
     act(app, "typer.multiBubble.capture", json!({}));
+}
+
+#[cfg(test)]
+mod refusal_tests {
+    #[test]
+    fn the_engines_codes_become_words_and_the_rest_stays() {
+        let _lang = crate::i18n::language_scope(crate::i18n::Lang::from_code("es").unwrap());
+        let raw = "invalid parameters for `typer.paste`: noSelection: select a bubble first (Magic Wand, Lasso, Marquee…), or pass \"bounds\"";
+        assert!(super::refusal(raw).starts_with("Selecciona un globo"), "{}", super::refusal(raw));
+        assert_eq!(super::refusal("the disk is full"), "the disk is full");
+    }
 }

@@ -46,6 +46,9 @@ pub struct State {
     pub prefix: String,
     pub zip_name: String,
     thumbs: HashMap<u64, egui::TextureHandle>,
+    /// The thumbnail being made off the page's thread, and where it arrives. A chapter's pages
+    /// take seconds each, so they come one at a time and the dialog is open meanwhile.
+    thumb_job: Option<std::sync::mpsc::Receiver<(u64, photocraft_raster::Rgba8Image)>>,
     /// The running export's result, filled by its job.
     pending: Option<Pending>,
 }
@@ -266,6 +269,40 @@ pub fn tick(app: &mut PhotocraftApp) {
     }
 }
 
+/// The thumbnails the dialog still lacks, one at a time off the page's thread.
+fn thumbnails(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    use std::sync::mpsc::TryRecvError;
+    if let Some(rx) = &app.zip_export.thumb_job {
+        match rx.try_recv() {
+            Ok((id, t)) => {
+                let img = egui::ColorImage::from_rgba_unmultiplied([t.width as usize, t.height as usize], &t.pixels);
+                let tex = ctx.load_texture(format!("zip-thumb-{id}"), img, egui::TextureOptions::LINEAR);
+                app.zip_export.thumbs.insert(id, tex);
+                app.zip_export.thumb_job = None;
+            }
+            Err(TryRecvError::Disconnected) => app.zip_export.thumb_job = None,
+            Err(TryRecvError::Empty) => {
+                ctx.request_repaint_after(std::time::Duration::from_millis(50));
+                return;
+            }
+        }
+    }
+    // While an export runs the machine is busy with the pages themselves.
+    if app.zip_export.pending.is_some() {
+        return;
+    }
+    let next = app.session.documents().iter().find(|d| !app.zip_export.thumbs.contains_key(&d.doc.id.0)).map(|d| (d.doc.id.0, d.doc.clone()));
+    let Some((id, doc)) = next else { return };
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.zip_export.thumb_job = Some(rx);
+    let repaint = ctx.clone();
+    crate::jobs_ui::off_thread(move || {
+        let _ = tx.send((id, photocraft_compose::thumbnail(&doc, 96)));
+        repaint.request_repaint();
+    });
+    ctx.request_repaint_after(std::time::Duration::from_millis(50));
+}
+
 /// Each frame: [`tick`]; the dialog.
 pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     tick(app);
@@ -275,14 +312,7 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     // Rows for documents closed meanwhile go; the thumbnails are made once.
     let open_ids: Vec<u64> = app.session.documents().iter().map(|d| d.doc.id.0).collect();
     app.zip_export.rows.retain(|r| open_ids.contains(&r.doc));
-    for d in app.session.documents() {
-        let id = d.doc.id.0;
-        app.zip_export.thumbs.entry(id).or_insert_with(|| {
-            let t = photocraft_compose::thumbnail(&d.doc, 96);
-            let img = egui::ColorImage::from_rgba_unmultiplied([t.width as usize, t.height as usize], &t.pixels);
-            ctx.load_texture(format!("zip-thumb-{id}"), img, egui::TextureOptions::LINEAR)
-        });
-    }
+    thumbnails(app, ctx);
     let screen = crate::safe_area::rect(ctx);
     let phone = screen.width() < 600.0;
     let mut open = true;
@@ -317,6 +347,9 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
                                 let s = tex.size_vec2();
                                 let k = 40.0 / s.x.max(s.y).max(1.0);
                                 ui.add(egui::Image::new((tex.id(), s * k)));
+                            } else {
+                                // Its thumbnail is on the way.
+                                ui.allocate_exact_size(egui::vec2(40.0, 40.0), egui::Sense::hover());
                             }
                             let label = format!("{}. {}", i + 1, r.name);
                             crate::widgets::checkbox(ui, &mut r.checked, &label);

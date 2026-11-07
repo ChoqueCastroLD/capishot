@@ -231,6 +231,14 @@ fn download(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         return Err(bad(DOWNLOAD, "give `id`, `ids`, `all: true` or `recommended: true`"));
     };
+    let asked = wanted.len();
+    let mut wanted = wanted;
+    if !photocraft_ai::catalog::GENERATIVE_FILL {
+        wanted.retain(|m| m.content != photocraft_ai::catalog::Content::Generative);
+        if asked > 0 && wanted.is_empty() {
+            return Err(bad(DOWNLOAD, "Generative Fill isn't available: its models can't be downloaded"));
+        }
+    }
     st.available().map_err(EngineError::Other)?;
     let mut queued = Vec::new();
     let mut skipped = Vec::new();
@@ -450,9 +458,10 @@ mod tests {
         // Download all, then delete all.
         fake.inner.lock().unwrap().instant = true;
         let v = s.execute(DOWNLOAD, json!({"all": true})).unwrap();
-        assert_eq!(v["queued"].as_array().unwrap().len(), photocraft_ai::models::files().len());
+        let wanted = photocraft_ai::models::files().iter().filter(|m| m.content != photocraft_ai::catalog::Content::Generative).count();
+        assert_eq!(v["queued"].as_array().unwrap().len(), wanted, "every model but Generative Fill's");
         let v = s.execute(DELETE, json!({"all": true})).unwrap();
-        assert_eq!(v["deleted"].as_array().unwrap().len(), photocraft_ai::models::files().len());
+        assert_eq!(v["deleted"].as_array().unwrap().len(), wanted);
         assert_eq!(v["storage"]["models"], 0);
     }
 
@@ -488,24 +497,28 @@ mod tests {
     }
 
     #[test]
-    fn cards_download_pause_resume_and_delete_keeps_shared_files() {
+    fn generative_fill_can_not_be_downloaded() {
+        let (mut s, _) = session();
+        for card in [cards::GENFILL_ULTRA_CARD, cards::GENFILL_FAST_CARD, cards::GENFILL_STANDARD_CARD, cards::GENFILL_HIGH_CARD] {
+            assert!(s.execute(DOWNLOAD, json!({"card": card})).is_err(), "{card}");
+        }
+        assert!(s.execute(DOWNLOAD, json!({"id": "genfill-taesd"})).is_err());
+    }
+
+    #[test]
+    fn cards_download_pause_resume_and_delete() {
         let (mut s, fake) = session();
-        let v = s.execute(DOWNLOAD, json!({"card": cards::GENFILL_ULTRA_CARD})).unwrap();
-        assert_eq!(v["queued"].as_array().unwrap().len(), 3);
-        fake.step();
-        let v = s.execute(PAUSE, json!({"card": cards::GENFILL_ULTRA_CARD})).unwrap();
-        assert_eq!(v["paused"], cards::GENFILL_ULTRA_CARD);
+        let v = s.execute(DOWNLOAD, json!({"card": "manga-lama"})).unwrap();
+        assert_eq!(v["queued"].as_array().unwrap().len(), 1);
+        let v = s.execute(PAUSE, json!({"card": "manga-lama"})).unwrap();
+        assert_eq!(v["paused"], "manga-lama");
         let list = s.execute(LIST, json!({})).unwrap();
         let card = |l: &Value, id: &str| l["cards"].as_array().unwrap().iter().find(|c| c["id"] == id).unwrap().clone();
-        assert_eq!(card(&list, cards::GENFILL_ULTRA_CARD)["state"], "paused");
-        s.execute(DOWNLOAD, json!({"card": cards::GENFILL_ULTRA_CARD})).unwrap();
+        assert_eq!(card(&list, "manga-lama")["state"], "paused");
+        s.execute(DOWNLOAD, json!({"card": "manga-lama"})).unwrap();
         while fake.step() {}
-        assert_eq!(card(&s.execute(LIST, json!({})).unwrap(), cards::GENFILL_ULTRA_CARD)["state"], "ready");
-        s.execute(DOWNLOAD, json!({"card": cards::GENFILL_STANDARD_CARD})).unwrap();
-        while fake.step() {}
-        let v = s.execute(DELETE, json!({"card": cards::GENFILL_ULTRA_CARD})).unwrap();
-        assert!(!v["deleted"].as_array().unwrap().iter().any(|i| i == "genfill-taesd"), "the Standard tier still uses TAESD");
-        assert_eq!(card(&s.execute(LIST, json!({})).unwrap(), cards::GENFILL_STANDARD_CARD)["state"], "ready");
+        assert_eq!(card(&s.execute(LIST, json!({})).unwrap(), "manga-lama")["state"], "ready");
+        s.execute(DELETE, json!({"card": "manga-lama"})).unwrap();
         assert!(s.execute(DOWNLOAD, json!({"card": "nope"})).is_err());
     }
 }

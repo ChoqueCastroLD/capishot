@@ -4756,3 +4756,10 @@ curves	Smooth	Згладити
 	One Cleaning Layer	Один шар очищень
 	AI Clean	Очищення ШІ
 	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO	Слово, яке не вміщається, розбивається дефісом і продовжується нижче: СО-БАКА
+	Select a bubble first, with the Magic Wand, the Lasso or a Marquee	Спочатку виділіть бульбашку Чарівною паличкою, Ласо або Областю
+	The selected area is too small for text	Виділена область замала для тексту
+	Select a type layer	Виберіть текстовий шар
+	No line to paste: load a script or write one	Немає рядка для вставлення: завантажте сценарій або напишіть рядок
+	Keep size needs a type layer selected to take the size from	Для збереження розміру потрібен вибраний текстовий шар
+	No bubble around this text	Навколо цього тексту немає бульбашки
+	There's no path here: draw one with the Pen tool	Тут немає контуру: намалюйте його Пером

@@ -5228,3 +5228,10 @@ shape	Appearance	Оформление
 	One Cleaning Layer	Один слой очисток
 	AI Clean	Очистка ИИ
 	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO	Слово, которое не помещается, разбивается дефисом и продолжается ниже: СО-БАКА
+	Select a bubble first, with the Magic Wand, the Lasso or a Marquee	Сначала выделите пузырь Волшебной палочкой, Лассо или Областью
+	The selected area is too small for text	Выделенная область слишком мала для текста
+	Select a type layer	Выберите текстовый слой
+	No line to paste: load a script or write one	Нет строки для вставки: загрузите сценарий или напишите строку
+	Keep size needs a type layer selected to take the size from	Для сохранения размера нужен выбранный текстовый слой
+	No bubble around this text	Вокруг этого текста нет пузыря
+	There's no path here: draw one with the Pen tool	Здесь нет контура: нарисуйте его Пером

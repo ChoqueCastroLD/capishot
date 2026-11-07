@@ -194,6 +194,7 @@ pub fn recommended(profile: &crate::profile::DeviceProfile, page_heights: &[u32]
     files()
         .into_iter()
         .filter(|m| m.lite == lite)
+        .filter(|m| crate::catalog::GENERATIVE_FILL || m.content != Content::Generative)
         .filter(|m| match (m.height, page_heights.is_empty()) {
             (Some(h), false) => page_heights.iter().any(|p| catalog_nearest(*p) == Some(h)),
             _ => true,

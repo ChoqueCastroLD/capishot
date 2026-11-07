@@ -4715,3 +4715,10 @@ curves	Smooth	スムーズ
 	One Cleaning Layer	クリーニング用レイヤー 1 枚
 	AI Clean	AI クリーニング
 	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO	収まらない単語をハイフンで分割して次の行に続けます: HY-PHEN
+	Select a bubble first, with the Magic Wand, the Lasso or a Marquee	まず自動選択、なげなわ、選択範囲ツールでフキダシを選択してください
+	The selected area is too small for text	選択範囲がテキストには小さすぎます
+	Select a type layer	テキストレイヤーを選択してください
+	No line to paste: load a script or write one	貼り付ける行がありません: 台本を読み込むか入力してください
+	Keep size needs a type layer selected to take the size from	サイズの維持にはテキストレイヤーの選択が必要です
+	No bubble around this text	このテキストの周りにフキダシがありません
+	There's no path here: draw one with the Pen tool	ここにパスはありません: ペンツールで描いてください
