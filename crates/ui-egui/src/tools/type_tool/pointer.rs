@@ -391,6 +391,14 @@ pub fn pointer_up(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
         // Another source's style shows its own name by the cursor.
         let shown = v.get("styleName").and_then(serde_json::Value::as_str).unwrap_or(kind).to_string();
         crate::bubble_type_ui::flash(app, &shown, start);
+        let styles = &app.ui.tool_options.bubble_styles;
+        let style = match kind {
+            "narration" => &styles.narration,
+            "floating" => &styles.floating,
+            _ => &styles.bubble,
+        };
+        let auto = crate::bubble_type_ui::style_params(style)["size"] == "auto";
+        app.bubble_autofit = v.get("layer").and_then(serde_json::Value::as_u64).filter(|_| auto && kind != "floating");
         if let Some(missing) = v.get("fallback").and_then(serde_json::Value::as_str) {
             let title = crate::i18n::fmt(tl!("The style {style} is gone: the shape's own style was used"), &[("style", missing)]);
             app.ui.notices.retain(|n| n.tag.as_deref() != Some("bubbleFallback"));

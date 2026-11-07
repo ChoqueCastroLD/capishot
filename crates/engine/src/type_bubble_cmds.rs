@@ -311,6 +311,59 @@ fn region_at(s: &mut Session, x: i32, y: i32, want: Option<Kind>) -> Result<(Kin
     Ok((kind, path, rect, lettering))
 }
 
+/// A size that follows the page shrinks at most to this share of itself to fit its balloon.
+const LEAST_FIT: f32 = 0.6;
+
+/// Shrinks a type-in-path layer until its text has room and no line holds a single letter and a
+/// hyphen, down to `least` of its size. Answers its size, and whether that's enough.
+fn fit_size_of(s: &mut Session, id: photocraft_doc::LayerId, least: f32) -> Result<(f32, bool)> {
+    let st = s.active().ok_or(EngineError::NoDocument)?;
+    let dpi = st.doc.resolution_dpi;
+    let Some(photocraft_doc::LayerContent::Text(t)) = st.doc.layer(id).map(|l| &l.content) else { return Err(EngineError::NoLayer(id)) };
+    let first = t.char_runs().first().map_or(0.0, |r| r.style.size_pt);
+    if !matches!(t.shape, TextShape::InPath { .. }) || first <= 0.0 {
+        return Ok((first, true));
+    }
+    let mut t = t.clone();
+    let scaled = |t: &photocraft_doc::TextLayer, k: f32| {
+        let mut out = t.clone();
+        for r in &mut out.runs {
+            r.style.size_pt *= k;
+            r.style.leading_pt = r.style.leading_pt.map(|l| l * k);
+        }
+        out.sync_summary();
+        out
+    };
+    let poor = |t: &photocraft_doc::TextLayer| {
+        let l = photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner()).layout(t, dpi);
+        l.overflow || l.lines.iter().any(|ln| ln.hyphen && t.text.get(ln.range.clone()).is_some_and(|w| w.trim().chars().count() < 2))
+    };
+    let (mut k, mut fits) = (1.0, !poor(&t));
+    let step = (1.0 / first).max(0.04);
+    while !fits && k - step >= least {
+        k -= step;
+        fits = !poor(&scaled(&t, k));
+    }
+    if k < 1.0 {
+        t = scaled(&t, k);
+        s.edit("Text Style", |doc, _| {
+            let (dpi, format) = (doc.resolution_dpi, doc.pixel_format());
+            let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
+            crate::type_cmds::refresh_at(dpi, format, &mut t);
+            l.content = photocraft_doc::LayerContent::Text(t);
+            Ok(())
+        })?;
+    }
+    Ok((first * k, fits))
+}
+
+fn fit_size(s: &mut Session, p: &Value) -> Result<Value> {
+    let id = photocraft_doc::LayerId(p.get("layer").and_then(Value::as_u64).ok_or_else(|| bad("\"layer\" is required"))?);
+    let least = p.get("least").and_then(Value::as_f64).map_or(LEAST_FIT, |v| v.clamp(0.1, 1.0) as f32);
+    let (size, fits) = fit_size_of(s, id, least)?;
+    Ok(json!({"layer": id.0, "size": size, "fits": fits}))
+}
+
 /// Text at this share of the page's height on a page, of its width on a long strip.
 const PAGE_TEXT: f64 = 1.0 / 65.0;
 const STRIP_TEXT: f64 = 1.0 / 28.0;
@@ -372,7 +425,8 @@ fn create_in_bubble(s: &mut Session, p: &Value) -> Result<Value> {
     // A zone the person drew is a bubble's text unless a style says otherwise.
     let kind = if area.is_some() { want.unwrap_or(Kind::Bubble) } else { region.as_ref().map_or(Kind::Floating, |r| r.0) };
     let Chosen { mut q, typer, used, fallback } = chosen_style(s, p, kind, picked, want)?;
-    if q.get("size").and_then(Value::as_str) == Some("auto") {
+    let auto = q.get("size").and_then(Value::as_str) == Some("auto");
+    if auto {
         let size = auto_size(s, kind, region.as_ref().and_then(|r| r.3));
         q["size"] = size.map_or(Value::Null, |v| json!(v));
     }
@@ -433,6 +487,10 @@ fn create_in_bubble(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(missing) = fallback {
         // Said, not an error: the text still goes in, in the shape's own style.
         out["fallback"] = json!(missing);
+    }
+    if auto && region.is_some() && p.get("text").and_then(Value::as_str).is_some_and(|t| !t.trim().is_empty()) && let Some(id) = out.get("layer").and_then(Value::as_u64) {
+        let (size, _) = fit_size_of(s, photocraft_doc::LayerId(id), LEAST_FIT)?;
+        out["size"] = json!(size);
     }
     if let Some((_, path, rect, _)) = region {
         out["path"] = crate::vector_cmds::path_json(&photocraft_doc::vector::Path::new(vec![path]));
@@ -574,6 +632,16 @@ fn set_bubble_style(s: &mut Session, p: &Value) -> Result<Value> {
 pub fn specs() -> Vec<CommandSpec> {
     let mut v = bubble_specs();
     v.push(CommandSpec {
+        id: "type.fitSize",
+        label: "Text Style",
+        menu: &[],
+        shortcut: None,
+        params: r#"{"layer": id, "least"?: 0.1..1 = 0.6}: shrinks type in a path until its text has room and no line holds a single letter and a hyphen, at most to that share of its size; answers {layer, size, fits}"#,
+        enabled: |s| s.active().map(|_| ()).ok_or_else(|| "no document".to_string()),
+        journal: true,
+        run: fit_size,
+    });
+    v.push(CommandSpec {
         id: "type.setBubbleStyle",
         label: "Text Style",
         menu: &[],
@@ -641,6 +709,24 @@ mod lobe_and_size_tests {
         let (l, r) = (bounds(&left), bounds(&right));
         assert!(l[1] <= 460.0, "the left one stops at the neck: {l:?} {left}");
         assert!(r[0] >= 420.0, "the right one starts there: {r:?}");
+    }
+
+    #[test]
+    fn a_size_that_follows_the_page_shrinks_to_fit_its_balloon() {
+        let mut s = joined(72.0);
+        let long = "Esta frase es bastante larga para un globo tan chico, y sigue y sigue hasta que ya no entra en el espacio que tiene. ".repeat(3);
+        let r = s.execute(CMD, json!({"x": 300, "y": 400, "text": long, "hyphenate": true, "styles": {"bubble": {"size": "auto"}}})).unwrap();
+        let (base, got) = (auto_size(&s, Kind::Bubble, None).unwrap(), r["size"].as_f64().unwrap());
+        assert!(got < base - 0.5 && got >= base * 0.59, "{got} of {base}");
+        // A short text stays at its size.
+        let r = s.execute(CMD, json!({"x": 600, "y": 400, "text": "Hola", "styles": {"bubble": {"size": "auto"}}})).unwrap();
+        assert!((r["size"].as_f64().unwrap() - base).abs() < 0.01);
+        // A size someone chose is theirs: nothing shrinks it by itself.
+        let mut s = joined(72.0);
+        let r = s.execute(CMD, json!({"x": 300, "y": 400, "text": long, "styles": {"bubble": {"size": 40}}})).unwrap();
+        assert!(r.get("size").is_none());
+        let out = s.execute("type.fitSize", json!({"layer": r["layer"]})).unwrap();
+        assert!(out["size"].as_f64().unwrap() < 40.0, "unless asked: {out}");
     }
 
     #[test]

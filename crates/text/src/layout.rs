@@ -154,6 +154,8 @@ pub struct TextLayout {
     pub px_per_pt: f32,
     /// Vertical type: line space is turned 90° clockwise into text space.
     pub vertical: bool,
+    /// Type in a path: some of the text found no room.
+    pub overflow: bool,
 }
 
 impl TextLayout {
@@ -282,7 +284,8 @@ impl Layouter {
 
     pub fn layout(&mut self, fonts: &mut FontDb, t: &TextLayer, dpi: f32) -> TextLayout {
         let mut fit = Fit::default();
-        let first = self.layout_pass(fonts, t, dpi, None, &mut fit);
+        let mut first = self.layout_pass(fonts, t, dpi, None, &mut fit);
+        first.overflow = fit.overflow;
         // Type in a path, centred: move the fitted block of lines until its middle is the
         // path's middle. Lines re-wrap at every height tried; a height where the text no longer
         // fits is not taken, so text that only fits from the top stays there (with the overflow

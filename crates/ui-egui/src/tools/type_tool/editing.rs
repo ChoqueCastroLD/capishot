@@ -610,6 +610,9 @@ fn commit_here(app: &mut PhotocraftApp, mods: egui::Modifiers) {
     } else if ed.created {
         let name = photocraft_engine::type_cmds::layer_name(&text);
         let _ = app.run("type.edit", json!({"layer": ed.layer, "name": name, "coalesce": ed.session}));
+        if app.bubble_autofit.take() == Some(ed.layer) {
+            let _ = app.run("type.fitSize", json!({"layer": ed.layer, "coalesce": ed.session}));
+        }
     }
 }
 
