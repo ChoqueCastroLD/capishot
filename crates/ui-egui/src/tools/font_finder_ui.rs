@@ -122,8 +122,9 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let options = answer["options"].as_array().cloned().unwrap_or_default();
     // A drawing a frame: five at once would hold the page.
     if app.font_finder.cards.len() < options.len() {
-        let st = BubbleTextStyle { size: SAMPLE_PT, ..style_of(&options[app.font_finder.cards.len()]) };
-        let img = crate::bubble_type_ui::render_text(&st, SAMPLE);
+        let option = &options[app.font_finder.cards.len()];
+        let st = BubbleTextStyle { size: SAMPLE_PT, ..style_of(option) };
+        let img = crate::bubble_type_ui::render_text(&st, SAMPLE, option["params"].get("__roleEffects"));
         let n = app.font_finder.cards.len();
         app.font_finder.cards.push(img.map(|i| ctx.load_texture(format!("font-finder-{n}"), i, egui::TextureOptions::LINEAR)));
         ctx.request_repaint();

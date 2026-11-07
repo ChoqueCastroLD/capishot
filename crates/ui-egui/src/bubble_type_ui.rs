@@ -305,11 +305,11 @@ fn preview(ui: &mut egui::Ui, tab: &str, st: &BubbleTextStyle) {
 const PREVIEW: (u32, u32) = (380, 110);
 
 fn render_sample(st: &BubbleTextStyle) -> Option<egui::ColorImage> {
-    render_text(st, tl!("Sample text"))
+    render_text(st, tl!("Sample text"), None)
 }
 
-/// `text` in the style, on a small neutral ground.
-pub(crate) fn render_text(st: &BubbleTextStyle, text: &str) -> Option<egui::ColorImage> {
+/// `text` in the style, with `effects` (a style's list of `[kind, params]`), on a small neutral ground.
+pub(crate) fn render_text(st: &BubbleTextStyle, text: &str, effects: Option<&Value>) -> Option<egui::ColorImage> {
     let mut s = photocraft_engine::Session::new();
     s.execute("file.new", json!({"width": PREVIEW.0, "height": PREVIEW.1, "background": "#d9d9d9"})).ok()?;
     let mut floating = style_params(st);
@@ -318,6 +318,9 @@ pub(crate) fn render_text(st: &BubbleTextStyle, text: &str) -> Option<egui::Colo
         m.remove("inset");
         m.remove("vertical");
         m.insert("size".into(), json!(st.size.min(48.0)));
+        if let Some(fx) = effects {
+            m.insert("__roleEffects".into(), fx.clone());
+        }
     }
     let x = match st.align.as_str() {
         "left" => 16.0,

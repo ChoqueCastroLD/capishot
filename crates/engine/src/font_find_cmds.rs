@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use photocraft_fontmatch::{Candidate, FaceSource, Library, Zone, find};
+use photocraft_fontmatch::{Candidate, FaceSource, Library, Scope, Zone, find_in};
 use photocraft_geom::Rect;
 use serde_json::{Value, json};
 
@@ -34,15 +34,39 @@ impl Session {
 fn option(c: &Candidate, dpi: f64) -> Value {
     let pt = f64::from(c.look.size) * 72.0 / dpi;
     let stroke = c.look.outline.map_or(Value::Null, |(color, width)| json!({"color": hex(color), "width": width.round()}));
+    let gradient = c.look.gradient.map_or(Value::Null, |(top, bottom)| json!({"top": hex(top), "bottom": hex(bottom)}));
+    let mut params = json!({"font": c.family, "fontStyle": c.style, "size": pt, "color": hex(c.look.fill), "stroke": stroke});
+    if let Some((top, bottom)) = c.look.gradient {
+        // Photoshop's angle 90 runs up the layer: its first colour is at the bottom.
+        params[crate::type_bubble_cmds::ROLE_EFFECTS] = json!([["gradientOverlay", {"from": hex(bottom), "to": hex(top), "angle": 90}]]);
+    }
     json!({
         "family": c.family,
         "style": c.style,
         "distance": c.distance,
         "rotation": c.look.tilt,
         "ground": hex(c.look.ground),
+        "gradient": gradient,
         // What the type commands take.
-        "params": {"font": c.family, "fontStyle": c.style, "size": pt, "color": hex(c.look.fill), "stroke": stroke},
+        "params": params,
     })
+}
+
+/// The families a list parameter names.
+fn names(p: &Value, key: &str) -> std::collections::HashSet<String> {
+    p.get(key).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default()
+}
+
+/// The families a document's type uses.
+fn used_families(list: &[photocraft_doc::Layer], out: &mut std::collections::HashSet<String>) {
+    for l in list {
+        if let photocraft_doc::LayerContent::Text(t) = &l.content {
+            out.extend(t.runs.iter().map(|r| r.style.font_family.clone()));
+        }
+        if let Some(children) = l.children() {
+            used_families(children, out);
+        }
+    }
 }
 
 fn run(s: &mut Session, p: &Value) -> Result<Value> {
@@ -56,6 +80,12 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("the zone is outside the page"));
     }
     let dpi = f64::from(doc.resolution_dpi).max(1.0);
+    let mut scope = Scope { only: names(p, "families"), prefer: names(p, "prefer") };
+    match p.get("scope").and_then(Value::as_str) {
+        None | Some("all") => {}
+        Some("document") => used_families(&doc.layers, &mut scope.only),
+        Some(_) => return Err(bad("\"scope\" must be \"all\" or \"document\"")),
+    }
     let generation = photocraft_text::fonts::generation();
     let cached = s.font_library.as_ref().filter(|(g, _)| *g == generation).map(|(_, l)| l.clone());
     let faces = if cached.is_some() { Vec::new() } else { photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner()).fonts.face_blobs() };
@@ -79,7 +109,7 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
                 }
             }
             let zone = Zone { rgb: &rgb, width: area.width() as usize, height: area.height() as usize };
-            let found: Vec<Value> = find(&library, &zone, k).iter().map(|c| option(c, dpi)).collect();
+            let found: Vec<Value> = find_in(&library, &zone, k, &scope).iter().map(|c| option(c, dpi)).collect();
             done.finish(Ok((library, generation, json!({"options": found, "rect": [area.x0, area.y0, area.width(), area.height()], "faces": 0}))));
         },
         move |s, (library, generation, mut out): (Arc<Library>, u64, Value)| {
@@ -97,7 +127,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: LABEL,
         menu: &[],
         shortcut: None,
-        params: r#"{"rect": [x, y, width, height], "k"?: 1..20 = 5}: the fonts closest to the lettering in the rectangle, by shapes alone (no model, no OCR; deterministic), as a job; answers {options: [{family, style, distance, rotation, ground, params: {font, fontStyle, size, color, stroke}}], rect, faces}. Empty options: nothing there reads as letters"#,
+        params: r#"{"rect": [x, y, width, height], "k"?: 1..20 = 5, "scope"?: "all"|"document" (the fonts the document's type uses), "families"?: [family, …] (only these), "prefer"?: [family, …] (these count as a little closer)}: the fonts closest to the lettering in the rectangle, by shapes alone (no model, no OCR; deterministic), as a job; answers {options: [{family, style, distance, rotation, ground, gradient: null|{top, bottom}, params: {font, fontStyle, size, color, stroke}}], rect, faces}; five that differ, not weights or copies of one design. Empty options: nothing there reads as letters"#,
         enabled: |s| s.active().map(|_| ()).ok_or_else(|| "no document".to_string()),
         journal: false,
         run,
@@ -127,6 +157,45 @@ mod tests {
         assert!(names.len() <= OPTIONS);
         assert_eq!(a["options"][0]["params"]["color"], "#000000");
         assert!(s.font_found().is_some());
+    }
+
+    #[test]
+    fn a_gradient_in_the_lettering_comes_back_on_the_right_way_up() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 600, "height": 200, "background": "white"})).unwrap();
+        let r = s.execute("type.create", json!({"x": 40, "y": 140, "text": "HIT", "font": "Inter", "size": 120, "color": "#000000"})).unwrap();
+        let layer = r["layer"].clone();
+        let top = |s: &Session, y: i32| photocraft_compose::render(&s.active().unwrap().doc, Rect::from_xywh(0, y, 600, 1)).px.iter().filter(|p| p[3] > 0.9 && p[1] < 0.2).map(|p| [p[0], p[2]]).next();
+        // What the applied option draws: find a bar of the first letter's top and bottom.
+        let o = option(
+            &Candidate {
+                family: "Inter".into(),
+                style: "Regular".into(),
+                distance: 0.0,
+                look: photocraft_fontmatch::Look { fill: [0, 0, 0], ground: [255, 255, 255], outline: None, gradient: Some(([255, 0, 0], [0, 0, 255])), tilt: 0.0, cap: 80.0, size: 110.0 },
+            },
+            72.0,
+        );
+        let styles = json!({"floating": o["params"], "bubble": o["params"], "narration": o["params"]});
+        s.execute("type.setBubbleStyle", json!({"layer": layer, "styles": styles})).unwrap();
+        let info = s.execute("type.info", json!({"layer": layer})).unwrap();
+        let b: Vec<f64> = info["bounds"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+        let first = top(&s, b[1] as i32 + 12).expect("ink near the top");
+        let last = top(&s, b[3] as i32 - 12).expect("ink near the bottom");
+        assert!(first[0] > first[1], "red on top: {first:?}");
+        assert!(last[1] > last[0], "blue below: {last:?}");
+    }
+
+    #[test]
+    fn a_scope_limits_the_list_and_a_preference_moves_it() {
+        let mut s = page();
+        let rect = json!([10, 40, 580, 120]);
+        let doc = s.execute(ID, json!({"rect": rect, "scope": "document"})).unwrap();
+        let names = |r: &Value| -> Vec<String> { r["options"].as_array().unwrap().iter().map(|o| o["family"].as_str().unwrap().to_string()).collect() };
+        assert_eq!(names(&doc), vec!["Inter".to_string()], "the document only uses Inter");
+        let only = s.execute(ID, json!({"rect": rect, "families": ["JetBrains Mono"]})).unwrap();
+        assert_eq!(names(&only), vec!["JetBrains Mono".to_string()]);
+        assert!(s.execute(ID, json!({"rect": rect, "scope": "elsewhere"})).is_err());
     }
 
     #[test]

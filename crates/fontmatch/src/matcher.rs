@@ -9,7 +9,7 @@ use crate::segment::{distance, letters};
 use crate::{Bitmap, CAP, Zone};
 
 /// How many faces reach the edge comparison.
-const SHORTLIST: usize = 40;
+const SHORTLIST: usize = 60;
 /// Its share of letters that count: a stuck pair or a stray mark shouldn't decide.
 const BEST_SHARE: f32 = 0.8;
 /// A glyph's size may differ this much from the letter's and still be compared.
@@ -64,9 +64,26 @@ fn chamfer(a: &Edged, b: &Edged) -> f32 {
     (one_way(&a.0, ox, oy, &b.1, b.2, b.3) + one_way(&b.0, -ox, -oy, &a.1, a.2, a.3)) / 2.0
 }
 
-/// The `k` faces closest to the zone's lettering, one per family and per look, closest first.
-/// Empty when the zone holds nothing that reads as letters.
+/// Which faces a search looks at.
+#[derive(Clone, Debug, Default)]
+pub struct Scope {
+    /// Only these families; empty: all of them.
+    pub only: HashSet<String>,
+    /// These families count as a little closer: the work's fonts first.
+    pub prefer: HashSet<String>,
+}
+
+/// How much closer a preferred family counts.
+const PREFER: f32 = 0.8;
+
+/// The `k` faces closest to the zone's lettering, one per design, closest first. Empty when the zone
+/// holds nothing that reads as letters.
 pub fn find(lib: &Library, zone: &Zone<'_>, k: usize) -> Vec<Candidate> {
+    find_in(lib, zone, k, &Scope::default())
+}
+
+/// [`find`] among the faces `scope` says.
+pub fn find_in(lib: &Library, zone: &Zone<'_>, k: usize, scope: &Scope) -> Vec<Candidate> {
     if lib.is_empty() {
         return Vec::new();
     }
@@ -96,7 +113,8 @@ pub fn find(lib: &Library, zone: &Zone<'_>, k: usize) -> Vec<Candidate> {
             *t += *b;
         }
     }
-    let mut order: Vec<usize> = (0..lib.faces.len()).collect();
+    let allowed = |f: usize| scope.only.is_empty() || scope.only.contains(&lib.faces[f].family);
+    let mut order: Vec<usize> = (0..lib.faces.len()).filter(|f| allowed(*f)).collect();
     order.sort_by(|a, b| totals[*a].total_cmp(&totals[*b]).then(a.cmp(b)));
     order.truncate(SHORTLIST);
     let queries: Vec<Edged> = found.letters.iter().map(|l| edges(l, 6)).collect();
@@ -122,17 +140,21 @@ pub fn find(lib: &Library, zone: &Zone<'_>, k: usize) -> Vec<Candidate> {
                 .collect();
             per.sort_by(f32::total_cmp);
             let keep = ((per.len() as f32 * BEST_SHARE) as usize).max(1);
-            (per[..keep].iter().sum::<f32>() / keep as f32, f)
+            let d = per[..keep].iter().sum::<f32>() / keep as f32;
+            (if scope.prefer.contains(&face.family) { d * PREFER } else { d }, f)
         })
         .collect();
     scored.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
-    let (mut families, mut looks) = (HashSet::new(), HashSet::new());
+    // Five that differ: not five weights of one family, nor copies of one design.
+    let mut names = HashSet::new();
+    let mut taken: Vec<usize> = Vec::new();
     let mut out = Vec::new();
     for (d, f) in scored {
         let face = &lib.faces[f];
-        if !families.insert(face.family.as_str()) || !looks.insert(face.look) {
+        if !names.insert(face.base_name()) || taken.iter().any(|t| lib.faces[*t].near_copy(face)) {
             continue;
         }
+        taken.push(f);
         out.push(Candidate { family: face.family.clone(), style: face.style.clone(), distance: d, look: look.for_face(face.size_for_cap) });
         if out.len() == k {
             break;

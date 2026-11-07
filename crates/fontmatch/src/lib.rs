@@ -14,7 +14,7 @@ pub mod segment;
 
 pub use index::{FaceSource, Library};
 pub use look::Look;
-pub use matcher::{Candidate, find};
+pub use matcher::{Candidate, Scope, find, find_in};
 
 /// A zone of a page: RGB, interleaved.
 #[derive(Clone, Copy, Debug)]

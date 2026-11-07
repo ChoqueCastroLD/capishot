@@ -206,7 +206,7 @@ fn apply_role(q: &mut Value, project: &crate::font_projects::Project, role: &str
 }
 
 /// The key [`apply_role`] passes the role's effects on in (`[[kind, params], …]`).
-const ROLE_EFFECTS: &str = "__roleEffects";
+pub(crate) const ROLE_EFFECTS: &str = "__roleEffects";
 
 /// The role effects [`apply_role`] put in `q`, as effects.
 fn role_effects(q: &Value) -> Vec<photocraft_doc::Effect> {

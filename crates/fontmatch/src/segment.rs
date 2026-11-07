@@ -21,6 +21,8 @@ pub struct Letters {
 
 /// At most this many letters are compared.
 const MAX_LETTERS: usize = 14;
+/// Shorter letters than this don't say enough.
+const MIN_CAP: f32 = 7.0;
 
 pub(crate) fn gray(z: &Zone<'_>) -> Vec<u8> {
     z.rgb.chunks_exact(3).map(|c| ((u32::from(c[0]) * 77 + u32::from(c[1]) * 150 + u32::from(c[2]) * 29) >> 8) as u8).collect()
@@ -158,13 +160,44 @@ pub(crate) fn components(b: &Bitmap, eight: bool) -> (Vec<u32>, Vec<Comp>) {
     (labels, comps)
 }
 
-/// The zone's ink: of the two sides of a threshold, the ground is the one that survives an erosion
-/// a tenth of the zone wide. A letter's stroke doesn't.
+/// How well a threshold separates `g`: the between-class variance at it.
+fn contrast(g: &[u8], t: u8) -> f64 {
+    let (mut n0, mut s0, mut n1, mut s1) = (0f64, 0f64, 0f64, 0f64);
+    for v in g {
+        if *v > t {
+            n1 += 1.0;
+            s1 += f64::from(*v);
+        } else {
+            n0 += 1.0;
+            s0 += f64::from(*v);
+        }
+    }
+    if n0 == 0.0 || n1 == 0.0 {
+        return 0.0;
+    }
+    let d = s0 / n0 - s1 / n1;
+    n0 * n1 / ((n0 + n1) * (n0 + n1)) * d * d
+}
+
+/// The zone's ink, on whichever of gray and the three channels tells it from the ground best: dark
+/// red on a pale yellow hardly differs in gray. Of the two sides of the threshold, the ground is the
+/// one that survives an erosion a tenth of the zone wide. A letter's stroke doesn't.
 fn ink_of(z: &Zone<'_>) -> Bitmap {
-    let g = gray(z);
-    let t = otsu(&g);
+    let mut planes = vec![gray(z)];
+    for k in 0..3 {
+        planes.push(z.rgb.iter().skip(k).step_by(3).copied().collect());
+    }
+    let mut best = (0.0, 0usize, 127u8);
+    for (i, g) in planes.iter().enumerate() {
+        let t = otsu(g);
+        // Gray unless a channel is clearly better: it's the steadiest on black and white.
+        let c = contrast(g, t) * if i == 0 { 1.25 } else { 1.0 };
+        if c > best.0 {
+            best = (c, i, t);
+        }
+    }
     let (w, h) = (z.width, z.height);
-    let light = Bitmap { width: w, height: h, data: g.iter().map(|v| *v > t).collect() };
+    let light = Bitmap { width: w, height: h, data: planes[best.1].iter().map(|v| *v > best.2).collect() };
     let dark = Bitmap { width: w, height: h, data: light.data.iter().map(|v| !*v).collect() };
     let r = (w.min(h) / 10).max(3) | 1;
     if eroded(&light, r).area() >= eroded(&dark, r).area() { dark } else { light }
@@ -368,12 +401,29 @@ pub(crate) fn scaled(b: &Bitmap, k: f32) -> Bitmap {
     out
 }
 
+/// Below this the letters found are too few to trust.
+const FEW_LETTERS: usize = 2;
+/// Letters this tall or less: strokes of a pixel or two, which screentone's opening would take.
+const SMALL_CAP: f32 = 16.0;
+
 /// The zone's letters. `None`: nothing that reads as lettering.
 pub fn letters(z: &Zone<'_>) -> Option<Letters> {
     if z.width < 8 || z.height < 8 || z.rgb.len() != z.width * z.height * 3 {
         return None;
     }
-    let raw = opened(&ink_of(z));
+    let raw = ink_of(z);
+    let opened = letters_of(opened(&raw));
+    // Small letters on a clean ground lose their strokes to the opening.
+    match opened {
+        Some(l) if l.letters.len() >= FEW_LETTERS && l.cap > SMALL_CAP => Some(l),
+        other => match (letters_of(raw), other) {
+            (Some(a), Some(b)) => Some(if a.letters.len() > b.letters.len() { a } else { b }),
+            (a, b) => a.or(b),
+        },
+    }
+}
+
+fn letters_of(raw: Bitmap) -> Option<Letters> {
     let (ink, ring) = match hollow(&raw) {
         Some((body, ring)) => (body, Some(ring)),
         None => (raw, None),
@@ -389,7 +439,7 @@ pub fn letters(z: &Zone<'_>) -> Option<Letters> {
     }
     // The taller half's median: dots and accents don't count.
     let cap = heights[heights.len() * 3 / 4] as f32;
-    if cap < 8.0 {
+    if cap < MIN_CAP {
         return None;
     }
     let k = CAP as f32 / cap;
@@ -443,6 +493,35 @@ mod tests {
         assert!(!body.get(60, 60), "the middle of the O");
         assert!(!body.get(12, 12), "the ring");
         assert!(ring >= 4.0, "{ring}");
+    }
+
+    #[test]
+    fn dark_red_on_pale_yellow_reads_by_the_channel_that_tells_them_apart() {
+        let (w, h) = (100, 60);
+        let mut rgb = vec![0u8; w * h * 3];
+        for y in 0..h {
+            for x in 0..w {
+                let ink = (20..80).contains(&x) && (20..40).contains(&y) && x % 12 < 6;
+                // Close in gray; far in blue.
+                let c: [u8; 3] = if ink { [190, 150, 30] } else { [190, 170, 200] };
+                rgb[(y * w + x) * 3..(y * w + x) * 3 + 3].copy_from_slice(&c);
+            }
+        }
+        let found = letters(&Zone { rgb: &rgb, width: w, height: h }).unwrap();
+        assert_eq!(found.letters.len(), 5, "each bar a letter");
+    }
+
+    #[test]
+    fn thin_small_letters_survive_the_clean_up_of_screentone() {
+        let (w, h) = (80, 30);
+        let mut rgb = vec![255u8; w * h * 3];
+        for x in (10..70).step_by(6) {
+            for y in 8..20 {
+                rgb[(y * w + x) * 3..(y * w + x) * 3 + 3].fill(0);
+            }
+        }
+        let found = letters(&Zone { rgb: &rgb, width: w, height: h }).unwrap();
+        assert!(found.letters.len() >= 5, "{}", found.letters.len());
     }
 
     #[test]

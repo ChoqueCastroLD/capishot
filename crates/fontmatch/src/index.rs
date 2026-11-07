@@ -38,6 +38,8 @@ pub struct Face {
     pub glyphs: Vec<Glyph>,
     /// Hash of the capitals' shapes: faces that share Latin letters count as one look.
     pub look: u64,
+    /// The capitals' coarse forms, to tell near copies apart.
+    pub(crate) capitals: Vec<u8>,
 }
 
 /// Every face, and each glyph's coarse form in one array to scan.
@@ -78,6 +80,34 @@ fn hash(bytes: impl Iterator<Item = u8>) -> u64 {
         h = (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
     }
     h
+}
+
+/// The mean difference of two faces' capitals, in 0..=255, below which they're copies of one design.
+const NEAR_COPY: u64 = 9;
+
+impl Face {
+    /// Another drawing of nearly the same letters.
+    pub fn near_copy(&self, other: &Face) -> bool {
+        if self.look == other.look {
+            return true;
+        }
+        if self.capitals.len() != other.capitals.len() || self.capitals.is_empty() {
+            return false;
+        }
+        let sum: u64 = self.capitals.iter().zip(&other.capitals).map(|(a, b)| u64::from(a.abs_diff(*b))).sum();
+        sum / self.capitals.len() as u64 <= NEAR_COPY
+    }
+
+    /// The family without its weights, slopes and version marks: `CC Wild Words Int Italic` is
+    /// `wild words`. Faces with one such name are one choice.
+    pub fn base_name(&self) -> String {
+        const MARKS: [&str; 26] = [
+            "regular", "bold", "italic", "oblique", "light", "medium", "semibold", "demibold", "extrabold", "black", "heavy", "thin", "book", "roman", "int", "cc", "bb", "dk", "lower", "upper", "new", "pro", "std", "mt", "w01", "w00",
+        ];
+        let lower = self.family.to_lowercase().replace(['-', '_', '.'], " ");
+        let words: Vec<&str> = lower.split_whitespace().filter(|w| !MARKS.contains(w) && !w.chars().all(|c| c.is_ascii_digit())).collect();
+        if words.is_empty() { lower.trim().to_string() } else { words.join(" ") }
+    }
 }
 
 impl Library {
@@ -122,13 +152,17 @@ impl Library {
             self.sizes.push([g.bitmap.width as f32 / CAP as f32, g.bitmap.height as f32 / CAP as f32]);
             self.glyph_of.push((face, k as u32));
         }
+        let mut capitals = Vec::new();
+        for g in glyphs.iter().filter(|g| g.ch.is_ascii_uppercase()) {
+            coarse(&g.bitmap, &mut capitals);
+        }
         let look = hash(glyphs.iter().filter(|g| g.ch.is_ascii_uppercase()).flat_map(|g| {
             let mut c = Vec::new();
             coarse(&g.bitmap, &mut c);
             // Rounded: drawings that differ by a pixel are one look.
             c.into_iter().map(|v| v / 32)
         }));
-        self.faces.push(Face { family: s.family.to_string(), style: s.style.to_string(), size_for_cap: size, glyphs, look });
+        self.faces.push(Face { family: s.family.to_string(), style: s.style.to_string(), size_for_cap: size, glyphs, look, capitals });
     }
 
     pub fn is_empty(&self) -> bool {

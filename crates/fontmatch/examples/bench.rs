@@ -1,8 +1,10 @@
 //! The font finder's benchmark: words drawn in the library's own fonts, damaged like scans, and how
 //! often the right face comes back. Faces with the same look count as the same answer.
 //!
-//! bench <folder of fonts> [targets] [seed]; prints top-1, top-5 and top-20 hit rates and times, a
-//! JSON line per mode. Fonts are read from the folder and aren't part of the repo.
+//! bench [--by-file] <folder of fonts> [targets] [seed]; prints top-1, top-5 and top-20 hit rates and
+//! times, a JSON line per mode. Fonts are read from the folder and aren't part of the repo. A face is
+//! named after its parent folder, as in Google Fonts (one folder, one family); with `--by-file`, after
+//! its file, for a library whose folders are categories.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -142,14 +144,16 @@ fn damage(ink: &Bitmap, mode: &str, rng: &mut Rng) -> Vec<u8> {
 }
 
 fn main() {
-    let a: Vec<String> = std::env::args().collect();
+    let mut a: Vec<String> = std::env::args().collect();
+    let by_file = a.iter().any(|v| v == "--by-file");
+    a.retain(|v| v != "--by-file");
     let targets: usize = a.get(2).map_or(100, |v| v.parse().unwrap());
     let mut rng = Rng(a.get(3).map_or(88172645463325252, |v| v.parse().unwrap()));
     let mut paths = Vec::new();
     walk(std::path::Path::new(&a[1]), &mut paths);
     let files: Vec<(String, Vec<u8>)> = paths
         .iter()
-        .filter_map(|p| Some((p.parent()?.file_name()?.to_str()?.to_string(), std::fs::read(p).ok()?)))
+        .filter_map(|p| Some(((if by_file { p.file_stem()? } else { p.parent()?.file_name()? }).to_str()?.to_string(), std::fs::read(p).ok()?)))
         .collect();
     let sources: Vec<FaceSource<'_>> = files.iter().map(|(f, d)| FaceSource { family: f, style: "", data: d, index: 0 }).collect();
     let t = std::time::Instant::now();
@@ -168,8 +172,8 @@ fn main() {
             let t = std::time::Instant::now();
             let found = find(&lib, &zone, 20);
             times.push(t.elapsed().as_secs_f64() * 1000.0);
-            let looks: Vec<u64> = found.iter().filter_map(|c| lib.faces.iter().find(|x| x.family == c.family).map(|x| x.look)).collect();
-            let at = found.iter().zip(&looks).position(|(c, l)| c.family == face.family || *l == face.look);
+            // The answer's family, or a copy of its design: those are one choice.
+            let at = found.iter().position(|c| c.family == face.family || lib.faces.iter().filter(|x| x.family == c.family).any(|x| x.near_copy(face) || x.base_name() == face.base_name()));
             n += 1;
             hit1 += usize::from(at.is_some_and(|p| p < 1));
             hit5 += usize::from(at.is_some_and(|p| p < 5));
