@@ -713,6 +713,16 @@ pub fn export_flat(doc: &Document, format: Format, opts: &ExportOptions) -> Resu
     export_flat_with(doc, format, opts, &photocraft_raster::Interrupt::NONE)
 }
 
+/// A PNG of `doc` rendered and encoded a band of rows at a time whatever its size, as
+/// [`export_flat`] writes one past [`STREAM_PNG_BYTES`]: an export of many pages in a row (a ZIP)
+/// holds no full-size composite, which a phone's tab may not survive. Interlaced is not written.
+pub fn export_png_in_bands(doc: &Document, opts: &ExportOptions) -> Result<ExportResult, IoError> {
+    if let Some(r) = export_mode_specific(doc, Format::Png, opts)? {
+        return Ok(r);
+    }
+    export_png_streamed(doc, opts, &photocraft_raster::Interrupt::NONE, 0)
+}
+
 /// [`export_flat`] reporting a coarse step through `ctl` once the composite is rendered; the
 /// encoder does the rest (#3389).
 pub(crate) fn export_flat_with(doc: &Document, format: Format, opts: &ExportOptions, ctl: &photocraft_raster::Interrupt) -> Result<ExportResult, IoError> {
@@ -1323,6 +1333,18 @@ mod streamed_png_tests {
         assert_eq!(streamed.warnings, whole.warnings);
         assert!(head(&streamed.bytes) == head(&whole.bytes), "{}: header chunks differ", doc.name);
         streamed
+    }
+
+    #[test]
+    fn a_small_page_in_bands_is_the_whole_image_export() {
+        let mut doc = Document::new("page", Size::new(120, 90), ColorMode::Rgb, SampleType::U8);
+        let page = layer(&doc, &[(doc.bounds(), &[1.0, 1.0, 1.0, 1.0]), (Rect::new(10, 20, 30, 40), &[0.8, 0.1, 0.2, 1.0])]);
+        let mut text = layer(&doc, &[(Rect::new(50, 10, 40, 30), &[0.0, 0.0, 0.0, 0.6])]);
+        text.blend = BlendMode::Multiply;
+        doc.layers = vec![page, text];
+        let whole = export_flat(&doc, Format::Png, &ExportOptions::default()).unwrap();
+        let banded = export_png_in_bands(&doc, &ExportOptions::default()).unwrap();
+        assert!(decoded(&whole.bytes).data() == decoded(&banded.bytes).data());
     }
 
     #[test]

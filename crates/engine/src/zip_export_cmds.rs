@@ -207,7 +207,12 @@ impl ZipExport {
             }
             Format::Psd => opts.document_path = page.path.as_ref().map(std::path::PathBuf::from),
         }
-        let out = photocraft_io::export(&doc, &format!("page.{}", self.format.ext()), &opts).map_err(|e| e.to_string())?;
+        // A PNG page is made a band of rows at a time: pages one after another on a phone.
+        let out = match self.format {
+            Format::Png => photocraft_io::export_png_in_bands(&doc, &opts),
+            _ => photocraft_io::export(&doc, &format!("page.{}", self.format.ext()), &opts),
+        }
+        .map_err(|e| e.to_string())?;
         Ok(out.bytes)
     }
 

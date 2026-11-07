@@ -3,6 +3,8 @@
 //  - two healthy tabs: nothing is offered in either;
 //  - the second tab open when the first freezes: it offers the work, and Recover brings it back;
 //  - a tab opened after the freeze: it offers the work on load.
+// The frozen tab holds its checkpoint's files so no one else can write them (a phone's tab that
+// froze mid-write): the recovered document still autosaves, under a key of its own.
 //
 //   CHROME=<chromium> PROFILE=<empty dir> node recovery-frozen-tab.mjs <url ending in />
 import { chromium } from 'playwright-core';
@@ -50,6 +52,17 @@ const b = await open();
 check((await waitOffer(b, 40000)) === null, 'two healthy tabs: nothing is offered');
 check(!(await offered(a)), 'nor in the first');
 
+// Every file of the first tab's checkpoint held as a write the second tab can't share.
+const held = await a.evaluate(async () => {
+  self.__hold = [];
+  const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('capishot-recovery');
+  for await (const [, d] of root.entries()) {
+    if (d.kind !== 'directory') continue;
+    for await (const [, f] of d.entries()) if (f.kind === 'file') self.__hold.push(await f.createWritable({ mode: 'exclusive', keepExistingData: true }));
+  }
+  return self.__hold.length;
+}).catch((e) => String(e));
+console.log('files held by the first tab:', held);
 freeze(a);
 const later = await waitOffer(b, 70000);
 check(later !== null, `the tab already open offers the frozen tab's work (${later} ms)`);
@@ -72,6 +85,21 @@ if (later !== null) {
   }
   check(back, 'Recover brings the document back');
   check(!(await offered(b)), 'and the dialog is gone');
+  // An edit in the recovered document: its checkpoint can't go where the frozen tab holds files.
+  await ex(b, 'select.rect', { x: 400, y: 100, width: 100, height: 100 });
+  await ex(b, 'edit.fill', { color: '#0000ff' });
+  await ex(b, 'select.deselect');
+  await b.waitForTimeout(20000);
+  const s = await request(b, 'ui.inspect');
+  const said = JSON.stringify([s.status, s.notices]);
+  check(!/Autosave failed/.test(said), `the recovered document autosaves (${String(s.status).slice(0, 120)})`);
+  const heads = await b.evaluate(async () => {
+    const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('capishot-recovery');
+    let n = 0;
+    for await (const [, d] of root.entries()) if (d.kind === 'directory') { try { await d.getFileHandle('head'); n++; } catch { /* none */ } }
+    return n;
+  });
+  check(heads >= 2, `under a key of its own (${heads} checkpoints)`);
 }
 
 const c = await open();

@@ -78,8 +78,14 @@ struct Slot {
     pending: Option<Job>,
     /// Being removed: no checkpoint is accepted.
     retiring: bool,
+    /// The checkpoint being encoded or written, to write again under a new key if storage
+    /// refuses the first.
+    running: Option<Job>,
+    /// Already moved to a new key once after a refused write.
+    moved: bool,
 }
 
+#[derive(Clone)]
 struct Job {
     doc: Arc<Document>,
     history: photocraft_ops::HistoryCheckpoint,
@@ -121,6 +127,10 @@ struct Inner {
     /// freezes later doesn't ask again about those.
     offered: Vec<String>,
     answered: std::collections::HashSet<String>,
+    /// Checkpoints recovered from a tab that still holds its lock (one that froze): that tab may
+    /// still write there, or hold its files so no one else can, so the document recovered from
+    /// one autosaves under a key of its own.
+    copies: std::collections::HashSet<String>,
     /// Wakes the page when something is to be offered with nothing else going on.
     ctx: Option<egui::Context>,
 }
@@ -333,6 +343,7 @@ impl Recovery {
             }
             let Some(job) = slot.pending.take() else { return };
             slot.busy = true;
+            slot.running = Some(job.clone());
             (job, slot.key.clone(), slot.saver.clone())
         };
         let info = RecoveryInfo {
@@ -430,8 +441,25 @@ impl Recovery {
         photocraft_ui_egui::telemetry::leave_stage(photocraft_ui_egui::telemetry::Stage::RecoveryCheckpoint);
         let retire = {
             let mut inner = self.0.borrow_mut();
+            // Storage refused the write (a tab that froze still holding the files of the
+            // checkpoint this document was recovered from): write it whole under a new key, once.
+            let refused = result.is_err() && live.is_some();
+            let again = inner.slots.get(&id).is_some_and(|s| refused && !s.moved && !s.retiring && s.running.is_some());
+            let key = again.then(|| inner.fresh_key());
             let Some(slot) = inner.slots.get_mut(&id) else { return };
             slot.busy = false;
+            let running = slot.running.take();
+            if let Some(key) = key {
+                slot.key = key;
+                slot.moved = true;
+                slot.saver.lock().unwrap_or_else(PoisonError::into_inner).forget();
+                if slot.pending.is_none() {
+                    slot.pending = running;
+                }
+                drop(inner);
+                self.kick(id);
+                return;
+            }
             {
                 let mut saver = slot.saver.lock().unwrap_or_else(PoisonError::into_inner);
                 match (&result, live) {
@@ -541,7 +569,12 @@ impl Recovery {
         photocraft_ui_egui::telemetry::set_stage(photocraft_ui_egui::telemetry::Stage::RecoveryLoad);
         let me = self.clone();
         wasm_bindgen_futures::spawn_local(async move {
+            let own = me.0.borrow().session.clone();
+            let held = sessions(rcv_held_sessions().await).unwrap_or_default();
             for key in keys {
+                if session_of(&key).is_some_and(|s| s != own && held.contains(s)) {
+                    me.0.borrow_mut().copies.insert(key.clone());
+                }
                 let read = match rcv_read(&key).await {
                     Ok(v) => v,
                     Err(e) => {
@@ -637,7 +670,7 @@ impl Inner {
     /// Document `id`'s slot, created with `inherited` (a recovered document's key) or a new key.
     fn claim(&mut self, id: u64, inherited: Option<&str>) -> Result<&mut Slot, String> {
         if !self.slots.contains_key(&id) {
-            let key = match inherited {
+            let key = match inherited.filter(|k| !self.copies.contains(*k)) {
                 Some(key) => {
                     if key.is_empty() || key.len() > 200 || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
                         return Err("Invalid recovery key".into());
@@ -647,14 +680,17 @@ impl Inner {
                     }
                     key.to_string()
                 }
-                None => {
-                    self.next_key += 1;
-                    format!("web-{}-{}", self.session, self.next_key)
-                }
+                None => self.fresh_key(),
             };
-            self.slots.insert(id, Slot { key, saver: Arc::default(), busy: false, pending: None, retiring: false });
+            self.slots.insert(id, Slot { key, saver: Arc::default(), busy: false, pending: None, retiring: false, running: None, moved: false });
         }
         self.slots.get_mut(&id).ok_or_else(|| "Recovery ownership unavailable".into())
+    }
+
+    /// A key no checkpoint uses yet.
+    fn fresh_key(&mut self) -> String {
+        self.next_key += 1;
+        format!("web-{}-{}", self.session, self.next_key)
     }
 }
 
