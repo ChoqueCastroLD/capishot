@@ -224,6 +224,17 @@ impl Session {
         self.poll_history_cache();
         Some(d)
     }
+
+    /// [`Self::close`] for a document that's gone for good: freeing its pixels and its history can
+    /// take seconds on a machine short of memory, so that doesn't happen on the UI's thread.
+    pub(crate) fn close_and_free(&mut self, index: usize) -> bool {
+        let Some(d) = self.close(index) else { return false };
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = std::thread::Builder::new().name("photocraft-doc-free".into()).spawn(move || drop(d));
+        #[cfg(target_arch = "wasm32")]
+        drop(d);
+        true
+    }
 }
 
 pub(super) fn fix_active(st: &mut DocState) {

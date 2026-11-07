@@ -41,7 +41,7 @@ fn import_result(name: &str, bytes: &[u8]) -> Result<photocraft_io::ImportResult
 pub(super) fn close_all(s: &mut Session) -> Result<Value> {
     let n = s.visible_count();
     while let Some(last) = s.visible_count().checked_sub(1) {
-        s.close(last);
+        s.close_and_free(last);
     }
     Ok(json!({"closed": n}))
 }
@@ -54,7 +54,7 @@ pub(super) fn close_others(s: &mut Session, p: &Value) -> Result<Value> {
     let n = s.visible_count() - 1;
     for i in (0..s.visible_count()).rev() {
         if i != keep {
-            s.close(i);
+            s.close_and_free(i);
         }
     }
     s.set_active(0);
