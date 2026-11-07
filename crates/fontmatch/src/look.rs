@@ -58,8 +58,10 @@ pub(crate) fn measure(z: &Zone<'_>, found: &Letters) -> Look {
     let fill = median(z, inside).or_else(|| median(z, |i| ink.data[i])).unwrap_or([0, 0, 0]);
     let fill_lum = i32::from(((u32::from(fill[0]) * 77 + u32::from(fill[1]) * 150 + u32::from(fill[2]) * 29) >> 8) as u8);
     let outline = found.ring.map(|width| {
-        // The ring: dark or light against the fill, right next to it.
-        let near = |i: usize| !ink.data[i] && (i32::from(lum[i]) - fill_lum).abs() > 60;
+        // The ring: right around the bodies, and clearly not their colour.
+        let outside = Bitmap { width: ink.width, height: ink.height, data: ink.data.iter().map(|v| !*v).collect() };
+        let far = crate::segment::distance(&outside);
+        let near = |i: usize| !ink.data[i] && far[i] <= width && (i32::from(lum[i]) - fill_lum).abs() > 60;
         (median(z, near).unwrap_or([0, 0, 0]), width)
     });
     let ground = median(z, |i| {

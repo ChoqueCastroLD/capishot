@@ -17,7 +17,7 @@ const CLICK_SIDE: f64 = 256.0;
 /// What the options draw: every kind of letter, as no words are known.
 const SAMPLE: &str = "ABCDEF abcdef 123";
 /// A drawing's letter size, whatever the zone's, so they can be told apart.
-const SAMPLE_PT: f32 = 40.0;
+const SAMPLE_PT: f32 = 28.0;
 /// The tallest the zone shows.
 const CROP_HEIGHT: f32 = 110.0;
 /// A drag smaller than this is a click.
