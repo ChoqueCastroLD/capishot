@@ -1434,6 +1434,14 @@ impl WebShell {
                 sink.send(Delivery::Stored(id, r));
             });
         }
+        if let Some(id) = photocraft_ui_egui::user_fonts_ui::take_scan() {
+            let db = db.clone();
+            let sink = sink.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let r = crate::indexed_fonts::get(&db, &id).await;
+                sink.send(Delivery::Scanned(id, r));
+            });
+        }
         if user_fonts::store().idle_work() {
             // Keep idle reads going without input.
             ctx.request_repaint_after(std::time::Duration::from_millis(250));

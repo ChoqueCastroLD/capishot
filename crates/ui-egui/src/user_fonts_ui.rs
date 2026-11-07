@@ -44,6 +44,8 @@ pub enum Delivery {
     Done { cancelled: bool },
     /// A stored file read back (lazy restore), by id.
     Stored(String, Result<Vec<u8>, String>),
+    /// A stored file read back only to be searched (`font_finder_ui`), by id.
+    Scanned(String, Result<Vec<u8>, String>),
     /// A store write of the font `id` finished.
     Written(String, Result<(), String>),
 }
@@ -264,6 +266,7 @@ pub fn tick(app: &mut PhotocraftApp, ctx: Option<&egui::Context>) {
                     }
                 }
             },
+            Delivery::Scanned(id, result) => crate::font_finder_ui::scanned(app, id, result),
             Delivery::Written(id, Ok(())) => log::debug!("font {id} stored"),
             Delivery::Written(id, Err(e)) => {
                 let kind = user_fonts::store().write_failed(&id, &e);
@@ -301,7 +304,7 @@ fn take_some(queue: &Arc<Mutex<Vec<Delivery>>>) -> Vec<Delivery> {
     let mut n = 0;
     for d in q.iter() {
         let size = match d {
-            Delivery::File(_, b) | Delivery::Stored(_, Ok(b)) => b.len() as u64,
+            Delivery::File(_, b) | Delivery::Stored(_, Ok(b)) | Delivery::Scanned(_, Ok(b)) => b.len() as u64,
             _ => 0,
         };
         if n > 0 && bytes.saturating_add(size) > BYTES_PER_FRAME {
@@ -476,6 +479,11 @@ fn set_actions(app: &mut PhotocraftApp, id: u64, actions: &[(&str, &str)]) {
 /// time (`idle`: the user isn't dragging, start-up is over).
 pub fn take_loads(idle: bool) -> Vec<String> {
     user_fonts::store().next_loads(idle)
+}
+
+/// The next stored file to read only to search it.
+pub fn take_scan() -> Option<String> {
+    user_fonts::store().next_scan()
 }
 
 // ------------------------------------------------------------------ missing fonts notice

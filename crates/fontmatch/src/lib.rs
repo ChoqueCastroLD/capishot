@@ -12,7 +12,7 @@ pub mod look;
 pub mod matcher;
 pub mod segment;
 
-pub use index::{FaceSource, Library};
+pub use index::{Face, FaceSource, Library};
 pub use look::Look;
 pub use matcher::{Candidate, Scope, find, find_in};
 

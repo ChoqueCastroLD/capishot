@@ -345,7 +345,9 @@ pub struct Session {
     /// The last `select.detectText` of each document.
     text_detections: Vec<(photocraft_doc::DocId, std::sync::Arc<photocraft_ai_textmask::Detection>)>,
     /// The font finder's alphabets, for the font list of this generation, and its last answer.
-    font_library: Option<(u64, std::sync::Arc<photocraft_fontmatch::Library>)>,
+    font_library: Option<(u64, usize, std::sync::Arc<photocraft_fontmatch::Library>)>,
+    /// Stored font files read only to be searched, by id (`font.find`).
+    font_files: std::collections::BTreeMap<String, Vec<photocraft_fontmatch::Face>>,
     font_found: Option<std::sync::Arc<serde_json::Value>>,
     /// Downloads and deletes AI model weights (`ai.models.*`, the AI Model Manager), injected by
     /// the shell; `None` where downloads are unavailable (see `ai_models_cmds`).

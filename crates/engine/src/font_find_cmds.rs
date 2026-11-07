@@ -1,9 +1,11 @@
 //! `font.find`: which fonts draw the lettering in a rectangle, and with what look. By shapes alone
 //! (`photocraft_fontmatch`): no model and no OCR, and the same zone gives the same list. Every
-//! face's alphabet is drawn on first use, as a job, and kept until the font list changes.
+//! face's alphabet is drawn on first use, as a job, and kept. The search also covers the stored
+//! fonts the session hasn't loaded, read one by one and let go ([`Session::add_font_file`]).
 
 use std::sync::Arc;
 
+pub use photocraft_fontmatch::Face;
 use photocraft_fontmatch::{Candidate, FaceSource, Library, Scope, Zone, find_in};
 use photocraft_geom::Rect;
 use serde_json::{Value, json};
@@ -29,6 +31,28 @@ impl Session {
     pub fn font_found(&self) -> Option<Arc<Value>> {
         self.font_found.clone()
     }
+
+    /// Was this stored font file already read for the search?
+    pub fn font_file_known(&self, id: &str) -> bool {
+        self.font_files.contains_key(id)
+    }
+
+    /// The search also covers `faces`, of the stored file `id`, though it isn't loaded.
+    pub fn add_font_file(&mut self, id: String, faces: Vec<Face>) {
+        self.font_files.insert(id, faces);
+    }
+}
+
+/// The faces of a font file, to search them without keeping the file.
+pub fn read_font_file(data: &[u8]) -> Vec<Face> {
+    photocraft_text::user_fonts::indexed_faces(data).iter().filter_map(|(index, f)| Face::read(&FaceSource { family: &f.family, style: &f.style, data, index: *index })).collect()
+}
+
+/// Every face the font database has, with its file. A family at a time: type keeps being drawn.
+fn face_blobs() -> Vec<photocraft_text::fonts::FaceBlob> {
+    let lock = || photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner());
+    let families = lock().fonts.families();
+    families.iter().flat_map(|family| lock().fonts.face_blobs(family)).collect()
 }
 
 fn option(c: &Candidate, dpi: f64) -> Value {
@@ -98,18 +122,25 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
         Some("document") => used_families(&doc.layers, &mut scope.only),
         Some(_) => return Err(bad("\"scope\" must be \"all\" or \"document\"")),
     }
+    {
+        let store = photocraft_text::user_fonts::store();
+        s.font_files.retain(|id, _| store.entry(id).is_some());
+    }
     let generation = photocraft_text::fonts::generation();
-    let cached = s.font_library.as_ref().filter(|(g, _)| *g == generation).map(|(_, l)| l.clone());
-    let faces = if cached.is_some() { Vec::new() } else { photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner()).fonts.face_blobs() };
+    let files = s.font_files.len();
+    let cached = s.font_library.as_ref().filter(|(g, n, _)| *g == generation && *n == files).map(|(_, _, l)| l.clone());
+    let known = s.font_library.as_ref().map(|(_, _, l)| l.clone());
+    let extra: Vec<Face> = if cached.is_some() { Vec::new() } else { s.font_files.values().flatten().cloned().collect() };
     crate::jobs::run_async(
         s,
         LABEL,
         false,
         move |ctx, done| {
             let library = cached.unwrap_or_else(|| {
+                let faces = face_blobs();
                 let sources: Vec<FaceSource<'_>> = faces.iter().map(|f| FaceSource { family: &f.family, style: &f.style, data: f.bytes(), index: f.index }).collect();
                 let step = ctx.clone();
-                Arc::new(Library::build(&sources, &mut |f| step.progress(f * 0.9, LABEL)))
+                Arc::new(Library::build_from(&sources, known.as_deref(), &extra, &mut |f| step.progress(f * 0.9, LABEL)))
             });
             ctx.progress(0.9, LABEL);
             let buffer = photocraft_compose::render(&doc, area);
@@ -126,7 +157,7 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
         },
         move |s, (library, generation, mut out): (Arc<Library>, u64, Value)| {
             out["faces"] = json!(library.faces.len());
-            s.font_library = Some((generation, library));
+            s.font_library = Some((generation, files, library));
             s.font_found = Some(Arc::new(out.clone()));
             Ok(out)
         },
@@ -169,6 +200,28 @@ mod tests {
         assert!(names.len() <= OPTIONS);
         assert_eq!(a["options"][0]["params"]["color"], "#000000");
         assert!(s.font_found().is_some());
+    }
+
+    #[test]
+    fn it_searches_a_stored_file_that_isnt_loaded_and_lets_it_go_with_the_store() {
+        let mut s = page();
+        let inter = photocraft_text::shared().lock().unwrap().fonts.face_blobs("Inter").into_iter().find(|f| f.style == "Regular").expect("Inter");
+        let mut faces = read_font_file(inter.bytes());
+        assert!(!faces.is_empty());
+        faces.iter_mut().for_each(|f| (f.family, f.key) = ("Only Stored".to_string(), 1));
+        let scoped = json!({"rect": [10, 40, 580, 120], "families": ["Only Stored"]});
+        assert_eq!(s.execute(ID, scoped.clone()).unwrap()["options"], json!([]));
+        s.add_font_file("x".repeat(64), faces.clone());
+        // Not in the store: it was removed before the search came.
+        assert_eq!(s.execute(ID, scoped.clone()).unwrap()["options"], json!([]));
+        let stored = photocraft_text::user_fonts::prepare("stored.ttf", inter.bytes().to_vec()).unwrap();
+        let id = stored.entry.id.clone();
+        photocraft_text::user_fonts::store().add(&stored);
+        s.add_font_file(id.clone(), faces);
+        let found = s.execute(ID, scoped.clone()).unwrap();
+        assert_eq!(found["options"][0]["family"], "Only Stored", "{found}");
+        photocraft_text::user_fonts::store().remove(&id);
+        assert_eq!(s.execute(ID, scoped).unwrap()["options"], json!([]), "gone with the store");
     }
 
     #[test]

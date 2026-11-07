@@ -4813,3 +4813,6 @@ curves	Smooth	Vloeiend maken
 	Click one to use it	Klik op een lettertype om het te gebruiken
 	{job} is still working on this page: wait for it to finish or cancel it (Esc)	{job} is nog bezig met deze pagina: wacht of annuleer (Esc)
 	This zone has several sizes of lettering: these match the largest	Dit gebied heeft letters van meerdere groottes: deze passen bij de grootste
+	Reading your fonts: {done} of {total}	Je lettertypen lezen: {done} van {total}
+	Very few fonts are loaded: load yours and the search looks through them	Er zijn heel weinig lettertypen geladen: laad de jouwe en de zoekopdracht doorzoekt ze
+	Among {n} loaded fonts. Click one to use it	Uit {n} geladen lettertypen. Klik op een om het te gebruiken

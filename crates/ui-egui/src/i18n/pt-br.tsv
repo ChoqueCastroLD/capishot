@@ -5502,3 +5502,6 @@ fontTab	Find More	Encontrar mais
 	Click one to use it	Clique em uma para usá-la
 	{job} is still working on this page: wait for it to finish or cancel it (Esc)	{job} ainda está trabalhando nesta página: espere terminar ou cancele (Esc)
 	This zone has several sizes of lettering: these match the largest	Esta área tem letras de vários tamanhos: estas opções são para as maiores
+	Reading your fonts: {done} of {total}	Lendo suas fontes: {done} de {total}
+	Very few fonts are loaded: load yours and the search looks through them	Há muito poucas fontes carregadas: carregue as suas e a busca vai olhá-las
+	Among {n} loaded fonts. Click one to use it	Entre {n} fontes carregadas. Clique em uma para usá-la

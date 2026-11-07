@@ -5092,3 +5092,6 @@ shape	Appearance	Apparence
 	Click one to use it	Cliquez sur une police pour l’utiliser
 	{job} is still working on this page: wait for it to finish or cancel it (Esc)	{job} travaille encore sur cette page : attendez la fin ou annulez (Échap)
 	This zone has several sizes of lettering: these match the largest	Cette zone contient plusieurs tailles de lettres : ces options valent pour les plus grandes
+	Reading your fonts: {done} of {total}	Lecture de vos polices : {done} sur {total}
+	Very few fonts are loaded: load yours and the search looks through them	Très peu de polices sont chargées : chargez les vôtres et la recherche les parcourra
+	Among {n} loaded fonts. Click one to use it	Parmi {n} polices chargées. Cliquez sur une pour l’utiliser

@@ -122,7 +122,7 @@ pub fn find_in(lib: &Library, zone: &Zone<'_>, k: usize, scope: &Scope) -> Vec<C
         .into_iter()
         .map(|f| {
             let face = &lib.faces[f];
-            let glyphs: Vec<Edged> = face.glyphs.iter().map(|g| edges(&g.bitmap, 6)).collect();
+            let glyphs: Vec<Edged> = face.glyphs.iter().map(|g| edges(&g.bitmap.unpack(), 6)).collect();
             let mut per: Vec<f32> = found
                 .letters
                 .iter()

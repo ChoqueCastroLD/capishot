@@ -4757,3 +4757,6 @@ curves	Smooth	Εξομάλυνση
 	Click one to use it	Κάντε κλικ σε μία για χρήση
 	{job} is still working on this page: wait for it to finish or cancel it (Esc)	Το {job} δουλεύει ακόμη σε αυτή τη σελίδα: περιμένετε ή ακυρώστε (Esc)
 	This zone has several sizes of lettering: these match the largest	Αυτή η περιοχή έχει γράμματα πολλών μεγεθών: αυτές οι επιλογές αφορούν τα μεγαλύτερα
+	Reading your fonts: {done} of {total}	Ανάγνωση των γραμματοσειρών σας: {done} από {total}
+	Very few fonts are loaded: load yours and the search looks through them	Έχουν φορτωθεί πολύ λίγες γραμματοσειρές: φορτώστε τις δικές σας και η αναζήτηση θα τις ελέγξει
+	Among {n} loaded fonts. Click one to use it	Ανάμεσα σε {n} φορτωμένες γραμματοσειρές. Κάντε κλικ σε μία για να τη χρησιμοποιήσετε

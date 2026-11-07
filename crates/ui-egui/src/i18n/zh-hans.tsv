@@ -3756,3 +3756,6 @@ curves	Smooth	平滑
 	Click one to use it	点击一个即可使用
 	{job} is still working on this page: wait for it to finish or cancel it (Esc)	{job} 仍在处理此页面:请等待完成或取消 (Esc)
 	This zone has several sizes of lettering: these match the largest	此区域有多种大小的文字:这些选项针对最大的文字
+	Reading your fonts: {done} of {total}	正在读取你的字体: {done} / {total}
+	Very few fonts are loaded: load yours and the search looks through them	已加载的字体很少: 加载你的字体后即可搜索它们
+	Among {n} loaded fonts. Click one to use it	在已加载的 {n} 个字体中。点击一个即可使用

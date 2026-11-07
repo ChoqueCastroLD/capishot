@@ -143,9 +143,15 @@ pub fn prepare(name: &str, bytes: Vec<u8>) -> Result<Prepared, String> {
 
 /// The faces of OpenType data (every face of a collection), named as fontique registers them.
 pub fn faces_of(data: &[u8]) -> Vec<Face> {
+    indexed_faces(data).into_iter().map(|(_, f)| f).collect()
+}
+
+/// [`faces_of`], each with its index in the file.
+pub fn indexed_faces(data: &[u8]) -> Vec<(u32, Face)> {
     let Ok(file) = FileRef::new(data) else { return Vec::new() };
     let mut out = Vec::new();
-    for font in file.fonts().flatten() {
+    for (index, font) in file.fonts().enumerate() {
+        let Ok(font) = font else { continue };
         let name =
             |id| font.localized_strings(id).english_or_first().map(|s| s.chars().take(MAX_NAME_CHARS).collect::<String>()).filter(|s| !s.trim().is_empty());
         let Some(family) = name(StringId::TYPOGRAPHIC_FAMILY_NAME).or_else(|| name(StringId::FAMILY_NAME)) else { continue };
@@ -155,7 +161,7 @@ pub fn faces_of(data: &[u8]) -> Vec<Face> {
         let style = name(StringId::TYPOGRAPHIC_SUBFAMILY_NAME)
             .or_else(|| name(StringId::SUBFAMILY_NAME))
             .unwrap_or_else(|| if italic { "Italic".into() } else { "Regular".into() });
-        out.push(Face { family, style, postscript: name(StringId::POSTSCRIPT_NAME), weight, italic });
+        out.push((index as u32, Face { family, style, postscript: name(StringId::POSTSCRIPT_NAME), weight, italic }));
         if out.len() >= MAX_FACES {
             break;
         }
@@ -298,6 +304,9 @@ pub struct Store {
     /// To read from the store, oldest first.
     queued: Vec<String>,
     in_flight: BTreeSet<String>,
+    /// Stored files to read only to look at, not to keep: [`Store::ask_scan`].
+    scans: Vec<String>,
+    scanning: Option<String>,
     ops: Vec<Op>,
     persistence: Persistence,
     generation: u64,
@@ -319,6 +328,8 @@ impl Store {
             unsaved: BTreeSet::new(),
             queued: Vec::new(),
             in_flight: BTreeSet::new(),
+            scans: Vec::new(),
+            scanning: None,
             ops: Vec::new(),
             persistence: Persistence::Session,
             generation: 0,
@@ -506,6 +517,39 @@ impl Store {
         }
         self.in_flight.extend(out.iter().cloned());
         out
+    }
+
+    /// Asks to read every unloaded file but those `known` once each, without registering them, so
+    /// a whole library can be looked at whatever its size. Answers how many are on their way.
+    pub fn ask_scan(&mut self, known: impl Fn(&str) -> bool) -> usize {
+        let ids: Vec<String> = self.entries.iter().filter(|e| !self.loaded.contains(&e.id) && !known(&e.id)).map(|e| e.id.clone()).collect();
+        for id in ids {
+            if self.scanning.as_ref() != Some(&id) && !self.scans.contains(&id) {
+                self.scans.push(id);
+            }
+        }
+        self.scans.len() + usize::from(self.scanning.is_some())
+    }
+
+    /// The next file to scan: one at a time, so only one is in memory.
+    pub fn next_scan(&mut self) -> Option<String> {
+        if self.scanning.is_some() || self.scans.is_empty() {
+            return None;
+        }
+        self.scanning = Some(self.scans.remove(0));
+        self.scanning.clone()
+    }
+
+    /// The file being scanned was looked at, or could not be read.
+    pub fn scan_done(&mut self, id: &str) {
+        if self.scanning.as_deref() == Some(id) {
+            self.scanning = None;
+        }
+    }
+
+    /// Files left to scan, the one being read included.
+    pub fn scans_left(&self) -> usize {
+        self.scans.len() + usize::from(self.scanning.is_some())
     }
 
     /// Is a stored file being read, or waiting to be?

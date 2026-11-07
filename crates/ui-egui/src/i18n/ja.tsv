@@ -4737,3 +4737,6 @@ curves	Smooth	スムーズ
 	Click one to use it	クリックして使用
 	{job} is still working on this page: wait for it to finish or cancel it (Esc)	{job} がこのページで処理中です。完了を待つかキャンセルしてください (Esc)
 	This zone has several sizes of lettering: these match the largest	この範囲には複数のサイズの文字があります。最も大きい文字に合わせています
+	Reading your fonts: {done} of {total}	フォントを読み込み中: {done} / {total}
+	Very few fonts are loaded: load yours and the search looks through them	読み込まれたフォントがごくわずかです。自分のフォントを読み込むと検索対象になります
+	Among {n} loaded fonts. Click one to use it	読み込み済みの {n} フォントから。クリックして使用

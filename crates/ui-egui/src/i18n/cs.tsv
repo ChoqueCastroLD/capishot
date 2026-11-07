@@ -4800,3 +4800,6 @@ cameraRaw	Dehaze	Odstranění oparu
 	Click one to use it	Kliknutím jedno použijte
 	{job} is still working on this page: wait for it to finish or cancel it (Esc)	{job} stále pracuje na této stránce: počkejte nebo zrušte (Esc)
 	This zone has several sizes of lettering: these match the largest	V této oblasti jsou písmena více velikostí: tyto možnosti platí pro největší
+	Reading your fonts: {done} of {total}	Čtení vašich písem: {done} z {total}
+	Very few fonts are loaded: load yours and the search looks through them	Je načteno velmi málo písem: načtěte svá a hledání je prohledá
+	Among {n} loaded fonts. Click one to use it	Mezi {n} načtenými písmy. Kliknutím jedno použijete

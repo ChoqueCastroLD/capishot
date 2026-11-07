@@ -417,16 +417,14 @@ impl FontDb {
         self.data.clone()
     }
 
-    /// Every face of every family, with its file, to read their outlines off the UI's thread.
-    pub fn face_blobs(&mut self) -> Vec<FaceBlob> {
+    /// Every face of `family`, with its file, to read their outlines off the UI's thread.
+    pub fn face_blobs(&mut self, family: &str) -> Vec<FaceBlob> {
         let mut out = Vec::new();
-        for family in self.families() {
-            let faces = self.faces(&family);
-            let Some(info) = self.fcx.collection.family_by_name(&family) else { continue };
-            for (f, face) in info.fonts().iter().zip(faces) {
-                if let Some(data) = f.load(Some(&mut self.fcx.source_cache)) {
-                    out.push(FaceBlob { family: family.clone(), style: face.style, index: f.index(), data });
-                }
+        let faces = self.faces(family);
+        let Some(info) = self.fcx.collection.family_by_name(family) else { return out };
+        for (f, face) in info.fonts().iter().zip(faces) {
+            if let Some(data) = f.load(Some(&mut self.fcx.source_cache)) {
+                out.push(FaceBlob { family: family.to_string(), style: face.style, index: f.index(), data });
             }
         }
         out

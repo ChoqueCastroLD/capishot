@@ -3631,3 +3631,6 @@ fontWeight	Italic	Itálico
 	Click one to use it	Clique num para o usar
 	{job} is still working on this page: wait for it to finish or cancel it (Esc)	{job} ainda está a trabalhar nesta página: aguarde ou cancele (Esc)
 	This zone has several sizes of lettering: these match the largest	Esta zona tem letras de vários tamanhos: estas opções são para as maiores
+	Reading your fonts: {done} of {total}	A ler os seus tipos de letra: {done} de {total}
+	Very few fonts are loaded: load yours and the search looks through them	Há muito poucos tipos de letra carregados: carregue os seus e a pesquisa vai vê-los
+	Among {n} loaded fonts. Click one to use it	Entre {n} tipos de letra carregados. Clique num para o usar

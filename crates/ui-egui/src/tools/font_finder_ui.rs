@@ -2,10 +2,14 @@
 //! rectangle, and `font.find` answers five fonts that look like the lettering there, with its fill
 //! and outline, with no model and no OCR. Each shows drawn with its look; choosing one applies it to
 //! the type layer in use and to the next text.
+//!
+//! It searches every font loaded in the app. In the browser those include the stored ones the
+//! session hasn't read yet: they're read first, one by one and let go, however many there are.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
-use photocraft_engine::font_find_cmds::ID;
+use photocraft_engine::font_find_cmds::{Face, ID, read_font_file};
+use photocraft_text::user_fonts;
 use serde_json::{Value, json};
 
 use crate::PhotocraftApp;
@@ -22,6 +26,8 @@ const SAMPLE_PT: f32 = 28.0;
 const CROP_HEIGHT: f32 = 110.0;
 /// A drag smaller than this is a click.
 const CLICK_DRAG: f64 = 4.0;
+/// Fewer faces than this and the answer can't be much: say so.
+const FEW_FACES: u64 = 10;
 
 /// The tool's window (`PhotocraftApp::font_finder`).
 #[derive(Default)]
@@ -32,6 +38,46 @@ pub(crate) struct State {
     /// The zone as it is on the page, to compare with.
     crop: Option<egui::TextureHandle>,
     closed: bool,
+    /// An option's family is on its way: draw them again when it comes.
+    awaiting: bool,
+    drawn_generation: u64,
+    /// The zone to search once the stored fonts are read, and how many were to read.
+    waiting: Option<[f64; 4]>,
+    to_read: usize,
+    /// Stored files read off the UI's thread.
+    read: Arc<Mutex<Vec<(String, Vec<Face>)>>>,
+}
+
+fn search(app: &mut PhotocraftApp, rect: [f64; 4]) {
+    if let Err(e) = app.run(ID, json!({"rect": rect})) {
+        app.ui.status = e;
+        app.ui.status_error = true;
+    }
+}
+
+/// A stored file arrived: its faces are read off the UI's thread and it's let go.
+pub(crate) fn scanned(app: &mut PhotocraftApp, id: String, bytes: Result<Vec<u8>, String>) {
+    let out = app.font_finder.read.clone();
+    let work = move || {
+        let faces = bytes.map(|b| read_font_file(&b)).unwrap_or_default();
+        out.lock().unwrap_or_else(PoisonError::into_inner).push((id, faces));
+    };
+    if crate::jobs_ui::OFF_THREAD { crate::jobs_ui::off_thread(work) } else { work() }
+}
+
+/// What arrived joins the search, and with all of it there the search starts.
+fn collect(app: &mut PhotocraftApp) {
+    let arrived = std::mem::take(&mut *app.font_finder.read.lock().unwrap_or_else(PoisonError::into_inner));
+    for (id, faces) in arrived {
+        user_fonts::store().scan_done(&id);
+        app.session.add_font_file(id, faces);
+    }
+    if app.font_finder.waiting.is_some() && user_fonts::store().scans_left() == 0 {
+        let rect = app.font_finder.waiting.take();
+        if let Some(rect) = rect.filter(|_| app.ui.tool == Tool::FontFinder) {
+            search(app, rect);
+        }
+    }
 }
 
 /// A press and release of the tool (document px).
@@ -43,9 +89,15 @@ pub fn finish(app: &mut PhotocraftApp, start: [f64; 2], end: [f64; 2]) {
         [start[0].min(end[0]), start[1].min(end[1]), w, h]
     };
     app.font_finder.closed = false;
-    if let Err(e) = app.run(ID, json!({"rect": rect})) {
-        app.ui.status = e;
-        app.ui.status_error = true;
+    let session = &app.session;
+    let left = user_fonts::store().ask_scan(|id| session.font_file_known(id));
+    if left > 0 {
+        if app.font_finder.waiting.is_none() {
+            app.font_finder.to_read = left;
+        }
+        app.font_finder.waiting = Some(rect);
+    } else {
+        search(app, rect);
     }
 }
 
@@ -109,13 +161,36 @@ fn choose(app: &mut PhotocraftApp, o: &Value) {
 
 /// The window with the answer, each option drawn with its look.
 pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    collect(app);
     let found = app.session.font_found();
     if !app.font_finder.shown.as_ref().zip(found.as_ref()).is_some_and(|(a, b)| Arc::ptr_eq(a, b)) {
         app.font_finder.shown.clone_from(&found);
         app.font_finder.cards.clear();
         app.font_finder.crop = found.as_deref().and_then(|a| crop_of(app, a, ctx));
+        // An option may be a stored font that was only read to search it.
+        for o in found.iter().flat_map(|a| a["options"].as_array().cloned().unwrap_or_default()) {
+            user_fonts::request(o["family"].as_str().unwrap_or_default());
+        }
+        app.font_finder.awaiting = user_fonts::store().loading();
+        app.font_finder.drawn_generation = photocraft_text::fonts::generation();
+    }
+    let generation = photocraft_text::fonts::generation();
+    if app.font_finder.awaiting && app.font_finder.drawn_generation != generation {
+        app.font_finder.drawn_generation = generation;
+        app.font_finder.awaiting = user_fonts::store().loading();
+        app.font_finder.cards.clear();
     }
     if app.ui.tool != Tool::FontFinder || app.font_finder.closed {
+        return;
+    }
+    if app.font_finder.waiting.is_some() {
+        let left = user_fonts::store().scans_left();
+        let total = app.font_finder.to_read.max(left).max(1);
+        egui::Window::new(tl!("Find Font")).id(egui::Id::new("font-finder-reading")).collapsible(false).resizable(false).show(ctx, |ui| {
+            ui.label(crate::i18n::fmt(tl!("Reading your fonts: {done} of {total}"), &[("done", &(total - left).to_string()), ("total", &total.to_string())]));
+            ui.add(egui::ProgressBar::new((total - left) as f32 / total as f32));
+        });
+        ctx.request_repaint();
         return;
     }
     let Some(answer) = app.font_finder.shown.clone() else { return };
@@ -137,7 +212,13 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let mut w = egui::Window::new(tl!("Find Font")).id(egui::Id::unique("font-finder-window")).open(&mut open).collapsible(false);
     // Beside the page, where the zone can still be seen.
     w = if phone { w.fixed_rect(screen.shrink(4.0)).resizable(false) } else { w.default_width(420.0).default_height(screen.height() * 0.8).default_pos(egui::pos2(screen.right() - 700.0, screen.top() + 90.0)) };
+    let faces = answer["faces"].as_u64().unwrap_or(0);
+    let mut load = false;
     w.show(ctx, |ui| {
+        if faces < FEW_FACES {
+            ui.label(egui::RichText::new(tl!("Very few fonts are loaded: load yours and the search looks through them")).color(t.warning));
+            load = ui.button(tl!("Load Fonts…")).clicked();
+        }
         if options.is_empty() {
             ui.label(tl!("No lettering found here. Try a tighter rectangle around the letters."));
             return;
@@ -150,7 +231,8 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
         if options[0]["mixed"].as_bool() == Some(true) {
             ui.label(egui::RichText::new(tl!("This zone has several sizes of lettering: these match the largest")).color(t.warning));
         }
-        ui.label(egui::RichText::new(tl!("Click one to use it")).color(t.text_dim));
+        let among = crate::i18n::fmt(tl!("Among {n} loaded fonts. Click one to use it"), &[("n", &faces.to_string())]);
+        ui.label(egui::RichText::new(among).color(t.text_dim));
         egui::ScrollArea::vertical().show(ui, |ui| {
             for (i, o) in options.iter().enumerate() {
                 let name = format!("{}  {}", o["family"].as_str().unwrap_or_default(), o["style"].as_str().unwrap_or_default());
@@ -173,6 +255,9 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     });
     if !open {
         app.font_finder.closed = true;
+    }
+    if load {
+        let _ = app.run("type.loadFonts", json!({}));
     }
     if let Some(o) = picked {
         choose(app, &o);

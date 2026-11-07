@@ -4089,3 +4089,6 @@ curves	Smooth	Glätten
 	Click one to use it	Klicke zum Verwenden auf eine
 	{job} is still working on this page: wait for it to finish or cancel it (Esc)	{job} arbeitet noch an dieser Seite: warte oder brich ab (Esc)
 	This zone has several sizes of lettering: these match the largest	Dieser Bereich hat mehrere Schriftgrößen: diese passen zur größten
+	Reading your fonts: {done} of {total}	Deine Schriften werden gelesen: {done} von {total}
+	Very few fonts are loaded: load yours and the search looks through them	Es sind nur sehr wenige Schriften geladen: Lade deine, dann werden sie durchsucht
+	Among {n} loaded fonts. Click one to use it	Unter {n} geladenen Schriften. Klicke auf eine, um sie zu verwenden

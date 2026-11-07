@@ -4284,3 +4284,6 @@ curves	Smooth	매끄럽게
 	Click one to use it	클릭해서 사용
 	{job} is still working on this page: wait for it to finish or cancel it (Esc)	{job} 작업이 이 페이지에서 진행 중입니다. 기다리거나 취소하세요 (Esc)
 	This zone has several sizes of lettering: these match the largest	이 영역에 여러 크기의 글자가 있습니다. 가장 큰 글자에 맞춘 결과입니다
+	Reading your fonts: {done} of {total}	글꼴 읽는 중: {done} / {total}
+	Very few fonts are loaded: load yours and the search looks through them	불러온 글꼴이 매우 적습니다. 내 글꼴을 불러오면 함께 검색합니다
+	Among {n} loaded fonts. Click one to use it	불러온 글꼴 {n}개 중에서. 클릭하면 사용합니다
