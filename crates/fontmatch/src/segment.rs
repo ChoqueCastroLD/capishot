@@ -242,9 +242,25 @@ fn hollow(ink: &Bitmap) -> Option<(Bitmap, f32)> {
     let (w, h) = (ink.width, ink.height);
     let ground = Bitmap { width: w, height: h, data: ink.data.iter().map(|v| !*v).collect() };
     let (labels, comps) = components(&ground, false);
-    let inner: Vec<bool> = comps.iter().map(|c| c.x0 > 0 && c.y0 > 0 && c.x1 < w && c.y1 < h && c.area > 30).collect();
-    let area: usize = comps.iter().zip(&inner).filter(|(_, i)| **i).map(|(c, _)| c.area).sum();
-    if (area as f32) < ink.area() as f32 * 0.6 {
+    let mut inner: Vec<bool> = comps.iter().map(|c| c.x0 > 0 && c.y0 > 0 && c.x1 < w && c.y1 < h && c.area > 30).collect();
+    // What sits inside another's box is a counter, the O's middle: the ground again, not a body.
+    let bodies = inner.clone();
+    for (i, c) in comps.iter().enumerate() {
+        let nested = comps.iter().zip(&bodies).enumerate().any(|(j, (o, is))| *is && j != i && o.x0 < c.x0 && o.y0 < c.y0 && o.x1 > c.x1 && o.y1 > c.y1);
+        if nested {
+            inner[i] = false;
+        }
+    }
+    // Every shape of ink goes around something: plain lettering only does at A, B, D, O…
+    let (_, shapes) = components(ink, true);
+    let mut sizes: Vec<usize> = shapes.iter().map(|c| c.area).collect();
+    sizes.sort_unstable();
+    let big = sizes.get(sizes.len() * 9 / 10).copied().unwrap_or(0);
+    // The ring around an O's counter is part of that O.
+    let outer: Vec<&Comp> = shapes.iter().filter(|c| !shapes.iter().any(|o| o.x0 < c.x0 && o.y0 < c.y0 && o.x1 > c.x1 && o.y1 > c.y1)).collect();
+    let shapes: Vec<&Comp> = outer.into_iter().filter(|c| c.area * 10 >= big).collect();
+    let around = shapes.iter().filter(|o| comps.iter().zip(&inner).any(|(c, is)| *is && o.x0 < c.x0 && o.y0 < c.y0 && o.x1 > c.x1 && o.y1 > c.y1)).count();
+    if shapes.is_empty() || around * 5 < shapes.len() * 4 {
         return None;
     }
     let mut body = Bitmap::new(w, h);
@@ -398,4 +414,63 @@ pub fn letters(z: &Zone<'_>) -> Option<Letters> {
         }
     }
     (!out.is_empty()).then_some(Letters { letters: out, cap, ink, tilt, ring })
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    /// A black ring of `t` around a white body, with a hole in it that's ringed too.
+    fn outlined_o() -> Bitmap {
+        let (w, h) = (120, 120);
+        let mut ink = Bitmap::new(w, h);
+        let ring = |x: usize, y: usize, a: usize, b: usize, t: usize| {
+            (a..b).contains(&x) && (a..b).contains(&y) && !((a + t..b - t).contains(&x) && (a + t..b - t).contains(&y))
+        };
+        for y in 0..h {
+            for x in 0..w {
+                ink.data[y * w + x] = ring(x, y, 10, 110, 6) || ring(x, y, 40, 80, 6);
+            }
+        }
+        ink
+    }
+
+    #[test]
+    fn an_outlined_letter_keeps_its_body_and_not_its_counter() {
+        let (body, ring) = hollow(&outlined_o()).unwrap();
+        assert!(body.get(25, 60), "the body");
+        assert!(!body.get(60, 60), "the middle of the O");
+        assert!(!body.get(12, 12), "the ring");
+        assert!(ring >= 4.0, "{ring}");
+    }
+
+    #[test]
+    fn lines_of_different_lengths_are_not_a_tilt() {
+        let (w, h) = (300, 100);
+        let mut m = Bitmap::new(w, h);
+        for (x1, y0) in [(280, 20), (120, 60)] {
+            for y in y0..y0 + 20 {
+                for x in 20..x1 {
+                    m.data[y * w + x] = (x / 12) % 2 == 0;
+                }
+            }
+        }
+        assert_eq!(tilt_of(&m), 0.0);
+    }
+
+    #[test]
+    fn a_turned_line_reads_as_its_angle() {
+        let (w, h) = (300, 200);
+        let mut m = Bitmap::new(w, h);
+        let (s, c) = 10f32.to_radians().sin_cos();
+        for k in 0..240 {
+            for t in 0..14 {
+                let (px, py) = (k as f32, t as f32);
+                let (x, y) = (30.0 + px * c - py * s, 60.0 + px * s + py * c);
+                m.data[y as usize * w + x as usize] = true;
+            }
+        }
+        assert!((tilt_of(&m).abs() - 10.0).abs() <= 1.0, "{}", tilt_of(&m));
+    }
 }
