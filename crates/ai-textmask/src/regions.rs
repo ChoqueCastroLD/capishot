@@ -1,5 +1,5 @@
-//! From the model's probabilities to regions: a port of `manga_text_mask.py`'s `fill_hollow` and
-//! `find_regions`.
+//! From the model's probabilities to regions: a port of `manga_text_mask.py`'s `fill_hollow`,
+//! `find_regions`, and for a model in giant mode (Shin3) `merge_giant` and `fill_bodies`.
 
 /// One connected piece of a word or effect: what a person keeps or drops, because the model joins
 /// art to the letters near it and a whole word would take the art with it.
@@ -39,7 +39,7 @@ const FILL_MAX_RATIO: u64 = 3;
 const FILL_MIN_WIDTH: f32 = 4.0;
 const THRESHOLD: f32 = 0.5;
 /// A mark needs a pixel this sure: the file's `confident`.
-const CONFIDENT: f32 = 0.99;
+const CONFIDENT: f32 = 0.8;
 const MIN_AREA: u64 = 12;
 const MIN_REGION_AREA: u64 = 60;
 const GAP: f32 = 0.7;
@@ -234,6 +234,180 @@ fn percentile(values: &mut [f32], p: f32) -> f32 {
     values[lo] + (values[hi] - values[lo]) * (at - lo as f32)
 }
 
+/// Giant mode: the half-size pass is merged where the full-size pass found a piece at least this
+/// part of the page tall, and covers at least this part of the half-size mark; never deeper than
+/// this inside solid black.
+const GIANT_MIN_PIECE: f32 = 0.06;
+const GIANT_MIN_COVER: f32 = 0.3;
+const GIANT_DARK_DEPTH: usize = 8;
+/// Then the white body of a giant letter is filled when the mask traces at least this part of the
+/// line around it. A body is paper this bright, between `(BODY_MIN_SIDE × height)²` and
+/// `BODY_MAX_AREA` of the page; the mask is looked for within `BODY_REACH`. A body with more small
+/// holes than `BODY_DOTS` per 10 000 px is halftone, and `BODY_GRID` same-size squares are windows.
+const BODY_RING: f32 = 0.8;
+const BODY_BRIGHT: u8 = 200;
+const BODY_MIN_SIDE: f32 = 1.0 / 60.0;
+const BODY_MAX_AREA: f32 = 0.12;
+const BODY_REACH: usize = 9;
+const BODY_DOTS: f32 = 4.0;
+const BODY_GRID: usize = 3;
+
+/// OpenCV's RGB to grey, in its fixed point.
+fn gray(rgb: &[u8]) -> Vec<u8> {
+    rgb.chunks_exact(3).map(|c| ((u32::from(c[0]) * 4899 + u32::from(c[1]) * 9617 + u32::from(c[2]) * 1868 + 8192) >> 14) as u8).collect()
+}
+
+/// Adds the half-size pass `half` (probabilities at the page's size) to `prob`, only around giant
+/// letters: at half size a paragraph blurs into one blob over the gaps between its letters.
+pub fn merge_giant(prob: &mut [f32], half: &[f32], rgb: &[u8], w: usize, h: usize) {
+    let marked: Vec<bool> = half.iter().map(|p| *p >= THRESHOLD).collect();
+    let (lab, st) = components(&marked, w, h, true);
+    if st.len() <= 1 {
+        return;
+    }
+    let m: Vec<bool> = prob.iter().map(|p| *p >= THRESHOLD).collect();
+    let (lab1, st1) = components(&m, w, h, true);
+    let big: Vec<bool> = st1.iter().enumerate().map(|(i, s)| i > 0 && (s.x1 - s.x0).max(s.y1 - s.y0) as f32 >= GIANT_MIN_PIECE * h as f32).collect();
+    let (mut has_big, mut covered) = (vec![false; st.len()], vec![0u64; st.len()]);
+    for i in 0..w * h {
+        let l = lab[i] as usize;
+        if big[lab1[i] as usize] {
+            has_big[l] = true;
+        }
+        if m[i] {
+            covered[l] += 1;
+        }
+    }
+    let hit: Vec<bool> = (0..st.len()).map(|l| l > 0 && has_big[l] && covered[l] as f32 >= GIANT_MIN_COVER * st[l].area.max(1) as f32).collect();
+    if !hit.iter().any(|v| *v) {
+        return;
+    }
+    // Deep inside solid black: black all around, `GIANT_DARK_DEPTH` px (an erosion, as the light
+    // grown by that much; past the page counts as black).
+    let light: Vec<bool> = rgb.chunks_exact(3).map(|c| (u32::from(c[0]) + u32::from(c[1]) + u32::from(c[2])) as f32 / 3.0 >= 80.0).collect();
+    let mut near_light = vec![false; w * h];
+    dilate_ellipse(&light, w, h, GIANT_DARK_DEPTH, &mut near_light);
+    for i in 0..w * h {
+        if hit[lab[i] as usize] && near_light[i] {
+            prob[i] = prob[i].max(half[i]);
+        }
+    }
+}
+
+/// Fills the white body of giant letters from the page itself: a white area is a letter body when
+/// the mask traces most of the line around it. Holes inside a body are counters and keep showing
+/// the art; halftone whites and grids of same-size squares are skipped. A body joins the piece
+/// most of the line around it belongs to.
+pub fn fill_bodies(d: &mut Detection, rgb: &[u8]) {
+    let (w, h) = (d.width, d.height);
+    let g = gray(rgb);
+    let bright: Vec<bool> = g.iter().map(|v| *v >= BODY_BRIGHT).collect();
+    let (lab, st) = components(&bright, w, h, false);
+    let reach = BODY_REACH / 2;
+    let has: Vec<bool> = d.labels.iter().map(|l| *l > 0).collect();
+    let mut near = vec![false; w * h];
+    dilate_ellipse(&has, w, h, reach, &mut near);
+    let (amin, amax) = ((h as f32 * BODY_MIN_SIDE).powi(2), BODY_MAX_AREA * (w * h) as f32);
+    let mut order: Vec<usize> = (1..st.len()).filter(|&i| (amin..=amax).contains(&(st[i].area as f32))).collect();
+    order.sort_by_key(|&i| std::cmp::Reverse(st[i].area));
+    let mut blocked = vec![false; w * h];
+    let mut cells: Vec<usize> = Vec::new();
+    for i in order {
+        let s = st[i];
+        let (x0, y0, x1, y1) = (s.x0 as usize, s.y0 as usize, s.x1 as usize, s.y1 as usize);
+        let at = |x: usize, y: usize| lab[y * w + x] as usize == i;
+        if (y0..y1).any(|y| (x0..x1).any(|x| at(x, y) && blocked[y * w + x])) {
+            continue;
+        }
+        // The box with a frame of nothing: what reaches the frame through the gaps is outside, the
+        // rest the body's holes.
+        let (cw, ch) = (x1 - x0 + 2, y1 - y0 + 2);
+        let body = |cx: usize, cy: usize| cx > 0 && cy > 0 && cx <= x1 - x0 && cy <= y1 - y0 && at(x0 + cx - 1, y0 + cy - 1);
+        let mut outside = vec![false; cw * ch];
+        let mut stack = vec![(0usize, 0usize)];
+        outside[0] = true;
+        while let Some((cx, cy)) = stack.pop() {
+            for (nx, ny) in [(cx.wrapping_sub(1), cy), (cx + 1, cy), (cx, cy.wrapping_sub(1)), (cx, cy + 1)] {
+                if nx < cw && ny < ch && !outside[ny * cw + nx] && !body(nx, ny) {
+                    outside[ny * cw + nx] = true;
+                    stack.push((nx, ny));
+                }
+            }
+        }
+        // Its outline: the body's pixels next to the outside (OpenCV's outer contour), those not on
+        // the page's edge (nobody's line).
+        let (mut ring, mut traced) = (0usize, 0usize);
+        for cy in 1..=y1 - y0 {
+            for cx in 1..=x1 - x0 {
+                if !body(cx, cy) || ![(cx - 1, cy), (cx + 1, cy), (cx, cy - 1), (cx, cy + 1)].iter().any(|&(a, b)| outside[b * cw + a]) {
+                    continue;
+                }
+                let (px, py) = (x0 + cx - 1, y0 + cy - 1);
+                if px > 0 && py > 0 && px + 1 < w && py + 1 < h {
+                    ring += 1;
+                    traced += usize::from(near[py * w + px]);
+                }
+            }
+        }
+        if ring < 20 || (traced as f32) < BODY_RING * ring as f32 {
+            continue;
+        }
+        let holes: Vec<bool> = (0..cw * ch).map(|k| !outside[k] && !body(k % cw, k / cw)).collect();
+        let (_, hs) = components(&holes, cw, ch, true);
+        let dots = hs.iter().skip(1).filter(|s| s.area < 400).count();
+        if dots as f32 * 1e4 / s.area as f32 > BODY_DOTS {
+            continue;
+        }
+        for (k, hole) in holes.iter().enumerate() {
+            if *hole {
+                blocked[(y0 + k / cw - 1) * w + x0 + k % cw - 1] = true;
+            }
+        }
+        cells.push(i);
+    }
+    // Windows and tiles: several squares of the same size.
+    let side = |i: usize| ((st[i].x1 - st[i].x0) as f32, (st[i].y1 - st[i].y0) as f32);
+    let square: Vec<usize> = cells.iter().copied().filter(|&i| side(i).0.min(side(i).1) > 0.8 * side(i).0.max(side(i).1)).collect();
+    let mut drop = std::collections::HashSet::new();
+    for &c in &square {
+        let (cw, ch) = side(c);
+        let same: Vec<usize> = square.iter().copied().filter(|&j| (side(j).0 - cw).abs() <= 0.2 * side(j).0.max(cw) && (side(j).1 - ch).abs() <= 0.2 * side(j).1.max(ch)).collect();
+        if same.len() >= BODY_GRID {
+            drop.extend(same);
+        }
+    }
+    for i in cells.into_iter().filter(|i| !drop.contains(i)) {
+        let s = st[i];
+        let (x0, y0) = ((s.x0 as usize).saturating_sub(BODY_REACH), (s.y0 as usize).saturating_sub(BODY_REACH));
+        let (x1, y1) = ((s.x1 as usize + BODY_REACH).min(w), (s.y1 as usize + BODY_REACH).min(h));
+        let (ww, wh) = (x1 - x0, y1 - y0);
+        let body: Vec<bool> = (0..ww * wh).map(|k| lab[(y0 + k / ww) * w + x0 + k % ww] as usize == i).collect();
+        let mut grown = vec![false; ww * wh];
+        dilate_ellipse(&body, ww, wh, reach, &mut grown);
+        let mut count: std::collections::BTreeMap<u32, usize> = std::collections::BTreeMap::new();
+        for k in 0..ww * wh {
+            let l = d.labels[(y0 + k / ww) * w + x0 + k % ww];
+            if grown[k] && l > 0 {
+                *count.entry(l).or_default() += 1;
+            }
+        }
+        // The most common; the lowest id on a tie, as numpy's argmax.
+        let Some(id) = count.iter().max_by(|a, b| a.1.cmp(b.1).then(b.0.cmp(a.0))).map(|(l, _)| *l) else { continue };
+        let mut added = 0u64;
+        for k in 0..ww * wh {
+            let p = (y0 + k / ww) * w + x0 + k % ww;
+            if body[k] && d.labels[p] == 0 {
+                d.labels[p] = id;
+                added += 1;
+            }
+        }
+        if let Some(r) = d.regions.iter_mut().find(|r| r.id == id) {
+            r.area += added;
+            r.bbox = [r.bbox[0].min(s.x0), r.bbox[1].min(s.y0), r.bbox[2].max(s.x1), r.bbox[3].max(s.y1)];
+        }
+    }
+}
+
 /// Holes of the mask that are flat bright paper and much wider than the line around them become
 /// text: the white body of a large outlined letter when the model traced its outline.
 pub fn fill_hollow(prob: &mut [f32], rgb: &[u8], w: usize, h: usize) {
@@ -241,7 +415,7 @@ pub fn fill_hollow(prob: &mut [f32], rgb: &[u8], w: usize, h: usize) {
     if !set.iter().any(|s| *s) {
         return;
     }
-    let gray: Vec<u8> = rgb.chunks_exact(3).map(|c| ((u32::from(c[0]) * 4899 + u32::from(c[1]) * 9617 + u32::from(c[2]) * 1868 + 8192) >> 14) as u8).collect();
+    let gray = gray(rgb);
     // The saturation of OpenCV's 8-bit HSV.
     let saturated = |i: usize| {
         let c = &rgb[i * 3..i * 3 + 3];
@@ -597,6 +771,79 @@ pub fn selection_mask(d: &Detection, ids: &[u32], grow: usize) -> Vec<bool> {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    /// A white page with `dark` rectangles of black.
+    fn page(w: usize, h: usize, dark: &[[usize; 4]]) -> Vec<u8> {
+        let mut rgb = vec![255u8; w * h * 3];
+        for &[x0, y0, x1, y1] in dark {
+            for y in y0..y1 {
+                rgb[(y * w + x0) * 3..(y * w + x1) * 3].fill(0);
+            }
+        }
+        rgb
+    }
+
+    #[test]
+    fn the_half_size_pass_joins_only_around_giant_letters() {
+        let (w, h) = (300, 400);
+        let rgb = page(w, h, &[]);
+        let mut prob = vec![0f32; w * h];
+        // A giant letter's thick outline (40 px tall, over 6 % of the page) and a small word.
+        blob(&mut prob, w, 20, 20, 40, 60, 0.9);
+        blob(&mut prob, w, 200, 300, 220, 306, 0.9);
+        let mut half = vec![0f32; w * h];
+        // At half size: the letter whole, and the word as one blob.
+        blob(&mut half, w, 20, 20, 60, 60, 0.95);
+        blob(&mut half, w, 195, 295, 225, 311, 0.95);
+        merge_giant(&mut prob, &half, &rgb, w, h);
+        assert!(prob[40 * w + 50] >= 0.95, "the letter's body comes from the half-size pass");
+        assert!(prob[298 * w + 197] < 0.5, "the word stays as the full-size pass found it");
+    }
+
+    #[test]
+    fn the_half_size_pass_stays_out_of_solid_black() {
+        let (w, h) = (300, 400);
+        let rgb = page(w, h, &[[0, 0, 300, 200]]);
+        let mut prob = vec![0f32; w * h];
+        blob(&mut prob, w, 20, 20, 60, 220, 0.9);
+        let mut half = vec![0f32; w * h];
+        blob(&mut half, w, 20, 20, 120, 220, 0.95);
+        merge_giant(&mut prob, &half, &rgb, w, h);
+        assert!(prob[60 * w + 80] < 0.5, "deep in black");
+        assert!(prob[196 * w + 80] >= 0.95, "near its edge, merged");
+    }
+
+    #[test]
+    fn a_traced_giant_letter_gets_its_white_body() {
+        // A white letter body 60 × 60 inside a black outline 4 px thick that the mask traced.
+        let (w, h) = (400, 600);
+        let rgb = page(w, h, &[[96, 96, 164, 100], [96, 160, 164, 164], [96, 96, 100, 164], [160, 96, 164, 164]]);
+        let mut prob = vec![0f32; w * h];
+        for (i, px) in rgb.chunks_exact(3).enumerate() {
+            if px[0] == 0 {
+                prob[i] = 0.95;
+            }
+        }
+        let mut d = find_regions(&prob, w, h);
+        assert_eq!(d.labels[130 * w + 130], 0);
+        fill_bodies(&mut d, &rgb);
+        assert_ne!(d.labels[130 * w + 130], 0, "the body joins the outline");
+        assert_eq!(d.labels[300 * w + 300], 0, "the paper around stays");
+        assert_eq!(d.regions.len(), 1);
+        assert_eq!(d.regions[0].area, 68 * 68);
+    }
+
+    #[test]
+    fn white_areas_the_mask_doesnt_trace_stay() {
+        let (w, h) = (400, 600);
+        let rgb = page(w, h, &[[96, 96, 164, 100], [96, 160, 164, 164], [96, 96, 100, 164], [160, 96, 164, 164]]);
+        let mut prob = vec![0f32; w * h];
+        // Only the top line was found.
+        blob(&mut prob, w, 96, 96, 164, 100, 0.95);
+        let mut d = find_regions(&prob, w, h);
+        fill_bodies(&mut d, &rgb);
+        assert_eq!(d.labels[130 * w + 130], 0);
+    }
 
     fn blob(prob: &mut [f32], w: usize, x0: usize, y0: usize, x1: usize, y1: usize, v: f32) {
         for y in y0..y1 {

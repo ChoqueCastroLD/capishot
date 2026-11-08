@@ -82,7 +82,7 @@ pub const CARDS: &[Card] = &[
     Card {
         id: "manga-text-mask",
         section: Section::Clean,
-        title: "Manga Text Mask",
+        title: "Manga Text Mask Shin3",
         description: "Finds the text and sound effects on a page, to choose what to clean.",
         files: &[catalog::TEXTMASK_ID],
         quality: 5,

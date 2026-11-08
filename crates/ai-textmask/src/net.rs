@@ -1,5 +1,5 @@
 //! The mask model on burn, for the browser: a ResNet-18 encoder, an ASPP and a U-Net decoder, as
-//! `manga-text-mask-precise.onnx` has them (`packaging/web-ai/convert-textmask.py` writes the weights).
+//! Shin3 (`manga-text-mask-shin3.onnx`) has them (`packaging/web-ai/convert-textmask.py` writes the weights).
 //! Same results as the ONNX file (`examples/netcheck.rs`).
 
 use burn::tensor::activation::relu;
@@ -128,7 +128,17 @@ impl Net {
         data.convert::<f32>().into_vec::<f32>().map_err(|e| Error::Device(format!("{e:?}")))
     }
 
-    /// The page's regions, in tiles of `t` overlapping by `overlap`. `progress` gets 0..=1.
+    /// The logits of `rgb` (`w × h`) in one piece, padded with white to multiples of 32.
+    pub async fn logits_whole_async(&self, rgb: &[u8], w: usize, h: usize) -> Result<Vec<f32>, Error> {
+        let (canvas, pw, ph) = pipeline::padded(rgb, w, h);
+        let out = self.forward(pipeline::planar(&canvas, pw, ph), pw, ph);
+        let data = out.into_data_async().await.map_err(|e| Error::Device(format!("{e:?}")))?;
+        let all = data.convert::<f32>().into_vec::<f32>().map_err(|e| Error::Device(format!("{e:?}")))?;
+        Ok(pipeline::unpadded(&all, pw, w, h))
+    }
+
+    /// The page's regions, in tiles of `t` overlapping by `overlap`, and in giant mode once more in
+    /// one piece at half its working height. `progress` gets 0..=1.
     pub async fn detect_async(&self, rgb: &[u8], w: usize, h: usize, t: usize, overlap: usize, progress: &mut dyn FnMut(f32)) -> Result<Detection, Error> {
         if w == 0 || h == 0 || rgb.len() != w * h * 3 {
             return Err(Error::Input("the page's buffer doesn't match its size".into()));
@@ -138,7 +148,8 @@ impl Net {
         let page = resized.as_deref().unwrap_or(rgb);
         let mut blend = pipeline::Blend::new(nw, nh, t, overlap);
         let (ys, xs) = (pipeline::starts(nh, t, overlap), pipeline::starts(nw, t, overlap));
-        let total = (ys.len() * xs.len()) as f32;
+        // The half-size pass counts as a tile.
+        let total = (ys.len() * xs.len() + usize::from(pipeline::GIANT)) as f32;
         let mut done = 0.0;
         for &y0 in &ys {
             for &x0 in &xs {
@@ -148,6 +159,14 @@ impl Net {
                 progress(done / total);
             }
         }
-        Ok(pipeline::regions(&blend.logits(), nw, nh, rgb, w, h))
+        let half = if pipeline::GIANT {
+            let (sw, sh) = pipeline::half_size(w, h);
+            let logits = self.logits_whole_async(&crate::resize::rgb(rgb, w, h, sw, sh), sw, sh).await?;
+            progress(1.0);
+            Some((logits, sw, sh))
+        } else {
+            None
+        };
+        Ok(pipeline::regions(&blend.logits(), nw, nh, half.as_ref().map(|(l, sw, sh)| (l.as_slice(), *sw, *sh)), rgb, w, h))
     }
 }

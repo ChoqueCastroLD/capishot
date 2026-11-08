@@ -1,24 +1,49 @@
 //! What a run does around the network, wherever it runs: the page at the size the network wants,
 //! tiles and their blending, and the regions from the logits.
 
-use crate::regions::{Detection, fill_hollow, find_regions};
+use crate::regions::{Detection, fill_bodies, fill_hollow, find_regions, merge_giant};
 
 /// The network works on pages of about this height; other pages are resized for it only.
 pub const MIN_HEIGHT: usize = 1500;
 pub const MAX_HEIGHT: usize = 2600;
-/// Pages at least this wide run at no more than this height: the file's `wide_page_min_width` and
-/// `wide_page_max_height`.
-const WIDE_PAGE_MIN_WIDTH: usize = 1200;
-const WIDE_PAGE_MAX_HEIGHT: usize = 2000;
+/// Giant mode (the file's `giant`, Shin3): every page also runs in one piece at this part of its
+/// working height, where a giant effect looks like letters of the size the network knows best.
+pub const GIANT: bool = true;
+const GIANT_SCALE: f64 = 0.5;
 
 /// The size a page reaches the network at, and whether that's a resize.
 pub fn net_size(w: usize, h: usize) -> (usize, usize) {
     let scale = if h < MIN_HEIGHT { MIN_HEIGHT as f64 / h as f64 } else if h > MAX_HEIGHT { MAX_HEIGHT as f64 / h as f64 } else { 1.0 };
-    let scale = if w >= WIDE_PAGE_MIN_WIDTH && h as f64 * scale > WIDE_PAGE_MAX_HEIGHT as f64 { WIDE_PAGE_MAX_HEIGHT as f64 / h as f64 } else { scale };
     if scale == 1.0 {
         return (w, h);
     }
     (((w as f64 * scale).round() as usize).max(1), ((h as f64 * scale).round() as usize).max(1))
+}
+
+/// The size of giant mode's half-size pass.
+pub fn half_size(w: usize, h: usize) -> (usize, usize) {
+    let hh = (h.clamp(MIN_HEIGHT, MAX_HEIGHT) as f64) * GIANT_SCALE;
+    (((w as f64 * hh / h as f64).round() as usize).max(32), (hh.round() as usize).max(32))
+}
+
+/// `rgb` (`w × h`) padded with white to multiples of 32: the network's input in one piece, and
+/// the padded size.
+pub fn padded(rgb: &[u8], w: usize, h: usize) -> (Vec<u8>, usize, usize) {
+    let (pw, ph) = (w.div_ceil(32) * 32, h.div_ceil(32) * 32);
+    let mut canvas = vec![255u8; pw * ph * 3];
+    for y in 0..h {
+        canvas[y * pw * 3..(y * pw + w) * 3].copy_from_slice(&rgb[y * w * 3..(y * w + w) * 3]);
+    }
+    (canvas, pw, ph)
+}
+
+/// The logits of a padded run cut back to `w × h`.
+pub fn unpadded(out: &[f32], pw: usize, w: usize, h: usize) -> Vec<f32> {
+    let mut logits = vec![0f32; w * h];
+    for y in 0..h {
+        logits[y * w..y * w + w].copy_from_slice(&out[y * pw..y * pw + w]);
+    }
+    logits
 }
 
 /// Where tiles of `t` overlapping by `overlap` start along a side of `len`.
@@ -75,12 +100,25 @@ impl Blend {
     }
 }
 
-/// The page's regions from the logits at `net_size`.
-pub fn regions(logits: &[f32], nw: usize, nh: usize, rgb: &[u8], w: usize, h: usize) -> Detection {
+/// Logits at `(nw, nh)` as probabilities at the page's size.
+fn probabilities(logits: &[f32], nw: usize, nh: usize, w: usize, h: usize) -> Vec<f32> {
     let prob: Vec<f32> = logits.iter().map(|l| 1.0 / (1.0 + (-l).exp())).collect();
-    let mut prob = if (nw, nh) == (w, h) { prob } else { crate::resize::plane(&prob, nw, nh, w, h) };
+    if (nw, nh) == (w, h) { prob } else { crate::resize::plane(&prob, nw, nh, w, h) }
+}
+
+/// The page's regions from the logits at `net_size`, and in giant mode those of the half-size pass
+/// at `half_size`.
+pub fn regions(logits: &[f32], nw: usize, nh: usize, half: Option<(&[f32], usize, usize)>, rgb: &[u8], w: usize, h: usize) -> Detection {
+    let mut prob = probabilities(logits, nw, nh, w, h);
     fill_hollow(&mut prob, rgb, w, h);
-    find_regions(&prob, w, h)
+    if let Some((half, sw, sh)) = half {
+        merge_giant(&mut prob, &probabilities(half, sw, sh, w, h), rgb, w, h);
+    }
+    let mut d = find_regions(&prob, w, h);
+    if half.is_some() {
+        fill_bodies(&mut d, rgb);
+    }
+    d
 }
 
 /// `rgb` as the network's input, planar in 0..=1.
@@ -128,8 +166,14 @@ mod tests {
         assert_eq!(net_size(1284, 1826), (1284, 1826));
         assert_eq!(net_size(500, 1000), (750, 1500));
         assert_eq!(net_size(1000, 5200), (500, 2600));
-        assert_eq!(net_size(1725, 2475), (1394, 2000), "wide pages stop lower");
-        assert_eq!(net_size(2000, 5200), (769, 2000));
-        assert_eq!(net_size(1100, 2400), (1100, 2400), "a narrow one doesn't");
+        assert_eq!(net_size(1725, 2475), (1725, 2475), "wide pages too");
+    }
+
+    #[test]
+    fn giant_mode_runs_at_half_the_working_height() {
+        assert_eq!(half_size(1284, 1826), (642, 913));
+        assert_eq!(half_size(500, 1000), (375, 750));
+        assert_eq!(half_size(1000, 5200), (250, 1300));
+        assert_eq!(half_size(40, 3000), (32, 1300), "never under 32");
     }
 }

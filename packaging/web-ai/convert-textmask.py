@@ -4,7 +4,7 @@
 The convolutions in the network's order as c00.w, c00.b, ... in fp16, with the one batch norm folded into
 the convolution before it. Needs onnx, numpy and safetensors.
 
-    convert-textmask.py manga-text-mask-precise.onnx manga-text-mask-precise-web.safetensors
+    convert-textmask.py shin3.onnx manga-text-mask-shin3-web.safetensors
 """
 import sys
 

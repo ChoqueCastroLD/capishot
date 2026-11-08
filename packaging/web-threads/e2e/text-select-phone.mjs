@@ -69,7 +69,7 @@ check(await tapRect('textSelectFind'), 'the Find button is there');
 const t0 = Date.now();
 for (let i = 0; i < 200 && !(await rect('textSelectDone')); i++) await sleep(1500);
 console.log(`found in ${Math.round((Date.now() - t0) / 1000)} s`);
-check(weights.includes('manga-text-mask-precise-web.safetensors'), `the browser's model came down (${weights})`);
+check(weights.includes(process.env.WEIGHTS || 'manga-text-mask-shin3-web.safetensors'), `the browser's model came down (${weights})`);
 await sleep(1000);
 await shot('1-pieces');
 // The bar along the top takes touches, and scrolls.

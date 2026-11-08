@@ -18,14 +18,16 @@ const TILE_ABOVE_AREA: usize = 6_500_000;
 /// On the CPU a whole page takes several GB: tiles past this area.
 const CPU_TILE_ABOVE_AREA: usize = 2_400_000;
 
-/// The file's name in the models folder.
-pub const FILE: &str = "manga-text-mask-precise.onnx";
-/// The model it replaced: nothing reads it any more.
-pub const OLD_FILE: &str = "manga-text-mask.onnx";
+/// The file's name in the models folder: Shin3.
+pub const FILE: &str = "manga-text-mask-shin3.onnx";
+/// The models it replaced (Shin1, Shin2): nothing reads them any more.
+pub const OLD_FILES: &[&str] = &["manga-text-mask.onnx", "manga-text-mask-precise.onnx"];
 
-/// Frees the room of [`OLD_FILE`] in the models folder `dir`.
+/// Frees the room of [`OLD_FILES`] in the models folder `dir`.
 pub fn forget_old_file(dir: &Path) {
-    let _ = std::fs::remove_file(dir.join(OLD_FILE));
+    for f in OLD_FILES {
+        let _ = std::fs::remove_file(dir.join(f));
+    }
 }
 
 struct Loaded {
@@ -108,17 +110,8 @@ fn run(session: &mut Session, rgb: &[u8], w: usize, h: usize) -> Result<Vec<f32>
 
 /// `rgb` padded with white to multiples of 32, and its logits cut back.
 fn whole(session: &mut Session, rgb: &[u8], w: usize, h: usize) -> Result<Vec<f32>, Error> {
-    let (pw, ph) = (w.div_ceil(32) * 32, h.div_ceil(32) * 32);
-    let mut canvas = vec![255u8; pw * ph * 3];
-    for y in 0..h {
-        canvas[y * pw * 3..(y * pw + w) * 3].copy_from_slice(&rgb[y * w * 3..(y * w + w) * 3]);
-    }
-    let out = run(session, &canvas, pw, ph)?;
-    let mut logits = vec![0f32; w * h];
-    for y in 0..h {
-        logits[y * w..y * w + w].copy_from_slice(&out[y * pw..y * pw + w]);
-    }
-    Ok(logits)
+    let (canvas, pw, ph) = pipeline::padded(rgb, w, h);
+    Ok(pipeline::unpadded(&run(session, &canvas, pw, ph)?, pw, w, h))
 }
 
 /// Fixed-size tiles, blended with linear ramps over the overlaps.
@@ -164,10 +157,20 @@ impl TextMasker for NativeTextMasker {
         let net = resized.as_deref().unwrap_or(rgb);
         let limit = if *cpu { CPU_TILE_ABOVE_AREA } else { TILE_ABOVE_AREA };
         let logits = if nw * nh > limit { tiled(session, net, nw, nh, cancelled)? } else { whole(session, net, nw, nh)? };
+        // Giant mode: the page once more, in one piece at half its working height.
+        let half = if pipeline::GIANT {
+            if cancelled() {
+                return Err(Error::Cancelled);
+            }
+            let (sw, sh) = pipeline::half_size(w, h);
+            Some((whole(session, &crate::resize::rgb(rgb, w, h, sw, sh), sw, sh)?, sw, sh))
+        } else {
+            None
+        };
         drop(slot);
         if cancelled() {
             return Err(Error::Cancelled);
         }
-        Ok(pipeline::regions(&logits, nw, nh, rgb, w, h))
+        Ok(pipeline::regions(&logits, nw, nh, half.as_ref().map(|(l, sw, sh)| (l.as_slice(), *sw, *sh)), rgb, w, h))
     }
 }
