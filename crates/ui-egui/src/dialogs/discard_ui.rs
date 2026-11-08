@@ -117,6 +117,12 @@ impl PhotocraftApp {
     pub fn has_unsaved_work(&self) -> bool {
         !self.allow_close && self.session.visible_documents().iter().any(|d| d.is_dirty())
     }
+
+    /// [`Self::has_unsaved_work`] that no recovery checkpoint holds yet: what leaving now would
+    /// lose where the session comes back (the browser keeps every open document).
+    pub fn has_unprotected_work(&self) -> bool {
+        self.has_unsaved_work() && !crate::prefs_ui::recovery_pending(self).is_empty()
+    }
 }
 
 /// Called once per frame: holds back a window close request while there is unsaved work. Every

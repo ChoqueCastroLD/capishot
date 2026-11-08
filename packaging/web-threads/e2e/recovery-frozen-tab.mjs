@@ -64,8 +64,15 @@ const held = await a.evaluate(async () => {
 }).catch((e) => String(e));
 console.log('files held by the first tab:', held);
 freeze(a);
-const later = await waitOffer(b, 70000);
-check(later !== null, `the tab already open offers the frozen tab's work (${later} ms)`);
+// Offered, or (Capishot's page keeping its session) brought back on its own.
+const hasLayers = async () => { const l = (await ex(b, 'layer.list', { flat: true })).layers; return Array.isArray(l) && l.length > 0; };
+let later = null;
+let auto = false;
+for (const t0 = Date.now(); Date.now() - t0 < 70000 && later === null && !auto; await b.waitForTimeout(1000)) {
+  if (await offered(b)) later = Date.now() - t0;
+  else auto = await hasLayers();
+}
+check(later !== null || auto, `the tab already open ${auto ? 'brings back' : 'offers'} the frozen tab's work`);
 if (later !== null) {
   await b.waitForTimeout(1000);
   const r = (await offered(b)).fields.buttons.recover;
@@ -85,6 +92,8 @@ if (later !== null) {
   }
   check(back, 'Recover brings the document back');
   check(!(await offered(b)), 'and the dialog is gone');
+}
+if (later !== null || auto) {
   // An edit in the recovered document: its checkpoint can't go where the frozen tab holds files.
   await ex(b, 'select.rect', { x: 400, y: 100, width: 100, height: 100 });
   await ex(b, 'edit.fill', { color: '#0000ff' });

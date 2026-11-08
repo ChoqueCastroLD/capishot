@@ -223,7 +223,8 @@ fn start_next_recovery(app: &mut PhotocraftApp) {
                     st.layer_anchor = context.layer_anchor.filter(|id| st.doc.layer(*id).is_some());
                 }
                 let st = s.active_mut().ok_or(photocraft_engine::EngineError::NoDocument)?;
-                st.saved_revision = 0;
+                // Unsaved, unless it was saved when checkpointed (a browser session coming back).
+                st.saved_revision = if context.dirty == Some(false) { st.revision } else { 0 };
                 let (id, revision) = (st.doc.id, st.revision);
                 let admitted_stamp = CheckpointStamp::of(st, doc.context.clone());
                 if let Some(index) = active.and_then(|id| s.documents().iter().position(|st| st.doc.id == id)) {

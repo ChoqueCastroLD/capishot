@@ -125,11 +125,14 @@ pub(super) struct RecoveryContext {
     tool: Option<crate::state::Tool>,
     tab_order: usize,
     active: bool,
+    /// Whether it had changes not written to its file; a session that comes back (the browser)
+    /// reopens a saved document as saved. Absent in older checkpoints: unsaved.
+    dirty: Option<bool>,
 }
 pub(super) fn recovery_context(app: &PhotocraftApp, index: usize, st: &photocraft_engine::DocState) -> Value {
     json!({"activeLayer": st.active_layer, "selectedLayers": st.selected_layers,
         "layerAnchor": st.layer_anchor, "view": app.ui.views.get(index), "tool": app.ui.tool,
-        "tabOrder": index, "active": app.session.active_index() == Some(index)})
+        "tabOrder": index, "active": app.session.active_index() == Some(index), "dirty": st.is_dirty()})
 }
 
 // ------------------------------------------------------------------ shortcuts

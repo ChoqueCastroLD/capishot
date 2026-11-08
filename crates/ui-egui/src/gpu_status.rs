@@ -263,7 +263,9 @@ fn choose_recovery(app: &mut PhotocraftApp, retry: bool) -> Result<(), String> {
 }
 
 /// Once a frame: the WebGL canvas's pipelines are built one at a time ([`GpuCanvas::warm_up`]);
-/// one that took too long keeps this device on the CPU canvas ([`keep_cpu_canvas`]).
+/// one that took too long is reported (`gpu_lost`, cause `slow_pipelines`). The canvas stays on
+/// the graphics card: a first visit builds shaders slowly on a good card too, and should the
+/// browser drop the context, the page asks how to reload.
 pub fn warm_up(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let Some(gpu) = app.gpu.as_ref() else { return };
     if gpu.warm_up() {
@@ -273,7 +275,7 @@ pub fn warm_up(app: &mut PhotocraftApp, ctx: &egui::Context) {
         && let Some(ms) = gpu.slow_pipelines()
     {
         app.gpu_slow_noted = true;
-        keep_cpu_canvas(app, "slow_pipelines", 1, Some(ms));
+        record_gpu_lost(app, "slow_pipelines", 1, Some(ms));
     }
 }
 
@@ -332,6 +334,26 @@ pub fn cpu_url(href: &str) -> String {
     url
 }
 
+/// The page's address `href` without `cpu` (the CPU canvas) in its query, the rest kept.
+pub fn gpu_url(href: &str) -> String {
+    let (base, hash) = match href.split_once('#') {
+        Some((b, h)) => (b, Some(h)),
+        None => (href, None),
+    };
+    let mut url = match base.split_once('?') {
+        Some((path, q)) => {
+            let kept: Vec<&str> = q.split('&').filter(|kv| !kv.is_empty() && *kv != "cpu" && !kv.starts_with("cpu=")).collect();
+            if kept.is_empty() { path.to_string() } else { format!("{path}?{}", kept.join("&")) }
+        }
+        None => base.to_string(),
+    };
+    if let Some(h) = hash {
+        url.push('#');
+        url.push_str(h);
+    }
+    url
+}
+
 /// Whether a page whose graphics context was lost at `since` should reload now: crash recovery
 /// holds every unsaved document (`saved`), or 8 s passed.
 pub fn ready_to_reload(saved: bool, since: f64, now: f64) -> bool {
@@ -348,21 +370,6 @@ pub fn api_class(app: &PhotocraftApp) -> &'static str {
         "metal" => "metal",
         _ => "unknown",
     }
-}
-
-/// From now on this device draws documents with the CPU canvas (Preferences › Performance ›
-/// Rendering: CPU), and the user is told why and how to undo it. `cause` and `n` (times this
-/// session) go to the usage statistics (`gpu_lost`).
-pub fn keep_cpu_canvas(app: &mut PhotocraftApp, cause: &str, n: u32, ms: Option<f64>) {
-    record_gpu_lost(app, cause, n, ms);
-    let _ = app.run("prefs.set", serde_json::json!({"values": {"performance.renderingMode": "cpu"}}));
-    crate::notices::post(
-        app,
-        tl!("Capishot will draw on the CPU on this device"),
-        vec![tl!("The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.").to_string()],
-        false,
-        None,
-    );
 }
 
 /// The `gpu_lost` usage event (see [`crate::telemetry::Recorder::gpu_lost`]).
@@ -502,13 +509,12 @@ mod tests {
         assert!(ready_to_reload(false, 0.0, 9000.0));
     }
 
-    /// Too slow pipelines: the CPU canvas from now on, said once, counted.
     #[test]
-    fn slow_pipelines_keep_the_cpu_canvas() {
-        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
-        keep_cpu_canvas(&mut app, "slow_pipelines", 1, Some(4840.0));
-        assert_eq!(app.session.prefs().performance.effective_rendering_mode(), photocraft_engine::prefs::RenderingMode::Cpu);
-        assert_eq!(app.ui.notices.len(), 1);
+    fn the_gpu_url_drops_only_the_cpu_flag() {
+        assert_eq!(gpu_url("https://x.test/capishot/?cpu=1"), "https://x.test/capishot/");
+        assert_eq!(gpu_url("https://x.test/?lang=es&cpu=1#{\"files\":[]}"), "https://x.test/?lang=es#{\"files\":[]}");
+        assert_eq!(gpu_url("https://x.test/?cpu&lang=es"), "https://x.test/?lang=es");
+        assert_eq!(gpu_url("https://x.test/capishot/"), "https://x.test/capishot/");
     }
 
     #[test]

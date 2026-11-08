@@ -1,6 +1,6 @@
 // Recovery survives a page killed mid-write: the autosave after a first good checkpoint stops after
 // its objects ('objects') or after its descriptor ('descriptor'), the renderer is crashed, and
-// Recover on the next load must restore the first checkpoint whole.
+// the next load must bring the first checkpoint back whole (on its own: the page keeps its session).
 //
 //   CHROME=<chromium> node recovery-crash.mjs <url> <profile dir> [objects,descriptor]
 import { chromium } from 'playwright-core';
@@ -77,22 +77,17 @@ for (const stop of phases.split(',')) {
   await Promise.race([cdp.send('Page.crash').catch(() => {}), new Promise(r => setTimeout(r, 3000))]);
   await hardClose(ctx);
   const b = await open();
-  const d = await waitFor(b.p, () => dialog(b.req), 30000, 500);
-  ok(`${stop}: Recover is offered`, !!d);
-  if (d) {
-    await b.p.waitForTimeout(1000);
-    const r = (await dialog(b.req)).fields.buttons.recover;
-    await human(b.p, (r[0] + r[2]) / 2, (r[1] + r[3]) / 2);
-    const back = await waitFor(b.p, async () => { const l = await layers(b.req); return l.length ? l : null; }, 60000, 1000);
-    if (!back) {
-      const s = await b.req('ui.inspect');
-      console.log('DEBUG', JSON.stringify({ dialogs: (s.dialogs || []).map(x => x.id), status: s.status, notices: s.notices, jobs: s.jobs }).slice(0, 1500));
-      
-    }
-    ok(`${stop}: Recover restores the last good checkpoint`, JSON.stringify(back) === JSON.stringify(good), `${JSON.stringify(back)} vs ${JSON.stringify(good)}`);
-    const errs = (await b.req('ui.inspect')).notices?.filter(n => n.error).map(n => n.lines) || [];
-    ok(`${stop}: no recovery errors`, errs.length === 0, JSON.stringify(errs));
+  // The session comes back on its own (Capishot's page keeps it): no question, the last good
+  // checkpoint.
+  const back = await waitFor(b.p, async () => { const l = await layers(b.req); return l.length ? l : null; }, 60000, 1000);
+  if (!back) {
+    const s = await b.req('ui.inspect');
+    console.log('DEBUG', JSON.stringify({ dialogs: (s.dialogs || []).map(x => x.id), status: s.status, notices: s.notices, jobs: s.jobs }).slice(0, 1500));
   }
+  ok(`${stop}: the last good checkpoint comes back`, JSON.stringify(back) === JSON.stringify(good), `${JSON.stringify(back)} vs ${JSON.stringify(good)}`);
+  ok(`${stop}: without asking`, !(await dialog(b.req)));
+  const errs = (await b.req('ui.inspect')).notices?.filter(n => n.error).map(n => n.lines) || [];
+  ok(`${stop}: no recovery errors`, errs.length === 0, JSON.stringify(errs));
   // Clean up for the next phase.
   await b.p.evaluate(async () => { const root = await navigator.storage.getDirectory(); await root.removeEntry('capishot-recovery', { recursive: true }).catch(() => {}); });
   await hardClose(b.ctx);

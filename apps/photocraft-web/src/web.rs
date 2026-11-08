@@ -161,6 +161,11 @@ pub async fn run(canvas: web_sys::HtmlCanvasElement, hosted: Option<crate::embed
     let q = if hosted.is_some() { String::new() } else { query() };
     // The Photopea-compatible config in the URL hash (crate::embed).
     let photopea = if hosted.is_some() { None } else { crate::embed::photopea_config() };
+    // One Capishot tab at a time: another one running, this page shows "Use here" and waits
+    // (tab_gate.rs), before it takes a graphics device or memory.
+    if hosted.is_none() && photopea.is_none() {
+        crate::tab_gate::claim(q.split(['?', '&']).any(|kv| kv == "anytab")).await;
+    }
     let embed_query = q.clone();
     let force_cpu = q.contains("cpu") || hosted.as_ref().is_some_and(|h| h.force_cpu);
     let force_webgl = q.contains("webgl") || hosted.as_ref().is_some_and(|h| h.force_webgl);
@@ -322,6 +327,12 @@ impl Boot {
         let r = recovery.services();
         (services.autosave, services.discard_autosave, services.poll_autosave) = (r.autosave, r.discard_autosave, r.poll_autosave);
         (services.autosave_unsaved_only, services.autosave_after_edit, services.recovery_menu) = (r.autosave_unsaved_only, r.autosave_after_edit, r.recovery_menu);
+        // Capishot's own page keeps its session: every open document is checkpointed and the next
+        // visit reopens them as they were. A page that embeds it decides what it opens.
+        let keep_session = !hosted && photopea.is_none();
+        if keep_session {
+            services.autosave_unsaved_only = false;
+        }
         let mut app = PhotocraftApp::new(session, services).with_control(control);
         // The threads build runs commands that can be jobs (filters, adjustments, Image Size,
         // opening and saving files…) on its worker pool, with progress and Esc to cancel, as the
@@ -334,10 +345,14 @@ impl Boot {
         // Reloaded after the graphics context was lost (gpu_lost.rs): what was open comes back.
         let lost_notice = crate::gpu_lost::take_notice();
         if (app.session.prefs().file_handling.recover_on_launch || lost_notice.is_some()) && photopea.is_none() && !hosted {
-            if lost_notice.is_some() {
-                recovery.auto_accept();
+            if keep_session {
+                recovery.restore_session();
+            } else {
+                if lost_notice.is_some() {
+                    recovery.auto_accept();
+                }
+                recovery.discover(true);
             }
-            recovery.discover(true);
             recovery.watch_other_tabs(ctx.clone());
         }
         // Image › Upscale with AI…: the AI worker module, loaded on first use (photocraft-ai-web).
@@ -419,11 +434,11 @@ impl Boot {
         }
         // Reloaded after the graphics context was lost: say what happened.
         match lost_notice {
-            Some("kept") => photocraft_ui_egui::notices::post(
+            Some("cpu") => photocraft_ui_egui::notices::post(
                 &mut app,
-                i18n::t("Capishot will draw on the CPU on this device"),
+                i18n::t("Capishot draws on the CPU for this visit"),
                 vec![
-                    i18n::t("The graphics card was too slow or restarted while drawing. To use it again: Preferences › Performance › Rendering Mode.")
+                    i18n::t("Your documents were reopened. The next visit uses the graphics card again; to stay on the CPU: Preferences › Performance › Rendering Mode.")
                         .to_string(),
                 ],
                 false,
@@ -431,8 +446,8 @@ impl Boot {
             ),
             Some(_) => photocraft_ui_egui::notices::post(
                 &mut app,
-                i18n::t("Your graphics card restarted; Capishot keeps working on the CPU"),
-                vec![i18n::t("Unsaved documents were reopened from crash recovery.").to_string()],
+                i18n::t("The graphics card restarted; Capishot reloaded"),
+                vec![i18n::t("Your documents were reopened.").to_string()],
                 false,
                 None,
             ),
@@ -452,6 +467,7 @@ impl Boot {
             places,
             canvas: pen_target,
             unsaved,
+            keep_session,
             served,
             user_fonts,
             database,
@@ -466,6 +482,7 @@ impl Boot {
             hosted,
             ui_language: "",
             lost_at: None,
+            handover_at: None,
             typing_view: None,
             was_typing: false,
             text_focus: None,
@@ -1123,6 +1140,8 @@ struct WebShell {
     viewport_changed_at: f64,
     /// When the graphics context was lost (ms), while the page saves for recovery (gpu_lost.rs).
     lost_at: Option<f64>,
+    /// When another tab chose "Use here" (tab_gate.rs): this one checkpoints and steps aside.
+    handover_at: Option<f64>,
     served: Served,
     /// The user's fonts in IndexedDB (`indexed_fonts`), once open.
     user_fonts: UserFontStore,
@@ -1132,6 +1151,9 @@ struct WebShell {
     ui_language: &'static str,
     /// Embedded by another page (`crate::embed_api`), which drives it every frame.
     hosted: bool,
+    /// The page keeps its session (every open document checkpointed and reopened next visit):
+    /// leaving asks only while an unsaved change has no checkpoint yet.
+    keep_session: bool,
     /// Frames begun so far, counted up to 2 (for the startup timings).
     startup_frames: u8,
     perf: crate::frame_perf::FramePerf,
@@ -1240,9 +1262,9 @@ impl WebShell {
         crate::gpu_lost::lost() || self.app.window_lost()
     }
 
-    /// Every frame once the graphics context is lost: unsaved documents go to crash recovery,
-    /// then the page reloads on the CPU canvas, where they reopen (gpu_lost.rs). An embedding
-    /// host's page isn't reloaded: it decides.
+    /// Every frame once the graphics context is lost: open documents go to crash recovery, then
+    /// the page asks whether to reload with the graphics card or on the CPU; they reopen either way
+    /// (gpu_lost.rs). An embedding host's page isn't reloaded: it decides.
     fn after_context_lost(&mut self, ctx: &egui::Context) {
         let now = js_sys::Date::now();
         let cause = if crate::gpu_lost::lost() { "context_lost" } else { "device_lost" };
@@ -1257,7 +1279,28 @@ impl WebShell {
         if !self.hosted && photocraft_ui_egui::gpu_status::ready_to_reload(saved, since, now) {
             self.unsaved.store(false, Ordering::Release);
             self.recovery.mark_crashed();
-            crate::gpu_lost::reload_on_cpu();
+            crate::gpu_lost::ask_reload(saved);
+        }
+        ctx.request_repaint_after(std::time::Duration::from_millis(100));
+    }
+
+    /// Every frame once another tab chose "Use here": every open document goes to its checkpoint
+    /// (the other tab reopens them from there), then this page reloads paused (tab_gate.rs). It
+    /// says it is still saving meanwhile; at most 20 s.
+    fn hand_over(&mut self, ctx: &egui::Context) {
+        let now = js_sys::Date::now();
+        let since = *self.handover_at.get_or_insert_with(|| {
+            photocraft_ui_egui::prefs_ui::flush_prefs(&mut self.app, ctx.input(|i| i.time));
+            crate::usage_stats::flush_now();
+            now
+        });
+        self.recovery.tick(&mut self.app);
+        let saved = photocraft_ui_egui::gpu_status::save_all_for_recovery(&mut self.app, ctx).is_ok();
+        if saved || now - since >= 20_000.0 {
+            self.unsaved.store(false, Ordering::Release);
+            crate::tab_gate::release();
+        } else {
+            crate::tab_gate::saving();
         }
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
     }
@@ -1339,7 +1382,8 @@ impl WebShell {
         }
         let documents = self.app.has_unsaved_work();
         self.recovery.set_unsaved(documents);
-        self.unsaved.store(documents || self.presets.unsaved() || crate::embed::upload_unconfirmed(), Ordering::Relaxed);
+        let at_risk = if self.keep_session { self.app.has_unprotected_work() } else { documents };
+        self.unsaved.store(at_risk || self.presets.unsaved() || crate::embed::upload_unconfirmed(), Ordering::Relaxed);
     }
 
     /// Fetches the served families asked for (picked in a font menu, or needed by a layout) and
@@ -1504,6 +1548,10 @@ impl eframe::App for WebShell {
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         if self.graphics_lost() {
             self.after_context_lost(ctx);
+            return;
+        }
+        if self.keep_session && crate::tab_gate::takeover_asked() {
+            self.hand_over(ctx);
             return;
         }
         self.keyboard(ctx);

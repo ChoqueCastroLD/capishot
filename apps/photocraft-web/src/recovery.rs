@@ -131,6 +131,9 @@ struct Inner {
     /// still write there, or hold its files so no one else can, so the document recovered from
     /// one autosaves under a key of its own.
     copies: std::collections::HashSet<String>,
+    /// The page keeps its session: every open document is checkpointed and comes back on the next
+    /// load, closed cleanly or not ([`Recovery::restore_session`]).
+    restore_all: bool,
     /// Wakes the page when something is to be offered with nothing else going on.
     ctx: Option<egui::Context>,
 }
@@ -264,6 +267,18 @@ impl Recovery {
     /// Open the documents the next offer lists without asking.
     pub fn auto_accept(&self) {
         self.0.borrow_mut().auto_accept = true;
+    }
+
+    /// On load: what the last visit had open comes back, as it was, without asking (the tab was
+    /// closed, the browser restarted, days went by). Every open document is checkpointed for that
+    /// (`autosave_unsaved_only` off), and closing a document removes its checkpoint.
+    pub fn restore_session(&self) {
+        {
+            let mut inner = self.0.borrow_mut();
+            inner.restore_all = true;
+            inner.auto_accept = true;
+        }
+        self.discover(true);
     }
 
     /// The autosave services for [`Services`].
@@ -529,7 +544,8 @@ impl Recovery {
                         continue;
                     }
                 }
-                if crashed && (clean.contains(&session) || me.0.borrow().answered.contains(&key)) {
+                let restore_all = me.0.borrow().restore_all;
+                if crashed && (me.0.borrow().answered.contains(&key) || (!restore_all && clean.contains(&session))) {
                     continue;
                 }
                 // A checkpoint with nothing whole left isn't offered after a crash; File ›
@@ -554,8 +570,13 @@ impl Recovery {
             // Forget clean marks of sessions that left nothing behind.
             let kept: js_sys::Array = clean.iter().filter(|s| sessions_with_checkpoints.contains(*s)).map(|s| JsValue::from_str(s)).collect();
             rcv_set_clean_sessions(kept);
-            entries.sort_by(|a, b| b.saved_at_ms.total_cmp(&a.saved_at_ms));
             let mut inner = me.0.borrow_mut();
+            if inner.restore_all && crashed {
+                // A session comes back in the order its documents were opened.
+                entries.sort_by_key(|e| (session_of(&e.key).map(str::to_string), e.key.rsplit('-').next().and_then(|n| n.parse::<u64>().ok())));
+            } else {
+                entries.sort_by(|a, b| b.saved_at_ms.total_cmp(&a.saved_at_ms));
+            }
             inner.offer = Some((entries, crashed));
             if let Some(ctx) = &inner.ctx {
                 ctx.request_repaint();

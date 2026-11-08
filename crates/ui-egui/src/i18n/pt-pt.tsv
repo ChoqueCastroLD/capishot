@@ -2533,7 +2533,7 @@
 	CPU / Compatibility	CPU / compatibilidade
 	Automatic uses GPU acceleration when available and falls back to CPU rendering on errors.	O modo automático usa a aceleração por GPU quando disponível e volta para a renderização por CPU em caso de erros.
 	Switched to CPU rendering	Renderização alterada para CPU
-	GPU acceleration could not continue. Your documents are unchanged.	A aceleração por GPU não pôde continuar. Seus documentos não foram alterados.
+	GPU acceleration could not continue. Your documents are unchanged.	A aceleração por GPU não pôde continuar. Os seus documentos não foram alterados.
 	Capishot is using the CPU image compositor. The window may still use your graphics adapter.	O Capishot está usando o compositor de imagens da CPU. A janela ainda pode usar seu adaptador gráfico.
 	Retry GPU requires a restart. Save your work first.	Tentar a GPU novamente exige reiniciar. Salve seu trabalho primeiro.
 	Keep Using CPU	Continuar usando a CPU
@@ -3690,3 +3690,13 @@ fontWeight	Italic	Itálico
 	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO. In a text box or a balloon: text from a click is one line	Uma palavra que não cabe é separada com hífen e continua abaixo: PE-RRO. Numa caixa de texto ou balão: texto de um clique é uma só linha
 	Hyphenation needs a text box: drag a rectangle with the tool	A separação precisa de uma caixa de texto: arraste um retângulo com a ferramenta
 	Automatic Size	Tamanho automático
+	Reload with the graphics card	Recarregar com a placa gráfica
+	Reload on the CPU (slower drawing)	Recarregar com CPU (desenho mais lento)
+	The graphics card stopped responding	A placa gráfica deixou de responder
+	Your documents are saved and will reopen as they were.	Os seus documentos estão salvos e vão reabrir como estavam.
+	Your documents will reopen from their last autosave.	Os seus documentos vão reabrir a partir do último salvamento automático.
+	It stopped again in this tab: the CPU is the safer choice.	Voltou a falhar neste separador: a CPU é a opção mais segura.
+	Capishot draws on the CPU for this visit	O Capishot desenha com a CPU nesta visita
+	Your documents were reopened. The next visit uses the graphics card again; to stay on the CPU: Preferences › Performance › Rendering Mode.	Os seus documentos foram reabertos. A próxima visita volta a usar a placa gráfica; para ficar na CPU: Preferências › Desempenho › Modo de renderização.
+	The graphics card restarted; Capishot reloaded	A placa gráfica reiniciou; o Capishot recarregou
+	Your documents were reopened.	Os seus documentos foram reabertos.

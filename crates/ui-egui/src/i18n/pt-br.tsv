@@ -5561,3 +5561,13 @@ fontTab	Find More	Encontrar mais
 	A word that doesn't fit is split with a hyphen and goes on below: PE-RRO. In a text box or a balloon: text from a click is one line	Uma palavra que não cabe é separada com hífen e continua abaixo: PE-RRO. Em caixa de texto ou balão: texto de um clique é uma linha só
 	Hyphenation needs a text box: drag a rectangle with the tool	A separação precisa de uma caixa de texto: arraste um retângulo com a ferramenta
 	Automatic Size	Tamanho automático
+	Reload with the graphics card	Recarregar com a placa de vídeo
+	Reload on the CPU (slower drawing)	Recarregar com CPU (desenho mais lento)
+	The graphics card stopped responding	A placa de vídeo parou de responder
+	Your documents are saved and will reopen as they were.	Seus documentos estão salvos e vão reabrir como estavam.
+	Your documents will reopen from their last autosave.	Seus documentos vão reabrir a partir do último salvamento automático.
+	It stopped again in this tab: the CPU is the safer choice.	Falhou de novo nesta aba: a CPU é a opção mais segura.
+	Capishot draws on the CPU for this visit	O Capishot desenha com a CPU nesta visita
+	Your documents were reopened. The next visit uses the graphics card again; to stay on the CPU: Preferences › Performance › Rendering Mode.	Seus documentos foram reabertos. A próxima visita usa a placa de vídeo de novo; para ficar na CPU: Preferências › Desempenho › Modo de renderização.
+	The graphics card restarted; Capishot reloaded	A placa de vídeo reiniciou; o Capishot recarregou
+	Your documents were reopened.	Seus documentos foram reabertos.

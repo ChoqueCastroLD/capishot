@@ -57,6 +57,8 @@ mod recovery;
 #[cfg(target_arch = "wasm32")]
 mod save_handles;
 #[cfg(target_arch = "wasm32")]
+mod tab_gate;
+#[cfg(target_arch = "wasm32")]
 mod src_param;
 #[cfg(target_arch = "wasm32")]
 mod startup;
