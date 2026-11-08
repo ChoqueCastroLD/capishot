@@ -73,7 +73,7 @@ pub(crate) fn document_to_psd(doc: &Document, force_psb: bool, size_limit: Optio
 /// layer at full opacity, Normal blend, unclipped, without masks or layer effects. Anything else
 /// (more layers, a type, shape or smart object layer, a mask, a hidden layer) is lost when the
 /// document is written flattened.
-fn flattens_losslessly(doc: &Document) -> bool {
+pub(crate) fn flattens_losslessly(doc: &Document) -> bool {
     match doc.layers.as_slice() {
         [] => true,
         [l] => {

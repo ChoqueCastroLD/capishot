@@ -323,6 +323,11 @@ impl PhotocraftApp {
                 {
                     return r;
                 }
+                if crate::psd_mode_ui::wants_prompt(app, &path) {
+                    let plain_save = plain_save && own.as_deref() == Some(path.as_str());
+                    crate::psd_mode_ui::park(app, path.clone(), choices, plain_save)?;
+                    return Ok(serde_json::json!({"path": path, "warnings": []}));
+                }
                 if crate::flat_copy_ui::wants_prompt(app, &path) {
                     let plain_save = plain_save && own.as_deref() == Some(path.as_str());
                     crate::flat_copy_ui::park(app, path.clone(), choices, plain_save)?;
@@ -717,7 +722,7 @@ impl PhotocraftApp {
 
     /// TIFF, Targa, DDS or JPEG Options is waiting on an answer before a save is written.
     pub(crate) fn save_options_open(&self) -> bool {
-        self.tiff_options.is_some() || self.flat_copy.is_some() || self.targa_options.is_some() || self.dds_options.is_some() || self.jpeg_options.is_some()
+        self.tiff_options.is_some() || self.flat_copy.is_some() || self.psd_mode.is_some() || self.targa_options.is_some() || self.dds_options.is_some() || self.jpeg_options.is_some()
     }
 
     /// Writes a save that waited on a format prompt (Targa, DDS or JPEG Options) once answered:

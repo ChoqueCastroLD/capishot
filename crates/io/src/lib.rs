@@ -95,6 +95,17 @@ pub use flat::{
     tga_alpha_channel_to_transparency, tga_default_bits,
 };
 pub use psd_export::{PsdExportOptions, document_to_psd, document_to_psd_with};
+
+/// Whether a PSD or PSB of `doc` loses its layers: Photoshop has none in Indexed Color, Bitmap and
+/// Multichannel, so such a file is written flattened (or, Multichannel, without them).
+pub fn psd_drops_layers(doc: &Document) -> bool {
+    match doc.mode {
+        ColorMode::Indexed | ColorMode::Bitmap => !palette_map::flattens_losslessly(doc),
+        ColorMode::Multichannel => !doc.layers.is_empty(),
+        _ => false,
+    }
+}
+
 pub use psd_import::{psd_to_document, psd_to_document_with};
 
 /// A decoded flat image (raw pixels a host hands over, for one) as a single-layer document, as

@@ -182,6 +182,7 @@ pub use dialogs::fill_ui;
 pub use dialogs::filter_dialog;
 use dialogs::filter_preview_ui;
 pub use dialogs::flat_copy_ui;
+pub use dialogs::psd_mode_ui;
 pub use dialogs::gallery_ui;
 pub use dialogs::guide_layout_ui;
 pub use dialogs::history_options_ui;
@@ -782,6 +783,9 @@ pub struct PhotocraftApp {
     /// A Save As to a file that can't keep the document, parked behind its question (see
     /// `flat_copy_ui`).
     pub(crate) flat_copy: Option<flat_copy_ui::Prompt>,
+    /// A PSD save that would lose the layers (Indexed, Bitmap, Multichannel), waiting on the
+    /// answer (see `psd_mode_ui`).
+    pub(crate) psd_mode: Option<psd_mode_ui::Prompt>,
     /// The path of the save confirmed there, so no notice repeats it. It lasts through the file's
     /// own options (Targa, DDS, JPEG), which can follow the question.
     pub(crate) flat_copy_confirmed: Option<String>,

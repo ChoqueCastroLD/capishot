@@ -3700,3 +3700,7 @@ fontWeight	Italic	Itálico
 	Your documents were reopened. The next visit uses the graphics card again; to stay on the CPU: Preferences › Performance › Rendering Mode.	Os seus documentos foram reabertos. A próxima visita volta a usar a placa gráfica; para ficar na CPU: Preferências › Desempenho › Modo de renderização.
 	The graphics card restarted; Capishot reloaded	A placa gráfica reiniciou; o Capishot recarregou
 	Your documents were reopened.	Os seus documentos foram reabertos.
+	This document is in {mode} mode, and a PSD in that mode can't keep layers: it would be saved flattened. Convert it to {to} to save it with its layers.	Este documento está no modo {mode}, e um PSD nesse modo não pode manter camadas: seria guardado achatado. Converta-o para {to} para o guardar com as camadas.
+	Convert to {to} and Save	Converter para {to} e guardar
+	Keep the layers?	Manter as camadas?
+	Save Flattened	Guardar achatado

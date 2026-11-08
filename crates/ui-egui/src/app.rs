@@ -239,6 +239,7 @@ impl PhotocraftApp {
             file_dialog: None,
             tiff_options: None,
             flat_copy: None,
+            psd_mode: None,
             flat_copy_confirmed: None,
             flat_copy_docs: Default::default(),
             flat_copy_saves: Default::default(),
