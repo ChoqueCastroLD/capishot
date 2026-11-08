@@ -76,13 +76,15 @@ fn detect(s: &mut Session, p: &Value) -> Result<Value> {
     let masker = s.text_masker.clone().ok_or_else(|| EngineError::Other(UNAVAILABLE.into()))?;
     let st = s.active().ok_or(EngineError::NoDocument)?;
     let (doc, id) = (st.doc.clone(), st.doc.id);
-    crate::jobs::run_async(
+    let page = doc.clone();
+    // The page's pixels are read off the page's thread: seconds for a big page on a phone.
+    crate::jobs::run_async_prepared(
         s,
         LABEL,
         true,
-        move |ctx, done| {
+        move |_| Ok(crate::jobs::Prep::Done(page_rgb(&page))),
+        move |ctx, (rgb, width, height), done| {
             ctx.progress(0.0, LABEL);
-            let (rgb, width, height) = page_rgb(&doc);
             let started = web_time::Instant::now();
             let (cancel, step) = (ctx.clone(), ctx.clone());
             let hooks = Hooks { cancelled: Arc::new(move || cancel.cancelled()), progress: Arc::new(move |f| step.progress(f, LABEL)) };
