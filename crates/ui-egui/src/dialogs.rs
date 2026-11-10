@@ -1262,6 +1262,7 @@ pub(super) mod filter_preview_ui;
 pub(super) mod filter_preview_worker;
 pub mod flat_copy_ui;
 pub mod psd_mode_ui;
+pub mod save_original_ui;
 pub mod gallery_ui;
 pub mod guide_layout_ui;
 pub mod history_options_ui;

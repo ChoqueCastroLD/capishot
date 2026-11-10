@@ -766,6 +766,7 @@ pub static CATALOG: &[(&[&str], &str, Option<&str>, &str)] = &[
     (&["Window"], "Layers", Some("F7"), "window.panel.layers"),
     (&["Window"], "Measurement Log", None, "window.panel.measurementLog"),
     (&["Window"], "Modifier Keys", None, "window.panel.modifierKeys"),
+    (&["Window"], "Save", None, crate::save_original_ui::PANEL),
     (&["Window"], "Navigator", None, "window.panel.navigator"),
     (&["Window"], "Notes", None, "window.panel.notes"),
     (&["Window"], "Paragraph", None, "window.panel.paragraph"),

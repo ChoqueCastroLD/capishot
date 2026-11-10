@@ -437,6 +437,8 @@ impl PhotocraftApp {
         tiff_options_ui::show(self, &ctx);
         crate::flat_copy_ui::show(self, &ctx);
         crate::psd_mode_ui::show(self, &ctx);
+        crate::save_original_ui::show(self, &ctx);
+        crate::save_original_ui::panel(self, &ctx);
         targa_options_ui::show(self, &ctx);
         jpeg_options_ui::show(self, &ctx);
         dds_options_ui::show(self, &ctx);

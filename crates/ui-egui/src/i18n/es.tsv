@@ -5607,3 +5607,14 @@ fontTab	Find More	Buscar más
 	Convert to {to} and Save	Convertir a {to} y guardar
 	Keep the layers?	¿Conservar las capas?
 	Save Flattened	Guardar aplanado
+	Save “{name}”	Guardar “{name}”
+	Process and save writes the image over the original file, with the same name and extension.	Procesar y guardar escribe la imagen sobre el archivo original, con el mismo nombre y extensión.
+	The file can't hold layers: it gets the flattened image. They stay editable here until you close the document.	El archivo no puede guardar capas: recibe la imagen aplanada. Siguen editables aquí hasta que cierres el documento.
+	Remember my choice	Recordar mi elección
+	Process and Save to Original	Procesar y guardar en el original
+	Ctrl+S on a JPEG, PNG or other flat file:	Ctrl+S en un JPG, PNG u otro archivo plano:
+	Save to the original	Guardar en el original
+	JPEG and lossy WebP quality:	Calidad de JPG y WebP con pérdida:
+	Maximum (larger file)	Máxima (archivo más pesado)
+	The file's own quality	La del archivo
+	PNG, TIFF and lossless WebP lose nothing. A JPEG is compressed again on each save: Maximum keeps the loss invisible.	PNG, TIFF y WebP sin pérdida no pierden nada. Un JPG se recomprime en cada guardado: Máxima hace que la pérdida no se note.

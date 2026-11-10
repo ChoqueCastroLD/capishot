@@ -116,6 +116,14 @@ choice!(UiFontSize { Tiny = "tiny", Small = "small", Medium = "medium", Large = 
 choice!(LogDestination { Metadata = "metadata", TextFile = "textFile", Both = "both" } default Metadata);
 choice!(LogDetail { SessionsOnly = "sessionsOnly", Concise = "concise", Detailed = "detailed" } default Concise);
 choice!(Ask { Always = "always", Never = "never", Ask = "ask" } default Always);
+choice!(
+    /// What File › Save does with a document whose own file is flat (JPEG, PNG…).
+    SaveFlatFile { Ask = "ask", Original = "original", SaveAs = "saveAs" } default Ask
+);
+choice!(
+    /// The quality a JPEG or lossy WebP is written at over its own file.
+    OriginalQuality { Maximum = "maximum", File = "file" } default Maximum
+);
 choice!(QuickExportFormat { Png = "png", Jpg = "jpg", Gif = "gif", Webp = "webp", Exr = "exr" } default Png);
 choice!(ExportLocation { Ask = "ask", SameFolder = "sameFolder" } default Ask);
 choice!(ExportMetadata { None = "none", Copyright = "copyright", All = "all" } default Copyright);
@@ -586,6 +594,8 @@ pub struct FileHandling {
     pub ask_before_saving_layered_tiff: bool,
     /// Save As asks before writing a file that can't keep the document.
     pub ask_before_saving_flat_copy: bool,
+    pub save_flat_file: SaveFlatFile,
+    pub original_quality: OriginalQuality,
     pub maximize_psd_compatibility: Ask,
     /// SVG groups deeper than this are rasterised on import; parser and document safety caps remain fixed.
     pub rasterize_svg_groups_deeper_than: u32,
@@ -619,6 +629,8 @@ impl Default for FileHandling {
             exr_aces_cg: false,
             ask_before_saving_layered_tiff: true,
             ask_before_saving_flat_copy: true,
+            save_flat_file: SaveFlatFile::Ask,
+            original_quality: OriginalQuality::Maximum,
             maximize_psd_compatibility: Ask::Always,
             rasterize_svg_groups_deeper_than: photocraft_doc::MAX_GROUP_DEPTH as u32,
             recent_file_count: 20,

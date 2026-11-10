@@ -25,6 +25,8 @@ pub struct CustomPar {
 pub struct ShellUi {
     /// Window › Modifier Keys panel open, and its latched keys.
     pub modifier_keys: bool,
+    /// Window › Save panel open (`save_original_ui`).
+    pub save_options: bool,
     pub sticky_shift: bool,
     pub sticky_command: bool,
     pub sticky_alt: bool,
@@ -35,8 +37,9 @@ pub struct ShellUi {
     pub dialog: Option<(String, Map<String, Value>)>,
 }
 
-const IDS: [&str; 7] = [
+const IDS: [&str; 8] = [
     "window.panel.modifierKeys",
+    crate::save_original_ui::PANEL,
     "window.workspace.newWorkspace",
     "window.workspace.deleteWorkspace",
     "window.workspace.lockWorkspace",
@@ -86,6 +89,7 @@ pub fn checked(app: &PhotocraftApp, id: &str) -> Option<bool> {
     match id {
         i if i.starts_with(SAVED) => Some(saved_name(app, i).is_some_and(|n| n == app.ui.workspace)),
         "window.panel.modifierKeys" => Some(app.ui.shell.modifier_keys),
+        crate::save_original_ui::PANEL => Some(app.ui.shell.save_options),
         "window.workspace.lockWorkspace" => Some(app.session.prefs().workspace_locked),
         "view.pixelAspectRatio.custom" => Some(app.ui.view.pixel_aspect.starts_with("custom:")),
         _ => None,
@@ -95,6 +99,8 @@ pub fn checked(app: &PhotocraftApp, id: &str) -> Option<bool> {
 pub fn is_enabled(app: &PhotocraftApp, id: &str) -> Option<bool> {
     Some(match id {
         "window.workspace.deleteWorkspace" => !app.session.prefs().workspaces.is_empty(),
+        // The browser can't write over a file.
+        crate::save_original_ui::PANEL => !cfg!(target_arch = "wasm32"),
         "view.thirtyTwoBitPreviewOptions" => app.session.is_enabled(id),
         i if handles(i) => true,
         _ => return None,
@@ -150,6 +156,10 @@ pub fn menu(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<
     }
     let s = &mut app.ui.shell;
     Some(match id {
+        crate::save_original_ui::PANEL => {
+            s.save_options = params.get("show").and_then(Value::as_bool).unwrap_or(!s.save_options);
+            Ok(json!({"visible": s.save_options}))
+        }
         "window.panel.modifierKeys" => {
             s.modifier_keys = params.get("show").and_then(Value::as_bool).unwrap_or(!s.modifier_keys);
             for (k, slot) in [("shift", &mut s.sticky_shift), ("command", &mut s.sticky_command), ("alt", &mut s.sticky_alt)] {

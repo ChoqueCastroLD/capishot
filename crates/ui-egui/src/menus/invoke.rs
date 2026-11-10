@@ -322,6 +322,9 @@ fn invoke_file_commands(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, 
             match params.get("path").and_then(Value::as_str) {
                 Some(path) => app.save_as_with(Some(path.to_string()), choices),
                 None => {
+                    if let Some(r) = crate::save_original_ui::intercept(app, choices) {
+                        return r.map(Some);
+                    }
                     let own = app.session.active().and_then(|d| d.path.clone().map(|p| (photocraft_engine::file_cmds::holds_at(&d.doc, &p), p, d)));
                     match own {
                         Some((true, path, d)) => {

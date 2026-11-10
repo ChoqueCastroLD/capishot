@@ -388,6 +388,25 @@ impl PhotocraftApp {
         Ok(r)
     }
 
+    /// File › Save over the document's own flat file, flattened if it has layers (which stay here,
+    /// the document unsaved). `maximum`: a JPEG or lossy WebP at the highest quality, else the file's.
+    pub(crate) fn save_over_original(&mut self, path: String, maximum: bool) -> Result<Value, String> {
+        let copy = self.saves_copy(&path, None)?;
+        let mut settings = ExportSettings { tiff_layers: false, ..self.save_settings() };
+        if maximum {
+            settings.jpeg_quality = Some(100);
+            settings.webp_quality = (!settings.webp_lossless).then_some(100);
+        }
+        // The question said what happens to the layers.
+        self.flat_copy_confirmed = Some(path.clone());
+        let r = match self.write_flat_aware(path.clone(), &settings, copy)? {
+            Some((path, warnings)) => serde_json::json!({"path": path, "warnings": warnings}),
+            None => serde_json::json!({"path": path, "warnings": [], "pending": true}),
+        };
+        self.session.journal.push(("file.save".into(), serde_json::json!({})));
+        Ok(r)
+    }
+
     /// Writes the Save As and journals it as a `file.saveAs` step with its path (and TIFF,
     /// Targa, DDS or JPEG answer), so an action being recorded keeps it (#2032).
     fn save_as_step(&mut self, path: String, tiff_layers: Option<bool>, choices: FormatChoices) -> Result<Value, String> {
@@ -722,7 +741,7 @@ impl PhotocraftApp {
 
     /// TIFF, Targa, DDS or JPEG Options is waiting on an answer before a save is written.
     pub(crate) fn save_options_open(&self) -> bool {
-        self.tiff_options.is_some() || self.flat_copy.is_some() || self.psd_mode.is_some() || self.targa_options.is_some() || self.dds_options.is_some() || self.jpeg_options.is_some()
+        self.tiff_options.is_some() || self.flat_copy.is_some() || self.psd_mode.is_some() || self.save_original.is_some() || self.targa_options.is_some() || self.dds_options.is_some() || self.jpeg_options.is_some()
     }
 
     /// Writes a save that waited on a format prompt (Targa, DDS or JPEG Options) once answered:
