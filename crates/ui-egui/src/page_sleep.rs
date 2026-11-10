@@ -44,6 +44,11 @@ const IDLE_PRESSED_S: f64 = 0.5;
 
 /// Whether pages are released on this device.
 pub fn enabled(app: &PhotocraftApp) -> bool {
+    // The single-threaded browser build encodes on the page's thread: a page put to sleep would
+    // stop it for seconds on the phones that need it most.
+    if cfg!(target_arch = "wasm32") && !app.background_jobs {
+        return false;
+    }
     match app.session.prefs().performance.release_inactive_pages {
         ReleasePages::Always => true,
         ReleasePages::Never => false,

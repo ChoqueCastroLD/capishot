@@ -62,7 +62,11 @@ fn errors_carry_a_class_never_the_message() {
     // AI on the GPU (the live report: a matmul over the workgroup memory crashed the worker).
     let crash = "Manga LaMa: inference failed: inference failed: the AI worker crashed: panicked at burn-cubecl-0.22.0/src/ops/tensor.rs:150:66: called `Result::unwrap()` on an `Err` value: Unable to launch matmul because a required feature is unavailable: Shared memory budget exceeded: kernel requests 35840 bytes, hardware allows 32768 bytes per cube.";
     assert_eq!(error_kind(crash), "ai.gpu_limit");
-    assert_eq!(error_kind("Manga LaMa: the GPU couldn't run the model: the AI worker crashed: RuntimeError: unreachable"), "ai.worker_crash");
+    assert_eq!(error_kind("Manga LaMa: the GPU couldn't run the model: the AI worker crashed: RuntimeError: unreachable"), "ai.worker_panic");
+    // A crashed worker says why, by class.
+    assert_eq!(error_kind("inference failed: the AI worker stopped: RangeError: Array buffer allocation failed"), "ai.worker_oom");
+    assert_eq!(error_kind("the AI worker stopped: failed to fetch Wasm: 404"), "ai.worker_load");
+    assert_eq!(error_kind("the AI worker crashed"), "ai.worker_crash");
     assert_eq!(error_kind("the GPU couldn't run the model: read-back failed"), "ai.gpu");
     assert_eq!(error_kind("inference failed: WebGPU device lost"), "ai.gpu_lost");
     let mut r = Recorder::new("a", "s", 0.0);

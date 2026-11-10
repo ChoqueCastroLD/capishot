@@ -992,7 +992,17 @@ pub fn error_kind(message: &str) -> &'static str {
     } else if has(&["device lost", "device was lost", "devicelost"]) {
         "ai.gpu_lost"
     } else if has(&["ai worker crashed", "ai worker stopped"]) {
-        "ai.worker_crash"
+        // Why it stopped, by its class: memory (a phone's worker killed or out of wasm memory), a
+        // panic, a file of another build it couldn't fetch.
+        if has(&["out of memory", "memory access out of bounds", "allocation failed", "could not allocate", "array buffer allocation"]) {
+            "ai.worker_oom"
+        } else if has(&["unreachable", "panicked"]) {
+            "ai.worker_panic"
+        } else if has(&["failed to fetch", "404", "networkerror"]) {
+            "ai.worker_load"
+        } else {
+            "ai.worker_crash"
+        }
     } else if has(&["gpu couldn't run", "webgpu", "wgpu"]) {
         "ai.gpu"
     } else if has(&["still running"]) {

@@ -329,7 +329,9 @@ impl Boot {
         (services.autosave_unsaved_only, services.autosave_after_edit, services.recovery_menu) = (r.autosave_unsaved_only, r.autosave_after_edit, r.recovery_menu);
         // Capishot's own page keeps its session: every open document is checkpointed and the next
         // visit reopens them as they were. A page that embeds it decides what it opens.
-        let keep_session = !hosted && photopea.is_none();
+        // The single-threaded build checkpoints on the page's thread: there every open page would
+        // stop it for seconds on a weak phone, so it keeps unsaved work only, as before.
+        let keep_session = !hosted && photopea.is_none() && cfg!(target_feature = "atomics");
         if keep_session {
             services.autosave_unsaved_only = false;
         }
