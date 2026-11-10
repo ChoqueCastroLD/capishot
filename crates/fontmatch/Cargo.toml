@@ -16,4 +16,4 @@ workspace = true
 
 [dependencies]
 flate2 = { workspace = true }
-skrifa = "0.44"
+skrifa = "0.47"
