@@ -1306,6 +1306,14 @@ pub fn with<R>(f: impl FnOnce(&mut Recorder) -> R) -> Option<R> {
     recorder()?.as_mut().map(f)
 }
 
+/// This installation's support code: the start of its telemetry install id, grouped
+/// (`a1b2-c3d4-e5f6`), which finds every session it sent. `None` while usage statistics are off.
+pub fn support_code() -> Option<String> {
+    let id = with(|r| r.install_id.clone())?;
+    let hex: String = id.chars().filter(char::is_ascii_hexdigit).take(12).collect();
+    (hex.len() == 12).then(|| format!("{}-{}-{}", &hex[0..4], &hex[4..8], &hex[8..12]))
+}
+
 /// The next batch to send, if recording and anything is waiting.
 pub fn take_batch() -> Option<String> {
     with(Recorder::take_batch).flatten()

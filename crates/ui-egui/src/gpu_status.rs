@@ -166,6 +166,11 @@ pub fn system_info_ui(app: &PhotocraftApp) -> Vec<String> {
         let template = "Platform: {os} {arch}";
         crate::i18n::fmt(tl!(template), &[("os", std::env::consts::OS), ("arch", std::env::consts::ARCH)])
     }];
+    // What a person sends so their sessions can be found in the usage statistics.
+    v.push(match crate::telemetry::support_code() {
+        Some(code) => crate::i18n::fmt(tl!("Support code: {code}"), &[("code", &code)]),
+        None => tl!("Support code: none (usage statistics are off)").to_string(),
+    });
     v.extend(app.perf.gpu_info.lines());
     v.extend(crate::monitor_status::summary_lines(app));
     if let Some(path) = log_file() {

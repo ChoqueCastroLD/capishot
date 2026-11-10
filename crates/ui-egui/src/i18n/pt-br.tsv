@@ -5587,3 +5587,5 @@ fontTab	Find More	Encontrar mais
 	The file's own quality	A do arquivo
 	PNG, TIFF and lossless WebP lose nothing. A JPEG is compressed again on each save: Maximum keeps the loss invisible.	PNG, TIFF e WebP sem perda não perdem nada. Um JPG é recomprimido a cada salvamento: Máxima torna a perda invisível.
 	Capishot was updated while this page was open, so its AI can't start. Reload the page to use it: your documents come back as they were.	O Capishot foi atualizado enquanto esta página estava aberta, por isso a IA não pode iniciar. Recarregue a página para usá-la: seus documentos voltam como estavam.
+	Support code: {code}	Código de suporte: {code}
+	Support code: none (usage statistics are off)	Código de suporte: nenhum (as estatísticas de uso estão desativadas)
