@@ -1150,8 +1150,11 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
         }
         JobOutcome::Done(_) => {
             app.sync_views();
-            app.ui.status = localize_label(&e.label);
-            app.ui.status_error = false;
+            // Putting a page to sleep is silent (`page_sleep`).
+            if !crate::page_sleep::silent(&e.command) {
+                app.ui.status = localize_label(&e.label);
+                app.ui.status_error = false;
+            }
         }
         JobOutcome::Failed(err) if crate::ai_model_gate::on_job_failed(app, &e.command, &err) => {
             // The model gate asks to download it instead.

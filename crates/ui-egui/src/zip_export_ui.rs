@@ -48,7 +48,9 @@ pub struct State {
     thumbs: HashMap<u64, egui::TextureHandle>,
     /// The thumbnail being made off the page's thread, and where it arrives. A chapter's pages
     /// take seconds each, so they come one at a time and the dialog is open meanwhile.
-    thumb_job: Option<std::sync::mpsc::Receiver<(u64, photocraft_raster::Rgba8Image)>>,
+    /// A slot the worker fills (a lock, never a channel: the page's thread may not block in the
+    /// browser), polled each frame.
+    thumb_job: Option<Arc<wasm_sync::Mutex<Option<(u64, photocraft_raster::Rgba8Image)>>>>,
     /// The running export's result, filled by its job.
     pending: Option<Pending>,
 }
@@ -163,6 +165,7 @@ pub fn start(app: &mut PhotocraftApp, params: &Value, target: &str) -> Result<Va
     let result: Arc<wasm_sync::Mutex<Outcome>> = Arc::default();
     let out = Arc::clone(&result);
     let touch = crate::touch_ui::active(app);
+    let (page_of, time_left, stay) = (tl!("Page {i} of {n}").to_string(), tl!("about {time} left").to_string(), tl!("Don't leave this screen").to_string());
     let label = crate::i18n::fmt(tl!("Exporting {name}"), &[("name", &crate::file_open::display_name(&target))]);
     let started = app.session.start_job(
         ID,
@@ -172,16 +175,17 @@ pub fn start(app: &mut PhotocraftApp, params: &Value, target: &str) -> Result<Va
         move |ctx| {
             let started = web_time::Instant::now();
             let mut step = |i: usize, n: usize| {
-                let mut line = crate::i18n::fmt(tl!("Page {i} of {n}"), &[("i", &(i + 1).min(n).to_string()), ("n", &n.to_string())]);
+                // Words translated on the page's thread: the catalogs live there, not on a worker.
+                let mut line = page_of.replace("{i}", &(i + 1).min(n).to_string()).replace("{n}", &n.to_string());
                 // Once a page is done, what is left at the pace so far.
                 if i > 0 && i < n {
                     let left = started.elapsed().as_secs_f64() / i as f64 * (n - i) as f64;
                     let left = if left < 60.0 { format!("{} s", left.ceil() as u64) } else { format!("{} min", (left / 60.0).ceil() as u64) };
-                    line = format!("{line} · {}", crate::i18n::fmt(tl!("about {time} left"), &[("time", &left)]));
+                    line = format!("{line} · {}", time_left.replace("{time}", &left));
                 }
                 // A phone kills a page it leaves in the background: the export would be lost.
                 if touch {
-                    line = format!("{line} · {}", tl!("Don't leave this screen"));
+                    line = format!("{line} · {stay}");
                 }
                 ctx.progress(i as f32 / n.max(1) as f32, &line);
                 ctx.check().is_ok()
@@ -283,17 +287,18 @@ pub fn tick(app: &mut PhotocraftApp) {
 
 /// The thumbnails the dialog still lacks, one at a time off the page's thread.
 fn thumbnails(app: &mut PhotocraftApp, ctx: &egui::Context) {
-    use std::sync::mpsc::TryRecvError;
-    if let Some(rx) = &app.zip_export.thumb_job {
-        match rx.try_recv() {
-            Ok((id, t)) => {
-                let img = egui::ColorImage::from_rgba_unmultiplied([t.width as usize, t.height as usize], &t.pixels);
+    if let Some(slot) = &app.zip_export.thumb_job {
+        // `try_lock`: the worker holds the lock only to put its result in.
+        let done = slot.try_lock().ok().and_then(|mut s| s.take());
+        match done {
+            Some((id, img)) => {
+                let img = egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.pixels);
                 let tex = ctx.load_texture(format!("zip-thumb-{id}"), img, egui::TextureOptions::LINEAR);
                 app.zip_export.thumbs.insert(id, tex);
                 app.zip_export.thumb_job = None;
             }
-            Err(TryRecvError::Disconnected) => app.zip_export.thumb_job = None,
-            Err(TryRecvError::Empty) => {
+            None => {
+                // The worker never asks for a repaint (it has no window): the page looks again.
                 ctx.request_repaint_after(std::time::Duration::from_millis(50));
                 return;
             }
@@ -305,17 +310,18 @@ fn thumbnails(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
     let next = app.session.documents().iter().find(|d| !app.zip_export.thumbs.contains_key(&d.doc.id.0)).map(|d| (d.doc.id.0, d.doc.clone(), d.sleeping.clone()));
     let Some((id, doc, sleeping)) = next else { return };
-    let (tx, rx) = std::sync::mpsc::channel();
-    app.zip_export.thumb_job = Some(rx);
-    let repaint = ctx.clone();
+    let slot: Arc<wasm_sync::Mutex<Option<(u64, photocraft_raster::Rgba8Image)>>> = Arc::default();
+    app.zip_export.thumb_job = Some(Arc::clone(&slot));
     crate::jobs_ui::off_thread(move || {
         // A sleeping page's stub is blank: its thumbnail comes from the page itself, decoded and let go.
         let doc = match sleeping.map(|s| photocraft_engine::sleep::decode(&s)) {
             Some(Ok((d, _))) => std::sync::Arc::new(d),
             _ => doc,
         };
-        let _ = tx.send((id, photocraft_compose::thumbnail(&doc, 96)));
-        repaint.request_repaint();
+        let img = photocraft_compose::thumbnail(&doc, 96);
+        if let Ok(mut s) = slot.lock() {
+            *s = Some((id, img));
+        }
     });
     ctx.request_repaint_after(std::time::Duration::from_millis(50));
 }
