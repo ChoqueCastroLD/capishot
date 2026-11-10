@@ -21,7 +21,8 @@ pub struct Prompt {
 /// The document's own file when File › Save would otherwise ask for a name: flat, writable by
 /// its format, and still there.
 fn own_flat_file(app: &PhotocraftApp) -> Option<String> {
-    if cfg!(target_arch = "wasm32") || app.session.is_enabled("layer.smartObjects.saveContents") {
+    // An action being recorded keeps its plain Save, which writes the file it is played on.
+    if cfg!(target_arch = "wasm32") || app.session.actions.recording.is_some() || app.session.is_enabled("layer.smartObjects.saveContents") {
         return None;
     }
     let st = app.session.active()?;
