@@ -1,7 +1,7 @@
 use super::batch_run::{batch_inputs_tree, process_tree};
 use super::open::import_opened;
-use super::paths::{file_name, list_images, read_file, stem};
-use super::save::SaveOpts;
+use super::paths::{file_name, join, list_images, read_file, stem};
+use super::save::{SaveOpts, save_doc};
 use super::{
     ColorMode, Document, EngineError, Layer, LayerContent, LayerId, Result, Session, Surface, Value, buffer_surface, flattened_checked, json, size_param,
     str_param,
@@ -87,14 +87,17 @@ pub(super) fn parse_steps(v: &Value) -> Result<Vec<(String, Value)>> {
 pub(super) fn image_processor(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.scripts.imageProcessor";
     let output = str_param(p, "output", cmd)?.to_string();
-    let inputs = batch_inputs_tree(p, cmd, &output)?;
+    let open = p.get("useOpenDocuments").and_then(Value::as_bool).unwrap_or(false);
+    // Photoshop's "Use Open Images": the documents as they are now (an upscale or a clean not
+    // saved yet included), not their files on disk.
+    let inputs = if open { Vec::new() } else { batch_inputs_tree(p, cmd, &output)? };
     let format = p.get("format").and_then(Value::as_str).unwrap_or("jpg").to_string();
     let fit = match (size_param(p, "width"), size_param(p, "height")) {
         (None, None) => None,
         (w, h) => Some(json!({"width": w.unwrap_or(1e9), "height": h.unwrap_or(1e9), "dontEnlarge": true})),
     };
     let to_srgb = p.get("convertToSrgb").and_then(Value::as_bool).unwrap_or(false);
-    let r = process_tree(s, &inputs, &output, &format, SaveOpts::from_params(s, p, cmd)?.or_quality(8.0), "", &|scratch, _| {
+    let prepare = |scratch: &mut Session, _: &str| -> Result<bool> {
         if to_srgb && scratch.active().is_some_and(|d| d.doc.mode != ColorMode::Rgb) {
             scratch.execute("image.mode.rgb", json!({}))?;
         }
@@ -102,8 +105,46 @@ pub(super) fn image_processor(s: &mut Session, p: &Value) -> Result<Value> {
             fit_image(scratch, fp)?;
         }
         Ok(false)
-    });
-    Ok(r)
+    };
+    let save = SaveOpts::from_params(s, p, cmd)?.or_quality(8.0);
+    if open {
+        return Ok(process_open_documents(s, &output, &format, save, &prepare));
+    }
+    Ok(process_tree(s, &inputs, &output, &format, save, "", &prepare))
+}
+
+/// [`process_tree`] over the open documents as they are: each one copied into a scratch session
+/// (a sleeping page decoded for it), `f` run there, then written to `output` under its name.
+fn process_open_documents(s: &Session, output: &str, format: &str, save: SaveOpts, f: &dyn Fn(&mut Session, &str) -> Result<bool>) -> Value {
+    let (mut files, mut errors) = (Vec::new(), Vec::new());
+    let mut written = super::batch_run::OutputClaims::default();
+    for st in s.documents().iter().filter(|d| !d.hidden) {
+        let name = st.path.clone().unwrap_or_else(|| st.doc.name.clone());
+        let ext = if format == "same" { super::batch_run::same_format(&name) } else { format.trim_start_matches('.').to_ascii_lowercase() };
+        let out = join(output, &format!("{}.{ext}", stem(&name)));
+        let r = (|| -> Result<()> {
+            written.check(&out).map_err(EngineError::Other)?;
+            let doc = match &st.sleeping {
+                Some(sl) => crate::sleep::decode(sl)?.0,
+                None => (*st.doc).clone(),
+            };
+            let mut scratch = Session::new();
+            scratch.add_document(doc, st.path.clone());
+            if !f(&mut scratch, &out)? {
+                let d = scratch.active().ok_or(EngineError::NoDocument)?;
+                save_doc(&d.doc, &out, save)?;
+            }
+            Ok(())
+        })();
+        match r {
+            Ok(()) => {
+                written.record(&out, &name);
+                files.push(out);
+            }
+            Err(e) => errors.push(json!({"file": name, "error": e.to_string()})),
+        }
+    }
+    json!({"files": files, "errors": errors})
 }
 
 pub(super) fn load_files_into_stack(s: &mut Session, p: &Value) -> Result<Value> {

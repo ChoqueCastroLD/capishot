@@ -462,7 +462,8 @@ pub(super) fn front(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, para
         ),
         "file.scripts.imageProcessor" => dialog(
             app,
-            json!({"input": dir, "includeSubfolders": false, "__labels": subfolders_label(), "output": format!("{dir}/processed"), "format": "jpg", "quality": 8, "width": 0, "height": 0, "convertToSrgb": true}),
+            // Open images first, as they are now: what was upscaled or cleaned and not saved yet.
+            json!({"useOpenDocuments": !app.session.documents().is_empty(), "input": dir, "includeSubfolders": false, "__labels": {"includeSubfolders": tl!("Include All Subfolders"), "useOpenDocuments": tl!("Use Open Images")}, "output": format!("{dir}/processed"), "format": "jpg", "quality": 8, "width": 0, "height": 0, "convertToSrgb": true}),
             json!({"format": ["jpg", "png", "psd", "tiff", "webp"]}),
         ),
         "file.automate.batch" => {

@@ -1935,3 +1935,24 @@ fn sanitize_keeps_windows_device_names_off_the_disk() {
         assert_eq!(sanitize(name), name);
     }
 }
+
+/// Image Processor's "Use Open Images" writes the documents as they are now: an image upscaled and
+/// not saved comes out upscaled, not as its file on disk.
+#[test]
+fn image_processor_uses_open_images_as_they_are() {
+    let dir = tmp("ipopen");
+    let input = join(&dir, "in");
+    std::fs::create_dir_all(&input).unwrap();
+    let a = png(&input, "a.png", 40, 20, "#ff0000");
+    let mut s = Session::new();
+    let doc = photocraft_io::import("a.png", &std::fs::read(&a).unwrap()).unwrap().document;
+    s.add_document(doc, Some(a.clone()));
+    s.execute("image.imageSize", json!({"width": 80})).unwrap();
+    let out = join(&dir, "out");
+    let r = s.execute("file.scripts.imageProcessor", json!({"useOpenDocuments": true, "output": out, "format": "png"})).unwrap();
+    let files = r["files"].as_array().unwrap();
+    assert_eq!(files.len(), 1, "{r}");
+    assert!(files[0].as_str().unwrap().ends_with("a.png"));
+    let back = photocraft_io::import("a.png", &std::fs::read(files[0].as_str().unwrap()).unwrap()).unwrap().document;
+    assert_eq!((back.size.width, back.size.height), (80, 40), "the edit, not the file on disk");
+}
