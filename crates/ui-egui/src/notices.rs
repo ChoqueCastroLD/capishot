@@ -64,9 +64,11 @@ impl Notice {
 /// Show a notice (newest last); returns its id.
 pub fn post(app: &mut PhotocraftApp, title: impl Into<String>, lines: Vec<String>, error: bool, dismiss_pref: Option<&str>) -> u64 {
     let id = app.ui.alloc_id();
+    let title = title.into();
+    let title = if error { friendly(&title) } else { title };
     app.ui.notices.push(Notice {
         id,
-        title: title.into(),
+        title,
         lines,
         error,
         dismiss_pref: dismiss_pref.map(str::to_owned),
@@ -224,7 +226,18 @@ pub fn io_warnings(app: &mut PhotocraftApp, what: &str, warnings: &[String]) {
 
 /// Report a failed file operation: the status bar shows it as an error and a notice keeps it on
 /// screen until dismissed.
+/// An error a person can act on, for one whose raw text says nothing to them: a page left open
+/// across an update asks for its own build's AI worker, which the site no longer has (a 404).
+pub fn friendly(message: &str) -> String {
+    let outdated = message.contains("AI worker") && (message.contains(" 404") || message.contains("failed to fetch"));
+    if outdated {
+        return tl!("Capishot was updated while this page was open, so its AI can't start. Reload the page to use it: your documents come back as they were.").to_string();
+    }
+    message.to_string()
+}
+
 pub fn error(app: &mut PhotocraftApp, message: String) {
+    let message = friendly(&message);
     app.ui.status = message.clone();
     app.ui.status_error = true;
     post(app, message, Vec::new(), true, None);
@@ -368,6 +381,13 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_ai_worker_of_an_old_build_asks_for_a_reload() {
+        let raw = "Detect Text: inference failed: the AI worker stopped: Uncaught Error: failed to fetch Wasm: 404  fetching 'https://capichan.com/capishot/ai/63d0d97aca3feb7a/photocraft_ai_worker_bg.wasm'";
+        assert!(friendly(raw).starts_with("Capishot was updated"));
+        assert_eq!(friendly("Save failed: disk full"), "Save failed: disk full");
+    }
     use crate::{PhotocraftApp, Services};
     use photocraft_engine::Session;
     use std::sync::{Arc, Mutex};
