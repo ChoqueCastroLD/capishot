@@ -1,8 +1,9 @@
 //! Pages in other tabs give back their memory (Preferences › Performance › Release Inactive
 //! Pages): a page not looked at for [`IDLE_S`] goes to sleep ([`photocraft_engine::sleep`]),
 //! one at a time, on a worker; activating a sleeping page wakes it, with "Loading page…" over the
-//! canvas and in the status bar until it is back. Auto does it on devices of 4 GB or less, where a
-//! browser tab is killed well before the page's memory runs out.
+//! canvas and in the status bar until it is back. Auto does it on devices of 4 GB or less, and in
+//! the browser with more than [`MANY_PAGES`] pages open on any device: a tab is killed well before
+//! the device's memory runs out.
 //!
 //! A page sleeps only once its crash recovery checkpoint is current (where pages are
 //! checkpointed), so sleeping never leaves its latest changes without one.
@@ -20,6 +21,8 @@ use crate::PhotocraftApp;
 pub const IDLE_S: f64 = 6.0;
 /// "4 GB or less": devices report a little under their nominal memory.
 const SMALL_DEVICE: u64 = 4_400 << 20;
+/// Pages open past which the browser releases inactive ones on any device (Auto).
+const MANY_PAGES: usize = 8;
 const SLEEP: &str = "document.sleep";
 const WAKE: &str = "document.wake";
 
@@ -44,7 +47,12 @@ pub fn enabled(app: &PhotocraftApp) -> bool {
     match app.session.prefs().performance.release_inactive_pages {
         ReleasePages::Always => true,
         ReleasePages::Never => false,
-        ReleasePages::Auto => crate::gpu_canvas::physical_memory().is_some_and(|b| b <= SMALL_DEVICE),
+        // A browser tab is killed long before the device runs out (a Chromebook's at about 1 GB):
+        // many pages open there sleep whatever the device has.
+        ReleasePages::Auto => {
+            crate::gpu_canvas::physical_memory().is_some_and(|b| b <= SMALL_DEVICE)
+                || (cfg!(target_arch = "wasm32") && app.session.documents().len() > MANY_PAGES)
+        }
     }
 }
 
