@@ -52,6 +52,9 @@ pub(super) fn humanize(key: &str) -> String {
         "simpleModifierButton" => return "Touch Modifier Button (Simple UI)".into(),
         "simpleTwoFingerRotate" => return "Rotate with Two Fingers (Simple UI)".into(),
         "stylusInput" => return "Stylus".into(),
+        "releaseInactivePages" => return "Release Inactive Pages".into(),
+        "saveFlatFile" => return "Ctrl+S on a Flat File".into(),
+        "originalQuality" => return "Quality When Saving to the Original".into(),
         "longPressMs" => return "Long Press for Eyedropper (ms)".into(),
         _ => {}
     }

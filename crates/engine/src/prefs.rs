@@ -117,6 +117,11 @@ choice!(LogDestination { Metadata = "metadata", TextFile = "textFile", Both = "b
 choice!(LogDetail { SessionsOnly = "sessionsOnly", Concise = "concise", Detailed = "detailed" } default Concise);
 choice!(Ask { Always = "always", Never = "never", Ask = "ask" } default Always);
 choice!(
+    /// Pages no one is looking at give back their memory ([`crate::sleep`]): on devices of 4 GB or
+    /// less (Auto), always, or never.
+    ReleasePages { Auto = "auto", Always = "always", Never = "never" } default Auto
+);
+choice!(
     /// What File › Save does with a document whose own file is flat (JPEG, PNG…).
     SaveFlatFile { Ask = "ask", Original = "original", SaveAs = "saveAs" } default Ask
 );
@@ -683,6 +688,8 @@ fn honoured_memory_usage_mb(stored: u32, web: bool) -> u32 {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Performance {
+    /// Release Inactive Pages: when pages in other tabs give back their memory.
+    pub release_inactive_pages: ReleasePages,
     /// Shared RAM target for managed document/history pixels, in MiB. This is not a
     /// reservation or a limit on total process memory, GPU caches, or temporary allocations.
     pub memory_usage_mb: u32,
@@ -792,6 +799,7 @@ impl Default for Performance {
             cache_levels: 4,
             cache_tile_size: 8192,
             use_gpu: true,
+            release_inactive_pages: ReleasePages::Auto,
             rendering_mode: None,
             gpu_backend: GpuBackend::Auto,
             gpu_adapter: String::new(),

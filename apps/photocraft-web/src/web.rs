@@ -325,7 +325,7 @@ impl Boot {
         let outbox: Outbox = Arc::default();
         let mut services = services(inbox.clone(), photopea.clone(), outbox.clone());
         let r = recovery.services();
-        (services.autosave, services.discard_autosave, services.poll_autosave) = (r.autosave, r.discard_autosave, r.poll_autosave);
+        (services.autosave, services.discard_autosave, services.poll_autosave, services.release_autosave) = (r.autosave, r.discard_autosave, r.poll_autosave, r.release_autosave);
         (services.autosave_unsaved_only, services.autosave_after_edit, services.recovery_menu) = (r.autosave_unsaved_only, r.autosave_after_edit, r.recovery_menu);
         // Capishot's own page keeps its session: every open document is checkpointed and the next
         // visit reopens them as they were. A page that embeds it decides what it opens.

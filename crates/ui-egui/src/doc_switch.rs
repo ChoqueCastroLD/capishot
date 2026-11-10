@@ -297,15 +297,20 @@ fn enforce_budget(app: &mut PhotocraftApp) -> Vec<DocId> {
         evicted.push(id);
     }
     for id in &evicted {
-        if let Some(gpu) = app.gpu.as_ref() {
-            gpu.evict(id.0);
-            gpu.evict(crate::canvas::viewport_pages::stream_key(id.0));
-        }
-        app.streams.remove(id);
-        app.canvases.retain(|(d, _), _| d != id);
-        crate::canvas::free_document_tile_views(app, *id);
+        evict(app, *id);
     }
     evicted
+}
+
+/// Frees document `id`'s canvas textures and caches (it stays open: showing it draws it again).
+pub(crate) fn evict(app: &mut PhotocraftApp, id: DocId) {
+    if let Some(gpu) = app.gpu.as_ref() {
+        gpu.evict(id.0);
+        gpu.evict(crate::canvas::viewport_pages::stream_key(id.0));
+    }
+    app.streams.remove(&id);
+    app.canvases.retain(|(d, _), _| *d != id);
+    crate::canvas::free_document_tile_views(app, id);
 }
 
 /// `document.memory`: what each open document holds, on the GPU and in memory.

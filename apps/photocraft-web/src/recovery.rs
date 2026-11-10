@@ -83,6 +83,8 @@ struct Slot {
     running: Option<Job>,
     /// Already moved to a new key once after a refused write.
     moved: bool,
+    /// Its document went to sleep: the saver lets go of its tiles once the checkpoint under way ends.
+    release: bool,
 }
 
 #[derive(Clone)]
@@ -283,10 +285,11 @@ impl Recovery {
 
     /// The autosave services for [`Services`].
     pub fn services(&self) -> Services {
-        let (queue, discard, poll) = (self.clone(), self.clone(), self.clone());
+        let (queue, discard, poll, release) = (self.clone(), self.clone(), self.clone(), self.clone());
         Services {
             autosave: Some(Box::new(move |doc, history, revision, path, key, context| queue.queue(doc, history, revision, path, key, context))),
             discard_autosave: Some(Box::new(move |id, key| discard.discard(id, key))),
+            release_autosave: Some(Box::new(move |id| release.release(id))),
             poll_autosave: Some(Box::new(move || poll.poll())),
             autosave_unsaved_only: true,
             autosave_after_edit: true,
@@ -331,6 +334,18 @@ impl Recovery {
             self.remove(id, key);
         }
         Ok(())
+    }
+
+    /// Document `id` went to sleep: its saver's handles to the tiles it encoded go, now or once
+    /// the checkpoint under way ends. The next checkpoint writes every object again.
+    fn release(&self, id: u64) {
+        let mut inner = self.0.borrow_mut();
+        let Some(slot) = inner.slots.get_mut(&id) else { return };
+        if slot.busy || slot.pending.is_some() {
+            slot.release = true;
+        } else {
+            slot.saver = Arc::default();
+        }
     }
 
     /// Removes `key`'s checkpoint, then reports document `id` retired.
@@ -481,6 +496,9 @@ impl Recovery {
                     (Ok(()), Some(live)) => saver.committed(live),
                     _ => saver.forget(),
                 }
+            }
+            if std::mem::take(&mut slot.release) && slot.pending.is_none() {
+                slot.saver = Arc::default();
             }
             let retire = slot.retiring.then(|| slot.key.clone());
             if retire.is_none() {
@@ -703,7 +721,7 @@ impl Inner {
                 }
                 None => self.fresh_key(),
             };
-            self.slots.insert(id, Slot { key, saver: Arc::default(), busy: false, pending: None, retiring: false, running: None, moved: false });
+            self.slots.insert(id, Slot { key, saver: Arc::default(), busy: false, pending: None, retiring: false, running: None, moved: false, release: false });
         }
         self.slots.get_mut(&id).ok_or_else(|| "Recovery ownership unavailable".into())
     }

@@ -313,6 +313,9 @@ pub type AutosaveFn =
     Box<dyn FnMut(&std::sync::Arc<Document>, photocraft_ops::HistoryCheckpoint, u64, Option<&str>, Option<&str>, serde_json::Value) -> Result<(), String>>;
 /// Retire a closed document's checkpoint off the UI thread; inherited keys remain owned until completion.
 pub type DiscardAutosaveFn = Box<dyn FnMut(u64, Option<&str>) -> Result<(), String>>;
+/// Forgets what the autosaver keeps for document `id` to write its next checkpoint quickly (the
+/// handles of its tiles): it went to sleep (`page_sleep`), and its pixels must go.
+pub type ReleaseAutosaveFn = Box<dyn FnMut(u64)>;
 pub struct AutosaveCompletion {
     pub document_id: u64,
     pub revision: u64,
@@ -491,6 +494,7 @@ pub struct Services {
     /// Documents… is enabled and asks it to (`recovery_ui`).
     pub recovery_menu: bool,
     pub discard_autosave: Option<DiscardAutosaveFn>,
+    pub release_autosave: Option<ReleaseAutosaveFn>,
     pub poll_autosave: Option<PollAutosaveFn>,
     pub recover: Option<RecoverFn>,
     pub discover_recovery: Option<DiscoverRecoveryFn>,

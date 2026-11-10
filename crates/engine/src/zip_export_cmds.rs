@@ -62,6 +62,9 @@ pub struct Page {
     pub doc: Arc<Document>,
     /// The document's file: linked smart objects a PSD embeds are resolved against it.
     pub path: Option<String>,
+    /// A sleeping page's real document, decoded when its turn comes ([`crate::sleep`]): one page
+    /// awake at a time.
+    pub sleeping: Option<Arc<crate::sleep::Sleeping>>,
 }
 
 /// An export ready to run anywhere (a worker): checked and captured from the session.
@@ -172,7 +175,7 @@ pub fn prepare(s: &Session, p: &Value) -> Result<ZipExport> {
     let prefix = p.get("prefix").and_then(Value::as_str).unwrap_or("");
     let names: Vec<String> = docs.iter().map(|d| d.doc.name.clone()).collect();
     let entries = entry_names(&names, format.ext(), sequence, prefix);
-    let pages = docs.iter().zip(entries).map(|(d, entry)| Page { entry, name: d.doc.name.clone(), doc: d.doc.clone(), path: d.path.clone() }).collect();
+    let pages = docs.iter().zip(entries).map(|(d, entry)| Page { entry, name: d.doc.name.clone(), doc: d.doc.clone(), path: d.path.clone(), sleeping: d.sleeping.clone() }).collect();
     Ok(ZipExport { pages, format, resize, srgb })
 }
 
@@ -180,7 +183,10 @@ impl ZipExport {
     /// One page flattened and encoded, or (PSD) saved with its layers; resizing and the sRGB
     /// conversion apply to the whole layered document, as Image Size and Convert to Profile do.
     pub fn render(&self, page: &Page) -> std::result::Result<Vec<u8>, String> {
-        let mut doc = (*page.doc).clone();
+        let mut doc = match &page.sleeping {
+            Some(s) => crate::sleep::decode(s).map_err(|e| e.to_string())?.0,
+            None => (*page.doc).clone(),
+        };
         let scale = match self.resize {
             Some(Resize::MaxWidth(w)) if doc.size.width > w => Some(w),
             Some(Resize::Percent(pc)) if pc < 100.0 => Some(((f64::from(doc.size.width) * pc / 100.0).round() as u32).max(1)),

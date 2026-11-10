@@ -30,7 +30,12 @@ fn target_doc<'a>(s: &'a Session, cmd: &str, p: &Value) -> Result<&'a DocState> 
         None => s.active().ok_or(EngineError::NoDocument),
         Some(v) => {
             let id = v.as_u64().ok_or_else(|| bad(cmd, "`document` must be a document id"))?;
-            s.documents().iter().find(|d| d.doc.id.0 == id).ok_or_else(|| bad(cmd, format!("no open document {id}")))
+            let st = s.documents().iter().find(|d| d.doc.id.0 == id).ok_or_else(|| bad(cmd, format!("no open document {id}")))?;
+            // A sleeping page's stub has no pixels to read.
+            if st.sleeping.is_some() {
+                return Err(EngineError::Other(format!("document {id} is asleep: activate it first")));
+            }
+            Ok(st)
         }
     }
 }

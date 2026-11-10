@@ -10,6 +10,7 @@
 pub mod adjust_params;
 mod allocation;
 pub mod build_info;
+pub mod sleep;
 mod canvas_geom;
 mod channel_clip;
 mod clip_group;
@@ -404,6 +405,8 @@ impl Session {
             "pageCacheMB": mb(self.typer.place.page_bytes()),
             "pixelsMB": mb(self.pixel_bytes()),
             "docCacheMB": mb(self.doc_cache.used()),
+            "sleepingMB": mb(self.docs.iter().filter_map(|st| st.sleeping.as_ref()).map(|s| s.bytes).sum()),
+            "asleep": self.docs.iter().filter(|st| st.sleeping.is_some()).count(),
             "docs": self.docs.len(),
             "layers": layers,
             "budgetMB": mb(self.prefs().performance.history_budget_bytes()),

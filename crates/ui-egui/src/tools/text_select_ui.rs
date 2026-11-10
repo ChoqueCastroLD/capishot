@@ -113,6 +113,11 @@ pub(crate) struct State {
     pub(crate) erase: bool,
 }
 
+/// Forgets what was found on document `id` (it went to sleep: [`crate::page_sleep`]).
+pub(crate) fn forget(app: &mut PhotocraftApp, id: DocId) {
+    app.text_select.docs.remove(&id);
+}
+
 const METHODS: [CleanMethod; 3] = [CleanMethod::Ai, CleanMethod::Fill, CleanMethod::Color];
 const SHAPES: [ZoneShape; 4] = [ZoneShape::Pick, ZoneShape::Rect, ZoneShape::Lasso, ZoneShape::Brush];
 

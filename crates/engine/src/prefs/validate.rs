@@ -3,7 +3,7 @@ use super::{
     AppearanceMode, Ask, CanvasBorder, CanvasColor, CheckerColors, CheckerSize, ColorPicker, DarkTheme, ExportLocation, ExportMetadata, FontPreview,
     GpuBackend, Interpolation, LightTheme, LineStyle, LinuxDisplayServer, LogDestination, LogDetail, OtherCursor, PaintingCursor, PixelDensity, PointSize,
     PressureCurve, QuickExportFormat, RawColorSpace, RawDemosaic, RawDepth, RawSharpen, RenderingMode, RightClickPaint, SimpleUi, StylusInput, TextEngine,
-    Theme, TypeUnit, UiFontSize, UiScale, Unit, Value,
+    Theme, TypeUnit, UiFontSize, UiScale, Unit, Value, ReleasePages, SaveFlatFile, OriginalQuality,
 };
 
 /// Preferences dialog sections in Photoshop's order: (id, title).
@@ -123,6 +123,9 @@ pub fn choices(path: &str) -> Option<&'static [&'static str]> {
         "performance.gpuBackend" => GpuBackend::NAMES,
         "performance.linuxDisplayServer" => LinuxDisplayServer::NAMES,
         "performance.renderingMode" => RenderingMode::NAMES,
+        "performance.releaseInactivePages" => ReleasePages::NAMES,
+        "fileHandling.saveFlatFile" => SaveFlatFile::NAMES,
+        "fileHandling.originalQuality" => OriginalQuality::NAMES,
         "enhancedControls.stylusInput" => StylusInput::NAMES,
         "performance.maxPixelDensity" => PixelDensity::NAMES,
         _ => return None,

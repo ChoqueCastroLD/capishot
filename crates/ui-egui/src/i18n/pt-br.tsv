@@ -5589,3 +5589,12 @@ fontTab	Find More	Encontrar mais
 	Capishot was updated while this page was open, so its AI can't start. Reload the page to use it: your documents come back as they were.	O Capishot foi atualizado enquanto esta página estava aberta, por isso a IA não pode iniciar. Recarregue a página para usá-la: seus documentos voltam como estavam.
 	Support code: {code}	Código de suporte: {code}
 	Support code: none (usage statistics are off)	Código de suporte: nenhum (as estatísticas de uso estão desativadas)
+	Loading page “{name}”	Carregando página “{name}”
+	It was freed to save memory	Foi liberada para economizar memória
+	Freeing memory	Liberando memória
+	Release Inactive Pages	Liberar páginas inativas
+	Ctrl+S on a Flat File	Ctrl+S em arquivo plano
+	Quality When Saving to the Original	Qualidade ao salvar no original
+	Page {i} of {n}	Página {i} de {n}
+	about {time} left	faltam ~{time}
+	Don't leave this screen	Não saia desta tela

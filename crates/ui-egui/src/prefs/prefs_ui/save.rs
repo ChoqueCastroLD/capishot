@@ -426,7 +426,8 @@ fn autosave(app: &mut PhotocraftApp) {
         .enumerate()
         .filter_map(|(index, st)| {
             // A host's hidden helper document is its own: never checkpointed (or recovered as a tab).
-            if st.hidden {
+            // A sleeping page is a stub: its checkpoint from before it slept stands.
+            if st.hidden || st.sleeping.is_some() {
                 return None;
             }
             // The browser keeps checkpoints of unsaved work only: a document written to its file

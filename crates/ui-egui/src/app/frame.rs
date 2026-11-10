@@ -92,6 +92,7 @@ impl PhotocraftApp {
         {
             let _s = perf_span::span("prefs.tick");
             prefs_ui::tick(self, ctx);
+            crate::page_sleep::tick(self, crate::gpu_canvas::now_ms() / 1000.0);
         }
         updates_ui::tick(self, ctx);
         match frame.as_deref() {
@@ -439,6 +440,7 @@ impl PhotocraftApp {
         crate::psd_mode_ui::show(self, &ctx);
         crate::save_original_ui::show(self, &ctx);
         crate::save_original_ui::panel(self, &ctx);
+        crate::page_sleep::overlay(self, &ctx);
         targa_options_ui::show(self, &ctx);
         jpeg_options_ui::show(self, &ctx);
         dds_options_ui::show(self, &ctx);

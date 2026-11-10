@@ -949,7 +949,7 @@ pub fn job_in_view(app: &PhotocraftApp) -> Option<JobInfo> {
     if let Some(j) = app.jobs.focus.and_then(|j| app.session.job(j)) {
         return Some(j);
     }
-    app.session.active_job().or_else(|| app.session.jobs().pop())
+    app.session.active_job().or_else(|| app.session.jobs().into_iter().filter(|j| !crate::page_sleep::silent(&j.command)).next_back())
 }
 
 /// Cancel job `id` (the status bar's ×, the dialog's Cancel, Esc, closing an opening tab).

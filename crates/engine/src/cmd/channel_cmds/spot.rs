@@ -82,7 +82,7 @@ pub(super) fn split(s: &mut Session, p: &Value) -> Result<Value> {
 /// Open grayscale documents with the active document's size, active first.
 pub(super) fn mergeable(s: &Session) -> Vec<usize> {
     let Some(a) = s.active() else { return Vec::new() };
-    let ok = |d: &DocState| d.doc.mode == ColorMode::Grayscale && d.doc.size == a.doc.size;
+    let ok = |d: &DocState| d.sleeping.is_none() && d.doc.mode == ColorMode::Grayscale && d.doc.size == a.doc.size;
     let mut v: Vec<usize> = s.active_index().into_iter().filter(|_| ok(a)).collect();
     v.extend(s.documents().iter().enumerate().filter(|(i, d)| Some(*i) != s.active_index() && ok(d)).map(|(i, _)| i));
     v

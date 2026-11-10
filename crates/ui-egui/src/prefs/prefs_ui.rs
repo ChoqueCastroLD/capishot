@@ -129,6 +129,11 @@ pub(super) struct RecoveryContext {
     /// reopens a saved document as saved. Absent in older checkpoints: unsaved.
     dirty: Option<bool>,
 }
+/// The revision of document `doc` its last confirmed crash recovery checkpoint holds.
+pub(crate) fn checkpointed_at(app: &PhotocraftApp, doc: photocraft_doc::DocId) -> Option<u64> {
+    app.prefs_rt.autosaved.get(&doc).map(|s| s.revision)
+}
+
 pub(super) fn recovery_context(app: &PhotocraftApp, index: usize, st: &photocraft_engine::DocState) -> Value {
     json!({"activeLayer": st.active_layer, "selectedLayers": st.selected_layers,
         "layerAnchor": st.layer_anchor, "view": app.ui.views.get(index), "tool": app.ui.tool,

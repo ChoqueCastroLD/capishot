@@ -162,6 +162,7 @@ pub fn start(app: &mut PhotocraftApp, params: &Value, target: &str) -> Result<Va
     let path = target.clone();
     let result: Arc<wasm_sync::Mutex<Outcome>> = Arc::default();
     let out = Arc::clone(&result);
+    let touch = crate::touch_ui::active(app);
     let label = crate::i18n::fmt(tl!("Exporting {name}"), &[("name", &crate::file_open::display_name(&target))]);
     let started = app.session.start_job(
         ID,
@@ -169,9 +170,20 @@ pub fn start(app: &mut PhotocraftApp, params: &Value, target: &str) -> Result<Va
         &label,
         false,
         move |ctx| {
-            let page = crate::i18n::t("Page");
+            let started = web_time::Instant::now();
             let mut step = |i: usize, n: usize| {
-                ctx.progress(i as f32 / n.max(1) as f32, &format!("{page} {}/{n}", (i + 1).min(n)));
+                let mut line = crate::i18n::fmt(tl!("Page {i} of {n}"), &[("i", &(i + 1).min(n).to_string()), ("n", &n.to_string())]);
+                // Once a page is done, what is left at the pace so far.
+                if i > 0 && i < n {
+                    let left = started.elapsed().as_secs_f64() / i as f64 * (n - i) as f64;
+                    let left = if left < 60.0 { format!("{} s", left.ceil() as u64) } else { format!("{} min", (left / 60.0).ceil() as u64) };
+                    line = format!("{line} · {}", crate::i18n::fmt(tl!("about {time} left"), &[("time", &left)]));
+                }
+                // A phone kills a page it leaves in the background: the export would be lost.
+                if touch {
+                    line = format!("{line} · {}", tl!("Don't leave this screen"));
+                }
+                ctx.progress(i as f32 / n.max(1) as f32, &line);
                 ctx.check().is_ok()
             };
             let r = if let Some(s) = stream.as_mut() {
@@ -291,12 +303,17 @@ fn thumbnails(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if app.zip_export.pending.is_some() {
         return;
     }
-    let next = app.session.documents().iter().find(|d| !app.zip_export.thumbs.contains_key(&d.doc.id.0)).map(|d| (d.doc.id.0, d.doc.clone()));
-    let Some((id, doc)) = next else { return };
+    let next = app.session.documents().iter().find(|d| !app.zip_export.thumbs.contains_key(&d.doc.id.0)).map(|d| (d.doc.id.0, d.doc.clone(), d.sleeping.clone()));
+    let Some((id, doc, sleeping)) = next else { return };
     let (tx, rx) = std::sync::mpsc::channel();
     app.zip_export.thumb_job = Some(rx);
     let repaint = ctx.clone();
     crate::jobs_ui::off_thread(move || {
+        // A sleeping page's stub is blank: its thumbnail comes from the page itself, decoded and let go.
+        let doc = match sleeping.map(|s| photocraft_engine::sleep::decode(&s)) {
+            Some(Ok((d, _))) => std::sync::Arc::new(d),
+            _ => doc,
+        };
         let _ = tx.send((id, photocraft_compose::thumbnail(&doc, 96)));
         repaint.request_repaint();
     });

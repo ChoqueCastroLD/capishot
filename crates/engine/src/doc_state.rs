@@ -72,6 +72,8 @@ pub struct DocState {
     /// but it is never shown, listed as a tab or made active. Hidden documents sit after every
     /// shown one in [`crate::Session::documents`] ([`crate::Session::visible_count`]).
     pub hidden: bool,
+    /// Asleep: the document above is a stub and this holds the real one ([`crate::sleep`]).
+    pub sleeping: Option<std::sync::Arc<crate::sleep::Sleeping>>,
 }
 
 impl DocState {
@@ -129,6 +131,7 @@ impl DocState {
             saved_selections: Vec::new(),
             uid_high,
             hidden: false,
+            sleeping: None,
         }
     }
     /// The selected layers in bottom-to-top document order, always including the active layer.
