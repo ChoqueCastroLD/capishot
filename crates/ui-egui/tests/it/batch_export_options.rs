@@ -233,6 +233,10 @@ fn batch_and_processor_real_controls_write_the_chosen_webp_quality() {
                 assert_eq!(fields["width"], json!(0));
                 assert_eq!(fields["height"], json!(0));
                 assert_eq!(fields["convertToSrgb"], json!(true));
+                // A document is open, so it starts on the open images: a folder here.
+                assert_eq!(fields["useOpenDocuments"], json!(true));
+                h.get_by_label("Use Open Images").click();
+                h.run_steps(3);
             }
             choose_webp(&mut h);
             edit_path(&mut h, "Input", &input);
