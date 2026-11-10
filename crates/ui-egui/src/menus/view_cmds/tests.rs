@@ -440,6 +440,11 @@ fn batch_dialogs_include_all_subfolders() {
         fields.insert("input".into(), json!(input));
         fields.insert("output".into(), json!(dir.join(out).to_string_lossy()));
         fields.insert("includeSubfolders".into(), json!(true));
+        // Image Processor starts on the open images when there are some: the folder here.
+        if id == "file.scripts.imageProcessor" {
+            assert_eq!(fields["useOpenDocuments"], json!(true));
+            fields.insert("useOpenDocuments".into(), json!(false));
+        }
         let r = crate::dialogs::confirm(&mut app, d).unwrap();
         assert_eq!(r["files"].as_array().map(Vec::len), Some(1), "{id}: {r}");
         assert!(dir.join(out).join("sub").is_dir(), "{id} keeps the subfolder: {r}");
