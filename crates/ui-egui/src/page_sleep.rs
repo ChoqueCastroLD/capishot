@@ -72,8 +72,16 @@ pub fn waking(app: &PhotocraftApp) -> Option<String> {
     st.sleeping.is_some().then(|| st.doc.name.clone())
 }
 
+/// GPU bytes the canvases of the open pages may hold together on a device of 4 GB or less, where
+/// integrated graphics take them from the same memory: past it, the pages seen least recently let
+/// go of theirs (`doc_switch`) and draw them again when shown.
+const SMALL_DEVICE_CANVAS_BUDGET: u64 = 160 << 20;
+
 /// Every frame: wake the active page if it sleeps; put one page unseen for [`IDLE_S`] to sleep.
 pub fn tick(app: &mut PhotocraftApp, now: f64) {
+    if crate::gpu_canvas::physical_memory().is_some_and(|b| b <= SMALL_DEVICE) {
+        crate::doc_switch::default_budget(app, SMALL_DEVICE_CANVAS_BUDGET);
+    }
     let running = |app: &PhotocraftApp, j: JobId| app.session.job(j).is_some_and(|j| j.state == "running");
     if let Some(st) = app.session.active() {
         app.page_sleep.seen.insert(st.doc.id, now);

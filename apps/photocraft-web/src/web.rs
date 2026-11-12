@@ -135,11 +135,29 @@ pub fn start() {
         {
             // No WebGPU adapter and no WebGL2 context (no GPU and the browser refuses software
             // WebGL, or hardware acceleration is off): nothing can draw the interface.
-            el.set_inner_html(&format!(
-                "<p>Capishot failed to start: {e}</p><p>A browser with WebGPU or WebGL2 is required. If this computer has no graphics \
-                 acceleration, turn on hardware acceleration in the browser settings (Chrome: Settings › System › Use graphics \
-                 acceleration) or try another browser.</p>"
-            ));
+            // In the person's language: the app's catalogs aren't loaded when it can't start.
+            let es = browser_languages().iter().any(|l| l.starts_with("es"));
+            let pt = browser_languages().iter().any(|l| l.starts_with("pt"));
+            let help = if es {
+                "<p><b>Capishot no puede dibujar en este navegador</b>: no tiene aceleración gráfica (WebGL2 o WebGPU).</p>\
+                 <p>1. Cierra el navegador por completo y vuelve a abrirlo: después de que la tarjeta gráfica falla varias veces, \
+                 Chrome y Edge la bloquean hasta reiniciarlos.<br>2. Activa la aceleración: Configuración › Sistema › \
+                 «Usar aceleración gráfica cuando esté disponible». En Brave, baja los escudos para este sitio.<br>3. Prueba \
+                 otro navegador (Chrome o Edge), o usa <a href=\"https://capichan.com/capishot/desktop/\">Capishot para escritorio</a>.</p>"
+            } else if pt {
+                "<p><b>O Capishot não consegue desenhar neste navegador</b>: ele não tem aceleração gráfica (WebGL2 ou WebGPU).</p>\
+                 <p>1. Feche o navegador por completo e abra de novo: depois que a placa de vídeo falha algumas vezes, o Chrome \
+                 e o Edge a bloqueiam até reiniciar.<br>2. Ative a aceleração: Configurações › Sistema › «Usar aceleração \
+                 gráfica quando disponível».<br>3. Tente outro navegador (Chrome ou Edge) ou use o \
+                 <a href=\"https://capichan.com/capishot/desktop/\">Capishot para desktop</a>.</p>"
+            } else {
+                "<p><b>Capishot can't draw in this browser</b>: it has no graphics acceleration (WebGL2 or WebGPU).</p>\
+                 <p>1. Close the browser completely and open it again: after the graphics card fails a few times, Chrome and \
+                 Edge block it until they restart.<br>2. Turn on hardware acceleration: Settings › System › Use graphics \
+                 acceleration.<br>3. Try another browser (Chrome or Edge), or use \
+                 <a href=\"https://capichan.com/capishot/desktop/\">Capishot for desktop</a>.</p>"
+            };
+            el.set_inner_html(&format!("{help}<p style=\"opacity:.6;font-size:12px\">{e}</p>"));
         }
     });
 }

@@ -197,6 +197,13 @@ fn set_layout(app: &mut PhotocraftApp, p: &Value) -> Result<Option<Value>, Strin
     Ok(Some(json!({"single": single})))
 }
 
+/// A canvas budget of `bytes` unless one was set (`page_sleep`, on a device of 4 GB or less).
+pub(crate) fn default_budget(app: &mut PhotocraftApp, bytes: u64) {
+    if app.doc_switch.budget.is_none() {
+        app.doc_switch.budget = Some(bytes);
+    }
+}
+
 fn set_budget(app: &mut PhotocraftApp, p: &Value) -> Result<Option<Value>, String> {
     let m = obj(p)?;
     check_fields(m, &["mb"])?;
