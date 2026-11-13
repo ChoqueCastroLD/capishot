@@ -70,7 +70,7 @@ STAGE="$TARGET_DIR/bindgen"
 rm -rf "$STAGE" "$OUT"
 wasm-bindgen --target web --no-typescript --weak-refs --out-dir "$STAGE" --out-name photocraft \
   "$TARGET_DIR/wasm32-unknown-unknown/$PROFILE/photocraft-web.wasm"
-"$WASM_OPT" -Oz --enable-threads --enable-bulk-memory --enable-mutable-globals --enable-sign-ext \
+"$WASM_OPT" "-${PHOTOCRAFT_WASM_OPT_LEVEL:-Oz}" --enable-threads --enable-bulk-memory --enable-mutable-globals --enable-sign-ext \
   --enable-nontrapping-float-to-int --enable-simd --enable-reference-types --enable-multivalue \
   --debuginfo "$STAGE/photocraft_bg.wasm" -o "$STAGE/photocraft_bg.opt.wasm"
 mv "$STAGE/photocraft_bg.opt.wasm" "$STAGE/photocraft_bg.wasm"
@@ -103,7 +103,8 @@ sed -i -E "/^import /s#(['\"]\./snippets/[^'\"]+\.js)(['\"])#\1?v=$snip\2#" "$OU
 if [ "${PHOTOCRAFT_WEB_TEST_BUILD:-0}" = "1" ]; then
   if command -v pigz >/dev/null; then pigz -6 -n "$OUT/photocraft_bg.wasm"; else gzip -6 -n "$OUT/photocraft_bg.wasm"; fi
 elif command -v pigz >/dev/null; then
-  pigz -11 -n "$OUT/photocraft_bg.wasm"
+  # -9: 4% larger than -11 (zopfli, 20 s): most browsers get the Brotli copy deploy.sh makes anyway.
+  pigz -9 -n "$OUT/photocraft_bg.wasm"
 else
   gzip -9 -n "$OUT/photocraft_bg.wasm"
 fi
