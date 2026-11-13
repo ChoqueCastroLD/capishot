@@ -1,3 +1,4 @@
+// Pages the user is not looking at release their canvas memory.
 //! Pages in other tabs give back their memory (Preferences › Performance › Release Inactive
 //! Pages): a page not looked at for [`IDLE_S`] goes to sleep ([`photocraft_engine::sleep`]),
 //! one at a time, on a worker; activating a sleeping page wakes it, with "Loading page…" over the
