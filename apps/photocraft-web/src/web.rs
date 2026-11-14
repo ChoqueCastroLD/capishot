@@ -508,6 +508,7 @@ impl Boot {
             text_focus: None,
             viewport_height: 0.0,
             viewport_changed_at: 0.0,
+            last_ime: None,
         }
     }
 }
@@ -1158,6 +1159,9 @@ struct WebShell {
     text_focus: Option<egui::Id>,
     viewport_height: f64,
     viewport_changed_at: f64,
+    /// The last frame's request for the on-screen keyboard and when it was made (ms): see
+    /// [`WebShell::hold_keyboard`].
+    last_ime: Option<(egui::output::IMEOutput, f64)>,
     /// When the graphics context was lost (ms), while the page saves for recovery (gpu_lost.rs).
     lost_at: Option<f64>,
     /// When another tab chose "Use here" (tab_gate.rs): this one checkpoints and steps aside.
@@ -1227,18 +1231,37 @@ impl WebShell {
             return;
         }
         let Some(id) = self.text_focus.take() else { return };
-        let deliberate = ctx.input(|i| {
-            i.pointer.any_pressed()
-                || i.events.iter().any(|e| matches!(e, egui::Event::Touch { phase: egui::TouchPhase::Start, .. }))
-                || i.key_pressed(egui::Key::Enter)
-                || i.key_pressed(egui::Key::Escape)
-                || i.key_pressed(egui::Key::Tab)
-        });
-        if !deliberate && now - self.viewport_changed_at < 800.0 && photocraft_ui_egui::touch_ui::active(&self.app) {
+        if !deliberate_unfocus(ctx) && now - self.viewport_changed_at < 800.0 && photocraft_ui_egui::touch_ui::active(&self.app) {
             ctx.memory_mut(|m| m.request_focus(id));
             self.text_focus = Some(id);
             ctx.request_repaint();
         }
+    }
+
+    /// eframe takes the keyboard down in any frame where no text field asks for it, and a phone
+    /// shows that at once: a field that skipped one frame (a relayout as the keyboard changed the
+    /// window, a panel resized, a list scrolled) closed the keyboard, and the field asking again a
+    /// frame later opened it: the keyboard went down and up over and over. A frame with no request
+    /// and no tap or key that leaves a field on purpose keeps the last request for up to 600 ms,
+    /// while the field gets its focus back ([`WebShell::keep_text_focus`]).
+    fn hold_keyboard(&mut self, ctx: &egui::Context) {
+        let now = js_sys::Date::now();
+        if let Some(ime) = ctx.output(|o| o.ime.clone()) {
+            self.last_ime = Some((ime, now));
+            return;
+        }
+        let Some((ime, at)) = self.last_ime.clone() else { return };
+        let edit_ended = self.was_typing && self.app.ui.text_edit.is_none();
+        if now - at > 600.0
+            || edit_ended
+            || deliberate_unfocus(ctx)
+            || !photocraft_ui_egui::touch_ui::active(&self.app)
+        {
+            self.last_ime = None;
+            return;
+        }
+        ctx.output_mut(|o| o.ime = Some(egui::output::IMEOutput { should_interrupt_composition: false, ..ime }));
+        ctx.request_repaint();
     }
 
     fn keyboard(&mut self, ctx: &egui::Context) {
@@ -1721,6 +1744,7 @@ impl eframe::App for WebShell {
         }
         self.app.ui_frame(ui, frame);
         self.app.finish_type_reset_pass(ui.ctx());
+        self.hold_keyboard(ui.ctx());
         {
             // After the frame's UI: a pan, zoom or rotation made this frame is reported now.
             let _s = photocraft_ui_egui::perf_span::span("embed.report");
@@ -1738,6 +1762,17 @@ impl eframe::App for WebShell {
         self.perf.end_update(&self.app, ui.ctx());
         self.watchdog.end(&self.app);
     }
+}
+
+/// A tap, or Enter, Esc or Tab, this frame: a text field that lost the focus lost it on purpose.
+fn deliberate_unfocus(ctx: &egui::Context) -> bool {
+    ctx.input(|i| {
+        i.pointer.any_pressed()
+            || i.events.iter().any(|e| matches!(e, egui::Event::Touch { phase: egui::TouchPhase::Start, .. }))
+            || i.key_pressed(egui::Key::Enter)
+            || i.key_pressed(egui::Key::Escape)
+            || i.key_pressed(egui::Key::Tab)
+    })
 }
 
 /// A save the worker pool encoded (or failed to), for [`WebShell::deliver_saves`].
