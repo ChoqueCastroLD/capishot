@@ -70,7 +70,9 @@ STAGE="$TARGET_DIR/bindgen"
 rm -rf "$STAGE" "$OUT"
 wasm-bindgen --target web --no-typescript --weak-refs --out-dir "$STAGE" --out-name photocraft \
   "$TARGET_DIR/wasm32-unknown-unknown/$PROFILE/photocraft-web.wasm"
-"$WASM_OPT" "-${PHOTOCRAFT_WASM_OPT_LEVEL:-Oz}" --enable-threads --enable-bulk-memory --enable-mutable-globals --enable-sign-ext \
+# -O2: about 2.5x faster than -Oz (72 s against 188 s on the loaded server) for 0.7% more gzip,
+# and it optimizes for speed. PHOTOCRAFT_WASM_OPT_LEVEL=Oz for the smallest module.
+"$WASM_OPT" "-${PHOTOCRAFT_WASM_OPT_LEVEL:-O2}" --enable-threads --enable-bulk-memory --enable-mutable-globals --enable-sign-ext \
   --enable-nontrapping-float-to-int --enable-simd --enable-reference-types --enable-multivalue \
   --debuginfo "$STAGE/photocraft_bg.wasm" -o "$STAGE/photocraft_bg.opt.wasm"
 mv "$STAGE/photocraft_bg.opt.wasm" "$STAGE/photocraft_bg.wasm"
