@@ -73,6 +73,11 @@ impl std::fmt::Debug for Snapshot {
 }
 
 impl Snapshot {
+    /// The document it holds (shared, for [`crate::Host::open_snapshot`]).
+    pub(crate) fn document(&self) -> &Document {
+        &self.0
+    }
+
     /// Renders it as `opts` asks (see [`RenderOptions`]). Errors (never panics) on a rect off the
     /// canvas, a bad scale, an unknown layer or an output over [`MAX_OUTPUT_PIXELS`].
     pub fn render(&self, opts: &RenderOptions) -> Result<Rgba> {

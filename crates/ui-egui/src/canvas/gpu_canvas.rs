@@ -963,6 +963,20 @@ impl GpuCanvas {
             }
             Err(e) => out.fallback = Some(e.0),
         }
+        if damage.is_none()
+            && need.is_some()
+            && key == doc.id.0
+            && let Some(px) = need.and_then(|n| self.cpu_first(key, doc, display, n.visible))
+        {
+            // The whole document on the CPU compositor: what the view shows first, in pieces for
+            // this frame's work, the rest on the next frames (`catch_up`), instead of the whole
+            // page in this frame (0.3 to 1 s for a 12 MP page with many layers, Capikoma
+            // request 19).
+            out.kind = "cpu-pieces";
+            out.px = px;
+            out.composite_ms = now_ms() - t0;
+            return out;
+        }
         if let Some(r) = damage {
             if r.is_empty() {
                 out.kind = "rect";
@@ -987,6 +1001,72 @@ impl GpuCanvas {
         out.px = bounds.width() as u64 * bounds.height() as u64;
         out.composite_ms = now_ms() - t0;
         out
+    }
+
+    /// The first frame of `doc` on the CPU compositor into a new display set for document
+    /// `key` (made when missing): pieces of [`CPU_PIECE_PX`] at full size, nearest `visible`
+    /// first, for [`FRAME_WORK_MS`]; the rest stays deferred for `catch_up` on the next frames.
+    /// `None` when the set can't be made (the caller composites in full).
+    fn cpu_first(
+        &self,
+        key: u64,
+        doc: &photocraft_doc::Document,
+        display: Option<&photocraft_engine::display_color::CanvasDisplay>,
+        visible: photocraft_geom::Rect,
+    ) -> Option<u64> {
+        let _s = crate::perf_span::span("canvas.cpu_first");
+        let size = [doc.size.width, doc.size.height];
+        if size[0] == 0 || size[1] == 0 || !self.health.is_ok() || u64::from(size[0]) * u64::from(size[1]) <= CPU_PIECE_PX {
+            return None;
+        }
+        let format = self.format_for(doc.depth, size);
+        {
+            let device = &self.rs.device;
+            let mut renderer = self.rs.renderer.write();
+            let res = renderer.callback_resources.canvas_mut(self.id)?;
+            // Only a document with no set yet (first shown, or evicted): a full refresh of one on
+            // screen keeps drawing in full, never a frame with parts of it missing.
+            if res.docs.get(&key).is_some_and(|d| d.size == size && d.format == format) {
+                return None;
+            }
+            // A new set: everything in it is deferred (`DocTextures::new`).
+            res.docs.remove(&key);
+            res.make_room(canvas_texture_bytes(size, self.tile, texel_bytes(format)));
+            let tex = DocTextures::new(device, res, size, self.tile, format)?;
+            res.docs.insert(key, tex);
+            res.reduced_at = now_ms();
+        }
+        let t0 = now_ms();
+        let near = near_view(visible, doc.bounds());
+        let mut px = 0;
+        while now_ms() - t0 < FRAME_WORK_MS {
+            let Some(piece) = self.with_doc(key, |_, d| d.stale().next_piece(near, CPU_PIECE_PX)).flatten() else { break };
+            let piece = cpu_rows(piece);
+            if !self.cpu_piece(key, doc, piece, display) {
+                self.forget_doc(key);
+                return None;
+            }
+            px += area(piece);
+        }
+        Some(px)
+    }
+
+    /// Composite `piece` of `doc` on the CPU into document `key`'s display set at full size.
+    /// Whether it was written.
+    fn cpu_piece(&self, key: u64, doc: &photocraft_doc::Document, piece: photocraft_geom::Rect, display: Option<&photocraft_engine::display_color::CanvasDisplay>) -> bool {
+        let _s = crate::perf_span::span("canvas.cpu_piece");
+        let piece = piece.intersect(&doc.bounds());
+        if piece.is_empty() {
+            return true;
+        }
+        if !self.health.is_ok() {
+            return false;
+        }
+        let buf = {
+            let _stage = crate::telemetry::stage_scope(crate::telemetry::Stage::Composing);
+            photocraft_compose::render(doc, piece)
+        };
+        self.upload_buffer_rect(key, &texture_buffer(display, &buf))
     }
 
     /// Bring what view `need` shows of document `key` up to date (regions an earlier
@@ -1032,6 +1112,15 @@ impl GpuCanvas {
                 }
                 match self.composite_lod_with(doc, p, encode_srgb, level, true, false) {
                     Ok(st) => out.px += st.pixels.max(1),
+                    // The CPU compositor draws the piece (the GPU one isn't ready or can't), in
+                    // rows of at most CPU_PIECE_PX; the rest comes back on the next frame.
+                    Err(_) if self.cpu_piece(key, doc, cpu_rows(p), display) => {
+                        out.px += area(cpu_rows(p)).max(1);
+                        if cpu_rows(p) != p {
+                            more = true;
+                            break 'urgent;
+                        }
+                    }
                     Err(_) => {
                         // Not on the GPU any more: the next refresh redraws the document.
                         self.forget_doc(key);
@@ -1077,6 +1166,11 @@ impl GpuCanvas {
                             timer();
                             wake.request_repaint();
                         });
+                    }
+                    Err(_) if self.cpu_piece(key, doc, cpu_rows(piece), display) => {
+                        out.px += area(cpu_rows(piece));
+                        out.refined = true;
+                        ctx.request_repaint();
                     }
                     Err(_) => {
                         self.forget_doc(key);
@@ -1911,6 +2005,16 @@ pub const REFINE_WORK: u64 = 2 << 20;
 /// slider scrub or a Move drag keeps producing frames, and refining between them would only
 /// redo work the next frame replaces.
 pub const REFINE_DELAY_MS: f64 = 120.0;
+
+/// The most pixels one piece composited on the CPU covers (the GPU's pieces are larger).
+pub const CPU_PIECE_PX: u64 = 256 * 1024;
+
+/// The first rows of `r` that hold at most [`CPU_PIECE_PX`] pixels (one row at least).
+fn cpu_rows(r: photocraft_geom::Rect) -> photocraft_geom::Rect {
+    let w = u64::from(r.width().max(1));
+    let rows = (CPU_PIECE_PX / w).max(1).min(u64::from(r.height())) as i32;
+    photocraft_geom::Rect::new(r.x0, r.y0, r.x1, r.y0 + rows)
+}
 
 static REDUCED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
@@ -2761,10 +2865,19 @@ impl DocTextures {
     /// Write `size` pixels at document `origin` from `texels` (in the texture format, row stride
     /// `stride` pixels) into every overlapping tile's level 0.
     fn write(&self, queue: &wgpu::Queue, origin: [u32; 2], size: [u32; 2], stride: u32, texels: &[u8]) {
+        self.write_level(queue, 0, origin, size, stride, texels);
+    }
+
+    /// [`DocTextures::write`] into mip level `level`: `origin` and `size` in that level's pixels
+    /// (document pixels shifted right by `level`).
+    fn write_level(&self, queue: &wgpu::Queue, level: u32, origin: [u32; 2], size: [u32; 2], stride: u32, texels: &[u8]) {
         let bpp = texel_bytes(self.format);
         let (x0, y0, x1, y1) = (origin[0], origin[1], origin[0] + size[0], origin[1] + size[1]);
         for t in &self.tiles {
-            let [tx, ty, tw, th] = t.rect;
+            if t.levels.len() as u32 <= level {
+                continue;
+            }
+            let [tx, ty, tw, th] = [t.rect[0] >> level, t.rect[1] >> level, (t.rect[2] >> level).max(1), (t.rect[3] >> level).max(1)];
             let (ix0, iy0, ix1, iy1) = (x0.max(tx), y0.max(ty), x1.min(tx + tw), y1.min(ty + th));
             if ix0 >= ix1 || iy0 >= iy1 {
                 continue;
@@ -2773,7 +2886,7 @@ impl DocTextures {
             queue.write_texture(
                 wgpu::TexelCopyTextureInfo {
                     texture: &t.texture,
-                    mip_level: 0,
+                    mip_level: level,
                     origin: wgpu::Origin3d { x: ix0 - tx, y: iy0 - ty, z: 0 },
                     aspect: wgpu::TextureAspect::All,
                 },

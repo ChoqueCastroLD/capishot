@@ -503,3 +503,42 @@ fn host_png() -> Vec<u8> {
     let d = maker.active_document().unwrap();
     maker.save(d, &SaveOptions { format: capishot_host::SaveFormat::Png, ..Default::default() }).unwrap().bytes
 }
+
+/// Capikoma request 19: raw pixels opened as a job, a document built by another host on another
+/// thread adopted without encoding, and the top-level layers alone.
+#[test]
+fn rgba_opens_as_a_job_and_a_snapshot_moves_between_hosts() {
+    let mut h = Host::new();
+    let (w, hgt) = (64u32, 48u32);
+    let rgba: Vec<u8> = (0..w * hgt).flat_map(|_| [10u8, 200, 30, 255]).collect();
+    let id = match h.start_open_rgba(w, hgt, rgba, OpenOptions { name: Some("raw".into()), hidden: true }).unwrap() {
+        Started::Done(v) => v["document"].as_u64().unwrap(),
+        Started::Job(job) => h.wait(job).unwrap()["document"].as_u64().unwrap(),
+    };
+    let info = h.documents().into_iter().find(|d| d.id == DocumentId(id)).expect("opened");
+    assert!(info.hidden && info.width == w && info.height == hgt);
+    assert!(h.start_open_rgba(w, hgt, vec![0; 10], OpenOptions::default()).is_err(), "a short buffer is an error");
+    assert!(h.start_open_rgba(0, 1, Vec::new(), OpenOptions::default()).is_err());
+
+    // Built on another thread by its own host, handed over as a snapshot.
+    let snap = std::thread::spawn(|| {
+        let mut other = Host::new();
+        other.execute("file.new", json!({"width": 32, "height": 16, "background": "white"})).unwrap();
+        other.execute("layer.new.layer", json!({"name": "Ink"})).unwrap();
+        other.execute("layer.new.group", json!({"name": "G"})).unwrap();
+        let doc = other.active_document().unwrap();
+        other.snapshot(doc).unwrap()
+    })
+    .join()
+    .unwrap();
+    let opened = h.open_snapshot(&snap, OpenOptions { name: None, hidden: true }).unwrap();
+    let again = h.open_snapshot(&snap, OpenOptions { name: None, hidden: true }).unwrap();
+    assert_ne!(opened.document, again.document, "each gets its own id");
+    let tops = h.top_layers(opened.document).unwrap();
+    assert_eq!(tops.iter().map(|t| (t.name.as_str(), t.kind)).collect::<Vec<_>>(), [("Background", "pixel"), ("Ink", "pixel"), ("G", "group")]);
+    assert!(tops.iter().all(|t| t.visible && t.children == 0));
+    let rev = h.documents().into_iter().find(|d| d.id == opened.document).unwrap().revision;
+    h.execute_with("layer.new.layer", json!({"name": "More"}), ExecOptions::on(opened.document)).unwrap();
+    assert_ne!(h.documents().into_iter().find(|d| d.id == opened.document).unwrap().revision, rev, "the revision tells a change");
+    assert!(h.top_layers(DocumentId(9_999_999)).is_err());
+}

@@ -241,3 +241,90 @@ fn a_view_shown_before_comes_back_kept_and_an_edit_drops_it() {
     assert_eq!(switch(&mut h, doc, "lang_en"), [0, 255, 0]);
     assert_eq!(gpu(&h).view_sets(doc.0), 0, "no room to keep one");
 }
+
+/// Capikoma request 19: the frames after `Host::show` of a big page that was opened but not shown
+/// yet (another document live). Prints each frame's time until the canvas is all drawn.
+#[test]
+#[ignore]
+fn show_big_page_frame_cost() {
+    let built = std::panic::catch_unwind(|| {
+        egui_kittest::Harness::builder().with_size(vec2(1280.0, 900.0)).with_pixels_per_point(1.0).with_max_steps(64).wgpu().build_eframe(|cc| {
+            let rs = cc.wgpu_render_state.as_ref().expect("a render state");
+            Pane { editor: CapishotEditor::new(Some(rs.clone())) }
+        })
+    });
+    let Ok(mut h) = built else {
+        eprintln!("skipping: no GPU adapter");
+        return;
+    };
+    h.state_mut().editor.host.execute("file.new", json!({"width": 400, "height": 300, "background": "white"})).expect("a document");
+    let small = h.state().editor.host.active_document().expect("active");
+    let page_doc = page(&mut h.state_mut().editor, 2900, 4000, 17);
+    h.state_mut().editor.host.show(small, false).expect("show");
+    for _ in 0..20 {
+        h.step();
+    }
+    let prewarm = std::env::var("SHOW_PREWARM").is_ok();
+    if prewarm {
+        h.state_mut().editor.host.prewarm(page_doc, &json!({})).expect("prewarm");
+        let mut v = Vec::new();
+        for _ in 0..80 {
+            let t = Instant::now();
+            h.step();
+            v.push(t.elapsed().as_secs_f64() * 1000.0);
+        }
+        eprintln!("NUM prewarm frames max {:.1} sum {:.0} ms", v.iter().copied().fold(0.0, f64::max), v.iter().sum::<f64>());
+    }
+    h.state_mut().editor.host.show(page_doc, false).expect("show");
+    let mut v = Vec::new();
+    let t0 = Instant::now();
+    let mut spans = String::new();
+    // Until the canvas is sharp (full size everywhere it shows), 10 s at most.
+    while v.len() < 3 || !h.state().editor.view.app().perf.gpu_sharp && t0.elapsed().as_secs_f64() < 10.0 {
+        photocraft_ui_egui::perf_span::begin_frame();
+        let t = Instant::now();
+        h.step();
+        v.push(t.elapsed().as_secs_f64() * 1000.0);
+        if v.len() == 1 {
+            spans = photocraft_ui_egui::perf_span::frame().iter().take(6).map(|(n, ms)| format!("{n} {ms:.1}")).collect::<Vec<_>>().join(", ");
+        }
+    }
+    eprintln!("NUM show spans of the first frame: {spans}; frames {} until sharp in {:.0} ms", v.len(), t0.elapsed().as_secs_f64() * 1000.0);
+    let sharp = h.state().editor.view.app().perf.gpu_sharp;
+    eprintln!("NUM show first {:.1} max after {:.1} sum {:.0} ms sharp {sharp} last {}", v[0], v[1..].iter().copied().fold(0.0, f64::max), v.iter().sum::<f64>(), h.state().editor.view.app().perf.last_refresh);
+}
+
+/// Capikoma request 19: what opening a raw page costs the calling thread, in the frame
+/// (`open_rgba`) and as a job (`start_open_rgba`), and adopting a page built by another host.
+#[test]
+#[ignore]
+fn open_page_cost() {
+    let (w, h) = (2980u32, 4032u32);
+    let rgba: Vec<u8> = (0..w * h).flat_map(|i| [(i % 251) as u8, (i % 241) as u8, (i % 239) as u8, 255]).collect();
+    let mut host = Host::new();
+    let t = Instant::now();
+    let image = crate::RgbaImage { width: w, height: h, stride: w as usize * 4, data: &rgba };
+    host.open_rgba(&image, crate::OpenOptions { name: Some("raw".into()), hidden: true }).expect("open");
+    eprintln!("NUM open_rgba {:.1} ms on the calling thread", t.elapsed().as_secs_f64() * 1000.0);
+    let copy = rgba.clone();
+    let t = Instant::now();
+    let started = host.start_open_rgba(w, h, copy, crate::OpenOptions { name: Some("raw".into()), hidden: true }).expect("start");
+    let call = t.elapsed().as_secs_f64() * 1000.0;
+    if let crate::Started::Job(job) = started {
+        host.wait(job).expect("opened");
+    }
+    eprintln!("NUM start_open_rgba {call:.1} ms on the calling thread, {:.1} ms until opened", t.elapsed().as_secs_f64() * 1000.0);
+    let mut maker = CapishotEditor::new(None);
+    let page_doc = page(&mut maker, 2900, 4000, 17);
+    let snap = maker.host.snapshot(page_doc).expect("snapshot");
+    let t = Instant::now();
+    host.open_snapshot(&snap, crate::OpenOptions { name: None, hidden: true }).expect("adopt");
+    eprintln!("NUM open_snapshot of a 2900x4000 page with 57 layers {:.1} ms", t.elapsed().as_secs_f64() * 1000.0);
+    let doc = maker.host.active_document().expect("active");
+    let t = Instant::now();
+    let tops = maker.host.top_layers(doc).expect("tops");
+    let light = t.elapsed().as_secs_f64() * 1000.0;
+    let t = Instant::now();
+    let _ = maker.host.inspect(doc, crate::InspectOptions::default()).expect("inspect");
+    eprintln!("NUM top_layers {light:.2} ms ({} layers), inspect {:.1} ms", tops.len(), t.elapsed().as_secs_f64() * 1000.0);
+}

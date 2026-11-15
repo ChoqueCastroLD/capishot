@@ -106,6 +106,21 @@ pub struct DocumentInfo {
     pub revision: u64,
 }
 
+/// One top-level layer of a document, as [`Host::top_layers`] lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TopLayer {
+    /// Its id.
+    pub id: LayerId,
+    /// Its name.
+    pub name: String,
+    /// `"pixel"`, `"group"`, `"adjustment"`, `"fill"`, `"text"`, `"shape"`, `"smart"` or `"deep"`.
+    pub kind: &'static str,
+    /// Its eye.
+    pub visible: bool,
+    /// Direct children (a group's; 0 otherwise).
+    pub children: usize,
+}
+
 /// [`Host::inspect`]'s options (`document.inspect`'s params).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct InspectOptions {
@@ -533,6 +548,45 @@ impl Host {
         Ok(files::add_decoded(&mut self.session, files::Decoded::new(r.document, r.warnings), opts.hidden))
     }
 
+    /// [`Self::open_rgba`] in the background (Capikoma request 19): the document is made on a
+    /// worker from `rgba`, tightly packed 8-bit straight RGBA rows (`width * 4` bytes each, sRGB),
+    /// moved in without a copy. A job like [`Self::start_open`]'s, with the same result
+    /// `{document, warnings, damaged, missingFonts}`; inline ([`Started::Done`]) in the
+    /// single-threaded browser build.
+    pub fn start_open_rgba(&mut self, width: u32, height: u32, rgba: Vec<u8>, opts: OpenOptions) -> Result<Started> {
+        const CMD: &str = "open";
+        let px = u64::from(width).saturating_mul(u64::from(height));
+        if width == 0 || height == 0 || px > 100_000_000 {
+            return Err(bad(CMD, format!("a {width}×{height} image (at most 100000000 pixels, none empty)")));
+        }
+        if rgba.len() as u64 != px.saturating_mul(4) {
+            return Err(bad(CMD, format!("{} bytes for a {width}×{height} RGBA image (needs {})", rgba.len(), px.saturating_mul(4))));
+        }
+        let name = opts.name.clone().unwrap_or_else(|| "Untitled".into());
+        let hidden = opts.hidden;
+        let label = format!("Opening {name}");
+        let started = self.session.start_job_in_worker(
+            jobs::OPEN_JOB,
+            json!({"name": name, "hidden": hidden}),
+            &label,
+            false,
+            move |_ctx| {
+                let image = photocraft_codecs::Image::from_u8(width, height, photocraft_codecs::ChannelLayout::Rgba, rgba)
+                    .map_err(|e| photocraft_engine::EngineError::Other(e.to_string()))?;
+                let r = photocraft_io::import_image(&name, &image).map_err(|e| photocraft_engine::EngineError::Other(e.to_string()))?;
+                Ok(files::Decoded::new(r.document, r.warnings))
+            },
+            move |s, decoded| {
+                let o = files::add_decoded(s, decoded, hidden);
+                Ok(json!({"document": o.document.0, "warnings": o.warnings, "damaged": o.damaged, "missingFonts": o.missing_fonts}))
+            },
+        )?;
+        Ok(match started {
+            jobs::Started::Done(v) => Started::Done(v),
+            jobs::Started::Job(id) => Started::Job(id.into()),
+        })
+    }
+
     /// [`Self::open`] in the background: decoded on a worker (natively, and in the browser
     /// threads build), with progress and cancel. The job's result is `{document, warnings,
     /// damaged, missingFonts}` (`document` the new id). Runs inline (returns [`Started::Done`])
@@ -563,6 +617,44 @@ impl Host {
             jobs::Started::Done(v) => Started::Done(v),
             jobs::Started::Job(id) => Started::Job(id.into()),
         })
+    }
+
+    /// A document built elsewhere (another [`Host`], on another thread) opened here without
+    /// encoding it (Capikoma request 19): the snapshot's layers and pixels are shared, not
+    /// copied, until either side edits them. Hidden as [`Self::open`]. The new document gets an
+    /// id of this host's (the snapshot's own when free).
+    pub fn open_snapshot(&mut self, snapshot: &crate::render::Snapshot, opts: OpenOptions) -> Result<Opened> {
+        let doc = snapshot.document().clone();
+        Ok(files::add_decoded(&mut self.session, files::Decoded::new(doc, Vec::new()), opts.hidden))
+    }
+
+    /// `document`'s top-level layers, bottom first, without the rest of the tree
+    /// ([`Self::inspect`] walks it all; a document's `revision` in [`Self::documents`] tells
+    /// whether anything changed since the last look).
+    pub fn top_layers(&self, document: DocumentId) -> Result<Vec<TopLayer>> {
+        use photocraft_doc::LayerContent as C;
+        let st = self.state(document)?;
+        Ok(st
+            .doc
+            .layers
+            .iter()
+            .map(|l| TopLayer {
+                id: LayerId(l.id.0),
+                name: l.name.clone(),
+                kind: match &l.content {
+                    C::Raster(_) => "pixel",
+                    C::Group(_) => "group",
+                    C::Adjustment(_) => "adjustment",
+                    C::Fill(_) => "fill",
+                    C::Text(_) => "text",
+                    C::Shape(_) => "shape",
+                    C::Smart(_) => "smart",
+                    C::Deep(_) => "deep",
+                },
+                visible: l.visible,
+                children: l.children().map_or(0, <[_]>::len),
+            })
+            .collect())
     }
 
     /// Make `document` the shown, active one in one step (a hidden one becomes shown; with

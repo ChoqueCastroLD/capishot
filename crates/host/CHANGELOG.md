@@ -6,6 +6,18 @@ Every change to the stable API is listed here with the commit to pin. Breaking c
 may change in any commit; their changes are listed under **Experimental**. A change to the
 `[patch]` pins (README.md) is listed too: copy the blocks again when you move the pin.
 
+## API_VERSION 1, additions (opening big pages off the frame, Capikoma request 19)
+
+- `Host::start_open_rgba(width, height, rgba: Vec<u8>, opts)`: `open_rgba` as a job (tightly
+  packed rows, moved in), with `start_open`'s result.
+- `Host::open_snapshot(&Snapshot, opts) -> Opened`: a document built by another `Host` (another
+  thread) opened here without encoding; pixels shared until either side edits them.
+- `Host::top_layers(document) -> Vec<TopLayer {id, name, kind, visible, children}>`: the top
+  level only. `DocumentInfo::revision` (in `documents()`) already tells whether anything changed.
+- The first frame of a document shown (or prewarmed) on the CPU compositor draws what the view
+  shows in pieces for about 24 ms and the rest over the next frames, instead of the whole page in
+  one frame; `document.prewarm` reports ready once the view's part is drawn.
+
 ## API_VERSION 1, additions (named view switches in one frame, Capikoma request 17)
 
 - `Host::prewarm_view(document, name)` and `CapishotView::prewarm_view(document, name)` (returns

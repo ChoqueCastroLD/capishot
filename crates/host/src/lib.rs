@@ -61,7 +61,7 @@ pub use events::{Event, JobEnd, Origin};
 pub use files::{OpenOptions, Opened, SaveFormat, SaveOptions, Saved};
 pub use host::{
     AddRgba, BatchSteps, DocumentInfo, ExecOptions, GetPixels, History, Host, InspectOptions, JobStatus, Pixels, PutPixels, PutRgba, SaveStarted, Started,
-    Subscription, ViewHooks,
+    Subscription, TopLayer, ViewHooks,
 };
 pub use photocraft_engine::live_cmds::RgbaImage;
 pub use ids::{DocumentId, JobHandle, LayerId, LayerUid};
