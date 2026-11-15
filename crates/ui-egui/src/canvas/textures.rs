@@ -631,6 +631,17 @@ pub(super) fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, le
     // kept sets: they show the document as it no longer is.
     if present && plain && seen.is_some_and(|s| s.0 != revision) {
         let shown = gpu.shows(id.0);
+        if shown.as_ref().is_some_and(|(d, k)| *k == display_key && (std::sync::Arc::ptr_eq(d, &doc) || crate::gpu_canvas::same_pixels(d, &doc))) {
+            // New revisions that draw nothing (a selection, a view defined again, a rename): the
+            // set already shows them. Several such steps between two frames used to redraw the
+            // whole page, as their damage can't be summed.
+            gpu.set_shows(id.0, Some((doc.clone(), display_key)));
+            if let Some(cache) = app.canvases.get_mut(&(id, GPU_OUTPUT)) {
+                cache.revision = revision;
+                cache.preview_key = preview_key;
+            }
+            return true;
+        }
         if shown.as_ref().is_some_and(|(d, k)| *k == display_key && crate::gpu_canvas::visibility_only(d, &doc)) {
             if gpu.switch_view(id.0, &doc, display_key) == crate::gpu_canvas::ViewSwitch::Restored {
                 app.perf.record("view-set", 0, 0.0, 0.0);
@@ -644,7 +655,9 @@ pub(super) fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, le
                 ctx.request_repaint();
                 return true;
             }
-        } else if gpu.view_sets(id.0) > 0 {
+        } else if gpu.view_sets(id.0) > 0 && !shown.as_ref().is_some_and(|(d, _)| crate::gpu_canvas::same_but_visibility(d, &doc)) {
+            // An edit that draws (not a selection, a rename or a redefined view): the kept sets
+            // show the document as it no longer is.
             gpu.drop_view_sets(id.0);
         }
     }

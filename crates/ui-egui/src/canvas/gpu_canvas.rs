@@ -36,7 +36,7 @@ pub use photocraft_gpu::{DeviceHealth, Fault};
 
 mod pages;
 mod view_sets;
-pub use view_sets::{MAX_VIEW_SETS, ViewSwitch, same_but_visibility, visibility_only};
+pub use view_sets::{MAX_VIEW_SETS, ViewSwitch, same_but_visibility, same_pixels, visibility_only};
 
 /// Default tile side; documents up to this size (and the device limit) use a single texture.
 pub const DEFAULT_TILE: u32 = 8192;

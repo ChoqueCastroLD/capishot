@@ -63,6 +63,11 @@ fn page(editor: &mut CapishotEditor, w: u32, h: u32, texts: usize) -> DocumentId
 }
 
 fn time_switches(prewarm: bool) {
+    let _ = time_sequence(prewarm, false, &["lang_en", "lang_pt", "lang_es", "lang_en", "lang_pt", "lang_es"]);
+}
+
+fn time_sequence(prewarm: bool, chatter: bool, clicks: &[&str]) -> Vec<f64> {
+    let mut firsts = Vec::new();
     let built = std::panic::catch_unwind(|| {
         egui_kittest::Harness::builder().with_size(vec2(1280.0, 900.0)).with_pixels_per_point(1.0).with_max_steps(64).wgpu().build_eframe(|cc| {
             let rs = cc.wgpu_render_state.as_ref().expect("a render state");
@@ -71,7 +76,7 @@ fn time_switches(prewarm: bool) {
     });
     let Ok(mut h) = built else {
         eprintln!("skipping: no GPU adapter");
-        return;
+        return Vec::new();
     };
     let (w, ht, texts) = (
         std::env::var("SWITCH_W").ok().and_then(|v| v.parse().ok()).unwrap_or(2900),
@@ -101,26 +106,47 @@ fn time_switches(prewarm: bool) {
             h.step();
         }
     }
-    for lang in ["lang_en", "lang_pt", "lang_es", "lang_en", "lang_pt", "lang_es"] {
+    for &lang in clicks {
         let t = Instant::now();
         let editor = &mut h.state_mut().editor;
         editor.host.apply_view(doc, lang).expect("apply");
         editor.host.show(doc, false).expect("show");
+        if chatter {
+            // What a host does around a click and draws nothing: a selection, the views defined
+            // again (Capikoma request 18).
+            editor.host.execute("select.rect", json!({"x": 10, "y": 10, "width": 40, "height": 30})).expect("a selection");
+            for l in LANGS {
+                let hidden: Vec<&str> = LANGS.iter().copied().filter(|x| *x != l).collect();
+                editor.host.define_view(doc, l, json!({"visible": [l], "hidden": hidden})).expect("a view");
+            }
+        }
         let apply = t.elapsed().as_secs_f64() * 1000.0;
         photocraft_ui_egui::perf_span::begin_frame();
         let first = frame(&mut h);
+        firsts.push(first);
         let perf = &h.state().editor.view.app().perf;
+        eprintln!("NUM   kept {} last {}", h.state().editor.view.app().gpu_canvas().map_or(0, |g| g.view_sets(doc.0)), h.state().editor.view.app().perf.last_refresh);
         eprintln!("NUM   fallback {:?} kind {} px {} comp {:.1} up {:.1} adapter {:?}", perf.gpu_fallback, perf.last_refresh, perf.last_refresh_px, perf.composite_ms, perf.upload_ms, perf.gpu_info.fallback);
         let spans: Vec<String> = photocraft_ui_egui::perf_span::frame().iter().take(8).map(|(n, ms)| format!("{n} {ms:.1}")).collect();
-        let rest: Vec<f64> = (0..5).map(|_| frame(&mut h)).collect();
+        let rest: Vec<f64> = (0..40).map(|_| frame(&mut h)).collect();
         eprintln!("NUM switch {lang}: apply {apply:.1} first {first:.1} next max {:.1} ms; spans {}", rest.iter().copied().fold(0.0, f64::max), spans.join(", "));
     }
+    firsts
 }
 
 #[test]
 #[ignore]
 fn view_switch_frame_cost() {
     time_switches(false);
+}
+
+/// Capikoma request 18's sequence: ES live, EN and PT prewarmed, then EN, PT, EN, EN.
+#[test]
+#[ignore]
+fn view_switch_frame_cost_request_18() {
+    let firsts = time_sequence(true, true, &["lang_en", "lang_pt", "lang_en", "lang_en"]);
+    // A slow loaded server: well under a redraw (150 ms and more), not a frame budget.
+    assert!(firsts.iter().all(|ms| *ms < 60.0), "every switch from a kept canvas: {firsts:?}");
 }
 
 #[test]

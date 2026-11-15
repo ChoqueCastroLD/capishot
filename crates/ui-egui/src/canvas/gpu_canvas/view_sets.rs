@@ -64,17 +64,37 @@ pub fn visibility_only(a: &Document, b: &Document) -> bool {
     same_but_visibility(a, b)
 }
 
-/// `a` with `b`'s layer visibility (and last applied comp) equals `b`. Shared pixel tiles compare
-/// by pointer, so this costs a walk over the layers, not over their pixels.
+/// `a` with `b`'s layer visibility equals `b` in everything that draws. Shared pixel tiles
+/// compare by pointer, so this costs a walk over the layers, not over their pixels.
 pub fn same_but_visibility(a: &Document, b: &Document) -> bool {
-    fn copy(to: &mut [Layer], from: &[Layer], depth: usize) {
+    same_drawing(a, b, true)
+}
+
+/// `a` and `b` draw the same pixels (see [`same_drawing`]).
+pub fn same_pixels(a: &Document, b: &Document) -> bool {
+    same_drawing(a, b, false)
+}
+
+/// `a` and `b` draw the same pixels: they are equal once what never reaches the canvas is set
+/// aside (the selection, guides, paths, layer comps, notes, metadata, the document's and layers'
+/// names, lock flags and labels), and with `visibility`, the layers' visibility too. A click that
+/// changes the selection or a host that redefines its views used to count as an edit, which
+/// dropped every kept set (Capikoma request 18).
+fn same_drawing(a: &Document, b: &Document, visibility: bool) -> bool {
+    fn copy(to: &mut [Layer], from: &[Layer], visibility: bool, depth: usize) {
         if depth > 64 {
             return;
         }
         for (t, f) in to.iter_mut().zip(from) {
-            t.visible = f.visible;
+            if visibility {
+                t.visible = f.visible;
+            }
+            t.name.clone_from(&f.name);
+            t.locks = f.locks.clone();
+            t.label = f.label.clone();
+            t.xmp.clone_from(&f.xmp);
             if let (Some(to), Some(from)) = (t.children_mut(), f.children()) {
-                copy(to, from, depth + 1);
+                copy(to, from, visibility, depth + 1);
             }
         }
     }
@@ -82,19 +102,29 @@ pub fn same_but_visibility(a: &Document, b: &Document) -> bool {
         return false;
     }
     let mut a = a.clone();
-    copy(&mut a.layers, &b.layers, 0);
+    copy(&mut a.layers, &b.layers, visibility, 0);
+    a.name.clone_from(&b.name);
+    a.guides = b.guides.clone();
+    a.ruler_origin = b.ruler_origin;
+    a.selection.clone_from(&b.selection);
+    a.metadata = b.metadata.clone();
+    a.paths.clone_from(&b.paths);
+    a.work_path.clone_from(&b.work_path);
+    a.clipping_path.clone_from(&b.clipping_path);
+    a.layer_comps.clone_from(&b.layer_comps);
     a.last_applied_comp = b.last_applied_comp;
+    a.last_document_state.clone_from(&b.last_document_state);
+    a.measurement = b.measurement.clone();
+    a.notes.clone_from(&b.notes);
+    a.slices = b.slices.clone();
+    a.variables = b.variables.clone();
+    a.file_encoding = b.file_encoding.clone();
     a == *b
 }
 
 /// Whether kept document `kept` shows exactly what `doc` does.
 fn same_view(kept: &Arc<Document>, doc: &Arc<Document>) -> bool {
-    if Arc::ptr_eq(kept, doc) {
-        return true;
-    }
-    let mut k = (**kept).clone();
-    k.last_applied_comp = doc.last_applied_comp;
-    k == **doc
+    Arc::ptr_eq(kept, doc) || same_drawing(kept, doc, false)
 }
 
 impl Resources {
@@ -366,7 +396,10 @@ mod tests {
         assert!(visibility_only(&a, &b));
         assert!(same_but_visibility(&a, &b));
         b.layers[1].name = "renamed".into();
-        assert!(!visibility_only(&a, &b), "and a rename");
+        b.layer_comps.clear();
+        assert!(visibility_only(&a, &b), "a rename and the comps draw nothing");
+        b.layers[1].opacity = 0.25;
+        assert!(!visibility_only(&a, &b), "an opacity draws");
         let mut c = a.clone();
         c.layers[1].opacity = 0.5;
         assert!(!same_but_visibility(&a, &c));
