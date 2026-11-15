@@ -118,7 +118,7 @@ use tabs::{dots, paint_dots, surround_pattern};
 pub(crate) use textures::canvas_texture_options;
 #[cfg(test)]
 pub(crate) use textures::detail_plan;
-pub(crate) use textures::{CpuTarget, DetailPlan, cpu_target, damage_since, effect_reach, ensure_texture_in_view, retain_gpu_documents, shown_as_document};
+pub(crate) use textures::{CpuTarget, DetailPlan, cpu_target, damage_since, effect_reach, ensure_texture_in_view, prewarm_view, retain_gpu_documents, shown_as_document};
 pub use textures::{MAX_TEXTURE, ensure_texture};
 #[cfg(test)]
 use textures::{clamp_texture_side, preview_bounds, texture_factor};

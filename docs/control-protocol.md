@@ -384,6 +384,14 @@ For hosts that keep one document in step between collaborators (the embed API an
   - `document.prewarm {id, viewport?, full? = false, timeoutMs? = 10000}`: the same drawing ahead
     without the swap (`full`: the whole document at full size) → `{id, frames, ms, timedOut,
     gpuBytes}`. A hidden document's layers are decoded when it opens.
+  - `document.prewarmView {id, name, timeoutMs? = 10000}`: draw named view `name` (see
+    `document.views.define`) of document `id` ahead, a slice of about 24 ms per frame, into a GPU
+    canvas texture set kept beside the document's own, so that `document.views.apply` then shows
+    it in one frame → `{id, name, ready, frames, ms, reason?}` (`ready: false` with a `reason`
+    when the canvas budget has no room for it, off the GPU canvas, or after `timeoutMs`). A view
+    the document showed before is kept the same way without asking: switching back to it takes
+    one frame. Kept sets count against `editor.setMemoryBudget` and the GPU canvas budget, go
+    first under memory pressure (at most 4 per document) and are dropped by any other edit.
   - `editor.setLayout {single: true}`: one visible document; Window › Arrange tiles, document
     tabs, "open documents as windows" and the open card of a file opening in the background
     never show while a document is shown (not saved; `false` restores them).

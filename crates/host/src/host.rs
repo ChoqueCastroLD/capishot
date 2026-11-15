@@ -204,6 +204,13 @@ pub trait ViewHooks {
     /// Get `document` ready to show at once (decode, upload, lay out type); `options` as the
     /// control protocol's `document.prewarm`. Returns whether anything was done.
     fn prewarm(&mut self, document: DocumentId, options: &Value) -> Result<bool>;
+    /// Get named view `name` of `document` ready, so that applying it ([`Host::apply_view`]) shows
+    /// it in one frame; `options` as the control protocol's `document.prewarmView` (`timeoutMs`).
+    /// Returns whether anything was done (the default: nothing).
+    fn prewarm_view(&mut self, document: DocumentId, name: &str, options: &Value) -> Result<bool> {
+        let _ = (document, name, options);
+        Ok(false)
+    }
 }
 
 /// How [`Host::start_save`] ended.
@@ -576,6 +583,21 @@ impl Host {
         self.state(document)?;
         match self.hooks.as_mut() {
             Some(h) => h.prewarm(document, options),
+            None => Ok(false),
+        }
+    }
+
+    /// Ask the widget to draw named view `name` of `document` ahead of time
+    /// ([`ViewHooks::prewarm_view`], `document.prewarmView`): the view's canvas is kept on the GPU
+    /// beside the document's, so [`Host::apply_view`] then shows it in one frame. A view shown
+    /// before is kept the same way without asking. `false` without a widget.
+    pub fn prewarm_view(&mut self, document: DocumentId, name: &str) -> Result<bool> {
+        let st = self.state(document)?;
+        if photocraft_engine::doc_views_cmds::view_signature(&st.doc, name).is_none() {
+            return Err(bad("document.prewarmView", format!("no view named \"{name}\"")));
+        }
+        match self.hooks.as_mut() {
+            Some(h) => h.prewarm_view(document, name, &Value::Null),
             None => Ok(false),
         }
     }

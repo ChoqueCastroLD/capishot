@@ -101,4 +101,15 @@ impl ViewHooks for Hooks {
         self.queue.control("document.prewarm", params, Awaited::Prewarm(document));
         Ok(true)
     }
+
+    fn prewarm_view(&mut self, document: DocumentId, name: &str, options: &Value) -> Result<bool> {
+        let mut params = match options {
+            Value::Object(m) => Value::Object(m.clone()),
+            _ => json!({}),
+        };
+        params["id"] = json!(document.0);
+        params["name"] = json!(name);
+        self.queue.control("document.prewarmView", params, Awaited::Reply);
+        Ok(true)
+    }
 }

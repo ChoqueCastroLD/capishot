@@ -35,6 +35,8 @@ pub use pages::{MAX_PAGE_SIDE, PageUpload};
 pub use photocraft_gpu::{DeviceHealth, Fault};
 
 mod pages;
+mod view_sets;
+pub use view_sets::{MAX_VIEW_SETS, ViewSwitch, same_but_visibility, visibility_only};
 
 /// Default tile side; documents up to this size (and the device limit) use a single texture.
 pub const DEFAULT_TILE: u32 = 8192;
@@ -427,6 +429,7 @@ impl GpuCanvas {
         let mut r = self.rs.renderer.write();
         if let Some(res) = r.callback_resources.canvas_mut(self.id) {
             res.canvas_budget = bytes;
+            res.trim_view_sets();
         }
     }
 
@@ -2292,6 +2295,8 @@ struct Resources {
     encode_pipeline_high: Option<wgpu::RenderPipeline>,
     mip_sampler: wgpu::Sampler,
     docs: HashMap<u64, DocTextures>,
+    /// Display texture sets kept per layer visibility (`view_sets`), counted in the canvas budget.
+    view_sets: Vec<view_sets::ViewSet>,
     views: HashMap<u64, ViewGpu>,
     out_linear: bool,
     /// Build each mip level in a scratch texture and copy it back instead of rendering into
@@ -2344,6 +2349,7 @@ impl Resources {
             }
         }
         self.docs.retain(|k, _| !keys.contains(k));
+        self.view_sets.retain(|v| !keys.contains(&v.key));
     }
 }
 
@@ -2409,6 +2415,9 @@ struct DocTextures {
     tiles: Vec<Tile>,
     /// What isn't current at every mip level (reduced or deferred refreshes).
     stale: std::sync::Mutex<Stale>,
+    /// The document the set shows and the display key it stores it with (see `view_sets`);
+    /// `None` when unknown (a new set, a preview).
+    shows: Option<(std::sync::Arc<photocraft_doc::Document>, u64)>,
 }
 
 struct Tile {
@@ -2604,6 +2613,7 @@ impl Resources {
             encode_pipeline_high,
             mip_sampler,
             docs: HashMap::new(),
+            view_sets: Vec::new(),
             views: HashMap::new(),
             out_linear: target.is_srgb(),
             separate_mip_targets: false,
@@ -2656,12 +2666,14 @@ fn init_buffer(device: &wgpu::Device, label: &str, contents: &[u8], usage: wgpu:
 impl Resources {
     /// GPU bytes of the documents' display texture sets.
     fn canvas_bytes(&self) -> u64 {
-        self.docs.values().map(DocTextures::bytes).fold(0, u64::saturating_add)
+        self.docs.values().map(DocTextures::bytes).fold(0, u64::saturating_add).saturating_add(self.view_set_bytes())
     }
 
     /// Drops the display texture sets of other documents, largest first, until a new set of
     /// `bytes` fits [`canvas_budget`] beside the rest (each is made again when its tab shows).
     fn make_room(&mut self, bytes: u64) {
+        // Kept view sets go first.
+        while self.canvas_bytes().saturating_add(bytes) > self.canvas_budget && self.drop_oldest_view_set() > 0 {}
         while self.canvas_bytes().saturating_add(bytes) > self.canvas_budget {
             let Some(k) = self.docs.iter().max_by_key(|(_, d)| d.bytes()).map(|(k, _)| *k) else { return };
             self.docs.remove(&k);
@@ -2671,6 +2683,9 @@ impl Resources {
     /// The same for `bytes` of viewport pages of `key`, which keep their place: only the other
     /// documents' textures give way.
     fn make_room_beside(&mut self, key: u64, bytes: u64) {
+        while !self.view_sets.is_empty() && self.canvas_bytes().saturating_add(bytes) > self.canvas_budget {
+            self.drop_oldest_view_set();
+        }
         let others = |res: &Self| res.docs.iter().filter(|(k, _)| **k != key).map(|(_, d)| d.bytes()).fold(0, u64::saturating_add);
         while others(self).saturating_add(bytes) > self.canvas_budget {
             let Some(k) = self.docs.iter().filter(|(k, _)| **k != key).max_by_key(|(_, d)| d.bytes()).map(|(k, _)| *k) else { return };
@@ -2731,7 +2746,7 @@ impl DocTextures {
         }
         let mut stale = Stale::default();
         stale.defer(photocraft_geom::Rect::new(0, 0, size[0] as i32, size[1] as i32));
-        Some(Self { size, format, tiles, stale: std::sync::Mutex::new(stale) })
+        Some(Self { size, format, tiles, stale: std::sync::Mutex::new(stale), shows: None })
     }
 
     fn stale(&self) -> std::sync::MutexGuard<'_, Stale> {

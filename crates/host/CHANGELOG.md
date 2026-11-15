@@ -6,6 +6,17 @@ Every change to the stable API is listed here with the commit to pin. Breaking c
 may change in any commit; their changes are listed under **Experimental**. A change to the
 `[patch]` pins (README.md) is listed too: copy the blocks again when you move the pin.
 
+## API_VERSION 1, additions (named view switches in one frame, Capikoma request 17)
+
+- `Host::prewarm_view(document, name)` and `CapishotView::prewarm_view(document, name)` (returns
+  the token of its `ViewEvent::Reply`: `{id, name, ready, frames, ms, reason?}`): draw a named view
+  ahead, a slice per frame, so `Host::apply_view` (`document.views.apply`) then shows it in one
+  frame. `ViewHooks::prewarm_view` has a default (does nothing): hosts with their own hooks keep
+  compiling.
+- Without asking, the GPU canvas keeps the canvas of a view it showed before (a GPU copy, within
+  the canvas budget and `set_memory_budget`, at most 4 per document, dropped by any other edit):
+  switching back to it takes one frame instead of redrawing the changed area.
+
 ## API_VERSION 1, additions (Move tool Auto-Select)
 
 - `view::MoveTarget::{Layer, Group}` (`as_str`), `ViewOptions::{move_target, move_auto_select}`: the

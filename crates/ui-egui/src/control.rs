@@ -45,7 +45,8 @@
 //!   `open(…, {cacheKey, version})` fills (remove one key, empty it, set its budget; default
 //!   512 MB) → `{budgetMb, usedMb, entries: [{key, version, mb}]}`
 //! - `editor.showDocument {id, viewport?, hidePrevious?, timeoutMs?}`, `document.prewarm {id,
-//!   viewport?, full?, timeoutMs?}`, `editor.setLayout {single}`, `editor.setMemoryBudget {mb}`,
+//!   viewport?, full?, timeoutMs?}`, `document.prewarmView {id, name, timeoutMs?}`,
+//!   `editor.setLayout {single}`, `editor.setMemoryBudget {mb}`,
 //!   `document.memory`: page switching for hosts with one visible document (`doc_switch`)
 //! - `jobs.list` / `jobs.cancel {job?}`: background jobs (#210) with progress; cancel one (or all).
 //!   `engine.execute`, `ui.menu.invoke` and `ui.dialog.confirm` wait for a command that runs as a

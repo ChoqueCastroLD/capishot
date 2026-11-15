@@ -2,6 +2,9 @@
 //! methods `editor.showDocument`, `document.prewarm`, `editor.setLayout`,
 //! `editor.setMemoryBudget` and `document.memory`.
 //!
+//! `document.prewarmView` draws a named view of a document into a display set kept aside on the
+//! GPU canvas, so that `document.views.apply` shows it in one frame (`gpu_canvas::view_sets`).
+//!
 //! A document is shown double-buffered: its canvas (the GPU canvas texture, or the CPU canvas's
 //! tiles) is drawn first for the view it will have ([`crate::canvas::prewarm`]) while the document shown before stays on screen,
 //! and the swap (the session's [`photocraft_engine::Session::show_document`]) happens at the
@@ -51,10 +54,21 @@ struct Waiting {
     full: bool,
 }
 
+/// A `document.prewarmView` in progress.
+struct ViewWaiting {
+    id: DocId,
+    name: String,
+    reply: Sender<Value>,
+    started_ms: f64,
+    timeout_ms: f64,
+    frames: u32,
+}
+
 /// What the methods are waiting for, the memory budget and when each document was last shown.
 #[derive(Default)]
 pub struct DocSwitch {
     waiting: Vec<Waiting>,
+    views: Vec<ViewWaiting>,
     /// `editor.setMemoryBudget`: the canvas textures every document may hold (bytes).
     budget: Option<u64>,
     /// Frame each document was last the active one in ([`PhotocraftApp::frame`]).
@@ -143,6 +157,7 @@ pub(crate) fn methods(app: &mut PhotocraftApp, ctx: &egui::Context, req: &Contro
     let r = match req.method.as_str() {
         "editor.showDocument" => show(app, ctx, req),
         "document.prewarm" => prewarm(app, ctx, req),
+        "document.prewarmView" => prewarm_view(app, ctx, req),
         "editor.setLayout" => set_layout(app, &req.params),
         "editor.setMemoryBudget" => set_budget(app, &req.params),
         "document.memory" => obj(&req.params).and_then(|m| check_fields(m, &[])).map(|()| Some(memory(app))),
@@ -187,6 +202,56 @@ fn prewarm(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) -
     app.doc_switch.waiting.push(Waiting { id, reply: req.reply.clone(), started_ms, timeout_ms, frames: 0, show: None, full });
     tick(app, ctx);
     Ok(None)
+}
+
+fn prewarm_view(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlRequest) -> Result<Option<Value>, String> {
+    let m = obj(&req.params)?;
+    check_fields(m, &["id", "name", "timeoutMs"])?;
+    let id = doc_param(app, m, "id")?;
+    let name = m.get("name").and_then(Value::as_str).filter(|n| !n.is_empty()).ok_or("`name` must be a view's name")?.to_string();
+    let has = app.session.documents().iter().find(|st| st.doc.id == id).is_some_and(|st| st.doc.layer_comps.iter().any(|c| c.name == name));
+    if !has {
+        return Err(format!("document {} has no view named \"{name}\"", id.0));
+    }
+    let timeout_ms = timeout_param(m, PREWARM_TIMEOUT_MS)?;
+    let started_ms = crate::gpu_canvas::now_ms();
+    app.doc_switch.views.push(ViewWaiting { id, name, reply: req.reply.clone(), started_ms, timeout_ms, frames: 0 });
+    tick(app, ctx);
+    Ok(None)
+}
+
+/// Work on the views waiting to be prewarmed: a slice of one each frame, the reply once it is
+/// drawn (`ready`), can't be kept, or the wait ran out.
+fn tick_views(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let now = crate::gpu_canvas::now_ms();
+    let mut keep = Vec::new();
+    for mut w in std::mem::take(&mut app.doc_switch.views) {
+        let Some(idx) = app.session.index_of_document(w.id) else {
+            reply_err(&w.reply, format!("document {} was closed", w.id.0));
+            continue;
+        };
+        let elapsed = now - w.started_ms;
+        let out = |ready: bool, error: Option<String>, w: &ViewWaiting| {
+            let mut v = json!({"id": w.id.0, "name": w.name, "ready": ready, "frames": w.frames, "ms": (elapsed * 10.0).round() / 10.0});
+            if let Some(e) = error {
+                v["reason"] = json!(e);
+            }
+            v
+        };
+        match crate::canvas::prewarm_view(app, idx, &w.name) {
+            Ok(true) => reply_ok(&w.reply, out(true, None, &w)),
+            Ok(false) if elapsed < w.timeout_ms => {
+                w.frames += 1;
+                keep.push(w);
+            }
+            Ok(false) => reply_ok(&w.reply, out(false, Some("timed out".into()), &w)),
+            Err(e) => reply_ok(&w.reply, out(false, Some(e), &w)),
+        }
+    }
+    app.doc_switch.views.extend(keep);
+    if !app.doc_switch.views.is_empty() {
+        ctx.request_repaint();
+    }
 }
 
 fn set_layout(app: &mut PhotocraftApp, p: &Value) -> Result<Option<Value>, String> {
@@ -258,6 +323,9 @@ pub(crate) fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
             ctx.request_repaint();
         }
     }
+    if !app.doc_switch.views.is_empty() {
+        tick_views(app, ctx);
+    }
     if app.doc_switch.budget.is_some() {
         enforce_budget(app);
     }
@@ -266,7 +334,8 @@ pub(crate) fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
 /// The canvas textures document `id` holds: its GPU canvas texture set and its CPU canvas tiles.
 pub(crate) fn canvas_bytes(app: &PhotocraftApp, id: DocId) -> u64 {
     let pages = app.gpu.as_ref().map_or(0, |g| g.pages(crate::canvas::viewport_pages::stream_key(id.0)).1);
-    let gpu = app.gpu.as_ref().and_then(|g| g.texture_info(id.0)).map_or(0, |(_, b)| b) + pages;
+    let kept = app.gpu.as_ref().map_or(0, |g| g.view_set_bytes(id.0));
+    let gpu = app.gpu.as_ref().and_then(|g| g.texture_info(id.0)).map_or(0, |(_, b)| b) + pages + kept;
     let tiles: usize = app.canvases.iter().filter(|((d, _), _)| *d == id).filter_map(|(_, c)| c.tiles.as_ref()).map(|t| t.texture_bytes()).sum();
     gpu.saturating_add(tiles as u64).saturating_add(crate::canvas::tile_views_bytes(app, id))
 }
@@ -284,6 +353,13 @@ fn enforce_budget(app: &mut PhotocraftApp) -> Vec<DocId> {
         return Vec::new();
     }
     crate::canvas::free_idle_tile_views(app, over);
+    // Then the display sets kept for view switches (any document's, the active one's too).
+    let over = total_now(app).saturating_sub(budget);
+    if over > 0
+        && let Some(gpu) = app.gpu.as_ref()
+    {
+        gpu.free_view_sets(over);
+    }
     let mut held: Vec<(DocId, u64)> =
         app.session.documents().iter().map(|st| (st.doc.id, canvas_bytes(app, st.doc.id))).filter(|(_, b)| *b > 0).collect();
     let mut total: u64 = held.iter().map(|(_, b)| b).sum();

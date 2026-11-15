@@ -548,6 +548,15 @@ impl CapishotView {
         self.queue.control("document.prewarm", p, Awaited::Prewarm(document));
     }
 
+    /// Draw named view `name` of `document` ahead, a slice per frame, into a canvas kept beside
+    /// the document's (`document.prewarmView`), so that applying the view later
+    /// ([`Host::apply_view`]) shows it in one frame. Answered by [`ViewEvent::Reply`] with the
+    /// returned token: `{id, name, ready, frames, ms, reason?}` (`ready` false with a `reason`
+    /// when the GPU canvas budget has no room for it, or off the GPU canvas). Returns the token.
+    pub fn prewarm_view(&mut self, document: DocumentId, name: &str) -> u64 {
+        self.queue.control("document.prewarmView", json!({"id": document.0, "name": name}), Awaited::Reply)
+    }
+
     /// The camera [`Host::show`] gives the document it shows.
     pub fn set_show_camera(&mut self, camera: DocumentCamera) {
         self.queue.set_show_camera(camera);
@@ -945,3 +954,5 @@ impl CapishotEditor {
 mod tests;
 #[cfg(test)]
 mod tiles_tests;
+#[cfg(test)]
+mod view_switch_tests;

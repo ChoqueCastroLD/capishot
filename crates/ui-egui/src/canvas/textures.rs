@@ -526,7 +526,11 @@ pub(super) fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, le
     let size = [doc.size.width, doc.size.height];
     // A Move drag: the moving layers come from the pages already on the GPU, at the offset (set
     // every frame: catch-up and deferred refreshes draw with the current offset too).
-    gpu.set_translated(crate::move_ui::gpu_translations(app, idx));
+    let translated = crate::move_ui::gpu_translations(app, idx);
+    // The display set shows the document as it is (no preview, no Move drag drawn from offset
+    // pages): it can be kept for a later view switch (`gpu_canvas::view_sets`).
+    let plain = raw_key == 0 && translated.is_empty();
+    gpu.set_translated(translated);
     let cache = app.canvases.entry((id, GPU_OUTPUT)).or_insert(CanvasCache { scale: 1.0, ..Default::default() });
     let present = cache.on_gpu && gpu.has(id.0, size);
     // Two fingers on the glass (touch_nav): the view keeps the levels it has while they pinch or
@@ -560,6 +564,9 @@ pub(super) fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, le
     };
 
     if present && cache.revision == revision && cache.preview_key == preview_key {
+        if !plain {
+            gpu.set_shows(id.0, None);
+        }
         // An adjustment preview composited where the view was: catch up where it moved to.
         if let Some(r) = crate::adjust_preview::uncovered(app, id, raw_key, visible) {
             let r = gpu.refresh(id.0, &doc, Some(r), display.as_deref());
@@ -611,11 +618,35 @@ pub(super) fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, le
         // the frame after), so frames don't queue up behind the pointer.
         gpu.defer(id.0, r);
         gpu.wake_when_done(ctx);
+        gpu.set_shows(id.0, plain.then(|| (doc.clone(), display_key)));
         if let Some(cache) = app.canvases.get_mut(&(id, GPU_OUTPUT)) {
             cache.revision = revision;
             cache.preview_key = preview_key;
         }
         return true;
+    }
+    // A change of layer visibility alone (a named view applied, Capikoma request 17): a set kept
+    // from when the document last looked like this takes the display set's place in this frame,
+    // or the set is kept as it was before the change is drawn into it. Any other edit drops the
+    // kept sets: they show the document as it no longer is.
+    if present && plain && seen.is_some_and(|s| s.0 != revision) {
+        let shown = gpu.shows(id.0);
+        if shown.as_ref().is_some_and(|(d, k)| *k == display_key && crate::gpu_canvas::visibility_only(d, &doc)) {
+            if gpu.switch_view(id.0, &doc, display_key) == crate::gpu_canvas::ViewSwitch::Restored {
+                app.perf.record("view-set", 0, 0.0, 0.0);
+                if let Some(cache) = app.canvases.get_mut(&(id, GPU_OUTPUT)) {
+                    cache.revision = revision;
+                    cache.preview_key = preview_key;
+                    cache.on_gpu = true;
+                    cache.texture = None;
+                }
+                // What the kept set left out of date is drawn on the next frames (`catch_up`).
+                ctx.request_repaint();
+                return true;
+            }
+        } else if gpu.view_sets(id.0) > 0 {
+            gpu.drop_view_sets(id.0);
+        }
     }
     gpu_budget(app, &gpu, idx, partial, visible);
     let r = gpu.refresh_for(id.0, &doc, if partial { damage } else { None }, display.as_deref(), crate::gpu_canvas::reduced_refreshes().then_some(need));
@@ -652,6 +683,7 @@ pub(super) fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, le
     } else {
         app.perf.gpu_fallback = r.fallback;
     }
+    gpu.set_shows(id.0, plain.then(|| (doc.clone(), display_key)));
     let Some(cache) = app.canvases.get_mut(&(id, GPU_OUTPUT)) else { return true };
     cache.revision = revision;
     cache.preview_key = preview_key;
@@ -715,6 +747,33 @@ pub(super) fn texture_buffer<'a>(
         Some(d) => d.texture_buffer(buf),
         None => std::borrow::Cow::Borrowed(buf),
     }
+}
+
+/// `document.prewarmView`: draw named view `name` of document `idx` into a kept display set on
+/// the GPU canvas, a slice per call (`gpu_canvas::view_sets`), so applying the view later shows it
+/// in one frame. `Ok(true)` once it is drawn, `Ok(false)` while there is more to draw (or the
+/// document's own set isn't there yet), `Err` when it can't be kept.
+pub(crate) fn prewarm_view(app: &mut PhotocraftApp, idx: usize, name: &str) -> Result<bool, String> {
+    let gpu = app.gpu.clone().ok_or("no GPU canvas")?;
+    let st = app.session.documents().get(idx).ok_or("no such document")?;
+    let view = photocraft_engine::doc_views_cmds::view_document(&st.doc, name).ok_or_else(|| format!("no view named \"{name}\""))?;
+    if photocraft_engine::mode_cmds::display_document(&view).is_some() {
+        return Err("a Duotone document's views are drawn when shown".into());
+    }
+    let size = [view.size.width, view.size.height];
+    if !gpu.has(view.id.0, size) {
+        return Ok(false);
+    }
+    let (display, _) = canvas_display(app, &view, None);
+    let display_key = texture_key(display.as_deref());
+    // Around the document's camera first (about a screen's worth), the rest after.
+    let visible = app.ui.views.get(idx).map_or(view.bounds(), |v| {
+        let half = 1200.0 / v.zoom.max(1e-3);
+        let c = |x: f32| x.clamp(-1e9, 1e9) as i32;
+        DRect::new(c(v.center[0] - half), c(v.center[1] - half), c(v.center[0] + half), c(v.center[1] + half))
+    });
+    gpu.prewarm_view_step(&std::sync::Arc::new(view), display.as_deref(), display_key, visible)
+        .ok_or_else(|| "the view can't be kept on the GPU (no room in the canvas budget)".to_string())
 }
 
 pub(crate) fn retain_gpu_documents(app: &mut PhotocraftApp) {
