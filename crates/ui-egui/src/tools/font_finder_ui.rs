@@ -400,7 +400,13 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
         app.font_finder.closed = true;
     }
     if load {
-        let _ = app.run("type.loadFonts", json!({}));
+        // A UI command (it opens the file picker), so through the menus, not the engine's `run`.
+        if let Err(e) = crate::menus::invoke(app, ctx, "type.loadFonts", json!({}))
+            && e != crate::file_dialog::CANCELLED
+        {
+            app.ui.status = e;
+            app.ui.status_error = true;
+        }
     }
     if let Some(o) = picked {
         choose(app, &o);
