@@ -4798,3 +4798,7 @@ curves	Smooth	スムーズ
 	Automatic Size	自動サイズ
 	The graphics card was reset	グラフィックカードがリセットされました
 	Capishot started again and reopened your documents.	Capishot を再起動し、ドキュメントを開き直しました。
+	Clean Text	テキストを消去
+	Split into Pieces	ピースに分割
+	The Bubble Text Remover: the text of a speech bubble with a plain background, without AI. Instant; a bubble it can't clean goes to AI	吹き出しテキスト消去：無地の背景の吹き出しの文字を AI なしで消します。一瞬で終わり、消せない吹き出しは AI に回します
+	{n} pieces were in bubbles without a plain background: cleaned with AI	{n} 個のピースは無地でない吹き出しにありました：AI で消去しました

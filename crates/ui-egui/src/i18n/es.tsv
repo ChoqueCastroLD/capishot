@@ -5633,3 +5633,7 @@ fontTab	Find More	Buscar más
 	Use Open Images	Usar imágenes abiertas
 	The graphics card was reset	Se reinició la tarjeta gráfica
 	Capishot started again and reopened your documents.	Capishot se volvió a abrir y recuperó sus documentos.
+	Clean Text	Limpiar texto
+	Split into Pieces	Separar en piezas
+	The Bubble Text Remover: the text of a speech bubble with a plain background, without AI. Instant; a bubble it can't clean goes to AI	El Quitatexto de globos: el texto de un globo con fondo liso, sin IA. Al instante; un globo que no puede limpiar pasa a IA
+	{n} pieces were in bubbles without a plain background: cleaned with AI	{n} piezas estaban en globos sin fondo liso: se limpiaron con IA

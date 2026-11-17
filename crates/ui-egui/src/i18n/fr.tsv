@@ -5151,3 +5151,7 @@ shape	Appearance	Apparence
 	Automatic Size	Taille automatique
 	The graphics card was reset	La carte graphique a été réinitialisée
 	Capishot started again and reopened your documents.	Capishot a redémarré et a rouvert vos documents.
+	Clean Text	Nettoyer le texte
+	Split into Pieces	Séparer en morceaux
+	The Bubble Text Remover: the text of a speech bubble with a plain background, without AI. Instant; a bubble it can't clean goes to AI	Le Gommeur de texte de bulles : le texte d'une bulle au fond uni, sans IA. Instantané ; une bulle qu'il ne peut pas nettoyer passe à l'IA
+	{n} pieces were in bubbles without a plain background: cleaned with AI	{n} morceaux étaient dans des bulles sans fond uni : nettoyés avec l'IA

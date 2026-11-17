@@ -4356,3 +4356,7 @@ curves	Smooth	매끄럽게
 	Automatic Size	자동 크기
 	The graphics card was reset	그래픽 카드가 재설정되었습니다
 	Capishot started again and reopened your documents.	Capishot이 다시 시작되어 문서를 다시 열었습니다.
+	Clean Text	텍스트 지우기
+	Split into Pieces	조각으로 나누기
+	The Bubble Text Remover: the text of a speech bubble with a plain background, without AI. Instant; a bubble it can't clean goes to AI	말풍선 텍스트 지우개: 배경이 단색인 말풍선의 글자를 AI 없이 지웁니다. 즉시 끝나며, 지울 수 없는 말풍선은 AI로 넘깁니다
+	{n} pieces were in bubbles without a plain background: cleaned with AI	{n}개 조각이 단색 배경이 아닌 말풍선에 있어 AI로 지웠습니다

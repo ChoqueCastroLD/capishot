@@ -606,7 +606,10 @@ pub(super) fn draw_drag_preview(app: &mut PhotocraftApp, painter: &egui::Painter
             // Retouching strokes preview as a translucent trail of the brush footprint: a mask,
             // not a brush-wide egui polyline (which zoomed in tessellates into wedges, #189).
             let col = match t {
-                Tool::QuickSelection | Tool::TextSelection => Color32::from_white_alpha(40),
+                // Text Selection's brush: its real size, in the colour of adding or taking away
+                // (a white trail didn't show on a white page).
+                Tool::TextSelection => crate::text_select_ui::drag_tint(app, painter.ctx(), d.modifiers).gamma_multiply(0.4),
+                Tool::QuickSelection => Color32::from_white_alpha(40),
                 // The Remove Tool tints what it will remove, like Photoshop's.
                 // Erasing from a waiting mask: a light veil instead.
                 Tool::Remove | Tool::RemoveAi

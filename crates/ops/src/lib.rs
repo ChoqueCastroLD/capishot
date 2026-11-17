@@ -385,6 +385,12 @@ impl History {
         self.last_record = Some(LastRecord { before, moved, evicted });
     }
 
+    /// The id of the current state: a step gets a new one, never used before in this History;
+    /// undo and redo bring back the one the state had.
+    pub fn current_id(&self) -> u64 {
+        self.current_id
+    }
+
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty() || self.cleared.is_some()
     }

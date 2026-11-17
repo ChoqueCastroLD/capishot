@@ -8,6 +8,8 @@ pub enum CleanMethod {
     #[default]
     Ai,
     Fill,
+    /// The Bubble Text Remover (`edit.removeBubbleText`).
+    Bubble,
     Color,
 }
 
@@ -357,6 +359,7 @@ pub struct ToolOptions {
     /// Text Selection: the colour of the pieces to fill by content, and of those to paint flat.
     pub text_select_fill_tint: [u8; 3],
     pub text_select_flat_tint: [u8; 3],
+    pub text_select_bubble_tint: [u8; 3],
     /// Text Selection: a flat clean takes the colour around each block, else `text_select_flat`.
     pub text_select_flat_auto: bool,
     pub text_select_flat: [u8; 3],
@@ -637,6 +640,7 @@ impl Default for ToolOptions {
             text_select_shape: ZoneShape::Pick,
             text_select_fill_tint: [46, 170, 90],
             text_select_flat_tint: [170, 80, 220],
+            text_select_bubble_tint: [0, 175, 190],
             text_select_flat_auto: true,
             text_select_flat: [255, 255, 255],
             text_select_clean_click: false,

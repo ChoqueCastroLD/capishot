@@ -3730,3 +3730,7 @@ fontWeight	Italic	Itálico
 	Use Open Images	Usar imagens abertas
 	The graphics card was reset	A placa gráfica foi reiniciada
 	Capishot started again and reopened your documents.	O Capishot voltou a abrir e reabriu os seus documentos.
+	Clean Text	Limpar texto
+	Split into Pieces	Separar em peças
+	The Bubble Text Remover: the text of a speech bubble with a plain background, without AI. Instant; a bubble it can't clean goes to AI	O Removedor de texto de balões: o texto de um balão com fundo liso, sem IA. Instantâneo; um balão que não consegue limpar passa para a IA
+	{n} pieces were in bubbles without a plain background: cleaned with AI	{n} peças estavam em balões sem fundo liso: foram limpas com IA

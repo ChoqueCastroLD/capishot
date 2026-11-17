@@ -5223,3 +5223,7 @@ shape	Appearance	Aspetto
 	Automatic Size	Dimensione automatica
 	The graphics card was reset	La scheda grafica è stata reimpostata
 	Capishot started again and reopened your documents.	Capishot è stato riavviato e ha riaperto i tuoi documenti.
+	Clean Text	Pulisci testo
+	Split into Pieces	Dividi in pezzi
+	The Bubble Text Remover: the text of a speech bubble with a plain background, without AI. Instant; a bubble it can't clean goes to AI	Il Rimuovi testo dai balloon: il testo di un balloon con sfondo uniforme, senza IA. Immediato; un balloon che non riesce a pulire passa all'IA
+	{n} pieces were in bubbles without a plain background: cleaned with AI	{n} pezzi erano in balloon senza sfondo uniforme: puliti con l'IA

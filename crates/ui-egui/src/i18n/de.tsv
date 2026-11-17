@@ -4148,3 +4148,7 @@ curves	Smooth	Glätten
 	Automatic Size	Automatische Größe
 	The graphics card was reset	Die Grafikkarte wurde zurückgesetzt
 	Capishot started again and reopened your documents.	Capishot wurde neu gestartet und hat Ihre Dokumente wieder geöffnet.
+	Clean Text	Text entfernen
+	Split into Pieces	In Teile aufteilen
+	The Bubble Text Remover: the text of a speech bubble with a plain background, without AI. Instant; a bubble it can't clean goes to AI	Der Sprechblasen-Textentferner: der Text einer Sprechblase mit einfarbigem Hintergrund, ohne KI. Sofort; eine Blase, die er nicht reinigen kann, geht an die KI
+	{n} pieces were in bubbles without a plain background: cleaned with AI	{n} Teile lagen in Blasen ohne einfarbigen Hintergrund: mit KI entfernt

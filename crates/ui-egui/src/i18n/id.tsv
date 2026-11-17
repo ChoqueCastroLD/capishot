@@ -4148,3 +4148,7 @@ curves	Smooth	Haluskan
 	Automatic Size	Ukuran otomatis
 	The graphics card was reset	Kartu grafis telah diatur ulang
 	Capishot started again and reopened your documents.	Capishot dimulai ulang dan membuka kembali dokumen Anda.
+	Clean Text	Bersihkan teks
+	Split into Pieces	Pisahkan jadi potongan
+	The Bubble Text Remover: the text of a speech bubble with a plain background, without AI. Instant; a bubble it can't clean goes to AI	Penghapus teks balon: teks balon dengan latar polos, tanpa AI. Instan; balon yang tak bisa dibersihkan diserahkan ke AI
+	{n} pieces were in bubbles without a plain background: cleaned with AI	{n} potongan berada di balon tanpa latar polos: dibersihkan dengan AI

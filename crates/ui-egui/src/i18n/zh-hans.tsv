@@ -3829,3 +3829,7 @@ curves	Smooth	平滑
 	Automatic Size	自动大小
 	The graphics card was reset	显卡已重置
 	Capishot started again and reopened your documents.	Capishot 已重新启动并重新打开了你的文档。
+	Clean Text	清除文字
+	Split into Pieces	拆分为碎片
+	The Bubble Text Remover: the text of a speech bubble with a plain background, without AI. Instant; a bubble it can't clean goes to AI	气泡文字清除器：不用 AI 清除纯色背景气泡里的文字。即刻完成；无法清除的气泡交给 AI
+	{n} pieces were in bubbles without a plain background: cleaned with AI	{n} 个碎片位于非纯色背景的气泡中：已用 AI 清除

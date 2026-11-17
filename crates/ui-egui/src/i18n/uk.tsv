@@ -4839,3 +4839,7 @@ curves	Smooth	Згладити
 	Automatic Size	Автоматичний розмір
 	The graphics card was reset	Відеокарту було перезапущено
 	Capishot started again and reopened your documents.	Capishot запустився знову й відкрив ваші документи.
+	Clean Text	Очистити текст
+	Split into Pieces	Розділити на частини
+	The Bubble Text Remover: the text of a speech bubble with a plain background, without AI. Instant; a bubble it can't clean goes to AI	Видалення тексту з бульбашок: текст бульбашки з однорідним тлом, без ШІ. Миттєво; бульбашка, яку не вдається очистити, переходить до ШІ
+	{n} pieces were in bubbles without a plain background: cleaned with AI	{n} частин були в бульбашках без однорідного тла: очищено за допомогою ШІ

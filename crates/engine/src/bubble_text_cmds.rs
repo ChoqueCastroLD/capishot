@@ -604,6 +604,32 @@ fn within(interior: &Mask, o: &bubble_find::Opts, area: Rect, seed: (i32, i32)) 
         && (win.y1 >= area.y1 || b.y1 + m < win.y1 - 1)
 }
 
+/// The speech bubble around `(x, y)` as this tool finds it, closed (not one cut by the page's
+/// edge or open onto a panel, which this tool takes too when clicked: what those hold is often
+/// text over art), with its body's bounds (without the tail) and whether its background is plain
+/// enough for this tool to clean it. For Text Selection, which gives the pieces in such a bubble
+/// to this tool.
+pub(crate) fn bubble_at(page: &crate::typer_place_cmds::support::PageImage, doc: &std::sync::Arc<photocraft_doc::Document>, x: i32, y: i32) -> Option<BubbleAt> {
+    let o = Search::default().opts(&page.img, page.area, page.area, (x, y));
+    let found = bubble_find::find_opts(&page.img, page.area, (x, y), false, &o).ok()?;
+    let b = found.body.bounds()?;
+    let shape = bubble_find::rectangularity(&found.interior).map_or(0.0, |r| r.0);
+    let inp = Input { doc: doc.clone(), active: None, editable: false, sample_all: true, tolerance: None, search: Search::default(), x, y };
+    let plain = plan_in(page, &inp, &found.interior).is_ok();
+    Some(BubbleAt { interior: found.interior, body: Rect::new(b.x0, b.y0, b.x1, b.y1), shape, plain })
+}
+
+/// What [`bubble_at`] finds.
+pub(crate) struct BubbleAt {
+    pub interior: Mask,
+    /// The bounds of its body (without the tail).
+    pub body: Rect,
+    /// How much of its smallest enclosing rectangle it fills, tail included: an ellipse 0.79, a
+    /// box 1, white paper between lines and drawings less.
+    pub shape: f64,
+    pub plain: bool,
+}
+
 fn remove_bubble_text(s: &mut Session, p: &Value) -> Result<Value> {
     if !p.is_object() && !p.is_null() {
         return Err(bad("params must be a JSON object"));

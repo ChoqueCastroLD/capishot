@@ -4,8 +4,11 @@
 //!
 //! The selection is a normal one, and what's chosen is read from it: Undo, the Lasso and
 //! Select › Modify all count. Each piece chosen also has how it will be cleaned: Manga LaMa at its
-//! fixed best (`edit.removeAi`, as Remove with AI), filled by content or painted flat
-//! (`edit.cleanQuick`). A click marks a block with the method in use, or takes it off; a box around
+//! fixed best (`edit.removeAi`, as Remove with AI), filled by content, by the Bubble Text Remover
+//! (`edit.removeBubbleText`, a click per bubble, AI for a bubble it refuses) or painted flat
+//! (`edit.cleanQuick`). Each piece starts with its own: in a speech bubble with a plain background
+//! the Bubble Text Remover, anything else AI; pieces of one bubble are one block. Once a method is
+//! picked in the bar, a click marks a block with it. A click marks a block, or takes it off; a box around
 //! pieces marks them, and on nothing, or with the Rectangle, the Lasso or the Brush, a drag draws a
 //! zone of its own, a piece like the others. ⌥ takes away. Clean runs each method on its pieces,
 //! the quick ones first. The contour is how far a selection reaches past the letters: too close
@@ -13,6 +16,15 @@
 //!
 //! All at once or one at a time: with Clean on Click a click cleans that block, and clicks made
 //! while one runs wait their turn. Either way what was cleaned leaves the pieces and the rest stay.
+//!
+//! Undo and Redo are the document's: every change in the tool is a history step (a selection, or
+//! `select.textStep` for what the document doesn't hold: a method, a split), and a whole Clean is
+//! one (its commands share a `coalesce` key). The tool's own state (the pieces, their methods and
+//! blocks) is remembered by history state id ([`History::current_id`]): when Undo or Redo lands
+//! on a state, the pieces come back as they were there, with no new detection. Finding the text
+//! again on pixels that haven't changed keeps what a person changed of the pieces.
+//!
+//! [`History::current_id`]: photocraft_ops::History::current_id
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -24,7 +36,7 @@ use photocraft_ai_textmask::regions::MAX_GROW;
 use photocraft_ai_textmask::{Detection, ModelState, default_grow};
 use photocraft_doc::DocId;
 use photocraft_engine::ai_inpaint_cmds::quick;
-use photocraft_engine::text_mask_cmds::{DETECT, PIECES, ZONE};
+use photocraft_engine::text_mask_cmds::{DETECT, PIECES, STEP, ZONE};
 use photocraft_geom::Rect;
 use serde_json::{Value, json};
 
@@ -48,8 +60,18 @@ const TAP_SCREEN_TOUCH: f32 = 16.0;
 const REACH_SCREEN_TOUCH: f32 = 24.0;
 
 /// A document's detection and what its selection makes of it.
+#[derive(Clone)]
 struct Pieces {
     detection: Arc<Detection>,
+    /// The method each piece starts with (see [`auto_method`]).
+    auto: Vec<CleanMethod>,
+    /// Pieces taken out of their bubble's block: each a block of its own.
+    alone: Vec<bool>,
+    /// A method was picked in the bar since the detection: clicks mark with it.
+    picked: bool,
+    /// The document when the pieces were found: finding the text again on the same pixels
+    /// keeps what a person changed.
+    page: Arc<photocraft_doc::Document>,
     /// The contour shown, and the one the selection has.
     grow: f32,
     applied: f32,
@@ -78,7 +100,7 @@ struct Look {
     marks: u64,
     by_suggestion: bool,
     active: CleanMethod,
-    on: [Color32; 3],
+    on: [Color32; 4],
     off: Color32,
 }
 
@@ -90,10 +112,36 @@ struct BlockMenu {
     pos: egui::Pos2,
 }
 
+/// The tool's state as one history state had it.
+#[derive(Clone)]
+struct Snap {
+    pieces: Option<Pieces>,
+}
+
+/// What the tool remembers of a document's history: the state id last seen, and the tool's state
+/// at each id (at most [`MAX_SNAPS`], the oldest dropped).
+#[derive(Default)]
+struct Remembered {
+    at: Option<u64>,
+    snaps: std::collections::BTreeMap<u64, Snap>,
+}
+
+const MAX_SNAPS: usize = 300;
+
 /// The tool's state (`PhotocraftApp::text_select`).
 #[derive(Default)]
 pub(crate) struct State {
     docs: HashMap<DocId, Pieces>,
+    history: HashMap<DocId, Remembered>,
+    /// The pieces of a document before it was found again, or closed with Done.
+    memory: HashMap<DocId, Pieces>,
+    /// The key the commands of a Clean share, so it's one history step.
+    run_key: Option<String>,
+    runs: u64,
+    /// The pieces of the Bubble Text Remover's click under way, for AI if it's refused.
+    bubble_running: Option<Vec<u32>>,
+    /// Pieces of a run that went to AI because their bubble wasn't plain.
+    to_ai: usize,
     /// The document whose detection waits for the model's download.
     waiting: Option<DocId>,
     /// The next detection keeps to the selection.
@@ -118,13 +166,19 @@ pub(crate) fn forget(app: &mut PhotocraftApp, id: DocId) {
     app.text_select.docs.remove(&id);
 }
 
-const METHODS: [CleanMethod; 3] = [CleanMethod::Ai, CleanMethod::Fill, CleanMethod::Color];
+const METHODS: [CleanMethod; 4] = [CleanMethod::Ai, CleanMethod::Fill, CleanMethod::Bubble, CleanMethod::Color];
+
+/// How a piece is cleaned unless someone says otherwise (`text_mask_cmds::auto_method`).
+fn auto_method(r: &photocraft_ai_textmask::Region) -> CleanMethod {
+    if photocraft_engine::text_mask_cmds::auto_method(r) == "bubble" { CleanMethod::Bubble } else { CleanMethod::Ai }
+}
 const SHAPES: [ZoneShape; 4] = [ZoneShape::Pick, ZoneShape::Rect, ZoneShape::Lasso, ZoneShape::Brush];
 
 fn method_label(m: CleanMethod) -> &'static str {
     match m {
         CleanMethod::Ai => tl!("AI"),
         CleanMethod::Fill => tl!("Content Fill"),
+        CleanMethod::Bubble => tl!("Bubble"),
         CleanMethod::Color => tl!("Flat Color"),
     }
 }
@@ -133,6 +187,7 @@ fn method_tip(m: CleanMethod) -> &'static str {
     match m {
         CleanMethod::Ai => tl!("Manga LaMa draws what was behind the letters. The best over drawings, and it takes a while"),
         CleanMethod::Fill => tl!("Copies from around each block. Quick, for tones and simple backgrounds"),
+        CleanMethod::Bubble => tl!("The Bubble Text Remover: the text of a speech bubble with a plain background, without AI. Instant; a bubble it can't clean goes to AI"),
         CleanMethod::Color => tl!("Paints each block in the color around it. Instant, for letters on an even balloon"),
     }
 }
@@ -141,6 +196,7 @@ fn method_tint(o: &crate::state::ToolOptions, m: CleanMethod) -> [u8; 3] {
     match m {
         CleanMethod::Ai => o.text_select_on,
         CleanMethod::Fill => o.text_select_fill_tint,
+        CleanMethod::Bubble => o.text_select_bubble_tint,
         CleanMethod::Color => o.text_select_flat_tint,
     }
 }
@@ -253,34 +309,35 @@ fn sync(app: &mut PhotocraftApp) {
     let idle = !app.session.has_jobs() && app.ui.dialogs.is_empty() && !crate::remove_ai_ui::is_open(app);
     if idle && app.text_select.cleaning.as_ref().is_some_and(|(d, _, _)| *d == doc) {
         if let Some((_, before, zone)) = app.text_select.cleaning.take() {
+            let bubble = app.text_select.bubble_running.take();
             if revision != before {
                 finish_clean(app, doc, &zone);
+            } else if let Some(group) = bubble {
+                // The Bubble Text Remover refused the bubble: its pieces go to AI.
+                to_ai(app, doc, &group);
+                plan_next(app, doc);
             } else {
                 abort_plan(app, doc);
             }
         }
     }
+    if idle && app.text_select.cleaning.is_none() && app.text_select.plan.is_empty() && app.text_select.queue.is_empty() && app.text_select.run_key.is_some() {
+        end_run(app);
+    }
+    follow_history(app, doc);
     let Some(detection) = app.session.text_detection() else {
         app.text_select.docs.remove(&doc);
         app.text_select.queue.clear();
+        remember(app, doc);
         return;
     };
     if !app.text_select.docs.get(&doc).is_some_and(|p| Arc::ptr_eq(&p.detection, &detection)) {
-        let grow = (default_grow(detection.width, detection.height) as f32 + app.ui.tool_options.text_select_contour).clamp(0.0, MAX_GROW as f32);
-        let n = detection.regions.len();
-        let method = vec![app.ui.tool_options.text_select_method; n];
-        app.text_select.docs.insert(doc, Pieces { detection, grow, applied: grow, chosen: vec![false; n], method, todo: vec![false; n], restore: vec![false; n], contour: vec![None; n], output: vec![None; n], marks: 0, revision: u64::MAX });
-        if !app.ui.tool_options.text_select_clean_click {
-            if let Err(e) = app.run(PIECES, json!({"pieces": "suggested", "grow": grow})) {
-                say(app, e);
-            }
-        } else {
-            let _ = app.run("select.deselect", json!({}));
-        }
+        found(app, doc, detection);
     }
     if idle && app.text_select.cleaning.is_none() {
         clean_next(app, doc);
     }
+
     let Some(st) = app.session.active() else { return };
     let (selection, revision) = (st.doc.selection.as_ref(), st.revision);
     if let Some(p) = app.text_select.docs.get(&doc)
@@ -292,21 +349,186 @@ fn sync(app: &mut PhotocraftApp) {
             p.revision = revision;
         }
     }
+    remember(app, doc);
+}
+
+/// A new detection on `doc`: each piece with its own method. On pixels that haven't changed
+/// since the pieces before it, what a person changed of those (methods, blocks, contours, where
+/// they go, what was chosen) is kept, piece by piece.
+fn found(app: &mut PhotocraftApp, doc: DocId, detection: Arc<Detection>) {
+    let Some(page) = app.session.active().map(|st| st.doc.clone()) else { return };
+    let grow = (default_grow(detection.width, detection.height) as f32 + app.ui.tool_options.text_select_contour).clamp(0.0, MAX_GROW as f32);
+    let n = detection.regions.len();
+    let auto: Vec<CleanMethod> = detection.regions.iter().map(auto_method).collect();
+    let before = app.text_select.docs.remove(&doc).or_else(|| app.text_select.memory.remove(&doc));
+    let same = before.filter(|b| b.detection.width == detection.width && b.detection.height == detection.height && photocraft_engine::layer_multi_cmds::same_pixels(&b.page, &page));
+    let mut p = Pieces {
+        detection,
+        method: auto.clone(),
+        auto,
+        alone: vec![false; n],
+        picked: false,
+        page,
+        grow,
+        applied: grow,
+        chosen: vec![false; n],
+        todo: vec![false; n],
+        restore: vec![false; n],
+        contour: vec![None; n],
+        output: vec![None; n],
+        marks: 0,
+        revision: u64::MAX,
+    };
+    let mut choose: Option<Vec<u32>> = None;
+    if let Some(old) = same {
+        let from = matches(&p.detection, &old.detection);
+        let old_of = |id: u32| from[id as usize].checked_sub(1).map(|o| o as usize);
+        for r in &p.detection.regions {
+            let (i, Some(o)) = (r.id as usize - 1, old_of(r.id)) else { continue };
+            p.method[i] = old.method[o];
+            p.alone[i] = old.alone[o];
+            p.contour[i] = old.contour[o];
+            p.output[i].clone_from(&old.output[o]);
+        }
+        p.picked = old.picked;
+        (p.grow, p.applied) = (old.grow, old.applied);
+        if old.chosen.iter().any(|c| *c) {
+            choose = Some(p.detection.regions.iter().filter(|r| old_of(r.id).is_some_and(|o| old.chosen[o])).map(|r| r.id).collect());
+        }
+    }
+    let applied = p.applied;
+    app.text_select.docs.insert(doc, p);
+    if app.ui.tool_options.text_select_clean_click {
+        let _ = app.run("select.deselect", json!({}));
+    } else if let Err(e) = app.run(PIECES, json!({"pieces": choose.map_or_else(|| json!("suggested"), |ids| json!(ids)), "grow": applied})) {
+        say(app, e);
+    }
+}
+
+/// For each piece of `new` (by id), the piece of `old` most of it was, 0 none.
+fn matches(new: &Detection, old: &Detection) -> Vec<u32> {
+    let mut count: HashMap<(u32, u32), u64> = HashMap::new();
+    for (n, o) in new.labels.iter().zip(&old.labels) {
+        if *n != 0 && *o != 0 {
+            *count.entry((*n, *o)).or_default() += 1;
+        }
+    }
+    let mut best = vec![(0u32, 0u64); new.regions.len() + 1];
+    for ((n, o), c) in count {
+        let b = &mut best[n as usize];
+        if c > b.1 || (c == b.1 && o < b.0) {
+            *b = (o, c);
+        }
+    }
+    best.into_iter().map(|(o, _)| o).collect()
+}
+
+/// Undo or Redo landed on a history state the tool has known: its pieces come back as they were
+/// there (not during a Clean, whose steps are one).
+fn follow_history(app: &mut PhotocraftApp, doc: DocId) {
+    let Some(id) = app.session.active().map(|st| st.history.current_id()) else { return };
+    let mem = app.text_select.history.entry(doc).or_default();
+    if mem.at == Some(id) {
+        return;
+    }
+    let arrived = mem.at.is_some();
+    mem.at = Some(id);
+    if !arrived || app.text_select.run_key.is_some() {
+        return;
+    }
+    let Some(snap) = mem.snaps.get(&id).cloned() else { return };
+    app.text_select.plan.clear();
+    app.text_select.queue.clear();
+    match snap.pieces {
+        Some(mut p) => {
+            app.session.set_text_detection(p.detection.clone());
+            p.revision = u64::MAX;
+            p.marks += 1;
+            p.todo.iter_mut().for_each(|t| *t = false);
+            p.restore.iter_mut().for_each(|t| *t = false);
+            app.text_select.docs.insert(doc, p);
+        }
+        None => {
+            app.session.forget_text_detection();
+            app.text_select.docs.remove(&doc);
+        }
+    }
+}
+
+/// What the tool has now, remembered for the current history state.
+fn remember(app: &mut PhotocraftApp, doc: DocId) {
+    let Some(id) = app.session.active().filter(|st| st.doc.id == doc).map(|st| st.history.current_id()) else { return };
+    let pieces = app.text_select.docs.get(&doc).cloned();
+    let mem = app.text_select.history.entry(doc).or_default();
+    mem.at = Some(id);
+    mem.snaps.insert(id, Snap { pieces });
+    while mem.snaps.len() > MAX_SNAPS {
+        mem.snaps.pop_first();
+    }
+}
+
+/// Runs a command of the tool: during a Clean, as part of its one history step.
+fn cmd(app: &mut PhotocraftApp, id: &str, mut params: Value) -> Result<Value, String> {
+    if let Some(key) = &app.text_select.run_key {
+        params["coalesce"] = json!(key);
+    }
+    app.run(id, params)
+}
+
+/// A history step for a change the document doesn't hold (a method, a block split).
+fn tool_step(app: &mut PhotocraftApp) {
+    let _ = cmd(app, STEP, json!({"label": tl!("Text Selection")}));
+}
+
+/// A Clean starts: its commands from here on are one history step.
+fn begin_run(app: &mut PhotocraftApp) {
+    if app.text_select.run_key.is_some() {
+        return;
+    }
+    app.text_select.runs += 1;
+    let key = format!("textSelect.clean.{}", app.text_select.runs);
+    app.text_select.to_ai = 0;
+    let _ = app.run(STEP, json!({"label": tl!("Clean Text"), "coalesce": key}));
+    app.text_select.run_key = Some(key);
+}
+
+/// A Clean ended: what went to AI that was meant for the Bubble Text Remover is said.
+fn end_run(app: &mut PhotocraftApp) {
+    app.text_select.run_key = None;
+    let n = std::mem::take(&mut app.text_select.to_ai);
+    if n > 0 {
+        app.ui.status = crate::i18n::fmt(tl!("{n} pieces were in bubbles without a plain background: cleaned with AI"), &[("n", &n.to_string())]);
+        app.ui.status_error = false;
+    }
+}
+
+/// The Bubble Text Remover refused `ids`' bubble: they're cleaned with AI, after the rest.
+fn to_ai(app: &mut PhotocraftApp, doc: DocId, ids: &[u32]) {
+    let Some(p) = app.text_select.docs.get_mut(&doc) else { return };
+    let Some(first) = ids.first() else { return };
+    let output = p.output[*first as usize - 1].clone();
+    for id in ids {
+        p.method[*id as usize - 1] = CleanMethod::Ai;
+        p.todo[*id as usize - 1] = true;
+    }
+    p.marks += 1;
+    app.text_select.to_ai += ids.len();
+    if !app.text_select.plan.iter().any(|(m, o)| *m == CleanMethod::Ai && *o == output) {
+        app.text_select.plan.insert(0, (CleanMethod::Ai, output));
+    }
 }
 
 /// `new` takes the place of the document's pieces: what's left of each keeps its marks, and what's
-/// new has the method in use.
+/// new has the method in use (picked in the bar), else its own.
 fn adopt(app: &mut PhotocraftApp, doc: DocId, new: Arc<Detection>) {
     let active = app.ui.tool_options.text_select_method;
     let Some(p) = app.text_select.docs.get_mut(&doc) else { return };
-    let mut from = vec![0u32; new.regions.len() + 1];
-    for (n, o) in new.labels.iter().zip(&p.detection.labels) {
-        if *n != 0 && *o != 0 {
-            from[*n as usize] = *o;
-        }
-    }
+    let from = matches(&new, &p.detection);
     let old = |id: u32| from[id as usize].checked_sub(1).map(|o| o as usize);
-    p.method = new.regions.iter().map(|r| old(r.id).map_or(active, |o| p.method[o])).collect();
+    let fresh = |r: &photocraft_ai_textmask::Region| if p.picked { active } else { auto_method(r) };
+    p.method = new.regions.iter().map(|r| old(r.id).map_or_else(|| fresh(r), |o| p.method[o])).collect();
+    p.auto = new.regions.iter().map(|r| old(r.id).map_or_else(|| auto_method(r), |o| p.auto[o])).collect();
+    p.alone = new.regions.iter().map(|r| old(r.id).is_some_and(|o| p.alone[o])).collect();
     p.todo = new.regions.iter().map(|r| old(r.id).is_some_and(|o| p.todo[o])).collect();
     p.restore = new.regions.iter().map(|r| old(r.id).is_some_and(|o| p.restore[o])).collect();
     p.contour = new.regions.iter().map(|r| old(r.id).and_then(|o| p.contour[o])).collect();
@@ -319,7 +541,7 @@ fn adopt(app: &mut PhotocraftApp, doc: DocId, new: Arc<Detection>) {
 
 /// A clean ended: what it cleaned leaves the pieces, and the selection with it. The run goes on.
 fn finish_clean(app: &mut PhotocraftApp, doc: DocId, zone: &photocraft_raster::Surface) {
-    let _ = app.run("select.deselect", json!({}));
+    let _ = cmd(app, "select.deselect", json!({}));
     let Some(d) = app.session.text_detection() else { return };
     let left = Arc::new(d.clipped(|x, y| zone.sample_channel(x as i32, y as i32, 0) < 0.5));
     if left.regions.is_empty() {
@@ -349,7 +571,7 @@ fn select_pieces(app: &mut PhotocraftApp, doc: DocId, ids: &[u32], mode: &str, k
         if let Some(keep) = keep {
             params["keep"] = json!(keep);
         }
-        if let Err(e) = app.run(PIECES, params) {
+        if let Err(e) = cmd(app, PIECES, params) {
             say(app, e);
             return;
         }
@@ -384,7 +606,8 @@ fn restore_chosen(app: &mut PhotocraftApp, doc: DocId) {
     }
 }
 
-/// Cleans what's selected with `m`, into `output` or where the tool's go.
+/// Cleans what's selected with `m`, into `output` or where the tool's go. Not the Bubble Text
+/// Remover, which goes bubble by bubble ([`plan_next`]).
 fn run_method(app: &mut PhotocraftApp, m: CleanMethod, output: Option<String>) {
     let Some(st) = app.session.active() else { return };
     let (doc, revision) = (st.doc.id, st.revision);
@@ -392,10 +615,14 @@ fn run_method(app: &mut PhotocraftApp, m: CleanMethod, output: Option<String>) {
     app.text_select.cleaning = Some((doc, revision, zone));
     let o = &app.ui.tool_options;
     let output = output.unwrap_or_else(|| o.clean_output.clone());
-    if m == CleanMethod::Ai {
+    if m == CleanMethod::Ai || m == CleanMethod::Bubble {
         let all = o.sample_all.remove_ai;
         let by_blocks = o.text_select_by_blocks;
-        crate::remove_ai_ui::request(app, json!({"sampleAllLayers": all, "byBlocks": by_blocks, "output": output}));
+        let mut params = json!({"sampleAllLayers": all, "byBlocks": by_blocks, "output": output});
+        if let Some(key) = &app.text_select.run_key {
+            params["coalesce"] = json!(key);
+        }
+        crate::remove_ai_ui::request(app, params);
         return;
     }
     let mut params = json!({"method": if m == CleanMethod::Fill { "fill" } else { "color" }, "output": output, "layerName": tl!("AI Clean")});
@@ -403,20 +630,63 @@ fn run_method(app: &mut PhotocraftApp, m: CleanMethod, output: Option<String>) {
         let [r, g, b] = o.text_select_flat;
         params["color"] = json!(format!("#{r:02x}{g:02x}{b:02x}"));
     }
-    if let Err(e) = app.run(quick::ID, params) {
+    if let Err(e) = cmd(app, quick::ID, params) {
         app.text_select.cleaning = None;
         abort_plan(app, doc);
         say(app, e);
     }
 }
 
+/// The Bubble Text Remover's click at `seed` for the pieces `ids` (selected): if it changes
+/// nothing (the bubble isn't plain, or isn't one), they go to AI.
+fn run_bubble(app: &mut PhotocraftApp, doc: DocId, seed: [f64; 2], ids: Vec<u32>, output: Option<String>) {
+    let Some(st) = app.session.active() else { return };
+    let revision = st.revision;
+    let zone = st.doc.selection.clone();
+    let o = &app.ui.tool_options;
+    let new_layer = output.as_deref().unwrap_or(o.clean_output.as_str()) != "current";
+    let params = json!({"x": seed[0], "y": seed[1], "newLayer": new_layer, "sampleAll": o.sample_all.remove_ai});
+    let Some(zone) = zone else {
+        to_ai(app, doc, &ids);
+        plan_next(app, doc);
+        return;
+    };
+    app.text_select.cleaning = Some((doc, revision, zone));
+    app.text_select.bubble_running = Some(ids.clone());
+    if cmd(app, photocraft_engine::bubble_text_cmds::ID, params).is_err() {
+        app.text_select.cleaning = None;
+        app.text_select.bubble_running = None;
+        to_ai(app, doc, &ids);
+        plan_next(app, doc);
+    }
+}
+
+/// `ids` are cleaned by the Bubble Text Remover, a bubble at a time, after what the plan has.
+fn start_bubbles(app: &mut PhotocraftApp, doc: DocId, ids: &[u32], output: Option<String>) {
+    let Some(p) = app.text_select.docs.get_mut(&doc) else { return };
+    for id in ids {
+        p.method[*id as usize - 1] = CleanMethod::Bubble;
+        p.todo[*id as usize - 1] = true;
+        p.output[*id as usize - 1].clone_from(&output);
+    }
+    p.marks += 1;
+    if !app.text_select.plan.iter().any(|(m, o)| *m == CleanMethod::Bubble && *o == output) {
+        app.text_select.plan.push((CleanMethod::Bubble, output));
+    }
+    plan_next(app, doc);
+}
+
 /// Cleans the pieces chosen, each with its method.
 fn clean(app: &mut PhotocraftApp) {
     let Some(doc) = app.session.active().map(|st| st.doc.id) else { return };
+    if !app.text_select.docs.contains_key(&doc) {
+        return;
+    }
+    begin_run(app);
     let Some(p) = app.text_select.docs.get_mut(&doc) else { return };
     // Last in, first out: the quick ones first, so that the model reads a cleaner page.
     let mut plan: Vec<(CleanMethod, Option<String>)> = Vec::new();
-    for m in [CleanMethod::Ai, CleanMethod::Fill, CleanMethod::Color] {
+    for m in [CleanMethod::Ai, CleanMethod::Fill, CleanMethod::Bubble, CleanMethod::Color] {
         for r in &p.detection.regions {
             let at = r.id as usize - 1;
             if p.chosen[at] && p.method[at] == m && !plan.iter().any(|(pm, po)| *pm == m && *po == p.output[at]) {
@@ -424,9 +694,9 @@ fn clean(app: &mut PhotocraftApp) {
             }
         }
     }
-    if plan.len() <= 1 {
+    if plan.len() <= 1 && plan.first().is_none_or(|(m, _)| *m != CleanMethod::Bubble) {
         // One way to go: what's selected, whatever else the selection has.
-        let (m, output) = plan.pop().unwrap_or((app.ui.tool_options.text_select_method, None));
+        let (m, output) = plan.pop().unwrap_or((CleanMethod::Ai, None));
         run_method(app, m, output);
         return;
     }
@@ -443,6 +713,11 @@ fn clean_block(app: &mut PhotocraftApp, doc: DocId, ids: &[u32], m: CleanMethod)
         p.restore[*id as usize - 1] = false;
     }
     let output = ids.first().and_then(|id| p.output[*id as usize - 1].clone());
+    begin_run(app);
+    if m == CleanMethod::Bubble {
+        start_bubbles(app, doc, ids, output);
+        return;
+    }
     select_pieces(app, doc, ids, "replace", None);
     run_method(app, m, output);
 }
@@ -454,6 +729,19 @@ fn plan_next(app: &mut PhotocraftApp, doc: DocId) {
         let ids: Vec<u32> = p.detection.regions.iter().map(|r| r.id).filter(|id| p.todo[*id as usize - 1] && p.method[*id as usize - 1] == m && p.output[*id as usize - 1] == output).collect();
         if ids.is_empty() {
             continue;
+        }
+        if m == CleanMethod::Bubble {
+            // A click per bubble: this one now, the others next.
+            let Some((seed, group)) = photocraft_engine::text_mask_cmds::bubble_clicks(&p.detection, &ids).into_iter().next() else { continue };
+            for id in &group {
+                p.todo[*id as usize - 1] = false;
+            }
+            if group.len() < ids.len() {
+                app.text_select.plan.push((m, output.clone()));
+            }
+            select_pieces(app, doc, &group, "replace", None);
+            run_bubble(app, doc, seed, group, output);
+            return;
         }
         for id in &ids {
             p.todo[*id as usize - 1] = false;
@@ -473,17 +761,28 @@ fn clean_next(app: &mut PhotocraftApp, doc: DocId) {
         let Some(id) = piece_at(&p.detection, x, y, reach(app, p)) else { continue };
         let ids = block_of(p, id);
         let output = p.output[id as usize - 1].clone();
+        // The method picked in the bar, else the block's own.
+        let m = if p.picked { app.ui.tool_options.text_select_method } else { p.method[id as usize - 1] };
+        begin_run(app);
+        if m == CleanMethod::Bubble {
+            start_bubbles(app, doc, &ids, output);
+            return;
+        }
         select_pieces(app, doc, &ids, "replace", None);
-        let m = app.ui.tool_options.text_select_method;
         run_method(app, m, output);
         return;
     }
 }
 
-/// The pieces of the block `id` is in.
+/// The pieces of the block `id` is in: its bubble's, else its word's or effect's; a piece split
+/// from its block is one alone.
 fn block_of(p: &Pieces, id: u32) -> Vec<u32> {
-    let group = p.detection.regions.get(id as usize - 1).map(|r| r.group);
-    p.detection.regions.iter().filter(|r| Some(r.group) == group).map(|r| r.id).collect()
+    let Some(r) = p.detection.regions.get(id as usize - 1) else { return Vec::new() };
+    if p.alone.get(id as usize - 1).copied().unwrap_or(false) {
+        return vec![id];
+    }
+    let same = |o: &photocraft_ai_textmask::Region| if r.bubble > 0 { o.bubble == r.bubble } else { o.bubble == 0 && o.group == r.group };
+    p.detection.regions.iter().filter(|o| same(o) && !p.alone[o.id as usize - 1]).map(|o| o.id).collect()
 }
 
 /// The piece under a pixel, else the nearest within `reach`: its contour counts as the piece.
@@ -512,21 +811,30 @@ enum Mark {
 
 /// `ids` get the method in use, or (a [`Mark::Toggle`] of ones that have it) leave the selection.
 fn mark(app: &mut PhotocraftApp, doc: DocId, ids: &[u32], how: Mark) {
-    let m = app.ui.tool_options.text_select_method;
+    let active = app.ui.tool_options.text_select_method;
     let Some(p) = app.text_select.docs.get_mut(&doc) else { return };
     let at = |id: u32| id as usize - 1;
-    let take = how == Mark::Remove || (how == Mark::Toggle && ids.iter().all(|id| p.chosen[at(*id)] && p.method[at(*id)] == m));
+    // Until a method is picked in the bar, each piece keeps its own.
+    let with = p.picked.then_some(active);
+    let take = how == Mark::Remove || (how == Mark::Toggle && ids.iter().all(|id| p.chosen[at(*id)] && with.is_none_or(|m| p.method[at(*id)] == m)));
     if take {
         let out: Vec<u32> = ids.iter().copied().filter(|id| p.chosen[at(*id)]).collect();
         let keep: Vec<u32> = p.detection.regions.iter().filter(|r| p.chosen[at(r.id)] && !out.contains(&r.id)).map(|r| r.id).collect();
         select_pieces(app, doc, &out, "subtract", Some(&keep));
     } else {
-        for id in ids {
-            p.method[at(*id)] = m;
+        if let Some(m) = with {
+            for id in ids {
+                p.method[at(*id)] = m;
+            }
+            p.marks += 1;
         }
-        p.marks += 1;
         let new: Vec<u32> = ids.iter().copied().filter(|id| !p.chosen[at(*id)]).collect();
-        select_pieces(app, doc, &new, "add", None);
+        if new.is_empty() {
+            // Only the method changed: a step of its own all the same.
+            tool_step(app);
+        } else {
+            select_pieces(app, doc, &new, "add", None);
+        }
     }
 }
 
@@ -534,8 +842,11 @@ fn mark(app: &mut PhotocraftApp, doc: DocId, ids: &[u32], how: Mark) {
 fn mark_only(app: &mut PhotocraftApp, doc: DocId, ids: Vec<u32>) {
     let m = app.ui.tool_options.text_select_method;
     let Some(p) = app.text_select.docs.get_mut(&doc) else { return };
-    for id in &ids {
-        p.method[*id as usize - 1] = m;
+    // Until a method is picked in the bar, each piece keeps its own.
+    if p.picked {
+        for id in &ids {
+            p.method[*id as usize - 1] = m;
+        }
     }
     p.marks += 1;
     select_pieces(app, doc, &ids, "replace", None);
@@ -621,19 +932,39 @@ pub fn finish_stroke(app: &mut PhotocraftApp, points: &[[f64; 3]], mods: egui::M
     mark(app, doc, &ids, if remove { Mark::Remove } else { Mark::Toggle });
 }
 
-/// The box or the lasso being drawn.
+/// The colour of a drag: what it adds, or (⌥, or Drag Removes on a touch screen) takes away.
+pub(crate) fn drag_tint(app: &PhotocraftApp, ctx: &egui::Context, mods: egui::Modifiers) -> Color32 {
+    let t = Tokens::get(ctx);
+    if mods.alt || app.text_select.erase { t.danger } else { t.accent }
+}
+
+/// The box or the lasso being drawn, as it's dragged: a line with a dark edge so it reads over
+/// any page, in the colour of adding or of taking away (which is dashed). The brush's stroke is
+/// the canvas's trail, in the same colour (`paint::draw_drag_preview`).
 pub(crate) fn draw_drag(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform, points: &[[f64; 3]], mods: egui::Modifiers) {
     let (Some(a), Some(b)) = (points.first(), points.last()) else { return };
     let at = |x: f64, y: f64| xf.to_screen(x as f32, y as f32);
-    let t = Tokens::get(painter.ctx());
-    let tint = if mods.alt || app.text_select.erase { t.danger } else { t.accent };
+    let tint = drag_tint(app, painter.ctx(), mods);
+    let away = mods.alt || app.text_select.erase;
+    let halo = Stroke::new(3.5, Color32::from_black_alpha(140));
+    let line = Stroke::new(2.0, tint);
+    let outline = |pts: Vec<egui::Pos2>| {
+        painter.add(egui::Shape::closed_line(pts.clone(), halo));
+        if away {
+            let mut ring = pts.clone();
+            ring.extend(pts.first().copied());
+            painter.extend(egui::Shape::dashed_line(&ring, line, 6.0, 4.0));
+        } else {
+            painter.add(egui::Shape::closed_line(pts, line));
+        }
+    };
     if app.ui.tool_options.text_select_shape == ZoneShape::Lasso {
-        let line: Vec<egui::Pos2> = points.iter().map(|p| at(p[0], p[1])).collect();
-        painter.add(egui::Shape::closed_line(line, Stroke::new(1.5, tint)));
+        outline(points.iter().map(|p| at(p[0], p[1])).collect());
         return;
     }
     let corners = vec![at(a[0], a[1]), at(b[0], a[1]), at(b[0], b[1]), at(a[0], b[1])];
-    painter.add(egui::Shape::convex_polygon(corners, tint.gamma_multiply(0.15), Stroke::new(1.5, tint)));
+    painter.add(egui::Shape::convex_polygon(corners.clone(), tint.gamma_multiply(0.18), Stroke::NONE));
+    outline(corners);
 }
 
 /// The overlay: the pieces chosen in a colour, the others in another.
@@ -649,7 +980,7 @@ fn overlay_image(p: &Pieces, look: &Look) -> egui::ColorImage {
                 0 => Color32::TRANSPARENT,
                 l if p.chosen[l as usize - 1] || p.todo[l as usize - 1] => look.on[p.method[l as usize - 1] as usize],
                 // Nothing is chosen when a click cleans: the model's doubts still show.
-                l if look.by_suggestion && d.regions.get(l as usize - 1).is_some_and(|r| r.suggested()) => look.on[look.active as usize],
+                l if look.by_suggestion && d.regions.get(l as usize - 1).is_some_and(|r| r.suggested()) => look.on[p.method[l as usize - 1] as usize],
                 _ => look.off,
             });
         }
@@ -768,6 +1099,10 @@ fn act(app: &mut PhotocraftApp, ctx: &egui::Context, what: Act) {
         }
         Act::Method(m) => {
             app.ui.tool_options.text_select_method = m;
+            // From now on clicks mark with it.
+            if let Some(p) = app.text_select.docs.get_mut(&doc) {
+                p.picked = true;
+            }
             return;
         }
         Act::Shape(shape) => {
@@ -848,6 +1183,9 @@ fn act(app: &mut PhotocraftApp, ctx: &egui::Context, what: Act) {
             return;
         }
         Act::Done => {
+            if let Some(p) = app.text_select.docs.get(&doc) {
+                app.text_select.memory.insert(doc, p.clone());
+            }
             app.session.forget_text_detection();
             app.text_select.queue.clear();
             app.text_select.plan.clear();
@@ -1020,6 +1358,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             crate::widgets::color_edit_button_srgb(ui, &mut o.text_select_on).on_hover_text(method_label(CleanMethod::Ai));
             crate::widgets::color_edit_button_srgb(ui, &mut o.text_select_fill_tint).on_hover_text(method_label(CleanMethod::Fill));
+            crate::widgets::color_edit_button_srgb(ui, &mut o.text_select_bubble_tint).on_hover_text(method_label(CleanMethod::Bubble));
             crate::widgets::color_edit_button_srgb(ui, &mut o.text_select_flat_tint).on_hover_text(method_label(CleanMethod::Color));
             crate::widgets::color_edit_button_srgb(ui, &mut o.text_select_off).on_hover_text(tl!("Color of the other pieces"));
             crate::widgets::value_field_named(ui, tl!("Opacity"), &mut o.text_select_opacity, 10.0..=90.0, " %", 54.0);
@@ -1083,6 +1422,8 @@ enum MenuAct {
     Clean(CleanMethod),
     Method(CleanMethod),
     Output(Option<String>),
+    /// Each piece of the block a block of its own.
+    Split,
 }
 
 fn menu_item(ui: &mut egui::Ui, icon: &str, label: &str, enabled: bool, height: f32) -> bool {
@@ -1123,9 +1464,17 @@ fn block_menu(app: &mut PhotocraftApp, ctx: &egui::Context) {
             if menu_item(ui, if on { "x" } else { "check" }, if on { tl!("Take Off the Selection") } else { tl!("Add to the Selection") }, !busy, h) {
                 todo = Some(MenuAct::Toggle);
             }
+            if ids.len() > 1 && menu_item(ui, "scissors", tl!("Split into Pieces"), !busy, h) {
+                todo = Some(MenuAct::Split);
+            }
             ui.separator();
             ui.label(egui::RichText::new(tl!("Clean Now")).color(t.text_dim));
-            for (icon, label, m) in [("sparkles", tl!("AI"), CleanMethod::Ai), ("paint-bucket", tl!("Content Fill"), CleanMethod::Fill), ("droplet", tl!("Flat Color"), CleanMethod::Color)] {
+            for (icon, label, m) in [
+                ("sparkles", tl!("AI"), CleanMethod::Ai),
+                ("paint-bucket", tl!("Content Fill"), CleanMethod::Fill),
+                ("bubble-text-remove", tl!("Bubble"), CleanMethod::Bubble),
+                ("droplet", tl!("Flat Color"), CleanMethod::Color),
+            ] {
                 if menu_item(ui, icon, label, !busy, h) {
                     todo = Some(MenuAct::Clean(m));
                 }
@@ -1200,6 +1549,17 @@ fn block_menu(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 }
                 p.marks += 1;
             }
+            tool_step(app);
+        }
+        MenuAct::Split => {
+            if let Some(p) = app.text_select.docs.get_mut(&doc) {
+                for id in &ids {
+                    p.alone[*id as usize - 1] = true;
+                }
+                p.marks += 1;
+            }
+            app.text_select.menu = None;
+            tool_step(app);
         }
         MenuAct::Output(o) => {
             if let Some(p) = app.text_select.docs.get_mut(&doc) {
@@ -1399,11 +1759,12 @@ pub fn touch_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let main = egui::Rect::from_min_size(pos2(if by_click { done.right() + gap } else { paint.right() + gap }, top), egui::vec2(main_w, h));
     let erasing = app.text_select.erase;
     let active = app.ui.tool_options.text_select_method;
-    // How to clean: above, three the same size.
+    // How to clean: above, all the same size.
     let chip_h = 40.0;
     let chip_top = top - gap - chip_h;
-    let chip_w = (row_w.max(area.width() - 16.0).min(area.width() - 16.0) - 2.0 * gap) / 3.0;
-    let chips_x = area.center().x - (chip_w * 3.0 + 2.0 * gap) / 2.0;
+    let n = METHODS.len() as f32;
+    let chip_w = (row_w.max(area.width() - 16.0).min(area.width() - 16.0) - (n - 1.0) * gap) / n;
+    let chips_x = area.center().x - (chip_w * n + (n - 1.0) * gap) / 2.0;
     let chip = |i: usize| egui::Rect::from_min_size(pos2(chips_x + (chip_w + gap) * i as f32, chip_top), egui::vec2(chip_w, chip_h));
     let t = Tokens::get(ctx);
     let g = ctx.fonts_mut(|f| f.layout(line.clone(), crate::theme::medium(11.0), t.text, area.width() - 32.0));
@@ -1435,7 +1796,7 @@ pub fn touch_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
             todo = Some(Act::Clean);
         }
     });
-    for (i, name) in ["textSelectMethod:ai", "textSelectMethod:fill", "textSelectMethod:color"].into_iter().enumerate() {
+    for (i, name) in ["textSelectMethod:ai", "textSelectMethod:fill", "textSelectMethod:bubble", "textSelectMethod:color"].into_iter().enumerate() {
         crate::touch_ui::note_rect(ctx, name, chip(i));
     }
     crate::touch_ui::note_rect(ctx, "textSelectDone", done);
@@ -1484,11 +1845,16 @@ mod tests {
     }
 
     fn test_look(doc: DocId, by_suggestion: bool) -> Look {
-        Look { doc, revision: 0, marks: 0, by_suggestion, active: CleanMethod::Ai, on: [Color32::BLUE, Color32::GREEN, Color32::YELLOW], off: Color32::RED }
+        Look { doc, revision: 0, marks: 0, by_suggestion, active: CleanMethod::Ai, on: [Color32::BLUE, Color32::GREEN, Color32::LIGHT_BLUE, Color32::YELLOW], off: Color32::RED }
     }
 
     fn covered(app: &PhotocraftApp, x: i32, y: i32) -> bool {
         app.session.active().unwrap().doc.selection.as_ref().is_some_and(|s| s.sample_channel(x, y, 0) >= 0.5)
+    }
+
+    /// A method picked in the bar.
+    fn pick(app: &mut PhotocraftApp, m: CleanMethod) {
+        act(app, &egui::Context::default(), Act::Method(m));
     }
 
     fn click(app: &mut PhotocraftApp, x: f64, y: f64, m: egui::Modifiers) {
@@ -1658,7 +2024,7 @@ mod tests {
         drag(&mut app, [10.0, 10.0], [80.0, 70.0], egui::Modifiers::ALT);
         sync(&mut app);
         assert_eq!(app.text_select.docs[&doc].chosen, vec![false, true]);
-        app.ui.tool_options.text_select_method = CleanMethod::Fill;
+        pick(&mut app, CleanMethod::Fill);
         drag(&mut app, [10.0, 10.0], [80.0, 70.0], egui::Modifiers::NONE);
         sync(&mut app);
         let p = &app.text_select.docs[&doc];
@@ -1728,9 +2094,9 @@ mod tests {
         sync(&mut app);
         let doc = app.session.active().unwrap().doc.id;
         // One flat, one by content.
-        app.ui.tool_options.text_select_method = CleanMethod::Color;
+        pick(&mut app, CleanMethod::Color);
         click(&mut app, 30.0, 30.0, egui::Modifiers::NONE);
-        app.ui.tool_options.text_select_method = CleanMethod::Fill;
+        pick(&mut app, CleanMethod::Fill);
         click(&mut app, 210.0, 130.0, egui::Modifiers::NONE);
         sync(&mut app);
         let p = &app.text_select.docs[&doc];
@@ -1789,7 +2155,7 @@ mod tests {
         set_grow(&mut app, doc, base + 1.0, None);
         assert!(covered(&app, 20 - base as i32 - 6, 30));
         let layers = app.session.active().unwrap().doc.layers.len();
-        app.ui.tool_options.text_select_method = CleanMethod::Color;
+        pick(&mut app, CleanMethod::Color);
         act(&mut app, &egui::Context::default(), Act::All);
         {
             let p = app.text_select.docs.get_mut(&doc).unwrap();
@@ -1809,7 +2175,7 @@ mod tests {
         click(&mut app, 150.0, 90.0, egui::Modifiers::NONE);
         sync(&mut app);
         let doc = app.session.active().unwrap().doc.id;
-        app.ui.tool_options.text_select_method = CleanMethod::Color;
+        pick(&mut app, CleanMethod::Color);
         act(&mut app, &egui::Context::default(), Act::All);
         // What another tool added stays in the clean.
         app.session.execute("select.rect", json!({"x": 100, "y": 150, "width": 20, "height": 20, "mode": "add"})).unwrap();
@@ -1847,5 +2213,236 @@ mod tests {
         let at = |x: usize, y: usize| img.pixels[y * img.size[0] + x];
         assert_ne!(at(30, 30), at(210, 130));
         assert_eq!(at(150, 90), Color32::TRANSPARENT);
+    }
+
+    /// Finds what is pure black (the lettering; outlines and screentone are grey).
+    struct Black;
+    impl TextMasker for Black {
+        fn model_state(&self) -> ModelState {
+            ModelState::Ready
+        }
+        fn device(&self) -> String {
+            "test".into()
+        }
+        fn detect(&self, page: Page<'_>, _: &dyn Fn() -> bool) -> Result<Detection, photocraft_ai_textmask::Error> {
+            let prob: Vec<f32> = page.rgb.as_chunks::<3>().0.iter().map(|c| if c[0] < 10 { 0.995 } else { 0.0 }).collect();
+            Ok(find_regions(&prob, page.width, page.height))
+        }
+    }
+
+    /// A speech bubble with two lines of words, and an effect on screentone below: the tool on,
+    /// the pieces found, AI a fake.
+    fn bubble_page() -> (PhotocraftApp, DocId) {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        // A bubble is a few hundredths of a page: the page around the art is large.
+        app.session.execute("file.new", json!({"width": 1200, "height": 1600, "background": "white"})).unwrap();
+        app.session.set_text_masker(Some(Arc::new(Black)));
+        app.session.set_inpainter(Some(Arc::new(photocraft_ai_lama::service::FakeInpainter::default())));
+        app.session
+            .edit("art", |doc, active| {
+                let surf = doc.layer_mut(active.unwrap()).unwrap().surface_mut().unwrap();
+                let grey = |v: f32| [v, v, v, 1.0];
+                for y in (450..700).step_by(6) {
+                    for x in (0..600).step_by(6) {
+                        surf.fill_rect(Rect::new(x, y, x + 3, y + 3), &grey(0.45));
+                    }
+                }
+                for (r, v) in [(0, 0.2), (5, 1.0)] {
+                    let (cx, cy, rx, ry) = (250, 180, 150 - r, 100 - r);
+                    for y in -ry..=ry {
+                        let dx = (f64::from(rx) * (1.0 - f64::from(y * y) / f64::from(ry * ry)).max(0.0).sqrt()).round() as i32;
+                        surf.fill_rect(Rect::new(cx - dx, cy + y, cx + dx + 1, cy + y + 1), &grey(v));
+                    }
+                }
+                for (x0, y0) in [(180, 150), (180, 195)] {
+                    for k in 0..6 {
+                        surf.fill_rect(Rect::new(x0 + k * 24, y0, x0 + k * 24 + 14, y0 + 24), &grey(0.0));
+                    }
+                }
+                for k in 0..4 {
+                    surf.fill_rect(Rect::new(120 + k * 60, 520, 160 + k * 60, 620), &grey(0.0));
+                }
+                Ok(())
+            })
+            .unwrap();
+        app.ui.tool = Tool::TextSelection;
+        click(&mut app, 500.0, 400.0, egui::Modifiers::NONE);
+        sync(&mut app);
+        let doc = app.session.active().unwrap().doc.id;
+        (app, doc)
+    }
+
+    fn piece(app: &PhotocraftApp, doc: DocId, x: f64, y: f64) -> u32 {
+        piece_at(&app.text_select.docs[&doc].detection, x, y, 0).unwrap_or_else(|| panic!("a piece at {x},{y}"))
+    }
+
+    fn method_of(app: &PhotocraftApp, doc: DocId, x: f64, y: f64) -> CleanMethod {
+        app.text_select.docs[&doc].method[piece(app, doc, x, y) as usize - 1]
+    }
+
+    fn ink(app: &PhotocraftApp, x: i32, y: i32) -> f32 {
+        photocraft_compose::render(&app.session.active().unwrap().doc, Rect::from_xywh(x, y, 1, 1)).px[0][0]
+    }
+
+    /// Each piece starts with its own method: the bubble's words the Bubble Text Remover's, the
+    /// effect on screentone AI's; a bubble's pieces are one block, and all are suggested.
+    #[test]
+    fn pieces_in_a_plain_bubble_start_as_bubble_and_the_effect_as_ai() {
+        let (app, doc) = bubble_page();
+        assert_eq!(method_of(&app, doc, 185.0, 160.0), CleanMethod::Bubble);
+        assert_eq!(method_of(&app, doc, 185.0, 205.0), CleanMethod::Bubble);
+        assert_eq!(method_of(&app, doc, 130.0, 560.0), CleanMethod::Ai);
+        let p = &app.text_select.docs[&doc];
+        assert_eq!(block_of(p, piece(&app, doc, 185.0, 160.0)).len(), 12, "both lines: one bubble, one block");
+        assert!(p.chosen.iter().all(|c| *c), "all suggested");
+    }
+
+    /// Clean: the bubble without AI, the effect with it, as one history step; Undo brings the
+    /// pieces and their methods back as they were, Redo cleans again.
+    #[test]
+    fn a_clean_is_one_step_and_undo_brings_the_pieces_back() {
+        let (mut app, doc) = bubble_page();
+        let ctx = egui::Context::default();
+        // A change of the effect's method, to see it come back.
+        let fx = piece(&app, doc, 130.0, 560.0);
+        let block = block_of(&app.text_select.docs[&doc], fx);
+        if let Some(p) = app.text_select.docs.get_mut(&doc) {
+            for id in &block {
+                p.method[*id as usize - 1] = CleanMethod::Fill;
+            }
+        }
+        tool_step(&mut app);
+        sync(&mut app);
+        let past = app.session.active().unwrap().history.past_len();
+        let before = app.text_select.docs[&doc].clone();
+        act(&mut app, &ctx, Act::Clean);
+        for _ in 0..12 {
+            sync(&mut app);
+        }
+        assert!(ink(&app, 185, 160) > 0.9 && ink(&app, 185, 205) > 0.9, "the bubble is clean");
+        assert!(ink(&app, 130, 560) > 0.3, "and the effect");
+        assert!(app.text_select.run_key.is_none(), "the run ended");
+        assert_eq!(app.session.active().unwrap().history.past_len(), past + 1, "one step: {:?}", app.session.active().unwrap().history.entries());
+        app.session.execute("edit.undo", json!({})).unwrap();
+        sync(&mut app);
+        assert!(ink(&app, 185, 160) < 0.1, "the letters are back");
+        let p = &app.text_select.docs[&doc];
+        assert!(Arc::ptr_eq(&p.detection, &before.detection), "the same pieces, no new detection");
+        assert_eq!(p.method, before.method, "with their methods");
+        assert_eq!(p.chosen, before.chosen);
+        app.session.execute("edit.redo", json!({})).unwrap();
+        sync(&mut app);
+        assert!(ink(&app, 185, 160) > 0.9);
+        assert!(app.session.text_detection().is_none_or(|d| d.regions.is_empty()), "nothing left after it");
+    }
+
+    /// A bubble the Bubble Text Remover refuses goes to AI, and the status says so.
+    #[test]
+    fn a_refused_bubble_goes_to_ai() {
+        let (mut app, doc) = bubble_page();
+        let ctx = egui::Context::default();
+        let fx = piece(&app, doc, 130.0, 560.0);
+        let p = app.text_select.docs.get(&doc).unwrap();
+        let block = block_of(p, fx);
+        // Only the effect, marked for the Bubble Text Remover: no bubble there.
+        select_pieces(&mut app, doc, &block, "replace", None);
+        if let Some(p) = app.text_select.docs.get_mut(&doc) {
+            for id in &block {
+                p.method[*id as usize - 1] = CleanMethod::Bubble;
+            }
+        }
+        sync(&mut app);
+        act(&mut app, &ctx, Act::Clean);
+        for _ in 0..12 {
+            sync(&mut app);
+        }
+        assert!(ink(&app, 130, 560) > 0.3, "cleaned by AI");
+        assert!(!app.ui.status_error && app.ui.status.contains(&block.len().to_string()), "said: {}", app.ui.status);
+        assert!(ink(&app, 185, 160) < 0.1, "the bubble wasn't in it");
+    }
+
+    /// Every change in the tool is a step: a method, a split, a zone; Undo and Redo go through them.
+    #[test]
+    fn method_split_and_zone_undo_and_redo() {
+        let (mut app, doc) = bubble_page();
+        let ctx = egui::Context::default();
+        let word = piece(&app, doc, 185.0, 160.0);
+        // A method for the bubble's block, from its menu.
+        assert!(open_menu(&mut app, Tool::TextSelection, [185.0, 160.0], [5.0, 5.0]));
+        let ids = block_of(&app.text_select.docs[&doc], word);
+        if let Some(p) = app.text_select.docs.get_mut(&doc) {
+            for id in &ids {
+                p.method[*id as usize - 1] = CleanMethod::Color;
+            }
+        }
+        tool_step(&mut app);
+        sync(&mut app);
+        // Split it.
+        if let Some(p) = app.text_select.docs.get_mut(&doc) {
+            for id in &ids {
+                p.alone[*id as usize - 1] = true;
+            }
+        }
+        tool_step(&mut app);
+        sync(&mut app);
+        assert_eq!(block_of(&app.text_select.docs[&doc], word), vec![word]);
+        // A zone.
+        app.ui.tool_options.text_select_shape = ZoneShape::Rect;
+        finish_stroke(&mut app, &[[400.0, 300.0, 1.0], [450.0, 340.0, 1.0]], egui::Modifiers::NONE);
+        sync(&mut app);
+        let n = app.text_select.docs[&doc].detection.regions.len();
+        let undo = |app: &mut PhotocraftApp| {
+            app.session.execute("edit.undo", json!({})).unwrap();
+            sync(app);
+        };
+        undo(&mut app);
+        assert_eq!(app.text_select.docs[&doc].detection.regions.len(), n - 1, "the zone left");
+        undo(&mut app);
+        assert_eq!(block_of(&app.text_select.docs[&doc], word).len(), 12, "joined again");
+        assert_eq!(method_of(&app, doc, 185.0, 160.0), CleanMethod::Color);
+        undo(&mut app);
+        assert_eq!(method_of(&app, doc, 185.0, 160.0), CleanMethod::Bubble, "its own method again");
+        for _ in 0..3 {
+            app.session.execute("edit.redo", json!({})).unwrap();
+            sync(&mut app);
+        }
+        assert_eq!(app.text_select.docs[&doc].detection.regions.len(), n, "the zone is back");
+        assert_eq!(method_of(&app, doc, 185.0, 160.0), CleanMethod::Color);
+        assert_eq!(block_of(&app.text_select.docs[&doc], word), vec![word]);
+        let _ = ctx;
+    }
+
+    /// Finding the text again on the same pixels keeps what was changed of the pieces; on changed
+    /// pixels it starts over.
+    #[test]
+    fn finding_again_on_the_same_pixels_keeps_the_corrections() {
+        let (mut app, doc) = bubble_page();
+        let ctx = egui::Context::default();
+        let fx = piece(&app, doc, 130.0, 560.0);
+        let block = block_of(&app.text_select.docs[&doc], fx);
+        if let Some(p) = app.text_select.docs.get_mut(&doc) {
+            for id in &block {
+                p.method[*id as usize - 1] = CleanMethod::Fill;
+            }
+        }
+        let word = piece(&app, doc, 185.0, 160.0);
+        mark(&mut app, doc, &[word], Mark::Remove);
+        sync(&mut app);
+        act(&mut app, &ctx, Act::FindAgain);
+        sync(&mut app);
+        sync(&mut app);
+        assert_eq!(method_of(&app, doc, 130.0, 560.0), CleanMethod::Fill, "the method stayed");
+        let word = piece(&app, doc, 185.0, 160.0);
+        assert!(!app.text_select.docs[&doc].chosen[word as usize - 1], "and what was taken off");
+        // Done, then changed pixels: as found.
+        act(&mut app, &ctx, Act::Done);
+        sync(&mut app);
+        app.session.execute("select.rect", json!({"x": 0, "y": 0, "width": 5, "height": 5})).unwrap();
+        app.session.execute("edit.fill", json!({"color": "#808080"})).unwrap();
+        app.session.execute("select.deselect", json!({})).unwrap();
+        act(&mut app, &ctx, Act::Find);
+        sync(&mut app);
+        sync(&mut app);
+        assert_eq!(method_of(&app, doc, 130.0, 560.0), CleanMethod::Ai);
     }
 }

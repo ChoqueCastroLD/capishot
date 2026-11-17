@@ -2898,6 +2898,29 @@ mod lasso_preview_tests {
         app
     }
 
+    /// The Text Selection tool's rectangle, lasso and brush show while they're dragged.
+    #[test]
+    fn text_selection_drags_show_live() {
+        use crate::canvas::{ToolEvent, tool_event};
+        for shape in [crate::state::ZoneShape::Rect, crate::state::ZoneShape::Lasso, crate::state::ZoneShape::Brush, crate::state::ZoneShape::Pick] {
+            let mut app = document();
+            app.ui.tool = Tool::TextSelection;
+            app.ui.tool_options.text_select_shape = shape;
+            let m = egui::Modifiers::NONE;
+            tool_event(&mut app, ToolEvent::Down { x: 20.0, y: 20.0, pressure: 1.0 }, m);
+            for (x, y) in [(60.0, 30.0), (90.0, 80.0), (40.0, 120.0)] {
+                tool_event(&mut app, ToolEvent::Move { x, y, pressure: 1.0 }, m);
+            }
+            let n = app.drag.as_ref().map_or(0, |d| d.points.len());
+            let ctx = egui::Context::default();
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| draw_drag_preview(&mut app, ui.painter(), &xf()));
+            output.textures_delta.clear();
+            let shapes = output.shapes.len();
+            eprintln!("{shape:?}: {n} points, {shapes} shapes, drag tool {:?}", app.drag.as_ref().map(|d| d.tool));
+            assert!(n >= 4 && shapes > 0, "{shape:?}: {n} points, {shapes} shapes");
+        }
+    }
+
     /// #7495: as in Photoshop, the Lasso's, Polygonal Lasso's and Magnetic Lasso's outline is a
     /// solid line until the selection is made; a Patch area dragged out keeps its marching ants.
     #[test]

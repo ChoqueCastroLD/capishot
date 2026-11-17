@@ -3,7 +3,7 @@
 
 /// One connected piece of a word or effect: what a person keeps or drops, because the model joins
 /// art to the letters near it and a whole word would take the art with it.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Region {
     /// 1.. in manga reading order.
     pub id: u32,
@@ -14,14 +14,38 @@ pub struct Region {
     pub area: u64,
     /// The mean probability of its pixels.
     pub score: f32,
+    /// The speech bubble it lies in, 1.. (pieces of one bubble share it), 0 in none. Found after
+    /// the detection, as the Bubble Text Remover finds a bubble (`select.detectText`).
+    pub bubble: u32,
+    /// Its bubble's background is plain: the Bubble Text Remover can clean it without AI.
+    pub plain: bool,
+    /// A long thin stroke on its own (a panel border, a speed line): art, not a letter.
+    pub line: bool,
 }
 
 impl Region {
     /// Whether it starts chosen. The model's doubts are mostly art: hatching and marks with the
-    /// size of a letter's piece. Dots are as small as they come and stay, doubted or not.
+    /// size of a letter's piece, and long thin strokes on their own. Dots are as small as they
+    /// come and stay, doubted or not, and so does what lies in a speech bubble.
     pub fn suggested(&self) -> bool {
-        !(self.score < DOUBT_ALWAYS || (self.score < DOUBT_SIZED && (DOUBT_MIN_AREA..DOUBT_MAX_AREA).contains(&self.area)))
+        if self.bubble > 0 {
+            return true;
+        }
+        !(self.line || self.score < DOUBT_ALWAYS || (self.score < DOUBT_SIZED && (DOUBT_MIN_AREA..DOUBT_MAX_AREA).contains(&self.area)))
     }
+}
+
+/// A piece alone in its group at least this part of the page's height long, and this many times
+/// longer than it is thick (its area over its length), is a line ([`Region::line`]).
+const LINE_MIN_LENGTH: f32 = 0.06;
+const LINE_MIN_RATIO: f32 = 12.0;
+
+/// Whether a piece of `bbox` and `area`, alone in its group on a page `h` tall, is a line.
+fn is_line(bbox: [u32; 4], area: u64, h: usize) -> bool {
+    let (w, ht) = ((bbox[2] - bbox[0]) as f32, (bbox[3] - bbox[1]) as f32);
+    let long = w.hypot(ht).max(w.max(ht));
+    let thick = area as f32 / long.max(1.0);
+    long >= LINE_MIN_LENGTH * h as f32 && long >= LINE_MIN_RATIO * thick.max(1.0)
 }
 
 /// A page's pieces.
@@ -605,12 +629,18 @@ pub fn find_regions(prob: &[f32], w: usize, h: usize) -> Detection {
     for (l, p) in labels.iter().zip(prob) {
         sums[*l as usize] += f64::from(*p);
     }
+    let mut in_group = vec![0u32; found.len() + 1];
+    for &(_, g) in &order {
+        in_group[g as usize] += 1;
+    }
     let regions = order
         .iter()
         .enumerate()
         .map(|(k, &(c, group))| {
             let s = st[c];
-            Region { id: k as u32 + 1, group, bbox: [s.x0, s.y0, s.x1, s.y1], area: s.area, score: (sums[k + 1] / s.area as f64) as f32 }
+            let bbox = [s.x0, s.y0, s.x1, s.y1];
+            let line = in_group[group as usize] == 1 && is_line(bbox, s.area, h);
+            Region { id: k as u32 + 1, group, bbox, area: s.area, score: (sums[k + 1] / s.area as f64) as f32, line, ..Region::default() }
         })
         .collect();
     Detection { width: w, height: h, labels, regions }
@@ -677,7 +707,7 @@ impl Detection {
     pub fn from_flat(width: usize, height: usize, labels: Vec<u32>, regions: &[f64]) -> Detection {
         let regions = regions
             .chunks_exact(8)
-            .map(|v| Region { id: v[0] as u32, group: v[1] as u32, bbox: [v[2] as u32, v[3] as u32, v[4] as u32, v[5] as u32], area: v[6] as u64, score: v[7] as f32 })
+            .map(|v| Region { id: v[0] as u32, group: v[1] as u32, bbox: [v[2] as u32, v[3] as u32, v[4] as u32, v[5] as u32], area: v[6] as u64, score: v[7] as f32, ..Region::default() })
             .collect();
         Detection { width, height, labels, regions }
     }
@@ -701,7 +731,7 @@ impl Detection {
             return None;
         }
         let mut regions = self.regions.clone();
-        regions.push(Region { id, group, bbox: [x0, y0, x1, y1], area: u64::from(area), score: 1.0 });
+        regions.push(Region { id, group, bbox: [x0, y0, x1, y1], area: u64::from(area), score: 1.0, ..Region::default() });
         Some(Detection { width: self.width, height: self.height, labels, regions })
     }
 
@@ -938,12 +968,36 @@ mod tests {
 
     #[test]
     fn hatching_starts_unchosen_and_letters_and_dots_start_chosen() {
-        let r = |score, area| Region { id: 1, group: 1, bbox: [0; 4], area, score };
+        let r = |score, area| Region { id: 1, group: 1, bbox: [0; 4], area, score, ..Region::default() };
         assert!(r(0.93, 5000).suggested(), "a word");
         assert!(r(0.87, 5850).suggested(), "a big word the model doubts");
         assert!(r(0.77, 48).suggested(), "a dot");
         assert!(!r(0.87, 1073).suggested(), "hatching");
         assert!(!r(0.64, 63).suggested(), "too doubtful at any size");
+        assert!(Region { bubble: 2, ..r(0.64, 63) }.suggested(), "in a speech bubble");
+        assert!(!Region { line: true, ..r(0.99, 900) }.suggested(), "a line");
+    }
+
+    /// A panel border and a speed line alone are lines, never suggested; a letter and a word's
+    /// long stroke beside its letters aren't lines.
+    #[test]
+    fn long_thin_strokes_on_their_own_are_not_suggested() {
+        let (w, h) = (600, 800);
+        let mut p = vec![0f32; w * h];
+        // A panel border, a diagonal speed line, a tall letter and a word: a dash beside letters.
+        blob(&mut p, w, 20, 100, 580, 104, 0.99);
+        for i in 0..200 {
+            blob(&mut p, w, 100 + i, 300 + i, 103 + i, 302 + i, 0.99);
+        }
+        blob(&mut p, w, 400, 500, 412, 560, 0.99);
+        blob(&mut p, w, 100, 700, 110, 730, 0.99);
+        blob(&mut p, w, 116, 714, 220, 718, 0.99);
+        let d = find_regions(&p, w, h);
+        let at = |x: u32, y: u32| d.regions.iter().find(|r| r.bbox[0] <= x && x < r.bbox[2] && r.bbox[1] <= y && y < r.bbox[3]).unwrap();
+        assert!(at(300, 102).line && !at(300, 102).suggested(), "the border");
+        assert!(at(200, 400).line, "the speed line");
+        assert!(!at(405, 530).line && at(405, 530).suggested(), "the letter");
+        assert!(!at(150, 716).line, "a stroke of a word");
     }
 
     #[test]

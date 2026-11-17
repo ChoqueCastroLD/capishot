@@ -4818,3 +4818,7 @@ curves	Smooth	Εξομάλυνση
 	Automatic Size	Αυτόματο μέγεθος
 	The graphics card was reset	Η κάρτα γραφικών επανεκκινήθηκε
 	Capishot started again and reopened your documents.	Το Capishot ξεκίνησε ξανά και άνοιξε πάλι τα έγγραφά σας.
+	Clean Text	Καθαρισμός κειμένου
+	Split into Pieces	Διαχωρισμός σε κομμάτια
+	The Bubble Text Remover: the text of a speech bubble with a plain background, without AI. Instant; a bubble it can't clean goes to AI	Η Αφαίρεση κειμένου συννεφάκων: το κείμενο ενός συννεφάκου με απλό φόντο, χωρίς ΤΝ. Άμεσα· ένα συννεφάκι που δεν μπορεί να καθαρίσει πηγαίνει στην ΤΝ
+	{n} pieces were in bubbles without a plain background: cleaned with AI	{n} κομμάτια ήταν σε συννεφάκια χωρίς απλό φόντο: καθαρίστηκαν με ΤΝ

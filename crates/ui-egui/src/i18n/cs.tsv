@@ -4859,3 +4859,7 @@ cameraRaw	Dehaze	Odstranění oparu
 	Automatic Size	Automatická velikost
 	The graphics card was reset	Grafická karta byla resetována
 	Capishot started again and reopened your documents.	Capishot se znovu spustil a otevřel vaše dokumenty.
+	Clean Text	Vyčistit text
+	Split into Pieces	Rozdělit na kousky
+	The Bubble Text Remover: the text of a speech bubble with a plain background, without AI. Instant; a bubble it can't clean goes to AI	Odstraňovač textu z bublin: text bubliny s jednolitým pozadím, bez AI. Okamžitě; bublina, kterou nevyčistí, jde do AI
+	{n} pieces were in bubbles without a plain background: cleaned with AI	{n} kousků bylo v bublinách bez jednolitého pozadí: vyčištěno pomocí AI
