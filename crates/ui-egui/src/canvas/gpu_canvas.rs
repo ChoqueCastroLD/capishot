@@ -1016,7 +1016,14 @@ impl GpuCanvas {
     ) -> Option<u64> {
         let _s = crate::perf_span::span("canvas.cpu_first");
         let size = [doc.size.width, doc.size.height];
-        if size[0] == 0 || size[1] == 0 || !self.health.is_ok() || u64::from(size[0]) * u64::from(size[1]) <= CPU_PIECE_PX {
+        if size[0] == 0 || size[1] == 0 || !self.health.is_ok() {
+            return None;
+        }
+        // A light document draws in full in this frame, never a frame with parts missing: only a
+        // heavy one (canvas pixels times its visible drawing layers over SLICED_FIRST_WORK) is
+        // worth slicing.
+        let layers = doc.walk().iter().filter(|(_, _, l)| l.visible && l.children().is_none()).count() as u64;
+        if (u64::from(size[0]) * u64::from(size[1])).saturating_mul(layers.max(1)) <= SLICED_FIRST_WORK {
             return None;
         }
         let format = self.format_for(doc.depth, size);
@@ -2005,6 +2012,11 @@ pub const REFINE_WORK: u64 = 2 << 20;
 /// slider scrub or a Move drag keeps producing frames, and refining between them would only
 /// redo work the next frame replaces.
 pub const REFINE_DELAY_MS: f64 = 120.0;
+
+/// Canvas pixels times visible drawing layers above which a new document's first frame on the
+/// CPU compositor is drawn in pieces ([`GpuCanvas::cpu_first`]): about four full layers of a
+/// 12 MP page. Below it the whole page is composited in that frame, as before.
+pub const SLICED_FIRST_WORK: u64 = 48_000_000;
 
 /// The most pixels one piece composited on the CPU covers (the GPU's pieces are larger).
 pub const CPU_PIECE_PX: u64 = 256 * 1024;
