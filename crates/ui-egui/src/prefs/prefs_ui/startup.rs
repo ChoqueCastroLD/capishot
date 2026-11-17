@@ -29,7 +29,17 @@ pub fn load(app: &mut PhotocraftApp) {
     app.prefs_rt.loaded = true;
     let mut invalid = Vec::new();
     let mut stored = None;
-    if let Some(text) = app.services.load_prefs.as_mut().and_then(|f| f()) {
+    let has_store = app.services.load_prefs.is_some();
+    let saved = app.services.load_prefs.as_mut().and_then(|f| f());
+    // A first launch (storage but no saved preferences yet) starts on Studio (Dark). Saved
+    // preferences always store their theme, so this never changes an existing user's.
+    if has_store && saved.is_none() {
+        app.session.prefs.edit(|p| {
+            p.interface.theme = prefs::Theme::Studio;
+            p.interface.dark_theme = prefs::DarkTheme::Studio;
+        });
+    }
+    if let Some(text) = saved {
         app.prefs_rt.saved_text = Some(text.clone());
         app.prefs_rt.saved_tree = serde_json::from_str(&text).ok();
         match app.session.load_prefs_json(&text) {
@@ -359,5 +369,35 @@ pub(super) fn presets_store(app: &mut PhotocraftApp) {
     }
     if let Some(w) = app.session.preset_store.as_mut().map(|s| s.take_warnings()).and_then(|w| w.into_iter().next()) {
         app.ui.status = w;
+    }
+}
+
+#[cfg(test)]
+mod first_launch_tests {
+    use photocraft_engine::prefs::{DarkTheme, Theme};
+
+    fn app(saved: Option<String>) -> crate::PhotocraftApp {
+        let services = crate::Services { load_prefs: Some(Box::new(move || saved.clone())), ..Default::default() };
+        let mut app = crate::PhotocraftApp::new(photocraft_engine::Session::new(), services);
+        super::load(&mut app);
+        app
+    }
+
+    #[test]
+    fn a_first_launch_starts_on_studio_dark() {
+        let app = app(None);
+        assert_eq!(app.session.prefs().interface.theme, Theme::Studio);
+        assert_eq!(app.session.prefs().interface.dark_theme, DarkTheme::Studio);
+    }
+
+    #[test]
+    fn saved_preferences_keep_their_theme() {
+        let mut s = photocraft_engine::Session::new();
+        s.prefs.edit(|p| {
+            p.interface.theme = Theme::ProMedium;
+            p.interface.dark_theme = DarkTheme::ProMedium;
+        });
+        let app = app(Some(s.prefs_value().to_string()));
+        assert_eq!(app.session.prefs().interface.dark_theme, DarkTheme::ProMedium);
     }
 }
