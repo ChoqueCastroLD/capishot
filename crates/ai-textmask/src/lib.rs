@@ -73,6 +73,8 @@ pub struct Timing {
     pub infer_ms: u64,
     /// From the network's answer to the pieces.
     pub regions_ms: u64,
+    /// The GPU failed and the CPU ran it.
+    pub fell_back: bool,
 }
 
 /// Runs the mask model. The engine holds one; a build without it has none.

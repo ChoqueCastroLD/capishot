@@ -140,6 +140,7 @@ fn detect(s: &mut Session, p: &Value) -> Result<Value> {
                 "stages": {"readMs": read_ms},
             });
             if let Some(t) = timing {
+                out["fellBack"] = json!(t.fell_back);
                 out["stages"]["loadMs"] = json!(t.load_ms);
                 out["stages"]["inferMs"] = json!(t.infer_ms);
                 out["stages"]["regionsMs"] = json!(t.regions_ms);
@@ -356,7 +357,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: LABEL,
             menu: &[],
             shortcut: None,
-            params: r#"{"inSelection"?: bool = false (keep only what is inside the selection, cut at its edge)}: finds the text and sound effects on the page with the mask model, as a job; answers {pieces: [{id, group, box, area, score, suggested}], model, device, cpu, region, ms (all of it), stages: {readMs (the page's pixels), loadMs (the model, 0 when it was loaded), inferMs (the network), regionsMs (from its answer to the pieces); the last three where the runtime tells them}}. Selects nothing: the model also marks art, so a person chooses"#,
+            params: r#"{"inSelection"?: bool = false (keep only what is inside the selection, cut at its edge)}: finds the text and sound effects on the page with the mask model, as a job; answers {pieces: [{id, group, box, area, score, suggested}], model, device, cpu, fellBack (the GPU failed and the CPU ran it), region, ms (all of it), stages: {readMs (the page's pixels), loadMs (the model, 0 when it was loaded), inferMs (the network), regionsMs (from its answer to the pieces); the last three where the runtime tells them}}. Selects nothing: the model also marks art, so a person chooses"#,
             enabled: has_masker,
             journal: false,
             run: detect,
@@ -420,7 +421,7 @@ mod tests {
             "test".into()
         }
         fn timing(&self) -> Option<photocraft_ai_textmask::Timing> {
-            Some(photocraft_ai_textmask::Timing { load_ms: 7, infer_ms: 40, regions_ms: 9 })
+            Some(photocraft_ai_textmask::Timing { load_ms: 7, infer_ms: 40, regions_ms: 9, fell_back: false })
         }
         fn detect(&self, page: Page<'_>, _: &dyn Fn() -> bool) -> std::result::Result<Detection, photocraft_ai_textmask::Error> {
             let prob: Vec<f32> = page.rgb.chunks_exact(3).map(|c| if c[0] < 128 { 0.995 } else { 0.0 }).collect();

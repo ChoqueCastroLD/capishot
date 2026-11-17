@@ -733,6 +733,9 @@ fn a_detection_reports_its_stages() {
     let r = &runs[1];
     assert_eq!((&r["device"], &r["read_ms"], &r["n"], &r["region"]), (&json!("cpu"), &json!(90), &json!(0), &json!("1-4")), "{r}");
     assert!(r.get("infer_ms").is_none() && r.get("load_ms").is_none(), "{r}");
+    // The first run of a command pays for the warm-up, and says so; a later one doesn't.
+    assert!(runs.iter().filter(|r| r.get("first") == Some(&json!(true))).count() <= 1, "{b}");
+    assert!(runs[1].get("first").is_none(), "{b}");
 }
 
 /// A name that isn't one of ours is no tool, whatever it starts with.

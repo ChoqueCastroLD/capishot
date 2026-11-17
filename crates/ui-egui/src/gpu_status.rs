@@ -56,13 +56,16 @@ pub fn check(app: &mut PhotocraftApp, ctx: &egui::Context) {
 }
 
 /// End-of-frame check of the device the window itself draws with (#3438). Once wgpu reports it
-/// lost (a driver reset, for example after the PC slept), egui-wgpu can't draw another frame: one
-/// with shapes panics creating its staging buffers (#1215), and one without leaves a frozen window
-/// whose close button opens an unsaved-changes prompt nobody can see. So this frame and every later
-/// one draw nothing; the first writes every unsaved document to crash recovery, waits for the
-/// writes, and closes the app without asking once all of them are saved. The next launch reopens
-/// the documents. If a write fails (a full disk, say) the app stays open with the documents in
-/// memory and tries again every [`RECOVERY_RETRY_SECS`]: closing would lose them.
+/// lost (a driver reset, for example after the PC slept, or a GPU reset during an AI run on
+/// DirectML), egui-wgpu can't draw another frame: one with shapes panics creating its staging
+/// buffers (#1215), and one without leaves a frozen window whose close button opens an
+/// unsaved-changes prompt nobody can see. So this frame and every later one draw nothing; the
+/// first writes every unsaved document to crash recovery, waits for the writes, and closes the
+/// window without asking once all of them are saved. The desktop app then starts again in a new
+/// process ([`relaunch_after_loss`]: the event loop can't be made again in this one), which
+/// reopens the documents, the saved ones from their files. If a write fails (a full disk, say)
+/// the app stays open with the documents in memory and tries again every
+/// [`RECOVERY_RETRY_SECS`]: closing would lose them.
 pub fn check_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let Some((device, health)) = app.window_device.as_ref() else { return };
     // A loss while the app sat idle or the PC slept is noticed here, before the next frame.
@@ -100,6 +103,9 @@ pub fn check_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
         Ok(()) => {
             app.window_recovery_retry = None;
             app.allow_close = true;
+            // The saved documents reopen from their files; the others from recovery.
+            let files = app.session.documents().iter().filter(|d| !d.is_dirty()).filter_map(|d| d.path.clone()).collect();
+            *RELAUNCH.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(files);
             crate::hosted::send(ctx, egui::ViewportCommand::Close);
         }
         Err(e) => {
@@ -112,6 +118,16 @@ pub fn check_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
 
 /// Seconds between attempts to save unsaved work for recovery after the window's device was lost.
 pub const RECOVERY_RETRY_SECS: f64 = 2.0;
+
+/// Set when the window closed because its device was lost: the files to open again.
+static RELAUNCH: std::sync::Mutex<Option<Vec<String>>> = std::sync::Mutex::new(None);
+
+/// The window closed because its GPU device was lost, with its work saved: the files of the
+/// documents that were saved, to open in the new process (the unsaved ones come back from
+/// recovery). `None`: it closed for another reason.
+pub fn relaunch_after_loss() -> Option<Vec<String>> {
+    RELAUNCH.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take()
+}
 
 /// Write every document with unsaved changes to crash recovery (Capishot's checkpoint writer,
 /// `prefs_ui::tick`), whatever the autosave timer, and report whether each is known to be on

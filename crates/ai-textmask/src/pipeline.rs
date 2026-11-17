@@ -46,11 +46,17 @@ pub fn half_size(w: usize, h: usize) -> (usize, usize) {
 /// the padded size.
 pub fn padded(rgb: &[u8], w: usize, h: usize) -> (Vec<u8>, usize, usize) {
     let (pw, ph) = (w.div_ceil(32) * 32, h.div_ceil(32) * 32);
+    (padded_to(rgb, w, h, pw, ph), pw, ph)
+}
+
+/// `rgb` (`w × h`) at the top left of a white `pw × ph` (at least as large).
+pub fn padded_to(rgb: &[u8], w: usize, h: usize, pw: usize, ph: usize) -> Vec<u8> {
     let mut canvas = vec![255u8; pw * ph * 3];
-    for y in 0..h {
-        canvas[y * pw * 3..(y * pw + w) * 3].copy_from_slice(&rgb[y * w * 3..(y * w + w) * 3]);
+    let n = w.min(pw);
+    for y in 0..h.min(ph) {
+        canvas[y * pw * 3..(y * pw + n) * 3].copy_from_slice(&rgb[y * w * 3..(y * w + n) * 3]);
     }
-    (canvas, pw, ph)
+    canvas
 }
 
 /// The logits of a padded run cut back to `w × h`.

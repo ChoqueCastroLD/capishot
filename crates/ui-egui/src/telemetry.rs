@@ -31,8 +31,9 @@
 //! ([`crash_location`]), and no byte of a panic's or a driver's message leaves: each is reduced to a
 //! fixed code ([`panic_code`], [`gpu_code`]).
 //! `ai_run` also reports finding the text (`select.detectText`), with where its time went
-//! (`read_ms`, `load_ms`, `infer_ms`, `post_ms`) and how many pieces it found (`n`): the collector
-//! takes those fields from any client of schema 7 on.
+//! (`read_ms`, `load_ms`, `infer_ms`, `post_ms`) and how many pieces it found (`n`), and for every
+//! AI command whether it is its first run in this run of the app (`first`, the warm-up): the
+//! collector takes those fields from any client of schema 7 on.
 //! Without a schema change (the collector refuses a whole batch for an unknown event or field), a
 //! canvas press a tool dropped goes out as a `command` with the id `toolDrop.<reason>.tool.<Name>`
 //! and source `tool` ([`Recorder::tool_drop`]): the reason is a fixed code, never free text.
@@ -421,7 +422,7 @@ pub const FIELDS: &[&str] = &[
     "e", "app", "commit", "threads", "coi", "cores", "gpu", "gpu_vendor", "browser", "browser_major", "os", "screen", "lang", "device", "mem", "channel", "os_ver",
     "cpu", "gpu_model", "gpu_driver", "ram", "disk", "active_s", "total_s", "id", "src", "n", "kind", "bytes", "mp", "layers", "ms", "ok", "op", "tool", "p50", "p95",
     "max", "long", "lat50", "lat95", "fps", "int95", "drop", "g", "w_in", "w_logic", "w_ui", "w_paint", "cmd", "job", "phase", "action", "api", "cause", "memMB", "upMin",
-    "docs", "model", "region", "fell_back", "lite", "ram_mb", "gpu_mb", "loc", "msg", "reason", "stage", "js_mb", "dev_gb", "loop", "read_ms", "load_ms", "infer_ms", "post_ms",
+    "docs", "model", "region", "fell_back", "lite", "ram_mb", "gpu_mb", "loc", "msg", "reason", "stage", "js_mb", "dev_gb", "loop", "read_ms", "load_ms", "infer_ms", "post_ms", "first",
 ];
 
 /// Fields holding a command or tool id, which [`sanitize_command_id`] already reduced to known ids
@@ -607,6 +608,9 @@ impl Recorder {
         }
         if let Some(n) = run.pieces {
             e["n"] = json!(n);
+        }
+        if run.first {
+            e["first"] = json!(true);
         }
         self.event(e);
     }
@@ -1518,6 +1522,8 @@ pub struct AiRun<'a> {
     pub stages: AiStages,
     /// How many pieces a detection found.
     pub pieces: Option<u64>,
+    /// The first run of this command in this run of the app: it pays for the model's warm-up.
+    pub first: bool,
 }
 
 /// The parts of an AI job's time, in ms: reading the page's pixels, loading the model (0: it was
@@ -1576,6 +1582,19 @@ pub fn ai_device_class(device: &str, cpu: bool) -> &'static str {
     }
 }
 
+/// The AI commands that have run in this run of the app.
+static AI_RUN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Whether `command` runs for the first time in this run of the app; from now on it has.
+fn first_run(command: &str) -> bool {
+    let mut seen = AI_RUN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if seen.iter().any(|c| c == command) {
+        return false;
+    }
+    seen.push(command.to_string());
+    true
+}
+
 /// An AI job ended: `reply` its result (`None`: it failed), `doc_mp` the document's size for
 /// replies that don't state their region. Cancelled jobs aren't reported.
 pub fn record_ai_job(command: &str, reply: Option<&Value>, doc_mp: Option<f64>, ms: f64) {
@@ -1605,6 +1624,7 @@ pub fn record_ai_job(command: &str, reply: Option<&Value>, doc_mp: Option<f64>, 
         fallback: reply.and_then(|r| r.get("notices")).map(|n| fallback_class(&n.to_string())),
         stages: AiStages { read: stage("readMs"), load: stage("loadMs"), infer: stage("inferMs"), post: stage("regionsMs") },
         pieces: reply.and_then(|r| r.get("pieces")).and_then(Value::as_array).map(|a| a.len() as u64),
+        first: first_run(command),
     };
     with(|r| r.ai_run(&run));
 }

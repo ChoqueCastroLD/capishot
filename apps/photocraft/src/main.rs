@@ -713,6 +713,17 @@ fn main() -> eframe::Result {
                 let lines = unreadable_paths.iter().map(|p| i18n::fmt(line, &[("path", p.as_str())])).collect();
                 photocraft_ui_egui::notices::post(&mut app, i18n::t("Could not open"), lines, true, None);
             }
+            // The last run's GPU was reset under its window: this run started in its place.
+            if relaunched_after_gpu_loss() {
+                use photocraft_ui_egui::i18n;
+                photocraft_ui_egui::notices::post(
+                    &mut app,
+                    i18n::t("The graphics card was reset"),
+                    vec![i18n::t("Capishot started again and reopened your documents.").to_string()],
+                    false,
+                    None,
+                );
+            }
             // Portable marker found but its data folder isn't writable (#228): say where settings went.
             if let Some(w) = &app_dirs::current().warning {
                 photocraft_ui_egui::notices::post(&mut app, "Portable mode is off", vec![w.clone()], false, None);
@@ -733,6 +744,12 @@ fn main() -> eframe::Result {
     #[cfg(not(target_os = "macos"))]
     if let Some(primary) = single_instance {
         primary.shutdown();
+    }
+    // The GPU was reset under the window (a driver reset; on Windows it may follow an AI run on
+    // DirectML): its work is in recovery, and a new process opens it again. Not twice within a
+    // minute, so a GPU that fails at every start doesn't start the app over and over.
+    if let Some(files) = photocraft_ui_egui::gpu_status::relaunch_after_loss() {
+        relaunch_after_gpu_loss(&files);
     }
     // Restart and Update: the helper installs once this process has exited, then starts Capishot.
     if let Some(plan) = photocraft_ui_egui::win_update::take_pending()
@@ -782,6 +799,37 @@ fn main() -> eframe::Result {
         }
     }
     result
+}
+
+/// Set on the process [`relaunch_after_gpu_loss`] starts: when (Unix seconds).
+const RELAUNCHED_AT: &str = "PHOTOCRAFT_RELAUNCHED_AFTER_GPU_LOSS";
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
+}
+
+/// This process was started by [`relaunch_after_gpu_loss`].
+fn relaunched_after_gpu_loss() -> bool {
+    std::env::var(RELAUNCHED_AT).is_ok_and(|v| !v.is_empty())
+}
+
+/// Starts Capishot again with `files` (the saved documents; the unsaved ones reopen from
+/// recovery), unless this process is itself such a start less than a minute old.
+fn relaunch_after_gpu_loss(files: &[String]) {
+    let started = std::env::var(RELAUNCHED_AT).ok().and_then(|v| v.parse::<u64>().ok());
+    if started.is_some_and(|t| unix_now().saturating_sub(t) < 60) {
+        log::error!("the GPU was lost again within a minute of the last restart: not starting again");
+        return;
+    }
+    let Ok(exe) = std::env::current_exe() else { return };
+    let mut command = std::process::Command::new(exe);
+    command.env(RELAUNCHED_AT, unix_now().to_string());
+    if !files.is_empty() {
+        command.arg("--").args(files);
+    }
+    if let Err(e) = command.spawn() {
+        log::error!("could not start Capishot again after the GPU was lost: {e}");
+    }
 }
 
 /// Tests that spawn child processes hold this for reading, tests that check who holds a file lock
