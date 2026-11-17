@@ -52,6 +52,8 @@ photocraft-raw = { workspace = true, features = ["testgen"] }
 # the binary.
 clap_complete = { workspace = true }
 clap_mangen = { workspace = true }
+# The Rust heap of Text Selection and its clean on a real page (tests/ai_memory.rs).
+stats_alloc = "0.1"
 
 [build-dependencies]
 # Icon + VERSIONINFO for photocraft-cli.exe; build.rs only uses it when targeting Windows.

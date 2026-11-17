@@ -11,6 +11,22 @@ pub const MAX_HEIGHT: usize = 2600;
 pub const GIANT: bool = true;
 const GIANT_SCALE: f64 = 0.5;
 
+/// What [`regions`] holds at its most, for each pixel of the page: the probabilities of both
+/// passes, the labels and sets of two component passes and the page in grey (measured: 31).
+pub const REGIONS_BYTES_PER_PIXEL: usize = 36;
+
+/// Fails when `bytes` more can't be had now. A buffer that can't be allocated ends the whole
+/// process (Rust aborts), so the large ones of a run are asked for first, where saying no is
+/// still an error to show. Not in the browser: its memory only grows, and one block of this size
+/// can be refused where the buffers themselves fit.
+pub fn room_for(bytes: usize) -> Result<(), crate::Error> {
+    if cfg!(target_arch = "wasm32") {
+        return Ok(());
+    }
+    let mut probe: Vec<u8> = Vec::new();
+    probe.try_reserve_exact(bytes).map_err(|_| crate::Error::Device(format!("not enough memory for this page ({} MB more are needed)", bytes >> 20)))
+}
+
 /// The size a page reaches the network at, and whether that's a resize.
 pub fn net_size(w: usize, h: usize) -> (usize, usize) {
     let scale = if h < MIN_HEIGHT { MIN_HEIGHT as f64 / h as f64 } else if h > MAX_HEIGHT { MAX_HEIGHT as f64 / h as f64 } else { 1.0 };

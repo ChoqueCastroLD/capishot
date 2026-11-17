@@ -603,6 +603,9 @@ impl<O: Send + 'static> Head<O> {
         let surf = doc.layer(id).and_then(|l| l.surface()).ok_or(EngineError::NoLayer(id))?;
         let sel = doc.selection.as_ref().ok_or_else(|| bad("make a selection around what to clean"))?;
         let fmt = surf.format();
+        // What the job holds for each pixel of the region: the layer's own pixels and their RGB in
+        // floats, the selection's coverage three times over and the flags of the tiles' plan.
+        crate::text_mask_cmds::room_for((w * h) as u64 * (fmt.channels() as u64 * 4 + 12 + 12 + 4))?;
         let layer_px = surf.read_region(region);
         if layer_px.len() != w * h * fmt.channels() {
             return Err(EngineError::Other("could not read the layer's pixels".into()));

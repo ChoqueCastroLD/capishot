@@ -178,7 +178,7 @@ fn ort_matches_pytorch(cpu: bool) {
         return eprintln!("ONNX Runtime skipped: {why}");
     }
     let bytes = tiny_safetensors("lama-ffc");
-    let dml = if cpu { DmlLama::cpu_from_safetensors(&bytes, 0) } else { DmlLama::from_safetensors(&bytes) }.unwrap();
+    let dml = if cpu { DmlLama::cpu_from_safetensors(bytes.clone(), 0) } else { DmlLama::from_safetensors(bytes.clone()) }.unwrap();
     let (rgb, mask) = tiny_input();
     let out = dml.generate(&rgb, &mask, W, H).unwrap();
     assert_eq!(out.len(), W * H * 3);

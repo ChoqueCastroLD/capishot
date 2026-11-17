@@ -64,11 +64,29 @@ pub struct Page<'a> {
     pub height: usize,
 }
 
+/// How long the parts of a detection took, in milliseconds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Timing {
+    /// Loading the model, when this run had to (0: it was loaded).
+    pub load_ms: u64,
+    /// The network: the page at its working size, every tile, the half-size pass.
+    pub infer_ms: u64,
+    /// From the network's answer to the pieces.
+    pub regions_ms: u64,
+}
+
 /// Runs the mask model. The engine holds one; a build without it has none.
 pub trait TextMasker: Send + Sync {
     fn model_state(&self) -> ModelState;
     /// Where it runs, for the UI ("DirectML", "CPU"); empty until known.
     fn device(&self) -> String;
+    /// Loads the model now, off the caller's thread, so the first detection doesn't wait for it.
+    /// Nothing happens when it is loaded, loading, or not downloaded.
+    fn warm(&self) {}
+    /// The parts of the last detection that ended well, where they're known.
+    fn timing(&self) -> Option<Timing> {
+        None
+    }
     /// The page's regions. `cancelled` is asked between tiles.
     fn detect(&self, page: Page<'_>, cancelled: &dyn Fn() -> bool) -> Result<Detection, Error>;
     /// [`TextMasker::detect`] for a job: a browser's page can't wait for its worker, so it

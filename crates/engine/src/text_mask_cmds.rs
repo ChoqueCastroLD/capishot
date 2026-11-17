@@ -19,6 +19,9 @@ pub const ZONE: &str = "select.textZone";
 pub const CLEAN: &str = "select.cleanPieces";
 const LABEL: &str = "Detect Text";
 const UNAVAILABLE: &str = "text detection isn't available in this build";
+/// What choosing pieces holds at its most for each pixel of the page: the mask in floats and the
+/// flags it's grown from (measured: 7).
+const MASK_BYTES_PER_PIXEL: u64 = 8;
 
 impl Session {
     /// Injects (or removes) the service that runs the mask model.
@@ -56,8 +59,24 @@ fn pieces_json(d: &Detection) -> Vec<Value> {
     d.regions.iter().map(|r| json!({"id": r.id, "group": r.group, "box": r.bbox, "area": r.area, "score": r.score, "suggested": r.suggested()})).collect()
 }
 
+/// Fails when `bytes` more can't be had now. A buffer that can't be allocated ends the whole
+/// app (Rust aborts), so a job's large ones are asked for first, where saying no is still an
+/// error to show. Not in the browser: its memory only grows, and one block of this size can be
+/// refused where the buffers themselves fit.
+pub(crate) fn room_for(bytes: u64) -> Result<()> {
+    if cfg!(target_arch = "wasm32") {
+        return Ok(());
+    }
+    let short = || EngineError::Other(format!("not enough memory for this ({} MB more are needed): close other documents or apps and try again", bytes >> 20));
+    let mut probe: Vec<u8> = Vec::new();
+    probe.try_reserve_exact(usize::try_from(bytes).map_err(|_| short())?).map_err(|_| short())
+}
+
 /// The page as the model reads it: what shows, over white.
-fn page_rgb(doc: &photocraft_doc::Document) -> (Vec<u8>, usize, usize) {
+fn page_rgb(doc: &photocraft_doc::Document) -> Result<(Vec<u8>, usize, usize)> {
+    let bounds = doc.bounds();
+    // The flattened page in floats, and its bytes.
+    room_for(u64::from(bounds.width()) * u64::from(bounds.height()) * 19)?;
     let b = photocraft_compose::flatten(doc);
     let (w, h) = (b.rect.width() as usize, b.rect.height() as usize);
     let mut rgb = Vec::with_capacity(w * h * 3);
@@ -68,7 +87,7 @@ fn page_rgb(doc: &photocraft_doc::Document) -> (Vec<u8>, usize, usize) {
             rgb.push((v.clamp(0.0, 1.0) * 255.0).round() as u8);
         }
     }
-    (rgb, w, h)
+    Ok((rgb, w, h))
 }
 
 fn detect(s: &mut Session, p: &Value) -> Result<Value> {
@@ -82,10 +101,14 @@ fn detect(s: &mut Session, p: &Value) -> Result<Value> {
         s,
         LABEL,
         true,
-        move |_| Ok(crate::jobs::Prep::Done(page_rgb(&page))),
-        move |ctx, (rgb, width, height), done| {
-            ctx.progress(0.0, LABEL);
+        move |_| {
             let started = web_time::Instant::now();
+            let (rgb, width, height) = page_rgb(&page)?;
+            Ok(crate::jobs::Prep::Done((rgb, width, height, started)))
+        },
+        move |ctx, (rgb, width, height, started), done| {
+            ctx.progress(0.0, LABEL);
+            let read_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
             let (cancel, step) = (ctx.clone(), ctx.clone());
             let hooks = Hooks { cancelled: Arc::new(move || cancel.cancelled()), progress: Arc::new(move |f| step.progress(f, LABEL)) };
             let service = masker.clone();
@@ -101,13 +124,26 @@ fn detect(s: &mut Session, p: &Value) -> Result<Value> {
                         None => d,
                     });
                     let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-                    done.finish(r.map(|d| (Arc::new(d), service.device(), ms)));
+                    done.finish(r.map(|d| (Arc::new(d), service.device(), ms, read_ms, service.timing())));
                 }),
             );
         },
-        move |s, (d, device, ms): (Arc<Detection>, String, u64)| {
+        move |s, (d, device, ms, read_ms, timing): (Arc<Detection>, String, u64, u64, Option<photocraft_ai_textmask::Timing>)| {
             s.text_detections.retain(|(doc, _)| *doc != id);
-            let out = json!({"pieces": pieces_json(&d), "device": device, "ms": ms});
+            let mut out = json!({
+                "pieces": pieces_json(&d),
+                "model": photocraft_ai::catalog::TEXTMASK_ID,
+                "cpu": device == "CPU",
+                "device": device,
+                "region": [0, 0, d.width, d.height],
+                "ms": ms,
+                "stages": {"readMs": read_ms},
+            });
+            if let Some(t) = timing {
+                out["stages"]["loadMs"] = json!(t.load_ms);
+                out["stages"]["inferMs"] = json!(t.infer_ms);
+                out["stages"]["regionsMs"] = json!(t.regions_ms);
+            }
             s.text_detections.push((id, d));
             Ok(out)
         },
@@ -136,6 +172,7 @@ fn clean_pieces(s: &mut Session, p: &Value) -> Result<Value> {
     let area = Rect::new(0, 0, i32::try_from(d.width).unwrap_or(i32::MAX), i32::try_from(d.height).unwrap_or(i32::MAX));
     let px = |v: &Value, key: &str| v.get(key).and_then(Value::as_f64).map(|v| v.round().max(0.0) as usize);
     let default = px(p, "grow").unwrap_or_else(|| default_grow(d.width, d.height));
+    room_for(MASK_BYTES_PER_PIXEL * (d.width * d.height) as u64)?;
     let mut gone = vec![false; d.width * d.height];
     let mut done = Vec::with_capacity(steps.len());
     let mut taken = std::collections::HashSet::new();
@@ -189,6 +226,7 @@ fn pieces(s: &mut Session, p: &Value) -> Result<Value> {
     let grow = px("grow").unwrap_or_else(|| default_grow(d.width, d.height));
     let area = Rect::new(0, 0, i32::try_from(d.width).unwrap_or(i32::MAX), i32::try_from(d.height).unwrap_or(i32::MAX));
     let mut mode = sel::SelectionMode::parse(p.get("mode").and_then(Value::as_str).unwrap_or("replace"));
+    room_for(MASK_BYTES_PER_PIXEL * (d.width * d.height) as u64)?;
     let mut mask: Vec<f32> = selection_mask(&d, &ids, grow).into_iter().map(|v| if v { 1.0 } else { 0.0 }).collect();
     // Taking a piece out leaves its neighbours' reach whole.
     if let Some(keep) = p.get("keep").and_then(Value::as_array) {
@@ -318,7 +356,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: LABEL,
             menu: &[],
             shortcut: None,
-            params: r#"{"inSelection"?: bool = false (keep only what is inside the selection, cut at its edge)}: finds the text and sound effects on the page with the mask model, as a job; answers {pieces: [{id, group, box, area, score, suggested}], device, ms}. Selects nothing: the model also marks art, so a person chooses"#,
+            params: r#"{"inSelection"?: bool = false (keep only what is inside the selection, cut at its edge)}: finds the text and sound effects on the page with the mask model, as a job; answers {pieces: [{id, group, box, area, score, suggested}], model, device, cpu, region, ms (all of it), stages: {readMs (the page's pixels), loadMs (the model, 0 when it was loaded), inferMs (the network), regionsMs (from its answer to the pieces); the last three where the runtime tells them}}. Selects nothing: the model also marks art, so a person chooses"#,
             enabled: has_masker,
             journal: false,
             run: detect,
@@ -381,6 +419,9 @@ mod tests {
         fn device(&self) -> String {
             "test".into()
         }
+        fn timing(&self) -> Option<photocraft_ai_textmask::Timing> {
+            Some(photocraft_ai_textmask::Timing { load_ms: 7, infer_ms: 40, regions_ms: 9 })
+        }
         fn detect(&self, page: Page<'_>, _: &dyn Fn() -> bool) -> std::result::Result<Detection, photocraft_ai_textmask::Error> {
             let prob: Vec<f32> = page.rgb.chunks_exact(3).map(|c| if c[0] < 128 { 0.995 } else { 0.0 }).collect();
             Ok(find_regions(&prob, page.width, page.height))
@@ -414,6 +455,27 @@ mod tests {
         s.execute(PIECES, json!({"pieces": "all", "grow": 3})).unwrap();
         let b = s.active().unwrap().doc.selection.clone().unwrap().content_bounds();
         assert_eq!(b, Rect::new(17, 17, 243, 153), "both, grown");
+    }
+
+    /// The answer says what ran, on what, and where the time went: the usage statistics' `ai_run`.
+    #[test]
+    fn a_detection_says_where_its_time_went() {
+        let mut s = page();
+        let r = s.execute(DETECT, json!({})).unwrap();
+        assert_eq!((r["model"].as_str(), r["device"].as_str(), r["cpu"].as_bool()), (Some("manga-text-mask"), Some("test"), Some(false)), "{r}");
+        assert_eq!(r["region"], json!([0, 0, 300, 200]));
+        let t = &r["stages"];
+        assert_eq!((&t["loadMs"], &t["inferMs"], &t["regionsMs"]), (&json!(7), &json!(40), &json!(9)), "{r}");
+        assert!(t["readMs"].is_u64() && r["ms"].is_u64(), "{r}");
+    }
+
+    /// A job's large buffers are asked for before the work: one that can't be had is an error,
+    /// where the allocation itself would have ended the app.
+    #[test]
+    fn what_cannot_be_had_is_an_error_not_an_abort() {
+        assert!(room_for(1 << 20).is_ok());
+        let e = room_for(u64::MAX / 4).unwrap_err().to_string();
+        assert!(e.contains("not enough memory"), "{e}");
     }
 
     fn covered(s: &Session, x: i32, y: i32) -> bool {

@@ -16,6 +16,7 @@
 
 use crate::dft::Dft2;
 use crate::weights::{Ffc, HostConv, Weights};
+use crate::{LamaError, Result};
 
 /// ONNX IR version 8 and operator set 17 (ONNX Runtime 1.14 and later).
 const IR_VERSION: u64 = 8;
@@ -94,15 +95,64 @@ impl Attr<'_> {
     }
 }
 
+/// How many bytes `v` takes as a varint.
+fn varint_len(mut v: u64) -> usize {
+    let mut n = 1;
+    while v >= 0x80 {
+        v >>= 7;
+        n += 1;
+    }
+    n
+}
+
+/// A `TensorProto` whose values stay where they are (the weights, 200 MB of them) until the
+/// model's bytes are written, once: as messages inside messages they were copied three times
+/// over, each in a buffer that grew by doubling, and loading the model took over 1 GB.
+struct Init<'a> {
+    /// Its dimensions, type and name.
+    head: Msg,
+    data: Data<'a>,
+}
+
+enum Data<'a> {
+    Floats(&'a [f32]),
+    Ints(Vec<i64>),
+}
+
+impl Init<'_> {
+    fn raw_len(&self) -> usize {
+        match &self.data {
+            Data::Floats(v) => v.len() * 4,
+            Data::Ints(v) => v.len() * 8,
+        }
+    }
+
+    /// The message's length: the head, then `raw_data` (field 9).
+    fn len(&self) -> usize {
+        let raw = self.raw_len();
+        self.head.0.len() + 1 + varint_len(raw as u64) + raw
+    }
+
+    fn write(&self, out: &mut Msg) {
+        out.0.extend_from_slice(&self.head.0);
+        out.key(9, 2);
+        out.varint(self.raw_len() as u64);
+        match &self.data {
+            Data::Floats(v) => v.iter().for_each(|x| out.0.extend_from_slice(&x.to_le_bytes())),
+            Data::Ints(v) => v.iter().for_each(|x| out.0.extend_from_slice(&x.to_le_bytes())),
+        }
+    }
+}
+
 /// A graph being built: nodes, initializers, fresh value names.
 #[derive(Default)]
-struct Graph {
+struct Graph<'a> {
     nodes: Vec<Msg>,
-    inits: Vec<Msg>,
+    inits: Vec<Init<'a>>,
     n: usize,
 }
 
-impl Graph {
+impl<'a> Graph<'a> {
     fn fresh(&mut self, p: &str) -> String {
         self.n += 1;
         format!("{p}{}", self.n)
@@ -126,21 +176,21 @@ impl Graph {
         self.node_to(op, inputs, attrs, &[&out]);
         out
     }
-    fn tensor(&mut self, p: &str, dims: &[usize], ty: u64, raw: Vec<u8>) -> String {
+    fn tensor(&mut self, p: &str, dims: &[usize], ty: u64, data: Data<'a>) -> String {
         let name = self.fresh(p);
-        let mut m = Msg::default();
+        let mut head = Msg::default();
         for d in dims {
-            m.int(1, *d as u64);
+            head.int(1, *d as u64);
         }
-        m.int(2, ty).str(8, &name).bytes(9, &raw);
-        self.inits.push(m);
+        head.int(2, ty).str(8, &name);
+        self.inits.push(Init { head, data });
         name
     }
-    fn floats(&mut self, p: &str, dims: &[usize], data: &[f32]) -> String {
-        self.tensor(p, dims, FLOAT, data.iter().flat_map(|v| v.to_le_bytes()).collect())
+    fn floats(&mut self, p: &str, dims: &[usize], data: &'a [f32]) -> String {
+        self.tensor(p, dims, FLOAT, Data::Floats(data))
     }
     fn ints(&mut self, p: &str, data: &[i64]) -> String {
-        self.tensor(p, &[data.len()], INT64, data.iter().flat_map(|v| v.to_le_bytes()).collect())
+        self.tensor(p, &[data.len()], INT64, Data::Ints(data.to_vec()))
     }
     /// Reflect padding of `pad` pixels on each side of the spatial axes.
     fn reflect(&mut self, x: &str, pad: i64) -> String {
@@ -148,7 +198,7 @@ impl Graph {
         self.node("Pad", &[x, &pads], &[Attr::Str("mode", "reflect")])
     }
     /// A convolution after reflect padding of `pad` (as `model.rs`'s `conv`).
-    fn conv(&mut self, x: &str, c: &HostConv, stride: i64, pad: i64) -> String {
+    fn conv(&mut self, x: &str, c: &'a HostConv, stride: i64, pad: i64) -> String {
         let x = if pad > 0 { self.reflect(x, pad) } else { x.to_string() };
         let w = self.floats("w", &c.shape, &c.w);
         let mut inputs = vec![x, w];
@@ -173,7 +223,7 @@ impl Graph {
     }
 
     /// Fourier unit (see the module docs): rfft2 → 1×1 conv + ReLU on `[re, im]` → irfft2.
-    fn fourier(&mut self, z: &str, fu: &HostConv) -> String {
+    fn fourier(&mut self, z: &str, fu: &'a HostConv) -> String {
         let [dc, ds, fwc, fws, iwc, iws] = DFT.map(|(n, _)| n);
         let (a, b) = (self.matmul(z, fwc), self.matmul(z, fws));
         let (ca, sb, cb, sa) = (self.matmul(dc, &a), self.matmul(ds, &b), self.matmul(dc, &b), self.matmul(ds, &a));
@@ -192,7 +242,7 @@ impl Graph {
         self.add(&xr, &xi)
     }
 
-    fn ffc(&mut self, xl: &str, xg: &str, f: &Ffc<HostConv>) -> (String, String) {
+    fn ffc(&mut self, xl: &str, xg: &str, f: &'a Ffc<HostConv>) -> (String, String) {
         let (l2l, g2l) = (self.conv(xl, &f.l2l, 1, 1), self.conv(xg, &f.g2l, 1, 1));
         let ol = self.add(&l2l, &g2l);
         let z = self.conv(xg, &f.st1, 1, 0);
@@ -228,7 +278,8 @@ fn value(name: &str, dims: &[(Option<usize>, &str)]) -> Msg {
 
 /// The generator as ONNX model bytes: [`INPUT`] `[1, 4, H, W]` (see `model.rs`'s
 /// `planar_input`) and the [`DFT`] matrices for `H/8 × W/8` → [`OUTPUT`] `[1, 3, H, W]` in 0..=1.
-pub(crate) fn lama(w: &Weights<HostConv>) -> Vec<u8> {
+/// One buffer of the model's exact size; an error where there's no memory for it.
+pub(crate) fn lama(w: &Weights<HostConv>) -> Result<Vec<u8>> {
     let mut g = Graph::default();
     let x = g.conv(INPUT, &w.stem, 1, 3);
     let x = g.relu(&x);
@@ -265,24 +316,39 @@ pub(crate) fn lama(w: &Weights<HostConv>) -> Vec<u8> {
     let y = g.conv(&x, &w.out, 1, 3);
     g.node_to("Sigmoid", &[&y], &[], &[OUTPUT]);
 
-    let mut graph = Msg::default();
+    // The graph: its nodes and name, the initializers (field 5), its inputs and outputs.
+    let mut before = Msg::default();
     for n in &g.nodes {
-        graph.msg(1, n);
+        before.msg(1, n);
     }
-    graph.str(2, "manga-lama");
-    for i in &g.inits {
-        graph.msg(5, i);
-    }
-    graph.msg(11, &value(INPUT, &[(Some(1), ""), (Some(4), ""), (None, "h"), (None, "w")]));
+    before.str(2, "manga-lama");
+    let mut after = Msg::default();
+    after.msg(11, &value(INPUT, &[(Some(1), ""), (Some(4), ""), (None, "h"), (None, "w")]));
     for (name, [r, c]) in DFT {
-        graph.msg(11, &value(name, &[(None, r), (None, c)]));
+        after.msg(11, &value(name, &[(None, r), (None, c)]));
     }
-    graph.msg(12, &value(OUTPUT, &[(Some(1), ""), (Some(3), ""), (None, "h"), (None, "w")]));
+    after.msg(12, &value(OUTPUT, &[(Some(1), ""), (Some(3), ""), (None, "h"), (None, "w")]));
+    let inits: usize = g.inits.iter().map(|i| 1 + varint_len(i.len() as u64) + i.len()).sum();
+    let graph = before.0.len() + inits + after.0.len();
     let mut opset = Msg::default();
     opset.str(1, "").int(2, OPSET);
+    let mut end = Msg::default();
+    end.msg(8, &opset);
     let mut model = Msg::default();
-    model.int(1, IR_VERSION).str(2, "capishot").msg(7, &graph).msg(8, &opset);
-    model.0
+    model.int(1, IR_VERSION).str(2, "capishot");
+    let total = model.0.len() + 1 + varint_len(graph as u64) + graph + end.0.len();
+    model.0.try_reserve_exact(total - model.0.len()).map_err(|_| LamaError::Device(format!("not enough memory to load the model ({} MB are needed)", total >> 20)))?;
+    model.key(7, 2);
+    model.varint(graph as u64);
+    model.0.extend_from_slice(&before.0);
+    for i in &g.inits {
+        model.key(5, 2);
+        model.varint(i.len() as u64);
+        i.write(&mut model);
+    }
+    model.0.extend_from_slice(&after.0);
+    model.0.extend_from_slice(&end.0);
+    Ok(model.0)
 }
 
 /// The [`DFT`] inputs for a `bh × bw` bottleneck: `(name, [rows, cols], values)`, cut out of
@@ -352,10 +418,91 @@ mod tests {
         }
     }
 
+    fn conv(o: usize, i: usize, k: usize, bias: bool, seed: f32) -> HostConv {
+        let w = (0..o * i * k * k).map(|n| seed + n as f32 * 0.01).collect();
+        HostConv { shape: [o, i, k, k], w, b: bias.then(|| (0..o).map(|n| seed - n as f32).collect()) }
+    }
+
+    fn tiny() -> Weights<HostConv> {
+        let ffc = |s: f32| Ffc { l2l: conv(2, 2, 3, false, s), g2l: conv(2, 6, 3, false, s + 1.0), l2g: conv(6, 2, 3, false, s + 2.0), st1: conv(3, 6, 1, true, s + 3.0), fu: conv(6, 6, 1, true, s + 4.0), st2: conv(6, 3, 1, false, s + 5.0) };
+        Weights {
+            arch: crate::weights::Arch { ngf: 1, blocks: 1 },
+            stem: conv(1, 4, 7, true, 0.5),
+            down1: conv(2, 1, 3, true, 1.5),
+            down2: conv(4, 2, 3, true, 2.5),
+            down3_l: conv(2, 4, 3, true, 3.5),
+            down3_g: conv(6, 4, 3, true, 4.5),
+            blocks: vec![[ffc(10.0), ffc(20.0)]],
+            up: [conv(8, 4, 3, true, 5.5), conv(4, 2, 3, true, 6.5), conv(2, 1, 3, true, 7.5)],
+            out: conv(3, 1, 7, true, 8.5),
+        }
+    }
+
+    /// The fields of a message: `(number, wire type, payload or varint bytes)`.
+    fn fields(mut b: &[u8]) -> Vec<(u64, u64, Vec<u8>)> {
+        fn varint(b: &mut &[u8]) -> u64 {
+            let (mut v, mut shift) = (0u64, 0);
+            loop {
+                let byte = b[0];
+                *b = &b[1..];
+                v |= u64::from(byte & 0x7f) << shift;
+                if byte & 0x80 == 0 {
+                    return v;
+                }
+                shift += 7;
+            }
+        }
+        let mut out = Vec::new();
+        while !b.is_empty() {
+            let key = varint(&mut b);
+            match key & 7 {
+                0 => out.push((key >> 3, 0, varint(&mut b).to_le_bytes().to_vec())),
+                2 => {
+                    let n = varint(&mut b) as usize;
+                    out.push((key >> 3, 2, b[..n].to_vec()));
+                    b = &b[n..];
+                }
+                other => panic!("wire type {other}"),
+            }
+        }
+        out
+    }
+
+    /// The model is written once, into a buffer of its exact size, and reads back as the messages
+    /// it was built from: every initializer whole, with its values.
+    #[test]
+    fn the_model_is_one_exact_buffer_that_reads_back() {
+        let w = tiny();
+        let model = lama(&w).unwrap();
+        assert_eq!(model.len(), model.capacity(), "its exact size, reserved once");
+        let top = fields(&model);
+        assert_eq!(top.iter().map(|f| f.0).collect::<Vec<_>>(), [1, 2, 7, 8], "ir version, producer, graph, opset");
+        let graph = fields(&top[2].2);
+        let count = |n: u64| graph.iter().filter(|f| f.0 == n).count();
+        // 7 graph inputs (the image and the DFT matrices), one output.
+        assert_eq!((count(11), count(12), count(2)), (7, 1, 1));
+        let inits: Vec<Vec<(u64, u64, Vec<u8>)>> = graph.iter().filter(|f| f.0 == 5).map(|f| fields(&f.2)).collect();
+        let dims_of = |t: &[(u64, u64, Vec<u8>)]| -> Vec<u64> { t.iter().filter(|f| f.0 == 1).map(|f| u64::from_le_bytes(f.2.clone().try_into().unwrap())).collect() };
+        // The stem's weights: their dimensions, their name and every value.
+        let stem = inits.iter().find(|t| dims_of(t) == [1, 4, 7, 7]).unwrap();
+        assert!(stem.iter().any(|f| f.0 == 8 && f.2.starts_with(b"w")));
+        let raw = &stem.iter().find(|f| f.0 == 9).unwrap().2;
+        let values: Vec<f32> = raw.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
+        assert_eq!(values, w.stem.w);
+        // Every weight and bias is in it, and the pads (int64).
+        let floats: usize = inits.iter().filter(|t| t.iter().any(|f| f.0 == 2 && f.2[0] == FLOAT as u8)).map(|t| t.iter().find(|f| f.0 == 9).unwrap().2.len() / 4).sum();
+        let all = |c: &HostConv| c.w.len() + c.b.as_ref().map_or(0, Vec::len);
+        let ffc = |f: &Ffc<HostConv>| all(&f.l2l) + all(&f.g2l) + all(&f.l2g) + all(&f.st1) + all(&f.fu) + all(&f.st2);
+        let want = all(&w.stem) + all(&w.down1) + all(&w.down2) + all(&w.down3_l) + all(&w.down3_g) + w.blocks.iter().map(|[a, b]| ffc(a) + ffc(b)).sum::<usize>() + w.up.iter().map(all).sum::<usize>() + all(&w.out);
+        assert_eq!(floats, want);
+        assert!(inits.iter().any(|t| t.iter().any(|f| f.0 == 2 && f.2[0] == INT64 as u8)), "the reflect pads");
+    }
+
     #[test]
     fn varints() {
         let mut m = Msg::default();
         m.varint(300);
         assert_eq!(m.0, [0xac, 0x02]);
+        assert_eq!([varint_len(0), varint_len(127), varint_len(128), varint_len(300), varint_len(1 << 28)], [1, 1, 2, 2, 5]);
     }
 }

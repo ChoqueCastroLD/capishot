@@ -275,7 +275,7 @@ impl NativeInpainter {
                     Ok(b) => b,
                     Err(e) => return Some(Err(e)),
                 };
-                match crate::directml::DmlLama::from_safetensors(&bytes) {
+                match crate::directml::DmlLama::from_safetensors(bytes) {
                     Ok(d) => {
                         // The burn copy on the GPU isn't needed while DirectML runs the model.
                         let mut m = self.model.lock().unwrap_or_else(PoisonError::into_inner);
@@ -336,7 +336,7 @@ impl NativeInpainter {
             _ => {
                 *slot = None;
                 let Ok(bytes) = self.weights(LAMA) else { return None };
-                let Ok(d) = crate::directml::DmlLama::cpu_from_safetensors(&bytes, req.threads) else { return fail() };
+                let Ok(d) = crate::directml::DmlLama::cpu_from_safetensors(bytes, req.threads) else { return fail() };
                 // burn's CPU copy isn't needed while ONNX Runtime runs the model.
                 let mut m = self.model.lock().unwrap_or_else(PoisonError::into_inner);
                 if m.as_ref().is_some_and(|b| b.id == LAMA && b.cpu) {
