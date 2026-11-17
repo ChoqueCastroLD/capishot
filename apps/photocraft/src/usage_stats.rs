@@ -237,6 +237,8 @@ fn collect_crumbs(dir: &Path, now: u64, alive: &dyn Fn(u32) -> bool) -> Vec<Valu
 enum Message {
     /// Send what is waiting now.
     Flush,
+    /// The app started or ended a stage of work: the breadcrumb is written now, with the memory.
+    Crumb,
     /// A session started: write its breadcrumb from now on.
     Session(Arc<Mutex<Crumb>>),
     /// Statistics were turned off: no more breadcrumbs.
@@ -298,8 +300,13 @@ fn run_thread(url: String, config: Option<PathBuf>, shared: Arc<Shared>, rx: mps
     let mut beats = 0u64;
     let beats_per_flush = (telemetry::FLUSH_MS / 1000.0 / BEAT.as_secs_f64()).round().max(1.0) as u64;
     loop {
+        let mut crumb_now = false;
         let flush_now = match rx.recv_timeout(BEAT) {
             Ok(Message::Flush) => true,
+            Ok(Message::Crumb) => {
+                crumb_now = true;
+                false
+            }
             Ok(Message::Session(c)) => {
                 crumb = Some(c);
                 beats = 0;
@@ -332,6 +339,11 @@ fn run_thread(url: String, config: Option<PathBuf>, shared: Arc<Shared>, rx: mps
             Err(RecvTimeoutError::Disconnected) => return,
         };
         if let (Some(c), Some((file, _))) = (&crumb, &files) {
+            // A run that dies of memory dies fast: what it had when the work started is the last word.
+            if let Some(mb) = resident_mb(&mut sys, pid).filter(|_| crumb_now) {
+                let mut c = c.lock().unwrap_or_else(PoisonError::into_inner);
+                c.mem_mb = c.mem_mb.max(mb);
+            }
             let snapshot = c.lock().unwrap_or_else(PoisonError::into_inner).clone();
             write_crumb(file, &snapshot, shared.started.load(Ordering::Relaxed), unix_secs());
         }
@@ -373,6 +385,8 @@ pub struct Shell {
     session_started_ms: f64,
     crumb: Arc<Mutex<Crumb>>,
     last_crumb_ms: f64,
+    /// The stage the breadcrumb was last written in.
+    crumb_stage: &'static str,
     last_gpu_ms: f64,
 }
 
@@ -406,6 +420,7 @@ impl Shell {
             session_started_ms: 0.0,
             crumb: Arc::default(),
             last_crumb_ms: 0.0,
+            crumb_stage: "",
             last_gpu_ms: 0.0,
         })
     }
@@ -430,7 +445,11 @@ impl Shell {
         telemetry::observe_frame(&self.app, ctx);
         self.shared.focused.store(ctx.input(|i| i.focused), Ordering::Relaxed);
         let now = telemetry::now_ms();
-        if now - self.last_crumb_ms >= 2000.0 {
+        // A stage that starts or ends (an AI job, an open) is written at once: the breadcrumb of a
+        // run that died seconds into a job said `idle` and the command before it.
+        let stage = telemetry::stage_name();
+        let staged = stage != self.crumb_stage;
+        if staged || now - self.last_crumb_ms >= 2000.0 {
             self.last_crumb_ms = now;
             // Only tried: the thread holds it for a copy of a few short strings.
             if let Ok(mut crumb) = self.crumb.try_lock() {
@@ -439,6 +458,10 @@ impl Shell {
                 crumb.tool.push_str(telemetry::tool_id(self.app.ui.tool).trim_start_matches("tool."));
                 crumb.docs = self.app.session.documents().len() as u64;
             }
+        }
+        if staged {
+            self.crumb_stage = stage;
+            let _ = self.tx.send(Message::Crumb);
         }
         if now - self.last_gpu_ms >= telemetry::FLUSH_MS {
             self.last_gpu_ms = now;

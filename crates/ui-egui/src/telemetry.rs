@@ -30,6 +30,9 @@
 //! `gpu_lost` its `reason`. A panic's location is kept only inside this source tree
 //! ([`crash_location`]), and no byte of a panic's or a driver's message leaves: each is reduced to a
 //! fixed code ([`panic_code`], [`gpu_code`]).
+//! `ai_run` also reports finding the text (`select.detectText`), with where its time went
+//! (`read_ms`, `load_ms`, `infer_ms`, `post_ms`) and how many pieces it found (`n`): the collector
+//! takes those fields from any client of schema 7 on.
 //! Without a schema change (the collector refuses a whole batch for an unknown event or field), a
 //! canvas press a tool dropped goes out as a `command` with the id `toolDrop.<reason>.tool.<Name>`
 //! and source `tool` ([`Recorder::tool_drop`]): the reason is a fixed code, never free text.
@@ -418,7 +421,7 @@ pub const FIELDS: &[&str] = &[
     "e", "app", "commit", "threads", "coi", "cores", "gpu", "gpu_vendor", "browser", "browser_major", "os", "screen", "lang", "device", "mem", "channel", "os_ver",
     "cpu", "gpu_model", "gpu_driver", "ram", "disk", "active_s", "total_s", "id", "src", "n", "kind", "bytes", "mp", "layers", "ms", "ok", "op", "tool", "p50", "p95",
     "max", "long", "lat50", "lat95", "fps", "int95", "drop", "g", "w_in", "w_logic", "w_ui", "w_paint", "cmd", "job", "phase", "action", "api", "cause", "memMB", "upMin",
-    "docs", "model", "region", "fell_back", "lite", "ram_mb", "gpu_mb", "loc", "msg", "reason", "stage", "js_mb", "dev_gb", "loop",
+    "docs", "model", "region", "fell_back", "lite", "ram_mb", "gpu_mb", "loc", "msg", "reason", "stage", "js_mb", "dev_gb", "loop", "read_ms", "load_ms", "infer_ms", "post_ms",
 ];
 
 /// Fields holding a command or tool id, which [`sanitize_command_id`] already reduced to known ids
@@ -596,6 +599,14 @@ impl Recorder {
         }
         if let Some(why) = run.fallback {
             e["reason"] = json!(why);
+        }
+        for (key, ms) in [("read_ms", run.stages.read), ("load_ms", run.stages.load), ("infer_ms", run.stages.infer), ("post_ms", run.stages.post)] {
+            if let Some(ms) = ms {
+                e[key] = json!(round_ms(ms));
+            }
+        }
+        if let Some(n) = run.pieces {
+            e["n"] = json!(n);
         }
         self.event(e);
     }
@@ -1503,6 +1514,20 @@ pub struct AiRun<'a> {
     pub lite: Option<bool>,
     /// Why it left the GPU, as a class: never the message.
     pub fallback: Option<&'static str>,
+    /// Where the time went, when the job says.
+    pub stages: AiStages,
+    /// How many pieces a detection found.
+    pub pieces: Option<u64>,
+}
+
+/// The parts of an AI job's time, in ms: reading the page's pixels, loading the model (0: it was
+/// loaded), the network, and from its answer to the result.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AiStages {
+    pub read: Option<f64>,
+    pub load: Option<f64>,
+    pub infer: Option<f64>,
+    pub post: Option<f64>,
 }
 
 /// The class of a GPU failure's message, for [`AiRun::fallback`].
@@ -1523,8 +1548,11 @@ fn fallback_class(message: &str) -> &'static str {
 }
 
 /// The jobs that are AI runs.
-fn is_ai_job(command: &str) -> bool {
-    matches!(command, photocraft_engine::ai_cmds::COMMAND | photocraft_engine::ai_inpaint_cmds::ID | photocraft_engine::remove_ai_cmds::ID)
+pub(crate) fn is_ai_job(command: &str) -> bool {
+    matches!(
+        command,
+        photocraft_engine::ai_cmds::COMMAND | photocraft_engine::ai_inpaint_cmds::ID | photocraft_engine::remove_ai_cmds::ID | photocraft_engine::text_mask_cmds::DETECT
+    )
 }
 
 /// Where an AI run ended as a class, from the reply's `device` (a free string: the adapter's name
@@ -1560,6 +1588,7 @@ pub fn record_ai_job(command: &str, reply: Option<&Value>, doc_mp: Option<f64>, 
     }
     let text = |key: &str| reply.and_then(|r| r.get(key)).and_then(Value::as_str);
     let flag = |key: &str| reply.and_then(|r| r.get(key)).and_then(Value::as_bool);
+    let stage = |key: &str| reply.and_then(|r| r.get("stages")).and_then(|s| s.get(key)).and_then(Value::as_f64);
     let region = reply.and_then(|r| r.get("region")).and_then(Value::as_array).and_then(|a| {
         let side = |i: usize| a.get(i).and_then(Value::as_f64);
         Some(side(2)? * side(3)? / 1_000_000.0)
@@ -1574,6 +1603,8 @@ pub fn record_ai_job(command: &str, reply: Option<&Value>, doc_mp: Option<f64>, 
         fell_back: flag("fellBack"),
         lite: flag("lite"),
         fallback: reply.and_then(|r| r.get("notices")).map(|n| fallback_class(&n.to_string())),
+        stages: AiStages { read: stage("readMs"), load: stage("loadMs"), infer: stage("inferMs"), post: stage("regionsMs") },
+        pieces: reply.and_then(|r| r.get("pieces")).and_then(Value::as_array).map(|a| a.len() as u64),
     };
     with(|r| r.ai_run(&run));
 }

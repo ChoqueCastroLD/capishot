@@ -682,6 +682,10 @@ pub(crate) fn draw(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewXf
     if app.ui.tool != Tool::TextSelection || app.session.active_index() != Some(idx) {
         return;
     }
+    // The model loads while the person looks at the page: the first detection doesn't wait for it.
+    if let Some(m) = app.session.text_masker() {
+        m.warm();
+    }
     sync(app);
     let ctx = painter.ctx().clone();
     if app.text_select.waiting.is_some() || !app.text_select.queue.is_empty() || app.text_select.cleaning.is_some() {

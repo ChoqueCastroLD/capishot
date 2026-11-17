@@ -705,6 +705,36 @@ fn an_ai_job_reports_model_device_and_region_only() {
     assert_eq!(ai_device_class("NVIDIA", false), "other");
 }
 
+/// Finding the text is an AI run too, with where its time went and how many pieces it found.
+#[test]
+fn a_detection_reports_its_stages() {
+    let _guard = GLOBAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    start(Recorder::new("a1", "s1", 0.0));
+    let reply = json!({
+        "pieces": [{"id": 1}, {"id": 2}, {"id": 3}],
+        "model": "manga-text-mask",
+        "device": "DirectML",
+        "cpu": false,
+        "region": [0, 0, 2500, 3500],
+        "ms": 2900,
+        "stages": {"readMs": 150, "loadMs": 0, "inferMs": 1900, "regionsMs": 820},
+    });
+    record_ai_job("select.detectText", Some(&reply), Some(12.0), 2950.0);
+    record_ai_job("select.detectText", Some(&json!({"pieces": [], "device": "CPU", "cpu": true, "stages": {"readMs": 90}})), Some(2.0), 400.0);
+    let body = take_batch().expect("a batch");
+    stop();
+    let b: Value = serde_json::from_str(&body).expect("JSON");
+    let runs = events(&b, "ai_run");
+    assert_eq!(runs.len(), 2, "{b}");
+    let r = &runs[0];
+    assert_eq!((&r["id"], &r["model"], &r["device"], &r["region"], &r["ms"]), (&json!("select.detectText"), &json!("manga-text-mask"), &json!("directml"), &json!("4-12"), &json!(2950)), "{r}");
+    assert_eq!((&r["read_ms"], &r["load_ms"], &r["infer_ms"], &r["post_ms"], &r["n"]), (&json!(150), &json!(0), &json!(1900), &json!(820), &json!(3)), "{r}");
+    // A runtime that doesn't tell its parts (the browser's worker) reports the ones known.
+    let r = &runs[1];
+    assert_eq!((&r["device"], &r["read_ms"], &r["n"], &r["region"]), (&json!("cpu"), &json!(90), &json!(0), &json!("1-4")), "{r}");
+    assert!(r.get("infer_ms").is_none() && r.get("load_ms").is_none(), "{r}");
+}
+
 /// A name that isn't one of ours is no tool, whatever it starts with.
 #[test]
 fn only_real_tools_are_named() {

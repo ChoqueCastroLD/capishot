@@ -478,13 +478,17 @@ fn on_files_event(app: &mut PhotocraftApp, e: &JobEvent) -> bool {
 pub fn run(app: &mut PhotocraftApp, id: &str, params: Value) -> Result<Value, String> {
     // AI runs show the progress card (`ai_progress`): remember what ran, follow its job.
     let ai = crate::ai_progress::is_ai(id, &params).then(|| params.clone());
-    if let Some(p) = &ai {
+    // Finding the text has no card, and is an AI run all the same: a crash during it says so.
+    let ai_stage = ai.is_some() || crate::telemetry::is_ai_job(id);
+    if ai_stage {
         crate::telemetry::set_stage(crate::telemetry::Stage::Ai);
+    }
+    if let Some(p) = &ai {
         crate::ai_progress::note_start(app, id, p);
     }
     let r = run_inner(app, id, params);
     // Over already, unless it became a job (`telemetry::leave_ai_stage` when that ends).
-    if ai.is_some() && !r.as_ref().is_ok_and(|v| v.get("job").is_some()) {
+    if ai_stage && !r.as_ref().is_ok_and(|v| v.get("job").is_some()) {
         crate::telemetry::leave_stage(crate::telemetry::Stage::Ai);
     }
     if let (Some(p), Ok(v)) = (&ai, &r)
