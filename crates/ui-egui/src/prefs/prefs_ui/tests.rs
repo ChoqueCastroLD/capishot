@@ -803,14 +803,14 @@ fn saving_keeps_preferences_another_instance_changed() {
     let (mut a, mut b) = (app_on(&store, Arc::default()), app_on(&store, Arc::default()));
     tick(&mut a, &ctx);
     tick(&mut b, &ctx);
-    a.run("prefs.set", json!({"values": {"interface.theme": "studio"}})).unwrap();
+    a.run("prefs.set", json!({"values": {"interface.theme": "softDark"}})).unwrap();
     tick(&mut a, &ctx);
-    assert_eq!(stored(&store)["interface"]["theme"], "studio");
+    assert_eq!(stored(&store)["interface"]["theme"], "softDark");
     // The other one, never reloaded, saves an unrelated change: the theme stays.
     b.run("prefs.set", json!({"values": {"performance.historyStates": 12}})).unwrap();
     tick(&mut b, &ctx);
     let v = stored(&store);
-    assert_eq!((v["interface"]["theme"].as_str(), v["performance"]["historyStates"].as_u64()), (Some("studio"), Some(12)));
+    assert_eq!((v["interface"]["theme"].as_str(), v["performance"]["historyStates"].as_u64()), (Some("softDark"), Some(12)));
     // And the first one's next save keeps the second one's change.
     a.run("prefs.set", json!({"values": {"interface.showTooltips": false}})).unwrap();
     tick(&mut a, &ctx);
@@ -828,7 +828,7 @@ fn saving_keeps_preferences_another_instance_changed() {
     let (mut c, _) = app_with_saved(store.lock().unwrap().clone());
     tick(&mut c, &ctx);
     assert_eq!(c.session.prefs().performance.history_states, 30);
-    assert_eq!(c.session.prefs().interface.theme, Theme::Studio);
+    assert_eq!(c.session.prefs().interface.theme, Theme::SoftDark);
 }
 
 #[test]
@@ -838,7 +838,7 @@ fn failed_preference_saves_are_retried() {
     let fail = Arc::new(AtomicBool::new(true));
     let mut app = app_on(&store, fail.clone());
     tick(&mut app, &egui::Context::default());
-    app.run("prefs.set", json!({"values": {"interface.theme": "studio"}})).unwrap();
+    app.run("prefs.set", json!({"values": {"interface.theme": "softDark"}})).unwrap();
     // The write fails: reported, and retried after a backoff rather than marked saved.
     assert_eq!(persist(&mut app, 100.0), Some(SAVE_RETRY_S));
     assert!(app.ui.status.starts_with("Couldn't save preferences: storage is full") && app.ui.status_error);
@@ -847,7 +847,7 @@ fn failed_preference_saves_are_retried() {
     // Storage works again: the pending change is written without another edit.
     fail.store(false, Ordering::Relaxed);
     assert_eq!(persist(&mut app, 102.0), None);
-    assert_eq!(stored(&store)["interface"]["theme"], "studio");
+    assert_eq!(stored(&store)["interface"]["theme"], "softDark");
     assert_eq!(app.ui.status, "Preferences saved");
     assert_eq!(persist(&mut app, 103.0), None, "nothing left to save");
 
