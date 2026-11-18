@@ -455,8 +455,10 @@ fn selection_specific_options(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: 
             // Live "Gradient" (a Gradient Fill layer) or "Classic gradient" (pixels):
             // both paint with the same engine-owned preset (#1651), and either swatch
             // click opens the Gradient Editor window, as in Photoshop.
-            if crate::gradient_ui::preset_swatch(app, ui) {
-                app.ui.panels.gradient_editor = true;
+            if crate::gradient_ui::preset_swatch(app, ui)
+                && let Some(f) = crate::floaters::Floater::of(crate::dock::Group::GradientEditor)
+            {
+                crate::floaters::reveal(app, f);
             }
             widgets::vline(ui, 22.0);
             ui.spacing_mut().item_spacing.x = 2.0;

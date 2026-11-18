@@ -43,6 +43,11 @@ pub fn gradients_panel(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             }
         }
     }
+    // Photoshop gradient files (.grd) join the panel: before this they could only be opened
+    // with File › Open or dropped on the window.
+    if crate::widgets::secondary_button(ui, tl!("Import Gradients…"), 0.0).clicked() {
+        crate::preset_files_ui::import_gradients_dialog(app);
+    }
 }
 
 // ------------------------------------------------------------------ Patterns

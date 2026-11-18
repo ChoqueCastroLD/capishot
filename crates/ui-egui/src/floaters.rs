@@ -93,6 +93,24 @@ pub fn dock(app: &mut PhotocraftApp, f: Floater) {
     sync_docked(app);
 }
 
+/// Open panel `f` where the user can see it: docked, its group unfolded and, when it shares a
+/// tab strip with another group, its tab in front. Opening a docked panel only marked it open,
+/// so one folded or behind another tab seemed not to open at all.
+pub fn reveal(app: &mut PhotocraftApp, f: Floater) {
+    f.set_open(app, true);
+    if docked(app, f) {
+        let g = f.group();
+        app.ui.dock.set_collapsed(g, false);
+        if let Some(host) = app.ui.dock.guests.get(&g).copied() {
+            app.ui.dock.set_collapsed(host, false);
+            app.ui.dock.front.insert(host, g);
+        } else if app.ui.dock.guests.values().any(|h| *h == g) {
+            app.ui.dock.front.remove(&g);
+        }
+    }
+    sync_docked(app);
+}
+
 /// Float docked panel `f` again: it opens in its window from now on.
 pub fn float(app: &mut PhotocraftApp, f: Floater) {
     app.ui.panels.dock_home.retain(|k| k != f.group().key());
@@ -338,5 +356,27 @@ mod tests {
         let mut out = ctx.run_ui(egui::RawInput::default(), |ui| hosts.push(Host::of(&app, ui.ctx(), Group::Notes)));
         out.textures_delta.clear();
         assert_eq!(hosts[3], Host::Hidden);
+    }
+}
+
+#[cfg(test)]
+mod reveal_tests {
+    use super::*;
+
+    #[test]
+    fn revealing_a_docked_panel_unfolds_it_and_brings_its_tab_to_the_front() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let f = Floater::of(Group::GradientEditor).unwrap();
+        dock(&mut app, f);
+        f.set_open(&mut app, false);
+        // Stacked behind the Layers tab, folded.
+        app.ui.dock.guests.insert(Group::GradientEditor, Group::Layers);
+        app.ui.dock.front.insert(Group::Layers, Group::Layers);
+        app.ui.dock.set_collapsed(Group::Layers, true);
+        app.ui.dock.set_collapsed(Group::GradientEditor, true);
+        reveal(&mut app, f);
+        assert!(app.ui.panels.gradient_editor);
+        assert!(!app.ui.dock.is_collapsed(Group::GradientEditor) && !app.ui.dock.is_collapsed(Group::Layers));
+        assert_eq!(app.ui.dock.front.get(&Group::Layers), Some(&Group::GradientEditor));
     }
 }

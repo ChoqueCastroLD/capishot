@@ -650,6 +650,9 @@ pub fn editor_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
                         let _ = app.run("gradient.presets.new", json!({}));
                     }
                     show_panel = widgets::secondary_button(ui, tl!("Gradients"), 0.0).clicked();
+                    if widgets::secondary_button(ui, tl!("Import Gradients…"), 0.0).clicked() {
+                        crate::preset_files_ui::import_gradients_dialog(app);
+                    }
                 });
             }
         }

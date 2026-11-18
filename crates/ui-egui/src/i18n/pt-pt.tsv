@@ -3739,3 +3739,4 @@ fontWeight	Italic	Itálico
 @plural	Batch: {n} file written|Batch: {n} files written	Lote: {n} ficheiro gravado|Lote: {n} ficheiros gravados
 	Errors: {n}	Erros: {n}
 	Skipped steps: {steps}	Passos ignorados: {steps}
+	Import Gradients…	Importar gradientes…
