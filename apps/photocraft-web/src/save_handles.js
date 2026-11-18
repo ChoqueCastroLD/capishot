@@ -9,11 +9,27 @@ export function sh_supported() {
   return typeof self.showSaveFilePicker === 'function' && self.isSecureContext !== false;
 }
 
+// The formats Save As offers besides the suggested one, in the browser's "Save as type" list:
+// picking one there changes the name's extension, and the extension picks the format.
+const SAVE_TYPES = [
+  ['Photoshop (PSD)', 'image/vnd.adobe.photoshop', 'psd'],
+  ['PNG', 'image/png', 'png'],
+  ['JPEG', 'image/jpeg', 'jpg'],
+  ['WebP', 'image/webp', 'webp'],
+  ['TIFF', 'image/tiff', 'tif'],
+  ['GIF', 'image/gif', 'gif'],
+  ['BMP', 'image/bmp', 'bmp'],
+];
+
 // Asks for a file named like `suggested`; resolves to the chosen file's name, `null` when the
 // user cancelled, or throws when the browser refused (no user gesture, a sandboxed frame).
 export async function sh_pick(suggested, description, mime, ext) {
   const opts = { suggestedName: suggested };
-  if (ext) opts.types = [{ description, accept: { [mime]: ['.' + ext] } }];
+  if (ext) {
+    opts.types = [{ description, accept: { [mime]: ['.' + ext] } }];
+    const same = (e) => e === ext || (ext === 'jpeg' && e === 'jpg') || (ext === 'tiff' && e === 'tif');
+    for (const [d, m, e] of SAVE_TYPES) if (!same(e)) opts.types.push({ description: d, accept: { [m]: ['.' + e] } });
+  }
   try {
     const handle = await self.showSaveFilePicker(opts);
     handles.set(handle.name, handle);
