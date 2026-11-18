@@ -290,7 +290,7 @@ pub use services::{
     OsEventsFn, PhotoshopShortcutsFn, PollAutosaveFn, QuitFn, RecoverFn, Recoverable, RecoveredDocument, RecoveryBatch, RecoveryDiscovery, RightButtonDownFn,
     SameFileFn, SaveFileFn, SaveTextFn, Services, SystemThemeFn, WindowFrameFn, WriteFn, WritesInPlaceFn,
 };
-pub(crate) use services::{SAVE_OPTIONS_OPEN, saved_revision_after_write};
+pub(crate) use services::{SAVE_OPTIONS_OPEN, avif_writable, export_formats, saved_revision_after_write};
 pub use text::bidi_text;
 pub use text::cjk_fonts;
 pub use text::direction;

@@ -4843,3 +4843,8 @@ curves	Smooth	Згладити
 	Split into Pieces	Розділити на частини
 	The Bubble Text Remover: the text of a speech bubble with a plain background, without AI. Instant; a bubble it can't clean goes to AI	Видалення тексту з бульбашок: текст бульбашки з однорідним тлом, без ШІ. Миттєво; бульбашка, яку не вдається очистити, переходить до ШІ
 	{n} pieces were in bubbles without a plain background: cleaned with AI	{n} частин були в бульбашках без однорідного тла: очищено за допомогою ШІ
+
+# File › Automate › Batch: the result line
+@plural	Batch: {n} file written|Batch: {n} files written	Пакетна обробка: записано {n} файл|Пакетна обробка: записано {n} файли|Пакетна обробка: записано {n} файлів
+	Errors: {n}	Помилки: {n}
+	Skipped steps: {steps}	Пропущені кроки: {steps}

@@ -7877,6 +7877,7 @@ dependencies = [
  "photocraft-heif",
  "png 0.18.1",
  "proptest",
+ "ravif",
  "rayon",
  "serde_json",
  "thiserror 2.0.21",

@@ -94,6 +94,8 @@ const SAVE_FILTERS: &[(&str, &[&str])] = &[
     ("PNG", &["png"]),
     ("JPEG", &["jpg", "jpeg"]),
     ("WebP", &["webp"]),
+    // Written only (Capishot doesn't open AVIF): Save As makes a flattened copy.
+    ("AVIF", &["avif"]),
     ("TIFF", &["tif", "tiff"]),
     ("Targa", &["tga"]),
     // Also in Photoshop's Save As list; ICO is Capishot's own (#4357): up to 256×256, with alpha.

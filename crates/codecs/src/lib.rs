@@ -41,7 +41,8 @@ pub use crate::image::{
     MAX_EXTRA_SAMPLES, Metadata, SampleType, convert_samples,
 };
 pub use crate::options::{
-    DdsCompression, DdsOptions, DecodeOptions, DpxBits, EncodeOptions, ExrCompression, JpegFormat, Limits, PngCompression, PngStereo, TiffCompression,
+    DEFAULT_AVIF_QUALITY, DEFAULT_AVIF_SPEED, DdsCompression, DdsOptions, DecodeOptions, DpxBits, EncodeOptions, ExrCompression, JpegFormat, Limits,
+    PngCompression, PngStereo, TiffCompression,
 };
 pub use crate::orientation::{exif_orientation, upright_exif, upright_xmp};
 pub use crate::resolution::{exif_resolution, export_exif, export_xmp, photoshop_resolution, xmp_resolution};
@@ -313,6 +314,10 @@ pub fn encode(image: &Image, format: Format, opts: &EncodeOptions) -> Result<Vec
         Format::Iff => iff::encode(image, plan),
         Format::OpenExr => exr::encode(image, plan, opts),
         Format::Heif => Err(CodecError::unsupported(format, "encoding is not available in this build")),
-        Format::Gif | Format::Bmp | Format::Tga | Format::Ico | Format::Qoi | Format::Hdr | Format::Avif => via_image::encode(format, image, plan, opts),
+        #[cfg(feature = "avif")]
+        Format::Avif => codecs::avif::encode(image, plan, opts),
+        #[cfg(not(feature = "avif"))]
+        Format::Avif => Err(CodecError::unsupported(format, "AVIF export is not included in this build")),
+        Format::Gif | Format::Bmp | Format::Tga | Format::Ico | Format::Qoi | Format::Hdr => via_image::encode(format, image, plan, opts),
     }
 }

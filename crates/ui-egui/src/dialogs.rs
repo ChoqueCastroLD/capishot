@@ -1015,6 +1015,23 @@ fn file_command(fields: &Fields) -> Option<&'static str> {
 
 /// Confirm a command dialog no specific handler owns: run its `__command` with the dialog's
 /// parameters, then settle the filter preview and the playing action.
+/// File › Automate › Batch's result line: the files written, the inputs that failed, and the
+/// action's steps Batch left out (view steps, Quick Export), so none is skipped unannounced.
+pub(crate) fn batch_result_line(v: &Value) -> String {
+    let lang = crate::i18n::current();
+    let written = v["files"].as_array().map_or(0, Vec::len) as u64;
+    let mut parts = vec![crate::i18n::trn(lang, written, "Batch: {n} file written", "Batch: {n} files written")];
+    let errors = v["errors"].as_array().map_or(0, Vec::len);
+    if errors > 0 {
+        parts.push(crate::i18n::fmt(tl!("Errors: {n}"), &[("n", &errors.to_string())]));
+    }
+    let skipped: Vec<&str> = v["skipped"].as_array().map(|a| a.iter().filter_map(|s| s["name"].as_str()).collect()).unwrap_or_default();
+    if !skipped.is_empty() {
+        parts.push(crate::i18n::fmt(tl!("Skipped steps: {steps}"), &[("steps", &skipped.join(", "))]));
+    }
+    parts.join(" · ")
+}
+
 fn confirm_generic_command(app: &mut PhotocraftApp, d: Dialog) -> Result<Value, String> {
     let Some(cmd) = d.fields.get("__command").and_then(Value::as_str).map(str::to_string) else {
         app.filter_preview = None;
@@ -1063,6 +1080,12 @@ fn confirm_generic_command(app: &mut PhotocraftApp, d: Dialog) -> Result<Value, 
     }
     if result.is_ok() && cmd == "view.newGuideLayout" {
         app.ui.view.guide_layout = params;
+    }
+    if cmd == "file.automate.batch"
+        && let Ok(v) = &result
+    {
+        app.ui.status = batch_result_line(v);
+        app.ui.status_error = v["files"].as_array().is_none_or(Vec::is_empty) && v["errors"].as_array().is_some_and(|e| !e.is_empty());
     }
     if result.is_ok() {
         if crate::adjust_dialog::owns(&d.fields) {

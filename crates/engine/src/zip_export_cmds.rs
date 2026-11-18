@@ -30,6 +30,8 @@ pub enum Format {
     Png,
     Jpg { quality: u8 },
     Webp { quality: u8, lossless: bool },
+    /// 8-bit sRGB AVIF at `quality` 1..=100 and encoder `speed` 1..=10.
+    Avif { quality: u8, speed: u8 },
     /// Layered PSD (PSB when too big for PSD), with its merged image.
     Psd,
 }
@@ -40,6 +42,7 @@ impl Format {
             Format::Png => "png",
             Format::Jpg { .. } => "jpg",
             Format::Webp { .. } => "webp",
+            Format::Avif { .. } => "avif",
             Format::Psd => "psd",
         }
     }
@@ -129,8 +132,18 @@ pub fn prepare(s: &Session, p: &Value) -> Result<ZipExport> {
         "png" => Format::Png,
         "jpg" | "jpeg" => Format::Jpg { quality: quality(p, 90)? },
         "webp" => Format::Webp { quality: quality(p, 90)?, lossless: p.get("lossless").and_then(Value::as_bool).unwrap_or(false) },
+        "avif" if photocraft_codecs::caps(photocraft_codecs::Format::Avif).write => {
+            let speed = match p.get("speed") {
+                None | Some(Value::Null) => photocraft_codecs::DEFAULT_AVIF_SPEED,
+                Some(v) => match v.as_f64() {
+                    Some(s) if (1.0..=10.0).contains(&s) => s.round() as u8,
+                    _ => return Err(bad("\"speed\" must be 1..10")),
+                },
+            };
+            Format::Avif { quality: quality(p, photocraft_codecs::DEFAULT_AVIF_QUALITY)?, speed }
+        }
         "psd" => Format::Psd,
-        f => return Err(bad(format!("unknown format \"{f}\" (png, jpg, webp or psd)"))),
+        f => return Err(bad(format!("unknown format \"{f}\" (png, jpg, webp, avif or psd)"))),
     };
     let resize = match p.get("resize") {
         None | Some(Value::Null) => None,
@@ -210,6 +223,10 @@ impl ZipExport {
             Format::Webp { quality, lossless } => {
                 opts.encode.webp_quality = quality;
                 opts.encode.webp_lossless = lossless;
+            }
+            Format::Avif { quality, speed } => {
+                opts.encode.avif_quality = quality;
+                opts.encode.avif_speed = speed;
             }
             Format::Psd => opts.document_path = page.path.as_ref().map(std::path::PathBuf::from),
         }
@@ -305,7 +322,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: "Export Open Documents as ZIP…",
         menu: &["File", "Export"],
         shortcut: None,
-        params: r##"{"docs"?:[document id] (default every open document, in tab order; the pages follow this order),"format":"png|jpg|webp|psd"="png" (psd: each document with its layers and merged image, as Save writes it),"quality"?:1..100 (JPEG, lossy WebP; default 90),"lossless"?:bool (WebP),"resize"?:{"maxWidth":px}|{"percent":1..100} (never enlarges),"srgb"?:bool (convert to sRGB),"naming":"keep|sequence"="keep" (the document names, or 001, 002… in order),"prefix"?:str (before the numbers),"path":file.zip} → {path,files,failed:[{document,error}]}. Each document flattened as Export As does (psd: layered), one page per document; the ZIP is written as the pages are made. A page that fails is reported in "failed" and the others are kept"##,
+        params: r##"{"docs"?:[document id] (default every open document, in tab order; the pages follow this order),"format":"png|jpg|webp|avif|psd"="png" (psd: each document with its layers and merged image, as Save writes it; avif: 8-bit sRGB, as every format without an embedded profile),"quality"?:1..100 (JPEG, lossy WebP: default 90; AVIF: default 85),"lossless"?:bool (WebP),"speed"?:1..10 (AVIF encoder speed, default 6; lower is smaller and slower),"resize"?:{"maxWidth":px}|{"percent":1..100} (never enlarges),"srgb"?:bool (convert to sRGB),"naming":"keep|sequence"="keep" (the document names, or 001, 002… in order),"prefix"?:str (before the numbers),"path":file.zip} → {path,files,failed:[{document,error}]}. Each document flattened as Export As does (psd: layered), one page per document; the ZIP is written as the pages are made. A page that fails is reported in "failed" and the others are kept"##,
         enabled,
         journal: true,
         run: export_zip,

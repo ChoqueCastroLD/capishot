@@ -26,6 +26,8 @@ use crate::commands::CommandSpec;
 use crate::{EngineError, Result, Session};
 
 mod adjustments;
+#[cfg(test)]
+mod batch_tests;
 mod convert;
 mod descriptors;
 mod events;

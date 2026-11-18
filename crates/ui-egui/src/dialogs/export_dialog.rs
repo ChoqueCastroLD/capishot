@@ -15,7 +15,12 @@ use crate::state::DialogKind;
 use crate::theme::Tokens;
 use crate::{ExportSettings, PhotocraftApp};
 
-const FORMATS: [(&str, &str); 6] = [("png", "PNG"), ("jpg", "JPG"), ("webp", "WebP"), ("tif", "TIFF"), ("tga", "TGA"), ("ico", "ICO")];
+const FORMATS: [(&str, &str); 7] = [("png", "PNG"), ("jpg", "JPG"), ("webp", "WebP"), ("avif", "AVIF"), ("tif", "TIFF"), ("tga", "TGA"), ("ico", "ICO")];
+
+/// The formats the dialog offers: AVIF only where this build writes it.
+fn formats() -> impl Iterator<Item = &'static (&'static str, &'static str)> {
+    FORMATS.iter().filter(|(k, _)| *k != "avif" || crate::avif_writable())
+}
 
 /// Preferences ▸ remembered dialog settings: Export As writes the settings it was used with
 /// last under its command id and seeds the next dialog from them, as Fill, Liquify and the
@@ -24,9 +29,10 @@ pub(crate) const COMMAND: &str = "file.export.exportAs";
 
 /// The dialog's own settings: what Export As remembers for next time and what an action records
 /// with the destination (#7207).
-const SETTINGS: [&str; 14] = [
+const SETTINGS: [&str; 15] = [
     "format",
     "quality",
+    "speed",
     "lossless",
     "transparency",
     "scale",
@@ -51,8 +57,9 @@ fn valid_setting(key: &str, v: &Value) -> bool {
     let num = |lo: f64, hi: f64| v.as_f64().is_some_and(|x| x.is_finite() && (lo..=hi).contains(&x));
     let one_of = |options: &[&str]| v.as_str().is_some_and(|s| options.contains(&s));
     match key {
-        "format" => v.as_str().is_some_and(|s| FORMATS.iter().any(|(k, _)| *k == s)),
+        "format" => v.as_str().is_some_and(|s| formats().any(|(k, _)| *k == s)),
         "quality" => num(1.0, 100.0),
+        "speed" => num(1.0, 10.0),
         "scale" => num(1.0, 1000.0),
         "width" | "height" => num(1.0, MAX_PX),
         "lossless" | "transparency" | "lockAspect" | "embedProfile" => v.is_boolean(),
@@ -104,6 +111,7 @@ fn open_sized(app: &mut PhotocraftApp, src_w: u32, src_h: u32) -> Result<u64, St
     f.insert("format".into(), json!("png"));
     f.insert("quality".into(), json!(app.session.prefs().export.jpeg_quality));
     f.insert("lossless".into(), json!(app.session.prefs().export.webp_lossless));
+    f.insert("speed".into(), json!(photocraft_codecs::DEFAULT_AVIF_SPEED));
     f.insert("transparency".into(), json!(true));
     f.insert("scale".into(), json!(100));
     f.insert("resample".into(), json!(DEFAULT_RESAMPLE));
@@ -422,8 +430,16 @@ fn set_format_defaults(f: &mut Map<String, Value>, fmt: &str, prefs: &photocraft
             f.insert("quality".into(), json!(prefs.webp_quality));
             f.insert("lossless".into(), json!(prefs.webp_lossless));
         }
+        "avif" => {
+            f.insert("quality".into(), json!(prefs.avif_quality.clamp(1, 100)));
+        }
         _ => {}
     }
+}
+
+/// The AVIF encoder speed, 1 (smallest, slowest) to 10.
+fn avif_speed(f: &Map<String, Value>) -> u8 {
+    n(f, "speed", f64::from(photocraft_codecs::DEFAULT_AVIF_SPEED)).clamp(1.0, 10.0).round() as u8
 }
 
 fn s_fmt(f: &Map<String, Value>) -> String {
@@ -449,6 +465,8 @@ fn settings(f: &Map<String, Value>) -> ExportSettings {
         jpeg_quality: (fmt == "jpg").then_some(quality),
         webp_lossless: fmt != "webp" || lossless(f),
         webp_quality: (fmt == "webp" && !lossless(f)).then_some(quality),
+        avif_quality: (fmt == "avif").then_some(quality),
+        avif_speed: (fmt == "avif").then(|| avif_speed(f)),
         xmp_all: metadata == "all",
         tga_bits: if fmt == "tga" { tga_bits(f) } else { None },
         embed_icc: f.get("embedProfile").and_then(Value::as_bool).unwrap_or(true),
@@ -457,6 +475,15 @@ fn settings(f: &Map<String, Value>) -> ExportSettings {
         embed_metadata: metadata != "none",
         ..Default::default()
     }
+}
+
+/// [`settings`] for the reduced proxy's size estimate. AVIF encodes it at a fast speed: the size
+/// differs by a few percent from the chosen speed's, and in the browser the estimate is encoded
+/// on the page's thread at every change.
+fn estimate_settings(f: &Map<String, Value>) -> ExportSettings {
+    let mut s = settings(f);
+    s.avif_speed = s.avif_speed.map(|sp| sp.max(9));
+    s
 }
 
 /// The preview and size estimate share a single reduced document. Resizing every layer twice is
@@ -480,7 +507,7 @@ fn scaled_estimate(bytes: usize, doc: &Document, proxy: &Document, f: &Map<Strin
 /// Estimated size (bytes) from the already prepared proxy encode, scaled by pixel count.
 fn estimate(app: &PhotocraftApp, doc: &Document, proxy: &Document, f: &Map<String, Value>) -> Option<u64> {
     let export = app.services.export.as_ref()?;
-    let (bytes, _) = export(proxy, &format!("estimate.{}", s_fmt(f)), &settings(f)).ok()?;
+    let (bytes, _) = export(proxy, &format!("estimate.{}", s_fmt(f)), &estimate_settings(f)).ok()?;
     Some(scaled_estimate(bytes.len(), doc, proxy, f))
 }
 
@@ -590,7 +617,7 @@ fn poll_or_start_preview(
 /// The native exporter uses this same IO encoder. Keep the entire estimate off the UI thread.
 #[cfg(not(target_arch = "wasm32"))]
 fn estimate_native(doc: &Document, proxy: &Document, f: &Map<String, Value>) -> Option<u64> {
-    let bytes = photocraft_io::export(proxy, &format!("estimate.{}", s_fmt(f)), &settings(f).io_options()).ok()?.bytes;
+    let bytes = photocraft_io::export(proxy, &format!("estimate.{}", s_fmt(f)), &estimate_settings(f).io_options()).ok()?.bytes;
     Some(scaled_estimate(bytes.len(), doc, proxy, f))
 }
 
@@ -877,7 +904,7 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(tl!("Format")).color(t.text_dim));
                 let mut fmt = s_fmt(f);
-                let opts: Vec<(String, &str)> = FORMATS.iter().map(|(k, l)| (k.to_string(), *l)).collect();
+                let opts: Vec<(String, &str)> = formats().map(|(k, l)| (k.to_string(), *l)).collect();
                 if crate::widgets::dropdown(ui, "export-format", tl!("Format"), &mut fmt, &opts, 130.0) {
                     set_format_defaults(f, &fmt, &app.session.prefs().export);
                 }
@@ -888,10 +915,16 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
                 crate::widgets::checkbox(ui, &mut ll, tl!("Lossless"));
                 f.insert("lossless".into(), json!(ll));
             }
-            if fmt == "jpg" || (fmt == "webp" && !lossless(f)) {
+            if fmt == "jpg" || fmt == "avif" || (fmt == "webp" && !lossless(f)) {
                 let mut q = n(f, "quality", 85.0) as f32;
                 crate::widgets::slider_row(ui, tl!("Quality"), &mut q, 1.0..=100.0, "%", None);
                 f.insert("quality".into(), json!(q.round()));
+            }
+            if fmt == "avif" {
+                // rav1e's speed: lower is a smaller file that takes longer to write.
+                let mut sp = f32::from(avif_speed(f));
+                crate::widgets::slider_row(ui, tl!("Speed"), &mut sp, 1.0..=10.0, "", None);
+                f.insert("speed".into(), json!(sp.round()));
             }
             if fmt == "tga" {
                 ui.horizontal(|ui| {
@@ -917,20 +950,23 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
                     f.insert("metadata".into(), json!(m));
                 }
             });
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(tl!("Color Profile")).color(t.text_dim));
-                let mut profile = s(f, "profile");
-                if profile != "srgb" {
-                    profile = "document".into();
-                }
-                let opts: Vec<(String, &str)> = vec![("document".into(), tl!("Document Profile")), ("srgb".into(), tl!("Convert to sRGB"))];
-                if crate::widgets::dropdown(ui, "export-profile", tl!("Color Profile"), &mut profile, &opts, 130.0) {
-                    f.insert("profile".into(), json!(profile));
-                }
-            });
-            let mut embed = f.get("embedProfile").and_then(Value::as_bool).unwrap_or(true);
-            crate::widgets::checkbox(ui, &mut embed, tl!("Embed Color Profile"));
-            f.insert("embedProfile".into(), json!(embed));
+            // AVIF is written as sRGB without an embedded profile: there is no profile to choose.
+            if fmt != "avif" {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(tl!("Color Profile")).color(t.text_dim));
+                    let mut profile = s(f, "profile");
+                    if profile != "srgb" {
+                        profile = "document".into();
+                    }
+                    let opts: Vec<(String, &str)> = vec![("document".into(), tl!("Document Profile")), ("srgb".into(), tl!("Convert to sRGB"))];
+                    if crate::widgets::dropdown(ui, "export-profile", tl!("Color Profile"), &mut profile, &opts, 130.0) {
+                        f.insert("profile".into(), json!(profile));
+                    }
+                });
+                let mut embed = f.get("embedProfile").and_then(Value::as_bool).unwrap_or(true);
+                crate::widgets::checkbox(ui, &mut embed, tl!("Embed Color Profile"));
+                f.insert("embedProfile".into(), json!(embed));
+            }
             ui.add_space(8.0);
             ui.label(egui::RichText::new(tl!("Image Size")).font(crate::theme::semibold(12.0)).color(t.text));
             let (bw, bh) = (n(f, "__w", f64::from(doc.size.width)), n(f, "__h", f64::from(doc.size.height)));
@@ -949,9 +985,10 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
             let layer = f.get("__layer").and_then(Value::as_u64);
             let key = egui::Id::unique(("export-preview", doc.id.0, app.session.active().map_or(0, |s| s.revision), layer));
             let sig = format!(
-                "{}{}{}{}{}{}{}{}{}{}{}{}{}",
+                "{}{}/{}{}{}{}{}{}{}{}{}{}{}{}",
                 s_fmt(f),
                 n(f, "quality", 85.0),
+                n(f, "speed", 0.0),
                 lossless(f),
                 f.get("transparency").map(|v| v.to_string()).unwrap_or_default(),
                 n(f, "scale", 100.0),
@@ -1171,7 +1208,13 @@ pub fn quick_export_png(app: &mut PhotocraftApp) -> Result<Value, String> {
         // Same Folder writes beside the document's file without asking, except when that would
         // replace the file itself (a document opened from photo.png): then the save dialog asks,
         // so replacing it is the user's choice (#6599).
+        // AVIF takes seconds for a big page: it goes through Export As's background export, so
+        // the window keeps drawing while it encodes.
+        let avif = fmt == "avif";
         if same && saved && !photocraft_engine::web_cmds::quick_export_target_is_own_file(&app.session) {
+            if avif && let Some(target) = photocraft_engine::web_cmds::quick_export_target(&app.session) {
+                return quick_export_avif(app, &prefs, &target);
+            }
             return quick_export(app, json!({}));
         }
         let st = app.session.active().ok_or("no document")?;
@@ -1179,6 +1222,10 @@ pub fn quick_export_png(app: &mut PhotocraftApp) -> Result<Value, String> {
         let (suggested, doc) = (format!("{stem}.{fmt}"), st.doc.id);
         return app.pick_save(&suggested, move |app, path| {
             app.refocus(doc)?;
+            // A name typed with another extension is that format (the engine command decides).
+            if avif && photocraft_engine::file_cmds::extension(&path).as_deref() == Some("avif") {
+                return quick_export_avif(app, &prefs, &path);
+            }
             quick_export(app, json!({"path": path}))
         });
     }
@@ -1187,6 +1234,24 @@ pub fn quick_export_png(app: &mut PhotocraftApp) -> Result<Value, String> {
     f.insert("transparency".into(), json!(true));
     f.insert("scale".into(), json!(100));
     confirm(app, &f)
+}
+
+/// Quick Export as AVIF to `path`: the active document at Export Preferences' AVIF quality, in
+/// sRGB, encoded in the background like Export As.
+fn quick_export_avif(app: &mut PhotocraftApp, prefs: &photocraft_engine::prefs::Export, path: &str) -> Result<Value, String> {
+    let doc = app.session.active().ok_or("no document")?.doc.clone();
+    let f = json!({
+        "format": "avif",
+        "quality": prefs.avif_quality.clamp(1, 100),
+        "speed": photocraft_codecs::DEFAULT_AVIF_SPEED,
+        "transparency": true,
+        "scale": 100,
+        "sizing": "scale",
+        "metadata": "none",
+        "profile": "srgb",
+    });
+    let Value::Object(f) = f else { return Err("export settings".into()) };
+    write_export(app, &doc, &f, path)
 }
 
 /// Runs Quick Export with `p` (an explicit `path`, or none for the document's folder).

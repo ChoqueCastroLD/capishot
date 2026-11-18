@@ -82,8 +82,9 @@ pub const ASYMMETRIC_EXCEPTIONS: &[(Format, &str)] = &[
     ),
     (
         Format::Avif,
-        "AVIF encode uses ravif (pure Rust) but decoding requires dav1d (C); read stays unsupported \
-         until a pure-Rust AV1 decoder is viable. Only enabled with the non-default `avif` feature.",
+        "AVIF encode uses ravif and rav1e (pure Rust, no nasm) but decoding requires dav1d (C, the \
+         image crate's `avif-native`); read stays unsupported until a pure-Rust AV1 decoder is \
+         viable. Behind the crate's non-default `avif` feature, which the apps enable.",
     ),
     (
         Format::Heif,

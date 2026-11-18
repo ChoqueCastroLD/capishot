@@ -5313,3 +5313,8 @@ shape	Appearance	Оформление
 	Split into Pieces	Разделить на части
 	The Bubble Text Remover: the text of a speech bubble with a plain background, without AI. Instant; a bubble it can't clean goes to AI	Удаление текста из пузырей: текст пузыря с однородным фоном, без ИИ. Мгновенно; пузырь, который не удаётся очистить, уходит в ИИ
 	{n} pieces were in bubbles without a plain background: cleaned with AI	{n} частей были в пузырях без однородного фона: очищены с ИИ
+
+# File › Automate › Batch: the result line
+@plural	Batch: {n} file written|Batch: {n} files written	Пакетная обработка: записан {n} файл|Пакетная обработка: записано {n} файла|Пакетная обработка: записано {n} файлов
+	Errors: {n}	Ошибки: {n}
+	Skipped steps: {steps}	Пропущенные шаги: {steps}

@@ -2108,6 +2108,7 @@ pub(crate) fn mime_for(name: &str) -> &'static str {
         Some("jpg" | "jpeg") => "image/jpeg",
         Some("tif" | "tiff") => "image/tiff",
         Some("webp") => "image/webp",
+        Some("avif") => "image/avif",
         Some("gif") => "image/gif",
         Some("psd" | "psb") => "image/vnd.adobe.photoshop",
         Some("ora") => "image/openraster",

@@ -4802,3 +4802,8 @@ curves	Smooth	スムーズ
 	Split into Pieces	ピースに分割
 	The Bubble Text Remover: the text of a speech bubble with a plain background, without AI. Instant; a bubble it can't clean goes to AI	吹き出しテキスト消去：無地の背景の吹き出しの文字を AI なしで消します。一瞬で終わり、消せない吹き出しは AI に回します
 	{n} pieces were in bubbles without a plain background: cleaned with AI	{n} 個のピースは無地でない吹き出しにありました：AI で消去しました
+
+# File › Automate › Batch: the result line
+@plural	Batch: {n} file written|Batch: {n} files written	バッチ処理: {n} 個のファイルを書き出しました
+	Errors: {n}	エラー: {n}
+	Skipped steps: {steps}	スキップした手順: {steps}

@@ -10,7 +10,7 @@ use crate::{Result, Session};
 
 const MAX_PRESETS: usize = 256;
 const MAX_PX: u32 = 300_000;
-const FORMATS: [&str; 6] = ["png", "jpg", "webp", "tif", "tga", "ico"];
+const FORMATS: [&str; 7] = ["png", "jpg", "webp", "avif", "tif", "tga", "ico"];
 
 /// Export As › Image Size › Resample, in Photoshop's order: the `image.imageSize` method each
 /// choice sends, and its menu label. The first one is the default.

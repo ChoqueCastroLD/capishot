@@ -234,10 +234,84 @@ impl OutputClaims {
     }
 }
 
-/// A recorded Save, Save As or Save a Copy, which marks the result Batch writes to its destination
-/// (Photoshop's "Override Action 'Save As' Commands").
+/// A recorded Save, Save As, Save a Copy or Export As, which marks the result Batch writes to its
+/// destination (Photoshop's "Override Action 'Save As' Commands"). An Export As also says how:
+/// its format and quality when Batch's format is "same" (see [`export_as_output`]).
 pub(crate) fn batch_save_point(id: &str) -> bool {
-    matches!(id, "file.save" | "file.saveAs" | "file.saveACopy")
+    matches!(id, "file.save" | "file.saveAs" | "file.saveACopy" | EXPORT_AS)
+}
+
+/// Capishot's File › Export › Export As, as an action records it (the shell runs it).
+const EXPORT_AS: &str = "file.export.exportAs";
+
+/// A Photoshop Save or Save As the import kept as `actions.photoshopStep` (a folder destination,
+/// a format Capishot doesn't write, a mismatched extension). Batch decides where and how the
+/// result is written, so such a step still marks it, as Photoshop's override does.
+fn kept_save_event(id: &str, p: &Value) -> bool {
+    id == crate::atn_cmds::PHOTOSHOP_STEP && p.get("event").and_then(Value::as_str).is_some_and(|e| e == "save" || e == "save ")
+}
+
+/// The name a step shows in the Actions panel: a kept Photoshop step's own, else its command's.
+fn step_name(id: &str, p: &Value) -> String {
+    if let Some(name) = p.get("name").and_then(Value::as_str).filter(|_| id == crate::atn_cmds::PHOTOSHOP_STEP) {
+        return name.to_string();
+    }
+    crate::commands::find(id)
+        .map(|c| c.label.trim_end_matches('…').to_string())
+        .or_else(|| crate::shell_commands::SHELL_COMMANDS.iter().find(|c| c.0 == id).map(|c| c.1.trim_end_matches('…').to_string()))
+        .unwrap_or_else(|| id.to_string())
+}
+
+/// The steps Batch plays, and the ones it leaves out with their names (`{"step", "command",
+/// "name"}`, `step` counting from 0 in `raw`): view steps and the shell's saves that don't mark
+/// the result (Quick Export) change nothing in the written file.
+pub(super) fn batch_steps(raw: Vec<(String, Value)>) -> (Vec<(String, Value)>, Vec<Value>) {
+    let mut steps = Vec::with_capacity(raw.len());
+    let mut skipped = Vec::new();
+    for (i, (id, params)) in raw.into_iter().enumerate() {
+        if kept_save_event(&id, &params) {
+            steps.push(("file.saveAs".to_string(), json!({})));
+        } else if batch_keeps_step(&id) && id != "file.export.quickExport" {
+            steps.push((id, params));
+        } else {
+            skipped.push(json!({"step": i, "command": id, "name": step_name(&id, &params)}));
+        }
+    }
+    (steps, skipped)
+}
+
+/// A step's params as Batch plays it for the result at `out`: a recorded Save for Web export goes
+/// beside that result (its name, the export's own extension) instead of the folder it was
+/// recorded in, which is another computer's in a downloaded action, so every page is exported.
+fn batch_params(id: &str, params: &Value, out: &str) -> Value {
+    if id != "file.export.saveForWebLegacy" {
+        return params.clone();
+    }
+    let mut p = params.clone();
+    let ext = p.get("path").and_then(Value::as_str).and_then(extension).unwrap_or_else(|| "png".into());
+    let dir = std::path::Path::new(out).parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
+    p["path"] = json!(join(&dir, &format!("{}.{ext}", stem(out))));
+    p
+}
+
+/// The format and save options a recorded Export As step asks for: its format, and its quality
+/// (JPEG and lossy WebP on the 1..100 scale, AVIF's own) and AVIF speed.
+fn export_as_output(p: &Value) -> Option<(String, SaveOpts)> {
+    let format = p.get("format").and_then(Value::as_str)?.to_ascii_lowercase();
+    let quality = p.get("quality").and_then(Value::as_f64).filter(|q| q.is_finite()).map(|q| q.clamp(1.0, 100.0));
+    let lossless = p.get("lossless").and_then(Value::as_bool).unwrap_or(false);
+    let mut save = SaveOpts::default();
+    match format.as_str() {
+        // Photoshop's 0-12 scale, which `SaveOpts::quality` holds.
+        "jpg" | "jpeg" => save.quality = quality.map(|q| (q - 1.0) * 12.0 / 99.0),
+        "webp" if !lossless => save.quality = quality.map(|q| (q - 1.0) * 12.0 / 99.0),
+        "avif" => {
+            save.avif_quality = quality.map(|q| q.round() as u8);
+            save.avif_speed = p.get("speed").and_then(Value::as_f64).filter(|s| s.is_finite()).map(|s| s.clamp(1.0, 10.0).round() as u8);
+        }
+        _ => {}
+    }
+    Some((format, save))
 }
 
 /// Whether Batch and droplets keep a recorded step: save points mark the result, while other
@@ -248,17 +322,20 @@ pub(crate) fn batch_keeps_step(id: &str) -> bool {
 
 pub(super) fn batch(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.automate.batch";
-    let mut steps =
+    let raw =
         parse_steps(p.get("steps").or_else(|| p.get("action")).ok_or_else(|| EngineError::BadParams { cmd: cmd.into(), msg: "missing \"steps\"".into() })?)?;
     // Each result goes to the destination folder, which overrides the action's recorded Save /
     // Save As steps: they only mark the result.
-    steps.retain(|(id, _)| batch_keeps_step(id) && id != "file.export.quickExport");
+    let (steps, skipped) = batch_steps(raw);
     if let Some((id, _)) = steps.iter().find(|(id, _)| !batch_save_point(id) && crate::commands::find(id).is_none()) {
         return Err(EngineError::BadParams { cmd: cmd.into(), msg: format!("unknown command `{id}` in the action") });
     }
     let output = str_param(p, "output", cmd)?.to_string();
     let inputs = batch_inputs_tree(p, cmd, &output)?;
-    let format = p.get("format").and_then(Value::as_str).unwrap_or("same").to_string();
+    let mut format = p.get("format").and_then(Value::as_str).unwrap_or("same").to_string();
+    // A recorded Export As (the last save point) writes its own format and quality where Batch
+    // keeps each file's format: an action that exports AVIF batches to AVIF.
+    let export_as = steps.iter().rev().find(|(id, _)| batch_save_point(id)).filter(|(id, _)| id == EXPORT_AS).and_then(|(_, p)| export_as_output(p));
     // Steps that call another action play it from the caller's actions; the playback stack comes
     // along so an action that batches itself is caught as a recursive call.
     let list = match p.get("calledActions") {
@@ -292,8 +369,24 @@ pub(super) fn batch(s: &mut Session, p: &Value) -> Result<Value> {
         playback_steps,
         ..Default::default()
     };
+    let mut save = SaveOpts::from_params(s, p, cmd)?;
+    if let Some((export_format, export_save)) = export_as.filter(|_| format == "same") {
+        format = export_format;
+        save.quality = save.quality.or(export_save.quality);
+        save.avif_quality = save.avif_quality.or(export_save.avif_quality);
+        save.avif_speed = save.avif_speed.or(export_save.avif_speed);
+    }
+    // A recorded JPEG or WebP Save As keeps its quality when Batch writes that format and asks
+    // for none of its own, as Photoshop's override keeps the step's format options.
+    let family = |e: &str| if e == "jpeg" { "jpg".to_string() } else { e.to_ascii_lowercase() };
+    if save.quality.is_none()
+        && let Some((_, recorded)) = steps.iter().rev().find(|(id, _)| batch_save_point(id) && id != EXPORT_AS)
+        && let (Some(q), Some(ext)) = (recorded.get("quality").and_then(Value::as_f64), recorded.get("path").and_then(Value::as_str).and_then(extension))
+        && family(&ext) == family(&format)
+    {
+        save.quality = Some(q);
+    }
     let names = batch_naming::plan(&inputs, &output, &format, p)?;
-    let save = SaveOpts::from_params(s, p, cmd)?;
     let authorize = s.authorize;
     // Each input runs in its own scratch session, so what the played steps spend is carried from
     // one input to the next (failed or not) and back to this session, not restarted per input.
@@ -312,7 +405,7 @@ pub(super) fn batch(s: &mut Session, p: &Value) -> Result<Value> {
                     saved = Some(scratch.active().ok_or(EngineError::NoDocument)?.doc.clone());
                     continue;
                 }
-                let r = scratch.execute(id, params.clone())?;
+                let r = scratch.execute(id, batch_params(id, params, out))?;
                 // A failed step inside a called action makes this file an error, not a saved result.
                 if let Some(error) = crate::actions_cmds::nested_failure(id, &r) {
                     return Err(EngineError::Other(error));
@@ -339,5 +432,7 @@ pub(super) fn batch(s: &mut Session, p: &Value) -> Result<Value> {
     if s.actions.playing > 0 {
         s.actions.playback_steps = carried.get();
     }
+    let mut r = r;
+    r["skipped"] = Value::Array(skipped);
     Ok(r)
 }

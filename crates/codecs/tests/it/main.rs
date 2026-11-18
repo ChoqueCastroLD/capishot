@@ -1,5 +1,6 @@
 //! The crate's integration tests, linked into one test binary.
 
+mod avif;
 mod camera_raw;
 mod common;
 mod dds;

@@ -53,11 +53,15 @@ fn avif_is_a_still_avif_with_its_size_depth_and_srgb() {
     assert_eq!(av1c[0], 0x81, "av1C marker and version 1");
     assert_eq!(av1c[2] & 0x40, 0, "8 bits, not high bit depth");
     assert_eq!(av1c[2] & 0x0c, 0, "4:4:4 (no chroma subsampling)");
-    let colr = one(ipco, b"colr");
-    assert_eq!(&colr[..4], b"nclx");
-    let primaries = u16::from_be_bytes([colr[4], colr[5]]);
-    let transfer = u16::from_be_bytes([colr[6], colr[7]]);
-    assert_eq!((primaries, transfer), (1, 13), "BT.709 primaries, sRGB transfer");
+    // sRGB (BT.709 primaries, sRGB transfer, BT.601 matrix, full range) is what a reader assumes
+    // without `colr`, so the encoder writes one only for anything else; the AV1 sequence header
+    // carries the same colour description.
+    for colr in boxes(ipco, b"colr") {
+        assert_eq!(&colr[..4], b"nclx");
+        let primaries = u16::from_be_bytes([colr[4], colr[5]]);
+        let transfer = u16::from_be_bytes([colr[6], colr[7]]);
+        assert_eq!((primaries, transfer), (1, 13), "BT.709 primaries, sRGB transfer");
+    }
     let mdat = one(&bytes, b"mdat");
     assert!(mdat.len() > 16, "AV1 payload");
     assert!(boxes(ipco, b"auxC").is_empty(), "opaque: no alpha image");
@@ -67,7 +71,7 @@ fn avif_is_a_still_avif_with_its_size_depth_and_srgb() {
 fn avif_keeps_transparency_as_an_alpha_image() {
     let mut img = rgba_page(32, 24, true);
     // Half the picture fully transparent.
-    for (i, px) in img.data_mut().chunks_exact_mut(4).enumerate() {
+    for (i, px) in img.data_mut().as_chunks_mut::<4>().0.iter_mut().enumerate() {
         if i % 32 < 16 {
             px[3] = 0;
         }

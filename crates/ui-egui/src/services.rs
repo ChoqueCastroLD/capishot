@@ -74,6 +74,10 @@ pub struct ExportSettings {
     pub webp_lossless: bool,
     /// Lossy WebP quality 1–100 (None = codec default).
     pub webp_quality: Option<u8>,
+    /// AVIF quality 1–100 (None = codec default).
+    pub avif_quality: Option<u8>,
+    /// AVIF encoder speed 1–10 (None = codec default).
+    pub avif_speed: Option<u8>,
     /// TIFF: keep the layers (Photoshop layer data); `false` is "Discard Layers and Save a Copy".
     pub tiff_layers: bool,
     /// Embed the document's whole XMP packet. `true` by default (Save As keeps the metadata);
@@ -110,6 +114,16 @@ pub struct ExportSettings {
     pub read_linked_files: bool,
 }
 
+/// Whether this build writes AVIF (the codecs' `avif` feature, which the apps turn on).
+pub(crate) fn avif_writable() -> bool {
+    photocraft_codecs::caps(photocraft_codecs::Format::Avif).write
+}
+
+/// An export dialog's format choices: `all` without `"avif"` when this build can't write it.
+pub(crate) fn export_formats(all: &[&'static str]) -> Vec<&'static str> {
+    all.iter().copied().filter(|f| *f != "avif" || avif_writable()).collect()
+}
+
 impl Default for ExportSettings {
     fn default() -> Self {
         ExportSettings {
@@ -117,6 +131,8 @@ impl Default for ExportSettings {
             jpeg_format: photocraft_codecs::JpegFormat::Baseline,
             webp_lossless: true,
             webp_quality: None,
+            avif_quality: None,
+            avif_speed: None,
             tiff_layers: true,
             xmp_all: true,
             tga_bits: None,
@@ -145,6 +161,12 @@ impl ExportSettings {
         opts.encode.webp_lossless = self.webp_lossless;
         if let Some(q) = self.webp_quality {
             opts.encode.webp_quality = q;
+        }
+        if let Some(q) = self.avif_quality {
+            opts.encode.avif_quality = q.clamp(1, 100);
+        }
+        if let Some(sp) = self.avif_speed {
+            opts.encode.avif_speed = sp.clamp(1, 10);
         }
         opts.encode.embed_icc = self.embed_icc;
         opts.encode.embed_metadata = self.embed_metadata;

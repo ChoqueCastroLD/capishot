@@ -129,7 +129,7 @@ choice!(
     /// The quality a JPEG or lossy WebP is written at over its own file.
     OriginalQuality { Maximum = "maximum", File = "file" } default Maximum
 );
-choice!(QuickExportFormat { Png = "png", Jpg = "jpg", Gif = "gif", Webp = "webp", Exr = "exr" } default Png);
+choice!(QuickExportFormat { Png = "png", Jpg = "jpg", Gif = "gif", Webp = "webp", Avif = "avif", Exr = "exr" } default Png);
 choice!(ExportLocation { Ask = "ask", SameFolder = "sameFolder" } default Ask);
 choice!(ExportMetadata { None = "none", Copyright = "copyright", All = "all" } default Copyright);
 choice!(
@@ -654,6 +654,8 @@ pub struct Export {
     /// Keep the existing lossless Quick Export default until the user opts into lossy WebP.
     pub webp_lossless: bool,
     pub webp_quality: u32,
+    /// AVIF quality 1..=100 (Quick Export as AVIF, and where Export As starts for AVIF).
+    pub avif_quality: u32,
     pub metadata: ExportMetadata,
     pub convert_to_srgb: bool,
 }
@@ -666,6 +668,7 @@ impl Default for Export {
             jpeg_quality: 85,
             webp_lossless: true,
             webp_quality: 85,
+            avif_quality: u32::from(photocraft_codecs::DEFAULT_AVIF_QUALITY),
             metadata: ExportMetadata::Copyright,
             convert_to_srgb: true,
         }

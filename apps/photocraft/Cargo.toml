@@ -39,7 +39,7 @@ photocraft-geom = { workspace = true }
 photocraft-compose = { workspace = true }
 photocraft-engine = { workspace = true, features = ["plugins"] }
 photocraft-fontfetch = { workspace = true }
-photocraft-codecs = { workspace = true, features = ["exr"] }
+photocraft-codecs = { workspace = true, features = ["exr", "avif"] }
 photocraft-io = { workspace = true, features = ["camera-raw"] }
 photocraft-format = { workspace = true }
 photocraft-automation = { workspace = true }

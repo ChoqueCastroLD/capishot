@@ -524,7 +524,9 @@ impl PhotocraftApp {
         let extras = flat_file_keeps_extras(&st.doc, path);
         let holds = file_holds(&st.doc, path);
         let lives_layered = st.path.as_deref().is_some_and(|p| photocraft_engine::file_cmds::saves_in_place(p) || tiff(p));
-        Ok(tiff_layers == Some(false) || (!holds && (plain_raster(&st.doc).is_none() || lives_layered || !extras)))
+        // A format Capishot writes but can't open (AVIF) never becomes the document's file.
+        let write_only = photocraft_engine::file_cmds::extension(path).and_then(|e| photocraft_codecs::from_extension(&e)).is_some_and(|f| !f.caps().read);
+        Ok(tiff_layers == Some(false) || write_only || (!holds && (plain_raster(&st.doc).is_none() || lives_layered || !extras)))
     }
 
     /// Whether saving the active document to `path` leaves content behind: a copy, not because it

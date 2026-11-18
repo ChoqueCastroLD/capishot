@@ -74,8 +74,8 @@ winsafe = { version = "=0.0.29", default-features = false, features = ["kernel"]
 photocraft-ipp = { workspace = true }
 
 [dev-dependencies]
-# EXR and camera raw behaviour is tested as the desktop app ships it.
-photocraft-codecs = { workspace = true, features = ["exr"] }
+# EXR, AVIF export and camera raw behaviour is tested as the desktop app ships it.
+photocraft-codecs = { workspace = true, features = ["exr", "avif"] }
 photocraft-io = { workspace = true, features = ["camera-raw"] }
 photocraft-affinity = { workspace = true, features = ["synth"] }
 # Synthetic camera raw files for the open tests.

@@ -19,7 +19,7 @@ elif [ "${PHOTOCRAFT_WEB_SPLIT:-1}" = "0" ]; then
   python3 "$HERE/split.py" --wasm "$wasm" --glue "$glue" --cold - --strip-only
 else
   python3 "$HERE/split.py" --wasm "$wasm" --glue "$glue" --cold "$HERE/cold-functions.txt.gz" --hot "$HERE/hot-commands.txt" \
-    --wasm-split "$(binaryen_tool wasm-split)"
+    --wasm-split "$(binaryen_tool wasm-split)" --cold-crates rav1e,ravif,av1_grain,v_frame,avif_serialize
 fi
 python3 "$HERE/rehash.py" "$D"
 python3 "$HERE/sri.py" "$D/index.html"

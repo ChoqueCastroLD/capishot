@@ -4863,3 +4863,8 @@ cameraRaw	Dehaze	Odstranění oparu
 	Split into Pieces	Rozdělit na kousky
 	The Bubble Text Remover: the text of a speech bubble with a plain background, without AI. Instant; a bubble it can't clean goes to AI	Odstraňovač textu z bublin: text bubliny s jednolitým pozadím, bez AI. Okamžitě; bublina, kterou nevyčistí, jde do AI
 	{n} pieces were in bubbles without a plain background: cleaned with AI	{n} kousků bylo v bublinách bez jednolitého pozadí: vyčištěno pomocí AI
+
+# File › Automate › Batch: the result line
+@plural	Batch: {n} file written|Batch: {n} files written	Dávka: zapsán {n} soubor|Dávka: zapsány {n} soubory|Dávka: zapsáno {n} souborů
+	Errors: {n}	Chyby: {n}
+	Skipped steps: {steps}	Vynechané kroky: {steps}

@@ -154,7 +154,7 @@ mod quick_export_label_tests {
     #[test]
     fn file_quick_export_menu_reflects_selected_format_without_renaming_layer_export() {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
-        for (value, expected) in [("png", "PNG"), ("jpg", "JPG"), ("gif", "GIF"), ("webp", "WebP"), ("exr", "EXR")] {
+        for (value, expected) in [("png", "PNG"), ("jpg", "JPG"), ("gif", "GIF"), ("webp", "WebP"), ("avif", "AVIF"), ("exr", "EXR")] {
             app.run("prefs.set", json!({"values": {"export.quickExportFormat": value}})).unwrap();
             let items = menu_items(&app);
             let quick: Vec<_> = items.iter().filter(|i| i.id == "file.export.quickExportAsPng").collect();

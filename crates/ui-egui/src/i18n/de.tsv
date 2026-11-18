@@ -4152,3 +4152,8 @@ curves	Smooth	Glätten
 	Split into Pieces	In Teile aufteilen
 	The Bubble Text Remover: the text of a speech bubble with a plain background, without AI. Instant; a bubble it can't clean goes to AI	Der Sprechblasen-Textentferner: der Text einer Sprechblase mit einfarbigem Hintergrund, ohne KI. Sofort; eine Blase, die er nicht reinigen kann, geht an die KI
 	{n} pieces were in bubbles without a plain background: cleaned with AI	{n} Teile lagen in Blasen ohne einfarbigen Hintergrund: mit KI entfernt
+
+# File › Automate › Batch: the result line
+@plural	Batch: {n} file written|Batch: {n} files written	Stapelverarbeitung: {n} Datei geschrieben|Stapelverarbeitung: {n} Dateien geschrieben
+	Errors: {n}	Fehler: {n}
+	Skipped steps: {steps}	Übersprungene Schritte: {steps}

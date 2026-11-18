@@ -141,7 +141,7 @@ pub fn range(path: &str) -> Option<(f64, f64)> {
         "fileHandling.rasterizeSvgGroupsDeeperThan" => (0.0, photocraft_doc::MAX_GROUP_DEPTH as f64),
         "interface.notificationDurationSeconds" => (1.0, 120.0),
         "enhancedControls.longPressMs" => (200.0, 1500.0),
-        "export.jpegQuality" | "export.webpQuality" => (1.0, 100.0),
+        "export.jpegQuality" | "export.webpQuality" | "export.avifQuality" => (1.0, 100.0),
         "performance.memoryUsageMb" => (256.0, 1_048_576.0),
         "performance.gpuMemoryMb" => (0.0, 1_048_576.0),
         "scratchDisks.budgetMb" => (0.0, 1_048_576.0),

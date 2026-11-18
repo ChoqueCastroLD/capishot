@@ -5227,3 +5227,8 @@ shape	Appearance	Aspetto
 	Split into Pieces	Dividi in pezzi
 	The Bubble Text Remover: the text of a speech bubble with a plain background, without AI. Instant; a bubble it can't clean goes to AI	Il Rimuovi testo dai balloon: il testo di un balloon con sfondo uniforme, senza IA. Immediato; un balloon che non riesce a pulire passa all'IA
 	{n} pieces were in bubbles without a plain background: cleaned with AI	{n} pezzi erano in balloon senza sfondo uniforme: puliti con l'IA
+
+# File › Automate › Batch: the result line
+@plural	Batch: {n} file written|Batch: {n} files written	Batch: {n} file scritto|Batch: {n} file scritti
+	Errors: {n}	Errori: {n}
+	Skipped steps: {steps}	Passaggi saltati: {steps}

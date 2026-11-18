@@ -744,3 +744,37 @@ fn applying_a_preset_restores_its_size_mode() {
     assert_eq!(f.get("height"), Some(&json!(50.0)));
     assert_eq!(f.get("sizing"), Some(&json!("scale")));
 }
+
+#[test]
+fn avif_is_offered_with_quality_and_speed_and_writes_an_avif() {
+    assert!(formats().any(|(k, l)| *k == "avif" && *l == "AVIF"), "this build writes AVIF, so Export As offers it");
+    let prefs = photocraft_engine::prefs::Export { avif_quality: 77, ..Default::default() };
+    let mut f = Map::new();
+    f.insert("speed".into(), json!(7));
+    set_format_defaults(&mut f, "avif", &prefs);
+    assert_eq!(f["quality"], 77, "AVIF starts at its own quality preference");
+    assert!(valid_setting("format", &json!("avif")) && valid_setting("speed", &json!(7)) && !valid_setting("speed", &json!(11)));
+    let s = settings(&f);
+    assert_eq!((s.avif_quality, s.avif_speed, s.jpeg_quality, s.webp_quality), (Some(77), Some(7), None, None));
+    assert_eq!(estimate_settings(&f).avif_speed, Some(9), "the size estimate encodes fast");
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    app.run("file.new", json!({"width": 48, "height": 32})).unwrap();
+    f.insert("scale".into(), json!(100));
+    let doc = export_document(&app.session.active().unwrap().doc, &f, None).unwrap();
+    let bytes = photocraft_io::export(&doc, "page.avif", &s.io_options()).unwrap().bytes;
+    assert_eq!(&bytes[4..12], b"ftypavif");
+}
+
+#[test]
+fn batch_and_image_processor_offer_avif() {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    app.run("file.new", json!({"width": 8, "height": 8})).unwrap();
+    app.session.actions.list.push(photocraft_engine::actions_cmds::Action::new("A", vec![("image.adjustments.invert".into(), json!({}))]));
+    for id in ["file.scripts.imageProcessor", "file.automate.batch", "file.export.layersToFiles"] {
+        let _ = crate::menus::invoke(&mut app, &egui::Context::default(), id, json!({}));
+        let dialog = app.ui.dialogs.iter().rev().find(|d| d.fields.get("__command").and_then(Value::as_str) == Some(id));
+        let Some(dialog) = dialog else { panic!("{id} opened no dialog") };
+        let formats = dialog.fields["__choices"]["format"].as_array().unwrap();
+        assert!(formats.contains(&json!("avif")) && formats.contains(&json!("webp")), "{id}: {formats:?}");
+    }
+}

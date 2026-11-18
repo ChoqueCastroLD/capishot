@@ -79,7 +79,7 @@ pub fn params(st: &State) -> Value {
         "prefix": st.prefix,
         "srgb": st.srgb,
     });
-    if st.format == "jpg" || st.format == "webp" {
+    if st.format == "jpg" || st.format == "webp" || st.format == "avif" {
         p["quality"] = json!(st.quality.round().clamp(1.0, 100.0));
     }
     if st.format == "webp" {
@@ -404,8 +404,15 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
             crate::widgets::hairline(ui);
             ui.label(RichText::new(tl!("Format")).font(crate::theme::semibold(13.0)));
             ui.horizontal_wrapped(|ui| {
-                for (k, l) in [("png", "PNG"), ("jpg", "JPG"), ("webp", "WebP"), ("psd", tl!("PSD (with layers)"))] {
+                for (k, l) in [("png", "PNG"), ("jpg", "JPG"), ("webp", "WebP"), ("avif", "AVIF"), ("psd", tl!("PSD (with layers)"))] {
+                    if k == "avif" && !crate::avif_writable() {
+                        continue;
+                    }
                     if ui.selectable_label(st.format == k, l).clicked() {
+                        // AVIF starts at its own default quality: JPEG's 90 makes large AVIF files.
+                        if k == "avif" && st.format != "avif" {
+                            st.quality = f32::from(photocraft_codecs::DEFAULT_AVIF_QUALITY);
+                        }
                         st.format = k.into();
                     }
                 }
@@ -416,7 +423,7 @@ pub fn window(app: &mut PhotocraftApp, ctx: &egui::Context) {
             if st.format == "psd" {
                 ui.label(RichText::new(tl!("Each document saved with its layers, as Save does. Size and sRGB apply to all its layers.")).small().color(t.text_faint));
             }
-            if st.format == "jpg" || (st.format == "webp" && !st.lossless) {
+            if st.format == "jpg" || st.format == "avif" || (st.format == "webp" && !st.lossless) {
                 ui.horizontal(|ui| {
                     ui.label(tl!("Quality"));
                     crate::widgets::value_field(ui, &mut st.quality, 1.0..=100.0, "", 50.0);

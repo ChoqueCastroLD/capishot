@@ -400,7 +400,7 @@ pub(super) fn front(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, para
             dialog(
                 app,
                 json!({"dir": dir, "prefix": name.rsplit_once('.').map_or(name.as_str(), |(a, _)| a), "format": "png", "visibleOnly": true}),
-                json!({"format": ["png", "jpg", "psd", "tiff", "webp", "bmp"]}),
+                json!({"format": crate::export_formats(&["png", "jpg", "psd", "tiff", "webp", "avif", "bmp"])}),
             )
         }
         "file.export.layerCompsToFiles" | "file.export.artboardsToFiles" => {
@@ -411,7 +411,7 @@ pub(super) fn front(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, para
             } else {
                 json!({"dir": dir, "prefix": prefix, "format": "png"})
             };
-            dialog(app, fields, json!({"format": ["png", "jpg", "psd", "tiff", "webp", "bmp"]}))
+            dialog(app, fields, json!({"format": crate::export_formats(&["png", "jpg", "psd", "tiff", "webp", "avif", "bmp"])}))
         }
         "file.export.artboardsToPdf" => {
             let (_, _, name) = doc?;
@@ -464,7 +464,7 @@ pub(super) fn front(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, para
             app,
             // Open images first, as they are now: what was upscaled or cleaned and not saved yet.
             json!({"useOpenDocuments": !app.session.documents().is_empty(), "input": dir, "includeSubfolders": false, "__labels": {"includeSubfolders": tl!("Include All Subfolders"), "useOpenDocuments": tl!("Use Open Images")}, "output": format!("{dir}/processed"), "format": "jpg", "quality": 8, "width": 0, "height": 0, "convertToSrgb": true}),
-            json!({"format": ["jpg", "png", "psd", "tiff", "webp"]}),
+            json!({"format": crate::export_formats(&["jpg", "png", "psd", "tiff", "webp", "avif"])}),
         ),
         "file.automate.batch" => {
             let Some(action) = crate::actions::selected_action(app) else {
@@ -475,7 +475,7 @@ pub(super) fn front(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, para
             dialog(
                 app,
                 json!({"action": name, "steps": steps, "input": dir, "includeSubfolders": false, "__labels": subfolders_label(), "output": format!("{dir}/batch"), "format": "same", "quality": null, "__batchQuality": 8, "naming": "", "startingSerial": 1}),
-                json!({"format": ["same", "png", "jpg", "psd", "tiff", "webp"]}),
+                json!({"format": crate::export_formats(&["same", "png", "jpg", "psd", "tiff", "webp", "avif"])}),
             )
         }
         // Channel workflow dialogs (see channels_panel.rs for the channel references).

@@ -28,6 +28,11 @@ pub(crate) struct SaveOpts {
     /// DDS: the compression and whether to write the mip chain (`"ddsCompression"`,
     /// `"ddsMipmaps"`); unset, uncompressed without mipmaps.
     pub dds: photocraft_io::DdsOptions,
+    /// AVIF quality 1..=100 (`"avifQuality"`); unset, the 0-12 `quality` mapped by
+    /// [`avif_quality`], else the codec's default.
+    pub avif_quality: Option<u8>,
+    /// AVIF encoder speed 1..=10 (`"avifSpeed"`); unset, the codec's default.
+    pub avif_speed: Option<u8>,
     /// PSD/PSB: embed the thumbnail resource (Preferences › File Handling › Image Previews).
     pub image_previews: bool,
     /// PSD/PSB: write the real merged image (Preferences › File Handling › Maximize PSD and PSB
@@ -45,6 +50,8 @@ impl Default for SaveOpts {
             dpx_bits: None,
             tiff_compression: None,
             dds: photocraft_io::DdsOptions::default(),
+            avif_quality: None,
+            avif_speed: None,
             image_previews: true,
             psd_maximize_compatibility: true,
         }
@@ -67,6 +74,8 @@ impl SaveOpts {
             dpx_bits: dpx_bits_param(p, cmd)?,
             tiff_compression: tiff_compression_param(p, cmd)?,
             dds: dds_param(p, cmd)?.unwrap_or_default(),
+            avif_quality: int_param(p, "avifQuality", 1, 100, cmd)?,
+            avif_speed: int_param(p, "avifSpeed", 1, 10, cmd)?,
             image_previews: file_handling.image_previews != crate::prefs::Ask::Never,
             psd_maximize_compatibility: file_handling.maximize_psd_compatibility != crate::prefs::Ask::Never,
         })
@@ -81,6 +90,19 @@ impl SaveOpts {
 impl From<Option<f64>> for SaveOpts {
     fn from(quality: Option<f64>) -> Self {
         SaveOpts { quality, ..Default::default() }
+    }
+}
+
+/// The whole number `p[key]` within `lo..=hi` (absent or null: `None`); anything else is a bad
+/// parameter of command `cmd`.
+pub(crate) fn int_param(p: &Value, key: &str, lo: u8, hi: u8, cmd: &str) -> Result<Option<u8>> {
+    match p.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v
+            .as_f64()
+            .filter(|x| x.is_finite() && (f64::from(lo)..=f64::from(hi)).contains(x))
+            .map(|x| Some(x.round() as u8))
+            .ok_or_else(|| EngineError::BadParams { cmd: cmd.into(), msg: format!("`{key}` must be a number from {lo} to {hi}, got {v}") }),
     }
 }
 
@@ -130,6 +152,13 @@ pub fn jpeg_format_param(p: &Value, cmd: &str) -> Result<Option<photocraft_codec
 /// range is clamped, and NaN or infinite is 100).
 pub fn jpeg_quality(q: f64) -> u8 {
     if q.is_finite() { (q.clamp(0.0, 12.0) / 12.0 * 99.0 + 1.0).round() as u8 } else { 100 }
+}
+
+/// Photoshop's 0-12 quality as an AVIF quality: 0 is 50, 12 is 100, linear between (8, Image
+/// Processor's default, is 83, near the codec's default of 85). AVIF below 50 smears lettering
+/// and screentone, so the scale starts there. NaN or infinite is the codec's default.
+pub fn avif_quality(q: f64) -> u8 {
+    if q.is_finite() { (50.0 + q.clamp(0.0, 12.0) / 12.0 * 50.0).round() as u8 } else { photocraft_codecs::DEFAULT_AVIF_QUALITY }
 }
 
 /// The DPX bits per sample in `p` (`"dpxBits": 8 | 10 | 12 | 16`; absent or null: the document's
@@ -201,6 +230,12 @@ pub(crate) fn encode(doc: &Document, path: &str, save: impl Into<SaveOpts>) -> R
     }
     if let Some(f) = save.jpeg_format {
         opts.encode.jpeg_format = f;
+    }
+    if let Some(q) = save.avif_quality.or_else(|| save.quality.map(avif_quality)) {
+        opts.encode.avif_quality = q;
+    }
+    if let Some(sp) = save.avif_speed {
+        opts.encode.avif_speed = sp;
     }
     photocraft_io::export(doc, path, &opts).map(|r| (r.bytes, r.warnings)).map_err(|e| EngineError::Other(format!("{path}: {e}")))
 }

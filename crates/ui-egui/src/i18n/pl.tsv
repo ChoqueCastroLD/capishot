@@ -4750,3 +4750,8 @@ curves	Smooth	Wygładź
 	Split into Pieces	Rozdziel na kawałki
 	The Bubble Text Remover: the text of a speech bubble with a plain background, without AI. Instant; a bubble it can't clean goes to AI	Usuwanie tekstu z dymków: tekst dymka o jednolitym tle, bez AI. Natychmiast; dymek, którego nie da się wyczyścić, trafia do AI
 	{n} pieces were in bubbles without a plain background: cleaned with AI	{n} kawałków było w dymkach bez jednolitego tła: wyczyszczono je za pomocą AI
+
+# File › Automate › Batch: the result line
+@plural	Batch: {n} file written|Batch: {n} files written	Przetwarzanie wsadowe: zapisano {n} plik|Przetwarzanie wsadowe: zapisano {n} pliki|Przetwarzanie wsadowe: zapisano {n} plików
+	Errors: {n}	Błędy: {n}
+	Skipped steps: {steps}	Pominięte kroki: {steps}

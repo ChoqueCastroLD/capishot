@@ -4152,3 +4152,8 @@ curves	Smooth	Haluskan
 	Split into Pieces	Pisahkan jadi potongan
 	The Bubble Text Remover: the text of a speech bubble with a plain background, without AI. Instant; a bubble it can't clean goes to AI	Penghapus teks balon: teks balon dengan latar polos, tanpa AI. Instan; balon yang tak bisa dibersihkan diserahkan ke AI
 	{n} pieces were in bubbles without a plain background: cleaned with AI	{n} potongan berada di balon tanpa latar polos: dibersihkan dengan AI
+
+# File › Automate › Batch: the result line
+@plural	Batch: {n} file written|Batch: {n} files written	Batch: {n} file ditulis
+	Errors: {n}	Error: {n}
+	Skipped steps: {steps}	Langkah yang dilewati: {steps}

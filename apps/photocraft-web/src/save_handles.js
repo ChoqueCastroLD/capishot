@@ -16,6 +16,7 @@ const SAVE_TYPES = [
   ['PNG', 'image/png', 'png'],
   ['JPEG', 'image/jpeg', 'jpg'],
   ['WebP', 'image/webp', 'webp'],
+  ['AVIF', 'image/avif', 'avif'],
   ['TIFF', 'image/tiff', 'tif'],
   ['GIF', 'image/gif', 'gif'],
   ['BMP', 'image/bmp', 'bmp'],

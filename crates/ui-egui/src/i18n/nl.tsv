@@ -4878,3 +4878,8 @@ curves	Smooth	Vloeiend maken
 	Split into Pieces	Opsplitsen in stukken
 	The Bubble Text Remover: the text of a speech bubble with a plain background, without AI. Instant; a bubble it can't clean goes to AI	De ballontekstwisser: de tekst van een tekstballon met een effen achtergrond, zonder AI. Direct; een ballon die hij niet kan wissen gaat naar AI
 	{n} pieces were in bubbles without a plain background: cleaned with AI	{n} stukken lagen in ballonnen zonder effen achtergrond: gewist met AI
+
+# File › Automate › Batch: the result line
+@plural	Batch: {n} file written|Batch: {n} files written	Batch: {n} bestand geschreven|Batch: {n} bestanden geschreven
+	Errors: {n}	Fouten: {n}
+	Skipped steps: {steps}	Overgeslagen stappen: {steps}

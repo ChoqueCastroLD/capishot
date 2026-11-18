@@ -1,3 +1,5 @@
+#[cfg(feature = "avif")]
+pub(crate) mod avif;
 pub(crate) mod dds;
 pub(crate) mod dds_bc;
 #[cfg(feature = "exr")]

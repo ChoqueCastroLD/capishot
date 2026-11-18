@@ -140,6 +140,7 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
                 QuickExportFormat::Jpg => "JPG",
                 QuickExportFormat::Gif => "GIF",
                 QuickExportFormat::Webp => "WebP",
+                QuickExportFormat::Avif => "AVIF",
                 QuickExportFormat::Exr => "EXR",
             }
         };

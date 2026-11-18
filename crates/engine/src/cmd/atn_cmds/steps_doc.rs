@@ -65,7 +65,28 @@ pub(super) fn save_from(d: &Descriptor) -> Mapped {
     if !exts.contains(&ext.as_str()) {
         return unsupported;
     }
-    step(if get_bool(d, "Cpy ") == Some(true) { "file.saveACopy" } else { "file.saveAs" }, json!({"path": path}))
+    let mut p = json!({"path": path});
+    if let Some(q) = save_quality(&class, format) {
+        p["quality"] = json!(q);
+    }
+    step(if get_bool(d, "Cpy ") == Some(true) { "file.saveACopy" } else { "file.saveAs" }, p)
+}
+
+/// The quality of a JPEG or lossy WebP Save As, on Photoshop's 0-12 scale that `file.saveAs`
+/// takes: JPEG Options' `EQlt` as it is, a WebP's 0-100 `quality` mapped back onto it. A
+/// lossless WebP, or a format without a quality, has none.
+fn save_quality(class: &str, format: &Descriptor) -> Option<f64> {
+    match class {
+        "JPEG" => get_num(format, "EQlt").filter(|q| q.is_finite()).map(|q| q.clamp(0.0, 12.0)),
+        "WebPFormat" | "Google WebPShop" | "Google WebP" => {
+            if get_enum(format, "compression").is_some_and(|c| c.to_ascii_lowercase().contains("lossless")) {
+                return None;
+            }
+            let q = get_num(format, "quality").filter(|q| q.is_finite())?.clamp(1.0, 100.0);
+            Some(((q - 1.0) * 12.0 / 99.0 * 100.0).round() / 100.0)
+        }
+        _ => None,
+    }
 }
 
 pub(super) fn save_to(id: &str, p: &Value) -> Option<Descriptor> {
@@ -75,7 +96,18 @@ pub(super) fn save_to(id: &str, p: &Value) -> Option<Descriptor> {
     let path = jstr(p, "path")?;
     let ext = path_extension(path)?;
     let (class, _) = SAVE_FORMATS.iter().find(|(_, exts)| exts.contains(&ext.as_str()))?;
-    let d = desc("null").with("As  ", D::Descriptor(desc(class))).with("In  ", path_value(path));
+    let mut format = desc(class);
+    if let Some(q) = jnum(p, "quality").filter(|q| q.is_finite()) {
+        let q = q.clamp(0.0, 12.0);
+        match *class {
+            "JPEG" => format = format.with("EQlt", long(q.round())),
+            "WebPFormat" => {
+                format = format.with("compression", enm("WebPCompression", "compressionLossy")).with("quality", long((q / 12.0 * 99.0 + 1.0).round()))
+            }
+            _ => {}
+        }
+    }
+    let d = desc("null").with("As  ", D::Descriptor(format)).with("In  ", path_value(path));
     Some(if id == "file.saveACopy" { d.with("Cpy ", D::Boolean(true)) } else { d })
 }
 

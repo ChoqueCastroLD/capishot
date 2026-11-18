@@ -39,7 +39,7 @@ photocraft-engine = { workspace = true, features = ["plugins"] }
 photocraft-fontfetch = { workspace = true }
 photocraft-io = { workspace = true, features = ["camera-raw"] }
 photocraft-format = { path = "../../crates/format" }
-photocraft-codecs = { workspace = true, features = ["exr"] }
+photocraft-codecs = { workspace = true, features = ["exr", "avif"] }
 clap = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

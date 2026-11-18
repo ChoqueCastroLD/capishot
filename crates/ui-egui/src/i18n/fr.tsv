@@ -5155,3 +5155,8 @@ shape	Appearance	Apparence
 	Split into Pieces	Séparer en morceaux
 	The Bubble Text Remover: the text of a speech bubble with a plain background, without AI. Instant; a bubble it can't clean goes to AI	Le Gommeur de texte de bulles : le texte d'une bulle au fond uni, sans IA. Instantané ; une bulle qu'il ne peut pas nettoyer passe à l'IA
 	{n} pieces were in bubbles without a plain background: cleaned with AI	{n} morceaux étaient dans des bulles sans fond uni : nettoyés avec l'IA
+
+# File › Automate › Batch: the result line
+@plural	Batch: {n} file written|Batch: {n} files written	Traitement par lots : {n} fichier écrit|Traitement par lots : {n} fichiers écrits
+	Errors: {n}	Erreurs : {n}
+	Skipped steps: {steps}	Étapes ignorées : {steps}

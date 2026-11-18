@@ -3833,3 +3833,8 @@ curves	Smooth	平滑
 	Split into Pieces	拆分为碎片
 	The Bubble Text Remover: the text of a speech bubble with a plain background, without AI. Instant; a bubble it can't clean goes to AI	气泡文字清除器：不用 AI 清除纯色背景气泡里的文字。即刻完成；无法清除的气泡交给 AI
 	{n} pieces were in bubbles without a plain background: cleaned with AI	{n} 个碎片位于非纯色背景的气泡中：已用 AI 清除
+
+# File › Automate › Batch: the result line
+@plural	Batch: {n} file written|Batch: {n} files written	批处理：已写入 {n} 个文件
+	Errors: {n}	错误：{n}
+	Skipped steps: {steps}	跳过的步骤：{steps}

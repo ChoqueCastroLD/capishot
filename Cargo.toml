@@ -161,6 +161,13 @@ opt-level = "s"
 [profile.wasm-release.package.photocraft-vector]
 opt-level = "s"
 
+# AVIF export: rav1e at "z" encodes several times slower; its code is in a lazily loaded chunk
+# (packaging/web-split/split.py --cold-crates), so its size doesn't add to the first load.
+[profile.wasm-release.package.rav1e]
+opt-level = 3
+[profile.wasm-release.package.ravif]
+opt-level = 3
+
 # Large crates off the per-frame and per-pixel paths: the document model, file parsers run once
 # per open/save, JSON (settings, presets, control channel), SVG parsing, and shader translation
 # (runs when a pipeline is created). "z" keeps the wasm well under the size gate.

@@ -58,6 +58,8 @@ def main():
     ap.add_argument('--chunk-bytes', type=float, default=5.5e6)
     ap.add_argument('--threads', action='store_true', help='the module uses threads and SIMD')
     ap.add_argument('--strip-only', action='store_true', help="don't split; only drop the name section")
+    ap.add_argument('--cold-crates', default='', help='comma-separated crates whose every function moves to the chunks '
+                    '(features no first frame runs, such as AVIF export: rav1e), named or not in --cold')
     a = ap.parse_args()
     if a.strip_only:
         strip_names(a.wasm)
@@ -73,7 +75,9 @@ def main():
     named = [f for f in funcs if not f[4].startswith('$f')]
     if len(named) < len(funcs) // 2:
         sys.exit(f'{a.wasm}: no name section; build it with names (wasm-opt --debuginfo) for the split')
-    moving = [f for f in funcs if norm(f[4]) in cold and not f[2] and not f[3]]
+    crates = [c for c in a.cold_crates.split(',') if c]
+    of_cold_crate = re.compile(r'(?<![A-Za-z0-9_])(?:' + '|'.join(map(re.escape, crates)) + r')\[[0-9a-f]+\]::') if crates else None
+    moving = [f for f in funcs if (norm(f[4]) in cold or (of_cold_crate and of_cold_crate.search(f[4]))) and not f[2] and not f[3]]
     # Chunks: the moving functions grouped by crate, then name, packed up to the code budget.
     moving.sort(key=lambda f: (crate_of(f[4]), f[4]))
     chunks, size = [[]], 0

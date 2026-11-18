@@ -35,13 +35,13 @@ pub(crate) fn encode(src: &Image, plan: Plan, opts: &EncodeOptions) -> Result<Ve
         .with_alpha_color_mode(ravif::AlphaColorMode::UnassociatedClean);
     let (wu, hu) = (w as usize, h as usize);
     let out = if alpha {
-        let px: Vec<ravif::RGBA8> = img.data().chunks_exact(4).map(|c| ravif::RGBA8::new(c[0], c[1], c[2], c[3])).collect();
+        let px: Vec<ravif::RGBA8> = img.data().as_chunks::<4>().0.iter().map(|&[r, g, b, a]| ravif::RGBA8::new(r, g, b, a)).collect();
         if px.len() != wu * hu {
             return Err(CodecError::InvalidImage("buffer size mismatch".into()));
         }
         enc.encode_rgba(ravif::Img::new(px.as_slice(), wu, hu))
     } else {
-        let px: Vec<ravif::RGB8> = img.data().chunks_exact(3).map(|c| ravif::RGB8::new(c[0], c[1], c[2])).collect();
+        let px: Vec<ravif::RGB8> = img.data().as_chunks::<3>().0.iter().map(|&[r, g, b]| ravif::RGB8::new(r, g, b)).collect();
         if px.len() != wu * hu {
             return Err(CodecError::InvalidImage("buffer size mismatch".into()));
         }

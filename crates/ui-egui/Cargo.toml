@@ -88,9 +88,9 @@ egui = { workspace = true, features = ["default_fonts", "monochrome_emoji_fonts"
 # Synthetic raw files for the open-time Camera Raw dialog tests.
 photocraft-raw = { workspace = true, features = ["testgen"] }
 egui_kittest = { workspace = true, features = ["wgpu", "snapshot", "eframe"] }
-# Tests keep egui's default fonts as the desktop app has them; EXR, camera raw and plug-in
+# Tests keep egui's default fonts as the desktop app has them; EXR, AVIF, camera raw and plug-in
 # behaviour is tested as the desktop app ships it.
-photocraft-codecs = { workspace = true, features = ["exr"] }
+photocraft-codecs = { workspace = true, features = ["exr", "avif"] }
 photocraft-io = { workspace = true, features = ["camera-raw"] }
 # Benchmark helpers for the `--json` benches `cargo xtask perf` runs (in-process RSS, percentiles).
 photocraft-testkit = { workspace = true }

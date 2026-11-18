@@ -62,7 +62,7 @@ pub(super) fn humanize(key: &str) -> String {
     if key == "webpLossless" {
         return "Lossless".into();
     }
-    if key == "webpQuality" {
+    if key == "webpQuality" || key == "avifQuality" {
         return "Quality".into();
     }
     // The auto-hide notice settings read best with their own labels (Interface › Notification, #2022).
@@ -404,7 +404,7 @@ pub(super) fn has_visible_fields(values: &Value, section: &str) -> bool {
     values.get(section).and_then(Value::as_object).is_some_and(|o| o.keys().any(|k| !prefs::is_hidden(&format!("{section}.{k}"))))
 }
 
-/// JPEG and WebP have independent settings; unrelated format controls stay out of view.
+/// JPEG, WebP and AVIF have independent settings; unrelated format controls stay out of view.
 pub(super) fn export_field_visible(obj: &Map<String, Value>, key: &str) -> bool {
     let format = obj.get("quickExportFormat").and_then(Value::as_str).unwrap_or("png");
     match key {
@@ -412,6 +412,7 @@ pub(super) fn export_field_visible(obj: &Map<String, Value>, key: &str) -> bool 
         "jpegQuality" => format == "jpg",
         "webpLossless" => format == "webp",
         "webpQuality" => format == "webp" && obj.get("webpLossless").and_then(Value::as_bool) != Some(true),
+        "avifQuality" => format == "avif",
         _ => true,
     }
 }

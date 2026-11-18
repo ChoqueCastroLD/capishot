@@ -28,7 +28,8 @@ path = "src/main.rs"
 [dependencies]
 photocraft-engine = { workspace = true }
 photocraft-io = { workspace = true }
-photocraft-codecs = { workspace = true }
+# AVIF export (rav1e, pure Rust): its code goes to a lazily loaded chunk (packaging/web-split).
+photocraft-codecs = { workspace = true, features = ["avif"] }
 photocraft-doc = { workspace = true }
 photocraft-ui-egui = { workspace = true }
 photocraft-compose = { workspace = true }

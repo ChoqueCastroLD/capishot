@@ -15,6 +15,7 @@ pub(super) fn export_preferences(s: &mut Session, p: &Value) -> Result<Value> {
         ("jpegQuality", "export.jpegQuality"),
         ("webpLossless", "export.webpLossless"),
         ("webpQuality", "export.webpQuality"),
+        ("avifQuality", "export.avifQuality"),
         ("metadata", "export.metadata"),
         ("convertToSrgb", "export.convertToSrgb"),
     ] {
@@ -73,8 +74,8 @@ pub(super) fn quick_export(s: &mut Session, p: &Value) -> Result<Value> {
     let fmt = match crate::file_cmds::extension(&path).as_deref() {
         None => fmt,
         Some("jpg" | "jpeg") => "jpg".into(),
-        Some(e @ ("png" | "gif" | "webp" | "exr")) => e.into(),
-        Some(e) => return Err(bad(cmd, format!("Quick Export writes PNG, JPEG, GIF, WebP or EXR, not .{e}; use Export As"))),
+        Some(e @ ("png" | "gif" | "webp" | "avif" | "exr")) => e.into(),
+        Some(e) => return Err(bad(cmd, format!("Quick Export writes PNG, JPEG, GIF, WebP, AVIF or EXR, not .{e}; use Export As"))),
     };
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let doc = d.doc.clone();
@@ -117,6 +118,15 @@ pub(super) fn quick_export(s: &mut Session, p: &Value) -> Result<Value> {
             let (wdoc, _, _) = web_document(&doc, &json!({}), &WebSettings { convert_to_srgb: prefs.convert_to_srgb, ..Default::default() })?;
             let quality = if prefs.webp_lossless { None } else { Some((f64::from(prefs.webp_quality.clamp(1, 100)) - 1.0) * 12.0 / 99.0) };
             let warnings = crate::file_cmds::save_doc(&wdoc, &path, quality)?;
+            crate::automate_cmds::fire_event(s, "export");
+            return Ok(json!({"path": path, "format": fmt, "warnings": warnings}));
+        }
+        "avif" => {
+            // The exporter converts to sRGB in any case (AVIF is written without an ICC profile).
+            let (wdoc, _, _) = web_document(&doc, &json!({}), &WebSettings { convert_to_srgb: prefs.convert_to_srgb, ..Default::default() })?;
+            let quality = Some(prefs.avif_quality.clamp(1, 100) as u8);
+            let save = crate::file_cmds::SaveOpts { avif_quality: quality, ..Default::default() };
+            let warnings = crate::file_cmds::save_doc(&wdoc, &path, save)?;
             crate::automate_cmds::fire_event(s, "export");
             return Ok(json!({"path": path, "format": fmt, "warnings": warnings}));
         }
