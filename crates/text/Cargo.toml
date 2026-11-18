@@ -48,6 +48,12 @@ rayon = { workspace = true }
 [target.'cfg(target_os = "macos")'.dependencies]
 parley = { version = "0.11", default-features = false, features = ["std", "complex-scripts", "system"] }
 
+# Windows only: the same `system` feature with fontique's DirectWrite backend, so fonts installed
+# outside C:\Windows\Fonts and the per-user folder (font managers, installers that register their
+# own path) are listed too. No fontconfig here either.
+[target.'cfg(target_os = "windows")'.dependencies]
+parley = { version = "0.11", default-features = false, features = ["std", "complex-scripts", "system"] }
+
 [build-dependencies]
 # Deflates the bundled fonts (build.rs); `flate2` above inflates them.
 flate2 = { workspace = true }

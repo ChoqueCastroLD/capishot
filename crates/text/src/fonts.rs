@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
 
 use parley::FontContext;
-#[cfg(any(target_os = "macos", all(test, not(target_arch = "wasm32"))))]
+#[cfg(any(target_os = "macos", target_os = "windows", all(test, not(target_arch = "wasm32"))))]
 use parley::fontique::SourceKind;
 use parley::fontique::{Blob, Collection, CollectionOptions, FamilyId, FontInfoOverride, FontStyle, FontWeight, FontWidth, GenericFamily, SourceCache};
 use skrifa::raw::{FileRef, TableProvider, types::Tag};
@@ -351,6 +351,10 @@ impl FontDb {
             // font folders (#6683).
             #[cfg(target_os = "macos")]
             files.extend(coretext_font_paths());
+            // DirectWrite knows every font Windows offers, also those installed outside the
+            // font folders (a font manager, an installer that registers its own path).
+            #[cfg(target_os = "windows")]
+            files.extend(directwrite_font_paths());
             // PingFang (the macOS Chinese UI font) lives outside the font folders.
             if cfg!(target_os = "macos") {
                 files.extend(crate::cjk::mac_pingfang());
@@ -1398,6 +1402,17 @@ mod fontconfig_tests {
 /// (a font manager, Adobe Fonts, Office, Apple's on-demand downloads). A scratch collection with
 /// fontique's Core Text backend lists them; its fonts are not used, only their files, so our own
 /// collection registers them like any scanned file.
+/// Every font file DirectWrite's system collection lists, as [`coretext_font_paths`] does on
+/// macOS. A failure reads as no files: the folder scan still has the font folders.
+#[cfg(target_os = "windows")]
+fn directwrite_font_paths() -> Vec<std::path::PathBuf> {
+    std::panic::catch_unwind(|| {
+        let mut system = Collection::new(CollectionOptions { shared: false, system_fonts: true });
+        font_files_of(&mut system)
+    })
+    .unwrap_or_default()
+}
+
 #[cfg(target_os = "macos")]
 fn coretext_font_paths() -> Vec<std::path::PathBuf> {
     // Reading arbitrary fonts must not take the scan down: no files is the folder scan's result.
@@ -1418,7 +1433,7 @@ const MACOS_PRIVATE_FONTS: &str = "/System/Library/PrivateFrameworks";
 
 /// The files `collection`'s fonts are read from, each once and in a fixed order. Fonts
 /// registered from memory have no file.
-#[cfg(any(target_os = "macos", all(test, not(target_arch = "wasm32"))))]
+#[cfg(any(target_os = "macos", target_os = "windows", all(test, not(target_arch = "wasm32"))))]
 fn font_files_of(collection: &mut Collection) -> Vec<std::path::PathBuf> {
     let names: Vec<String> = collection.family_names().map(str::to_string).collect();
     let mut files = HashSet::new();
