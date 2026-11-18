@@ -187,9 +187,17 @@ fn sidebar_transparent_preset_reaches_classic_canvas_over_existing_art() {
     app.run("layer.new.layer", json!({})).unwrap();
     app.ui.tool_options.gradient_classic = true;
     app.ui.tool_options.gradient_dither = false;
-    let mut h = Harness::builder().with_size(vec2(420.0, 600.0)).build_ui_state(|ui, app| crate::preset_panels::gradients_panel(app, ui), app);
+    // The panel's Import Gradients… button draws text in the app's fonts.
+    let mut h = Harness::builder().with_size(vec2(420.0, 600.0)).build_ui_state(
+        |ui, app| {
+            PhotocraftApp::setup_context(ui.ctx(), crate::theme::ThemeKind::ALL[0]);
+            crate::preset_panels::gradients_panel(app, ui)
+        },
+        app,
+    );
     h.get_by_label("Foreground to Transparent").click();
-    h.run();
+    // The app's fonts keep asking for repaints while the CJK fallbacks load.
+    h.run_steps(3);
     assert_eq!(h.state().session.presets.gradient.name, "Foreground to Transparent");
     drag(h.state_mut(), [20.0, 60.0], [180.0, 60.0]);
     let st = h.state().session.active().unwrap();
