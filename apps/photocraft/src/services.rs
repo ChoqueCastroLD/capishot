@@ -793,6 +793,11 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
         load_prefs: Some(Box::new(|| std::fs::read_to_string(prefs_file()?).ok())),
         photoshop_shortcuts: Some(Box::new(|| crate::photoshop_settings::live_keyboard_shortcuts(&|k| std::env::var_os(k)))),
         save_prefs: Some(Box::new(|text: &str| write_atomic(&prefs_file().ok_or("no config directory")?, text.as_bytes()))),
+        // A burst of changes (switching tools, dragging a panel) is written once, a second after
+        // it: each write is a durable file replace on the window's thread, which took 300 ms to
+        // over a second on Windows (usage statistics: `prefs.persist`, 0.13.25). Pending changes
+        // are written when the app closes (`tool_memory::save_on_exit`).
+        prefs_debounce_s: 1.0,
         load_typer: Some(Box::new(|| std::fs::read_to_string(typer_file()?).ok())),
         save_typer: Some(Box::new(|text: &str| {
             let path = typer_file().ok_or("no config directory")?;

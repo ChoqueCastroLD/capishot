@@ -38,14 +38,14 @@ pub fn weak_integrated_gpu(device_type: &str, adapter: &str, vram_mb: Option<u64
     let a = adapter.to_ascii_lowercase().replace("(tm)", "").replace("(r)", "");
     let a = a.split_whitespace().collect::<Vec<_>>().join(" ");
     const WEAK: &[&str] = &[
-        "radeon r2 ",
-        "radeon r3 ",
-        "radeon r4 ",
-        "radeon r5 ",
-        "radeon r6 ",
-        "radeon r7 ",
-        "radeon vega 3 ",
-        "radeon vega 6 ",
+        "radeon r2 graphics",
+        "radeon r3 graphics",
+        "radeon r4 graphics",
+        "radeon r5 graphics",
+        "radeon r6 graphics",
+        "radeon r7 graphics",
+        "radeon vega 3 graphics",
+        "radeon vega 6 graphics",
         "intel hd graphics",
         "intel uhd graphics",
         "hd graphics ",
