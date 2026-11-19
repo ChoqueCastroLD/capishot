@@ -192,7 +192,9 @@ pub(super) fn layer_row(
         x += ts + 6.0;
     }
     // With thumbnails disabled the labels and disclosure controls remain interactive.
+    let masks_span = crate::perf_span::span("layers.masks");
     let masks = if ts > 0.0 { crate::mask_thumbs_ui::paint(app, ctx, ui, &painter, doc, l, &mut x, rect.center().y, ts, actions) } else { Default::default() };
+    drop(masks_span);
     let rc = RowCtx { l, doc, row, rect, ts, thumb, resp: &resp, masks: &masks };
     paint_target_brackets(app, &painter, &t, &rc);
     // Right-hand indicators first; the name gets what is left and ends in "…" (#144).

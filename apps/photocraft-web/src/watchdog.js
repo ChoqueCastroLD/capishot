@@ -8,7 +8,10 @@ export function wd_start() {
   started = true;
   try {
     new PerformanceObserver((list) => {
-      for (const e of list.getEntries()) if (e.duration >= 200 && pending.length < 100) pending.push(e.duration);
+      // [start, duration] pairs, the start on the app's clock (time origin + page time), so the
+      // app can tell a task of the page's load or between its frames from one of a frame.
+      const origin = performance.timeOrigin || 0;
+      for (const e of list.getEntries()) if (e.duration >= 200 && pending.length < 200) pending.push(origin + e.startTime, e.duration);
     }).observe({ type: 'longtask', buffered: true });
   } catch (e) {
     // Firefox and Safari have no long-task entries: the app's frame check still reports.

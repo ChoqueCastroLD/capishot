@@ -466,6 +466,15 @@ pub fn measure(t: &mut TextLayer, dpi: f32, fmt: PixelFormat) -> Option<Rect> {
     ink(t)
 }
 
+/// [`measure`], and the layout's bounds (what `TySh` data is built from).
+fn measure_with_bounds(t: &mut TextLayer, dpi: f32, fmt: PixelFormat) -> (Option<Rect>, Option<[f32; 4]>) {
+    let mut eng = photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner());
+    let (layout, r) = eng.render(t, dpi, fmt);
+    t.cache = Some(r.surface);
+    drop(eng);
+    (ink(t), layout.bounds())
+}
+
 /// Render the layer's pixels and regenerate its PSD `TySh` data (what `type_cmds::refresh` does).
 pub fn finish(t: &mut TextLayer, dpi: f32, fmt: PixelFormat) {
     let mut eng = photocraft_text::shared().lock().unwrap_or_else(|e| e.into_inner());
@@ -534,14 +543,29 @@ pub fn fit_and_center(t: &mut TextLayer, fit: Fit, target: (f64, f64), d: DocInf
         // centred lines, so measure again.
         measured = if fit == Fit::Height { i } else { None };
     }
-    let i = match measured {
-        Some(i) => Some(i),
-        None => measure(t, d.dpi, d.format),
+    // The layout of the pixels the cache holds now, when this call rendered them (`finish` needs it).
+    let (i, layout_bounds) = match measured {
+        Some(i) => (Some(i), None),
+        None => {
+            let (i, b) = measure_with_bounds(t, d.dpi, d.format);
+            (i, Some(b))
+        }
     };
     if let Some(i) = i {
         let (dx, dy) = place::center_offset(target, &i);
         t.transform.m[4] += dx;
         t.transform.m[5] += dy;
+        // A move by whole pixels moves the rendered pixels by as many: the measured render is
+        // shifted rather than drawn again (one text render instead of two or three per layer: a
+        // TypeR Align on a page of balloons took 0.35 to 1.6 s).
+        if let (Some(bounds), Some(cache)) = (layout_bounds, t.cache.as_ref())
+            && let (Ok(sx), Ok(sy)) = (i32::try_from(dx as i64), i32::try_from(dy as i64))
+        {
+            let content = cache.content_bounds();
+            t.cache = Some(cache.translated(sx, sy, content));
+            t.psd_raw = Some(Arc::new(photocraft_text::psd::build_tysh(t, d.dpi, bounds)));
+            return ink(t);
+        }
     }
     finish(t, d.dpi, d.format);
     // Anything that moved the layout after measuring gets one correction.

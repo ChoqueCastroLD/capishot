@@ -1569,6 +1569,22 @@ pub struct AiStages {
     pub post: Option<f64>,
 }
 
+/// The `phase` of a long task from `start` for `ms` (the app's clock), reported at the end
+/// (`now`) of the frame that began at `frame_start`: the page's load when it ended before the
+/// app's first frame (`boot`), the frame's own phase when it overlaps the frame, else
+/// `between_frames` (script outside the app's frames: the browser, a worker's message, GC). The
+/// long tasks the browser buffered from the load used to be reported with the first frame's
+/// phase (`ui.chrome`, up to 39 s, 19 users).
+pub fn long_task_phase(start: f64, ms: f64, first_frame: Option<f64>, frame_start: Option<f64>, now: f64, frame_phase: Option<&'static str>) -> Option<&'static str> {
+    let end = start + ms;
+    match (first_frame, frame_start) {
+        (Some(first), _) if end <= first + 1.0 => Some("boot"),
+        (None, _) => Some("boot"),
+        (_, Some(f)) if start < now && end > f => frame_phase,
+        _ => Some("between_frames"),
+    }
+}
+
 /// The class of a GPU failure's message, for [`AiRun::fallback`].
 fn fallback_class(message: &str) -> &'static str {
     let m = message.to_lowercase();

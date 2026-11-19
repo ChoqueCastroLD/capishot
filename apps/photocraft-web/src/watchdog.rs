@@ -17,7 +17,10 @@ extern "C" {
 #[derive(Default)]
 pub struct Watchdog {
     frame_start: Option<f64>,
+    /// When the app's first frame began: long tasks that ended before it were the page's load.
+    first_frame: Option<f64>,
 }
+
 
 impl Watchdog {
     pub fn new() -> Self {
@@ -27,15 +30,20 @@ impl Watchdog {
 
     /// A frame begins (the shell's `logic`).
     pub fn begin(&mut self) {
-        self.frame_start = Some(crate::frame_perf::now_ms());
+        let now = crate::frame_perf::now_ms();
+        self.frame_start = Some(now);
+        self.first_frame.get_or_insert(now);
         photocraft_ui_egui::perf_span::begin_frame();
     }
 
     /// The frame ended (the shell's `ui`): report it if it froze the page, and any long tasks
     /// the browser saw since.
     pub fn end(&mut self, app: &PhotocraftApp) {
-        let frame = self.frame_start.take().map(|t| crate::frame_perf::now_ms() - t);
-        let long: Vec<f64> = wd_take().iter().filter_map(|v| v.as_f64()).collect();
+        let now = crate::frame_perf::now_ms();
+        let frame_start = self.frame_start.take();
+        let frame = frame_start.map(|t| now - t);
+        let raw: Vec<f64> = wd_take().iter().filter_map(|v| v.as_f64()).collect();
+        let long: Vec<(f64, f64)> = raw.chunks_exact(2).map(|p| (p[0], p[1])).collect();
         if frame.is_none_or(|ms| ms < telemetry::FREEZE_MS) && long.is_empty() {
             return;
         }
@@ -53,8 +61,11 @@ impl Watchdog {
             log::warn!("frame took {ms:.0} ms ({ctx:?}) spans: {}", spans.join(", "));
             telemetry::with(|r| r.freeze(FreezeSource::Frame, ms, &ctx));
         }
-        for ms in long {
-            telemetry::with(|r| r.freeze(FreezeSource::LongTask, ms, &ctx));
+        for (start, ms) in long {
+            let mut c = ctx.clone();
+            c.phase = telemetry::long_task_phase(start, ms, self.first_frame, frame_start, now, ctx.phase);
+            telemetry::with(|r| r.freeze(FreezeSource::LongTask, ms, &c));
         }
     }
 }
+

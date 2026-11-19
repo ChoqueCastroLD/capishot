@@ -1847,6 +1847,8 @@ mod navigator_animated_zoom_tests {
 #[cfg(test)]
 mod history_panel_select_tests;
 #[cfg(test)]
+mod layers_panel_perf_tests;
+#[cfg(test)]
 mod layer_click_type_commit_tests {
     use super::*;
     use egui_kittest::{Harness, kittest::Queryable};

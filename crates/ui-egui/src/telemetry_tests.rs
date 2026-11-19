@@ -991,3 +991,14 @@ fn a_panic_outside_the_tree_names_the_crate_and_a_clean_message_head() {
     assert_eq!(e["ext"], "wgpu-hal-30.0.1/src/dx12/command.rs:46");
     assert!(crash_batch("0123456789abcdef", "0123456789abcdef", "desktop", &e).is_some(), "the event may leave");
 }
+
+/// A long task the browser buffered from the page's load is the load's, not the first frame's
+/// (`ui.chrome` with up to 39 s); one between frames is neither frame's.
+#[test]
+fn a_long_task_is_the_loads_a_frames_or_between_frames() {
+    let first = Some(1000.0);
+    assert_eq!(long_task_phase(100.0, 800.0, first, Some(5000.0), 5300.0, Some("ui.chrome")), Some("boot"));
+    assert_eq!(long_task_phase(5010.0, 250.0, first, Some(5000.0), 5300.0, Some("dock.layers")), Some("dock.layers"));
+    assert_eq!(long_task_phase(3000.0, 400.0, first, Some(5000.0), 5300.0, Some("ui.chrome")), Some("between_frames"));
+    assert_eq!(long_task_phase(100.0, 800.0, None, None, 300.0, Some("ui.chrome")), Some("boot"));
+}

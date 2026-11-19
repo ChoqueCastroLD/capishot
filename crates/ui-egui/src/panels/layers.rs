@@ -124,6 +124,10 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         crate::layer_filter_ui::bar(app, ui);
         ui.add_space(4.0);
     }
+    // Finer spans than the dock's, so a slow Layers panel says which part took the time (a
+    // ChromeOS install's frames spent 270 ms in `dock.layers` itself after a type resize or a
+    // layer move; a headless frame of the same kind of page takes 1 to 3 ms).
+    let header_span = crate::perf_span::span("layers.header");
     if let Some(l) = active_layer {
         // With several layers selected, blend mode, Opacity, Fill and the locks change every one
         // of them, as in Photoshop; the controls show the active layer's values.
@@ -234,6 +238,8 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         inactive_blend_rows(ui, t.pro);
     }
 
+    drop(header_span);
+    let rows_span = crate::perf_span::span("layers.rows");
     // Top of the stack first, groups above their contents, closed groups' contents hidden (#126).
     let rows = crate::layer_tree_ui::panel_rows(app, &doc);
     let ctx = ui.ctx().clone();
@@ -337,6 +343,8 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             // Likewise a selected smart filter whose row is gone.
             crate::smart_ui::forget_hidden(ui.ctx(), doc.id);
         });
+    drop(rows_span);
+    let footer_span = crate::perf_span::span("layers.footer");
     // Leaving the list or hovering an invalid target immediately cancels the temporary
     // image. The release still uses the actual command, not the preview snapshot.
     if !app.reorder_preview_hit {
@@ -501,6 +509,8 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             actions.push(("layer.linkLayers".into(), json!({})));
         }
     });
+    drop(footer_span);
+    let _actions_span = crate::perf_span::span("layers.actions");
     for (id, p) in actions {
         // A row click commits even when it selects the layer already being edited (#5584).
         // Finish before selection changes so the existing type session keeps its own target.

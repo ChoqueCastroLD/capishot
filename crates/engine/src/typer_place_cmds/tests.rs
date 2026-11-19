@@ -705,3 +705,56 @@ fn typer_real_pages() {
         );
     }
 }
+
+/// Align moves the text by whole pixels and shifts the pixels it measured instead of drawing them
+/// again: they must be exactly what a fresh render at the new place draws, and so must the PSD
+/// text data.
+#[test]
+fn aligned_pixels_equal_a_fresh_render() {
+    let mut s = session(&[B1, B2, B3]);
+    let a = new_type(&mut s, "Off centre", B1.cx - 70.3, B1.cy - 30.6, None);
+    let b = new_type(&mut s, "Box text here", B2.cx - 60.0, B2.cy + 10.0, Some(120.0));
+    s.execute("layer.layerStyle.stroke", json!({"layer": b, "size": 3})).ok();
+    s.execute("typer.align", json!({"layers": [a, b]})).unwrap();
+    let doc = s.active().unwrap().doc.clone();
+    for id in [a, b] {
+        let t = text_layer(&s, id);
+        let mut fresh = t.clone();
+        fresh.cache = None;
+        fresh.psd_raw = None;
+        support::finish(&mut fresh, doc.resolution_dpi, doc.pixel_format());
+        let (got, want) = (t.cache.as_ref().unwrap(), fresh.cache.as_ref().unwrap());
+        let area = got.content_bounds().union(&want.content_bounds());
+        assert!(!area.is_empty());
+        let n = got.channels();
+        let (mut p, mut q) = ([0f32; 8], [0f32; 8]);
+        for y in area.y0..area.y1 {
+            for x in area.x0..area.x1 {
+                got.read_pixel(x, y, &mut p[..n]);
+                want.read_pixel(x, y, &mut q[..n]);
+                assert_eq!(p, q, "layer {id} at {x},{y}");
+            }
+        }
+        assert_eq!(t.psd_raw, fresh.psd_raw, "layer {id}: the same PSD text data");
+    }
+}
+
+/// `typer.align` on a page of 12 balloons: the time per call (`cargo test -- --ignored
+/// typer_align_timing --nocapture`).
+#[test]
+#[ignore = "timing"]
+fn typer_align_timing() {
+    let bubbles: Vec<B> = (0..12).map(|i| B { cx: 90.0 + 190.0 * (i % 4) as f64, cy: 100.0 + 200.0 * (i / 4) as f64, rx: 80.0, ry: 70.0, tail: false }).collect();
+    let mut s = Session::new();
+    s.add_document(page(800, 640, &bubbles), None);
+    s.execute("typer.library.import", json!({"json": library(), "now": 1})).unwrap();
+    let ids: Vec<u64> = bubbles.iter().map(|b| new_type(&mut s, "Some words in a balloon", b.cx - 50.0, b.cy - 20.0, Some(110.0))).collect();
+    let t = std::time::Instant::now();
+    let n = 5;
+    for _ in 0..n {
+        for id in &ids {
+            s.execute("typer.align", json!({"layers": [id]})).unwrap();
+        }
+    }
+    eprintln!("typer.align: {:.1} ms per layer", t.elapsed().as_secs_f64() * 1e3 / (n * ids.len()) as f64);
+}
