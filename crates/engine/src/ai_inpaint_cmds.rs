@@ -135,6 +135,9 @@ impl AiOptions {
     }
 }
 
+/// The largest working side of a Manga LaMa run on the GPU: larger crops are downscaled to it.
+pub const GPU_MAX_SIDE: u64 = 1024;
+
 /// `full_res_default`: without `maxSide`, crops larger than the working side are split into
 /// full-resolution tiles (the Remove tools) rather than downscaled (`edit.inpaintAi`).
 pub(crate) fn ai_options(s: &Session, p: &Value, cmd: &str, full_res_default: bool) -> Result<AiOptions> {
@@ -154,7 +157,9 @@ pub(crate) fn ai_options(s: &Session, p: &Value, cmd: &str, full_res_default: bo
     if !max_side.is_multiple_of(8) {
         return Err(bad("`maxSide` must be a multiple of 8".into()));
     }
-    let max_side = if lite { max_side.min(512) } else { max_side };
+    // On the GPU one tile is one piece of GPU work, and a long one makes Windows reset the GPU
+    // (and the window with it): Manga LaMa at 2048 px is about 6.5 TFLOP, four times 1024's.
+    let max_side = if lite { max_side.min(512) } else if run.choice.cpu { max_side } else { max_side.min(GPU_MAX_SIDE) };
     let margin = uint("margin", 64, 0, 1024)?;
     let allow_download = match p.get("allowDownload") {
         None | Some(Value::Null) => false,
@@ -231,6 +236,8 @@ pub(crate) struct FillRun {
     pub model: &'static ModelInfo,
     pub cpu: bool,
     pub fell_back: bool,
+    /// The run was kept off the GPU ([`crate::ai_cmds::GpuGuard`]).
+    pub guard: Option<crate::ai_cmds::GpuGuard>,
 }
 
 /// The AI fill of a `w×h` region (`rgb` interleaved RGB 0..=1, `cover` the hole's coverage),
@@ -302,7 +309,7 @@ fn fill_step(mut st: FillState) {
         let Some(t) = st.plan.get(st.next).cloned() else {
             let FillState { rgb, finish, opts, fell_back, trail, .. } = st;
             let t = trail.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            let run = FillRun { model: opts.model, cpu: opts.run.choice.cpu || t.cpu, fell_back: fell_back || t.fell_back };
+            let run = FillRun { model: opts.model, cpu: opts.run.choice.cpu || t.cpu, fell_back: fell_back || t.fell_back, guard: opts.run.guard };
             drop(t);
             return finish(Ok((rgb, run)));
         };
@@ -718,6 +725,7 @@ fn apply(s: &mut Session, label: &str, plan: Plan, generated: &[f32], device: St
         "cpu": run.cpu || device == "CPU",
         "device": device,
         "fellBack": run.fell_back,
+        "gpuGuard": run.guard.map(crate::ai_cmds::GpuGuard::id),
         "ms": ms,
     }))
 }
@@ -728,7 +736,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: "Clean Selected Area with AI",
         menu: &["Edit"],
         shortcut: None,
-        params: r#"{"output"?: "new" (default: the result on a new layer above, alpha = selection coverage) | "single" (on one layer above that gathers every clean, which it also reads) | "current" (paint it into the layer), "layerName"?: str (what those layers are called), "keepActive"?: bool (the active layer stays), "byBlocks"?: bool (a run for each block of the selection, not one for neighbours whose crops overlap), "layer"?: layer id (default: the active pixel layer), "maxSide"?: 0 or 64..2048, multiple of 8 (default 512: larger crops are downscaled to this working size; 0: full resolution, larger crops split into overlapping 512 px tiles feathered at their seams), "margin"?: 0..1024 px of context around each masked blob (default 64), "allowDownload"?: bool (fetch the model's weights when not cached: Manga LaMa about 100 MB, MI-GAN 13 MB; default false), "quality"?: "auto"|"fast"|"best" (fast: the lite MI-GAN, at most 512 px tiles; auto: Manga LaMa on a capable GPU, MI-GAN on the CPU, phones and weak machines), "device"?: "auto"|"gpu"|"cpu"|"directml"|"wgpu" (directml, wgpu: natively, that GPU runtime; auto picks DirectML on Windows for Manga LaMa when ONNX Runtime is installed), "model"?: "auto"|"manga-lama"|"migan-512", "threads"?: 0..64 (CPU threads, 0 = one per core), "keepLoaded"?: bool (default true)} -> {"layer", "pixels", "region": [x,y,w,h], "device", "model", "lite", "cpu" (it ran on the CPU, also when an automatic run found no usable GPU), "fellBack" (it left where it was headed: the GPU failed mid-run and the CPU finished it, DirectML couldn't run it, or there was no usable GPU; then "notices" say which: ai.gpuFallback, ai.directmlFallback, ai.cpuFallback), "ms" (the run's wall time)}. Erases what the selection covers (text, SFX) and fills it with Manga LaMa (or MI-GAN). Background job, one undo step."#,
+        params: r#"{"output"?: "new" (default: the result on a new layer above, alpha = selection coverage) | "single" (on one layer above that gathers every clean, which it also reads) | "current" (paint it into the layer), "layerName"?: str (what those layers are called), "keepActive"?: bool (the active layer stays), "byBlocks"?: bool (a run for each block of the selection, not one for neighbours whose crops overlap), "layer"?: layer id (default: the active pixel layer), "maxSide"?: 0 or 64..2048, multiple of 8 (default 512: larger crops are downscaled to this working size, at most 1024 on the GPU; 0: full resolution, larger crops split into overlapping 512 px tiles feathered at their seams), "margin"?: 0..1024 px of context around each masked blob (default 64), "allowDownload"?: bool (fetch the model's weights when not cached: Manga LaMa about 100 MB, MI-GAN 13 MB; default false), "quality"?: "auto"|"fast"|"best" (fast: the lite MI-GAN, at most 512 px tiles; auto: Manga LaMa on a capable GPU, MI-GAN on the CPU, phones and weak machines), "device"?: "auto"|"gpu"|"cpu"|"directml"|"wgpu" (directml, wgpu: natively, that GPU runtime; auto picks DirectML on Windows for Manga LaMa when ONNX Runtime is installed), "model"?: "auto"|"manga-lama"|"migan-512", "threads"?: 0..64 (CPU threads, 0 = one per core), "keepLoaded"?: bool (default true)} -> {"layer", "pixels", "region": [x,y,w,h], "device", "model", "lite", "cpu" (it ran on the CPU, also when an automatic run found no usable GPU), "fellBack" (it left where it was headed: the GPU failed mid-run and the CPU finished it, DirectML couldn't run it, or there was no usable GPU; then "notices" say which: ai.gpuFallback, ai.directmlFallback, ai.cpuFallback), "ms" (the run's wall time)}. Erases what the selection covers (text, SFX) and fills it with Manga LaMa (or MI-GAN). Background job, one undo step."#,
         enabled,
         run: inpaint_ai,
         journal: true,

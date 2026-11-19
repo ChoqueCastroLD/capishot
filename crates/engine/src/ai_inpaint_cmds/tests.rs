@@ -415,3 +415,45 @@ fn a_run_forced_onto_the_cpu_says_so() {
     let r = s.execute(ID, json!({"model": "manga-lama", "device": "gpu"})).unwrap();
     assert_eq!((r["device"].clone(), r["cpu"].clone(), r["fellBack"].clone()), (json!("CPU"), json!(true), json!(false)), "{r}");
 }
+
+/// The shell's guard (a GPU lost during an AI run before, or a weak integrated one) keeps
+/// automatic runs on the CPU: Auto quality the lite model, Remove with AI's Manga LaMa on the CPU,
+/// the reply saying why. A device named in the params still goes where it was asked.
+#[test]
+fn a_guarded_gpu_keeps_automatic_runs_on_the_cpu() {
+    use photocraft_ai::profile::{DeviceProfile, GpuClass};
+    use photocraft_ai::service::FakeUpscaler;
+    let run = |guard: Option<crate::ai_cmds::GpuGuard>, id: &str, params: Value| {
+        let fake = Arc::new(FakeInpainter::default());
+        let mut s = page(8);
+        s.set_inpainter(Some(fake.clone()));
+        let gpu = DeviceProfile { gpu: GpuClass::Discrete, memory_gb: Some(8.0), cores: Some(8), ..Default::default() };
+        s.set_ai_upscaler(Some(Arc::new(FakeUpscaler { profile: std::sync::Mutex::new(gpu), ..Default::default() })));
+        s.set_ai_gpu_guard(guard);
+        let r = s.execute(id, params).unwrap();
+        let last = fake.last.lock().unwrap().unwrap();
+        (r, last)
+    };
+    use crate::ai_cmds::GpuGuard::{LostBefore, WeakGpu};
+    let (r, last) = run(None, ID, json!({}));
+    assert_eq!((last, r.get("gpuGuard").and_then(Value::as_str)), (("manga-lama", false), None));
+    let (r, last) = run(Some(LostBefore), ID, json!({}));
+    assert_eq!((last, r["gpuGuard"].as_str()), (("migan-512", true), Some("gpuLostBefore")), "Auto: the lite model on the CPU");
+    let (r, last) = run(Some(WeakGpu), crate::remove_ai_cmds::ID, json!({}));
+    assert_eq!((last, r["gpuGuard"].as_str()), (("manga-lama", true), Some("weakGpu")), "Remove with AI: Manga LaMa, on the CPU");
+    let (r, last) = run(Some(LostBefore), ID, json!({"device": "gpu"}));
+    assert_eq!((last, r.get("gpuGuard").and_then(Value::as_str)), (("manga-lama", false), None), "the GPU when asked for");
+}
+
+/// One GPU run is bounded: a working side over [`GPU_MAX_SIDE`] is capped there on the GPU (a
+/// long run gets the GPU reset), not on the CPU.
+#[test]
+fn a_gpu_run_works_on_at_most_gpu_max_side() {
+    let opts = |p: Value| {
+        let s = with_fake(page(8), FakeInpainter::default());
+        ai_options(&s, &p, ID, false).unwrap().tiles.max_side
+    };
+    assert_eq!(opts(json!({"maxSide": 2048, "model": "manga-lama", "device": "gpu"})), GPU_MAX_SIDE as usize);
+    assert_eq!(opts(json!({"maxSide": 2048, "model": "manga-lama", "device": "cpu"})), 2048);
+    assert_eq!(opts(json!({"maxSide": 768, "model": "manga-lama", "device": "gpu"})), 768);
+}

@@ -354,6 +354,7 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
             ui.colored_label(tokens.warning, e.to_string());
         }
     }
+    crate::ai_gpu_guard::options_row(app, ui);
     advanced(app, ui, Kind::Inpaint, f)
 }
 

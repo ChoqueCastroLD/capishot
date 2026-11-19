@@ -27,6 +27,9 @@ const MASK_BYTES_PER_PIXEL: u64 = 8;
 impl Session {
     /// Injects (or removes) the service that runs the mask model.
     pub fn set_text_masker(&mut self, masker: Option<Arc<dyn TextMasker>>) {
+        if let (Some(m), Some(_)) = (&masker, self.ai_gpu_guard()) {
+            m.set_cpu_only(true);
+        }
         self.text_masker = masker;
     }
 
@@ -191,6 +194,7 @@ fn detect(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.active().ok_or(EngineError::NoDocument)?;
     let (doc, id) = (st.doc.clone(), st.doc.id);
     let page = doc.clone();
+    let guard = s.ai_gpu_guard();
     // The page as the Bubble Text Remover sees it, for the bubbles: composited on the job's
     // thread. Not in the browser, where the answer comes back on the page's thread.
     let bubble_page = if cfg!(target_arch = "wasm32") { None } else { Some(crate::typer_place_cmds::page_work(s)?) };
@@ -252,6 +256,9 @@ fn detect(s: &mut Session, p: &Value) -> Result<Value> {
                 "bubbles": n_bubbles,
                 "stages": {"readMs": read_ms, "bubblesMs": bubbles_ms},
             });
+            if let Some(g) = guard {
+                out["gpuGuard"] = json!(g.id());
+            }
             if let Some(t) = timing {
                 out["fellBack"] = json!(t.fell_back);
                 out["stages"]["loadMs"] = json!(t.load_ms);

@@ -4884,3 +4884,6 @@ curves	Smooth	Vloeiend maken
 @plural	Batch: {n} file written|Batch: {n} files written	Batch: {n} bestand geschreven|Batch: {n} bestanden geschreven
 	Errors: {n}	Fouten: {n}
 	Skipped steps: {steps}	Overgeslagen stappen: {steps}
+	AI runs on the CPU: the GPU was reset during an AI run on this computer. AI Options can switch the GPU back on.	AI draait op de CPU: de GPU is tijdens een AI-taak op deze computer gereset. Met AI-opties zet je de GPU weer aan.
+	AI runs on the CPU: this integrated GPU can reset during a model's run. AI Options can switch the GPU back on.	AI draait op de CPU: deze geïntegreerde GPU kan tijdens een modeltaak resetten. Met AI-opties zet je de GPU weer aan.
+	Use the GPU again	De GPU weer gebruiken

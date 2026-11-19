@@ -4849,3 +4849,6 @@ curves	Smooth	Згладити
 @plural	Batch: {n} file written|Batch: {n} files written	Пакетна обробка: записано {n} файл|Пакетна обробка: записано {n} файли|Пакетна обробка: записано {n} файлів
 	Errors: {n}	Помилки: {n}
 	Skipped steps: {steps}	Пропущені кроки: {steps}
+	AI runs on the CPU: the GPU was reset during an AI run on this computer. AI Options can switch the GPU back on.	ШІ працює на ЦП: під час роботи ШІ на цьому комп'ютері GPU було скинуто. У параметрах ШІ можна знову ввімкнути GPU.
+	AI runs on the CPU: this integrated GPU can reset during a model's run. AI Options can switch the GPU back on.	ШІ працює на ЦП: цей вбудований GPU може скинутися під час роботи моделі. У параметрах ШІ можна знову ввімкнути GPU.
+	Use the GPU again	Знову використовувати GPU

@@ -92,6 +92,7 @@ impl DmlLama {
             let mut b = if let Some(threads) = cpu {
                 // The CPU provider plans its buffers per shape (memory pattern) and uses one
                 // thread per physical core by default.
+                let threads = photocraft_ai_ort::cpu_threads(threads);
                 let b = if threads > 0 { b.with_intra_threads(threads).map_err(|e| e.to_string())? } else { b };
                 b.with_memory_pattern(true)
                     .map_err(|e| e.to_string())?

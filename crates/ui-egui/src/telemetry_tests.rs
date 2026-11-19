@@ -955,3 +955,39 @@ fn work_returns_to_where_the_page_rests() {
     assert_eq!(stages.leave(Stage::Decoding), None, "back in front: the next heartbeat writes it");
     assert_eq!(stages.name(), "idle");
 }
+
+/// What the document's state refuses (TypeR without a bubble, a Remove stroke outside the
+/// selection) is no bad parameter; a DirectML fallback's notice is its own class, whatever its
+/// cause says.
+#[test]
+fn refusals_of_the_documents_state_and_ai_fallbacks_have_their_own_classes() {
+    assert_eq!(error_kind("invalid parameters for `typer.align`: noBubble: no bubble around the text"), "no_target");
+    assert_eq!(error_kind("invalid parameters for `typer.align`: noSelection: select a bubble first"), "no_target");
+    assert_eq!(error_kind("invalid parameters for `edit.removeAi`: the stroke doesn't cover anything that can change (check the selection)"), "no_target");
+    assert_eq!(error_kind("invalid parameters for `typer.align`: \"tolerance\" must be a number"), "invalid_params");
+    let cause = "DirectML: ONNX Runtime: Non-zero status code returned while running Conv node. Status Message: INVALID_ARGUMENT";
+    assert_eq!(notice_error_kind(photocraft_engine::ai_cmds::DIRECTML_FALLBACK_CLASS, cause), "ai.directml");
+    assert_eq!(notice_error_kind(photocraft_engine::ai_cmds::CPU_FALLBACK_CLASS, cause), "ai.no_gpu");
+    assert_eq!(notice_error_kind("other.class", "radius must be positive"), "invalid_params");
+}
+
+/// A panic in a dependency says which crate and file, and the first line of its message, with
+/// nothing of the machine or the user's files in either.
+#[test]
+fn a_panic_outside_the_tree_names_the_crate_and_a_clean_message_head() {
+    let reg = "C:\\Users\\SecretUser\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\wgpu-hal-30.0.1\\src\\dx12\\command.rs";
+    assert_eq!(external_location(reg, 46).as_deref(), Some("wgpu-hal-30.0.1/src/dx12/command.rs:46"));
+    let git = "/home/SecretUser/.cargo/git/checkouts/craft-libs-0123abcd/5f2e1aa/src/lib.rs";
+    assert_eq!(external_location(git, 7).as_deref(), Some("craft-libs-0123abcd/src/lib.rs:7"));
+    assert_eq!(external_location("/rustc/90b35a6239c3d8bdabc530a6a0816f7ff89a0aaf/library/core/src/result.rs", 1).as_deref(), Some("std/core/src/result.rs:1"));
+    assert_eq!(external_location("/home/SecretUser/project/src/main.rs", 3), None);
+    let msg = "called `Result::unwrap()` on an `Err` value: Os { code: 5, message: \"C:\\Users\\SecretUser\\page 01.psd\" } at D:/Secret/x.png\nsecond line";
+    let head = panic_head(msg).unwrap();
+    assert!(head.starts_with("called `Result unwrap()` on an `Err` value Os { code 5, message _ }"), "{head}");
+    assert!(!head.contains("Secret") && !head.contains(':') && !head.contains('/') && head.len() <= 80, "{head}");
+    let mut e = crash_event("panic", Some(EXTERNAL_LOCATION), Some("unwrap_err"), None, Some("ai"), None);
+    add_panic_detail(&mut e, external_location(reg, 46).as_deref(), Some(&head));
+    add_panic_detail(&mut e, Some("/home/SecretUser/a.rs:1"), Some("page.psd"));
+    assert_eq!(e["ext"], "wgpu-hal-30.0.1/src/dx12/command.rs:46");
+    assert!(crash_batch("0123456789abcdef", "0123456789abcdef", "desktop", &e).is_some(), "the event may leave");
+}

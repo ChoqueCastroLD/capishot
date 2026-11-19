@@ -4158,3 +4158,6 @@ curves	Smooth	Glätten
 @plural	Batch: {n} file written|Batch: {n} files written	Stapelverarbeitung: {n} Datei geschrieben|Stapelverarbeitung: {n} Dateien geschrieben
 	Errors: {n}	Fehler: {n}
 	Skipped steps: {steps}	Übersprungene Schritte: {steps}
+	AI runs on the CPU: the GPU was reset during an AI run on this computer. AI Options can switch the GPU back on.	KI läuft auf der CPU: Die GPU wurde während eines KI-Laufs auf diesem Computer zurückgesetzt. In den KI-Optionen lässt sich die GPU wieder einschalten.
+	AI runs on the CPU: this integrated GPU can reset during a model's run. AI Options can switch the GPU back on.	KI läuft auf der CPU: Diese integrierte GPU kann während eines Modelllaufs zurückgesetzt werden. In den KI-Optionen lässt sich die GPU wieder einschalten.
+	Use the GPU again	GPU wieder verwenden

@@ -5319,3 +5319,6 @@ shape	Appearance	Оформление
 @plural	Batch: {n} file written|Batch: {n} files written	Пакетная обработка: записан {n} файл|Пакетная обработка: записано {n} файла|Пакетная обработка: записано {n} файлов
 	Errors: {n}	Ошибки: {n}
 	Skipped steps: {steps}	Пропущенные шаги: {steps}
+	AI runs on the CPU: the GPU was reset during an AI run on this computer. AI Options can switch the GPU back on.	ИИ работает на ЦП: во время работы ИИ на этом компьютере GPU был сброшен. В параметрах ИИ можно снова включить GPU.
+	AI runs on the CPU: this integrated GPU can reset during a model's run. AI Options can switch the GPU back on.	ИИ работает на ЦП: этот встроенный GPU может сброситься во время работы модели. В параметрах ИИ можно снова включить GPU.
+	Use the GPU again	Снова использовать GPU

@@ -3740,3 +3740,6 @@ fontWeight	Italic	Itálico
 	Errors: {n}	Erros: {n}
 	Skipped steps: {steps}	Passos ignorados: {steps}
 	Import Gradients…	Importar gradientes…
+	AI runs on the CPU: the GPU was reset during an AI run on this computer. AI Options can switch the GPU back on.	A IA é executada no CPU: a GPU foi reiniciada durante uma execução de IA neste computador. As Opções de IA podem reativar a GPU.
+	AI runs on the CPU: this integrated GPU can reset during a model's run. AI Options can switch the GPU back on.	A IA é executada no CPU: esta GPU integrada pode reiniciar durante a execução de um modelo. As Opções de IA podem reativar a GPU.
+	Use the GPU again	Usar a GPU novamente

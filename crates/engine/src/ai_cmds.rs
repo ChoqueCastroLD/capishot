@@ -56,6 +56,43 @@ impl Session {
     pub fn ai_profile(&self) -> DeviceProfile {
         self.ai_upscaler.as_ref().map(|u| u.profile()).unwrap_or_default()
     }
+
+    /// Keeps automatic AI runs (every model, Remove with AI and the text finder too) on the CPU
+    /// for `guard`'s reason, or lets them use the GPU again (`None`). A device the user named
+    /// (`"device": "gpu"`, `directml`, `wgpu`) still runs where it was asked.
+    pub fn set_ai_gpu_guard(&mut self, guard: Option<GpuGuard>) {
+        self.ai_gpu_guard = guard;
+        if let Some(m) = &self.text_masker {
+            m.set_cpu_only(guard.is_some());
+        }
+    }
+
+    /// Why automatic AI runs stay on the CPU here, if they do.
+    pub fn ai_gpu_guard(&self) -> Option<GpuGuard> {
+        self.ai_gpu_guard
+    }
+}
+
+/// Why automatic AI runs stay off the GPU on this machine (the shell decides; [`run_choice`]
+/// applies it). A GPU that resets during a model's run takes the window's drawing with it: the
+/// app has to start again and the run is lost.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GpuGuard {
+    /// The GPU was lost during an AI run of this install before.
+    LostBefore,
+    /// A weak integrated GPU (an old APU, Intel HD/UHD, little shared memory): a model's run is
+    /// long enough there for Windows to reset the GPU, and the CPU is about as fast.
+    WeakGpu,
+}
+
+impl GpuGuard {
+    /// The id replies carry (`gpuGuard`).
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::LostBefore => "gpuLostBefore",
+            Self::WeakGpu => "weakGpu",
+        }
+    }
 }
 
 /// The user's Quality and Device choices and what they resolve to on this machine.
@@ -67,6 +104,8 @@ pub struct RunChoice {
     pub backend: GpuBackend,
     pub choice: Choice,
     pub profile: DeviceProfile,
+    /// The run is on the CPU because of this, not because it was asked or there is no GPU.
+    pub guard: Option<GpuGuard>,
 }
 
 /// Reads `quality` and `device` (both default `auto`) for `cmd`.
@@ -78,8 +117,11 @@ pub(crate) fn run_choice(s: &Session, p: &Value, cmd: &str) -> Result<RunChoice>
     let device = if backend == GpuBackend::Auto { DevicePref::parse(text("device")) } else { Some(DevicePref::Gpu) };
     let device = device.ok_or_else(|| bad("`device` must be auto, gpu, cpu, directml or wgpu".into()))?;
     let profile = s.ai_profile();
-    let choice = profile::choose(&profile, quality, device);
-    Ok(RunChoice { quality, device, backend, choice, profile })
+    // An automatic device on a machine whose GPU can't be trusted with a model: the CPU, as if
+    // chosen, so Quality Auto takes the lite model there (Best and Remove with AI keep theirs).
+    let guard = s.ai_gpu_guard().filter(|_| device == DevicePref::Auto && backend == GpuBackend::Auto);
+    let choice = profile::choose(&profile, quality, if guard.is_some() { DevicePref::Cpu } else { device });
+    Ok(RunChoice { quality, device, backend, choice, profile, guard })
 }
 
 /// The notice when a run fell back to the CPU after the GPU failed ([`crate::jobs::JobCtx::notice`]).

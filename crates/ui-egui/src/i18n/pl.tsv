@@ -4756,3 +4756,6 @@ curves	Smooth	Wygładź
 @plural	Batch: {n} file written|Batch: {n} files written	Przetwarzanie wsadowe: zapisano {n} plik|Przetwarzanie wsadowe: zapisano {n} pliki|Przetwarzanie wsadowe: zapisano {n} plików
 	Errors: {n}	Błędy: {n}
 	Skipped steps: {steps}	Pominięte kroki: {steps}
+	AI runs on the CPU: the GPU was reset during an AI run on this computer. AI Options can switch the GPU back on.	AI działa na CPU: GPU zostało zresetowane podczas pracy AI na tym komputerze. W Opcjach AI można ponownie włączyć GPU.
+	AI runs on the CPU: this integrated GPU can reset during a model's run. AI Options can switch the GPU back on.	AI działa na CPU: ten zintegrowany GPU może się zresetować podczas pracy modelu. W Opcjach AI można ponownie włączyć GPU.
+	Use the GPU again	Ponownie używaj GPU

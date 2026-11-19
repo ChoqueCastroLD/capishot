@@ -1114,7 +1114,10 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
         JobOutcome::Failed(err) => {
             crate::telemetry::with(|r| r.error(&e.command, err));
         }
-        JobOutcome::Done(v) => job_notices(app, &e.command, v),
+        JobOutcome::Done(v) => {
+            job_notices(app, &e.command, v);
+            crate::ai_gpu_guard::after_run(app, v);
+        }
         JobOutcome::Cancelled => {}
     }
     if e.command == photocraft_engine::remove_ai_cmds::ID {
@@ -1197,7 +1200,8 @@ fn job_notices(app: &mut PhotocraftApp, command: &str, v: &Value) {
         }
         let cause = field("cause");
         if !cause.is_empty() {
-            crate::telemetry::with(|r| r.error(command, cause));
+            let kind = crate::telemetry::notice_error_kind(field("class"), cause);
+            crate::telemetry::with(|r| r.error_of_kind(command, kind));
         }
         notices::post(app, text, Vec::new(), false, None);
     }

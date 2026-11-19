@@ -337,6 +337,8 @@ pub struct Session {
     /// The model runner for `image.upscaleAi` (photocraft-ai), injected by the shell; `None`
     /// where AI upscaling is unavailable (see `ai_cmds`).
     ai_upscaler: Option<Arc<dyn photocraft_ai::service::Upscaler>>,
+    /// Why automatic AI runs stay off the GPU here (set by the shell; see `ai_cmds::GpuGuard`).
+    ai_gpu_guard: Option<ai_cmds::GpuGuard>,
     /// TypeR: script, cursor, style library and settings (see `typer_state`, `docs/typer.md`).
     pub typer: typer_state::TyperSession,
     /// Runs Manga LaMa for `edit.inpaintAi` and the Remove tool's AI mode, injected by the shell;

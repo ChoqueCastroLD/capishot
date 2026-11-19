@@ -4869,3 +4869,6 @@ cameraRaw	Dehaze	Odstranění oparu
 @plural	Batch: {n} file written|Batch: {n} files written	Dávka: zapsán {n} soubor|Dávka: zapsány {n} soubory|Dávka: zapsáno {n} souborů
 	Errors: {n}	Chyby: {n}
 	Skipped steps: {steps}	Vynechané kroky: {steps}
+	AI runs on the CPU: the GPU was reset during an AI run on this computer. AI Options can switch the GPU back on.	AI běží na procesoru: GPU se během běhu AI na tomto počítači resetovala. V Možnostech AI lze GPU znovu zapnout.
+	AI runs on the CPU: this integrated GPU can reset during a model's run. AI Options can switch the GPU back on.	AI běží na procesoru: tato integrovaná GPU se může během běhu modelu resetovat. V Možnostech AI lze GPU znovu zapnout.
+	Use the GPU again	Znovu používat GPU

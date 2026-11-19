@@ -4828,3 +4828,6 @@ curves	Smooth	Εξομάλυνση
 @plural	Batch: {n} file written|Batch: {n} files written	Μαζική επεξεργασία: γράφτηκε {n} αρχείο|Μαζική επεξεργασία: γράφτηκαν {n} αρχεία
 	Errors: {n}	Σφάλματα: {n}
 	Skipped steps: {steps}	Βήματα που παραλείφθηκαν: {steps}
+	AI runs on the CPU: the GPU was reset during an AI run on this computer. AI Options can switch the GPU back on.	Η AI εκτελείται στη CPU: η GPU επανεκκινήθηκε κατά τη διάρκεια μιας εκτέλεσης AI σε αυτόν τον υπολογιστή. Οι Επιλογές AI μπορούν να ενεργοποιήσουν ξανά τη GPU.
+	AI runs on the CPU: this integrated GPU can reset during a model's run. AI Options can switch the GPU back on.	Η AI εκτελείται στη CPU: αυτή η ενσωματωμένη GPU μπορεί να επανεκκινηθεί κατά την εκτέλεση ενός μοντέλου. Οι Επιλογές AI μπορούν να ενεργοποιήσουν ξανά τη GPU.
+	Use the GPU again	Χρήση της GPU ξανά

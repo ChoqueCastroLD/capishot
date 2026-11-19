@@ -423,6 +423,7 @@ pub const FIELDS: &[&str] = &[
     "cpu", "gpu_model", "gpu_driver", "ram", "disk", "active_s", "total_s", "id", "src", "n", "kind", "bytes", "mp", "layers", "ms", "ok", "op", "tool", "p50", "p95",
     "max", "long", "lat50", "lat95", "fps", "int95", "drop", "g", "w_in", "w_logic", "w_ui", "w_paint", "cmd", "job", "phase", "action", "api", "cause", "memMB", "upMin",
     "docs", "model", "region", "fell_back", "lite", "ram_mb", "gpu_mb", "loc", "msg", "reason", "stage", "js_mb", "dev_gb", "loop", "read_ms", "load_ms", "infer_ms", "post_ms", "first",
+    "gpu_guard", "ext", "head",
 ];
 
 /// Fields holding a command or tool id, which [`sanitize_command_id`] already reduced to known ids
@@ -447,6 +448,13 @@ fn is_clean_text(key: &str, text: &str) -> bool {
     // A crash's location is the one value shaped like a path: only this tree's sources pass.
     if key == "loc" {
         return is_crash_location(text);
+    }
+    // A panic in a dependency: the crate's folder and its file (never a machine's path).
+    if key == "ext" {
+        return is_external_location(text);
+    }
+    if key == "head" {
+        return is_panic_head(text);
     }
     text.len() <= 80 && !text.contains(['/', '\\', ':', '\n']) && (ID_FIELDS.contains(&key) || file_kind(text) == "other")
 }
@@ -612,6 +620,9 @@ impl Recorder {
         if run.first {
             e["first"] = json!(true);
         }
+        if let Some(g) = run.gpu_guard {
+            e["gpu_guard"] = json!(g);
+        }
         self.event(e);
     }
 
@@ -716,7 +727,11 @@ impl Recorder {
 
     /// Count a failed command, classified by [`error_kind`]; the message itself is not kept.
     pub fn error(&mut self, id: &str, message: &str) {
-        let kind = error_kind(message);
+        self.error_of_kind(id, error_kind(message));
+    }
+
+    /// An error of `id` whose class is known ([`AI_FALLBACK_KINDS`]): never classified from text.
+    pub fn error_of_kind(&mut self, id: &str, kind: &'static str) {
         bump(&mut self.errors, (id, kind), &mut self.dropped, |(id, k)| (id.to_string(), k));
     }
 
@@ -1031,7 +1046,23 @@ pub fn error_kind(message: &str) -> &'static str {
         "unsupported"
     } else if has(&["no document", "no active document", "open a document", "no open document"]) {
         "no_document"
-    } else if has(&["no layer", "no selection", "no active layer", "nothing to", "no path"]) {
+    } else if has(&[
+        "no layer",
+        "no selection",
+        "no active layer",
+        "nothing to",
+        "no path",
+        // TypeR's refusals (`typer_place_cmds::support::typer_error`) and Remove's strokes that
+        // fall where nothing can change: the document's state, not a caller's bad parameter.
+        "noselection:",
+        "smallselection:",
+        "notextlayer:",
+        "notext:",
+        "nobubble:",
+        "doesn't cover anything",
+        "outside the canvas",
+        "nothing is left around",
+    ]) {
         "no_target"
     } else if has(&["out of memory", "too large", "too big", "exceeds", "limit"]) {
         "too_large"
@@ -1524,6 +1555,8 @@ pub struct AiRun<'a> {
     pub pieces: Option<u64>,
     /// The first run of this command in this run of the app: it pays for the model's warm-up.
     pub first: bool,
+    /// Kept on the CPU by the shell's guard (`gpu_lost_before`, `weak_gpu`).
+    pub gpu_guard: Option<&'static str>,
 }
 
 /// The parts of an AI job's time, in ms: reading the page's pixels, loading the model (0: it was
@@ -1551,6 +1584,19 @@ fn fallback_class(message: &str) -> &'static str {
     } else {
         "other"
     }
+}
+
+/// The classes a finished AI job's fallback notice counts as (not its cause's words: a DirectML
+/// failure reads "INVALID_ARGUMENT" and counted as a bad parameter of the command).
+pub const AI_FALLBACK_KINDS: [(&str, &str); 3] = [
+    (photocraft_engine::ai_cmds::DIRECTML_FALLBACK_CLASS, "ai.directml"),
+    (photocraft_engine::ai_cmds::GPU_FALLBACK_CLASS, "ai.gpu"),
+    (photocraft_engine::ai_cmds::CPU_FALLBACK_CLASS, "ai.no_gpu"),
+];
+
+/// The error class of a job notice of `class` with `cause`.
+pub fn notice_error_kind(class: &str, cause: &str) -> &'static str {
+    AI_FALLBACK_KINDS.iter().find(|(c, _)| *c == class).map_or_else(|| error_kind(cause), |(_, k)| *k)
 }
 
 /// The jobs that are AI runs.
@@ -1625,6 +1671,11 @@ pub fn record_ai_job(command: &str, reply: Option<&Value>, doc_mp: Option<f64>, 
         stages: AiStages { read: stage("readMs"), load: stage("loadMs"), infer: stage("inferMs"), post: stage("regionsMs") },
         pieces: reply.and_then(|r| r.get("pieces")).and_then(Value::as_array).map(|a| a.len() as u64),
         first: first_run(command),
+        gpu_guard: match text("gpuGuard") {
+            Some("gpuLostBefore") => Some("gpu_lost_before"),
+            Some("weakGpu") => Some("weak_gpu"),
+            _ => None,
+        },
     };
     with(|r| r.ai_run(&run));
 }
@@ -1977,6 +2028,95 @@ pub fn gpu_code(message: &str) -> &'static str {
         "invalid_object"
     } else {
         "other"
+    }
+}
+
+/// A panic outside this tree, as `<crate folder>/<file in it>:<line>`: a crates.io dependency
+/// (`ort-2.0.0-rc.15/src/session/mod.rs:120`), a git one (`<checkout>/<file>`) or the standard
+/// library (`std/core/src/result.rs:1`). `None` for anything else (a path on the machine says who
+/// built it, or whose it is).
+pub fn external_location(file: &str, line: u32) -> Option<String> {
+    let f = file.replace('\\', "/");
+    let rest = if let Some(i) = f.find("/registry/src/") {
+        // `<index>/<crate-version>/<file>`: the index folder is dropped.
+        f.get(i + "/registry/src/".len()..)?.split_once('/')?.1.to_string()
+    } else if let Some(i) = f.find("/git/checkouts/") {
+        // `<repo-hash>/<rev>/<file>`: the revision folder is dropped.
+        let (repo, after) = f.get(i + "/git/checkouts/".len()..)?.split_once('/')?;
+        format!("{repo}/{}", after.split_once('/')?.1)
+    } else if let Some(after) = f.strip_prefix("/rustc/").and_then(|r| r.split_once("/library/")) {
+        format!("std/{}", after.1)
+    } else {
+        return None;
+    };
+    let text = format!("{rest}:{line}");
+    is_external_location(&text).then_some(text)
+}
+
+/// Whether `text` is an [`external_location`].
+fn is_external_location(text: &str) -> bool {
+    let Some((file, line)) = text.rsplit_once(':') else { return false };
+    let parts: Vec<&str> = file.split('/').collect();
+    text.len() <= 120
+        && !line.is_empty()
+        && line.len() <= 7
+        && line.bytes().all(|b| b.is_ascii_digit())
+        && (2..=9).contains(&parts.len())
+        && parts.iter().all(|p| !p.is_empty() && p.len() <= 64 && *p != ".." && p.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b'+')))
+        && file.ends_with(".rs")
+}
+
+/// The first line of a panic's message with nothing in it that could be the user's: quoted text,
+/// paths and file names become `_`, and only plain punctuation is kept (no `:`, `/`, `\`). At most
+/// 80 characters. `called Result::unwrap() on an Err value  Error { code  Fail, msg  _ }`.
+pub fn panic_head(message: &str) -> Option<String> {
+    let line = message.lines().next().unwrap_or_default();
+    let mut out = String::new();
+    let mut quote: Option<char> = None;
+    for c in line.chars() {
+        match quote {
+            Some(q) if c == q => {
+                out.push('_');
+                quote = None;
+            }
+            Some(_) => {}
+            None if c == '"' || c == '\'' => quote = Some(c),
+            None => out.push(c),
+        }
+    }
+    let words: Vec<String> = out
+        .split_whitespace()
+        .map(|w| {
+            let looks_like_file = w.contains(['/', '\\']) || w.rsplit_once('.').is_some_and(|(a, ext)| !a.is_empty() && (2..=5).contains(&ext.len()) && ext.bytes().all(|b| b.is_ascii_alphabetic()) && !w.contains("::"));
+            if looks_like_file { "_".to_string() } else { w.chars().map(|c| if c.is_ascii_alphanumeric() || " _.,()<>`=+#{}[]!?*&|-".contains(c) { c } else { ' ' }).collect() }
+        })
+        .collect();
+    let head: String = words.join(" ").split_whitespace().collect::<Vec<_>>().join(" ").chars().take(80).collect();
+    let head = head.trim().to_string();
+    is_panic_head(&head).then_some(head)
+}
+
+/// Whether `text` is a [`panic_head`].
+fn is_panic_head(text: &str) -> bool {
+    !text.is_empty() && text.len() <= 80 && text.chars().all(|c| c.is_ascii_alphanumeric() || " _.,()<>`=+#{}[]!?*&|-".contains(c)) && file_kind(text) == "other"
+}
+
+/// The `ext` ([`external_location`], for a panic outside this tree) and `head` ([`panic_head`])
+/// of a panic, from the panic hook.
+pub fn panic_detail(info: &std::panic::PanicHookInfo<'_>) -> (Option<String>, Option<String>) {
+    let ext = info.location().filter(|l| crash_location(l.file(), l.line()) == EXTERNAL_LOCATION).and_then(|l| external_location(l.file(), l.line()));
+    let payload = info.payload();
+    let message = payload.downcast_ref::<&str>().copied().or_else(|| payload.downcast_ref::<String>().map(String::as_str)).unwrap_or("");
+    (ext, panic_head(message))
+}
+
+/// Adds a panic's `ext` and `head` to its `crash` event, each only if it is one.
+pub fn add_panic_detail(event: &mut Value, ext: Option<&str>, head: Option<&str>) {
+    if let Some(ext) = ext.filter(|t| is_external_location(t)) {
+        event["ext"] = json!(ext);
+    }
+    if let Some(head) = head.filter(|t| is_panic_head(t)) {
+        event["head"] = json!(head);
     }
 }
 

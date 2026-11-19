@@ -5233,3 +5233,6 @@ shape	Appearance	Aspetto
 @plural	Batch: {n} file written|Batch: {n} files written	Batch: {n} file scritto|Batch: {n} file scritti
 	Errors: {n}	Errori: {n}
 	Skipped steps: {steps}	Passaggi saltati: {steps}
+	AI runs on the CPU: the GPU was reset during an AI run on this computer. AI Options can switch the GPU back on.	L'IA usa la CPU: la GPU è stata reimpostata durante un'esecuzione IA su questo computer. Le Opzioni IA possono riattivare la GPU.
+	AI runs on the CPU: this integrated GPU can reset during a model's run. AI Options can switch the GPU back on.	L'IA usa la CPU: questa GPU integrata può reimpostarsi durante l'esecuzione di un modello. Le Opzioni IA possono riattivare la GPU.
+	Use the GPU again	Usa di nuovo la GPU

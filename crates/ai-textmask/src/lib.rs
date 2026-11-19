@@ -85,6 +85,9 @@ pub trait TextMasker: Send + Sync {
     /// Loads the model now, off the caller's thread, so the first detection doesn't wait for it.
     /// Nothing happens when it is loaded, loading, or not downloaded.
     fn warm(&self) {}
+    /// Runs on the CPU only from now on (`true`), or may use the GPU again: the shell's guard
+    /// for a GPU that was lost during an AI run, or a weak one. Nothing for a CPU-only masker.
+    fn set_cpu_only(&self, _cpu_only: bool) {}
     /// The parts of the last detection that ended well, where they're known.
     fn timing(&self) -> Option<Timing> {
         None

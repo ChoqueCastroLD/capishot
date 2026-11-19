@@ -143,13 +143,15 @@ static PANIC_MARK: OnceLock<PathBuf> = OnceLock::new();
 /// crash guard may keep it alive). Never the message, which may name a file.
 pub fn note_panic(info: &std::panic::PanicHookInfo<'_>) {
     let (location, code) = telemetry::panic_report(info);
+    let (ext, head) = telemetry::panic_detail(info);
     if let Some(mark) = PANIC_MARK.get() {
-        let _ = std::fs::write(mark, panic_mark(&location, code));
+        let _ = std::fs::write(mark, panic_mark(&location, code, ext.as_deref(), head.as_deref()));
     }
     // A loop of caught panics stays a few events. The recorder's lock is only tried: this thread
     // may be holding it.
     if PANICS_QUEUED.fetch_add(1, Ordering::Relaxed) < MAX_PANICS_QUEUED {
-        let event = telemetry::crash_event("panic", Some(&location), Some(code), None, Some(telemetry::stage_name()), None);
+        let mut event = telemetry::crash_event("panic", Some(&location), Some(code), None, Some(telemetry::stage_name()), None);
+        telemetry::add_panic_detail(&mut event, ext.as_deref(), head.as_deref());
         telemetry::with(|r| r.event(event));
     }
 }
@@ -158,8 +160,8 @@ pub fn note_panic(info: &std::panic::PanicHookInfo<'_>) {
 const MAX_PANICS_QUEUED: u64 = 3;
 static PANICS_QUEUED: AtomicU64 = AtomicU64::new(0);
 
-fn panic_mark(location: &str, code: &str) -> String {
-    json!({"loc": location, "msg": code, "stage": telemetry::stage_name()}).to_string()
+fn panic_mark(location: &str, code: &str, ext: Option<&str>, head: Option<&str>) -> String {
+    json!({"loc": location, "msg": code, "stage": telemetry::stage_name(), "ext": ext, "head": head}).to_string()
 }
 
 /// `previous` unclean exits in a row, then the `unclean_exit`s among `events`: each says its place
@@ -224,7 +226,9 @@ fn collect_crumbs(dir: &Path, now: u64, alive: &dyn Fn(u32) -> bool) -> Vec<Valu
             // An empty or damaged mark is only the fact, as the older versions wrote it.
             if let Some(p) = std::fs::read_to_string(&mark).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
                 let field = |key: &str| p.get(key).and_then(Value::as_str);
-                events.push(telemetry::crash_event("panic", field("loc"), field("msg"), None, field("stage"), number("memMB")));
+                let mut crash = telemetry::crash_event("panic", field("loc"), field("msg"), None, field("stage"), number("memMB"));
+                telemetry::add_panic_detail(&mut crash, field("ext"), field("head"));
+                events.push(crash);
             }
         }
         remove_crumb(&file, &mark);
@@ -668,14 +672,15 @@ mod tests {
         let dir = temp_dir("crash-mark");
         let (dead, mark) = crumb_files(&dir, 111);
         write_crumb(&dead, &Crumb::default(), 1000, 1600);
-        std::fs::write(&mark, panic_mark("crates/gpu/src/health.rs:12", "index_oob")).unwrap();
+        std::fs::write(&mark, panic_mark("crates/gpu/src/health.rs:12", "index_oob", Some("ort-2.0.0-rc.15/src/value/mod.rs:9"), Some("called Result unwrap() on an Err value"))).unwrap();
         let (hostile, hostile_mark) = crumb_files(&dir, 222);
         write_crumb(&hostile, &Crumb::default(), 1000, 1600);
-        std::fs::write(&hostile_mark, r#"{"loc":"/home/SecretUser/page.psd:1","msg":"SecretLayer","stage":"SecretPage"}"#).unwrap();
+        std::fs::write(&hostile_mark, r#"{"loc":"/home/SecretUser/page.psd:1","msg":"SecretLayer","stage":"SecretPage","ext":"/home/SecretUser/a.rs:1","head":"Secret/page.psd"}"#).unwrap();
         let events = collect_crumbs(&dir, 5010, &|_| false);
         let crashes: Vec<&Value> = events.iter().filter(|e| e["e"] == "crash").collect();
         assert_eq!(crashes.len(), 2, "{events:?}");
         assert_eq!(crashes.iter().filter(|e| e["loc"] == "crates/gpu/src/health.rs:12" && e["msg"] == "index_oob").count(), 1, "{crashes:?}");
+        assert_eq!(crashes.iter().filter(|e| e["ext"] == "ort-2.0.0-rc.15/src/value/mod.rs:9" && e["head"] == "called Result unwrap() on an Err value").count(), 1, "{crashes:?}");
         let text = Value::Array(events.clone()).to_string();
         assert!(!text.contains("Secret"), "{text}");
         let _ = std::fs::remove_dir_all(dir);

@@ -54,6 +54,7 @@ pub mod work_area;
 // Capishot modules.
 pub mod ai_model_gate;
 pub mod ai_models_ui;
+pub mod ai_gpu_guard;
 pub mod ai_options_ui;
 pub mod ai_progress;
 pub mod ai_upscale_ui;

@@ -74,6 +74,8 @@ struct Inner {
     cpu: bool,
     /// A run on the GPU failed: the CPU from now on.
     gpu_failed: AtomicBool,
+    /// The shell keeps AI runs off the GPU ([`TextMasker::set_cpu_only`]).
+    cpu_only: AtomicBool,
     loaded: Mutex<Option<Loaded>>,
     device: Mutex<String>,
     /// The parts of the last detection.
@@ -123,6 +125,7 @@ impl NativeTextMasker {
             path,
             cpu,
             gpu_failed: AtomicBool::new(false),
+            cpu_only: AtomicBool::new(false),
             loaded: Mutex::new(None),
             device: Mutex::new(String::new()),
             timing: Mutex::new(None),
@@ -144,6 +147,9 @@ impl Inner {
             // `CAPISHOT_AI_CPU_ARENA=1` it has one, given back after each run as on DirectML.
             let arena = ep::CPU::default().with_arena_allocator(!cpu || cpu_arena_on()).build();
             let mut b = if cpu {
+                // Leaves a core to the window on a small machine ([`photocraft_ai_ort::cpu_threads`]).
+                let threads = photocraft_ai_ort::cpu_threads(0);
+                let b = if threads > 0 { b.with_intra_threads(threads).map_err(|e| e.to_string())? } else { b };
                 b.with_memory_pattern(true).map_err(|e| e.to_string())?.with_execution_providers([arena.error_on_failure()]).map_err(|e| e.to_string())?
             } else {
                 // DirectML wants sequential execution and no memory pattern (its own allocator).
@@ -172,8 +178,14 @@ impl Inner {
     /// The model, loaded now if it wasn't (or once the load under way ends).
     fn load(&self) -> Result<std::sync::MutexGuard<'_, Option<Loaded>>, Error> {
         let mut slot = self.loaded.lock().unwrap_or_else(PoisonError::into_inner);
+        let cpu_only = self.cpu_only.load(Ordering::Relaxed);
+        // Loaded on the GPU before the shell said the CPU only: its sessions go.
+        if cpu_only && slot.as_ref().is_some_and(|l| !l.cpu) {
+            *slot = None;
+        }
         if slot.is_none() {
             let gpu = !self.cpu
+                && !cpu_only
                 && !self.gpu_failed.load(Ordering::Relaxed)
                 && cfg!(windows)
                 && std::env::var("CAPISHOT_AI_DEVICE").map_or(true, |v| !v.eq_ignore_ascii_case("cpu"));
@@ -265,7 +277,8 @@ fn run_once(net: &mut Net, rgb: &[u8], w: usize, h: usize) -> Result<Vec<f32>, E
             options.set(SHRINK.0, SHRINK.1).map_err(|e| err(e.to_string()))?;
         }
         let out = session.run_with_options(ort::inputs!["image" => input], &options).map_err(|e| err(e.to_string()))?;
-        let (_, data) = out["logit"].try_extract_tensor::<f32>().map_err(|e| err(e.to_string()))?;
+        let logit = out.get("logit").ok_or_else(|| err("the model gave no `logit` output".into()))?;
+        let (_, data) = logit.try_extract_tensor::<f32>().map_err(|e| err(e.to_string()))?;
         Ok(data.to_vec())
     }))
     .unwrap_or_else(|_| Err(err("the run failed".into())))
@@ -305,6 +318,10 @@ impl TextMasker for NativeTextMasker {
             return ModelState::Unavailable(e);
         }
         if self.inner.path.is_file() { ModelState::Ready } else { ModelState::NeedsDownload }
+    }
+
+    fn set_cpu_only(&self, cpu_only: bool) {
+        self.inner.cpu_only.store(cpu_only, Ordering::Relaxed);
     }
 
     fn device(&self) -> String {

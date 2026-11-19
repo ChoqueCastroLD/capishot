@@ -161,6 +161,7 @@ fn session(env: &Environment, model: &[u8], size: Option<(usize, usize)>, cpu: O
         b = b.with_optimization_level(GraphOptimizationLevel::Level3).map_err(|e| e.to_string())?;
         b = match cpu {
             Some(threads) => {
+                let threads = photocraft_ai_ort::cpu_threads(threads);
                 if threads > 0 {
                     b = b.with_intra_threads(threads).map_err(|e| e.to_string())?;
                 }

@@ -130,7 +130,9 @@ pub fn on_panic(info: &std::panic::PanicHookInfo<'_>) {
         return;
     }
     patch(panic_fields);
-    let event = telemetry::crash_event("panic", Some(&location), Some(code), None, Some(telemetry::stage_name()), Some(memory_bytes() >> 20));
+    let mut event = telemetry::crash_event("panic", Some(&location), Some(code), None, Some(telemetry::stage_name()), Some(memory_bytes() >> 20));
+    let (ext, head) = telemetry::panic_detail(info);
+    telemetry::add_panic_detail(&mut event, ext.as_deref(), head.as_deref());
     if crate::usage_stats::send_crash(&event) {
         PANIC_SENT.store(true, Ordering::Release);
         patch(panic_fields);

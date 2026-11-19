@@ -4808,3 +4808,6 @@ curves	Smooth	スムーズ
 @plural	Batch: {n} file written|Batch: {n} files written	バッチ処理: {n} 個のファイルを書き出しました
 	Errors: {n}	エラー: {n}
 	Skipped steps: {steps}	スキップした手順: {steps}
+	AI runs on the CPU: the GPU was reset during an AI run on this computer. AI Options can switch the GPU back on.	AI は CPU で実行されます: このコンピューターで AI の実行中に GPU がリセットされました。AI オプションで GPU を再び有効にできます。
+	AI runs on the CPU: this integrated GPU can reset during a model's run. AI Options can switch the GPU back on.	AI は CPU で実行されます: この内蔵 GPU はモデルの実行中にリセットされることがあります。AI オプションで GPU を再び有効にできます。
+	Use the GPU again	GPU を再び使用

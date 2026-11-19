@@ -29,6 +29,7 @@ pub const OOM_AUTO_RETRIES: u32 = 3;
 /// (#6564): the dropped canvas freed its memory, so a new one is built at once and the views
 /// redraw through it, up to [`OOM_AUTO_RETRIES`] times.
 pub fn check(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    crate::ai_gpu_guard::sync(app);
     if let Some(fault) = app.gpu.as_ref().and_then(|g| g.fault()) {
         fall_back(app, &fault);
         if fault.is_out_of_memory() && app.gpu_oom_retries < OOM_AUTO_RETRIES && can_retry_now(app) {
@@ -81,6 +82,8 @@ pub fn check_window(app: &mut PhotocraftApp, ctx: &egui::Context) {
         let reason = health.fault().map_or_else(|| "GPU device lost".to_string(), |f| f.to_string());
         let then = if cfg!(target_arch = "wasm32") { "reloading on the CPU canvas" } else { "closing" };
         log::error!("{reason}: the window can't be drawn any more; saving unsaved documents for recovery and {then}");
+        // Lost during an AI run: its models run on the CPU from the next start on.
+        crate::ai_gpu_guard::note_gpu_lost(app);
     }
     // In the browser the page reloads instead (the web shell, as for a lost WebGL context): its
     // documents reopen from crash recovery. Closing it lost the user's place, and a phone's tab
@@ -145,6 +148,9 @@ pub fn save_for_recovery(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result
 /// Drop the GPU canvas after `fault`: free its resources, send every view through the CPU
 /// path, record why, and tell the user. Documents are untouched.
 pub fn fall_back(app: &mut PhotocraftApp, fault: &photocraft_gpu::Fault) {
+    if fault.is_lost() {
+        crate::ai_gpu_guard::note_gpu_lost(app);
+    }
     let Some(gpu) = app.gpu.take() else { return };
     // The GPU canvas is gone (that's this error); the switch to the CPU is `render_path`'s line.
     log::error!("{fault}; GPU canvas dropped");

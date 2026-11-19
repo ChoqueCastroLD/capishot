@@ -700,6 +700,9 @@ impl AiRun {
         // `device` too: `CAPISHOT_AI_DEVICE=cpu` forces the CPU without the request knowing.
         o.insert("cpu".into(), json!(self.run.cpu || self.device == "CPU"));
         o.insert("fellBack".into(), json!(self.run.fell_back));
+        if let Some(g) = self.run.guard {
+            o.insert("gpuGuard".into(), json!(g.id()));
+        }
         o.insert("ms".into(), json!(self.ms));
     }
 }

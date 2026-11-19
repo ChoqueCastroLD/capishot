@@ -3795,3 +3795,6 @@ curves	Smooth	平滑
 @plural	Batch: {n} file written|Batch: {n} files written	批次處理：已寫入 {n} 個檔案
 	Errors: {n}	錯誤：{n}
 	Skipped steps: {steps}	略過的步驟：{steps}
+	AI runs on the CPU: the GPU was reset during an AI run on this computer. AI Options can switch the GPU back on.	AI 在 CPU 上執行：這台電腦在執行 AI 時 GPU 被重設。可在 AI 選項中重新啟用 GPU。
+	AI runs on the CPU: this integrated GPU can reset during a model's run. AI Options can switch the GPU back on.	AI 在 CPU 上執行：此內建 GPU 在模型執行時可能會被重設。可在 AI 選項中重新啟用 GPU。
+	Use the GPU again	重新使用 GPU
