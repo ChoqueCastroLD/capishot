@@ -447,3 +447,26 @@ fn the_ramp_covers_its_checkerboard_at_half_pixel_offsets() {
         assert_eq!(ramp, checker.round_to_pixels(ppp), "{ppp}x: the ramp covers every pixel of the checker");
     }
 }
+
+/// A live gradient dragged with a type layer active colours the letters: the new gradient fill
+/// layer is a clipping mask on the text, not a layer over the whole page.
+#[test]
+fn a_gradient_over_an_active_type_layer_clips_to_its_letters() {
+    let mut app = app_with_gradient("linear");
+    app.ui.tool_options.gradient_classic = false;
+    app.session.execute("type.create", json!({"x": 10, "y": 50, "text": "Hola", "size": 30})).unwrap();
+    let text = app.session.active().unwrap().active_layer.unwrap();
+    drag(&mut app, [10.0, 60.0], [150.0, 60.0]);
+    let d = app.session.active().unwrap();
+    let grad = d.active_layer.unwrap();
+    assert_ne!(grad, text, "a new gradient layer");
+    assert!(d.doc.layer(grad).unwrap().clipped, "clipped to the text below");
+
+    // On a pixel layer it stays a layer of its own, as before.
+    let mut app = app_with_gradient("linear");
+    app.ui.tool_options.gradient_classic = false;
+    app.run("layer.new.layer", json!({})).unwrap();
+    drag(&mut app, [10.0, 60.0], [150.0, 60.0]);
+    let d = app.session.active().unwrap();
+    assert!(!d.doc.layer(d.active_layer.unwrap()).unwrap().clipped);
+}

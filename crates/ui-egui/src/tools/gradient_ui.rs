@@ -307,8 +307,17 @@ fn finish(app: &mut PhotocraftApp) {
             let _ = match redraw {
                 Some(id) => app.run(cmds::SET, json!({"layer": id.0, "from": from, "to": to})),
                 None => {
+                    // Dragged with a type layer active: the gradient colours the letters, as a
+                    // clipping mask on that layer (a gradient layer over the whole page hid it).
+                    let on_text = app.session.active().is_some_and(|d| {
+                        d.active_layer.and_then(|id| d.doc.layer(id)).is_some_and(|l| matches!(l.content, photocraft_doc::LayerContent::Text(_)))
+                    });
                     let p = create_params(app, from, to);
-                    app.run(cmds::CREATE, p)
+                    let r = app.run(cmds::CREATE, p);
+                    if on_text && r.is_ok() {
+                        let _ = app.run("layer.createClippingMask", json!({}));
+                    }
+                    r
                 }
             };
         }
