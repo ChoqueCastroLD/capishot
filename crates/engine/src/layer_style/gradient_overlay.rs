@@ -2,9 +2,58 @@
 
 use photocraft_doc::effects::GradientInterpolation;
 use photocraft_doc::{Color, Gradient};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::{color_of, f_of, overlay_gradient};
+
+/// The most stops a `stops` or `opacityStops` param may carry (Photoshop's editor allows far fewer).
+const MAX_STOPS: usize = 256;
+
+/// Explicit colour stops, `"stops": [[location 0..1, colour], …]`, sorted by location. A colour is
+/// `"#rrggbb"`, `[r, g, b]` (0..1) or a stored colour object (`{"mode", "c", "alpha"}`, exact, any
+/// colour model). `None` when absent or malformed, or with fewer than two stops.
+pub fn stops_param(params: &Value) -> Option<Vec<(f32, Color)>> {
+    let list = params.get("stops")?.as_array()?;
+    if list.len() < 2 || list.len() > MAX_STOPS {
+        return None;
+    }
+    let mut out = Vec::with_capacity(list.len());
+    for stop in list {
+        let pair = stop.as_array()?;
+        let location = pair.first()?.as_f64()? as f32;
+        let raw = pair.get(1)?;
+        let color = match serde_json::from_value::<Color>(raw.clone()) {
+            Ok(c) if c.c.iter().all(|v| v.is_finite()) && c.alpha.is_finite() => Color { alpha: c.alpha.clamp(0.0, 1.0), ..c },
+            _ => color_of(&json!({ "c": raw }), "c")?,
+        };
+        if !location.is_finite() {
+            return None;
+        }
+        out.push((location.clamp(0.0, 1.0), color));
+    }
+    out.sort_by(|a, b| a.0.total_cmp(&b.0));
+    Some(out)
+}
+
+/// Explicit transparency stops, `"opacityStops": [[location 0..1, opacity 0..100], …]`, sorted;
+/// an empty list means fully opaque. `None` when absent or malformed.
+pub fn opacity_stops_param(params: &Value) -> Option<Vec<(f32, f32)>> {
+    let list = params.get("opacityStops")?.as_array()?;
+    if list.len() > MAX_STOPS {
+        return None;
+    }
+    let mut out = Vec::with_capacity(list.len());
+    for stop in list {
+        let pair = stop.as_array()?;
+        let (location, opacity) = (pair.first()?.as_f64()? as f32, pair.get(1)?.as_f64()? as f32);
+        if !location.is_finite() || !opacity.is_finite() {
+            return None;
+        }
+        out.push((location.clamp(0.0, 1.0), (opacity / 100.0).clamp(0.0, 1.0)));
+    }
+    out.sort_by(|a, b| a.0.total_cmp(&b.0));
+    Some(out)
+}
 
 fn edit_endpoint(stop: Option<&mut (f32, Color)>, params: &Value, key: &str) {
     if let (Some(stop), Some(color)) = (stop, color_of(params, key)) {
@@ -38,17 +87,29 @@ fn without_unchanged_ends(gradient: &Gradient, params: &Value) -> Value {
 }
 
 /// Edits recorded source stops, initializing legacy curves from their end colours.
+/// Explicit `stops` (a preset picked in the dialog, or its stop strip) replace the editable
+/// colour stops before the `from`/`to` end edits apply; `opacityStops` replace the transparency.
 pub(super) fn overlay(gradient: &mut Gradient, interpolation: &mut Option<GradientInterpolation>, params: &Value) {
+    let explicit = stops_param(params);
+    if let Some(opacity) = opacity_stops_param(params) {
+        gradient.opacity_stops = opacity;
+    }
     // Reset to Default restores the factory's unbaked interpolation too.
     if params.get("method").and_then(Value::as_str) == Some("custom") {
         if let Some(source) = interpolation.take() {
             gradient.stops = source.stops;
+        }
+        if let Some(stops) = explicit {
+            gradient.stops = stops;
         }
         overlay_gradient(gradient, &without_unchanged_ends(gradient, params));
         return;
     }
     let requested = params.get("method").and_then(Value::as_str).filter(|name| photocraft_io::GradientMethod::from_name(name).is_some());
     if interpolation.is_none() && requested.is_none() {
+        if let Some(stops) = explicit {
+            gradient.stops = stops;
+        }
         overlay_gradient(gradient, &without_unchanged_ends(gradient, params));
         return;
     }
@@ -60,6 +121,9 @@ pub(super) fn overlay(gradient: &mut Gradient, interpolation: &mut Option<Gradie
         // older method commands). Keep the legacy rebuild-from-ends behaviour on first choice.
         stops: vec![(0.0, gradient.stops.first().map_or(Color::BLACK, |s| s.1)), (1.0, gradient.stops.last().map_or(Color::WHITE, |s| s.1))],
     });
+    if let Some(stops) = explicit {
+        source.stops = stops;
+    }
     if let Some(method) = requested {
         source.method = method.to_ascii_lowercase();
     }
@@ -77,7 +141,7 @@ pub(super) fn overlay(gradient: &mut Gradient, interpolation: &mut Option<Gradie
     // Geometry edits must not replace just the ends of the baked curve.
     let mut geometry = params.clone();
     if let Some(object) = geometry.as_object_mut() {
-        for key in ["method", "smoothness", "from", "to"] {
+        for key in ["method", "smoothness", "from", "to", "stops", "opacityStops"] {
             object.remove(key);
         }
     }
@@ -242,5 +306,40 @@ mod tests {
         overlay(&mut gradient, &mut source, &super::super::effect_defaults("gradientOverlay"));
         assert!(source.is_none());
         assert_eq!(gradient, Gradient::default());
+    }
+
+    #[test]
+    fn explicit_stops_replace_the_colour_stops_and_keep_opacity() {
+        let three = vec![(0.0, Color::rgb(1.0, 0.0, 0.0)), (0.4, Color::rgb(0.0, 1.0, 0.0)), (1.0, Color::rgb(0.0, 0.0, 1.0))];
+        let stops = json!(three.iter().map(|(t, c)| json!([t, c])).collect::<Vec<_>>());
+        // Recorded and unrecorded interpolation, and the dialog's default `custom`.
+        for (method, recorded) in [("custom", false), ("custom", true), ("classic", true), ("smooth", false)] {
+            let mut gradient = Gradient { opacity_stops: vec![(0.0, 0.3), (1.0, 0.9)], ..Gradient::default() };
+            let mut source =
+                recorded.then(|| GradientInterpolation { method: "classic".into(), smoothness: 100.0, stops: Gradient::default().stops });
+            // The dialog sends the new ends as `from`/`to` hex too: they must not re-quantize them.
+            overlay(&mut gradient, &mut source, &json!({"method": method, "stops": stops, "from": "#ff0000", "to": "#0000ff"}));
+            let editable = source.as_ref().map_or(&gradient.stops, |s| &s.stops);
+            assert_eq!(editable, &three, "{method} {recorded}");
+            assert_eq!(gradient.opacity_stops, vec![(0.0, 0.3), (1.0, 0.9)]);
+            if let Some(m) = source.as_ref().and_then(|s| GradientMethod::from_name(&s.method)) {
+                assert_eq!(gradient.stops, bake_gradient(three.clone(), &[0.5, 0.5], 1.0, m));
+            }
+        }
+    }
+
+    #[test]
+    fn stop_params_accept_hex_and_rgb_and_reject_garbage() {
+        let parsed = stops_param(&json!({"stops": [[1.0, "#0000ff"], [0.0, [1.0, 0.0, 0.0]]]})).unwrap();
+        assert_eq!(parsed, vec![(0.0, Color::rgb(1.0, 0.0, 0.0)), (1.0, Color::rgb(0.0, 0.0, 1.0))]);
+        for bad in [json!({"stops": [[0.0, "#000000"]]}), json!({"stops": "x"}), json!({"stops": [[0.0, "zz"], [1.0, 3]]}), json!({"stops": [[null, "#000000"], [1, "#ffffff"]]})] {
+            assert!(stops_param(&bad).is_none(), "{bad}");
+        }
+        assert_eq!(opacity_stops_param(&json!({"opacityStops": [[1.0, 50], [0.0, 100]]})), Some(vec![(0.0, 1.0), (1.0, 0.5)]));
+        assert_eq!(opacity_stops_param(&json!({"opacityStops": []})), Some(vec![]));
+        assert!(opacity_stops_param(&json!({"opacityStops": [[0.0]]})).is_none());
+        let fx = super::super::effect_from_params("gradientOverlay", &json!({"stops": [[0, "#ff0000"], [0.5, "#00ff00"], [1, "#0000ff"]]})).unwrap();
+        let Effect::GradientOverlay { gradient, .. } = fx else { panic!("overlay") };
+        assert_eq!(gradient.stops.len(), 3);
     }
 }

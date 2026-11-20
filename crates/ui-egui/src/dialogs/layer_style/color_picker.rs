@@ -2,9 +2,10 @@
 use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 
-use super::{P, defaults, effects_of, set_param, spec};
+use super::gradient::set_color_field;
+use super::{P, defaults, effects_of, spec};
 use crate::{PhotocraftApp, color_picker_ui, state::DialogKind};
 
 const TARGET: &str = "__layerStyleColor";
@@ -50,6 +51,10 @@ fn color_value(fields: &Map<String, Value>, effect: &str, field: &str) -> Result
         return Err("ambiguous Layer Style effect id".into());
     }
     let kind = e.get("kind").and_then(Value::as_str).ok_or("invalid effect kind")?;
+    // One colour stop of a gradient overlay (its stop strip's double-click).
+    if let Some(rgb) = super::gradient::stop_color(fields, effect, field) {
+        return Ok(ColorField { source: e.clone(), color: color_picker_ui::hex(rgb?) });
+    }
     if !spec(kind).iter().any(|(key, _, p)| *key == field && matches!(p, P::Color)) {
         return Err("not a Layer Style color parameter".into());
     }
@@ -112,7 +117,7 @@ pub(crate) fn take_request(app: &mut PhotocraftApp, parent: u64) -> Result<(), S
 pub(crate) fn set_color(app: &mut PhotocraftApp, parent: u64, effect: &str, field: &str, rgb: [f32; 3]) -> Result<(), String> {
     let d = app.ui.dialog_mut(parent).filter(|d| d.kind == DialogKind::LayerStyle).ok_or("the Layer Style dialog closed")?;
     color_value(&d.fields, effect, field)?;
-    set_param(&mut d.fields, effect, field, json!(color_picker_ui::hex(rgb)));
+    set_color_field(&mut d.fields, effect, field, &color_picker_ui::hex(rgb));
     Ok(())
 }
 
@@ -130,7 +135,7 @@ pub(crate) fn preview_fields<'a>(app: &PhotocraftApp, parent: u64, fields: &'a M
         return Cow::Borrowed(fields);
     }
     let mut shown = fields.clone();
-    set_param(&mut shown, &t.effect, &t.field, json!(color));
+    set_color_field(&mut shown, &t.effect, &t.field, &color);
     Cow::Owned(shown)
 }
 
@@ -140,7 +145,7 @@ pub(crate) fn confirm(app: &mut PhotocraftApp, fields: &Map<String, Value>) -> R
     let color = fields.get("color").and_then(Value::as_str).and_then(color_picker_ui::parse_hex).map(color_picker_ui::hex).ok_or("invalid picker color")?;
     if t.color != color {
         let parent = app.ui.dialog_mut(t.parent).ok_or("Layer Style dialog closed")?;
-        set_param(&mut parent.fields, &t.effect, &t.field, json!(color));
+        set_color_field(&mut parent.fields, &t.effect, &t.field, &color);
     }
     Ok(Value::Null)
 }

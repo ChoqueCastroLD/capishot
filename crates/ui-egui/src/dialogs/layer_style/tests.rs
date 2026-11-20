@@ -153,7 +153,8 @@ fn every_kind_has_spec_and_defaults() {
     for &(kind, _) in KINDS {
         assert!(!spec(kind).is_empty(), "{kind}");
         let d = defaults(kind);
-        for &(key, _, _) in spec(kind) {
+        // The Gradient row edits `stops` (absent by default: the snapshot's own stops show).
+        for &(key, _, _) in spec(kind).iter().filter(|(_, _, p)| !matches!(p, P::Gradient)) {
             assert!(d.get(key).is_some(), "{kind}.{key} has no default");
         }
     }

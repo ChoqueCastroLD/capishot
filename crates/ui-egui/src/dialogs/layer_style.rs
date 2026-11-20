@@ -25,8 +25,11 @@ use crate::{PhotocraftApp, widgets};
 mod bevel_modes_tests;
 pub(crate) mod color_picker;
 mod contour;
+mod gradient;
 #[cfg(test)]
 mod gradient_method_tests;
+#[cfg(test)]
+mod gradient_picker_tests;
 
 #[derive(Clone, Copy)]
 enum P {
@@ -35,6 +38,8 @@ enum P {
     Blend,
     Choice(&'static [(&'static str, &'static str)]),
     GradientMethod,
+    /// A gradient overlay's stops: swatch, preset picker and stop strip (`gradient.rs`).
+    Gradient,
     Check,
     Angle,
     /// A pattern from the dialog's `patternList` field (`[[id, name], …]`).
@@ -160,6 +165,7 @@ fn spec(kind: &str) -> &'static [(&'static str, &'static str, P)] {
         "gradientOverlay" => &[
             ("blend", "Blend Mode", P::Blend),
             ("opacity", "Opacity", P::Slider(0.0, 100.0, "%")),
+            ("gradient", "Gradient", P::Gradient),
             ("from", "From", P::Color),
             ("to", "To", P::Color),
             ("reverse", "Reverse", P::Check),
@@ -1189,6 +1195,7 @@ fn page(
                 });
             }
             P::Contour(aa) => contour::row(app, ui, f, &selected, key, label, aa, &mut disp),
+            P::Gradient => gradient::row(app, ui, f, &selected, label, stacked),
             P::Check => {
                 let mut b = disp.get(key).and_then(Value::as_bool).unwrap_or(false);
                 if widgets::checkbox(ui, &mut b, label).changed() {

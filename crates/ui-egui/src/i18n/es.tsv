@@ -5646,3 +5646,7 @@ fontTab	Find More	Buscar más
 	AI runs on the CPU: the GPU was reset during an AI run on this computer. AI Options can switch the GPU back on.	La IA se ejecuta en la CPU: la GPU se reinició durante una ejecución de IA en este equipo. Opciones de IA permite volver a usar la GPU.
 	AI runs on the CPU: this integrated GPU can reset during a model's run. AI Options can switch the GPU back on.	La IA se ejecuta en la CPU: esta GPU integrada puede reiniciarse durante la ejecución de un modelo. Opciones de IA permite volver a usar la GPU.
 	Use the GPU again	Volver a usar la GPU
+
+# Layer Style › Gradient Overlay: gradient swatch, preset picker and stop strip
+	Click to pick a gradient preset	Haz clic para elegir un degradado predefinido
+	From and To edit the first and last stops	Desde y Hasta editan la primera y la última parada

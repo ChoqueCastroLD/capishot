@@ -4161,3 +4161,7 @@ curves	Smooth	Haluskan
 	AI runs on the CPU: the GPU was reset during an AI run on this computer. AI Options can switch the GPU back on.	AI berjalan di CPU: GPU direset saat AI berjalan di komputer ini. Opsi AI dapat mengaktifkan GPU kembali.
 	AI runs on the CPU: this integrated GPU can reset during a model's run. AI Options can switch the GPU back on.	AI berjalan di CPU: GPU terintegrasi ini dapat direset saat model berjalan. Opsi AI dapat mengaktifkan GPU kembali.
 	Use the GPU again	Gunakan GPU lagi
+
+# Layer Style › Gradient Overlay: gradient swatch, preset picker and stop strip
+	Click to pick a gradient preset	Klik untuk memilih preset gradien
+	From and To edit the first and last stops	Dari dan Ke mengubah titik pertama dan terakhir

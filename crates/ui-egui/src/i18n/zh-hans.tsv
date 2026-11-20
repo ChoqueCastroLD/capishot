@@ -3842,3 +3842,7 @@ curves	Smooth	平滑
 	AI runs on the CPU: the GPU was reset during an AI run on this computer. AI Options can switch the GPU back on.	AI 在 CPU 上运行：这台电脑在运行 AI 时 GPU 被重置。可在 AI 选项中重新启用 GPU。
 	AI runs on the CPU: this integrated GPU can reset during a model's run. AI Options can switch the GPU back on.	AI 在 CPU 上运行：此集成 GPU 在模型运行时可能会被重置。可在 AI 选项中重新启用 GPU。
 	Use the GPU again	重新使用 GPU
+
+# Layer Style › Gradient Overlay: gradient swatch, preset picker and stop strip
+	Click to pick a gradient preset	点按以选取渐变预设
+	From and To edit the first and last stops	“从”和“到”编辑第一个和最后一个色标

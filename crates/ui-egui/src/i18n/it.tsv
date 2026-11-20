@@ -5236,3 +5236,7 @@ shape	Appearance	Aspetto
 	AI runs on the CPU: the GPU was reset during an AI run on this computer. AI Options can switch the GPU back on.	L'IA usa la CPU: la GPU è stata reimpostata durante un'esecuzione IA su questo computer. Le Opzioni IA possono riattivare la GPU.
 	AI runs on the CPU: this integrated GPU can reset during a model's run. AI Options can switch the GPU back on.	L'IA usa la CPU: questa GPU integrata può reimpostarsi durante l'esecuzione di un modello. Le Opzioni IA possono riattivare la GPU.
 	Use the GPU again	Usa di nuovo la GPU
+
+# Layer Style › Gradient Overlay: gradient swatch, preset picker and stop strip
+	Click to pick a gradient preset	Fai clic per scegliere un gradiente predefinito
+	From and To edit the first and last stops	Da e A modificano il primo e l'ultimo punto

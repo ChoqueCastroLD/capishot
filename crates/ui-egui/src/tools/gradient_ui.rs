@@ -899,7 +899,7 @@ fn selection_after_edit(f: &Fill, p: &Value, previous: Option<Marker>) -> Option
     Some(if opacity { Marker::Opacity(at) } else { Marker::Color(at) })
 }
 
-fn stop_strip(ui: &mut egui::Ui, key: egui::Id, f: &Fill, midpoints: bool, pending: Option<&Value>, colors: ([f32; 4], [f32; 4])) -> Option<StopAction> {
+pub(crate) fn stop_strip(ui: &mut egui::Ui, key: egui::Id, f: &Fill, midpoints: bool, pending: Option<&Value>, colors: ([f32; 4], [f32; 4])) -> Option<StopAction> {
     let Fill::Gradient { stops, .. } = f else { return None };
     let t = Tokens::get(ui.ctx());
     let w = ui.available_width().max(120.0);

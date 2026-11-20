@@ -4831,3 +4831,7 @@ curves	Smooth	Εξομάλυνση
 	AI runs on the CPU: the GPU was reset during an AI run on this computer. AI Options can switch the GPU back on.	Η AI εκτελείται στη CPU: η GPU επανεκκινήθηκε κατά τη διάρκεια μιας εκτέλεσης AI σε αυτόν τον υπολογιστή. Οι Επιλογές AI μπορούν να ενεργοποιήσουν ξανά τη GPU.
 	AI runs on the CPU: this integrated GPU can reset during a model's run. AI Options can switch the GPU back on.	Η AI εκτελείται στη CPU: αυτή η ενσωματωμένη GPU μπορεί να επανεκκινηθεί κατά την εκτέλεση ενός μοντέλου. Οι Επιλογές AI μπορούν να ενεργοποιήσουν ξανά τη GPU.
 	Use the GPU again	Χρήση της GPU ξανά
+
+# Layer Style › Gradient Overlay: gradient swatch, preset picker and stop strip
+	Click to pick a gradient preset	Κάντε κλικ για να επιλέξετε προκαθορισμένη διαβάθμιση
+	From and To edit the first and last stops	Τα Από και Έως αλλάζουν το πρώτο και το τελευταίο σημείο

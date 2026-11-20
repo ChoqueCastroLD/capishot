@@ -4369,3 +4369,7 @@ curves	Smooth	매끄럽게
 	AI runs on the CPU: the GPU was reset during an AI run on this computer. AI Options can switch the GPU back on.	AI가 CPU에서 실행됩니다: 이 컴퓨터에서 AI 실행 중 GPU가 재설정되었습니다. AI 옵션에서 GPU를 다시 켤 수 있습니다.
 	AI runs on the CPU: this integrated GPU can reset during a model's run. AI Options can switch the GPU back on.	AI가 CPU에서 실행됩니다: 이 내장 GPU는 모델 실행 중 재설정될 수 있습니다. AI 옵션에서 GPU를 다시 켤 수 있습니다.
 	Use the GPU again	GPU 다시 사용
+
+# Layer Style › Gradient Overlay: gradient swatch, preset picker and stop strip
+	Click to pick a gradient preset	클릭하여 그레이디언트 사전 설정 선택
+	From and To edit the first and last stops	시작과 끝은 첫 번째와 마지막 정지점을 편집합니다

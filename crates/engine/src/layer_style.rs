@@ -14,6 +14,8 @@ use crate::{EngineError, Result, Session};
 
 mod gradient_overlay;
 
+pub use gradient_overlay::{opacity_stops_param as gradient_opacity_stops_param, stops_param as gradient_stops_param};
+
 /// Parses a gradient style name (`linear`, `radial`, `angle`, `reflected`, `diamond`).
 pub fn gradient_style(s: &str) -> GradientStyle {
     match s.to_ascii_lowercase().as_str() {
@@ -68,7 +70,8 @@ fn gradient_stops(p: &Value, from: Color, to: Color) -> Vec<(f32, Color)> {
 }
 fn gradient(p: &Value) -> Gradient {
     Gradient {
-        stops: gradient_stops(p, color(p, "from", [0.0; 3]), color(p, "to", [1.0; 3])),
+        stops: gradient_overlay::stops_param(p).unwrap_or_else(|| gradient_stops(p, color(p, "from", [0.0; 3]), color(p, "to", [1.0; 3]))),
+        opacity_stops: gradient_overlay::opacity_stops_param(p).unwrap_or_default(),
         style: gradient_style(p.get("style").and_then(Value::as_str).unwrap_or("linear")),
         angle: f(p, "angle", 90.0),
         scale: (f(p, "scale", 100.0) / 100.0).clamp(0.1, 1.5),
@@ -729,7 +732,7 @@ fn overlay_stroke(s: &mut StrokeFx, p: &Value) {
         };
     }
     overlay_bool(p, "overprint", &mut s.overprint);
-    if p.get("from").is_some() {
+    if p.get("from").is_some() || gradient_overlay::stops_param(p).is_some() {
         s.paint = FxPaint::Gradient(gradient(p));
     } else if let Some(c) = color_of(p, "color") {
         s.paint = FxPaint::Color(c);
@@ -1095,7 +1098,7 @@ pub fn specs() -> Vec<CommandSpec> {
         style_cmd!(
             "gradientOverlay",
             "Gradient Overlay…",
-            r##"{"from":"#rrggbb","to":"#rrggbb","method":"classic|perceptual|linear|smooth"? (Photoshop's interpolation; omitted on new effects: straight stops; edits retain the recorded method),"smoothness":0..100=100,"style":"linear|radial|angle|reflected|diamond","angle":deg=90,"scale":10..150=100,"reverse":bool,"opacity":0..100,"blend":str,"add":bool}"##
+            r##"{"from":"#rrggbb","to":"#rrggbb","stops":[[0..1,"#rrggbb"|[r,g,b]|colour object],…]? (2..256 colour stops, replacing the editable stops before from/to edit the ends),"opacityStops":[[0..1,0..100],…]? ([] = opaque),"method":"classic|perceptual|linear|smooth"? (Photoshop's interpolation; omitted on new effects: straight stops; edits retain the recorded method),"smoothness":0..100=100,"style":"linear|radial|angle|reflected|diamond","angle":deg=90,"scale":10..150=100,"reverse":bool,"opacity":0..100,"blend":str,"add":bool}"##
         ),
         style_cmd!(
             "patternOverlay",

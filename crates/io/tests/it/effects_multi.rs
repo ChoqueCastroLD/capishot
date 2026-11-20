@@ -81,3 +81,28 @@ fn joined_shape_components_roundtrip() {
     let m = max_diff(&d, &back);
     assert!(m <= 1.0 / 255.0 + 1e-5, "render changed by {m}");
 }
+
+/// A Gradient Overlay picked from a multi-stop preset keeps every colour stop, its locations and
+/// its opacity stops through a PSD save and reopen, and renders the same.
+#[test]
+fn three_stop_gradient_overlay_roundtrips() {
+    let mut d = Document::with_background("t", Size::new(48, 32), ColorMode::Rgb, SampleType::U8, Color::WHITE);
+    let mut l = Layer::raster("text", PixelFormat::RGBA8);
+    l.surface_mut().unwrap().fill_rect(Rect::new(4, 4, 44, 28), &[0.0, 0.0, 0.0, 1.0]);
+    let stops = vec![(0.0, Color::rgb(1.0, 0.0, 0.0)), (0.3, Color::rgb(0.0, 1.0, 0.0)), (1.0, Color::rgb(0.0, 0.0, 1.0))];
+    let gradient = Gradient { stops: stops.clone(), opacity_stops: vec![(0.0, 1.0), (1.0, 0.6)], angle: 0.0, ..Gradient::default() };
+    l.effects.items = vec![Effect::GradientOverlay { common: FxCommon::new(BlendMode::Normal, 1.0), gradient, dither: false, interpolation: None }];
+    d.layers.push(l);
+    let back = roundtrip(&d);
+    let Some(Effect::GradientOverlay { gradient: g, .. }) = back.layers[1].effects.items.first() else { panic!("overlay lost: {:?}", back.layers[1].effects.items) };
+    assert_eq!(g.stops.len(), 3, "{:?}", g.stops);
+    for ((t, c), (bt, bc)) in stops.iter().zip(&g.stops) {
+        assert!((t - bt).abs() < 1.0 / 4096.0 + 1e-6, "location {t} became {bt}");
+        let (a, b) = (c.to_rgba8(), bc.to_rgba8());
+        assert_eq!(a, b, "stop at {t}");
+    }
+    assert_eq!(g.opacity_stops.len(), 2);
+    assert!((g.opacity_stops[1].1 - 0.6).abs() < 1e-3);
+    let m = max_diff(&d, &back);
+    assert!(m <= 1.0 / 255.0 + 1e-5, "render changed by {m}");
+}
