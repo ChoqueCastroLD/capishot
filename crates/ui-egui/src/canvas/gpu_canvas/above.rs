@@ -27,9 +27,9 @@
 //! ([`GpuCanvas::prepare_drag`]). When a drag ends the cache is rebased on the moved document
 //! ([`GpuCanvas::rebase_drag`]): the release frame and a drag of the same layers again come from
 //! it at once, and the refinement composites the release's region exactly once the edits pause.
-//! A drag that starts before its images are ready draws its frames whole at a level coarse enough
-//! to stay short (a lower-resolution preview, never a partial frame) with the rest of its budget
-//! going to the images, and switches to them once they are.
+//! A drag that starts before its images are ready draws its frames whole, at the view's level
+//! (as sharp as any frame: what doesn't move is never shown at a lower resolution), what is left
+//! of a short frame going to the images, and switches to them once they are.
 //!
 //! When the run is composited every frame instead (it doesn't look the same wherever it goes, or
 //! its blend isn't affine) only the above is kept: the frame composites the layers up to the

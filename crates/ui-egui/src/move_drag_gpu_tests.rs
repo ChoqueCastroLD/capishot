@@ -216,11 +216,11 @@ fn render(h: &mut Harness) -> Frame {
 /// Fraction of sampled document pixels of the presented frame `img` that differ from `want` by
 /// more than a few levels, away from `pointer` (the ΔX/ΔY readout beside it).
 fn mismatch(h: &Harness, img: &Frame, want: &[[u8; 4]], pointer: egui::Pos2) -> f64 {
-    // The level the view samples (a lower-resolution preview's while the full size waits).
+    // A frame the view shows from a coarser level anywhere (the page blurred) is wholly off.
     let level = h.state().gpu.as_ref().zip(h.state().session.active()).map_or(0, |(g, st)| g.view_floor(st.doc.id.0, st.doc.bounds()) as u32);
     if level > 0 {
-        // A lower-resolution preview frame (a drag before its cache is ready): compared by blocks.
-        return crate::move_repeat_tests::block_mismatch(h, &img.px, (img.w, img.h), want, Rect::new(0, 0, W as i32, H as i32), pointer, 1 << level);
+        eprintln!("BLURRY: the view shows level {level} at 100%");
+        return 1.0;
     }
     let (mut n, mut bad) = (0u64, 0u64);
     for y in (6..H as i32 - 6).step_by(7) {

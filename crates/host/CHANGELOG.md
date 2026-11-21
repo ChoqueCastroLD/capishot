@@ -23,8 +23,10 @@ may change in any commit; their changes are listed under **Experimental**. A cha
   at that event (no frame behind the pointer).
 - Layers with effects, type and smart objects with smart filters are kept as images for a drag
   (not drawn again per frame or per build); the cache is rebased when a drag ends, so the release
-  and a drag of the same layer again draw from it; drags that start before it is ready draw
-  lower-resolution previews instead of long frames.
+  and a drag of the same layer again draw from it. A drag that starts before it is ready draws
+  whole frames at the view's resolution (0.13.32 drew them, and the release, at a lower
+  resolution: the whole page blurred during drags and for seconds after); a Move drag and its
+  release composite at the level the view samples, never coarser.
 
 ## API_VERSION 1, additions (opening big pages off the frame, Capikoma request 19)
 

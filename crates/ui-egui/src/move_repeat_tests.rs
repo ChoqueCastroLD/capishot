@@ -250,16 +250,18 @@ fn expected(doc: &Document, id: LayerId, (dx, dy): (i32, i32), region: Rect) -> 
 }
 
 /// Fraction of sampled pixels of the presented frame off `want` (of `region`) by more than a few
-/// levels, away from the pointer (the offset readout beside it).
+/// levels, away from the pointer (the offset readout beside it). A frame the view shows from a
+/// coarser level anywhere (a lower-resolution composite: the page blurred) is wholly off: the
+/// layers that don't move are never shown degraded (0.13.32 did, on an RX 570).
 fn mismatch(h: &mut Harness, want: &[[u8; 4]], region: Rect, pointer: egui::Pos2) -> f64 {
-    // The level the view samples (a lower-resolution preview's while the full size waits).
     let level = h.state().gpu.as_ref().zip(h.state().session.active()).map_or(0, |(g, st)| g.view_floor(st.doc.id.0, st.doc.bounds()) as u32);
+    if level > 0 {
+        eprintln!("BLURRY: the view shows level {level} at 100%");
+        return 1.0;
+    }
     let img = h.render().expect("render");
     let (iw, ih) = (img.width(), img.height());
     let px = img.into_raw();
-    if level > 0 {
-        return block_mismatch(h, &px, (iw, ih), want, region, pointer, 1 << level);
-    }
     let (mut n, mut bad) = (0u64, 0u64);
     for y in (region.y0 + 3..region.y1 - 3).step_by(7) {
         for x in (region.x0 + 3..region.x1 - 3).step_by(5) {
@@ -275,60 +277,6 @@ fn mismatch(h: &mut Harness, want: &[[u8; 4]], region: Rect, pointer: egui::Pos2
             let Some(w) = want.get((y - region.y0) as usize * region.width() as usize + (x - region.x0) as usize) else { continue };
             n += 1;
             if (0..3).any(|k| got[k].abs_diff(w[k]) > 12) {
-                bad += 1;
-            }
-        }
-    }
-    bad as f64 / n.max(1) as f64
-}
-
-/// [`mismatch`] of a lower-resolution preview frame (an interactive frame composited at a
-/// coarser level, its texels `b` x `b` document pixels): the screen sampled at the pixel nearest
-/// each texel's centre against what the view's bilinear filtering of the expected texels (box
-/// averages of the pixels they cover) gives there.
-pub(crate) fn block_mismatch(h: &Harness, px: &[u8], (iw, ih): (u32, u32), want: &[[u8; 4]], region: Rect, pointer: egui::Pos2, b: i32) -> f64 {
-    let texel = |tx: i32, ty: i32| -> Option<[f32; 3]> {
-        let (mut sum, mut k) = ([0f32; 3], 0f32);
-        for yy in ty * b..ty * b + b {
-            for xx in tx * b..tx * b + b {
-                if !region.contains(xx, yy) {
-                    return None;
-                }
-                let w = want.get((yy - region.y0) as usize * region.width() as usize + (xx - region.x0) as usize)?;
-                for c in 0..3 {
-                    sum[c] += f32::from(w[c]);
-                }
-                k += 1.0;
-            }
-        }
-        Some(sum.map(|v| v / k))
-    };
-    let (mut n, mut bad) = (0u64, 0u64);
-    // The screen pixel at document x = tx * b + b / 2 has its centre half a pixel further: the
-    // bilinear weight of the next texel there.
-    let f = 0.5 / b as f32;
-    for ty in region.y0.div_euclid(b) + 1..region.y1.div_euclid(b) - 1 {
-        for tx in region.x0.div_euclid(b) + 1..region.x1.div_euclid(b) - 1 {
-            let c = screen(h, (tx * b + b / 2) as f32 + 0.5, (ty * b + b / 2) as f32 + 0.5);
-            if (c.x - pointer.x).abs() < 160.0 + b as f32 && (c.y - pointer.y).abs() < 100.0 + b as f32 {
-                continue;
-            }
-            let (sx, sy) = (c.x.floor() as u32, c.y.floor() as u32);
-            if sx >= iw || sy >= ih {
-                continue;
-            }
-            let (Some(g), Some(t00), Some(t10), Some(t01), Some(t11)) =
-                (px.get((sy as usize * iw as usize + sx as usize) * 4..), texel(tx, ty), texel(tx + 1, ty), texel(tx, ty + 1), texel(tx + 1, ty + 1))
-            else {
-                continue;
-            };
-            n += 1;
-            let off = (0..3).any(|c| {
-                let top = t00[c] * (1.0 - f) + t10[c] * f;
-                let bottom = t01[c] * (1.0 - f) + t11[c] * f;
-                (f32::from(g[c]) - (top * (1.0 - f) + bottom * f)).abs() > 12.0
-            });
-            if off {
                 bad += 1;
             }
         }
@@ -515,6 +463,14 @@ fn repeat(device: Device, page: Page, rounds: usize, moves: i32, rest: bool) -> 
             let pe = screen(&h, start[0] + last.0 as f32, start[1] + last.1 as f32);
             h.event(egui::Event::PointerButton { pos: pe, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
             timed(&mut h, format!("round {round} {name} release"), &mut run, again || rest);
+            // The release frame shows the layer where it landed, everything sharp.
+            let landed = h.state().session.active().expect("doc").doc.clone();
+            let want = expected(&landed, id, (0, 0), region);
+            let m = mismatch(&mut h, &want, region, pe);
+            if m > 0.01 {
+                eprintln!("OFF {device:?} {page:?} round {round} {name} release: {:.2}% off", m * 100.0);
+            }
+            run.worst_mismatch = run.worst_mismatch.max(m);
             let now = h.state().session.active().expect("doc").doc.clone();
             let all = Rect::new(i32::MIN / 4, i32::MIN / 4, i32::MAX / 4, i32::MAX / 4);
             let moved = now.layer(id).and_then(|l| photocraft_compose::change_bounds(l, all));
@@ -546,18 +502,16 @@ fn repeat(device: Device, page: Page, rounds: usize, moves: i32, rest: bool) -> 
 /// The owner's bar: no frame of any drag over 33 ms, every frame right.
 fn check(device: Device, page: Page) {
     // Back to back, different layers, no frame between: the drags start before their caches are
-    // ready (lower-resolution previews, the caches made with what is left of each frame). Every
-    // frame right (previews compared by blocks, which their filtering at block edges still moves a
-    // little), no effect drawn again for a layer that only moved; the times are reported. (On the
-    // manga page the effect cache's budget can't hold every layer's maps at once: reported, see
-    // the dev log.)
+    // ready (frames composited whole, the caches made with what is left of each frame). Every
+    // frame and every release right and sharp: what doesn't move is never shown at a lower
+    // resolution. No effect drawn again for a layer that only moved; the times are reported. (On
+    // the manga page the effect cache's budget can't hold every layer's maps at once: reported,
+    // see the dev log.)
     let Some(run) = repeat(device, page, 2, 9, false) else { return };
-    if page != Page::Manga {
-        assert!(run.worst_mismatch < 0.1, "{device:?} {page:?}: a frame {:.1}% off the composite at its offset", run.worst_mismatch * 100.0);
+    assert!(run.worst_mismatch < 0.02, "{device:?} {page:?}: a frame {:.1}% off the full-quality composite at its offset", run.worst_mismatch * 100.0);
+    if page != Page::Manga && matches!(device, Device::Gpu | Device::SlowGpu) {
         // (With 4 GB the effect cache's budget lets maps go and they are drawn again when needed.)
-        if matches!(device, Device::Gpu | Device::SlowGpu) {
-            assert_eq!(run.fx_rebuilt, 0, "{device:?} {page:?}: layer effects drawn again for layers that only moved");
-        }
+        assert_eq!(run.fx_rebuilt, 0, "{device:?} {page:?}: layer effects drawn again for layers that only moved");
     }
     // The pointer resting on each layer before its drag (its cache made meanwhile), then the same
     // layer dragged again at once (the cache rebased on the release): every frame from the cache,

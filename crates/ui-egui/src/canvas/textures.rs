@@ -532,7 +532,11 @@ pub(super) fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, le
     let plain = raw_key == 0 && translated.is_empty();
     gpu.set_translated(translated);
     let (moving, offset) = crate::move_ui::moving_ids(app, idx);
+    // A Move drag and its release composite at the level the view samples, never the coarser
+    // one large edits take while zoomed out: the layers that don't move stay sharp.
+    let dragging = !moving.is_empty();
     gpu.set_moving(id.0, moving, offset);
+    let level = if dragging || gpu.release_pending(id.0) { sample_level } else { level };
     let cache = app.canvases.entry((id, GPU_OUTPUT)).or_insert(CanvasCache { scale: 1.0, ..Default::default() });
     let present = cache.on_gpu && gpu.has(id.0, size);
     // Two fingers on the glass (touch_nav): the view keeps the levels it has while they pinch or
@@ -581,7 +585,10 @@ pub(super) fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, le
         }
         // Regions composited reduced or left for later: what the view shows now, then (once the
         // edits pause) the rest at full size, a piece per frame.
-        let c = gpu.catch_up(id.0, &doc, display.as_deref(), need, !gesture && !sharpen, ctx);
+        // No refinement while a button is down: a press starts a drag (a release drawn from the
+        // drag cache, refined on the next drag's press, composited its effects again there).
+        let pressed = ctx.input(|i| i.pointer.any_down());
+        let c = gpu.catch_up(id.0, &doc, display.as_deref(), need, !gesture && !sharpen && !pressed, ctx);
         app.perf.gpu_sharp = gpu.sharp_in(id.0, visible);
         if sharpen && gpu.current_in(id.0, visible, sample_level) {
             ctx.data_mut(|d| d.remove::<bool>(after_id));
@@ -615,10 +622,12 @@ pub(super) fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, le
         && crate::gpu_canvas::PACE_COMPOSITES
         && crate::gpu_canvas::reduced_refreshes()
         && let Some(r) = damage.filter(|r| !r.is_empty())
+        && !gpu.release_pending(id.0)
         && gpu.busy()
     {
         // The last composite is still on the GPU: this edit waits for it (catch_up draws it on
-        // the frame after), so frames don't queue up behind the pointer.
+        // the frame after), so frames don't queue up behind the pointer. Not a Move drag's
+        // release: its frame comes from the drag cache in one draw, sharp, in this frame.
         gpu.defer(id.0, r);
         gpu.wake_when_done(ctx);
         gpu.set_shows(id.0, plain.then(|| (doc.clone(), display_key)));

@@ -465,16 +465,20 @@ impl GpuCanvas {
         let Some(res) = r.callback_resources.canvas_mut(self.id) else { return };
         if ids.is_empty() {
             // The drag ended: its last offset is what the release moved the layers by (the
-            // cache is rebased on it, `GpuCanvas::refresh_for`), and the next frames are still
-            // interactive (the release frame, a drag that follows at once).
+            // cache is rebased on it, `GpuCanvas::refresh_for`).
             if let Some((ids, offset)) = res.moving.remove(&key) {
                 res.released = Some((key, ids, offset));
-                res.interactive.insert(key, now_ms() + INTERACTIVE_MS);
             }
         } else {
-            res.interactive.insert(key, now_ms() + INTERACTIVE_MS);
             res.moving.insert(key, (ids, offset));
         }
+    }
+
+    /// Whether a Move drag on document `key` just ended and its release frame is still to draw
+    /// ([`GpuCanvas::set_moving`]).
+    pub fn release_pending(&self, key: u64) -> bool {
+        let r = self.rs.renderer.read();
+        r.callback_resources.canvas(self.id).is_some_and(|res| res.released.as_ref().is_some_and(|(k, _, _)| *k == key))
     }
 
     /// The layers a Move drag on document `key` moves and its offset ([`GpuCanvas::set_moving`]).
@@ -488,24 +492,6 @@ impl GpuCanvas {
     pub fn drag_ready_for(&self, doc: &photocraft_doc::Document, ids: &[photocraft_doc::LayerId]) -> bool {
         let r = self.rs.renderer.read();
         r.callback_resources.canvas(self.id).is_some_and(|res| res.drag.as_ref().is_some_and(|c| c.ready_for(doc, ids)))
-    }
-
-    /// The level of detail an interactive frame of document `key` composites `px` pixels (at
-    /// `level`) at, so it takes about [`INTERACTIVE_FRAME_MS`] at the rate the last composites
-    /// took: a coarser level (a lower-resolution preview the refinement brings back to full size
-    /// once the edits pause) rather than a frame that holds the drag. `level` outside one.
-    fn interactive_level(&self, key: u64, px: u64, level: u32) -> u32 {
-        let r = self.rs.renderer.read();
-        let Some(res) = r.callback_resources.canvas(self.id) else { return level };
-        let live = res.interactive.get(&key).is_some_and(|until| now_ms() < *until);
-        if !live || res.cost_rate <= 0.0 {
-            return level;
-        }
-        let mut l = level;
-        while l < level + MAX_INTERACTIVE_BOOST && l < photocraft_gpu::MAX_LOD && res.cost_rate * (px >> (2 * (l - level))) as f64 > INTERACTIVE_FRAME_MS {
-            l += 1;
-        }
-        l
     }
 
     /// GPU bytes of the drag cache (tests and diagnostics).
@@ -1027,20 +1013,10 @@ impl GpuCanvas {
             } else {
                 self.release_frame(doc, view, n.level, encode_srgb)
             };
-            // An interactive frame the cache can't draw (a drag started before it was ready, the
-            // frame after a release): what the view shows, at a level coarse enough to keep the
-            // frame short (a lower-resolution preview, refined to full size once edits pause),
-            // never a frame that holds the drag.
-            let boosted = if split.is_none() && blank.is_empty() && !view.is_empty() {
-                self.interactive_level(key, area(view) >> (2 * level), level)
-            } else {
-                level
-            };
-            let interactive = boosted != level || moving.is_some();
-            let level = boosted;
-            if let Ok(st) = &mut r {
-                st.level = level;
-            }
+            // A drag frame the cache can't draw (it started before the cache was ready): what the
+            // view shows, composited whole at the view's level, as sharp as any other frame.
+            // (0.13.32 drew these at up to two levels coarser to keep them short: the whole page,
+            // static layers too, went blurry during drags and for seconds after on an RX 570.)
             let parts = match split {
                 Some(st) => {
                     out.kind = DRAG_CACHE_KIND;
@@ -1048,7 +1024,7 @@ impl GpuCanvas {
                     later.extend(subtract(now, view));
                     Vec::new()
                 }
-                None if interactive => {
+                None if moving.is_some() => {
                     later.extend(subtract(now, view));
                     vec![view]
                 }
@@ -1084,7 +1060,7 @@ impl GpuCanvas {
                         res.reduced_at = now_ms();
                     }
                     res.last_passes = stats.passes;
-                    // What compositing costs here (the interactive frames' level, above).
+                    // What compositing costs here (sizes refinement pieces).
                     if !drag_ready && stats.pixels > 0 {
                         let rate = took / stats.pixels as f64;
                         res.cost_rate = if res.cost_rate > 0.0 { res.cost_rate * 0.6 + rate * 0.4 } else { rate };
@@ -1103,7 +1079,7 @@ impl GpuCanvas {
                         res.cold_frames = res.cold_frames.wrapping_add(1);
                         res.cold_frames
                     });
-                    let left = INTERACTIVE_BUDGET_MS - (now_ms() - t0);
+                    let left = COLD_FRAME_MS - (now_ms() - t0);
                     let budget = if left <= 0.0 && cold.is_some_and(|c| c % COLD_PIECE_EVERY == 0) { f64::MIN_POSITIVE } else { left };
                     self.prepare_drag(doc, ids, n.visible, n.level, encode_srgb, budget);
                 }
@@ -1261,14 +1237,9 @@ impl GpuCanvas {
         }
         let bounds = doc.bounds();
         let near = if need.focus { need.visible.intersect(&bounds) } else { near_view(need.visible, bounds) };
-        // While a drag goes on (and just after), a lower-resolution preview is what the view
-        // should show: only what nothing is drawn for is urgent, not the preview's full size
-        // (that is the refinement's, once the edits pause).
-        let Some((urgent, reduced_at, passes, cost_rate)) = self.with_doc(key, |res, d| {
-            let live = res.interactive.get(&key).is_some_and(|until| now_ms() < *until);
-            let level = if live { need.level.max(photocraft_gpu::MAX_LOD) } else { need.level };
-            (d.stale().needed(near, level), res.reduced_at, res.last_passes, res.cost_rate)
-        }) else {
+        let Some((urgent, reduced_at, passes, cost_rate)) =
+            self.with_doc(key, |res, d| (d.stale().needed(near, need.level), res.reduced_at, res.last_passes, res.cost_rate))
+        else {
             return out;
         };
         let encode_srgb = display.is_some_and(|d| d.encode_srgb);
@@ -1342,7 +1313,7 @@ impl GpuCanvas {
             // Not past what one frame composites at the rate measured here either (the pacer
             // sizes pieces from the GPU's completion, which a software adapter or a CPU-bound
             // frame doesn't reflect).
-            let cap = if cost_rate > 0.0 { (INTERACTIVE_FRAME_MS / cost_rate) as u64 } else { u64::MAX };
+            let cap = if cost_rate > 0.0 { (REFINE_FRAME_MS / cost_rate) as u64 } else { u64::MAX };
             let budget = (work / passes.max(1) as u64).min(cap).max(128 * 128);
             if let Some(piece) = self.with_doc(key, |_, d| d.stale().next_piece(need.visible, budget)).flatten() {
                 self.rs.queue.on_submitted_work_done(self.refine.before());
@@ -1876,8 +1847,7 @@ pub struct Perf {
     pub last_refresh: &'static str,
     /// Pixels in the last refresh.
     pub last_refresh_px: u64,
-    /// Mip level the last GPU refresh composited at (0: full size; an interactive frame's
-    /// lower-resolution preview above).
+    /// Mip level the last GPU refresh composited at (0: full size; above it a zoomed-out view's).
     pub last_refresh_level: u32,
     /// Whether the GPU canvas path is active.
     pub gpu: bool,
@@ -2265,22 +2235,15 @@ pub const REFINE_DELAY_MS: f64 = 120.0;
 /// [`Refresh::kind`] of a frame drawn from the drag cache (`above`).
 pub const DRAG_CACHE_KIND: &str = "gpu-drag-cache";
 
-/// How long a document's frames stay interactive after a Move drag event (milliseconds).
-const INTERACTIVE_MS: f64 = 400.0;
-
-/// The work an interactive frame aims at (milliseconds of compositing).
-const INTERACTIVE_FRAME_MS: f64 = 12.0;
-
-/// The most levels an interactive frame goes coarser than the view's: two, where the
-/// compositor's reduction is still an exact box filter (`photocraft_gpu::Compositor::render_lod`;
-/// coarser ones subsample, which aliases fine detail).
-const MAX_INTERACTIVE_BOOST: u32 = 2;
+/// The compositing a refinement piece aims at (milliseconds).
+const REFINE_FRAME_MS: f64 = 12.0;
 
 /// On a device whose drag frames leave no budget for the cache: a piece every this many frames.
 const COLD_PIECE_EVERY: u32 = 4;
 
-/// The longest an interactive frame may take with the drag cache's pieces (milliseconds).
-const INTERACTIVE_BUDGET_MS: f64 = 24.0;
+/// A drag frame the cache can't draw yet gives the cache's pieces what is left under this
+/// (milliseconds): the frame stays as short as one without them.
+const COLD_FRAME_MS: f64 = 12.0;
 
 /// Canvas pixels times visible drawing layers above which a new document's first frame on the
 /// CPU compositor is drawn in pieces ([`GpuCanvas::cpu_first`]): about four full layers of a
@@ -2773,9 +2736,6 @@ struct Resources {
     moving: HashMap<u64, (Vec<photocraft_doc::LayerId>, (i32, i32))>,
     /// The last drag that ended: document, layers and the offset it moved them by.
     released: Option<(u64, Vec<photocraft_doc::LayerId>, (i32, i32))>,
-    /// Until when a document's frames are interactive ([`now_ms`]): a drag and the frames
-    /// just after it, composited at a coarser level when the full one wouldn't fit the frame.
-    interactive: HashMap<u64, f64>,
     /// Milliseconds per pixel the last composites of a refresh took (0: none yet).
     cost_rate: f64,
     /// The same for the drag cache's pieces (`above`), the slower of their CPU and GPU times.
@@ -3127,7 +3087,6 @@ impl Resources {
             shown: Default::default(),
             moving: HashMap::new(),
             released: None,
-            interactive: HashMap::new(),
             cost_rate: 0.0,
             piece_rate: 0.0,
             cold_frames: 0,
