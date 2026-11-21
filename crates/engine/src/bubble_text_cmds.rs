@@ -665,6 +665,17 @@ fn remove_bubble_text(s: &mut Session, p: &Value) -> Result<Value> {
         sample_all = true;
         new_layer = true;
     }
+    // A pixel layer with nothing at the click (a layer of cleans, a new empty layer): the page is
+    // read from what is seen and the result painted on that layer, so a click after a clean that
+    // made such a layer finds the bubble instead of an empty layer ("noBubble").
+    if editable
+        && !sample_all
+        && let Some(surf) = active.and_then(|id| doc.layer(id)).and_then(|l| l.surface())
+        && surf.format().alpha
+        && surf.pixel(x, y).last().is_some_and(|a| *a <= 0.0)
+    {
+        sample_all = true;
+    }
     let layer_fmt = active.and_then(|id| doc.layer(id)).and_then(|l| l.surface()).map(|s| s.format());
     // The page is composited (where it changed) in the job too.
     let page = crate::typer_place_cmds::page_work(s)?;
@@ -723,9 +734,10 @@ fn apply(
                 surf.write_region(region, &px);
                 surf.prune();
             }
-            let nid = doc.insert_above(active, l);
-            *act = Some(nid);
-            return Ok(nid);
+            // The new layer goes above and the layer being worked on stays active: the next click
+            // reads the page again, not the new layer (which has only this bubble's fill).
+            let _ = act;
+            return Ok(doc.insert_above(active, l));
         }
         let id = active.ok_or(EngineError::Other("no active layer".into()))?;
         let surf = crate::edit_menu_cmds::writable_surface(doc, id)?;
@@ -773,7 +785,7 @@ pub fn specs() -> Vec<CommandSpec> {
         label: LABEL,
         menu: &[],
         shortcut: None,
-        params: r##"{"x":px,"y":px (the click),"tolerance"?:1..255|"auto" (how far from the background, as a colour difference, a pixel counts as text; default auto: from the bubble's noise),"sampleAll"?:bool (model the background from every visible layer, not the active one; default false),"newLayer"?:bool (the result on a new layer above; default false),"gapRadius"?:1..32|"auto" (px: outline gaps up to about twice this wide stay shut),"reach"?:1..512|"auto" (px: how far from the click a light pixel to start from may be),"window"?:16..65536|"page"|"auto" (px: half the side of the largest square searched around the click, or the whole page)} → {"ok":true,"layer","bubbleBounds":[x,y,w,h],"pixels" (painted),"background":"solid"|"gradient","region","newLayer","search":{"scale","gapRadius","reach","window"}}. The Bubble Text Remover tool's click: the text in the speech bubble, narration box or SFX bubble at the point is removed without AI. The bubble is found as for type.createInBubble (a click on a letter still finds it; a bubble cut by the page edge, or one that opens onto a panel border or the gutter, is bounded by the edge or by its lettering's block, its panel lines kept as walls; "region" says which: "bubble", "edge" or "textCluster"); its background is a solid colour or a smooth gradient fitted around the lettering, and only the pixels that differ from it (with their anti-aliased edge, a 1 px feather) are painted with it plus matching noise; a 2 px band along the outline is never touched. The search is sized for the page's resolution: the ink's stroke width around the click gives its scale against a 1x page (about 1500 px wide), and the gap radius (2 px at 1x), the reach (24 px) and the windows (384 and 1024 px) scale with it ("search" in the result says what was used); it stays in its windows unless "window":"page", so a click with no bubble answers at once. Errors: "noBubble (…)" with no bubble there ("beyondWindow" when the light area reaches past the search window), "notPlain: …" when the background isn't plain (screentone, art: use Remove with AI), "noText: …" when nothing in it differs; none changes anything. A type, shape or other non-pixel active layer gets the result on a new layer. One undo step"##,
+        params: r##"{"x":px,"y":px (the click),"tolerance"?:1..255|"auto" (how far from the background, as a colour difference, a pixel counts as text; default auto: from the bubble's noise),"sampleAll"?:bool (model the background from every visible layer, not the active one; default false),"newLayer"?:bool (the result on a new layer above; default false),"gapRadius"?:1..32|"auto" (px: outline gaps up to about twice this wide stay shut),"reach"?:1..512|"auto" (px: how far from the click a light pixel to start from may be),"window"?:16..65536|"page"|"auto" (px: half the side of the largest square searched around the click, or the whole page)} → {"ok":true,"layer","bubbleBounds":[x,y,w,h],"pixels" (painted),"background":"solid"|"gradient","region","newLayer","search":{"scale","gapRadius","reach","window"}}. The Bubble Text Remover tool's click: the text in the speech bubble, narration box or SFX bubble at the point is removed without AI. The bubble is found as for type.createInBubble (a click on a letter still finds it; a bubble cut by the page edge, or one that opens onto a panel border or the gutter, is bounded by the edge or by its lettering's block, its panel lines kept as walls; "region" says which: "bubble", "edge" or "textCluster"); its background is a solid colour or a smooth gradient fitted around the lettering, and only the pixels that differ from it (with their anti-aliased edge, a 1 px feather) are painted with it plus matching noise; a 2 px band along the outline is never touched. The search is sized for the page's resolution: the ink's stroke width around the click gives its scale against a 1x page (about 1500 px wide), and the gap radius (2 px at 1x), the reach (24 px) and the windows (384 and 1024 px) scale with it ("search" in the result says what was used); it stays in its windows unless "window":"page", so a click with no bubble answers at once. Errors: "noBubble (…)" with no bubble there ("beyondWindow" when the light area reaches past the search window), "notPlain: …" when the background isn't plain (screentone, art: use Remove with AI), "noText: …" when nothing in it differs; none changes anything. A type, shape or other non-pixel active layer gets the result on a new layer; a pixel layer with nothing at the click (a layer of cleans) reads what is seen and is painted. The active layer never changes. One undo step"##,
         enabled,
         journal: true,
         run: remove_bubble_text,

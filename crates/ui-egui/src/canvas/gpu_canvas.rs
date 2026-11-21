@@ -1478,6 +1478,12 @@ impl GpuCanvas {
         }
     }
 
+    /// Wait until the GPU has finished everything queued (measurements: the GPU side of a frame).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn finish(&self) {
+        self.health.wait(&self.rs.device, None);
+    }
+
     /// Read back level 0 of document `key`'s canvas texture: its format, size and the stored
     /// (premultiplied) texels as `f32` RGBA, row-major. Waits for the GPU; for tests, benchmarks
     /// and debugging.

@@ -46,6 +46,8 @@ enum Page {
     BottomOverlay,
     /// [`Page::Bottom`] with the cache of the layers above turned off (the measure to compare).
     BottomUncached,
+    /// The same 16 layers with the dragged one on top.
+    Top,
 }
 
 fn harness(device: Device) -> Option<Harness> {
@@ -110,8 +112,13 @@ fn credits_page(app: &mut PhotocraftApp) -> LayerId {
 /// with a half-transparent layer in it, and a layer with a drop shadow. With `overlay`, the
 /// Screen layer blends in Overlay instead. Returns the dragged layer's id.
 fn bottom_page(app: &mut PhotocraftApp, overlay: bool) -> LayerId {
+    stack_page(app, overlay, false)
+}
+
+/// [`bottom_page`], the dragged layer at the bottom (above the Background) or on `top`.
+fn stack_page(app: &mut PhotocraftApp, overlay: bool, top: bool) -> LayerId {
     app.run("file.new", json!({"width": W, "height": H, "background": "white", "name": "pila"})).expect("a document");
-    let moving = stripes_layer(app, "photo");
+    let mut moving = if top { None } else { Some(stripes_layer(app, "photo")) };
     for (i, text) in ["typer: naxu", "facebook.com/shiliellano", "capitulo x", "gracias por leer", "creditos"].iter().enumerate() {
         let l = (app.run("type.create", json!({"x": 120 + i as u32 * 40, "y": 140 + i as u32 * 120, "text": text, "size": 64, "color": "#202020"})).expect("type"))["layer"]
             .as_u64()
@@ -145,9 +152,14 @@ fn bottom_page(app: &mut PhotocraftApp, overlay: bool) -> LayerId {
     app.run("layer.groupLayers", json!({"name": "Group 1"})).expect("group");
     let shadow = tint(app, "badge", "#c03030", [1500, 80, 1800, 300], photocraft_color::BlendMode::Normal, 1.0);
     app.run("layer.layerStyle.dropShadow", json!({"layer": shadow.0})).ok();
+    if moving.is_none() {
+        let groups = app.session.active().expect("doc").doc.layers.len();
+        app.run("layer.select", json!({"layer": app.session.active().expect("doc").doc.layers[groups - 1].id.0})).expect("select");
+        moving = Some(stripes_layer(app, "photo"));
+    }
     let n = app.session.active().expect("doc").doc.walk().len();
     assert_eq!(n, 16, "16 layers");
-    moving
+    moving.expect("the dragged layer")
 }
 
 /// A new layer of uneven colour stripes over the whole canvas, a transparent gap beside each (the
@@ -223,6 +235,8 @@ fn mismatch(h: &Harness, img: &Frame, want: &[[u8; 4]], pointer: egui::Pos2) -> 
 
 struct Frames {
     step_ms: Vec<f64>,
+    /// GPU drain after each drag frame.
+    gpu_ms: Vec<f64>,
     /// Drag frames drawn from a moved copy rather than in place.
     copied: usize,
     /// Drag frames with the layers above cached (`gpu_canvas::above`).
@@ -245,6 +259,7 @@ fn drag(device: Device, page: Page, frames: i32) -> Option<Frames> {
         Page::Credits => credits_page(h.state_mut()),
         Page::Bottom | Page::BottomUncached => bottom_page(h.state_mut(), false),
         Page::BottomOverlay => bottom_page(h.state_mut(), true),
+        Page::Top => stack_page(h.state_mut(), false, true),
     };
     crate::gpu_canvas::set_above_cache(page != Page::BottomUncached);
     {
@@ -305,7 +320,7 @@ fn drag(device: Device, page: Page, frames: i32) -> Option<Frames> {
     h.step();
     h.event(egui::Event::PointerButton { pos: p0, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
     h.step();
-    let mut out = Frames { step_ms: Vec::new(), copied: 0, cached: 0, worst: 0.0, worst_older: 1.0 };
+    let mut out = Frames { step_ms: Vec::new(), gpu_ms: Vec::new(), copied: 0, cached: 0, worst: 0.0, worst_older: 1.0 };
     let mut last = (0, 0);
     for i in 1..=frames {
         let (dx, dy) = (-(i * 23), -(i * 9));
@@ -316,10 +331,22 @@ fn drag(device: Device, page: Page, frames: i32) -> Option<Frames> {
         // The frame that takes the pointer event shows the layer there (the canvas paints after
         // the Move tool's events), and so does the next one, with no event.
         for k in 0..2 {
+            crate::perf_span::begin_frame();
             let t = std::time::Instant::now();
             h.step();
+            let cpu = t.elapsed().as_secs_f64() * 1000.0;
+            // The GPU side: what was queued this frame, drained (lavapipe runs it on the CPU).
+            let t = std::time::Instant::now();
+            if let Some(g) = h.state().gpu.as_ref() {
+                g.finish();
+            }
+            let gpu = t.elapsed().as_secs_f64() * 1000.0;
             if k == 0 {
-                out.step_ms.push(t.elapsed().as_secs_f64() * 1000.0);
+                let spans: Vec<String> = crate::perf_span::frame().iter().take(8).map(|(n, ms)| format!("{n} {ms:.1}")).collect();
+                let attributed: f64 = crate::perf_span::frame().iter().map(|(_, ms)| ms).sum();
+                eprintln!("PROFILE {device:?} {page:?} move {i}: cpu {cpu:.1} ms (spans {attributed:.1}: {}), gpu drain {gpu:.1} ms", spans.join(", "));
+                out.gpu_ms.push(gpu);
+                out.step_ms.push(cpu);
                 if !crate::move_ui::drawn_in_place(h.state(), 0) {
                     out.copied += 1;
                 }
@@ -359,16 +386,24 @@ fn drag(device: Device, page: Page, frames: i32) -> Option<Frames> {
     let mut sorted: Vec<f64> = out.step_ms.iter().skip(1).copied().collect();
     sorted.sort_by(f64::total_cmp);
     eprintln!(
-        "{device:?} {page:?}: {} drag frames ({} from a moved copy, {} with the layers above cached), first {:.1} ms, then median {:.1} ms, max {:.1} ms; worst frame {:.2}% off its offset",
+        "{device:?} {page:?}: {} drag frames ({} from a moved copy, {} with the layers above cached), CPU first {:.1} ms, then median {:.1} ms, max {:.1} ms; GPU drain first {:.1} ms, then median {:.1} ms; worst frame {:.2}% off its offset",
         out.step_ms.len(),
         out.copied,
         out.cached,
         out.step_ms.first().copied().unwrap_or(0.0),
         sorted[sorted.len() / 2],
         sorted.last().copied().unwrap_or(0.0),
+        out.gpu_ms.first().copied().unwrap_or(0.0),
+        median(&out.gpu_ms[1.min(out.gpu_ms.len())..]),
         out.worst * 100.0
     );
     Some(out)
+}
+
+fn median(v: &[f64]) -> f64 {
+    let mut v = v.to_vec();
+    v.sort_by(f64::total_cmp);
+    v.get(v.len() / 2).copied().unwrap_or(0.0)
 }
 
 fn check(device: Device, page: Page) {
@@ -380,7 +415,7 @@ fn check(device: Device, page: Page) {
         match page {
             Page::Bottom => assert_eq!(f.cached, 10, "{device:?}: every drag frame lays the layers above from the maps"),
             Page::BottomOverlay | Page::BottomUncached => assert_eq!(f.cached, 0, "{device:?} {page:?}: composited whole"),
-            Page::Credits => assert_eq!(f.cached, 0, "nothing above the Smart Object but an empty group"),
+            Page::Credits | Page::Top => assert_eq!(f.cached, 0, "nothing above the dragged layer but an empty group"),
         }
     }
     assert!(
@@ -434,6 +469,11 @@ fn a_bottom_layer_drag_on_the_cpu_canvas_shows_every_frame_at_its_offset() {
 #[test]
 fn a_bottom_layer_drag_under_an_overlay_layer_composites_the_layers_above_whole() {
     check(Device::Gpu, Page::BottomOverlay);
+}
+
+#[test]
+fn a_top_layer_drag_shows_every_frame_at_its_offset() {
+    check(Device::Gpu, Page::Top);
 }
 
 /// The same drag with the cache turned off: the measure to compare with (and the frames still

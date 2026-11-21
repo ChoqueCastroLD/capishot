@@ -247,11 +247,32 @@ fn on_a_new_layer_the_page_stays() {
     assert_eq!(pixels(&s), dirty, "the page untouched");
     let d = s.active().unwrap();
     assert_eq!(d.doc.layers.len(), 2);
-    assert_eq!(d.active_layer, Some(LayerId(r["layer"].as_u64().unwrap())));
+    let page_layer = d.doc.layers.iter().map(|l| l.id).find(|id| *id != LayerId(r["layer"].as_u64().unwrap()));
+    assert_eq!(d.active_layer, page_layer, "the page stays active: the next click reads it");
     let seen = photocraft_compose::render(&d.doc, Rect::new(0, 0, W as i32, H as i32));
     let seen: Vec<[f32; 4]> = seen.px.to_vec();
     let (mean, _) = residue(&seen, &clean, [240, 430, 760, 770], &inside_oval);
     assert!(mean < 0.001, "{mean}");
+}
+
+/// The case users hit: a clean on a new layer, then a click on another bubble. The page stays
+/// active, so the next click reads it; and with an empty layer active (a layer of cleans chosen
+/// by hand), a click reads what is seen and paints on that layer instead of answering "noBubble".
+#[test]
+fn an_empty_active_layer_reads_the_page_and_the_new_layer_is_not_selected() {
+    let mut s = oval_page(white);
+    letter(&mut s, "HELLO", 400.0, 620.0, 60.0, "#000000");
+    let page_layer = s.active().unwrap().active_layer;
+    s.execute(ID, json!({"x": 500, "y": 520, "newLayer": true})).unwrap();
+    assert_eq!(s.active().unwrap().active_layer, page_layer);
+    s.execute("edit.undo", json!({})).unwrap();
+
+    s.execute("layer.new.layer", json!({})).unwrap();
+    let empty = s.active().unwrap().active_layer;
+    assert_ne!(empty, page_layer);
+    let r = s.execute(ID, json!({"x": 500, "y": 520})).expect("reads the page through the empty layer");
+    assert_eq!(r["newLayer"], false, "painted on the empty layer itself");
+    assert_eq!(empty.map(|l| l.0), r["layer"].as_u64());
 }
 
 #[test]
