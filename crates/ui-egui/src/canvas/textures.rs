@@ -531,6 +531,7 @@ pub(super) fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, le
     // pages): it can be kept for a later view switch (`gpu_canvas::view_sets`).
     let plain = raw_key == 0 && translated.is_empty();
     gpu.set_translated(translated);
+    gpu.set_moving(id.0, crate::move_ui::moving_ids(app, idx));
     let cache = app.canvases.entry((id, GPU_OUTPUT)).or_insert(CanvasCache { scale: 1.0, ..Default::default() });
     let present = cache.on_gpu && gpu.has(id.0, size);
     // Two fingers on the glass (touch_nav): the view keeps the levels it has while they pinch or

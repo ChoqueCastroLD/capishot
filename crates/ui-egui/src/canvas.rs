@@ -683,6 +683,12 @@ fn paint_canvas(app: &mut PhotocraftApp, ui: &egui::Ui, view: &View, xf: ViewXfo
 
 /// Where a canvas keeps "the pointer is on its scrollbars" (last frame's), and the id its bars grow
 /// from: each tile has its own.
+/// Whether the Move tool is (or may this frame start) dragging layers on the primary canvas: the
+/// Move tool selected or held (⌘), or a Move drag under way.
+fn moves_layers_now(app: &PhotocraftApp) -> bool {
+    app.ui.tool == Tool::Move || app.tool_override == Some(Tool::Move) || app.drag.as_ref().is_some_and(|d| d.tool == Tool::Move)
+}
+
 fn bars_hover_id(idx: usize, tile_salt: u64) -> egui::Id {
     let id = egui::Id::unique(("pc-canvas-bars-hover", idx));
     if tile_salt == 0 { id } else { id.with(tile_salt) }
@@ -2097,6 +2103,11 @@ fn canvas_view_tile(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect
     // Default-mode Crop changes its camera during input. Defer its image until the new camera
     // is known; other tools keep their existing paint order and texture/outline snapshots.
     let crop_camera = primary && crate::crop_mode::moves_image(app);
+    // A Move drag: the image is painted after this frame's pointer events too, so the frame shows
+    // the layers where the pointer is now, not where it was a frame ago (the canvas used to paint
+    // before taking the events, one frame behind the pointer). Its tool draws nothing during
+    // input; its outline and readout are overlays, painted after the image as before.
+    let input_first = crop_camera || (primary && moves_layers_now(app));
     let paint_input = CanvasPaintInput {
         ctx: &ctx,
         rect,
@@ -2115,7 +2126,7 @@ fn canvas_view_tile(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect
         pixel_grid,
         tile,
     };
-    let painted = if crop_camera { None } else { Some(paint_canvas(app, ui, &display_view, xf, &paint_input)) };
+    let painted = if input_first { None } else { Some(paint_canvas(app, ui, &display_view, xf, &paint_input)) };
     let img_rect = xf.doc_rect(doc.bounds());
 
     // Under an open dialog the canvas widget is inert, but the image still pans and zooms.

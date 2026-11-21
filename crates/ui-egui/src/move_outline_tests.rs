@@ -117,9 +117,10 @@ fn the_outline_belongs_to_the_layer_auto_select_picked() {
     h.step();
     h.event(Event::PointerMoved(p0 + egui::vec2(20.0, 0.0)));
     h.step();
-    // The frame the drag starts in picks A: it outlines A, never B, which isn't moving.
+    // The frame the drag starts in picks A: it outlines A, never B, which isn't moving, already
+    // where the pointer took it (the canvas paints after the Move tool's events).
     assert_eq!(active(&h), Some(a), "Auto-Select picked A");
-    assert_eq!(edges(&h), outline(&h, A), "the frame that picks A outlines A, not the previously selected B");
+    assert_eq!(edges(&h), outline(&h, A.translate(5, 0)), "the frame that picks A outlines A at the pointer, not the previously selected B");
     h.step();
     assert_eq!(edges(&h), outline(&h, A.translate(5, 0)), "A's outline follows it");
     button(&mut h, p0 + egui::vec2(20.0, 0.0), false);
@@ -143,17 +144,15 @@ fn the_outline_moves_in_lockstep_with_a_fast_drag() {
     h.step();
     assert_eq!(active(&h), Some(b));
     assert_eq!(edges(&h), outline(&h, B.translate(-5, 0)));
-    // Big jumps, one per frame. A frame draws the layer where the previous frame's events left it
-    // (the image is painted before this frame's events are read), and the outline goes with it.
-    let mut shown = (-5, 0);
+    // Big jumps, one per frame. The frame that reads the pointer event draws the layer there (the
+    // image is painted after the Move tool's events), and the outline goes with it; so does the
+    // next frame.
     for (dx, dy) in [(-30, -10), (-36, -30), (-12, -36), (-40, 0)] {
         h.event(Event::PointerMoved(p0 + egui::vec2(dx as f32 * 4.0, dy as f32 * 4.0)));
         h.step();
-        assert_eq!(edges(&h), outline(&h, B.translate(shown.0, shown.1)), "drawn with the layer at {shown:?} while the pointer moved to {dx},{dy}");
-        // The next frame shows both at the pointer.
+        assert_eq!(edges(&h), outline(&h, B.translate(dx, dy)), "drawn with the layer at the pointer, {dx},{dy}, in the event's frame");
         h.step();
         assert_eq!(edges(&h), outline(&h, B.translate(dx, dy)), "the outline is where the layer is shown, at {dx},{dy}");
-        shown = (dx, dy);
     }
     button(&mut h, p0 + egui::vec2(-160.0, 0.0), false);
     h.step();

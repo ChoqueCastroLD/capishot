@@ -34,8 +34,11 @@ use eframe::wgpu;
 pub use pages::{MAX_PAGE_SIDE, PageUpload};
 pub use photocraft_gpu::{DeviceHealth, Fault};
 
+mod above;
 mod pages;
 mod view_sets;
+
+pub use above::set_above_cache;
 pub use view_sets::{MAX_VIEW_SETS, ViewSwitch, same_but_visibility, same_pixels, visibility_only};
 
 /// Default tile side; documents up to this size (and the device limit) use a single texture.
@@ -453,6 +456,27 @@ impl GpuCanvas {
         }
     }
 
+    /// The layers a Move drag moves (`move_ui`; empty without a drag): the layers above them are
+    /// composited once for the drag and laid over each frame (`above`).
+    pub fn set_moving(&self, key: u64, ids: Vec<photocraft_doc::LayerId>) {
+        let mut r = self.rs.renderer.write();
+        let Some(res) = r.callback_resources.canvas_mut(self.id) else { return };
+        if ids.is_empty() {
+            // No drag on this document (any more): its cached layers above go.
+            if res.moving.remove(&key).is_some() && res.above.as_ref().is_some_and(|m| m.doc() == key) {
+                res.above = None;
+            }
+        } else if res.moving.get(&key) != Some(&ids) {
+            res.moving.insert(key, ids);
+        }
+    }
+
+    /// GPU bytes of a Move drag's cached layers above (tests and diagnostics).
+    pub fn above_bytes(&self) -> u64 {
+        let r = self.rs.renderer.read();
+        r.callback_resources.canvas(self.id).and_then(|res| res.above.as_ref().map(above::AboveMaps::bytes)).unwrap_or(0)
+    }
+
     /// Layers the next refreshes draw from their already resident pre-move surface at an offset
     /// (a Move drag's preview), instead of uploading the moved copy every frame. Empty: none.
     pub fn set_translated(&self, translated: Vec<photocraft_gpu::Translated>) {
@@ -664,31 +688,11 @@ impl GpuCanvas {
         self.composite_lod_with(doc, region, encode_srgb, level, partial, true)
     }
 
-    /// [`GpuCanvas::composite_lod`]; `fill_prefix` off for the catch-up and refinement, which
-    /// draw a region once ([`photocraft_gpu::Compositor::set_fill_prefix`]).
-    fn composite_lod_with(
-        &self,
-        doc: &photocraft_doc::Document,
-        region: photocraft_geom::Rect,
-        encode_srgb: bool,
-        level: u32,
-        partial: bool,
-        fill_prefix: bool,
-    ) -> Result<photocraft_gpu::Stats, photocraft_gpu::Unsupported> {
-        let _s = crate::perf_span::span("gpu.composite");
-        let (device, queue) = (&self.rs.device, &self.rs.queue);
-        let size = [doc.size.width, doc.size.height];
-        if size[0] == 0 || size[1] == 0 {
-            return Err(photocraft_gpu::Unsupported("empty document".into()));
-        }
-        if std::env::var_os("PHOTOCRAFT_CPU_COMPOSE").is_some() {
-            return Err(photocraft_gpu::Unsupported("disabled by PHOTOCRAFT_CPU_COMPOSE".into()));
-        }
-        if let Some(f) = self.fault() {
-            return Err(photocraft_gpu::Unsupported(f.to_string()));
-        }
-        let mut renderer = self.rs.renderer.write();
-        let Some(res) = renderer.callback_resources.canvas_mut(self.id) else { return Err(photocraft_gpu::Unsupported("no GPU canvas".into())) };
+    /// The compositor of `res`, made on first use (WebGL: warmed up first) and set up for the
+    /// next render (health, budgets, focus, the lower-stack cache fill, a Move drag's translated
+    /// layers). The caller puts it back in `res.compositor`.
+    fn take_compositor(&self, res: &mut Resources, fill_prefix: bool) -> Result<photocraft_gpu::Compositor, photocraft_gpu::Unsupported> {
+        let device = &self.rs.device;
         // A driver that couldn't build the pipelines once won't later: stay on the CPU compositor.
         if let Some(e) = &res.compositor_failed {
             return Err(e.clone());
@@ -739,6 +743,35 @@ impl GpuCanvas {
         comp.set_focus(res.compositor_focus);
         comp.set_fill_prefix(fill_prefix);
         comp.set_translated(res.compositor_translated.clone());
+        Ok(comp)
+    }
+
+    /// [`GpuCanvas::composite_lod`]; `fill_prefix` off for the catch-up and refinement, which
+    /// draw a region once ([`photocraft_gpu::Compositor::set_fill_prefix`]).
+    fn composite_lod_with(
+        &self,
+        doc: &photocraft_doc::Document,
+        region: photocraft_geom::Rect,
+        encode_srgb: bool,
+        level: u32,
+        partial: bool,
+        fill_prefix: bool,
+    ) -> Result<photocraft_gpu::Stats, photocraft_gpu::Unsupported> {
+        let _s = crate::perf_span::span("gpu.composite");
+        let (device, queue) = (&self.rs.device, &self.rs.queue);
+        let size = [doc.size.width, doc.size.height];
+        if size[0] == 0 || size[1] == 0 {
+            return Err(photocraft_gpu::Unsupported("empty document".into()));
+        }
+        if std::env::var_os("PHOTOCRAFT_CPU_COMPOSE").is_some() {
+            return Err(photocraft_gpu::Unsupported("disabled by PHOTOCRAFT_CPU_COMPOSE".into()));
+        }
+        if let Some(f) = self.fault() {
+            return Err(photocraft_gpu::Unsupported(f.to_string()));
+        }
+        let mut renderer = self.rs.renderer.write();
+        let Some(res) = renderer.callback_resources.canvas_mut(self.id) else { return Err(photocraft_gpu::Unsupported("no GPU canvas".into())) };
+        let mut comp = self.take_compositor(res, fill_prefix)?;
         let key = doc.id.0;
         let format = self.format_for(doc.depth, size);
         let fresh = res.docs.get(&key).is_none_or(|d| d.size != size || d.format != format);
@@ -928,6 +961,19 @@ impl GpuCanvas {
             // A split refresh draws each piece once, as the catch-up does: no whole-chunk fill
             // of the lower-stack cache (it would read, and upload, far more than the piece).
             let whole = parts.len() <= 1;
+            // A Move drag frame: what the view shows, with the layers above the moving ones laid
+            // over from maps made once for the drag (`above`); the margin around the view waits
+            // for it (it shows nothing yet). Else (or when it can't) composited whole.
+            let view = now.intersect(&n.visible);
+            let split = if blank.is_empty() && !view.is_empty() { self.composite_above(doc, view, encode_srgb, level) } else { None };
+            let parts = match split {
+                Some(st) => {
+                    r = Ok(st);
+                    later.extend(subtract(now, view));
+                    Vec::new()
+                }
+                None => parts,
+            };
             for (i, p) in parts.into_iter().enumerate() {
                 if i > 0 && now_ms() - t0 >= frame_work_ms() && covered(p, &blank) {
                     later.push(p);
@@ -2555,6 +2601,15 @@ struct Resources {
     /// Documents the view has shown (`GpuCanvas::note_shown`): a set made for one again is never
     /// left with blank parts ([`Stale::blank`]).
     shown: std::collections::HashSet<u64>,
+    /// The layers a Move drag moves ([`GpuCanvas::set_moving`]; empty without one).
+    moving: HashMap<u64, Vec<photocraft_doc::LayerId>>,
+    /// The layers above them, cached for the drag (`above`), counted in the canvas budget.
+    above: Option<above::AboveMaps>,
+    /// Whether the Background (id, surface fingerprint) is opaque everywhere (`above`).
+    opaque_bg: Option<(photocraft_doc::LayerId, u64, bool)>,
+    apply_bgl: wgpu::BindGroupLayout,
+    apply_pipeline: wgpu::RenderPipeline,
+    apply_pipeline_high: Option<wgpu::RenderPipeline>,
     /// Passes of the last plan the compositor ran (sizes refinement pieces).
     last_passes: usize,
     encode_bgl: wgpu::BindGroupLayout,
@@ -2580,6 +2635,9 @@ impl Resources {
         }
         self.docs.retain(|k, _| !keys.contains(k));
         self.view_sets.retain(|v| !keys.contains(&v.key));
+        if self.above.as_ref().is_some_and(|m| keys.contains(&m.doc())) {
+            self.above = None;
+        }
     }
 }
 
@@ -2825,6 +2883,18 @@ impl Resources {
         });
         let encode_pipeline = pipeline(device, "pc_encode", &encode_layout, &encode_module, ("vs", "fs"), FORMAT, None);
         let encode_pipeline_high = high.then(|| pipeline(device, "pc_encode_16f", &encode_layout, &encode_module, ("vs", "fs"), FORMAT_HIGH, None));
+        // A Move drag's cached layers above laid over its frame (`above`).
+        let apply_module =
+            device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("pc_above_apply"), source: wgpu::ShaderSource::Wgsl(above::APPLY_WGSL.into()) });
+        let unfilterable_at = |binding: u32| wgpu::BindGroupLayoutEntry { binding, ..unfilterable };
+        let apply_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pc_above_apply"),
+            entries: &[unfilterable_at(0), unfilterable_at(1), unfilterable_at(2), uniform_entry(3, 16, wgpu::ShaderStages::FRAGMENT)],
+        });
+        let apply_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("pc_above_apply"), bind_group_layouts: &[Some(&apply_bgl)], immediate_size: 0 });
+        let apply_pipeline = pipeline(device, "pc_above_apply", &apply_layout, &apply_module, ("vs", "fs"), FORMAT, None);
+        let apply_pipeline_high = high.then(|| pipeline(device, "pc_above_apply_16f", &apply_layout, &apply_module, ("vs", "fs"), FORMAT_HIGH, None));
         let identity_lut = lut_bind_group(device, queue, &lut_bgl, 2, &identity_lut_bytes());
         Self {
             lut_bgl,
@@ -2859,10 +2929,21 @@ impl Resources {
             canvas_budget: canvas_budget_override().unwrap_or_else(|| canvas_budget(physical_memory())),
             reduced_at: f64::NEG_INFINITY,
             shown: Default::default(),
+            moving: HashMap::new(),
+            above: None,
+            opaque_bg: None,
+            apply_bgl,
+            apply_pipeline,
+            apply_pipeline_high,
             last_passes: 1,
             encode_bgl,
             encode_pipeline,
         }
+    }
+
+    /// The pipeline laying a Move drag's cached layers above into a `format` tile (`above`).
+    fn apply_pipeline(&self, format: wgpu::TextureFormat) -> Option<&wgpu::RenderPipeline> {
+        if format == FORMAT_HIGH { self.apply_pipeline_high.as_ref() } else { Some(&self.apply_pipeline) }
     }
 
     /// The pipeline encoding compositor output into a `format` tile.
@@ -2897,13 +2978,22 @@ fn init_buffer(device: &wgpu::Device, label: &str, contents: &[u8], usage: wgpu:
 impl Resources {
     /// GPU bytes of the documents' display texture sets.
     fn canvas_bytes(&self) -> u64 {
-        self.docs.values().map(DocTextures::bytes).fold(0, u64::saturating_add).saturating_add(self.view_set_bytes())
+        self.docs
+            .values()
+            .map(DocTextures::bytes)
+            .fold(0, u64::saturating_add)
+            .saturating_add(self.view_set_bytes())
+            .saturating_add(self.above.as_ref().map_or(0, above::AboveMaps::bytes))
     }
 
     /// Drops the display texture sets of other documents, largest first, until a new set of
     /// `bytes` fits [`canvas_budget`] beside the rest (each is made again when its tab shows).
     fn make_room(&mut self, bytes: u64) {
-        // Kept view sets go first.
+        // A Move drag's cached layers above go first (the drag composites them whole without),
+        // then kept view sets.
+        if self.canvas_bytes().saturating_add(bytes) > self.canvas_budget {
+            self.above = None;
+        }
         while self.canvas_bytes().saturating_add(bytes) > self.canvas_budget && self.drop_oldest_view_set() > 0 {}
         while self.canvas_bytes().saturating_add(bytes) > self.canvas_budget {
             let Some(k) = self.docs.iter().max_by_key(|(_, d)| d.bytes()).map(|(k, _)| *k) else { return };
@@ -2914,6 +3004,9 @@ impl Resources {
     /// The same for `bytes` of viewport pages of `key`, which keep their place: only the other
     /// documents' textures give way.
     fn make_room_beside(&mut self, key: u64, bytes: u64) {
+        if self.canvas_bytes().saturating_add(bytes) > self.canvas_budget {
+            self.above = None;
+        }
         while !self.view_sets.is_empty() && self.canvas_bytes().saturating_add(bytes) > self.canvas_budget {
             self.drop_oldest_view_set();
         }

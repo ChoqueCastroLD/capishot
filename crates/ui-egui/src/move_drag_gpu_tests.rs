@@ -1,10 +1,12 @@
-//! A Move drag of a big Smart Object on a credits page (the owner's "creditos villana embarazada"
-//! report, 0.13.28): every frame of the drag must show the whole canvas at the drag's current
-//! offset, never parts of it at older offsets (vertical bands where the slow-GPU frame budget left
-//! pieces of the refresh for frames that never came while the pointer kept moving), and stay
-//! cheap. Drives the real app offscreen with real pointer events, compares every presented frame
-//! with the CPU composite of the document moved to that frame's offset, and prints the per-frame
-//! cost. Skips without a GPU adapter.
+//! Move drags: a big Smart Object on a credits page (the owner's "creditos villana embarazada"
+//! report, 0.13.28), and a layer at the bottom of a 16-layer stack. Every frame of a drag must show
+//! the whole canvas at the drag's offset as of that frame's pointer event (not the one before),
+//! never parts of it at older offsets (vertical bands where the slow-GPU frame budget left pieces
+//! of the refresh for frames that never came while the pointer kept moving), and stay cheap: the
+//! moving layer drawn in place, the layers above it from maps made once for the drag
+//! (`gpu_canvas::above`). Drives the real app offscreen with real pointer events, compares every
+//! presented frame with the CPU composite of the document moved to that frame's offset, and prints
+//! the per-frame cost. Skips without a GPU adapter.
 
 use egui::{Modifiers, PointerButton};
 use photocraft_doc::LayerId;
@@ -30,6 +32,20 @@ enum Device {
     LowMemoryGpu,
     /// The CPU canvas (no GPU canvas: software or blocklisted drivers).
     Cpu,
+}
+
+/// What is dragged.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Page {
+    /// The big Smart Object on top of the credits page.
+    Credits,
+    /// A layer at the bottom of a 16-layer stack (just above the Background), the layers above
+    /// cached for the drag.
+    Bottom,
+    /// The same with an Overlay layer above (not affine: composited whole every frame).
+    BottomOverlay,
+    /// [`Page::Bottom`] with the cache of the layers above turned off (the measure to compare).
+    BottomUncached,
 }
 
 fn harness(device: Device) -> Option<Harness> {
@@ -59,7 +75,9 @@ fn harness(device: Device) -> Option<Harness> {
 fn credits_page(app: &mut PhotocraftApp) -> LayerId {
     app.run("file.new", json!({"width": W, "height": H, "background": "white", "name": "creditos"})).expect("a document");
     app.run("layer.new.layer", json!({"name": "Layer 2"})).expect("a layer");
-    app.run("edit.fill", json!({"color": "#d8c8e8", "rect": [0, 700, 1920, 1080]})).ok();
+    app.run("select.rect", json!({"x": 0, "y": 700, "width": 1920, "height": 380})).expect("select");
+    app.run("edit.fill", json!({"color": "#d8c8e8"})).expect("fill");
+    app.run("select.deselect", json!({})).expect("deselect");
     for i in 0..6 {
         let x = 80 + i * 300;
         app.run("shape.create", json!({"rect": [x, 760, x + 220, 1000], "fill": "#6a7fb8"})).expect("a rectangle");
@@ -69,15 +87,78 @@ fn credits_page(app: &mut PhotocraftApp) -> LayerId {
         app.run("layer.layerStyle.stroke", json!({"layer": l, "size": 6, "position": "outside", "color": "#ffffff"})).expect("stroke");
     }
     app.run("layer.new.layer", json!({"name": "mirai project icon"})).expect("a layer");
-    app.run("edit.fill", json!({"color": "#3070c0", "rect": [1650, 60, 1850, 260]})).ok();
+    app.run("select.rect", json!({"x": 1650, "y": 60, "width": 200, "height": 200})).expect("select");
+    app.run("edit.fill", json!({"color": "#3070c0"})).expect("fill");
+    app.run("select.deselect", json!({})).expect("deselect");
     app.run("layer.smartObjects.convertToSmartObject", json!({})).expect("a smart object");
-    app.run("layer.new.layer", json!({"name": "Gemini_Generated_Image"})).expect("a layer");
+    stripes_layer(app, "Gemini_Generated_Image");
+    app.run("layer.smartObjects.convertToSmartObject", json!({})).expect("a smart object");
+    app.run("edit.transform", json!({"scaleX": 104, "scaleY": 123})).expect("scaled past the canvas");
+    let big = app.session.active().expect("doc").active_layer.expect("the big Smart Object");
+    // An empty group on top, as on the page (Auto-Select picks the big Smart Object under it).
+    app.run("layer.new.group", json!({"name": "Group 1"})).ok();
+    app.run("layer.select", json!({"layer": big.0})).expect("select");
+    let st = app.session.active().expect("doc");
+    assert!(matches!(st.doc.layer(big).map(|l| &l.content), Some(photocraft_doc::LayerContent::Smart(_))), "a Smart Object");
+    let b = st.doc.layer(big).and_then(|l| l.surface()).map(|s| s.content_bounds()).expect("pixels");
+    eprintln!("the big Smart Object's pixels: {b:?}");
+    big
+}
+
+/// A page of 16 layers with the dragged one at the bottom: the Background, the dragged stripes,
+/// then five type layers with a Stroke, four rectangles, a Multiply and a Screen layer, a group
+/// with a half-transparent layer in it, and a layer with a drop shadow. With `overlay`, the
+/// Screen layer blends in Overlay instead. Returns the dragged layer's id.
+fn bottom_page(app: &mut PhotocraftApp, overlay: bool) -> LayerId {
+    app.run("file.new", json!({"width": W, "height": H, "background": "white", "name": "pila"})).expect("a document");
+    let moving = stripes_layer(app, "photo");
+    for (i, text) in ["typer: naxu", "facebook.com/shiliellano", "capitulo x", "gracias por leer", "creditos"].iter().enumerate() {
+        let l = (app.run("type.create", json!({"x": 120 + i as u32 * 40, "y": 140 + i as u32 * 120, "text": text, "size": 64, "color": "#202020"})).expect("type"))["layer"]
+            .as_u64()
+            .expect("a type layer");
+        app.run("layer.layerStyle.stroke", json!({"layer": l, "size": 6, "position": "outside", "color": "#ffffff"})).expect("stroke");
+    }
+    for i in 0..4 {
+        let x = 80 + i * 450;
+        app.run("shape.create", json!({"rect": [x, 760, x + 220, 1000], "fill": "#6a7fb8"})).expect("a rectangle");
+    }
+    let tint = |app: &mut PhotocraftApp, name: &str, color: &str, rect: [i32; 4], blend: photocraft_color::BlendMode, opacity: f32| {
+        let id = LayerId(app.run("layer.new.layer", json!({"name": name})).expect("a layer")["layer"].as_u64().expect("id"));
+        app.run("select.rect", json!({"x": rect[0], "y": rect[1], "width": rect[2] - rect[0], "height": rect[3] - rect[1]})).expect("select");
+        app.run("edit.fill", json!({"color": color})).expect("fill");
+        app.run("select.deselect", json!({})).expect("deselect");
+        app.session
+            .edit("blend", |doc, _| {
+                let l = doc.layer_mut(id).expect("layer");
+                l.blend = blend;
+                l.opacity = opacity;
+                Ok(())
+            })
+            .expect("blend");
+        id
+    };
+    tint(app, "multiply", "#e0a040", [300, 0, 1300, 700], photocraft_color::BlendMode::Multiply, 0.7);
+    let light = if overlay { photocraft_color::BlendMode::Overlay } else { photocraft_color::BlendMode::Screen };
+    tint(app, "light", "#3050c0", [900, 300, 1900, 1080], light, 0.6);
+    let inner = tint(app, "veil", "#ffffff", [0, 500, 1920, 650], photocraft_color::BlendMode::Normal, 0.5);
+    app.run("layer.select", json!({"layer": inner.0})).expect("select");
+    app.run("layer.groupLayers", json!({"name": "Group 1"})).expect("group");
+    let shadow = tint(app, "badge", "#c03030", [1500, 80, 1800, 300], photocraft_color::BlendMode::Normal, 1.0);
+    app.run("layer.layerStyle.dropShadow", json!({"layer": shadow.0})).ok();
+    let n = app.session.active().expect("doc").doc.walk().len();
+    assert_eq!(n, 16, "16 layers");
+    moving
+}
+
+/// A new layer of uneven colour stripes over the whole canvas, a transparent gap beside each (the
+/// layers below show through). Returns its id.
+fn stripes_layer(app: &mut PhotocraftApp, name: &str) -> LayerId {
+    app.run("layer.new.layer", json!({"name": name})).expect("a layer");
     app.session
         .edit("stripes", |doc, active| {
             let l = doc.layer_mut(active.expect("active")).expect("layer").surface_mut().expect("raster");
             let fmt = l.format();
-            // Stripes of uneven widths (no period a drag offset could line up with) with a
-            // transparent gap beside each: the layers below show through.
+            // No period a drag offset could line up with.
             let (mut x, mut i) = (0, 0);
             while x < W as i32 {
                 let t = i as f32 * 0.37;
@@ -90,17 +171,7 @@ fn credits_page(app: &mut PhotocraftApp) -> LayerId {
             Ok(())
         })
         .expect("stripes");
-    app.run("layer.smartObjects.convertToSmartObject", json!({})).expect("a smart object");
-    app.run("edit.transform", json!({"scaleX": 104, "scaleY": 123})).expect("scaled past the canvas");
-    let big = app.session.active().expect("doc").active_layer.expect("the big Smart Object");
-    // An empty group on top, as on the page (Auto-Select picks the big Smart Object under it).
-    app.run("layer.new.group", json!({"name": "Group 1"})).ok();
-    app.run("layer.select", json!({"layer": big.0})).expect("select");
-    let st = app.session.active().expect("doc");
-    assert!(matches!(st.doc.layer(big).map(|l| &l.content), Some(photocraft_doc::LayerContent::Smart(_))), "a Smart Object");
-    let b = st.doc.layer(big).and_then(|l| l.surface()).map(|s| s.content_bounds()).expect("pixels");
-    eprintln!("the big Smart Object's pixels: {b:?}");
-    big
+    app.session.active().expect("doc").active_layer.expect("the stripes")
 }
 
 fn screen(h: &Harness, x: f32, y: f32) -> egui::Pos2 {
@@ -154,12 +225,14 @@ struct Frames {
     step_ms: Vec<f64>,
     /// Drag frames drawn from a moved copy rather than in place.
     copied: usize,
+    /// Drag frames with the layers above cached (`gpu_canvas::above`).
+    cached: usize,
     worst: f64,
     worst_older: f64,
 }
 
-/// Drag the big Smart Object across the page over `frames` frames and check every presented frame.
-fn drag(device: Device, frames: i32) -> Option<Frames> {
+/// Drag `page`'s layer across it over `frames` frames and check every presented frame.
+fn drag(device: Device, page: Page, frames: i32) -> Option<Frames> {
     let _gpu = photocraft_testkit::gpu_lock();
     if device == Device::LowMemoryGpu {
         crate::gpu_canvas::set_physical_memory(4 << 30);
@@ -168,7 +241,12 @@ fn drag(device: Device, frames: i32) -> Option<Frames> {
         eprintln!("skipping: no GPU adapter");
         return None;
     };
-    let big = credits_page(h.state_mut());
+    let big = match page {
+        Page::Credits => credits_page(h.state_mut()),
+        Page::Bottom | Page::BottomUncached => bottom_page(h.state_mut(), false),
+        Page::BottomOverlay => bottom_page(h.state_mut(), true),
+    };
+    crate::gpu_canvas::set_above_cache(page != Page::BottomUncached);
     {
         let app = h.state_mut();
         app.sync_views();
@@ -227,7 +305,7 @@ fn drag(device: Device, frames: i32) -> Option<Frames> {
     h.step();
     h.event(egui::Event::PointerButton { pos: p0, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
     h.step();
-    let mut out = Frames { step_ms: Vec::new(), copied: 0, worst: 0.0, worst_older: 1.0 };
+    let mut out = Frames { step_ms: Vec::new(), copied: 0, cached: 0, worst: 0.0, worst_older: 1.0 };
     let mut last = (0, 0);
     for i in 1..=frames {
         let (dx, dy) = (-(i * 23), -(i * 9));
@@ -235,28 +313,33 @@ fn drag(device: Device, frames: i32) -> Option<Frames> {
         // Pointer positions are document positions here (100%, no snapping).
         let p = egui::pos2(p.x.round() + (p0.x - p0.x.round()), p.y.round() + (p0.y - p0.y.round()));
         h.event(egui::Event::PointerMoved(p));
-        // The canvas paints before it takes the frame's pointer events (as every egui widget),
-        // so the frame with a move shows the offset before it and the next one this offset:
-        // both must show the whole page at exactly that one offset.
-        for (k, shows) in [(0, last), (1, (dx, dy))] {
+        // The frame that takes the pointer event shows the layer there (the canvas paints after
+        // the Move tool's events), and so does the next one, with no event.
+        for k in 0..2 {
             let t = std::time::Instant::now();
             h.step();
-            out.step_ms.push(t.elapsed().as_secs_f64() * 1000.0);
+            if k == 0 {
+                out.step_ms.push(t.elapsed().as_secs_f64() * 1000.0);
+                if !crate::move_ui::drawn_in_place(h.state(), 0) {
+                    out.copied += 1;
+                }
+                if h.state().gpu.as_ref().is_some_and(|g| g.above_bytes() > 0) {
+                    out.cached += 1;
+                }
+            }
             let img = render(&mut h);
-            let now = mismatch(&h, &img, &expected(&before, big, shows.0, shows.1), p);
+            let now = mismatch(&h, &img, &expected(&before, big, dx, dy), p);
             eprintln!(
-                "{device:?} move {i}.{k} at {shows:?}: {:.1} ms, {:.2}% off ({} {} px)",
+                "{device:?} {page:?} move {i}.{k} at ({dx}, {dy}): {:.1} ms, {:.2}% off ({} {} px)",
                 out.step_ms.last().copied().unwrap_or(0.0),
                 now * 100.0,
                 h.state().perf.last_refresh,
                 h.state().perf.last_refresh_px
             );
-            if k == 1 && !crate::move_ui::drawn_in_place(h.state(), 0) {
-                out.copied += 1;
-            }
             out.worst = out.worst.max(now);
-            if k == 1 {
-                out.worst_older = out.worst_older.min(mismatch(&h, &img, &expected(&before, big, last.0, last.1), p));
+            if k == 0 {
+                let older = mismatch(&h, &img, &expected(&before, big, last.0, last.1), p);
+                out.worst_older = out.worst_older.min(older);
             }
         }
         last = (dx, dy);
@@ -264,18 +347,23 @@ fn drag(device: Device, frames: i32) -> Option<Frames> {
     h.event(egui::Event::PointerButton { pos: screen(&h, start[0] + last.0 as f32, start[1] + last.1 as f32), button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
     h.run_steps(4);
     crate::gpu_canvas::set_frame_work_ms(None);
+    crate::gpu_canvas::set_above_cache(true);
+    if let Some(g) = h.state().gpu.as_ref() {
+        assert_eq!(g.above_bytes(), 0, "{device:?} {page:?}: the drag's cached layers above go with it");
+    }
     let after = h.state().session.active().expect("doc").doc.clone();
     let moved = after.layer(big).and_then(|l| l.surface()).map(|s| s.content_bounds());
     let was = before.layer(big).and_then(|l| l.surface()).map(|s| s.content_bounds());
-    assert_eq!(moved, was.map(|r| r.translate(last.0, last.1)), "{device:?}: the release moved the layer by the last offset");
-    // The frames that draw a new offset (every other one: see above), the first one aside.
-    let mut sorted: Vec<f64> = out.step_ms.iter().skip(1).step_by(2).skip(1).copied().collect();
+    assert_eq!(moved, was.map(|r| r.translate(last.0, last.1)), "{device:?} {page:?}: the release moved the layer by the last offset");
+    // The drag frames, the first one aside.
+    let mut sorted: Vec<f64> = out.step_ms.iter().skip(1).copied().collect();
     sorted.sort_by(f64::total_cmp);
     eprintln!(
-        "{device:?}: {} drag frames ({} from a moved copy), first {:.1} ms, then median {:.1} ms, max {:.1} ms; worst frame {:.2}% off its offset",
+        "{device:?} {page:?}: {} drag frames ({} from a moved copy, {} with the layers above cached), first {:.1} ms, then median {:.1} ms, max {:.1} ms; worst frame {:.2}% off its offset",
         out.step_ms.len(),
         out.copied,
-        out.step_ms.get(1).copied().unwrap_or(0.0),
+        out.cached,
+        out.step_ms.first().copied().unwrap_or(0.0),
         sorted[sorted.len() / 2],
         sorted.last().copied().unwrap_or(0.0),
         out.worst * 100.0
@@ -283,33 +371,74 @@ fn drag(device: Device, frames: i32) -> Option<Frames> {
     Some(out)
 }
 
-fn check(device: Device) {
-    let Some(f) = drag(device, 10) else { return };
+fn check(device: Device, page: Page) {
+    let Some(f) = drag(device, page, 10) else { return };
     if device != Device::Cpu {
-        // The Smart Object is drawn from its resident pages at the offset: no moved copy of its
+        // The moving layer is drawn from its resident pages at the offset: no moved copy of its
         // pixels (nor anything rendered again) per frame.
-        assert_eq!(f.copied, 0, "{device:?}: drag frames drawn from a moved copy");
+        assert_eq!(f.copied, 0, "{device:?} {page:?}: drag frames drawn from a moved copy");
+        match page {
+            Page::Bottom => assert_eq!(f.cached, 10, "{device:?}: every drag frame lays the layers above from the maps"),
+            Page::BottomOverlay | Page::BottomUncached => assert_eq!(f.cached, 0, "{device:?} {page:?}: composited whole"),
+            Page::Credits => assert_eq!(f.cached, 0, "nothing above the Smart Object but an empty group"),
+        }
     }
-    assert!(f.worst < 0.01, "{device:?}: a drag frame showed {:.1}% of the page away from the drag's offset (parts drawn at older offsets)", f.worst * 100.0);
-    assert!(f.worst_older > 0.05, "{device:?}: the frames really moved the layer");
+    assert!(
+        f.worst < 0.01,
+        "{device:?} {page:?}: a drag frame showed {:.1}% of the page away from the drag's offset (parts at older offsets, or a frame behind the pointer)",
+        f.worst * 100.0
+    );
+    assert!(f.worst_older > 0.05, "{device:?} {page:?}: the frames really moved the layer");
 }
 
 #[test]
 fn a_big_smart_object_drag_shows_every_frame_at_its_offset() {
-    check(Device::Gpu);
+    check(Device::Gpu, Page::Credits);
 }
 
 #[test]
 fn a_big_smart_object_drag_on_a_slow_gpu_never_shows_older_offsets() {
-    check(Device::SlowGpu);
+    check(Device::SlowGpu, Page::Credits);
 }
 
 #[test]
 fn a_big_smart_object_drag_with_4_gb_of_memory_shows_every_frame_at_its_offset() {
-    check(Device::LowMemoryGpu);
+    check(Device::LowMemoryGpu, Page::Credits);
 }
 
 #[test]
 fn a_big_smart_object_drag_on_the_cpu_canvas_shows_every_frame_at_its_offset() {
-    check(Device::Cpu);
+    check(Device::Cpu, Page::Credits);
+}
+
+#[test]
+fn a_bottom_layer_drag_lays_the_15_layers_above_from_maps() {
+    check(Device::Gpu, Page::Bottom);
+}
+
+#[test]
+fn a_bottom_layer_drag_with_4_gb_of_memory_lays_the_layers_above_from_maps() {
+    check(Device::LowMemoryGpu, Page::Bottom);
+}
+
+#[test]
+fn a_bottom_layer_drag_on_a_slow_gpu_lays_the_layers_above_from_maps() {
+    check(Device::SlowGpu, Page::Bottom);
+}
+
+#[test]
+fn a_bottom_layer_drag_on_the_cpu_canvas_shows_every_frame_at_its_offset() {
+    check(Device::Cpu, Page::Bottom);
+}
+
+#[test]
+fn a_bottom_layer_drag_under_an_overlay_layer_composites_the_layers_above_whole() {
+    check(Device::Gpu, Page::BottomOverlay);
+}
+
+/// The same drag with the cache turned off: the measure to compare with (and the frames still
+/// right).
+#[test]
+fn a_bottom_layer_drag_without_the_cache_of_the_layers_above() {
+    check(Device::Gpu, Page::BottomUncached);
 }

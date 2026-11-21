@@ -345,7 +345,7 @@ Both backends consume the same plan. This is the only place that encodes Photosh
   - a residency cache keyed by `(TileId, generation)`,
   - cached group and effect results that are invalidated by generation,
   - one global `Budget` for GPU memory.
-- **Complete frames (the canvas).** A frame never shows part of what the view shows at an older state of the document than the rest. Only a document shown for the first time may fill from blank in pieces over several frames (`gpu_canvas::Stale::blank`); edits, Move drag frames, pans into regions an edit deferred and restored view sets are drawn whole in their frame (offscreen parts may wait until the view gets there). A Move drag draws the moving raster, type and Smart Object layers (and plain groups of them) from their resident pages at the offset (`photocraft_gpu::Translated`) over the lower-stack cache, so a frame copies, uploads and renders none of their pixels; the CPU canvas keeps the composites below and above the moving run (`ui-egui/src/move_cpu.rs`).
+- **Complete frames (the canvas).** A frame never shows part of what the view shows at an older state of the document than the rest. Only a document shown for the first time may fill from blank in pieces over several frames (`gpu_canvas::Stale::blank`); edits, Move drag frames, pans into regions an edit deferred and restored view sets are drawn whole in their frame (offscreen parts may wait until the view gets there). A Move drag draws the moving raster, type and Smart Object layers (and plain groups of them) from their resident pages at the offset (`photocraft_gpu::Translated`) over the lower-stack cache, so a frame copies, uploads and renders none of their pixels. The layers above the moving run are composited once per drag over opaque black and over opaque white at the view's resolution (`gpu_canvas/above.rs`, counted in the canvas budget) and laid over each frame as `k + (w - k)·c`, exact for layers that change an opaque backdrop affinely (Normal, Multiply, Screen, their effects, masks, clipping and groups) over an opaque Background; anything else composites the frame whole. The CPU canvas does the same per tile (`ui-egui/src/move_cpu.rs`). The Move tool's frames paint the canvas after the frame's pointer events, so they show the layers where the pointer is now.
 - **Parity tests.** For every blend mode, adjustment and effect, the CPU and GPU results must match within a tolerance of ≤1/255 for 8-bit output. This runs in CI on a software adapter (wgpu with lavapipe or WARP).
 
 ### 7.3 Color
@@ -589,7 +589,7 @@ Each phase ends with a demoable build and green CI on all targets. Phases 8–10
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-11-21 | minor | Backends: complete frames on the canvas (only a first fill may come in pieces) and Move drags drawn in place |
+| 2026-11-21 | minor | Backends: complete frames on the canvas (only a first fill may come in pieces), Move drags drawn in place with the layers above cached, Move frames painted after the pointer events |
 | 2026-10-21 | minor | Removed references to the deleted `rust-framework-options.md`; dropped the UI toolkit and plug-in items from Open decisions, both recorded as decided |
 | 2026-10-20 | minor | GPU display matrix/shaper path preserves near-black ICC values; complex transforms retain the 3D LUT fallback (#7958) |
 | 2026-10-14 | minor | Principle 5: every large payload in the document model is `Arc`-shared, so snapshots never copy one (#4535) |

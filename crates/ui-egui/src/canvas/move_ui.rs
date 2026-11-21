@@ -245,6 +245,16 @@ pub(crate) fn drawn_in_place(app: &PhotocraftApp, idx: usize) -> bool {
     app.move_preview.as_ref().is_some_and(|p| p.in_place && p.doc == st.doc.id && p.revision == st.revision && !p.offsets.is_empty())
 }
 
+/// The layers document `idx`'s Move drag moves while its preview shows them moved (the GPU canvas
+/// keeps the layers above them composited for the drag, `gpu_canvas::above`); empty otherwise.
+pub(crate) fn moving_ids(app: &PhotocraftApp, idx: usize) -> Vec<LayerId> {
+    let Some(st) = app.session.documents().get(idx) else { return Vec::new() };
+    match app.move_preview.as_ref() {
+        Some(p) if p.doc == st.doc.id && p.revision == st.revision && !p.floating && !p.offsets.is_empty() && p.shown.is_some() => p.ids.clone(),
+        _ => Vec::new(),
+    }
+}
+
 /// What the GPU canvas can draw of document `idx`'s Move preview from the layers' resident
 /// pages at the drag's offset (`photocraft_gpu::Translated`): the moving layers' pixels and
 /// linked masks as the document holds them, each with the copy the preview shows; or a floating
