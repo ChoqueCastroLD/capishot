@@ -157,6 +157,7 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Do
     // it is (no full-resolution copy of the moving layers per frame).
     let lazy = app.cpu_move_split.is_some_and(|(d, r, frame)| d == doc_id && r == revision && frame + 1 >= app.frame);
     if (p.in_place || lazy) && p.offsets.last() != Some(&offset) {
+        let t0 = crate::gpu_canvas::now_ms();
         // The document as it is: the GPU canvas moves the layers (`gpu_translations`), the CPU
         // canvas its split composites' (`move_cpu`).
         if lazy || p.shown.is_none() {
@@ -164,6 +165,9 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Do
         }
         p.offsets.push(offset);
         app.perf_counters.move_preview_reused += 1;
+        // Recorded on every path, so freezes and tests see the drag's preview step whichever
+        // way the canvas draws it.
+        app.perf.span("move preview", crate::gpu_canvas::now_ms() - t0);
     } else if p.offsets.last() != Some(&offset) {
         let t0 = crate::gpu_canvas::now_ms();
         // The last frame's preview, when nothing else holds it, is reused: only the moving layers
