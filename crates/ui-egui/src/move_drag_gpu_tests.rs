@@ -117,7 +117,7 @@ struct Frame {
 }
 
 fn render(h: &mut Harness) -> Frame {
-    let img = render(&mut h);
+    let img = h.render().expect("render");
     Frame { w: img.width(), h: img.height(), px: img.into_raw() }
 }
 
