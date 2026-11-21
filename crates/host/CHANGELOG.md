@@ -6,6 +6,17 @@ Every change to the stable API is listed here with the commit to pin. Breaking c
 may change in any commit; their changes are listed under **Experimental**. A change to the
 `[patch]` pins (README.md) is listed too: copy the blocks again when you move the pin.
 
+## API_VERSION 1, behaviour (no frame mixes states of a page)
+
+- No API change. The canvas never shows part of what the view shows at an older state of the
+  document than the rest: only a page shown for the first time fills from blank in pieces
+  (request 19); an edit, a Move drag frame, a pan into a region an edit left for later, a kept
+  view restored (`apply_view` after `prewarm_view`, request 17/18: what the prewarm had not
+  drawn yet is drawn in that frame) and a page shown again after its canvas was let go are drawn
+  whole in their frame.
+- A Move drag of a Smart Object, a type layer or a plain group draws it from its pixels already
+  on the GPU at the offset each frame (no copy per frame).
+
 ## API_VERSION 1, additions (opening big pages off the frame, Capikoma request 19)
 
 - `Host::start_open_rgba(width, height, rgba: Vec<u8>, opts)`: `open_rgba` as a job (tightly

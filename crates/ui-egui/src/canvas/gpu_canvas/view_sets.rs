@@ -256,6 +256,9 @@ impl GpuCanvas {
             if let Some(d) = res.docs.get_mut(&key) {
                 // The same document, maybe another `Arc` of it.
                 d.shows = Some((to.clone(), display));
+                // Nothing of a document on screen waits (`Stale::blank`): the parts a prewarm
+                // left undrawn go in the frame that shows it.
+                d.stale().blank.clear();
             }
             return ViewSwitch::Restored;
         }

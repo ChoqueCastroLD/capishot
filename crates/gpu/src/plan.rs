@@ -355,10 +355,19 @@ pub fn plan(doc: &Document) -> Result<Plan<'_>, Unsupported> {
     plan_moved(doc, None)
 }
 
-/// Whether a layer can be drawn moved from its unmoved pixels ([`plan_moved`]): a raster layer
-/// without layer effects or a vector mask (those are built from where the layer is).
+/// Whether a layer can be drawn moved from its unmoved pixels ([`plan_moved`]), without layer
+/// effects or a vector mask (those are built from where the layer is): a raster layer; a Smart
+/// Object or type layer from its rendered pixels (what a Move drag's moved copy shifts too: they
+/// are not rendered again until the release); a group without a mask or artboard (its children
+/// move, each checked on its own).
 pub fn movable_in_place(layer: &Layer) -> bool {
-    matches!(layer.content, LayerContent::Raster(_)) && !has_effects(layer) && layer.vector_mask.is_none()
+    let content = match &layer.content {
+        LayerContent::Raster(_) => true,
+        LayerContent::Smart(_) | LayerContent::Text(_) => layer.surface().is_some(),
+        LayerContent::Group(g) => g.artboard.is_none() && layer.mask.is_none(),
+        _ => false,
+    };
+    content && !has_effects(layer) && layer.vector_mask.is_none()
 }
 
 /// [`plan`] with the layers in `moved` drawn at their offsets: their bounds (and the bounds of

@@ -651,7 +651,10 @@ pub(super) fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, le
                     cache.on_gpu = true;
                     cache.texture = None;
                 }
-                // What the kept set left out of date is drawn on the next frames (`catch_up`).
+                // What the kept set left out of date where the view shows it is drawn in this
+                // frame (never a frame with parts of the view at the other view's state); the
+                // rest, and its full-size refinement, on the next frames.
+                draw_view_now(app, &gpu, &doc, display.as_deref(), need, ctx);
                 ctx.request_repaint();
                 return true;
             }
@@ -669,12 +672,12 @@ pub(super) fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, le
     }
     if !r.kind.starts_with("gpu") && crate::move_ui::drawn_in_place(app, idx) && crate::move_ui::in_place_failed(app) {
         // The CPU drew the document as it is, without the move: draw this frame (and the rest of
-        // the drag) from a moved copy instead.
-        ctx.request_repaint();
+        // the drag) from a moved copy instead, in full, now. Handing the frame to the CPU canvas
+        // showed its tiles as they were when it last drew (parts at older states).
         if let Some(cache) = app.canvases.get_mut(&(id, GPU_OUTPUT)) {
             cache.on_gpu = false;
         }
-        return false;
+        return ensure_gpu(app, idx, visible, level, sample_level, ctx);
     }
     if r.kind == "lost" || r.kind == crate::gpu_canvas::REFRESH_OVER_BUDGET {
         // The device is gone (`gpu_status` then drops the GPU canvas) or the canvas is over the
@@ -703,6 +706,22 @@ pub(super) fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, le
     cache.on_gpu = true;
     cache.texture = None;
     true
+}
+
+/// Draw in this frame what the view shows of `doc` that its display set left out of date
+/// (`GpuCanvas::catch_up`, no background refinement).
+fn draw_view_now(
+    app: &mut PhotocraftApp,
+    gpu: &crate::gpu_canvas::GpuCanvas,
+    doc: &photocraft_doc::Document,
+    display: Option<&photocraft_engine::display_color::CanvasDisplay>,
+    need: crate::gpu_canvas::ViewNeed,
+    ctx: &egui::Context,
+) {
+    let c = gpu.catch_up(doc.id.0, doc, display, need, false, ctx);
+    if c.px > 0 {
+        app.perf.record("gpu-catch-up", c.px, c.composite_ms, 0.0);
+    }
 }
 
 /// Point the wgpu compositor at what the view shows, and size its memory budget from GPU Memory,

@@ -765,6 +765,10 @@ impl GpuCanvas {
                 res.compositor = Some(comp);
                 return Err(photocraft_gpu::Unsupported(OVER_CANVAS_BUDGET.into()));
             };
+            if res.shown.contains(&key) {
+                // Shown before (its set let go to make room): drawn whole, nothing waits.
+                tex.stale().blank.clear();
+            }
             res.docs.insert(key, tex);
         }
         let (Some(pipe), Some(d)) = (res.encode_pipeline(format), res.docs.get(&key)) else {
@@ -909,18 +913,23 @@ impl GpuCanvas {
             let now = region.intersect(&near);
             let later = subtract(region, near);
             let level = if area(now) >= LOD_MIN_PX { n.level } else { 0 };
-            // A big refresh (a document just opened, a change to the whole canvas) goes in pieces,
-            // the view's centre first, for as long as the frame's work allows; the rest is
-            // deferred and `catch_up` continues it on the next frames. One frame used to composite
-            // (and upload every layer of) a whole 16-50 MP page: seconds on a phone.
+            // A document's first frames (a new, blank set) go in pieces, the view's centre first,
+            // for as long as the frame's work allows; the rest is deferred and `catch_up`
+            // continues it on the next frames. One frame used to composite (and upload every
+            // layer of) a whole 16-50 MP page: seconds on a phone. Only blank parts wait
+            // (`Stale::blank`): everything else the view shows is drawn in this frame, so no
+            // frame shows part of it at an older state. A Move drag on a slow GPU drew one piece
+            // per frame and left the others at older offsets for the whole drag (vertical bands,
+            // 0.13.28). Without blank parts it is one composite, the lower-stack cache filled.
+            let blank = self.blank_now(key, bounds);
             let mut later = later;
             let mut r: Result<photocraft_gpu::Stats, photocraft_gpu::Unsupported> = Ok(photocraft_gpu::Stats { level, ..Default::default() });
-            let parts = pieces(now, n.visible);
+            let parts = if blank.is_empty() { vec![now].into_iter().filter(|p| !p.is_empty()).collect() } else { pieces(now, n.visible) };
             // A split refresh draws each piece once, as the catch-up does: no whole-chunk fill
             // of the lower-stack cache (it would read, and upload, far more than the piece).
             let whole = parts.len() <= 1;
             for (i, p) in parts.into_iter().enumerate() {
-                if i > 0 && now_ms() - t0 >= frame_work_ms() {
+                if i > 0 && now_ms() - t0 >= frame_work_ms() && covered(p, &blank) {
                     later.push(p);
                     continue;
                 }
@@ -947,6 +956,7 @@ impl GpuCanvas {
                     }
                     res.last_passes = stats.passes;
                 });
+                self.note_shown(key, n.visible);
             }
             r
         } else {
@@ -1031,9 +1041,10 @@ impl GpuCanvas {
             let device = &self.rs.device;
             let mut renderer = self.rs.renderer.write();
             let res = renderer.callback_resources.canvas_mut(self.id)?;
-            // Only a document with no set yet (first shown, or evicted): a full refresh of one on
-            // screen keeps drawing in full, never a frame with parts of it missing.
-            if res.docs.get(&key).is_some_and(|d| d.size == size && d.format == format) {
+            // Only a document with no set yet that was never shown: a full refresh of one on
+            // screen, or of one shown before whose set was let go, draws in full, never a frame
+            // with parts of it missing.
+            if res.docs.get(&key).is_some_and(|d| d.size == size && d.format == format) || res.shown.contains(&key) {
                 return None;
             }
             // A new set: everything in it is deferred (`DocTextures::new`).
@@ -1055,6 +1066,7 @@ impl GpuCanvas {
             }
             px += area(piece);
         }
+        self.note_shown(key, visible);
         Some(px)
     }
 
@@ -1107,25 +1119,39 @@ impl GpuCanvas {
             self.wake_when_done(ctx);
             return out;
         }
-        // What the view needs, in pieces within the frame's work (a big deferred refresh comes
-        // back here frame after frame until it's done).
+        // What the view needs. Blank parts of a document's first frames (`Stale::blank`) in
+        // pieces within the frame's work, the big first refresh coming back here frame after
+        // frame until it's done; everything else in this frame, so the view never shows part of
+        // it at an older state (a pan into a region an edit deferred, a kept view set restored).
+        let blank = self.blank_now(key, bounds);
         let mut more = false;
-        'urgent: for r in urgent {
+        for r in urgent {
             let level = if area(r) >= LOD_MIN_PX { need.level } else { 0 };
-            for p in pieces(r, need.visible) {
-                if out.px > 0 && now_ms() - t0 >= frame_work_ms() {
+            let parts = if blank.is_empty() { vec![r] } else { pieces(r, need.visible) };
+            'parts: for p in parts {
+                if out.px > 0 && now_ms() - t0 >= frame_work_ms() && covered(p, &blank) {
                     more = true;
-                    break 'urgent;
+                    continue;
                 }
                 match self.composite_lod_with(doc, p, encode_srgb, level, true, false) {
                     Ok(st) => out.px += st.pixels.max(1),
                     // The CPU compositor draws the piece (the GPU one isn't ready or can't), in
-                    // rows of at most CPU_PIECE_PX; the rest comes back on the next frame.
+                    // rows of at most CPU_PIECE_PX; blank rows left come back on the next frame,
+                    // any other row goes now.
                     Err(_) if self.cpu_piece(key, doc, cpu_rows(p), display) => {
                         out.px += area(cpu_rows(p)).max(1);
-                        if cpu_rows(p) != p {
-                            more = true;
-                            break 'urgent;
+                        let mut rest = p;
+                        while cpu_rows(rest) != rest {
+                            rest = photocraft_geom::Rect::new(rest.x0, cpu_rows(rest).y1, rest.x1, rest.y1);
+                            if covered(rest, &blank) {
+                                more = true;
+                                continue 'parts;
+                            }
+                            if !self.cpu_piece(key, doc, cpu_rows(rest), display) {
+                                self.forget_doc(key);
+                                return out;
+                            }
+                            out.px += area(cpu_rows(rest)).max(1);
                         }
                     }
                     Err(_) => {
@@ -1141,6 +1167,7 @@ impl GpuCanvas {
             out.again_ms = Some(0.0);
             return out;
         }
+        self.note_shown(key, need.visible);
         let wait = REFINE_DELAY_MS - (now_ms() - reduced_at);
         // One refinement piece on the GPU at a time, sized from how long the last one took
         // there (submit to completion): the frames stay short on a slow GPU, pieces grow on a
@@ -1240,6 +1267,35 @@ impl GpuCanvas {
         self.with_doc(key, |_, d| !d.stale().is_empty()).unwrap_or(false)
     }
 
+    /// Document `key`'s blank parts ([`Stale::blank`]) as a refresh starts: what of it may wait
+    /// for a later frame. Taken once per refresh, so the pieces drawn during it (all at the
+    /// document's current state) don't stop their neighbours from waiting. Without a set: all of
+    /// `bounds` for a document never shown (the refresh makes a blank one), nothing for one
+    /// shown before.
+    fn blank_now(&self, key: u64, bounds: photocraft_geom::Rect) -> Vec<photocraft_geom::Rect> {
+        let mut r = self.rs.renderer.write();
+        let Some(res) = r.callback_resources.canvas_mut(self.id) else { return Vec::new() };
+        match res.docs.get(&key) {
+            Some(d) => d.stale().blank.clone(),
+            None if res.shown.contains(&key) => Vec::new(),
+            None => vec![bounds],
+        }
+    }
+
+    /// The view showing `visible` drew from document `key`'s set this frame. Once nothing it shows
+    /// is blank, the document has been shown: from then on nothing of it waits (its blank parts
+    /// elsewhere are drawn whole when the view gets there, and a set made for it again after it
+    /// was let go is drawn whole too).
+    fn note_shown(&self, key: u64, visible: photocraft_geom::Rect) {
+        self.with_doc(key, |res, d| {
+            let mut st = d.stale();
+            if !st.blank_in(visible) {
+                st.blank.clear();
+                res.shown.insert(key);
+            }
+        });
+    }
+
     fn with_doc<T>(&self, key: u64, f: impl FnOnce(&mut Resources, &DocTextures) -> T) -> Option<T> {
         let mut r = self.rs.renderer.write();
         let res: &mut Resources = r.callback_resources.canvas_mut(self.id)?;
@@ -1327,6 +1383,7 @@ impl GpuCanvas {
         // LUTs and identity-transform signatures can outlive document textures. Prune both,
         // or a preserved-ID reopen can skip rebuilding a missing LUT.
         res.luts.retain(|k, _| live.contains(&k.0));
+        res.shown.retain(|k| live.contains(k));
         res.display_lut_signatures.retain(|k, _| live.contains(&k.0));
     }
 
@@ -2104,11 +2161,28 @@ fn subtract(a: photocraft_geom::Rect, b: photocraft_geom::Rect) -> Vec<photocraf
         .collect()
 }
 
+/// Whether `r` lies inside the union of `parts`.
+fn covered(r: photocraft_geom::Rect, parts: &[photocraft_geom::Rect]) -> bool {
+    let mut rest = vec![r];
+    for b in parts {
+        rest = rest.into_iter().flat_map(|p| subtract(p, *b)).collect();
+        if rest.is_empty() {
+            return true;
+        }
+    }
+    rest.is_empty() || r.is_empty()
+}
+
 /// Regions of a display texture whose finer mip levels are out of date: each holds the first
 /// level that is current there (`u32::MAX`: none, the region was deferred). Disjoint.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Stale {
     regions: Vec<(photocraft_geom::Rect, u32)>,
+    /// Parts never drawn since the set was made for a document not shown yet (disjoint): the
+    /// only parts a frame may leave for later (`GpuCanvas::blank_now`), so a big page just opened
+    /// fills from blank in pieces (Capikoma request 19) while no frame ever shows a part of the
+    /// view at an older state of the document than the rest.
+    blank: Vec<photocraft_geom::Rect>,
 }
 
 impl Stale {
@@ -2118,6 +2192,13 @@ impl Stale {
     pub(crate) fn mark(&mut self, r: photocraft_geom::Rect, level: u32) {
         if r.is_empty() {
             return;
+        }
+        if level != u32::MAX && !self.blank.is_empty() {
+            self.blank = self.blank.iter().flat_map(|b| subtract(*b, r)).collect();
+            if self.blank.len() > Self::MAX_REGIONS {
+                // Conservative: nothing waits (drawn in full rather than wrongly left out).
+                self.blank.clear();
+            }
         }
         let mut out = Vec::with_capacity(self.regions.len() + 4);
         for &(e, l) in &self.regions {
@@ -2133,6 +2214,18 @@ impl Stale {
             let level = self.regions.iter().map(|e| e.1).max().unwrap_or(level);
             self.regions = vec![(all, level)];
         }
+    }
+
+    /// Whether a blank part ([`Stale::blank`]) meets `area`.
+    pub(crate) fn blank_in(&self, area: photocraft_geom::Rect) -> bool {
+        self.blank.iter().any(|b| !b.intersect(&area).is_empty())
+    }
+
+    /// Whether `r` is all blank: leaving it for a later frame shows nothing old there, only
+    /// nothing yet.
+    #[cfg(test)]
+    fn may_wait(&self, r: photocraft_geom::Rect) -> bool {
+        covered(r, &self.blank)
     }
 
     /// Nothing at all is current in `r` (it was not composited).
@@ -2459,6 +2552,9 @@ struct Resources {
     canvas_budget: u64,
     /// When the last reduced or partly deferred refresh happened ([`now_ms`]).
     reduced_at: f64,
+    /// Documents the view has shown (`GpuCanvas::note_shown`): a set made for one again is never
+    /// left with blank parts ([`Stale::blank`]).
+    shown: std::collections::HashSet<u64>,
     /// Passes of the last plan the compositor ran (sizes refinement pieces).
     last_passes: usize,
     encode_bgl: wgpu::BindGroupLayout,
@@ -2762,6 +2858,7 @@ impl Resources {
             compositor_translated: Vec::new(),
             canvas_budget: canvas_budget_override().unwrap_or_else(|| canvas_budget(physical_memory())),
             reduced_at: f64::NEG_INFINITY,
+            shown: Default::default(),
             last_passes: 1,
             encode_bgl,
             encode_pipeline,
@@ -2878,8 +2975,9 @@ impl DocTextures {
                 tiles.push(Tile { rect: [tx, ty, w, h], texture, levels, bind_group, _uniform: uniform, page: None });
             }
         }
-        let mut stale = Stale::default();
-        stale.defer(photocraft_geom::Rect::new(0, 0, size[0] as i32, size[1] as i32));
+        let whole = photocraft_geom::Rect::new(0, 0, size[0] as i32, size[1] as i32);
+        let mut stale = Stale { blank: vec![whole], ..Stale::default() };
+        stale.defer(whole);
         Some(Self { size, format, tiles, stale: std::sync::Mutex::new(stale), shows: None })
     }
 
@@ -3643,6 +3741,28 @@ mod tests {
             s.mark(p, 0);
         }
         assert!(s.is_empty());
+    }
+
+    /// Only parts never drawn may wait for a later frame: a part drawn once and deferred again
+    /// (an edit there, a Move drag) would show an older state of the document beside the rest.
+    #[test]
+    fn only_blank_parts_may_wait() {
+        use photocraft_geom::Rect;
+        let whole = Rect::new(0, 0, 2048, 1024);
+        let mut s = Stale { blank: vec![whole], ..Stale::default() };
+        s.defer(whole);
+        assert!(s.may_wait(Rect::new(1024, 0, 2048, 1024)), "a new set is blank");
+        s.mark(Rect::new(0, 0, 1024, 1024), 0);
+        assert!(!s.may_wait(Rect::new(0, 0, 1024, 1024)), "drawn");
+        assert!(!s.may_wait(Rect::new(1000, 0, 1100, 50)), "partly drawn");
+        assert!(s.may_wait(Rect::new(1024, 0, 2048, 1024)), "still blank");
+        // Deferring a drawn part (an edit left for later) doesn't make it blank again.
+        s.defer(Rect::new(0, 0, 1024, 1024));
+        assert!(!s.may_wait(Rect::new(0, 0, 1024, 1024)));
+        assert!(s.blank_in(Rect::new(1500, 0, 1600, 10)) && !s.blank_in(Rect::new(0, 0, 1024, 1024)));
+        // A reduced composite draws too.
+        s.mark(Rect::new(1024, 0, 2048, 512), 2);
+        assert!(!s.may_wait(Rect::new(1024, 0, 2048, 512)));
     }
 
     #[test]

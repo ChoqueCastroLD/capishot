@@ -204,3 +204,42 @@ fn a_focused_catch_up_sharpens_just_the_view_at_once() {
     settle(&g, &doc, fit);
     assert_eq!(max_diff(&g.read_texels(key).unwrap().2, &want), 0.0, "settled");
 }
+
+/// Only blank parts wait (0.13.28): on a GPU so slow that one piece takes a frame's work, a new
+/// document's first refresh still comes in pieces (Capikoma request 19), but once the view has
+/// been complete, an edit over the whole view (a Move drag frame) is drawn whole in its frame,
+/// never one piece now and the rest at the old state.
+#[test]
+fn only_a_first_refresh_comes_in_pieces() {
+    let _gpu = GPU_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some((g, _rs)) = canvas() else { return };
+    let mut doc = page();
+    if !g.supports(&doc) {
+        eprintln!("skipping: not on the wgpu compositor");
+        return;
+    }
+    let key = doc.id.0;
+    let view = ViewNeed { visible: doc.bounds(), level: 0, focus: false };
+    gpu_canvas::set_frame_work_ms(Some(0.0));
+    let first = g.refresh_for(key, &doc, None, None, Some(view));
+    assert!(first.px <= 1024 * 1024, "{} px: one piece of the first refresh", first.px);
+    assert!(g.has_stale(key), "the rest of the blank page waits");
+    // The next frames fill it from blank, a piece at a time.
+    let mut frames = 0;
+    while !g.current_in(key, doc.bounds(), 0) {
+        let c = g.catch_up(key, &doc, None, view, false, &egui::Context::default());
+        assert!(c.px <= 1024 * 1024 + 1, "{} px in a catch-up frame", c.px);
+        frames += 1;
+        assert!(frames < 20, "the first refresh doesn't finish");
+    }
+    assert!(frames >= 1, "the first refresh came in pieces");
+    // An edit over the whole page (a drag frame): all of it in this frame.
+    doc.layers[2].opacity = 0.35;
+    let r = g.refresh_for(key, &doc, Some(doc.bounds()), None, Some(view));
+    gpu_canvas::set_frame_work_ms(None);
+    assert_eq!(r.px, 1536 * 1100, "{r:?}: the whole page in the edit's frame");
+    assert!(!g.has_stale(key), "nothing left at the old state");
+    let exact = copy(&doc);
+    g.refresh(exact.id.0, &exact, None, None);
+    assert_eq!(max_diff(&g.read_texels(key).unwrap().2, &g.read_texels(exact.id.0).unwrap().2), 0.0, "the edit's frame is the full refresh");
+}

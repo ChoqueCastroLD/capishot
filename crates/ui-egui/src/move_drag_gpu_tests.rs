@@ -68,7 +68,6 @@ fn credits_page(app: &mut PhotocraftApp) -> LayerId {
         let l = (app.run("type.create", json!({"x": 120, "y": 140 + i as u32 * 120, "text": text, "size": 64, "color": "#202020"})).expect("type"))["layer"].as_u64().expect("a type layer");
         app.run("layer.layerStyle.stroke", json!({"layer": l, "size": 6, "position": "outside", "color": "#ffffff"})).expect("stroke");
     }
-    app.run("layer.new.group", json!({"name": "Group 1"})).ok();
     app.run("layer.new.layer", json!({"name": "mirai project icon"})).expect("a layer");
     app.run("edit.fill", json!({"color": "#3070c0", "rect": [1650, 60, 1850, 260]})).ok();
     app.run("layer.smartObjects.convertToSmartObject", json!({})).expect("a smart object");
@@ -77,19 +76,27 @@ fn credits_page(app: &mut PhotocraftApp) -> LayerId {
         .edit("stripes", |doc, active| {
             let l = doc.layer_mut(active.expect("active")).expect("layer").surface_mut().expect("raster");
             let fmt = l.format();
-            for i in 0..(W as i32 / 24 + 1) {
-                let t = i as f32 * 0.137;
+            // Stripes of uneven widths (no period a drag offset could line up with) with a
+            // transparent gap beside each: the layers below show through.
+            let (mut x, mut i) = (0, 0);
+            while x < W as i32 {
+                let t = i as f32 * 0.37;
                 let c = [0.5 + 0.45 * (t * 6.0).sin(), 0.5 + 0.45 * (t * 4.0 + 2.0).sin(), 0.5 + 0.45 * (t * 3.0 + 4.0).sin(), 1.0];
-                // A transparent gap beside every stripe: the layers below show through.
-                l.fill_rect(Rect::new(i * 24, 0, i * 24 + 16, H as i32), &photocraft_raster::from_rgba(&fmt, c));
+                let w = 9 + (i * 7919) % 29;
+                l.fill_rect(Rect::new(x, 0, x + w, H as i32), &photocraft_raster::from_rgba(&fmt, c));
+                x += w + 4 + (i * 104_729) % 11;
+                i += 1;
             }
             Ok(())
         })
         .expect("stripes");
     app.run("layer.smartObjects.convertToSmartObject", json!({})).expect("a smart object");
     app.run("edit.transform", json!({"scaleX": 104, "scaleY": 123})).expect("scaled past the canvas");
+    let big = app.session.active().expect("doc").active_layer.expect("the big Smart Object");
+    // An empty group on top, as on the page (Auto-Select picks the big Smart Object under it).
+    app.run("layer.new.group", json!({"name": "Group 1"})).ok();
+    app.run("layer.select", json!({"layer": big.0})).expect("select");
     let st = app.session.active().expect("doc");
-    let big = st.active_layer.expect("the big Smart Object");
     assert!(matches!(st.doc.layer(big).map(|l| &l.content), Some(photocraft_doc::LayerContent::Smart(_))), "a Smart Object");
     let b = st.doc.layer(big).and_then(|l| l.surface()).map(|s| s.content_bounds()).expect("pixels");
     eprintln!("the big Smart Object's pixels: {b:?}");
@@ -145,6 +152,8 @@ fn mismatch(h: &Harness, img: &Frame, want: &[[u8; 4]], pointer: egui::Pos2) -> 
 
 struct Frames {
     step_ms: Vec<f64>,
+    /// Drag frames drawn from a moved copy rather than in place.
+    copied: usize,
     worst: f64,
     worst_older: f64,
 }
@@ -164,7 +173,9 @@ fn drag(device: Device, frames: i32) -> Option<Frames> {
         let app = h.state_mut();
         app.sync_views();
         app.ui.tool = crate::state::Tool::Move;
-        app.ui.tool_options.move_auto_select = true;
+        // The press would pick whatever is under the pointer (a stripe or a gap): the selected
+        // layer moves, as Auto-Select does on the Smart Object itself.
+        app.ui.tool_options.move_auto_select = false;
         app.ui.tool_options.move_show_transform = true;
         app.ui.extras.snap = false;
         app.ui.view.show.smart_guides = false;
@@ -175,10 +186,32 @@ fn drag(device: Device, frames: i32) -> Option<Frames> {
     let (req, _rx) = crate::control::ControlRequest::new("ui.set", json!({"zoom": 1.0, "center": [W / 2, H / 2]}));
     crate::control::handle(h.state_mut(), &ctx, &req);
     h.run_steps(20);
+    // A GL adapter builds the GPU compositor's pipelines one a frame first (`warm_up`).
+    let doc_id = h.state().session.active().expect("doc").doc.id;
+    for _ in 0..600 {
+        let Some(g) = h.state().gpu.clone() else { break };
+        let doc = h.state().session.active().expect("doc").doc.clone();
+        if g.supports(&doc) {
+            if !h.state().perf.last_refresh.starts_with("gpu") {
+                // Drawn on the CPU while it warmed up: drawn again on the GPU.
+                g.evict(doc_id.0);
+                h.run_steps(4);
+            }
+            break;
+        }
+        g.warm_up();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        h.step();
+    }
+    if device != Device::Cpu && !h.state().perf.last_refresh.starts_with("gpu") {
+        eprintln!("skipping: the GPU compositor isn't drawing here ({})", h.state().perf.last_refresh);
+        return None;
+    }
     if device != Device::Cpu && !h.state().perf.gpu {
         eprintln!("skipping: the canvas fell back to the CPU here");
         return None;
     }
+    eprintln!("{device:?} settled: {} {} px, fallback {:?}", h.state().perf.last_refresh, h.state().perf.last_refresh_px, h.state().perf.gpu_fallback);
     let before = h.state().session.active().expect("doc").doc.clone();
     // Settled: the page as it is.
     let img = render(&mut h);
@@ -194,7 +227,7 @@ fn drag(device: Device, frames: i32) -> Option<Frames> {
     h.step();
     h.event(egui::Event::PointerButton { pos: p0, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
     h.step();
-    let mut out = Frames { step_ms: Vec::new(), worst: 0.0, worst_older: 1.0 };
+    let mut out = Frames { step_ms: Vec::new(), copied: 0, worst: 0.0, worst_older: 1.0 };
     let mut last = (0, 0);
     for i in 1..=frames {
         let (dx, dy) = (-(i * 23), -(i * 9));
@@ -202,15 +235,30 @@ fn drag(device: Device, frames: i32) -> Option<Frames> {
         // Pointer positions are document positions here (100%, no snapping).
         let p = egui::pos2(p.x.round() + (p0.x - p0.x.round()), p.y.round() + (p0.y - p0.y.round()));
         h.event(egui::Event::PointerMoved(p));
-        let t = std::time::Instant::now();
-        h.step();
-        out.step_ms.push(t.elapsed().as_secs_f64() * 1000.0);
-        let img = render(&mut h);
-        let now = mismatch(&h, &img, &expected(&before, big, dx, dy), p);
-        let older = mismatch(&h, &img, &expected(&before, big, last.0, last.1), p);
-        eprintln!("{device:?} frame {i} at ({dx}, {dy}): {:.2}% off its offset, {:.2}% off the previous one", now * 100.0, older * 100.0);
-        out.worst = out.worst.max(now);
-        out.worst_older = out.worst_older.min(older);
+        // The canvas paints before it takes the frame's pointer events (as every egui widget),
+        // so the frame with a move shows the offset before it and the next one this offset:
+        // both must show the whole page at exactly that one offset.
+        for (k, shows) in [(0, last), (1, (dx, dy))] {
+            let t = std::time::Instant::now();
+            h.step();
+            out.step_ms.push(t.elapsed().as_secs_f64() * 1000.0);
+            let img = render(&mut h);
+            let now = mismatch(&h, &img, &expected(&before, big, shows.0, shows.1), p);
+            eprintln!(
+                "{device:?} move {i}.{k} at {shows:?}: {:.1} ms, {:.2}% off ({} {} px)",
+                out.step_ms.last().copied().unwrap_or(0.0),
+                now * 100.0,
+                h.state().perf.last_refresh,
+                h.state().perf.last_refresh_px
+            );
+            if k == 1 && !crate::move_ui::drawn_in_place(h.state(), 0) {
+                out.copied += 1;
+            }
+            out.worst = out.worst.max(now);
+            if k == 1 {
+                out.worst_older = out.worst_older.min(mismatch(&h, &img, &expected(&before, big, last.0, last.1), p));
+            }
+        }
         last = (dx, dy);
     }
     h.event(egui::Event::PointerButton { pos: screen(&h, start[0] + last.0 as f32, start[1] + last.1 as f32), button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
@@ -220,11 +268,14 @@ fn drag(device: Device, frames: i32) -> Option<Frames> {
     let moved = after.layer(big).and_then(|l| l.surface()).map(|s| s.content_bounds());
     let was = before.layer(big).and_then(|l| l.surface()).map(|s| s.content_bounds());
     assert_eq!(moved, was.map(|r| r.translate(last.0, last.1)), "{device:?}: the release moved the layer by the last offset");
-    let mut sorted = out.step_ms.clone();
+    // The frames that draw a new offset (every other one: see above), the first one aside.
+    let mut sorted: Vec<f64> = out.step_ms.iter().skip(1).step_by(2).skip(1).copied().collect();
     sorted.sort_by(f64::total_cmp);
     eprintln!(
-        "{device:?}: {} drag frames, frame work median {:.1} ms, max {:.1} ms; worst frame {:.2}% off its offset",
-        sorted.len(),
+        "{device:?}: {} drag frames ({} from a moved copy), first {:.1} ms, then median {:.1} ms, max {:.1} ms; worst frame {:.2}% off its offset",
+        out.step_ms.len(),
+        out.copied,
+        out.step_ms.get(1).copied().unwrap_or(0.0),
         sorted[sorted.len() / 2],
         sorted.last().copied().unwrap_or(0.0),
         out.worst * 100.0
@@ -234,6 +285,11 @@ fn drag(device: Device, frames: i32) -> Option<Frames> {
 
 fn check(device: Device) {
     let Some(f) = drag(device, 10) else { return };
+    if device != Device::Cpu {
+        // The Smart Object is drawn from its resident pages at the offset: no moved copy of its
+        // pixels (nor anything rendered again) per frame.
+        assert_eq!(f.copied, 0, "{device:?}: drag frames drawn from a moved copy");
+    }
     assert!(f.worst < 0.01, "{device:?}: a drag frame showed {:.1}% of the page away from the drag's offset (parts drawn at older offsets)", f.worst * 100.0);
     assert!(f.worst_older > 0.05, "{device:?}: the frames really moved the layer");
 }

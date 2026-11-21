@@ -179,3 +179,49 @@ fn in_place_moves_draw_like_the_moved_copy() {
     assert!(!photocraft_gpu::plan::movable_in_place(&fx.layers[1]));
     assert!(photocraft_gpu::plan::movable_in_place(&base.layers[1]));
 }
+
+/// A Smart Object larger than the canvas, inside a group, moved in place (a Move drag of a placed
+/// image, 0.13.28): drawn from its rendered pixels at the offset, every frame equals compositing
+/// the moved copy (the rendered pixels shifted, as the drag's copy shows them), pixels from past
+/// the canvas edge coming into view, uploaded once.
+#[test]
+fn a_smart_object_in_a_group_moves_in_place_like_the_moved_copy() {
+    let Some((device, queue, mut comp)) = gpu() else { return };
+    let mut base = doc();
+    let fmt = base.pixel_format();
+    let mut cache = photocraft_raster::Surface::new(fmt);
+    let mut x = -80;
+    let mut i = 0;
+    while x < 790 {
+        let w = 9 + (i * 7919) % 29;
+        cache.fill_rect(Rect::new(x, -60, x + w, 590), &photocraft_raster::from_rgba(&fmt, [(i % 7) as f32 / 7.0, 0.4, 1.0 - (i % 5) as f32 / 5.0, 1.0]));
+        x += w + 4 + (i * 104_729) % 11;
+        i += 1;
+    }
+    let source = photocraft_doc::SmartSource::Linked { path: "placed.png".into() };
+    let smart = Layer::new("placed", photocraft_doc::LayerContent::Smart(photocraft_doc::SmartObject::new(source, photocraft_geom::Affine::IDENTITY, Some(cache.clone()))));
+    let id = smart.id;
+    let group = Layer::group("Group 1", vec![smart]);
+    assert!(photocraft_gpu::plan::movable_in_place(&group), "a plain group");
+    assert!(photocraft_gpu::plan::movable_in_place(&group.children().expect("group")[0]), "a Smart Object with rendered pixels");
+    base.layers.push(group);
+    photocraft_gpu::render_to_vec_stats(&mut comp, &device, &queue, &base, base.bounds()).expect("resident");
+    // The first offset brings pixels from past the canvas edge into view (their pages upload
+    // once); the next ones show nothing that isn't resident by then.
+    for (i, offset) in [(37, -23), (30, -20), (5, 0), (-12, 7)].into_iter().enumerate() {
+        let mut shown = base.clone();
+        let l = shown.layer_mut(id).expect("smart");
+        if let photocraft_doc::LayerContent::Smart(sm) = &mut l.content {
+            sm.cache = Some(cache.translated(offset.0, offset.1, cache.content_bounds()));
+        }
+        let mut plain = photocraft_gpu::Compositor::try_new_with_format(&device, wgpu::TextureFormat::Rgba32Float).expect("compositor");
+        let (want, _) = photocraft_gpu::render_to_vec_stats(&mut plain, &device, &queue, &shown, shown.bounds()).expect("reference");
+        comp.set_translated(vec![Translated::in_place(id, false, &cache, offset)]);
+        let (got, stats) = photocraft_gpu::render_to_vec_stats(&mut comp, &device, &queue, &base, base.bounds()).expect("in place");
+        let worst = want.iter().zip(&got).map(|(w, g)| (0..4).map(|k| (w[k] - g[k]).abs()).fold(0.0f32, f32::max)).fold(0.0f32, f32::max);
+        assert!(worst <= 1.0 / 255.0, "offset {offset:?}: max diff {:.2}/255", worst * 255.0);
+        if i > 0 && offset.0 >= 0 {
+            assert_eq!(stats.tiles_uploaded, 0, "offset {offset:?}: everything is resident");
+        }
+    }
+}
