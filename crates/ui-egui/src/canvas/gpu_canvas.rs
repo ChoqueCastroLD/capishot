@@ -920,7 +920,7 @@ impl GpuCanvas {
             // of the lower-stack cache (it would read, and upload, far more than the piece).
             let whole = parts.len() <= 1;
             for (i, p) in parts.into_iter().enumerate() {
-                if i > 0 && now_ms() - t0 >= FRAME_WORK_MS {
+                if i > 0 && now_ms() - t0 >= frame_work_ms() {
                     later.push(p);
                     continue;
                 }
@@ -1046,7 +1046,7 @@ impl GpuCanvas {
         let t0 = now_ms();
         let near = near_view(visible, doc.bounds());
         let mut px = 0;
-        while now_ms() - t0 < FRAME_WORK_MS {
+        while now_ms() - t0 < frame_work_ms() {
             let Some(piece) = self.with_doc(key, |_, d| d.stale().next_piece(near, CPU_PIECE_PX)).flatten() else { break };
             let piece = cpu_rows(piece);
             if !self.cpu_piece(key, doc, piece, display) {
@@ -1113,7 +1113,7 @@ impl GpuCanvas {
         'urgent: for r in urgent {
             let level = if area(r) >= LOD_MIN_PX { need.level } else { 0 };
             for p in pieces(r, need.visible) {
-                if out.px > 0 && now_ms() - t0 >= FRAME_WORK_MS {
+                if out.px > 0 && now_ms() - t0 >= frame_work_ms() {
                     more = true;
                     break 'urgent;
                 }
@@ -1485,6 +1485,24 @@ pub struct CatchUp {
 /// The canvas work (compositing, uploading layer tiles) one frame does for a big refresh before
 /// it defers the rest to the next frames, in milliseconds. At least one piece always goes.
 pub const FRAME_WORK_MS: f64 = 24.0;
+
+/// [`FRAME_WORK_MS`] unless [`set_frame_work_ms`] replaced it (as `f64` bits; 0: not replaced).
+static FRAME_WORK_OVERRIDE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Replace [`FRAME_WORK_MS`] (`None`: back to it). Tests and measurements use it to act like a
+/// slow GPU, where one piece of a big refresh already takes the whole frame's work.
+pub fn set_frame_work_ms(ms: Option<f64>) {
+    FRAME_WORK_OVERRIDE.store(ms.map_or(0, |v| v.max(f64::MIN_POSITIVE).to_bits()), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The frame's work for big refreshes in milliseconds: [`FRAME_WORK_MS`], or what
+/// [`set_frame_work_ms`] set.
+pub fn frame_work_ms() -> f64 {
+    match FRAME_WORK_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => FRAME_WORK_MS,
+        bits => f64::from_bits(bits),
+    }
+}
 
 /// Side of a piece of a big refresh, in document pixels: a quarter of a compositor page, so a
 /// piece uploads a few hundred tiles at most.

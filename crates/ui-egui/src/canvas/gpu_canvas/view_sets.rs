@@ -354,7 +354,7 @@ impl GpuCanvas {
                     break;
                 }
             }
-            if now_ms() - t0 >= super::FRAME_WORK_MS {
+            if now_ms() - t0 >= super::frame_work_ms() {
                 break;
             }
         }
