@@ -267,6 +267,9 @@ fn tile_image(display: Option<&photocraft_engine::display_color::CanvasDisplay>,
 
 /// Composite `rects` (level pixels at factor `f`) from `source` (the reduced document), or
 /// without one by reducing the full-resolution composite of `doc`.
+/// The budget of an idle frame for making the Move split ahead (milliseconds).
+const SPLIT_AHEAD_MS: f64 = 6.0;
+
 fn render_level(doc: &Document, source: Option<&Document>, f: i64, rects: &[DRect]) -> Vec<photocraft_compose::Buffer> {
     match source {
         Some(src) => photocraft_compose::render_rects(src, rects),
@@ -328,6 +331,12 @@ pub fn paint(
             *doc = Arc::new(d);
         }
     };
+    // The Move tool, no drag: the split for the layer a press would move, made ahead in idle
+    // frames (`move_cpu`), so a drag's first frame is drawn from it as the others are.
+    let ahead = (move_plan.is_none() && app.ui.tool == crate::state::Tool::Move && app.drag.is_none())
+        .then(|| crate::move_ui::press_targets(app, idx))
+        .filter(|ids| !ids.is_empty())
+        .map(|ids| crate::move_cpu::Plan { base: doc.clone(), ids, doc: id, revision, offset: (0, 0) });
     let tex_budget = texture_budget(app);
     let mip_budget = mip_budget(app);
     let cache = app.canvases.entry(key).or_default();
@@ -340,7 +349,7 @@ pub fn paint(
         tc.size = size;
         tc.shown = None;
     }
-    if move_plan.is_none() {
+    if move_plan.is_none() && ahead.is_none() {
         tc.move_split = None;
     }
     let now = (revision, preview_key ^ display_key);
@@ -395,6 +404,38 @@ pub fn paint(
         }
     }
     drop(setup);
+    if let Some(plan) = ahead.as_ref().filter(|_| stale.is_empty() && missing.is_empty() && tc.pending.is_none()) {
+        let _s = crate::perf_span::span("move.split_ahead");
+        let t0 = crate::gpu_canvas::now_ms();
+        let levels = tc.levels.clone();
+        let mut reduce = |d: &Document| {
+            if level == 0 {
+                return d.clone();
+            }
+            let mut l = levels.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            l.mips.document(d, level)
+        };
+        if !tc.move_split.as_ref().is_some_and(|s| s.is_for(plan, level)) {
+            tc.move_split = crate::move_cpu::Split::new(plan, level, &mut reduce);
+        }
+        if let Some(split) = tc.move_split.as_mut() {
+            let mut left = false;
+            for &k in &want {
+                let held = tile_rect(k, size).inflate(GUTTER).intersect(&bounds);
+                if !split.needs(held) {
+                    continue;
+                }
+                if crate::gpu_canvas::now_ms() - t0 >= SPLIT_AHEAD_MS {
+                    left = true;
+                    break;
+                }
+                split.fill(&[(held, held)]);
+            }
+            if left {
+                ctx.request_repaint();
+            }
+        }
+    }
     let t0 = crate::gpu_canvas::now_ms();
     // The document to composite the level from (`None`: reduce the full-resolution composite),
     // found when a tile needs drawing.
@@ -433,6 +474,7 @@ pub fn paint(
         let faithful = level == 0 || photocraft_compose::proxy::lod_faithful(&doc);
         // A Move drag: only the moving layers are re-blended over cached composites (`move_cpu`).
         let mut split_bufs = None;
+        let mut blits = None;
         if let Some(plan) = move_plan.as_ref().filter(|_| faithful) {
             let held: Vec<(DRect, DRect)> = jobs
                 .iter()
@@ -457,15 +499,30 @@ pub fn paint(
                 let _s = crate::perf_span::span("move.split_new");
                 tc.move_split = crate::move_cpu::Split::new(plan, level, &mut reduce);
             }
-            split_bufs = {
-                let _s = crate::perf_span::span("move.split_render");
-                tc.move_split.as_mut().and_then(|s| s.render(plan.offset, &held))
-            };
-            if split_bufs.is_some() {
+            // The one-blit path where the canvas shows the document's values as they are.
+            if display.as_deref().is_none_or(|d| d.is_identity()) {
+                let _s = crate::perf_span::span("move.blit");
+                blits = tc.move_split.as_mut().and_then(|s| s.render_rgba8(plan.offset, &held));
+            }
+            if blits.is_none() {
+                split_bufs = {
+                    let _s = crate::perf_span::span("move.split_render");
+                    tc.move_split.as_mut().and_then(|s| s.render(plan.offset, &held))
+                };
+            }
+            if blits.is_some() || split_bufs.is_some() {
                 move_split_frames += 1;
             }
         }
-        let bufs = match split_bufs {
+        let images: Vec<(DRect, egui::ColorImage)> = if let Some(b) = blits {
+            let _s = crate::perf_span::span("move.blit_images");
+            rects
+                .iter()
+                .zip(b)
+                .map(|(r, px)| (*r, egui::ColorImage::from_rgba_premultiplied([r.width() as usize, r.height() as usize], px.as_flattened())))
+                .collect()
+        } else {
+            let bufs = match split_bufs {
             Some(b) => b,
             None => {
                 if lazy {
@@ -476,14 +533,16 @@ pub fn paint(
                 let _s = crate::perf_span::span("cpu.render");
                 render_level(&doc, source.as_deref(), f, &rects)
             }
+            };
+            let _s = crate::perf_span::span("cpu.tile_images");
+            bufs.iter().map(|b| (b.rect, tile_image(display.as_deref(), b))).collect()
         };
         let c1 = crate::gpu_canvas::now_ms();
         composite_ms += c1 - c0;
-        for (job, buf) in jobs.into_iter().zip(bufs) {
-            px += u64::from(buf.rect.width()) * u64::from(buf.rect.height());
+        for (job, (rect, img)) in jobs.into_iter().zip(images) {
+            px += u64::from(rect.width()) * u64::from(rect.height());
             match job {
                 Job::Full(k, held) => {
-                    let img = tile_image(display.as_deref(), &buf);
                     match tc.tiles.get_mut(&k) {
                         Some(t) if t.tex.size() == img.size => {
                             t.tex.set(img, TextureOptions::LINEAR);
@@ -499,7 +558,6 @@ pub fn paint(
                 Job::Part(k, part) => {
                     if let Some(t) = tc.tiles.get_mut(&k) {
                         if !part.is_empty() {
-                            let img = tile_image(display.as_deref(), &buf);
                             t.tex.set_partial([(part.x0 - t.held.x0) as usize, (part.y0 - t.held.y0) as usize], img, TextureOptions::LINEAR);
                         }
                         t.dirty = None;
@@ -514,7 +572,9 @@ pub fn paint(
         // Missing tiles go to the worker pool with the document as shown.
         shift(&mut doc, &mut lazy);
     }
-    let split_ready = move_plan.as_ref().is_some_and(|p| tc.move_split.as_ref().is_some_and(|s| s.is_for(p, level)));
+    // Made ahead counts too: the drag's first frame then shows the document as it is and lets
+    // this canvas shift the moving layers (`move_ui::display_doc`), no moved copy made for it.
+    let split_ready = move_plan.as_ref().or(ahead.as_ref()).is_some_and(|p| tc.move_split.as_ref().is_some_and(|s| s.is_for(p, level)));
     if ASYNC_TILES && rest.peek().is_some() && tc.pending.is_none() {
         let jobs: Vec<(TileKey, DRect)> = rest
             .by_ref()

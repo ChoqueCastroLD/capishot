@@ -16,10 +16,11 @@ may change in any commit; their changes are listed under **Experimental**. A cha
   whole in their frame.
 - A Move drag of a Smart Object, a type layer or a plain group draws it from its pixels already
   on the GPU at the offset each frame (no copy per frame).
-- A Move drag keeps the layers above the moving ones composited for the drag (over black and
-  over white, at the view's resolution, within the canvas budget) and lays them over each frame,
-  where they blend affinely over an opaque Background; the frame of a Move pointer event shows the
-  layers at that event (no frame behind the pointer).
+- A Move drag's frames come from images made ahead while the Move tool rests on the page (the
+  layers below, the moving layer alone, the layers above over black and over white, at the view's
+  resolution, within the canvas budget): one draw per frame on the GPU canvas, 8-bit blits on the
+  CPU canvas, the first frame like the others. The frame of a Move pointer event shows the layers
+  at that event (no frame behind the pointer).
 
 ## API_VERSION 1, additions (opening big pages off the frame, Capikoma request 19)
 

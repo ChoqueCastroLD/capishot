@@ -591,6 +591,7 @@ pub(super) fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, le
         if c.px > 0 {
             app.perf.record(if c.refined { "gpu-refine" } else { "gpu-catch-up" }, c.px, c.composite_ms, 0.0);
         }
+        prepare_drag_ahead(app, &gpu, &doc, idx, need, display.as_deref(), plain && !gesture, ctx);
         if let Some(ms) = c.again_ms {
             ctx.request_repaint_after(std::time::Duration::from_secs_f64(ms.max(0.0) / 1000.0));
         }
@@ -707,6 +708,41 @@ pub(super) fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, le
     cache.on_gpu = true;
     cache.texture = None;
     true
+}
+
+/// The budget of an idle frame for making the drag cache ahead (milliseconds).
+const DRAG_AHEAD_MS: f64 = 6.0;
+
+/// With the Move tool and no drag, in the canvas's idle frames (`idle`: the document as it is on
+/// screen): the drag cache for the layer a press would move, a piece at a time
+/// (`gpu_canvas::above`), so a drag's first frame is drawn from it as the others are. With another
+/// tool, the cache goes.
+#[allow(clippy::too_many_arguments)]
+fn prepare_drag_ahead(
+    app: &mut PhotocraftApp,
+    gpu: &crate::gpu_canvas::GpuCanvas,
+    doc: &photocraft_doc::Document,
+    idx: usize,
+    need: crate::gpu_canvas::ViewNeed,
+    display: Option<&photocraft_engine::display_color::CanvasDisplay>,
+    idle: bool,
+    ctx: &egui::Context,
+) {
+    if app.ui.tool != crate::state::Tool::Move {
+        gpu.drop_drag_cache(doc.id.0);
+        return;
+    }
+    if !idle || app.drag.is_some() {
+        return;
+    }
+    let ids = crate::move_ui::press_targets(app, idx);
+    if ids.is_empty() {
+        return;
+    }
+    let encode_srgb = display.is_some_and(|d| d.encode_srgb);
+    if gpu.prepare_drag(doc, &ids, need.visible, need.level, encode_srgb, DRAG_AHEAD_MS) {
+        ctx.request_repaint();
+    }
 }
 
 /// Draw in this frame what the view shows of `doc` that its display set left out of date

@@ -18,6 +18,7 @@
 
 pub mod adjust;
 pub mod advanced;
+pub mod blit;
 pub mod bounds;
 pub mod cmyk;
 pub mod deep;

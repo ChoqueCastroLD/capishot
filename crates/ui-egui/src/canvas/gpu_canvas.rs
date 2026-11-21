@@ -38,7 +38,7 @@ mod above;
 mod pages;
 mod view_sets;
 
-pub use above::set_above_cache;
+pub use above::{DragMode, drag_frames, set_above_cache};
 pub use view_sets::{MAX_VIEW_SETS, ViewSwitch, same_but_visibility, same_pixels, visibility_only};
 
 /// Default tile side; documents up to this size (and the device limit) use a single texture.
@@ -456,25 +456,44 @@ impl GpuCanvas {
         }
     }
 
-    /// The layers a Move drag moves (`move_ui`; empty without a drag): the layers above them are
-    /// composited once for the drag and laid over each frame (`above`).
+    /// The layers a Move drag moves (`move_ui`; empty without a drag): its frames come from the
+    /// drag cache when it is ready for them (`above`).
     pub fn set_moving(&self, key: u64, ids: Vec<photocraft_doc::LayerId>) {
         let mut r = self.rs.renderer.write();
         let Some(res) = r.callback_resources.canvas_mut(self.id) else { return };
         if ids.is_empty() {
-            // No drag on this document (any more): its cached layers above go.
-            if res.moving.remove(&key).is_some() && res.above.as_ref().is_some_and(|m| m.doc() == key) {
-                res.above = None;
-            }
+            res.moving.remove(&key);
         } else if res.moving.get(&key) != Some(&ids) {
             res.moving.insert(key, ids);
         }
     }
 
-    /// GPU bytes of a Move drag's cached layers above (tests and diagnostics).
+    /// The layers a Move drag on document `key` moves ([`GpuCanvas::set_moving`]).
+    fn moving_of(&self, key: u64) -> Option<Vec<photocraft_doc::LayerId>> {
+        let r = self.rs.renderer.read();
+        r.callback_resources.canvas(self.id).and_then(|res| res.moving.get(&key).cloned())
+    }
+
+    /// GPU bytes of the drag cache (tests and diagnostics).
     pub fn above_bytes(&self) -> u64 {
         let r = self.rs.renderer.read();
-        r.callback_resources.canvas(self.id).and_then(|res| res.above.as_ref().map(above::AboveMaps::bytes)).unwrap_or(0)
+        r.callback_resources.canvas(self.id).and_then(|res| res.drag.as_ref().map(above::DragCache::bytes)).unwrap_or(0)
+    }
+
+    /// Whether document `key`'s drag cache is ready (tests and diagnostics).
+    pub fn drag_ready(&self, key: u64) -> bool {
+        let r = self.rs.renderer.read();
+        r.callback_resources.canvas(self.id).is_some_and(|res| res.drag.as_ref().is_some_and(|c| c.doc() == key && c.is_ready()))
+    }
+
+    /// Let go of document `key`'s drag cache (the Move tool put down).
+    pub fn drop_drag_cache(&self, key: u64) {
+        let mut r = self.rs.renderer.write();
+        if let Some(res) = r.callback_resources.canvas_mut(self.id)
+            && res.drag.as_ref().is_some_and(|c| c.doc() == key)
+        {
+            res.drag = None;
+        }
     }
 
     /// Layers the next refreshes draw from their already resident pre-move surface at an offset
@@ -965,7 +984,7 @@ impl GpuCanvas {
             // over from maps made once for the drag (`above`); the margin around the view waits
             // for it (it shows nothing yet). Else (or when it can't) composited whole.
             let view = now.intersect(&n.visible);
-            let split = if blank.is_empty() && !view.is_empty() { self.composite_above(doc, view, encode_srgb, level) } else { None };
+            let split = if blank.is_empty() && !view.is_empty() { self.drag_frame(doc, view, n.level, encode_srgb) } else { None };
             let parts = match split {
                 Some(st) => {
                     r = Ok(st);
@@ -974,6 +993,7 @@ impl GpuCanvas {
                 }
                 None => parts,
             };
+            let drag_ready = split.is_some();
             for (i, p) in parts.into_iter().enumerate() {
                 if i > 0 && now_ms() - t0 >= frame_work_ms() && covered(p, &blank) {
                     later.push(p);
@@ -1003,6 +1023,14 @@ impl GpuCanvas {
                     res.last_passes = stats.passes;
                 });
                 self.note_shown(key, n.visible);
+                // A drag whose cache isn't ready: a piece of it per frame, after the frame's
+                // whole composite, until its frames can come from it.
+                if !drag_ready
+                    && blank.is_empty()
+                    && let Some(ids) = self.moving_of(key)
+                {
+                    self.prepare_drag(doc, &ids, n.visible, n.level, encode_srgb, 0.0);
+                }
             }
             r
         } else {
@@ -2610,12 +2638,15 @@ struct Resources {
     /// The layers a Move drag moves ([`GpuCanvas::set_moving`]; empty without one).
     moving: HashMap<u64, Vec<photocraft_doc::LayerId>>,
     /// The layers above them, cached for the drag (`above`), counted in the canvas budget.
-    above: Option<above::AboveMaps>,
+    drag: Option<above::DragCache>,
     /// Whether the Background (id, surface fingerprint) is opaque everywhere (`above`).
     opaque_bg: Option<(photocraft_doc::LayerId, u64, bool)>,
     apply_bgl: wgpu::BindGroupLayout,
     apply_pipeline: wgpu::RenderPipeline,
     apply_pipeline_high: Option<wgpu::RenderPipeline>,
+    drag_bgl: wgpu::BindGroupLayout,
+    drag_pipeline: wgpu::RenderPipeline,
+    drag_pipeline_high: Option<wgpu::RenderPipeline>,
     /// Passes of the last plan the compositor ran (sizes refinement pieces).
     last_passes: usize,
     encode_bgl: wgpu::BindGroupLayout,
@@ -2641,8 +2672,8 @@ impl Resources {
         }
         self.docs.retain(|k, _| !keys.contains(k));
         self.view_sets.retain(|v| !keys.contains(&v.key));
-        if self.above.as_ref().is_some_and(|m| keys.contains(&m.doc())) {
-            self.above = None;
+        if self.drag.as_ref().is_some_and(|m| keys.contains(&m.doc())) {
+            self.drag = None;
         }
     }
 }
@@ -2901,6 +2932,16 @@ impl Resources {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("pc_above_apply"), bind_group_layouts: &[Some(&apply_bgl)], immediate_size: 0 });
         let apply_pipeline = pipeline(device, "pc_above_apply", &apply_layout, &apply_module, ("vs", "fs"), FORMAT, None);
         let apply_pipeline_high = high.then(|| pipeline(device, "pc_above_apply_16f", &apply_layout, &apply_module, ("vs", "fs"), FORMAT_HIGH, None));
+        let drag_module =
+            device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("pc_drag_frame"), source: wgpu::ShaderSource::Wgsl(above::DRAG_WGSL.into()) });
+        let drag_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pc_drag_frame"),
+            entries: &[unfilterable_at(0), unfilterable_at(1), unfilterable_at(2), unfilterable_at(3), uniform_entry(4, 32, wgpu::ShaderStages::FRAGMENT)],
+        });
+        let drag_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("pc_drag_frame"), bind_group_layouts: &[Some(&drag_bgl)], immediate_size: 0 });
+        let drag_pipeline = pipeline(device, "pc_drag_frame", &drag_layout, &drag_module, ("vs", "fs"), FORMAT, None);
+        let drag_pipeline_high = high.then(|| pipeline(device, "pc_drag_frame_16f", &drag_layout, &drag_module, ("vs", "fs"), FORMAT_HIGH, None));
         let identity_lut = lut_bind_group(device, queue, &lut_bgl, 2, &identity_lut_bytes());
         Self {
             lut_bgl,
@@ -2936,15 +2977,23 @@ impl Resources {
             reduced_at: f64::NEG_INFINITY,
             shown: Default::default(),
             moving: HashMap::new(),
-            above: None,
+            drag: None,
             opaque_bg: None,
             apply_bgl,
             apply_pipeline,
             apply_pipeline_high,
+            drag_bgl,
+            drag_pipeline,
+            drag_pipeline_high,
             last_passes: 1,
             encode_bgl,
             encode_pipeline,
         }
+    }
+
+    /// The pipeline of a drag frame from the cache into a `format` tile (`above`).
+    fn drag_pipeline(&self, format: wgpu::TextureFormat) -> Option<&wgpu::RenderPipeline> {
+        if format == FORMAT_HIGH { self.drag_pipeline_high.as_ref() } else { Some(&self.drag_pipeline) }
     }
 
     /// The pipeline laying a Move drag's cached layers above into a `format` tile (`above`).
@@ -2989,7 +3038,7 @@ impl Resources {
             .map(DocTextures::bytes)
             .fold(0, u64::saturating_add)
             .saturating_add(self.view_set_bytes())
-            .saturating_add(self.above.as_ref().map_or(0, above::AboveMaps::bytes))
+            .saturating_add(self.drag.as_ref().map_or(0, above::DragCache::bytes))
     }
 
     /// Drops the display texture sets of other documents, largest first, until a new set of
@@ -2998,7 +3047,7 @@ impl Resources {
         // A Move drag's cached layers above go first (the drag composites them whole without),
         // then kept view sets.
         if self.canvas_bytes().saturating_add(bytes) > self.canvas_budget {
-            self.above = None;
+            self.drag = None;
         }
         while self.canvas_bytes().saturating_add(bytes) > self.canvas_budget && self.drop_oldest_view_set() > 0 {}
         while self.canvas_bytes().saturating_add(bytes) > self.canvas_budget {
@@ -3011,7 +3060,7 @@ impl Resources {
     /// documents' textures give way.
     fn make_room_beside(&mut self, key: u64, bytes: u64) {
         if self.canvas_bytes().saturating_add(bytes) > self.canvas_budget {
-            self.above = None;
+            self.drag = None;
         }
         while !self.view_sets.is_empty() && self.canvas_bytes().saturating_add(bytes) > self.canvas_budget {
             self.drop_oldest_view_set();

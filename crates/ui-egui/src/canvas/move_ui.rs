@@ -245,6 +245,23 @@ pub(crate) fn drawn_in_place(app: &PhotocraftApp, idx: usize) -> bool {
     app.move_preview.as_ref().is_some_and(|p| p.in_place && p.doc == st.doc.id && p.revision == st.revision && !p.offsets.is_empty())
 }
 
+/// The layers a press of the Move tool on document `idx` would move now: the one under the
+/// pointer with Auto-Select (its rollover target), else the selected ones; none when the press
+/// would float selected pixels.
+pub(crate) fn press_targets(app: &PhotocraftApp, idx: usize) -> Vec<LayerId> {
+    let Some(st) = app.session.documents().get(idx) else { return Vec::new() };
+    if app.session.active_index() != Some(idx) || moves_selected_pixels_with(app, Tool::Move) {
+        return Vec::new();
+    }
+    let picked = app.ui.tool_options.move_auto_select.then_some(app.canvas_hover_layer).flatten();
+    let roots = match picked {
+        Some(id) => vec![id],
+        None => st.selected_layers(),
+    };
+    let ids = photocraft_engine::layer_multi_cmds::move_targets(&st.doc, &roots);
+    ids.into_iter().filter(|id| !st.doc.is_background(*id)).collect()
+}
+
 /// The layers document `idx`'s Move drag moves while its preview shows them moved (the GPU canvas
 /// keeps the layers above them composited for the drag, `gpu_canvas::above`); empty otherwise.
 pub(crate) fn moving_ids(app: &PhotocraftApp, idx: usize) -> Vec<LayerId> {

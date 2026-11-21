@@ -58,6 +58,42 @@ pub(crate) struct Split {
     below_tiles: HashMap<DRect, Buffer>,
     /// The top over opaque black and over opaque white, per tile.
     above_tiles: HashMap<DRect, (Buffer, Buffer)>,
+    /// The one-blit path ([`Blit`]), when the drag can take it.
+    blit: Option<Blit>,
+}
+
+/// A drag whose moving run is one layer that composites as its own image over the rest
+/// ([`photocraft_compose::composites_as_over`]) under an affine top (or none): its frames are 8-bit
+/// blits of images made once, as on the GPU canvas (`gpu_canvas::above`): the moving layer alone
+/// (the sprite), at the offset, over the below's tiles, the top's map laid over that
+/// ([`photocraft_compose::blit`]). No float composite, conversion or allocation but the output.
+struct Blit {
+    /// The sprite's extent (level pixels, at offset 0) and its premultiplied pixels.
+    rect: DRect,
+    px: Vec<[u8; 4]>,
+    /// The below's and the top's tiles in 8 bits, made from the float ones once.
+    below: HashMap<DRect, Vec<[u8; 4]>>,
+    above: HashMap<DRect, (Vec<[u8; 4]>, Vec<[u8; 4]>)>,
+}
+
+/// The largest sprite kept (pixels): past it the drag takes the float path.
+const MAX_SPRITE_PX: u64 = 64 << 20;
+
+impl Blit {
+    /// The sprite of `layer` (in the level's document `d`), or `None` when it is too big.
+    fn new(d: &Document, layer: &Layer) -> Option<Blit> {
+        let all = DRect::new(i32::MIN / 4, i32::MIN / 4, i32::MAX / 4, i32::MAX / 4);
+        let rect = photocraft_compose::change_bounds(layer, all)?;
+        if rect.is_empty() || u64::from(rect.width()) * u64::from(rect.height()) > MAX_SPRITE_PX {
+            return None;
+        }
+        let mut alone = d.clone();
+        alone.layers = vec![layer.clone()];
+        let mut alone = photocraft_engine::layer_multi_cmds::moved(&alone, &[layer.id], -rect.x0, -rect.y0).ok()?;
+        alone.size = photocraft_geom::Size::new(rect.width(), rect.height());
+        let buf = photocraft_compose::render(&alone, alone.bounds());
+        Some(Blit { rect, px: buf.to_premultiplied_rgba8(), below: HashMap::new(), above: HashMap::new() })
+    }
 }
 
 /// A pass-through group whose children composite straight into the backdrop (no opacity, fill,
@@ -188,7 +224,20 @@ impl Split {
         };
         let below = Arc::new(reduce(&part(stack.get(..start)?)));
         let above = (top < stack.len()).then(|| Arc::new(reduce(&part(stack.get(top..).unwrap_or_default()))));
-        Some(Split { key: (plan.doc, plan.revision, plan.ids.clone(), level), middle, below, above, below_tiles: HashMap::new(), above_tiles: HashMap::new() })
+        let blit = (end == start + 1 && top == end)
+            .then(|| stack.get(start))
+            .flatten()
+            .filter(|l| !l.clipped && photocraft_compose::composites_as_over(l, mode))
+            .and_then(|l| middle.0.layers.iter().find(|m| m.id == l.id).and_then(|m| Blit::new(&middle.0, m)));
+        Some(Split {
+            key: (plan.doc, plan.revision, plan.ids.clone(), level),
+            middle,
+            below,
+            above,
+            below_tiles: HashMap::new(),
+            above_tiles: HashMap::new(),
+            blit,
+        })
     }
 
     /// Whether this split is the one for `plan` at `level`.
@@ -205,6 +254,77 @@ impl Split {
         let (d, moving, f) = &self.middle;
         let lv = |v: i32| (f64::from(v) / *f as f64).round() as i32;
         let middle = photocraft_engine::layer_multi_cmds::moved(d, moving, lv(offset.0), lv(offset.1)).ok()?;
+        self.fill(jobs);
+        let backdrops: Vec<Buffer> = jobs.iter().map(|(r, held)| crop(self.below_tiles.get(held), *r)).collect();
+        let mut out = photocraft_compose::render_rects_over(&middle, backdrops);
+        if let Some(above) = &self.above {
+            for (b, (_, held)) in out.iter_mut().zip(jobs) {
+                let applied = self.above_tiles.get(held).is_some_and(|(k, w)| photocraft_compose::apply_affine(b, k, w));
+                if !applied {
+                    // Not opaque here: the top layers composited for real.
+                    if let Some(done) = photocraft_compose::render_rects_over(above, vec![std::mem::replace(b, Buffer::transparent(DRect::EMPTY))]).pop() {
+                        *b = done;
+                    }
+                }
+            }
+        }
+        Some(out)
+    }
+
+    /// [`Split::render`] by the one-blit path, as premultiplied RGBA8 per job: `None` when the
+    /// drag can't take it (or a pixel under the top isn't opaque: the caller renders the frame).
+    pub(crate) fn render_rgba8(&mut self, offset: (i32, i32), jobs: &[(DRect, DRect)]) -> Option<Vec<Vec<[u8; 4]>>> {
+        self.blit.as_ref()?;
+        let f = self.middle.2;
+        let lv = |v: i32| (f64::from(v) / f as f64).round() as i32;
+        let (ox, oy) = (lv(offset.0), lv(offset.1));
+        self.fill(jobs);
+        let blit = self.blit.as_mut()?;
+        let mut out = Vec::with_capacity(jobs.len());
+        for (r, held) in jobs {
+            if !blit.below.contains_key(held) {
+                blit.below.insert(*held, self.below_tiles.get(held)?.to_premultiplied_rgba8());
+            }
+            if self.above.is_some() && !blit.above.contains_key(held) {
+                let (k, w) = self.above_tiles.get(held)?;
+                blit.above.insert(*held, (k.to_premultiplied_rgba8(), w.to_premultiplied_rgba8()));
+            }
+            let below = blit.below.get(held)?;
+            let above = blit.above.get(held).filter(|_| self.above.is_some());
+            let (rw, hw, sw) = (r.width() as usize, held.width() as usize, blit.rect.width() as usize);
+            let mut px = vec![[0u8; 4]; rw * r.height() as usize];
+            // The sprite's columns on this job, at the offset.
+            let (sx0, sx1) = (r.x0.max(blit.rect.x0 + ox), r.x1.min(blit.rect.x1 + ox));
+            for y in r.y0..r.y1 {
+                let o = (y - r.y0) as usize * rw;
+                let h = (y - held.y0) as usize * hw + (r.x0 - held.x0) as usize;
+                let row = px.get_mut(o..o + rw)?;
+                let brow = below.get(h..h + rw)?;
+                row.copy_from_slice(brow);
+                let sy = y - oy;
+                if sx0 < sx1 && sy >= blit.rect.y0 && sy < blit.rect.y1 {
+                    let (a, b) = ((sx0 - r.x0) as usize, (sx1 - r.x0) as usize);
+                    let s = (sy - blit.rect.y0) as usize * sw + (sx0 - ox - blit.rect.x0) as usize;
+                    photocraft_compose::blit::over_row(row.get_mut(a..b)?, brow.get(a..b)?, blit.px.get(s..s + (b - a))?);
+                }
+                if let Some((k, w)) = above
+                    && !photocraft_compose::blit::affine_row(row, k.get(h..h + rw)?, w.get(h..h + rw)?)
+                {
+                    return None;
+                }
+            }
+            out.push(px);
+        }
+        Some(out)
+    }
+
+    /// Whether the tile `held` still has to be made ([`Split::fill`]).
+    pub(crate) fn needs(&self, held: DRect) -> bool {
+        !self.below_tiles.contains_key(&held) || (self.above.is_some() && !self.above_tiles.contains_key(&held))
+    }
+
+    /// The below's (and the top's maps') tiles `jobs` hold, made where missing.
+    pub(crate) fn fill(&mut self, jobs: &[(DRect, DRect)]) {
         let mut held: Vec<DRect> = jobs.iter().map(|(_, h)| *h).collect();
         held.sort_by_key(|r| (r.y0, r.x0, r.y1, r.x1));
         held.dedup();
@@ -225,20 +345,22 @@ impl Split {
                 }
             }
         }
-        let backdrops: Vec<Buffer> = jobs.iter().map(|(r, held)| crop(self.below_tiles.get(held), *r)).collect();
-        let mut out = photocraft_compose::render_rects_over(&middle, backdrops);
-        if let Some(above) = &self.above {
-            for (b, (_, held)) in out.iter_mut().zip(jobs) {
-                let applied = self.above_tiles.get(held).is_some_and(|(k, w)| photocraft_compose::apply_affine(b, k, w));
-                if !applied {
-                    // Not opaque here: the top layers composited for real.
-                    if let Some(done) = photocraft_compose::render_rects_over(above, vec![std::mem::replace(b, Buffer::transparent(DRect::EMPTY))]).pop() {
-                        *b = done;
-                    }
+        // The one-blit path's 8-bit copies, made with them.
+        if let Some(blit) = self.blit.as_mut() {
+            for h in &held {
+                if !blit.below.contains_key(h)
+                    && let Some(b) = self.below_tiles.get(h)
+                {
+                    blit.below.insert(*h, b.to_premultiplied_rgba8());
+                }
+                if self.above.is_some()
+                    && !blit.above.contains_key(h)
+                    && let Some((k, w)) = self.above_tiles.get(h)
+                {
+                    blit.above.insert(*h, (k.to_premultiplied_rgba8(), w.to_premultiplied_rgba8()));
                 }
             }
         }
-        Some(out)
     }
 }
 
@@ -356,6 +478,60 @@ mod tests {
             for (g, w) in got.iter().zip(&want) {
                 let worst = g.px.iter().zip(&w.px).flat_map(|(a, b)| (0..4).map(move |c| (a[c] - b[c]).abs())).fold(0.0f32, f32::max);
                 assert!(worst <= 1.0 / 255.0, "{ids:?}: off by {worst}");
+            }
+        }
+    }
+
+    /// A Normal layer at the bottom of a stack of Normal, Multiply and Screen layers (an effect, a
+    /// mask): its drag takes the one-blit path, and every frame equals the full composite of the
+    /// moved document within 8-bit rounding, at levels 0 and 1, including pixels the layer brings
+    /// in from past the canvas edge.
+    #[test]
+    fn one_blit_frames_match_the_full_composite() {
+        let mut d = Document::with_background("t", Size::new(300, 200), ColorMode::Rgb, SampleType::U8, Color::rgb(1.0, 1.0, 1.0));
+        let fmt = d.pixel_format();
+        let mut photo = Layer::raster("photo", fmt);
+        let s = photo.surface_mut().unwrap();
+        for i in 0..20 {
+            s.fill_rect(DRect::new(-60 + i * 21, -30, -60 + i * 21 + 13, 240), &[0.05 * i as f32, 0.7 - 0.03 * i as f32, 0.4, 0.6 + 0.02 * i as f32]);
+        }
+        photo.opacity = 0.9;
+        let moving = d.insert_above(None, photo);
+        for i in 0..8 {
+            let mut l = Layer::raster(format!("L{i}"), fmt);
+            let x = i * 31 % 200;
+            l.surface_mut().unwrap().fill_rect(DRect::new(x, 10 + i * 17, x + 90, 120 + i * 6), &[0.9 - 0.1 * i as f32, 0.3, 0.1 * i as f32, 0.5]);
+            l.blend = [BlendMode::Normal, BlendMode::Multiply, BlendMode::Screen][i as usize % 3];
+            if i == 3 {
+                l.effects.items = vec![Effect::default_drop_shadow()];
+            }
+            if i == 5 {
+                let mut m = LayerMask::reveal_all();
+                m.surface.fill_rect(DRect::new(0, 0, 120, 200), &[0.25]);
+                l.mask = Some(m);
+            }
+            d.insert_above(None, l);
+        }
+        let base = Arc::new(d);
+        for level in [0u32, 1] {
+            let plan = Plan { base: base.clone(), ids: vec![moving], doc: base.id, revision: 1, offset: (0, 0) };
+            let mut mips = photocraft_compose::mip::MipCache::default();
+            let mut reduce = |doc: &Document| if level == 0 { doc.clone() } else { mips.document(doc, level) };
+            let mut split = Split::new(&plan, level, &mut reduce).expect("splittable");
+            assert!(split.blit.is_some(), "one layer laid over the rest, an affine top: the one-blit path");
+            for (dx, dy) in [(6, 4), (32, -12), (-40, 20)] {
+                let moved = photocraft_engine::layer_multi_cmds::moved(&base, &[moving], dx, dy).unwrap();
+                let f = 1i32 << level;
+                let held = DRect::new(0, 0, 300 / f, 200 / f);
+                let jobs = [(DRect::new(10 / f, 20 / f, 200 / f, 150 / f), held), (held, held)];
+                let got = split.render_rgba8((dx, dy), &jobs).expect("blitted");
+                let full = reduce(&moved);
+                let want = photocraft_compose::render_rects(&full, &jobs.iter().map(|j| j.0).collect::<Vec<_>>());
+                for (g, w) in got.iter().zip(&want) {
+                    let w = w.to_premultiplied_rgba8();
+                    let worst = g.iter().zip(&w).flat_map(|(a, b)| (0..4).map(move |c| a[c].abs_diff(b[c]))).max().unwrap_or(0);
+                    assert!(worst <= 2, "level {level} offset {dx},{dy}: off by {worst}/255");
+                }
             }
         }
     }

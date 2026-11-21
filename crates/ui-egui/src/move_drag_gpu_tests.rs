@@ -48,6 +48,8 @@ enum Page {
     BottomUncached,
     /// The same 16 layers with the dragged one on top.
     Top,
+    /// [`Page::Bottom`] dragged at once, before the drag cache is ready.
+    BottomCold,
 }
 
 fn harness(device: Device) -> Option<Harness> {
@@ -239,8 +241,9 @@ struct Frames {
     gpu_ms: Vec<f64>,
     /// Drag frames drawn from a moved copy rather than in place.
     copied: usize,
-    /// Drag frames with the layers above cached (`gpu_canvas::above`).
+    /// Drag frames drawn from the drag cache (`gpu_canvas::above`), and the first one's index.
     cached: usize,
+    cached_first: usize,
     worst: f64,
     worst_older: f64,
 }
@@ -257,7 +260,7 @@ fn drag(device: Device, page: Page, frames: i32) -> Option<Frames> {
     };
     let big = match page {
         Page::Credits => credits_page(h.state_mut()),
-        Page::Bottom | Page::BottomUncached => bottom_page(h.state_mut(), false),
+        Page::Bottom | Page::BottomUncached | Page::BottomCold => bottom_page(h.state_mut(), false),
         Page::BottomOverlay => bottom_page(h.state_mut(), true),
         Page::Top => stack_page(h.state_mut(), false, true),
     };
@@ -305,6 +308,22 @@ fn drag(device: Device, page: Page, frames: i32) -> Option<Frames> {
         return None;
     }
     eprintln!("{device:?} settled: {} {} px, fallback {:?}", h.state().perf.last_refresh, h.state().perf.last_refresh_px, h.state().perf.gpu_fallback);
+    // The pointer rests on the page with the Move tool a moment: the idle frames make the drag
+    // cache (unless the drag starts at once).
+    if page != Page::BottomCold
+        && let Some(g) = h.state().gpu.clone()
+    {
+        let t = std::time::Instant::now();
+        let mut frames = 0;
+        while !g.drag_ready(doc_id.0) && frames < 400 {
+            h.step();
+            frames += 1;
+        }
+        eprintln!("{device:?} {page:?}: drag cache ready {} after {frames} idle frames, {:.0} ms, {:.1} MB", g.drag_ready(doc_id.0), t.elapsed().as_secs_f64() * 1000.0, g.above_bytes() as f64 / 1048576.0);
+    } else if device == Device::Cpu {
+        // The CPU canvas makes its split ahead in idle frames too.
+        h.run_steps(40);
+    }
     let before = h.state().session.active().expect("doc").doc.clone();
     // Settled: the page as it is.
     let img = render(&mut h);
@@ -320,7 +339,7 @@ fn drag(device: Device, page: Page, frames: i32) -> Option<Frames> {
     h.step();
     h.event(egui::Event::PointerButton { pos: p0, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
     h.step();
-    let mut out = Frames { step_ms: Vec::new(), gpu_ms: Vec::new(), copied: 0, cached: 0, worst: 0.0, worst_older: 1.0 };
+    let mut out = Frames { step_ms: Vec::new(), gpu_ms: Vec::new(), copied: 0, cached: 0, cached_first: 0, worst: 0.0, worst_older: 1.0 };
     let mut last = (0, 0);
     for i in 1..=frames {
         let (dx, dy) = (-(i * 23), -(i * 9));
@@ -331,6 +350,7 @@ fn drag(device: Device, page: Page, frames: i32) -> Option<Frames> {
         // The frame that takes the pointer event shows the layer there (the canvas paints after
         // the Move tool's events), and so does the next one, with no event.
         for k in 0..2 {
+            let cache_frames = crate::gpu_canvas::drag_frames();
             crate::perf_span::begin_frame();
             let t = std::time::Instant::now();
             h.step();
@@ -350,7 +370,11 @@ fn drag(device: Device, page: Page, frames: i32) -> Option<Frames> {
                 if !crate::move_ui::drawn_in_place(h.state(), 0) {
                     out.copied += 1;
                 }
-                if h.state().gpu.as_ref().is_some_and(|g| g.above_bytes() > 0) {
+                let (sprite, layered) = crate::gpu_canvas::drag_frames();
+                if (sprite, layered) != cache_frames {
+                    if out.cached == 0 {
+                        out.cached_first = i as usize;
+                    }
                     out.cached += 1;
                 }
             }
@@ -375,9 +399,6 @@ fn drag(device: Device, page: Page, frames: i32) -> Option<Frames> {
     h.run_steps(4);
     crate::gpu_canvas::set_frame_work_ms(None);
     crate::gpu_canvas::set_above_cache(true);
-    if let Some(g) = h.state().gpu.as_ref() {
-        assert_eq!(g.above_bytes(), 0, "{device:?} {page:?}: the drag's cached layers above go with it");
-    }
     let after = h.state().session.active().expect("doc").doc.clone();
     let moved = after.layer(big).and_then(|l| l.surface()).map(|s| s.content_bounds());
     let was = before.layer(big).and_then(|l| l.surface()).map(|s| s.content_bounds());
@@ -407,15 +428,21 @@ fn median(v: &[f64]) -> f64 {
 }
 
 fn check(device: Device, page: Page) {
-    let Some(f) = drag(device, page, 10) else { return };
+    let frames = if page == Page::BottomCold { 40 } else { 10 };
+    let Some(f) = drag(device, page, frames) else { return };
     if device != Device::Cpu {
         // The moving layer is drawn from its resident pages at the offset: no moved copy of its
         // pixels (nor anything rendered again) per frame.
         assert_eq!(f.copied, 0, "{device:?} {page:?}: drag frames drawn from a moved copy");
         match page {
-            Page::Bottom => assert_eq!(f.cached, 10, "{device:?}: every drag frame lays the layers above from the maps"),
+            Page::Bottom | Page::Credits | Page::Top => assert_eq!(f.cached, 10, "{device:?} {page:?}: every drag frame comes from the cache made ahead"),
             Page::BottomOverlay | Page::BottomUncached => assert_eq!(f.cached, 0, "{device:?} {page:?}: composited whole"),
-            Page::Credits | Page::Top => assert_eq!(f.cached, 0, "nothing above the dragged layer but an empty group"),
+            Page::BottomCold => assert!(
+                f.cached > 0 && f.cached < frames as usize && f.cached_first > 1,
+                "{device:?}: whole frames until the cache is ready ({} of {frames} from it, first at {})",
+                f.cached,
+                f.cached_first
+            ),
         }
     }
     assert!(
@@ -474,6 +501,16 @@ fn a_bottom_layer_drag_under_an_overlay_layer_composites_the_layers_above_whole(
 #[test]
 fn a_top_layer_drag_shows_every_frame_at_its_offset() {
     check(Device::Gpu, Page::Top);
+}
+
+#[test]
+fn a_bottom_layer_drag_before_the_cache_is_ready_draws_whole_frames_then_switches() {
+    check(Device::Gpu, Page::BottomCold);
+}
+
+#[test]
+fn a_top_layer_drag_with_4_gb_of_memory_shows_every_frame_at_its_offset() {
+    check(Device::LowMemoryGpu, Page::Top);
 }
 
 /// The same drag with the cache turned off: the measure to compare with (and the frames still
