@@ -879,6 +879,8 @@ mod doc_switch_tests;
 #[cfg(test)]
 mod move_drag_gpu_tests;
 #[cfg(test)]
+mod move_repeat_tests;
+#[cfg(test)]
 mod navigator_gpu_tests;
 #[cfg(test)]
 mod type_drag_gpu_tests;

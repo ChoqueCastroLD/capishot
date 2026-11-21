@@ -36,9 +36,11 @@ pub use photocraft_gpu::{DeviceHealth, Fault};
 
 mod above;
 mod pages;
+mod timing;
 mod view_sets;
 
-pub use above::{DragMode, drag_frames, set_above_cache};
+pub(crate) use above::moves_with_layer;
+pub use above::{DragMode, drag_frames, drag_gpu_ms, set_above_cache};
 pub use view_sets::{MAX_VIEW_SETS, ViewSwitch, same_but_visibility, same_pixels, visibility_only};
 
 /// Default tile side; documents up to this size (and the device limit) use a single texture.
@@ -458,20 +460,52 @@ impl GpuCanvas {
 
     /// The layers a Move drag moves (`move_ui`; empty without a drag): its frames come from the
     /// drag cache when it is ready for them (`above`).
-    pub fn set_moving(&self, key: u64, ids: Vec<photocraft_doc::LayerId>) {
+    pub fn set_moving(&self, key: u64, ids: Vec<photocraft_doc::LayerId>, offset: (i32, i32)) {
         let mut r = self.rs.renderer.write();
         let Some(res) = r.callback_resources.canvas_mut(self.id) else { return };
         if ids.is_empty() {
-            res.moving.remove(&key);
-        } else if res.moving.get(&key) != Some(&ids) {
-            res.moving.insert(key, ids);
+            // The drag ended: its last offset is what the release moved the layers by (the
+            // cache is rebased on it, `GpuCanvas::refresh_for`), and the next frames are still
+            // interactive (the release frame, a drag that follows at once).
+            if let Some((ids, offset)) = res.moving.remove(&key) {
+                res.released = Some((key, ids, offset));
+                res.interactive.insert(key, now_ms() + INTERACTIVE_MS);
+            }
+        } else {
+            res.interactive.insert(key, now_ms() + INTERACTIVE_MS);
+            res.moving.insert(key, (ids, offset));
         }
     }
 
-    /// The layers a Move drag on document `key` moves ([`GpuCanvas::set_moving`]).
-    fn moving_of(&self, key: u64) -> Option<Vec<photocraft_doc::LayerId>> {
+    /// The layers a Move drag on document `key` moves and its offset ([`GpuCanvas::set_moving`]).
+    fn moving_of(&self, key: u64) -> Option<(Vec<photocraft_doc::LayerId>, (i32, i32))> {
         let r = self.rs.renderer.read();
         r.callback_resources.canvas(self.id).and_then(|res| res.moving.get(&key).cloned())
+    }
+
+    /// Whether the drag cache is ready for `ids` moving on `doc` as it is (the Move preview can
+    /// then show the document unmoved and let the cache shift them: `move_ui::display_doc`).
+    pub fn drag_ready_for(&self, doc: &photocraft_doc::Document, ids: &[photocraft_doc::LayerId]) -> bool {
+        let r = self.rs.renderer.read();
+        r.callback_resources.canvas(self.id).is_some_and(|res| res.drag.as_ref().is_some_and(|c| c.ready_for(doc, ids)))
+    }
+
+    /// The level of detail an interactive frame of document `key` composites `px` pixels (at
+    /// `level`) at, so it takes about [`INTERACTIVE_FRAME_MS`] at the rate the last composites
+    /// took: a coarser level (a lower-resolution preview the refinement brings back to full size
+    /// once the edits pause) rather than a frame that holds the drag. `level` outside one.
+    fn interactive_level(&self, key: u64, px: u64, level: u32) -> u32 {
+        let r = self.rs.renderer.read();
+        let Some(res) = r.callback_resources.canvas(self.id) else { return level };
+        let live = res.interactive.get(&key).is_some_and(|until| now_ms() < *until);
+        if !live || res.cost_rate <= 0.0 {
+            return level;
+        }
+        let mut l = level;
+        while l < level + MAX_INTERACTIVE_BOOST && l < photocraft_gpu::MAX_LOD && res.cost_rate * (px >> (2 * (l - level))) as f64 > INTERACTIVE_FRAME_MS {
+            l += 1;
+        }
+        l
     }
 
     /// GPU bytes of the drag cache (tests and diagnostics).
@@ -890,6 +924,7 @@ impl GpuCanvas {
             None => result,
         };
         if result.is_ok() {
+            let _s = crate::perf_span::span("canvas.mips");
             d.regenerate_mips_from(device, queue, res, [region.x0 as u32, region.y0 as u32, region.x1 as u32, region.y1 as u32], level);
             self.pace.submitted(queue);
             if std::env::var_os("PHOTOCRAFT_GPU_SYNC").is_some() {
@@ -984,16 +1019,43 @@ impl GpuCanvas {
             // over from maps made once for the drag (`above`); the margin around the view waits
             // for it (it shows nothing yet). Else (or when it can't) composited whole.
             let view = now.intersect(&n.visible);
-            let split = if blank.is_empty() && !view.is_empty() { self.drag_frame(doc, view, n.level, encode_srgb) } else { None };
+            let moving = self.moving_of(key);
+            let split = if !blank.is_empty() || view.is_empty() {
+                None
+            } else if let Some((ids, offset)) = &moving {
+                self.drag_frame(doc, view, n.level, encode_srgb, ids, *offset)
+            } else {
+                self.release_frame(doc, view, n.level, encode_srgb)
+            };
+            // An interactive frame the cache can't draw (a drag started before it was ready, the
+            // frame after a release): what the view shows, at a level coarse enough to keep the
+            // frame short (a lower-resolution preview, refined to full size once edits pause),
+            // never a frame that holds the drag.
+            let boosted = if split.is_none() && blank.is_empty() && !view.is_empty() {
+                self.interactive_level(key, area(view) >> (2 * level), level)
+            } else {
+                level
+            };
+            let interactive = boosted != level || moving.is_some();
+            let level = boosted;
+            if let Ok(st) = &mut r {
+                st.level = level;
+            }
             let parts = match split {
                 Some(st) => {
+                    out.kind = DRAG_CACHE_KIND;
                     r = Ok(st);
                     later.extend(subtract(now, view));
                     Vec::new()
                 }
+                None if interactive => {
+                    later.extend(subtract(now, view));
+                    vec![view]
+                }
                 None => parts,
             };
             let drag_ready = split.is_some();
+            let composing = now_ms();
             for (i, p) in parts.into_iter().enumerate() {
                 if i > 0 && now_ms() - t0 >= frame_work_ms() && covered(p, &blank) {
                     later.push(p);
@@ -1012,6 +1074,7 @@ impl GpuCanvas {
                 }
             }
             if let Ok(stats) = &r {
+                let took = now_ms() - composing;
                 self.with_doc(key, |res, d| {
                     let mut stale = d.stale();
                     for p in &later {
@@ -1021,15 +1084,28 @@ impl GpuCanvas {
                         res.reduced_at = now_ms();
                     }
                     res.last_passes = stats.passes;
+                    // What compositing costs here (the interactive frames' level, above).
+                    if !drag_ready && stats.pixels > 0 {
+                        let rate = took / stats.pixels as f64;
+                        res.cost_rate = if res.cost_rate > 0.0 { res.cost_rate * 0.6 + rate * 0.4 } else { rate };
+                    }
                 });
                 self.note_shown(key, n.visible);
-                // A drag whose cache isn't ready: a piece of it per frame, after the frame's
-                // whole composite, until its frames can come from it.
+                // A drag whose cache isn't ready: what the frame has left of its budget goes to
+                // the cache's pieces, until its frames can come from it.
                 if !drag_ready
                     && blank.is_empty()
-                    && let Some(ids) = self.moving_of(key)
+                    && let Some((ids, _)) = &moving
                 {
-                    self.prepare_drag(doc, &ids, n.visible, n.level, encode_srgb, 0.0);
+                    // What is left of the frame's budget; on a device too slow to leave any, the
+                    // smallest piece every few frames, so the drag still gets to its cache.
+                    let cold = self.with_doc(key, |res, _| {
+                        res.cold_frames = res.cold_frames.wrapping_add(1);
+                        res.cold_frames
+                    });
+                    let left = INTERACTIVE_BUDGET_MS - (now_ms() - t0);
+                    let budget = if left <= 0.0 && cold.is_some_and(|c| c % COLD_PIECE_EVERY == 0) { f64::MIN_POSITIVE } else { left };
+                    self.prepare_drag(doc, ids, n.visible, n.level, encode_srgb, budget);
                 }
             }
             r
@@ -1038,7 +1114,9 @@ impl GpuCanvas {
         };
         match gpu {
             Ok(stats) => {
-                out.kind = if damage.is_some() { "gpu-rect" } else { "gpu-full" };
+                if out.kind != DRAG_CACHE_KIND {
+                    out.kind = if damage.is_some() { "gpu-rect" } else { "gpu-full" };
+                }
                 out.px = stats.pixels;
                 out.level = stats.level;
                 out.composite_ms = now_ms() - t0;
@@ -1183,7 +1261,14 @@ impl GpuCanvas {
         }
         let bounds = doc.bounds();
         let near = if need.focus { need.visible.intersect(&bounds) } else { near_view(need.visible, bounds) };
-        let Some((urgent, reduced_at, passes)) = self.with_doc(key, |res, d| (d.stale().needed(near, need.level), res.reduced_at, res.last_passes)) else {
+        // While a drag goes on (and just after), a lower-resolution preview is what the view
+        // should show: only what nothing is drawn for is urgent, not the preview's full size
+        // (that is the refinement's, once the edits pause).
+        let Some((urgent, reduced_at, passes, cost_rate)) = self.with_doc(key, |res, d| {
+            let live = res.interactive.get(&key).is_some_and(|until| now_ms() < *until);
+            let level = if live { need.level.max(photocraft_gpu::MAX_LOD) } else { need.level };
+            (d.stale().needed(near, level), res.reduced_at, res.last_passes, res.cost_rate)
+        }) else {
             return out;
         };
         let encode_srgb = display.is_some_and(|d| d.encode_srgb);
@@ -1254,7 +1339,11 @@ impl GpuCanvas {
         let max = if self.rs.adapter.get_info().backend == wgpu::Backend::Gl { REFINE_WORK / 4 } else { REFINE_WORK * 16 };
         let (busy, work) = self.refine.next_work(max);
         if idle && wait <= 0.0 && !busy {
-            let budget = (work / passes.max(1) as u64).max(128 * 128);
+            // Not past what one frame composites at the rate measured here either (the pacer
+            // sizes pieces from the GPU's completion, which a software adapter or a CPU-bound
+            // frame doesn't reflect).
+            let cap = if cost_rate > 0.0 { (INTERACTIVE_FRAME_MS / cost_rate) as u64 } else { u64::MAX };
+            let budget = (work / passes.max(1) as u64).min(cap).max(128 * 128);
             if let Some(piece) = self.with_doc(key, |_, d| d.stale().next_piece(need.visible, budget)).flatten() {
                 self.rs.queue.on_submitted_work_done(self.refine.before());
                 match self.composite_lod_with(doc, piece, encode_srgb, 0, true, false) {
@@ -1717,7 +1806,9 @@ pub fn use_adapter_limits_with(setup: &mut egui_wgpu::WgpuSetup, on_adapter: imp
     if let egui_wgpu::WgpuSetup::CreateNew(create) = setup {
         create.device_descriptor = std::sync::Arc::new(move |adapter| {
             on_adapter(adapter);
-            wgpu::DeviceDescriptor { label: Some("photocraft wgpu device"), required_limits: device_limits(adapter), ..Default::default() }
+            // Timestamp queries where the adapter has them: the drag cache's GPU time (`timing`).
+            let required_features = adapter.features() & wgpu::Features::TIMESTAMP_QUERY;
+            wgpu::DeviceDescriptor { label: Some("photocraft wgpu device"), required_features, required_limits: device_limits(adapter), ..Default::default() }
         });
     }
 }
@@ -1785,6 +1876,9 @@ pub struct Perf {
     pub last_refresh: &'static str,
     /// Pixels in the last refresh.
     pub last_refresh_px: u64,
+    /// Mip level the last GPU refresh composited at (0: full size; an interactive frame's
+    /// lower-resolution preview above).
+    pub last_refresh_level: u32,
     /// Whether the GPU canvas path is active.
     pub gpu: bool,
     /// Layer tiles uploaded by the last GPU composite.
@@ -2168,6 +2262,26 @@ pub const REFINE_WORK: u64 = 2 << 20;
 /// redo work the next frame replaces.
 pub const REFINE_DELAY_MS: f64 = 120.0;
 
+/// [`Refresh::kind`] of a frame drawn from the drag cache (`above`).
+pub const DRAG_CACHE_KIND: &str = "gpu-drag-cache";
+
+/// How long a document's frames stay interactive after a Move drag event (milliseconds).
+const INTERACTIVE_MS: f64 = 400.0;
+
+/// The work an interactive frame aims at (milliseconds of compositing).
+const INTERACTIVE_FRAME_MS: f64 = 12.0;
+
+/// The most levels an interactive frame goes coarser than the view's: two, where the
+/// compositor's reduction is still an exact box filter (`photocraft_gpu::Compositor::render_lod`;
+/// coarser ones subsample, which aliases fine detail).
+const MAX_INTERACTIVE_BOOST: u32 = 2;
+
+/// On a device whose drag frames leave no budget for the cache: a piece every this many frames.
+const COLD_PIECE_EVERY: u32 = 4;
+
+/// The longest an interactive frame may take with the drag cache's pieces (milliseconds).
+const INTERACTIVE_BUDGET_MS: f64 = 24.0;
+
 /// Canvas pixels times visible drawing layers above which a new document's first frame on the
 /// CPU compositor is drawn in pieces ([`GpuCanvas::cpu_first`]): about four full layers of a
 /// 12 MP page. Below it the whole page is composited in that frame, as before.
@@ -2263,6 +2377,9 @@ pub(crate) struct Stale {
     /// fills from blank in pieces (Capikoma request 19) while no frame ever shows a part of the
     /// view at an older state of the document than the rest.
     blank: Vec<photocraft_geom::Rect>,
+    /// Parts drawn current but approximately (a drag's release drawn from its cache): the view
+    /// shows them as they are, and the refinement composites them exactly once the edits pause.
+    approx: Vec<photocraft_geom::Rect>,
 }
 
 impl Stale {
@@ -2272,6 +2389,13 @@ impl Stale {
     pub(crate) fn mark(&mut self, r: photocraft_geom::Rect, level: u32) {
         if r.is_empty() {
             return;
+        }
+        if level == 0 && !self.approx.is_empty() {
+            self.approx = self.approx.iter().flat_map(|a| subtract(*a, r)).collect();
+            if self.approx.len() > Self::MAX_REGIONS {
+                let all = self.approx.iter().copied().reduce(|a, b| a.union(&b)).unwrap_or(r);
+                self.approx = vec![all];
+            }
         }
         if level != u32::MAX && !self.blank.is_empty() {
             self.blank = self.blank.iter().flat_map(|b| subtract(*b, r)).collect();
@@ -2314,7 +2438,15 @@ impl Stale {
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.regions.is_empty()
+        self.regions.is_empty() && self.approx.is_empty()
+    }
+
+    /// `r` is current but approximate ([`Stale::approx`]).
+    pub(crate) fn approx(&mut self, r: photocraft_geom::Rect) {
+        if !r.is_empty() {
+            self.approx.retain(|a| !r.contains_rect(a));
+            self.approx.push(r);
+        }
     }
 
     /// The finest level current everywhere in `area`, ignoring deferred regions.
@@ -2330,7 +2462,9 @@ impl Stale {
     /// The next piece to bring to full size: of a region the view shows first, at most about
     /// `px` pixels (whole rows).
     pub(crate) fn next_piece(&self, visible: photocraft_geom::Rect, px: u64) -> Option<photocraft_geom::Rect> {
-        let r = self.regions.iter().map(|e| e.0).max_by_key(|r| (!r.intersect(&visible).is_empty(), std::cmp::Reverse(r.y0)))?;
+        // Regions out of date first, then the approximate ones.
+        let pick = |rs: &mut dyn Iterator<Item = photocraft_geom::Rect>| rs.max_by_key(|r| (!r.intersect(&visible).is_empty(), std::cmp::Reverse(r.y0)));
+        let r = pick(&mut self.regions.iter().map(|e| e.0)).or_else(|| pick(&mut self.approx.iter().copied()))?;
         let r = if r.intersect(&visible).is_empty() { r } else { r.intersect(&visible) };
         // At least 16 rows, at most the region's (clamp would panic on a region under 16 rows).
         let rows = (px / u64::from(r.width().max(1))).max(16).min(u64::from(r.height()).max(1)) as i32;
@@ -2636,7 +2770,20 @@ struct Resources {
     /// left with blank parts ([`Stale::blank`]).
     shown: std::collections::HashSet<u64>,
     /// The layers a Move drag moves ([`GpuCanvas::set_moving`]; empty without one).
-    moving: HashMap<u64, Vec<photocraft_doc::LayerId>>,
+    moving: HashMap<u64, (Vec<photocraft_doc::LayerId>, (i32, i32))>,
+    /// The last drag that ended: document, layers and the offset it moved them by.
+    released: Option<(u64, Vec<photocraft_doc::LayerId>, (i32, i32))>,
+    /// Until when a document's frames are interactive ([`now_ms`]): a drag and the frames
+    /// just after it, composited at a coarser level when the full one wouldn't fit the frame.
+    interactive: HashMap<u64, f64>,
+    /// Milliseconds per pixel the last composites of a refresh took (0: none yet).
+    cost_rate: f64,
+    /// The same for the drag cache's pieces (`above`), the slower of their CPU and GPU times.
+    piece_rate: f64,
+    /// Drag frames drawn whole (no cache ready) so far.
+    cold_frames: u32,
+    /// The GPU's milliseconds per pixel of the last piece (submission to completion; f64 bits).
+    piece_gpu_rate: std::sync::Arc<std::sync::atomic::AtomicU64>,
     /// The layers above them, cached for the drag (`above`), counted in the canvas budget.
     drag: Option<above::DragCache>,
     /// Whether the Background (id, surface fingerprint) is opaque everywhere (`above`).
@@ -2645,6 +2792,8 @@ struct Resources {
     apply_pipeline: wgpu::RenderPipeline,
     apply_pipeline_high: Option<wgpu::RenderPipeline>,
     drag_bgl: wgpu::BindGroupLayout,
+    /// GPU time of drag frames (timestamp queries, where the device has them).
+    timer: Option<timing::GpuTimer>,
     drag_pipeline: wgpu::RenderPipeline,
     drag_pipeline_high: Option<wgpu::RenderPipeline>,
     /// Passes of the last plan the compositor ran (sizes refinement pieces).
@@ -2936,7 +3085,7 @@ impl Resources {
             device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("pc_drag_frame"), source: wgpu::ShaderSource::Wgsl(above::DRAG_WGSL.into()) });
         let drag_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("pc_drag_frame"),
-            entries: &[unfilterable_at(0), unfilterable_at(1), unfilterable_at(2), unfilterable_at(3), uniform_entry(4, 32, wgpu::ShaderStages::FRAGMENT)],
+            entries: &[unfilterable_at(0), unfilterable_at(1), unfilterable_at(2), unfilterable_at(3), unfilterable_at(4), uniform_entry(5, 32, wgpu::ShaderStages::FRAGMENT)],
         });
         let drag_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("pc_drag_frame"), bind_group_layouts: &[Some(&drag_bgl)], immediate_size: 0 });
@@ -2977,12 +3126,19 @@ impl Resources {
             reduced_at: f64::NEG_INFINITY,
             shown: Default::default(),
             moving: HashMap::new(),
+            released: None,
+            interactive: HashMap::new(),
+            cost_rate: 0.0,
+            piece_rate: 0.0,
+            cold_frames: 0,
+            piece_gpu_rate: Default::default(),
             drag: None,
             opaque_bg: None,
             apply_bgl,
             apply_pipeline,
             apply_pipeline_high,
             drag_bgl,
+            timer: timing::GpuTimer::new(device, queue),
             drag_pipeline,
             drag_pipeline_high,
             last_passes: 1,

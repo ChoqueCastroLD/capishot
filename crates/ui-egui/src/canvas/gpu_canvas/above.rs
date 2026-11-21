@@ -4,34 +4,45 @@
 //! So, as Photoshop, Affinity or Krita do, the canvas keeps what doesn't move as images made once:
 //!
 //! - **below**: the layers under the moving ones, composited (the view's part, at its level);
-//! - **sprite**: the moving layer (or group) composited alone, over its whole extent (also past
-//!   the canvas edges: a drag brings those pixels into view), at the same level;
+//! - **sprite**: the moving run (the layer or group, with its effects and clipped layers)
+//!   composited alone, over its whole extent (also past the canvas edges: a drag brings those
+//!   pixels into view), at the same level. A run that composites as its own image laid over the
+//!   rest ([`photocraft_compose::composites_as_over`]) is one image; any other that changes an
+//!   opaque backdrop affinely (layer effects, type, a blend mode, clipped layers: Outer Glow,
+//!   Gradient Overlay, Stroke, Drop Shadow...) is kept as its composite over opaque black and
+//!   over opaque white, laid over the below as the above is;
 //! - **above**: the layers over the moving ones composited over opaque black (`k`) and over opaque
 //!   white (`w`). For layers that change an opaque backdrop affinely
 //!   ([`photocraft_compose::composites_affinely`]: Normal, Multiply and Screen layers, their
 //!   effects, masks, clipping and groups) a pixel `c` under them comes out as `k + (w - k) * c`,
 //!   as on the CPU canvas (`move_cpu`).
 //!
-//! A drag frame is then one draw per display tile: the sprite at the offset over the below, the
-//! above laid over that ([`DRAG_WGSL`]); no plan, no layer pages, no allocations but the frame's
-//! command buffer. Those images are made ahead, off the drag's frames: while the Move tool is
-//! current and the canvas is idle, for the layer a press would move (the one under the pointer
-//! with Auto-Select, else the selected ones), a piece at a time within the frame's budget
-//! ([`GpuCanvas::prepare_drag`]). A drag that starts before they are ready draws its frames whole,
-//! as before (never partly), and switches to the images once they are.
+//! The run's effects, smart filters and type are thus drawn once per drag, not per frame: what
+//! only moves is shifted (`moves_with_layer`: effects that follow the layer). A drag frame is one
+//! draw per display tile ([`DRAG_WGSL`]); no plan, no layer pages, no allocations but the frame's
+//! command buffer, and the Move preview is the document as it is (no moved copy per frame).
+//! Those images are made ahead, off the drag's frames: while the Move tool is current and the
+//! canvas is idle, for the layer a press would move (the one under the pointer with Auto-Select,
+//! else the selected ones), pieces sized to what is left of the frame's budget
+//! ([`GpuCanvas::prepare_drag`]). When a drag ends the cache is rebased on the moved document
+//! ([`GpuCanvas::rebase_drag`]): the release frame and a drag of the same layers again come from
+//! it at once, and the refinement composites the release's region exactly once the edits pause.
+//! A drag that starts before its images are ready draws its frames whole at a level coarse enough
+//! to stay short (a lower-resolution preview, never a partial frame) with the rest of its budget
+//! going to the images, and switches to them once they are.
 //!
-//! When the moving unit doesn't composite as its own image laid over the rest
-//! ([`photocraft_compose::composites_as_over`]: a blend mode, clipped layers, effects...), only
-//! the above is kept: the frame composites the layers up to the moving ones and lays it over
-//! (`layered`). Where neither can be exact the frame is composited whole every time:
+//! When the run is composited every frame instead (it doesn't look the same wherever it goes, or
+//! its blend isn't affine) only the above is kept: the frame composites the layers up to the
+//! moving ones, the run drawn in place, and lays it over (`layered`). Where neither can be exact
+//! the frame is composited whole:
 //!
-//! - a layer above that doesn't composite affinely (Overlay, Difference, adjustments, Blend If,
-//!   knockout, Bevel and Emboss...);
-//! - with layers above, what lies under them might not be opaque everywhere (no opaque Background
-//!   under the moving layers, a knockout): over a transparent pixel they composite differently;
+//! - a layer above (or in the run, without the layered path) that doesn't composite affinely
+//!   (Overlay, Difference, adjustments, Blend If, knockout, Bevel and Emboss...);
+//! - what lies under them might not be opaque everywhere (no opaque Background under the moving
+//!   layers, a knockout): over a transparent pixel they composite differently;
 //! - Lab, CMYK, multichannel or 32-bit documents, spot channels, artboards, linear documents the
-//!   canvas stores sRGB-encoded; a moving layer not drawn in place (a shape or a layer with
-//!   effects: its moved copy changes every frame);
+//!   canvas stores sRGB-encoded; effects anchored to the canvas (a Gradient Overlay not aligned
+//!   with the layer, a pattern not linked to it) or a fill layer in the run;
 //! - the images don't fit the canvas budget or a texture side.
 //!
 //! The images are at the view's level of detail (screen resolution, not the document's), counted
@@ -56,6 +67,9 @@ pub(super) struct Map {
 enum Kind {
     Below,
     Sprite,
+    /// The moving run over opaque black and over opaque white ([`DragMode::Affine`]).
+    SpriteBlack,
+    SpriteWhite,
     Black,
     White,
 }
@@ -65,6 +79,10 @@ enum Kind {
 pub enum DragMode {
     /// One draw: sprite over below, the above laid over.
     Sprite,
+    /// One draw: the moving run kept as its composite over black and over white (layers with
+    /// effects, type, clipped layers: anything that changes an opaque backdrop affinely) laid over
+    /// the below as the above is, `k + (w - k) * c`.
+    Affine,
     /// The layers up to the moving ones composited, the above laid over.
     Layered,
 }
@@ -88,6 +106,8 @@ pub(super) struct DragCache {
     sprite_at: (i32, i32),
     below: Option<Map>,
     sprite: Option<Map>,
+    sprite_black: Option<Map>,
+    sprite_white: Option<Map>,
     black: Option<Map>,
     white: Option<Map>,
     /// The layered mode's per-frame composite.
@@ -106,7 +126,7 @@ impl DragCache {
 
     pub(super) fn bytes(&self) -> u64 {
         let b = texel_bytes(self.format);
-        [&self.below, &self.sprite, &self.black, &self.white, &self.lower].iter().filter_map(|m| m.as_ref()).map(|m| area(m.rect) * b).fold(0, u64::saturating_add)
+        [&self.below, &self.sprite, &self.sprite_black, &self.sprite_white, &self.black, &self.white, &self.lower].iter().filter_map(|m| m.as_ref()).map(|m| area(m.rect) * b).fold(0, u64::saturating_add)
     }
 
     fn ready(&self) -> bool {
@@ -115,6 +135,11 @@ impl DragCache {
 
     pub(super) fn is_ready(&self) -> bool {
         self.ready()
+    }
+
+    /// Ready for `ids` moving on `doc` as it is (whatever the view).
+    pub(super) fn ready_for(&self, doc: &Document, ids: &[LayerId]) -> bool {
+        self.ready() && self.doc == doc.id.0 && self.ids == ids && self.layers == doc.layers
     }
 
     /// Whether the images show `doc` (with `ids` moving) for a view of `view` at `level`.
@@ -131,25 +156,36 @@ impl DragCache {
         match k {
             Kind::Below => self.below.as_ref(),
             Kind::Sprite => self.sprite.as_ref(),
+            Kind::SpriteBlack => self.sprite_black.as_ref(),
+            Kind::SpriteWhite => self.sprite_white.as_ref(),
             Kind::Black => self.black.as_ref(),
             Kind::White => self.white.as_ref(),
         }
     }
 
-    /// The document `k`'s map composites (its own id, so the document's lower-stack cache is
-    /// left alone).
+    /// The document `k`'s map composites. Its id is its own, derived from the document's and
+    /// the same every time: the layers it shares with the document keep their pages and effect
+    /// maps in the compositor (they are the same layers), and nothing is forgotten when it is
+    /// done. A fresh id per build, forgotten after, dropped the shared layers' pages and effect
+    /// maps with it, so every build uploaded every layer and drew every effect again (the
+    /// 216-310 ms `gpu.composite_above` freezes of 0.13.30 on an RX 570).
     fn source(&self, k: Kind, doc: &Document) -> Option<Document> {
         let mut d = doc.clone();
-        d.id = photocraft_doc::DocId::fresh();
+        d.id = photocraft_doc::DocId(doc.id.0 ^ (0x9e37_79b9_7f4a_7c15u64.wrapping_mul(k as u64 + 1)));
         match k {
             Kind::Below => d.layers.truncate(self.root),
-            Kind::Sprite => {
+            Kind::Sprite | Kind::SpriteBlack | Kind::SpriteWhite => {
                 d.layers = doc.layers.get(self.root..self.top)?.to_vec();
-                let rect = self.sprite.as_ref()?.rect;
+                let rect = self.map(k)?.rect;
                 let (x, y) = self.sprite_at;
                 let roots: Vec<LayerId> = d.layers.iter().map(|l| l.id).collect();
                 d = photocraft_engine::layer_multi_cmds::moved(&d, &roots, -x, -y).ok()?;
                 d.size = photocraft_geom::Size::new((rect.width() << self.level).max(1), (rect.height() << self.level).max(1));
+                if k != Kind::Sprite {
+                    let v = if k == Kind::SpriteBlack { 0.0 } else { 1.0 };
+                    let backdrop = Layer::new("backdrop", photocraft_doc::LayerContent::Fill(photocraft_doc::Fill::Solid(photocraft_color::Color::rgb(v, v, v))));
+                    d.layers.insert(0, backdrop);
+                }
             }
             Kind::Black | Kind::White => {
                 let v = if k == Kind::Black { 0.0 } else { 1.0 };
@@ -171,6 +207,25 @@ fn shell_of(doc: &Document) -> Document {
 
 fn knockout_free(layers: &[Layer], depth: usize) -> bool {
     depth < 64 && layers.iter().all(|l| l.advanced.knockout == photocraft_doc::Knockout::None && l.children().is_none_or(|c| knockout_free(c, depth + 1)))
+}
+
+/// Whether `l` looks the same wherever it is moved (only shifted): its effects follow it (a
+/// Gradient Overlay or gradient Stroke aligned with the layer, a pattern linked to it), and it is
+/// no fill layer (those fill a frame of the canvas).
+pub(crate) fn moves_with_layer(l: &Layer, depth: usize) -> bool {
+    use photocraft_doc::{Effect, FxPaint, LayerContent};
+    let gradient_ok = |p: &FxPaint| match p {
+        FxPaint::Color(_) => true,
+        FxPaint::Gradient(g) => g.align,
+        FxPaint::Pattern { .. } => false,
+    };
+    let fx_ok = l.effects.items.iter().filter(|e| e.enabled()).all(|e| match e {
+        Effect::GradientOverlay { gradient, .. } => gradient.align,
+        Effect::PatternOverlay { link, .. } => *link,
+        Effect::Stroke(s) => gradient_ok(&s.paint),
+        _ => true,
+    });
+    depth < 64 && fx_ok && !matches!(l.content, LayerContent::Fill(_)) && l.children().is_none_or(|c| c.iter().all(|k| moves_with_layer(k, depth + 1)))
 }
 
 fn draws(l: &Layer, depth: usize) -> bool {
@@ -234,8 +289,11 @@ fn bands(r: Rect, px: u64) -> Vec<Rect> {
     out
 }
 
-/// Pixels of one piece of a cache image.
+/// Pixels of one piece of a cache image (at most).
 const PIECE_PX: u64 = 256 * 1024;
+
+/// The smallest piece worth drawing (pixels).
+const MIN_PIECE_PX: u64 = 64 * 1024;
 
 static DRAG_CACHE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
@@ -247,6 +305,18 @@ pub fn set_above_cache(on: bool) {
 /// Drag frames drawn from the cache, by mode (tests and diagnostics).
 static SPRITE_FRAMES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static LAYERED_FRAMES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// GPU milliseconds of the last drag frame measured (timestamp queries; f64 bits, 0: none) and of
+/// the last cache piece (from its submission to the GPU's completion).
+static DRAG_GPU_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static PIECE_GPU_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// GPU time of the last drag frame measured with timestamp queries, and of the last cache piece
+/// (submission to completion), in milliseconds (tests and diagnostics; `None`: not measured).
+pub fn drag_gpu_ms() -> (Option<f64>, Option<f64>) {
+    let get = |a: &std::sync::atomic::AtomicU64| Some(f64::from_bits(a.load(std::sync::atomic::Ordering::Relaxed))).filter(|v| *v > 0.0);
+    (get(&DRAG_GPU_MS), get(&PIECE_GPU_MS))
+}
 
 /// Drag frames drawn from the cache so far: (one-draw sprite frames, layered frames).
 pub fn drag_frames() -> (u64, u64) {
@@ -273,24 +343,31 @@ impl GpuCanvas {
         while doc.layers.get(top).is_some_and(|l| l.clipped) {
             top += 1;
         }
-        // Drawn in place (the document doesn't change during the drag).
-        if !doc.layers.get(root..top)?.iter().all(|l| movable(l, 0)) || doc.layers.get(root).is_none_or(|l| l.clipped) {
+        let run = doc.layers.get(root..top)?;
+        if doc.layers.get(root).is_none_or(|l| l.clipped) {
             return None;
         }
         let above = doc.layers.get(top..)?;
         let above_draws = above.iter().any(|l| draws(l, 0));
-        let above_ok = !above_draws || {
-            above.iter().all(|l| photocraft_compose::composites_affinely(l, doc.mode, true)) && knockout_free(doc.layers.get(..top)?, 0) && self.opaque_under(res, doc, root)
-        };
+        // Whether what lies under the layers above (and under the run) is opaque everywhere.
+        let mut opaque = None;
+        let mut opaque_to = |res: &mut Resources| *opaque.get_or_insert_with(|| knockout_free(doc.layers.get(..top).unwrap_or_default(), 0) && self.opaque_under(res, doc, root));
+        let above_ok = !above_draws || (above.iter().all(|l| photocraft_compose::composites_affinely(l, doc.mode, true)) && opaque_to(res));
         if !above_ok {
             return None;
         }
-        let sprite = top == root + 1 && doc.layers.get(root).is_some_and(|l| photocraft_compose::composites_as_over(l, doc.mode));
-        match (sprite, above_draws) {
-            (true, _) => Some((DragMode::Sprite, root, top)),
-            (false, true) => Some((DragMode::Layered, root, top)),
-            (false, false) => None,
+        // The run kept as an image: it looks the same wherever it goes, and composites as its
+        // own image laid over the rest (one sprite), or changes an opaque backdrop affinely (two).
+        let shifts = run.iter().all(|l| moves_with_layer(l, 0));
+        if shifts && top == root + 1 && run.iter().all(|l| photocraft_compose::composites_as_over(l, doc.mode)) {
+            return Some((DragMode::Sprite, root, top));
         }
+        if shifts && run.iter().all(|l| photocraft_compose::composites_affinely(l, doc.mode, true)) && opaque_to(res) {
+            return Some((DragMode::Affine, root, top));
+        }
+        // Else the run is composited every frame, from its pages at the offset (drawn in place),
+        // with only the above kept.
+        (above_draws && run.iter().all(|l| movable(l, 0))).then_some((DragMode::Layered, root, top))
     }
 
     /// Whether everything under `doc.layers[root..]` is opaque: an opaque Background below it.
@@ -309,8 +386,8 @@ impl GpuCanvas {
     }
 
     /// Make (or keep making) the drag cache for moving `ids` of `doc` in a view showing `visible`
-    /// at `level`: pieces for up to `budget_ms` this call (one at least). Returns whether pieces
-    /// are left (the caller asks for another frame).
+    /// at `level`: pieces for up to `budget_ms` this call. Returns whether pieces are left (the
+    /// caller asks for another frame).
     pub fn prepare_drag(&self, doc: &Document, ids: &[LayerId], visible: Rect, level: u32, encode_srgb: bool, budget_ms: f64) -> bool {
         let _s = crate::perf_span::span("canvas.drag_cache");
         let t0 = now_ms();
@@ -340,12 +417,33 @@ impl GpuCanvas {
         };
         let mut sources: Vec<(Kind, Document)> = Vec::new();
         let mut failed = false;
+        // Pieces sized to what is left of the budget, at the rate the last ones took (a piece
+        // that wouldn't fit is cut to rows that do).
         let mut drawn = 0;
         while let Some(&(kind, piece)) = cache.todo.first() {
-            if drawn > 0 && now_ms() - t0 >= budget_ms {
+            let left = budget_ms - (now_ms() - t0);
+            if left <= 0.0 {
+                break;
+            }
+            // At least the smallest piece per call with budget left (else a rate measured on a
+            // slow first piece, its pages uploaded, would never let another one go).
+            let fits_px = if res.piece_rate > 0.0 { ((left / res.piece_rate).max(0.0) as u64).max(MIN_PIECE_PX) } else { PIECE_PX };
+            if drawn > 0 && fits_px <= MIN_PIECE_PX && left < res.piece_rate * MIN_PIECE_PX as f64 {
                 break;
             }
             drawn += 1;
+            let piece = if area(piece) > fits_px {
+                let rows = (fits_px / u64::from(piece.width().max(1))).max(1) as i32;
+                let (head, tail) = (Rect::new(piece.x0, piece.y0, piece.x1, piece.y0 + rows), Rect::new(piece.x0, piece.y0 + rows, piece.x1, piece.y1));
+                if let Some(first) = cache.todo.first_mut() {
+                    *first = (kind, head);
+                }
+                cache.todo.insert(1, (kind, tail));
+                head
+            } else {
+                piece
+            };
+            let started = now_ms();
             let src = match sources.iter().find(|(k, _)| *k == kind) {
                 Some((_, d)) => d,
                 None => {
@@ -368,10 +466,20 @@ impl GpuCanvas {
                 failed = true;
                 break;
             }
+            let rate = (now_ms() - started) / area(piece).max(1) as f64;
+            // The GPU's time for it too (on a GPU the work is queued, the CPU time is small): the
+            // next pieces are sized by whichever is slower, so the map builds never queue up a
+            // long hitch on the GPU either.
+            let gpu_rate = f64::from_bits(res.piece_gpu_rate.load(std::sync::atomic::Ordering::Relaxed));
+            let rate = rate.max(gpu_rate);
+            res.piece_rate = if res.piece_rate > 0.0 { res.piece_rate * 0.6 + rate * 0.4 } else { rate };
+            let (gpu_rate, px) = (res.piece_gpu_rate.clone(), area(piece).max(1) as f64);
+            queue.on_submitted_work_done(move || {
+                let ms = now_ms() - started;
+                PIECE_GPU_MS.store(ms.to_bits(), std::sync::atomic::Ordering::Relaxed);
+                gpu_rate.store((ms / px).to_bits(), std::sync::atomic::Ordering::Relaxed);
+            });
             cache.todo.remove(0);
-        }
-        for (_, d) in &sources {
-            comp.forget_doc(d.id);
         }
         res.compositor = Some(comp);
         if failed {
@@ -406,6 +514,14 @@ impl GpuCanvas {
                 }
                 want.push((Kind::Below, view));
                 want.push((Kind::Sprite, sprite_rect));
+            }
+            DragMode::Affine => {
+                if !fits(sprite_rect) || !fits(view) {
+                    return None;
+                }
+                want.push((Kind::Below, view));
+                want.push((Kind::SpriteBlack, sprite_rect));
+                want.push((Kind::SpriteWhite, sprite_rect));
             }
             DragMode::Layered => {
                 if !fits(view) {
@@ -453,6 +569,8 @@ impl GpuCanvas {
             sprite_at: (sx, sy),
             below: get(Kind::Below),
             sprite: get(Kind::Sprite),
+            sprite_black: get(Kind::SpriteBlack),
+            sprite_white: get(Kind::SpriteWhite),
             black: get(Kind::Black),
             white: get(Kind::White),
             lower: lower.then(|| make(view)),
@@ -464,25 +582,23 @@ impl GpuCanvas {
     /// A Move drag frame of `doc` over `region` (document pixels, what the view shows) at
     /// `level`, from the drag cache when it is ready for it; `None` otherwise (the caller
     /// composites the frame whole; nothing was written then).
-    pub(super) fn drag_frame(&self, doc: &Document, region: Rect, level: u32, encode_srgb: bool) -> Option<photocraft_gpu::Stats> {
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn drag_frame(&self, doc: &Document, region: Rect, level: u32, encode_srgb: bool, ids: &[LayerId], offset: (i32, i32)) -> Option<photocraft_gpu::Stats> {
         let _s = crate::perf_span::span("gpu.drag_frame");
         let (device, queue) = (&self.rs.device, &self.rs.queue);
         let key = doc.id.0;
         let mut renderer = self.rs.renderer.write();
         let res = renderer.callback_resources.canvas_mut(self.id)?;
-        let ids = res.moving.get(&key)?.clone();
         let d_level = res.docs.get(&key)?.max_level();
         let level = level.min(d_level).min(photocraft_gpu::MAX_LOD);
         let region = region.intersect(&doc.bounds());
         let lregion = photocraft_gpu::level_rect(region, level).intersect(&photocraft_gpu::level_bounds(doc.bounds(), level));
-        if lregion.is_empty() || !res.drag.as_ref().is_some_and(|c| c.ready() && c.shows(doc, &ids, level, lregion)) {
+        if lregion.is_empty() || !res.drag.as_ref().is_some_and(|c| c.ready() && c.shows(doc, ids, level, lregion)) {
             return None;
         }
-        // The drag's offset: the moving layers are drawn in place (`photocraft_gpu::Translated`).
-        let offset = res.compositor_translated.iter().find(|t| !t.mask && ids.iter().any(|id| doc.layer(*id).is_some_and(|l| holds(l, &[t.layer], 0))))?.offset;
         let mut cache = res.drag.take()?;
         let written = match cache.mode {
-            DragMode::Sprite => draw_sprite(device, queue, res, key, &mut cache, lregion, offset, encode_srgb),
+            DragMode::Sprite | DragMode::Affine => draw_sprite(device, queue, res, key, &mut cache, lregion, offset, encode_srgb),
             DragMode::Layered => self.draw_layered(res, doc, &cache, region, encode_srgb),
         };
         let mode = cache.mode;
@@ -496,9 +612,67 @@ impl GpuCanvas {
             d.regenerate_mips_from(device, queue, res, [region.x0 as u32, region.y0 as u32, region.x1 as u32, region.y1 as u32], level);
         }
         self.pace.submitted(queue);
-        let counter = if mode == DragMode::Sprite { &SPRITE_FRAMES } else { &LAYERED_FRAMES };
+        let counter = if mode == DragMode::Layered { &LAYERED_FRAMES } else { &SPRITE_FRAMES };
         counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Some(photocraft_gpu::Stats { level, pixels: area(lregion), ..Default::default() })
+    }
+
+    /// A drag of `ids` on document `doc` (key) ended moved by `offset` (`doc` is the document
+    /// after it): when the cache shows the document before it, it shows `doc` too, its run only
+    /// shifted (`moves_with_layer`); it is kept for `doc` (the release frame, and a drag of the
+    /// same layers again, come from it at once). Whether it was.
+    pub(super) fn rebase_drag(&self, doc: &Document, ids: &[LayerId], offset: (i32, i32)) -> bool {
+        let mut renderer = self.rs.renderer.write();
+        let Some(res) = renderer.callback_resources.canvas_mut(self.id) else { return false };
+        let Some(c) = res.drag.as_mut().filter(|c| c.doc == doc.id.0 && c.ids == ids && c.ready()) else { return false };
+        let step = 1i32 << c.level;
+        let same_shape = c.layers.len() == doc.layers.len() && c.shell == shell_of(doc);
+        let unmoved = |r: std::ops::Range<usize>| c.layers.get(r.clone()).zip(doc.layers.get(r)).is_some_and(|(a, b)| a == b);
+        let shifted = c.layers.get(c.root..c.top).zip(doc.layers.get(c.root..c.top)).is_some_and(|(was, now)| {
+            was.iter().zip(now).all(|(a, b)| {
+                let all = Rect::new(i32::MIN / 4, i32::MIN / 4, i32::MAX / 4, i32::MAX / 4);
+                a.id == b.id && photocraft_compose::change_bounds(a, all).map(|r| r.translate(offset.0, offset.1)) == photocraft_compose::change_bounds(b, all)
+            })
+        });
+        let ok = offset.0 % step == 0
+            && offset.1 % step == 0
+            && c.mode != DragMode::Layered
+            && same_shape
+            && unmoved(0..c.root)
+            && unmoved(c.top..c.layers.len())
+            && shifted;
+        if ok {
+            c.layers = doc.layers.clone();
+            c.sprite_at = (c.sprite_at.0 + offset.0, c.sprite_at.1 + offset.1);
+            c.binds.clear();
+        } else {
+            res.drag = None;
+        }
+        ok
+    }
+
+    /// The frame of a release (no drag on `doc` any more): when the drag that ended can be
+    /// rebased on `doc` ([`GpuCanvas::rebase_drag`]), drawn from its cache at offset 0, its region
+    /// left to the refinement for an exact composite once the edits pause (`Stale::approx`).
+    pub(super) fn release_frame(&self, doc: &Document, region: Rect, level: u32, encode_srgb: bool) -> Option<photocraft_gpu::Stats> {
+        let (ids, offset) = {
+            let mut r = self.rs.renderer.write();
+            let res = r.callback_resources.canvas_mut(self.id)?;
+            if !res.released.as_ref().is_some_and(|(k, _, _)| *k == doc.id.0) {
+                return None;
+            }
+            let (_, ids, offset) = res.released.take()?;
+            (ids, offset)
+        };
+        if !self.rebase_drag(doc, &ids, offset) {
+            return None;
+        }
+        let st = self.drag_frame(doc, region, level, encode_srgb, &ids, (0, 0))?;
+        self.with_doc(doc.id.0, |res, d| {
+            d.stale().approx(region.intersect(&doc.bounds()));
+            res.reduced_at = super::now_ms();
+        });
+        Some(st)
     }
 
     /// The layered mode's frame: the layers up to the moving ones composited (with the
@@ -576,7 +750,14 @@ fn render_into(
 fn draw_sprite(device: &wgpu::Device, queue: &wgpu::Queue, res: &Resources, key: u64, cache: &mut DragCache, lregion: Rect, offset: (i32, i32), encode_srgb: bool) -> bool {
     let Some(d) = res.docs.get(&key) else { return false };
     let Some(pipe) = res.drag_pipeline(d.format) else { return false };
-    let (Some(below), Some(sprite)) = (&cache.below, &cache.sprite) else { return false };
+    let affine = cache.mode == DragMode::Affine;
+    let (Some(below), Some(sprite), Some(sprite2)) = (
+        &cache.below,
+        if affine { &cache.sprite_black } else { &cache.sprite },
+        if affine { &cache.sprite_white } else { &cache.sprite },
+    ) else {
+        return false;
+    };
     let level = cache.level;
     let keep_hdr = i32::from(d.format == FORMAT_HIGH);
     let above = cache.black.is_some() && cache.white.is_some();
@@ -586,15 +767,24 @@ fn draw_sprite(device: &wgpu::Device, queue: &wgpu::Queue, res: &Resources, key:
     let (sx, sy) = (cache.sprite_at.0 >> level, cache.sprite_at.1 >> level);
     let view = cache.view;
     let record = crate::perf_span::span("drag.record");
+    if let Some(ms) = res.timer.as_ref().and_then(super::timing::GpuTimer::take) {
+        DRAG_GPU_MS.store(ms.to_bits(), std::sync::atomic::Ordering::Relaxed);
+    }
+    let timer = res.timer.as_ref().filter(|t| t.free());
     let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("pc_drag_frame") });
-    for t in &d.tiles {
-        let Some(target) = t.levels.get(level as usize) else { continue };
-        let [tx, ty, tw, th] = [t.rect[0] >> level, t.rect[1] >> level, (t.rect[2] >> level).max(1), (t.rect[3] >> level).max(1)].map(|v| v as i32);
-        let r = lregion.intersect(&Rect::from_xywh(tx, ty, tw as u32, th as u32));
-        if r.is_empty() {
-            continue;
-        }
-        let words: [i32; 8] = [tx - view.x0, ty - view.y0, i32::from(encode_srgb), keep_hdr, tx - sx - ox, ty - sy - oy, i32::from(above), 0];
+    let tiles: Vec<_> = d
+        .tiles
+        .iter()
+        .filter_map(|t| {
+            let target = t.levels.get(level as usize)?;
+            let [tx, ty, tw, th] = [t.rect[0] >> level, t.rect[1] >> level, (t.rect[2] >> level).max(1), (t.rect[3] >> level).max(1)].map(|v| v as i32);
+            let r = lregion.intersect(&Rect::from_xywh(tx, ty, tw as u32, th as u32));
+            (!r.is_empty()).then_some((t, target, tx, ty, r))
+        })
+        .collect();
+    let last = tiles.len().saturating_sub(1);
+    for (i, (t, target, tx, ty, r)) in tiles.into_iter().enumerate() {
+        let words: [i32; 8] = [tx - view.x0, ty - view.y0, i32::from(encode_srgb), keep_hdr, tx - sx - ox, ty - sy - oy, i32::from(above), i32::from(affine)];
         let bytes: Vec<u8> = words.iter().flat_map(|v| v.to_le_bytes()).collect();
         let entry = cache.binds.entry(t.rect).or_insert_with(|| {
             let ubuf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -611,9 +801,10 @@ fn draw_sprite(device: &wgpu::Device, queue: &wgpu::Queue, res: &Resources, key:
                 entries: &[
                     wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&below.view) },
                     wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&sprite.view) },
-                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(k) },
-                    wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(w) },
-                    wgpu::BindGroupEntry { binding: 4, resource: ubuf.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&sprite2.view) },
+                    wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(k) },
+                    wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(w) },
+                    wgpu::BindGroupEntry { binding: 5, resource: ubuf.as_entire_binding() },
                 ],
             });
             (ubuf, bg)
@@ -628,7 +819,7 @@ fn draw_sprite(device: &wgpu::Device, queue: &wgpu::Queue, res: &Resources, key:
                 ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
             })],
             depth_stencil_attachment: None,
-            timestamp_writes: None,
+            timestamp_writes: timer.and_then(|t| t.writes(i == 0, i == last)),
             occlusion_query_set: None,
             multiview_mask: None,
         });
@@ -637,11 +828,17 @@ fn draw_sprite(device: &wgpu::Device, queue: &wgpu::Queue, res: &Resources, key:
         pass.set_scissor_rect((r.x0 - tx) as u32, (r.y0 - ty) as u32, r.width(), r.height());
         pass.draw(0..3, 0..1);
     }
+    if let Some(t) = timer {
+        t.resolve(&mut enc);
+    }
     let buf = enc.finish();
     drop(record);
     // On a software adapter (lavapipe) the draw runs here, on the CPU; on a GPU it is queued.
     let _s = crate::perf_span::span("drag.submit");
     queue.submit([buf]);
+    if let Some(t) = timer {
+        t.submitted();
+    }
     true
 }
 
@@ -738,11 +935,15 @@ fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
 /// as the encode pass stores a composite.
 pub(super) const DRAG_WGSL: &str = r#"
 @group(0) @binding(0) var below: texture_2d<f32>;
+// The sprite (premultiplied), or with `b.w` the run over black...
 @group(0) @binding(1) var sprite: texture_2d<f32>;
-@group(0) @binding(2) var over_black: texture_2d<f32>;
-@group(0) @binding(3) var over_white: texture_2d<f32>;
-// a: tile to below/above, encode sRGB, keep values above 1.0; b: tile to sprite, has above.
-@group(0) @binding(4) var<uniform> u: array<vec4<i32>, 2>;
+// ... and over white.
+@group(0) @binding(2) var sprite_white: texture_2d<f32>;
+@group(0) @binding(3) var over_black: texture_2d<f32>;
+@group(0) @binding(4) var over_white: texture_2d<f32>;
+// a: tile to below/above, encode sRGB, keep values above 1.0; b: tile to sprite, has above,
+// the run kept as its affine map.
+@group(0) @binding(5) var<uniform> u: array<vec4<i32>, 2>;
 
 @vertex
 fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
@@ -762,11 +963,19 @@ fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let bp = p + a.xy;
     let sp = p + b.xy;
     let size = vec2<i32>(textureDimensions(sprite));
-    var s = vec4(0.0);
-    if (all(sp >= vec2(0)) && all(sp < size)) {
-        s = textureLoad(sprite, sp, 0);
+    let inside = all(sp >= vec2(0)) && all(sp < size);
+    var c = textureLoad(below, bp, 0);
+    if (b.w != 0) {
+        // The run over an opaque below: its map where it is, the below unchanged elsewhere.
+        if (inside) {
+            let sk = textureLoad(sprite, sp, 0);
+            let sw = textureLoad(sprite_white, sp, 0);
+            c = vec4(sk.rgb + (sw.rgb - sk.rgb) * c.rgb, 1.0);
+        }
+    } else if (inside) {
+        let s = textureLoad(sprite, sp, 0);
+        c = s + c * (1.0 - s.a);
     }
-    let c = s + textureLoad(below, bp, 0) * (1.0 - s.a);
     var alpha = clamp(c.a, 0.0, 1.0);
     var rgb = vec3(0.0);
     if (b.z != 0) {

@@ -689,6 +689,15 @@ fn span(name: &'static str) -> Option<Box<dyn std::any::Any>> {
     SPAN.get().map(|f| f(name))
 }
 
+/// Layer effect shapes built (or built again) so far, process-wide: a moved layer, or another
+/// document composited with the same layers, keeps its maps (tests and diagnostics).
+static FX_BUILDS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// [`FX_BUILDS`]: layer effect maps built so far.
+pub fn fx_builds() -> u64 {
+    FX_BUILDS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 fn first_error<T>(device: &wgpu::Device, f: impl FnOnce() -> T) -> (T, Option<wgpu::Error>) {
     let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
     let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
@@ -1159,6 +1168,7 @@ impl Compositor {
                 return Err(error);
             }
         };
+        let _s = span("gpu.submit");
         queue.submit([encoder.finish()]);
         Ok(stats)
     }
@@ -1573,8 +1583,10 @@ impl Compositor {
         // Pass clips at the level of detail (rounded out, the same for every pass).
         let clips: Vec<Option<Rect>> = plan.passes.iter().map(|p| p.clip.map(|c| level_rect(c, level))).collect();
         let first_pass = checkpoint.filter(|_| chunks.iter().all(|c| self.prefix.contains(*c))).map_or(0, |c| c.pass_end);
+        let bind = span("gpu.bind");
         let bound = self.bind_cell(device, queue, encoder, doc, plan, paged, cell, fr, first_pass, stats);
 
+        drop(bind);
         // Chunk pool of the smallest side that holds every chunk of this cell.
         let side = chunks.iter().map(|c| c.width().max(c.height())).max().unwrap_or(1).next_power_of_two().clamp(64, self.chunk.max(64));
         let mut pool = self.pools.remove(&side).unwrap_or_default();
@@ -2008,6 +2020,7 @@ impl Compositor {
             }
         }
         if rebuild {
+            FX_BUILDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let shape = Tex::map(device, "pc_fx_shape", region, MAP32);
             let n = rw as usize * rh as usize;
             self.fx.insert(

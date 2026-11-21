@@ -75,6 +75,9 @@ pub(crate) struct MovePreview {
     /// from their own pixels (`photocraft_gpu::Translated::in_place`): no per-frame copy of the
     /// moved layers. Off for the CPU canvas, and for good once the GPU canvas fell back.
     in_place: bool,
+    /// `shown` is the unmoved document because the GPU canvas's drag cache draws the move
+    /// ([`gpu_lazy_failed`] when it didn't).
+    gpu_lazy: bool,
 }
 
 impl MovePreview {
@@ -146,7 +149,7 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Do
         let bounds = bounds.map(|b| moving.iter().filter_map(|id| shape_reach(doc.layer(*id)?, canvas)).fold(b, |acc, r| acc.union(&r)));
         let in_place = in_place_ok(app, &doc, &moving);
         app.move_preview =
-            Some(MovePreview { doc: doc_id, revision, ids, moving, bounds, canvas, offsets: Vec::new(), shown: None, floating: false, in_place });
+            Some(MovePreview { doc: doc_id, revision, ids, moving, bounds, canvas, offsets: Vec::new(), shown: None, floating: false, in_place, gpu_lazy: false });
     }
     let p = app.move_preview.as_mut()?;
     if offset == (0, 0) && p.offsets.is_empty() {
@@ -156,6 +159,13 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Do
     // it shifts the moving layers itself, at the zoom's level, so the preview is the document as
     // it is (no full-resolution copy of the moving layers per frame).
     let lazy = app.cpu_move_split.is_some_and(|(d, r, frame)| d == doc_id && r == revision && frame + 1 >= app.frame);
+    // The GPU canvas's drag cache is ready for these layers (`gpu_canvas::above`): it shifts
+    // them itself, effects and all, so the preview is the document as it is too (no moved copy
+    // of a layer with effects, nor its effects drawn again, per frame).
+    let gpu_lazy = !p.floating && app.gpu.as_ref().is_some_and(|g| g.drag_ready_for(&doc, &p.ids));
+    let p = app.move_preview.as_mut()?;
+    p.gpu_lazy = gpu_lazy;
+    let lazy = lazy || gpu_lazy;
     if (p.in_place || lazy) && p.offsets.last() != Some(&offset) {
         let t0 = crate::gpu_canvas::now_ms();
         // The document as it is: the GPU canvas moves the layers (`gpu_translations`), the CPU
@@ -243,6 +253,21 @@ pub(crate) fn in_place_failed(app: &mut PhotocraftApp) -> bool {
     }
 }
 
+/// The GPU canvas didn't draw a Move preview from its drag cache although the preview counted on
+/// it (the cache let go meanwhile): the preview becomes a moved copy again. Returns whether there
+/// was such a preview to rebuild.
+pub(crate) fn gpu_lazy_failed(app: &mut PhotocraftApp) -> bool {
+    match app.move_preview.as_mut() {
+        Some(p) if p.gpu_lazy && !p.in_place => {
+            p.gpu_lazy = false;
+            p.shown = None;
+            p.offsets.clear();
+            true
+        }
+        _ => false,
+    }
+}
+
 /// Whether document `idx`'s Move preview is drawn in place (see [`in_place_failed`]).
 pub(crate) fn drawn_in_place(app: &PhotocraftApp, idx: usize) -> bool {
     let Some(st) = app.session.documents().get(idx) else { return false };
@@ -268,11 +293,14 @@ pub(crate) fn press_targets(app: &PhotocraftApp, idx: usize) -> Vec<LayerId> {
 
 /// The layers document `idx`'s Move drag moves while its preview shows them moved (the GPU canvas
 /// keeps the layers above them composited for the drag, `gpu_canvas::above`); empty otherwise.
-pub(crate) fn moving_ids(app: &PhotocraftApp, idx: usize) -> Vec<LayerId> {
-    let Some(st) = app.session.documents().get(idx) else { return Vec::new() };
+pub(crate) fn moving_ids(app: &PhotocraftApp, idx: usize) -> (Vec<LayerId>, (i32, i32)) {
+    let Some(st) = app.session.documents().get(idx) else { return (Vec::new(), (0, 0)) };
     match app.move_preview.as_ref() {
-        Some(p) if p.doc == st.doc.id && p.revision == st.revision && !p.floating && !p.offsets.is_empty() && p.shown.is_some() => p.ids.clone(),
-        _ => Vec::new(),
+        Some(p) if p.doc == st.doc.id && p.revision == st.revision && !p.floating && p.shown.is_some() => match p.offsets.last() {
+            Some(&o) => (p.ids.clone(), o),
+            None => (Vec::new(), (0, 0)),
+        },
+        _ => (Vec::new(), (0, 0)),
     }
 }
 
@@ -401,6 +429,7 @@ fn floating_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Document>, u
             shown: None,
             floating: true,
             in_place: false,
+            gpu_lazy: false,
         });
     }
     if offset == (0, 0) && app.move_preview.as_ref().is_none_or(|p| p.offsets.is_empty()) {

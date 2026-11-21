@@ -71,30 +71,83 @@ struct Blit {
     /// The sprite's extent (level pixels, at offset 0) and its premultiplied pixels.
     rect: DRect,
     px: Vec<[u8; 4]>,
+    /// A run that changes an opaque backdrop affinely (layer effects, type, a blend mode, clipped
+    /// layers) is kept instead as its composite over opaque black and over opaque white (`px`
+    /// and this), laid over the below as the top is.
+    white: Option<Vec<[u8; 4]>>,
     /// The below's and the top's tiles in 8 bits, made from the float ones once.
     below: HashMap<DRect, Vec<[u8; 4]>>,
     above: HashMap<DRect, (Vec<[u8; 4]>, Vec<[u8; 4]>)>,
+    /// The documents the sprite is composited from (the run alone; over black and over white),
+    /// and the rows of it composited so far: made a band at a time ([`Split::prepare`]).
+    sources: Vec<Document>,
+    rows: i32,
 }
 
 /// The largest sprite kept (pixels): past it the drag takes the float path.
 const MAX_SPRITE_PX: u64 = 64 << 20;
 
 impl Blit {
-    /// The sprite of `layer` (in the level's document `d`), or `None` when it is too big.
-    fn new(d: &Document, layer: &Layer) -> Option<Blit> {
+    /// The sprite of the run `layers` (in the level's document `d`): one image when it is one
+    /// layer laid over the rest (`over`), else its composite over black and over white; `None`
+    /// when it is too big.
+    fn new(d: &Document, layers: &[Layer], over: bool) -> Option<Blit> {
         let all = DRect::new(i32::MIN / 4, i32::MIN / 4, i32::MAX / 4, i32::MAX / 4);
-        let rect = photocraft_compose::change_bounds(layer, all)?;
+        let rect = layers.iter().filter_map(|l| photocraft_compose::change_bounds(l, all)).reduce(|a, b| a.union(&b))?;
         if rect.is_empty() || u64::from(rect.width()) * u64::from(rect.height()) > MAX_SPRITE_PX {
             return None;
         }
+        let ids: Vec<LayerId> = layers.iter().map(|l| l.id).collect();
         let mut alone = d.clone();
-        alone.layers = vec![layer.clone()];
-        let mut alone = photocraft_engine::layer_multi_cmds::moved(&alone, &[layer.id], -rect.x0, -rect.y0).ok()?;
+        alone.layers = layers.to_vec();
+        let mut alone = photocraft_engine::layer_multi_cmds::moved(&alone, &ids, -rect.x0, -rect.y0).ok()?;
         alone.size = photocraft_geom::Size::new(rect.width(), rect.height());
-        let buf = photocraft_compose::render(&alone, alone.bounds());
-        Some(Blit { rect, px: buf.to_premultiplied_rgba8(), below: HashMap::new(), above: HashMap::new() })
+        let over_fill = |v: f32| {
+            let mut d = alone.clone();
+            let fill = Layer::new("backdrop", LayerContent::Fill(photocraft_doc::Fill::Solid(photocraft_color::Color::rgb(v, v, v))));
+            d.layers.insert(0, fill);
+            d
+        };
+        let sources = if over { vec![alone] } else { vec![over_fill(0.0), over_fill(1.0)] };
+        let n = rect.width() as usize * rect.height() as usize;
+        Some(Blit {
+            rect,
+            px: vec![[0; 4]; n],
+            white: (!over).then(|| vec![[0; 4]; n]),
+            below: HashMap::new(),
+            above: HashMap::new(),
+            sources,
+            rows: 0,
+        })
+    }
+
+    /// Whether the sprite is all composited.
+    fn ready(&self) -> bool {
+        self.rows >= self.rect.height() as i32
+    }
+
+    /// Composite the sprite's next band of rows (about [`BAND_PX`] pixels).
+    fn band(&mut self) {
+        let w = self.rect.width() as usize;
+        let rows = ((BAND_PX / w.max(1) as u64).max(1) as i32).min(self.rect.height() as i32 - self.rows);
+        if rows <= 0 {
+            return;
+        }
+        let band = DRect::new(0, self.rows, self.rect.width() as i32, self.rows + rows);
+        let at = self.rows as usize * w;
+        for (i, src) in self.sources.iter().enumerate() {
+            let px = photocraft_compose::render(src, band).to_premultiplied_rgba8();
+            let dst = if i == 0 { Some(&mut self.px) } else { self.white.as_mut() };
+            if let Some(d) = dst.and_then(|d| d.get_mut(at..at + px.len())) {
+                d.copy_from_slice(&px);
+            }
+        }
+        self.rows += rows;
     }
 }
+
+/// Pixels of one band of a sprite composited at once.
+const BAND_PX: u64 = 128 * 1024;
 
 /// A pass-through group whose children composite straight into the backdrop (no opacity, fill,
 /// mask, effects or clipped layers to mix): its children can stand in the stack in its place.
@@ -224,11 +277,15 @@ impl Split {
         };
         let below = Arc::new(reduce(&part(stack.get(..start)?)));
         let above = (top < stack.len()).then(|| Arc::new(reduce(&part(stack.get(top..).unwrap_or_default()))));
-        let blit = (end == start + 1 && top == end)
-            .then(|| stack.get(start))
-            .flatten()
-            .filter(|l| !l.clipped && photocraft_compose::composites_as_over(l, mode))
-            .and_then(|l| middle.0.layers.iter().find(|m| m.id == l.id).and_then(|m| Blit::new(&middle.0, m)));
+        // The run kept as an image (one layer laid over the rest), or as its affine map (layer
+        // effects, type, clipped layers: anything that changes an opaque backdrop affinely), when
+        // it looks the same wherever it goes; the middle is then the run alone (no layer between
+        // it and the top).
+        let run = stack.get(start..end).unwrap_or_default();
+        let shifts = top == end && !run.is_empty() && run.first().is_some_and(|l| !l.clipped) && run.iter().all(|l| crate::gpu_canvas::moves_with_layer(l, 0));
+        let over = run.len() == 1 && run.iter().all(|l| photocraft_compose::composites_as_over(l, mode));
+        let affine = run.iter().all(|l| photocraft_compose::composites_affinely(l, mode, true));
+        let blit = (shifts && (over || affine)).then(|| Blit::new(&middle.0, &middle.0.layers, over)).flatten();
         Some(Split {
             key: (plan.doc, plan.revision, plan.ids.clone(), level),
             middle,
@@ -274,7 +331,7 @@ impl Split {
     /// [`Split::render`] by the one-blit path, as premultiplied RGBA8 per job: `None` when the
     /// drag can't take it (or a pixel under the top isn't opaque: the caller renders the frame).
     pub(crate) fn render_rgba8(&mut self, offset: (i32, i32), jobs: &[(DRect, DRect)]) -> Option<Vec<Vec<[u8; 4]>>> {
-        self.blit.as_ref()?;
+        self.blit.as_ref().filter(|b| b.ready())?;
         let f = self.middle.2;
         let lv = |v: i32| (f64::from(v) / f as f64).round() as i32;
         let (ox, oy) = (lv(offset.0), lv(offset.1));
@@ -305,7 +362,14 @@ impl Split {
                 if sx0 < sx1 && sy >= blit.rect.y0 && sy < blit.rect.y1 {
                     let (a, b) = ((sx0 - r.x0) as usize, (sx1 - r.x0) as usize);
                     let s = (sy - blit.rect.y0) as usize * sw + (sx0 - ox - blit.rect.x0) as usize;
-                    photocraft_compose::blit::over_row(row.get_mut(a..b)?, brow.get(a..b)?, blit.px.get(s..s + (b - a))?);
+                    match &blit.white {
+                        None => photocraft_compose::blit::over_row(row.get_mut(a..b)?, brow.get(a..b)?, blit.px.get(s..s + (b - a))?),
+                        Some(white) => {
+                            if !photocraft_compose::blit::affine_row(row.get_mut(a..b)?, blit.px.get(s..s + (b - a))?, white.get(s..s + (b - a))?) {
+                                return None;
+                            }
+                        }
+                    }
                 }
                 if let Some((k, w)) = above
                     && !photocraft_compose::blit::affine_row(row, k.get(h..h + rw)?, w.get(h..h + rw)?)
@@ -316,6 +380,20 @@ impl Split {
             out.push(px);
         }
         Some(out)
+    }
+
+    /// Make the one-blit path's sprite for up to `budget_ms` (a band at least). Whether it is
+    /// ready (or there is none to make).
+    pub(crate) fn prepare(&mut self, budget_ms: f64) -> bool {
+        let Some(b) = self.blit.as_mut() else { return true };
+        let t0 = crate::gpu_canvas::now_ms();
+        while !b.ready() {
+            b.band();
+            if crate::gpu_canvas::now_ms() - t0 >= budget_ms {
+                break;
+            }
+        }
+        b.ready()
     }
 
     /// Whether the tile `held` still has to be made ([`Split::fill`]).
@@ -519,6 +597,8 @@ mod tests {
             let mut reduce = |doc: &Document| if level == 0 { doc.clone() } else { mips.document(doc, level) };
             let mut split = Split::new(&plan, level, &mut reduce).expect("splittable");
             assert!(split.blit.is_some(), "one layer laid over the rest, an affine top: the one-blit path");
+            assert!(split.render_rgba8((1, 1), &[(DRect::new(0, 0, 8, 8), DRect::new(0, 0, 8, 8))]).is_none(), "not before its sprite is made");
+            assert!(split.prepare(f64::INFINITY));
             for (dx, dy) in [(6, 4), (32, -12), (-40, 20)] {
                 let moved = photocraft_engine::layer_multi_cmds::moved(&base, &[moving], dx, dy).unwrap();
                 let f = 1i32 << level;

@@ -71,6 +71,8 @@ pub struct TileCanvas {
     pending: Option<Pending>,
     /// A Move drag's cached composites below and above the moving layers (`move_cpu`).
     move_split: Option<crate::move_cpu::Split>,
+    /// The split made ahead (the Move tool, no drag) is ready for the view (tests).
+    pub(crate) ahead_ready: bool,
 }
 
 /// Missing tiles composited in the background: the canvas keeps drawing (other levels stand in)
@@ -270,6 +272,9 @@ fn tile_image(display: Option<&photocraft_engine::display_color::CanvasDisplay>,
 /// The budget of an idle frame for making the Move split ahead (milliseconds).
 const SPLIT_AHEAD_MS: f64 = 6.0;
 
+/// The budget of a drag frame for the split's sprite while it isn't ready (milliseconds).
+const DRAG_BAND_MS: f64 = 2.0;
+
 fn render_level(doc: &Document, source: Option<&Document>, f: i64, rects: &[DRect]) -> Vec<photocraft_compose::Buffer> {
     match source {
         Some(src) => photocraft_compose::render_rects(src, rects),
@@ -419,7 +424,7 @@ pub fn paint(
             tc.move_split = crate::move_cpu::Split::new(plan, level, &mut reduce);
         }
         if let Some(split) = tc.move_split.as_mut() {
-            let mut left = false;
+            let mut left = !split.prepare(SPLIT_AHEAD_MS);
             for &k in &want {
                 let held = tile_rect(k, size).inflate(GUTTER).intersect(&bounds);
                 if !split.needs(held) {
@@ -431,6 +436,7 @@ pub fn paint(
                 }
                 split.fill(&[(held, held)]);
             }
+            tc.ahead_ready = !left;
             if left {
                 ctx.request_repaint();
             }
@@ -505,6 +511,10 @@ pub fn paint(
                 blits = tc.move_split.as_mut().and_then(|s| s.render_rgba8(plan.offset, &held));
             }
             if blits.is_none() {
+                // Its sprite still being made: a band of it this frame, the frame on the float path.
+                if let Some(s) = tc.move_split.as_mut() {
+                    s.prepare(DRAG_BAND_MS);
+                }
                 split_bufs = {
                     let _s = crate::perf_span::span("move.split_render");
                     tc.move_split.as_mut().and_then(|s| s.render(plan.offset, &held))

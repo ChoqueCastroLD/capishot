@@ -603,7 +603,10 @@ pub(crate) fn shape_key(layer: &Layer, canvas: Rect) -> u64 {
         LayerContent::Shape(sh) => {
             std::mem::discriminant(&layer.content).hash(&mut h);
             if photocraft_compose::effect_outline(layer).is_some() {
-                format!("{:?}", sh.path).hash(&mut h);
+                // Where the outline is doesn't matter (a moved shape keeps its maps, shifted with
+                // its region, `Compositor::sync_fx`): its form, relative to its whole-pixel origin.
+                let (x0, y0) = sh.path.control_bounds().map_or((0.0, 0.0), |(x0, y0, _, _)| (x0.floor(), y0.floor()));
+                format!("{:?}", sh.path.transform(&photocraft_geom::Affine::translate(-x0, -y0))).hash(&mut h);
             }
         }
         other => std::mem::discriminant(other).hash(&mut h),

@@ -531,7 +531,8 @@ pub(super) fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, le
     // pages): it can be kept for a later view switch (`gpu_canvas::view_sets`).
     let plain = raw_key == 0 && translated.is_empty();
     gpu.set_translated(translated);
-    gpu.set_moving(id.0, crate::move_ui::moving_ids(app, idx));
+    let (moving, offset) = crate::move_ui::moving_ids(app, idx);
+    gpu.set_moving(id.0, moving, offset);
     let cache = app.canvases.entry((id, GPU_OUTPUT)).or_insert(CanvasCache { scale: 1.0, ..Default::default() });
     let present = cache.on_gpu && gpu.has(id.0, size);
     // Two fingers on the glass (touch_nav): the view keeps the levels it has while they pinch or
@@ -672,10 +673,11 @@ pub(super) fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, le
         // What was left out of date is brought up to date on the following frames.
         ctx.request_repaint_after(std::time::Duration::from_secs_f64(crate::gpu_canvas::REFINE_DELAY_MS / 1000.0));
     }
-    if !r.kind.starts_with("gpu") && crate::move_ui::drawn_in_place(app, idx) && crate::move_ui::in_place_failed(app) {
-        // The CPU drew the document as it is, without the move: draw this frame (and the rest of
-        // the drag) from a moved copy instead, in full, now. Handing the frame to the CPU canvas
-        // showed its tiles as they were when it last drew (parts at older states).
+    if preview_needs_copy(app, idx, &r, raw_key) {
+        // The Move preview counted on drawing the layers from where they are (in place, or the
+        // drag cache), which this refresh didn't: this frame (and the rest of the drag) from a
+        // moved copy instead, in full, now. Handing the frame to the CPU canvas showed its tiles
+        // as they were when it last drew (parts at older states).
         if let Some(cache) = app.canvases.get_mut(&(id, GPU_OUTPUT)) {
             cache.on_gpu = false;
         }
@@ -692,6 +694,7 @@ pub(super) fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, le
         log::info!("{e}; using the CPU compositor");
     }
     app.perf.record(r.kind, r.px, r.composite_ms, r.upload_ms);
+    app.perf.last_refresh_level = r.level;
     if r.kind == "full" {
         let reason = r.fallback.clone().map(crate::render_path::CpuReason::Unsupported);
         crate::notices::slow_cpu_refresh(app, id.0, r.composite_ms + r.upload_ms, reason.as_ref());
@@ -708,6 +711,14 @@ pub(super) fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, le
     cache.on_gpu = true;
     cache.texture = None;
     true
+}
+
+/// Whether refresh `r` of document `idx` (preview key `raw_key`) didn't draw a Move preview the
+/// way it counted on (the drag cache, or the layers in place on the GPU compositor): the preview
+/// becomes a moved copy ([`crate::move_ui::gpu_lazy_failed`], [`crate::move_ui::in_place_failed`]).
+fn preview_needs_copy(app: &mut PhotocraftApp, idx: usize, r: &crate::gpu_canvas::Refresh, raw_key: u64) -> bool {
+    (r.kind != crate::gpu_canvas::DRAG_CACHE_KIND && raw_key != 0 && crate::move_ui::gpu_lazy_failed(app))
+        || (!r.kind.starts_with("gpu") && crate::move_ui::drawn_in_place(app, idx) && crate::move_ui::in_place_failed(app))
 }
 
 /// The budget of an idle frame for making the drag cache ahead (milliseconds).

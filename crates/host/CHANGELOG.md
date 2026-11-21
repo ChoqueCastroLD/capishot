@@ -21,6 +21,10 @@ may change in any commit; their changes are listed under **Experimental**. A cha
   resolution, within the canvas budget): one draw per frame on the GPU canvas, 8-bit blits on the
   CPU canvas, the first frame like the others. The frame of a Move pointer event shows the layers
   at that event (no frame behind the pointer).
+- Layers with effects, type and smart objects with smart filters are kept as images for a drag
+  (not drawn again per frame or per build); the cache is rebased when a drag ends, so the release
+  and a drag of the same layer again draw from it; drags that start before it is ready draw
+  lower-resolution previews instead of long frames.
 
 ## API_VERSION 1, additions (opening big pages off the frame, Capikoma request 19)
 
