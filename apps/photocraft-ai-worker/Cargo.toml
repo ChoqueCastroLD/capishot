@@ -23,7 +23,7 @@ js-sys = "0.3"
 # burn's rand needs a randomness source on wasm32-unknown-unknown (wgpu enables it otherwise).
 getrandom = { version = "0.4", features = ["wasm_js"] }
 # Downloads are hashed chunk by chunk as they arrive.
-sha2 = "0.10"
+sha2 = "0.11"
 web-sys = { version = "0.3", features = ["DedicatedWorkerGlobalScope", "WorkerGlobalScope", "WorkerNavigator", "MessageEvent", "CacheStorage", "Cache", "Request", "Response", "ResponseInit", "ReadableStream", "ReadableStreamDefaultReader", "ReadableStreamReadResult", "Headers", "RequestInit", "Blob", "Performance", "console"] }
 
 # The plain worker: WebGPU, else the CPU on one thread (SIMD128).
