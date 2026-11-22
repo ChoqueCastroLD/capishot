@@ -80,7 +80,8 @@ fn a_new_active_layer_opens_its_groups_and_scrolls_into_view() {
         assert!(expanded(h.state(), group), "{theme:?}: the parent group opened");
         let r = row(&h, "Deep inside").expect("row listed once its group is open");
         assert!(in_view(&h, r), "{theme:?}: scrolled into view: {r:?}");
-        assert!(!in_view(&h, row(&h, "Stack 29").unwrap()), "{theme:?}: the top scrolled away");
+        // Out of view (the panel lays out only the rows in view: a row scrolled away isn't drawn).
+        assert!(row(&h, "Stack 29").is_none_or(|r| !in_view(&h, r)), "{theme:?}: the top scrolled away");
 
         // Back to the top layer: scrolls back up.
         h.state_mut().run("layer.select", json!({"layer": top.0})).unwrap();
@@ -110,7 +111,7 @@ fn a_new_active_layer_opens_its_groups_and_scrolls_into_view() {
         h.run_steps(4);
         h.state_mut().run("layer.select", json!({"layer": top.0})).unwrap();
         h.run_steps(4);
-        assert!(!in_view(&h, row(&h, "Deep inside").unwrap()));
+        assert!(row(&h, "Deep inside").is_none_or(|r| !in_view(&h, r)));
         h.state_mut().run("edit.undo", json!({})).unwrap();
         h.run_steps(4);
         assert_eq!(h.state().session.active().unwrap().active_layer, Some(inner), "{theme:?}: undo made the inner layer active");

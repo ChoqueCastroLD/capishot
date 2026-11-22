@@ -281,6 +281,18 @@ pub fn layouts() -> u64 {
     LAYOUTS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+thread_local! {
+    /// Type layers laid out by this thread ([`crate::layouts_here`]).
+    static LAYOUTS_HERE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// How many type layouts this thread has made so far (monotonic): [`layouts`] without the other
+/// threads' (tests running side by side in one process, each driving its own app, saw each
+/// other's layouts in the process-wide count).
+pub fn layouts_here() -> u64 {
+    LAYOUTS_HERE.with(std::cell::Cell::get)
+}
+
 pub(crate) struct Layouter {
     lcx: LayoutContext<RunBrush>,
     optical: crate::optical::Cache,
@@ -293,6 +305,7 @@ impl Layouter {
 
     pub fn layout(&mut self, fonts: &mut FontDb, t: &TextLayer, dpi: f32) -> TextLayout {
         LAYOUTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        LAYOUTS_HERE.with(|n| n.set(n.get() + 1));
         let mut fit = Fit::default();
         let mut first = self.layout_pass(fonts, t, dpi, None, &mut fit);
         first.overflow = fit.overflow;

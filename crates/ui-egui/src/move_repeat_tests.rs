@@ -455,7 +455,10 @@ fn repeat(device: Device, page: Page, rounds: usize, moves: i32, rest: bool) -> 
             timed(&mut h, format!("round {round} {name} press"), &mut run, again || rest);
             let mut last = (0, 0);
             for i in 1..=moves {
-                let d = (-(i * 17) * if (round + usize::from(again)) % 2 == 0 { 1 } else { -1 }, -(i * 7) * if again { -1 } else { 1 });
+                // Down first, then back up: a layer near the top edge (the credits page's first
+                // line) dragged up first was left a few pixels on the page, its again-press then
+                // on its transform box's edge (a scale, not a move: nothing moved).
+                let d = (-(i * 17) * if (round + usize::from(again)) % 2 == 0 { 1 } else { -1 }, (i * 7) * if again { -1 } else { 1 });
                 let p = screen(&h, start[0] + d.0 as f32, start[1] + d.1 as f32);
                 let p = egui::pos2(p.x.round() + (p0.x - p0.x.round()), p.y.round() + (p0.y - p0.y.round()));
                 h.event(egui::Event::PointerMoved(p));

@@ -140,7 +140,7 @@ fn type_on(device: Device, page: fn(&mut PhotocraftApp) -> Option<LayerId>, text
         let app = h.state();
         let visited = |app: &PhotocraftApp| counter(app, "rows_drawn") + counter(app, "rows_skipped");
         let (l0, px0, r0, v0, t0, c0) =
-            (counter(app, "layouts"), app.perf.refreshed_px, counter(app, "rows_drawn"), visited(app), counter(app, "thumbs"), counter(app, "channel_thumbs_full"));
+            (photocraft_text::layouts_here(), app.perf.refreshed_px, counter(app, "rows_drawn"), visited(app), counter(app, "thumbs"), counter(app, "channel_thumbs_full"));
         for c in c {
             h.event(Event::Text(c.to_string()));
         }
@@ -152,7 +152,7 @@ fn type_on(device: Device, page: fn(&mut PhotocraftApp) -> Option<LayerId>, text
         let app = h.state();
         keys.push(Key {
             ms,
-            layouts: counter(app, "layouts") - l0,
+            layouts: photocraft_text::layouts_here() - l0,
             px: app.perf.refreshed_px - px0,
             rows: counter(app, "rows_drawn") - r0,
             visited: visited(app) - v0,
@@ -269,7 +269,8 @@ fn set_style_lays_out_each_layer_it_changes_once() {
     h.run_steps(10);
     crate::type_tool::edit_active(h.state_mut()).expect("edit");
     h.run_steps(5);
-    let layouts = |h: &Harness| counter(h.state(), "layouts");
+    // This thread's: other tests lay type out in the same process at the same time.
+    let layouts = |_: &Harness| photocraft_text::layouts_here();
     let renderings = |h: &Harness| -> Vec<(LayerId, Option<photocraft_raster::Surface>)> {
         let doc = &h.state().session.active().expect("doc").doc;
         doc.walk()
