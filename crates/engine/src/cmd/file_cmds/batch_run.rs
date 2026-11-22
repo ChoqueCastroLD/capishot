@@ -104,22 +104,9 @@ pub(crate) fn list_images_tree(dir: &str, _skip: &str, _cmd: &str) -> Result<Vec
 }
 
 /// Opens each input in a scratch session, runs `f` on it and saves it to `output` as `format`
-/// (`"same"` keeps the input's extension). Errors per file are collected, not fatal.
-pub(crate) fn process_files(
-    s: &Session,
-    inputs: &[String],
-    output: &str,
-    format: &str,
-    save: SaveOpts,
-    suffix: &str,
-    f: &dyn Fn(&mut Session) -> Result<()>,
-) -> Result<Value> {
-    let inputs: Vec<BatchInput> = inputs.iter().map(|path| BatchInput { path: path.clone(), rel_dir: String::new() }).collect();
-    process_tree(s.prefs().raw_defaults.resolution, &inputs, output, format, save, suffix, &crate::jobs::JobCtx::new(), &|scratch, _| f(scratch).map(|()| false))
-}
-
-/// [`process_files`] for inputs from subfolders: each result goes to its input's relative folder
-/// under `output` (created as needed), so `a/x.png` and `b/x.png` don't collide. `f` gets the
+/// (`"same"` keeps the input's extension); errors per file are collected, not fatal. Inputs from
+/// subfolders go to their relative folder under `output` (created as needed), so `a/x.png` and
+/// `b/x.png` don't collide. `f` gets the
 /// output path and returns `true` when it wrote the result there itself (Batch writes what a
 /// recorded save marked); otherwise the active document is saved after it. A raw opens at
 /// `raw_ppi` (the user's Raw Defaults); progress and cancellation go through `ctx`.

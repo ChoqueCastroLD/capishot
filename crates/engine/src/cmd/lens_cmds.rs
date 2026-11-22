@@ -478,13 +478,26 @@ fn lens_batch(s: &mut Session, p: &Value) -> Result<Value> {
         // Batch default: the EXIF-driven profile, as Photoshop's dialog suggests.
         m.entry("profile").or_insert(json!("auto"));
     }
-    crate::file_cmds::process_files(s, &inputs, &output, &format, crate::file_cmds::SaveOpts::from_params(s, p, LENS_BATCH)?, "", &|scratch| {
-        if scratch.active().is_some_and(|d| d.doc.layers.len() > 1) {
-            scratch.execute("layer.flattenImage", json!({}))?;
-        }
-        scratch.execute(LENS, params.clone())?;
-        Ok(())
-    })
+    let save = crate::file_cmds::SaveOpts::from_params(s, p, LENS_BATCH)?;
+    let raw_ppi = s.prefs().raw_defaults.resolution;
+    let inputs: Vec<crate::file_cmds::BatchInput> = inputs.into_iter().map(|path| crate::file_cmds::BatchInput { path, rel_dir: String::new() }).collect();
+    // On a worker, a file at a time with progress and Esc to cancel, like Batch: a folder of photos
+    // held the window until the last was written. Inline when the session runs commands inline.
+    crate::jobs::run(
+        s,
+        "Lens Correction",
+        false,
+        move |ctx| {
+            crate::file_cmds::process_tree(raw_ppi, &inputs, &output, &format, save, "", ctx, &|scratch, _| {
+                if scratch.active().is_some_and(|d| d.doc.layers.len() > 1) {
+                    scratch.execute("layer.flattenImage", json!({}))?;
+                }
+                scratch.execute(LENS, params.clone())?;
+                Ok(false)
+            })
+        },
+        |_, v| Ok(v),
+    )
 }
 
 const LENS_DOC: &str = r##"{"profile":"none|auto|generic","focalLength":mm=0,"correctDistortion":bool=true,"correctVignette":bool=true,"correctCA":bool=true,"autoScale":bool=false,"distortion":-100..100=0,"redCyan":-100..100=0,"blueYellow":-100..100=0,"vignetteAmount":-100..100=0,"vignetteMidpoint":0..100=50,"vertical":-100..100=0,"horizontal":-100..100=0,"angle":-180..180=0,"scale":50..150=100,"edge":"transparency|edgeExtension|black|white","straighten":[[x,y],[x,y]]?}"##;

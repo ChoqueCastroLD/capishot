@@ -1957,10 +1957,10 @@ fn image_processor_uses_open_images_as_they_are() {
     assert_eq!((back.size.width, back.size.height), (80, 40), "the edit, not the file on disk");
 }
 
-/// Batch and Image Processor run on a worker as a job (a folder of pages held the window for 13
+/// Batch, Image Processor and Lens Correction run on a worker as a job (a folder of pages held the window for 13
 /// to 23 s): the session answers while they run, and their result arrives through `poll_jobs`.
 #[test]
-fn batch_and_image_processor_run_as_jobs() {
+fn batch_image_processor_and_lens_correction_run_as_jobs() {
     let dir = tmp("batch-job");
     let input: Vec<String> = (0..4).map(|i| png(&dir, &format!("p{i}.png"), 64, 48, "#ff0000")).collect();
     let mut s = session(16, 16, 8);
@@ -1990,6 +1990,13 @@ fn batch_and_image_processor_run_as_jobs() {
     let job = started(&mut s, "file.scripts.imageProcessor", json!({"input": input, "output": out, "format": "png", "width": 32}));
     let crate::jobs::JobOutcome::Done(v) = finished(&mut s, job).outcome else { panic!() };
     assert_eq!(v["files"].as_array().unwrap().len(), 4, "{v}");
+    // Lens Correction's batch too (it held the window until the last file was written).
+    let out = join(&dir, "lens");
+    let job = started(&mut s, "file.automate.lensCorrection", json!({"input": input, "output": out, "vignetteAmount": 60}));
+    assert!(s.execute("layer.list", json!({})).is_ok());
+    let crate::jobs::JobOutcome::Done(v) = finished(&mut s, job).outcome else { panic!() };
+    assert_eq!(v["files"].as_array().unwrap().len(), 4, "{v}");
+    assert!(v["errors"].as_array().unwrap().is_empty(), "{v}");
 }
 
 /// A batch's progress moves a file at a time, and a cancel stops it before the next file: what
