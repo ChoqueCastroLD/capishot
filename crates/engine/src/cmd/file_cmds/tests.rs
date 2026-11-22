@@ -1956,3 +1956,66 @@ fn image_processor_uses_open_images_as_they_are() {
     let back = photocraft_io::import("a.png", &std::fs::read(files[0].as_str().unwrap()).unwrap()).unwrap().document;
     assert_eq!((back.size.width, back.size.height), (80, 40), "the edit, not the file on disk");
 }
+
+/// Batch and Image Processor run on a worker as a job (a folder of pages held the window for 13
+/// to 23 s): the session answers while they run, and their result arrives through `poll_jobs`.
+#[test]
+fn batch_and_image_processor_run_as_jobs() {
+    let dir = tmp("batch-job");
+    let input: Vec<String> = (0..4).map(|i| png(&dir, &format!("p{i}.png"), 64, 48, "#ff0000")).collect();
+    let mut s = session(16, 16, 8);
+    let started = |s: &mut Session, id: &str, p: Value| match s.start(id, p).unwrap() {
+        crate::jobs::Started::Job(job) => job,
+        crate::jobs::Started::Done(v) => panic!("{id} ran on this thread: {v}"),
+    };
+    let finished = |s: &mut Session, job| {
+        let t = std::time::Instant::now();
+        loop {
+            if let Some(e) = s.poll_jobs().into_iter().find(|e| e.id == job) {
+                return e;
+            }
+            assert!(t.elapsed().as_secs() < 60, "the job didn't end");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    };
+    let out = join(&dir, "batch");
+    let job = started(&mut s, "file.automate.batch", json!({"steps": [["image.adjustments.invert", {}]], "input": input, "output": out, "format": "png"}));
+    // The session isn't held: a query answers while the batch runs.
+    assert!(s.execute("layer.list", json!({})).is_ok());
+    let e = finished(&mut s, job);
+    let crate::jobs::JobOutcome::Done(v) = e.outcome else { panic!("{:?}", e.outcome) };
+    assert_eq!(v["files"].as_array().unwrap().len(), 4, "{v}");
+    assert!(v["skipped"].is_array(), "{v}");
+    let out = join(&dir, "processed");
+    let job = started(&mut s, "file.scripts.imageProcessor", json!({"input": input, "output": out, "format": "png", "width": 32}));
+    let crate::jobs::JobOutcome::Done(v) = finished(&mut s, job).outcome else { panic!() };
+    assert_eq!(v["files"].as_array().unwrap().len(), 4, "{v}");
+}
+
+/// A batch's progress moves a file at a time, and a cancel stops it before the next file: what
+/// was written stays, nothing more is.
+#[test]
+fn a_batch_reports_each_file_and_stops_between_files_when_cancelled() {
+    let dir = tmp("batch-cancel");
+    let input: Vec<String> = (0..5).map(|i| png(&dir, &format!("p{i}.png"), 8, 8, "#ffffff")).collect();
+    let inputs: Vec<BatchInput> = input.iter().map(|p| BatchInput { path: p.clone(), rel_dir: String::new() }).collect();
+    let out = join(&dir, "out");
+    let ctx = crate::jobs::JobCtx::new();
+    let seen = std::sync::Mutex::new(Vec::new());
+    let r = super::batch_run::process_tree(72.0, &inputs, &out, "png", SaveOpts::default(), "", &ctx, &|_, _| {
+        let mut seen = seen.lock().unwrap();
+        seen.push(ctx.fraction());
+        if seen.len() == 2 {
+            ctx.cancel();
+        }
+        Ok(false)
+    });
+    assert!(matches!(r, Err(EngineError::Cancelled)), "{r:?}");
+    assert_eq!(*seen.lock().unwrap(), [0.0, 0.2], "progress before each file");
+    let written = std::fs::read_dir(&out).map(|d| d.count()).unwrap_or(0);
+    assert_eq!(written, 2, "the files done before the cancel stay; none after it");
+    let ctx = crate::jobs::JobCtx::new();
+    let r = super::batch_run::process_tree(72.0, &inputs, &join(&dir, "all"), "png", SaveOpts::default(), "", &ctx, &|_, _| Ok(false)).unwrap();
+    assert_eq!(r["files"].as_array().unwrap().len(), 5);
+    assert_eq!(ctx.fraction(), 1.0);
+}

@@ -97,7 +97,7 @@ pub(super) fn image_processor(s: &mut Session, p: &Value) -> Result<Value> {
         (w, h) => Some(json!({"width": w.unwrap_or(1e9), "height": h.unwrap_or(1e9), "dontEnlarge": true})),
     };
     let to_srgb = p.get("convertToSrgb").and_then(Value::as_bool).unwrap_or(false);
-    let prepare = |scratch: &mut Session, _: &str| -> Result<bool> {
+    let prepare = move |scratch: &mut Session, _: &str| -> Result<bool> {
         if to_srgb && scratch.active().is_some_and(|d| d.doc.mode != ColorMode::Rgb) {
             scratch.execute("image.mode.rgb", json!({}))?;
         }
@@ -110,7 +110,10 @@ pub(super) fn image_processor(s: &mut Session, p: &Value) -> Result<Value> {
     if open {
         return Ok(process_open_documents(s, &output, &format, save, &prepare));
     }
-    Ok(process_tree(s, &inputs, &output, &format, save, "", &prepare))
+    // The files are read, processed and written on a worker, a file at a time with progress and
+    // Esc to cancel: a folder of pages held the window for seconds.
+    let raw_ppi = s.prefs().raw_defaults.resolution;
+    crate::jobs::run(s, "Image Processor", false, move |ctx| process_tree(raw_ppi, &inputs, &output, &format, save, "", ctx, &prepare), |_, v| Ok(v))
 }
 
 /// [`process_tree`] over the open documents as they are: each one copied into a scratch session

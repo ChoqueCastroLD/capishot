@@ -1136,6 +1136,7 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
             app.ui.brush_tab = 1;
         }
         JobOutcome::Done(v) if e.command == "lut.installPack" => crate::lut_library_ui::report(app, &v),
+        JobOutcome::Done(v) if e.command == "file.automate.batch" => crate::dialogs::batch_status(app, &v),
         // As `retouch_ui::report_smart_result` says it when Quick Selection runs inline.
         JobOutcome::Done(v) if e.command == "select.quick" && v.get("changed").and_then(Value::as_bool) == Some(false) => {
             app.sync_views();

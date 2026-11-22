@@ -1017,6 +1017,12 @@ fn file_command(fields: &Fields) -> Option<&'static str> {
 /// parameters, then settle the filter preview and the playing action.
 /// File › Automate › Batch's result line: the files written, the inputs that failed, and the
 /// action's steps Batch left out (view steps, Quick Export), so none is skipped unannounced.
+/// The status bar after a batch run: how many files it wrote, its errors and skipped steps.
+pub(crate) fn batch_status(app: &mut PhotocraftApp, v: &Value) {
+    app.ui.status = batch_result_line(v);
+    app.ui.status_error = v["files"].as_array().is_none_or(Vec::is_empty) && v["errors"].as_array().is_some_and(|e| !e.is_empty());
+}
+
 pub(crate) fn batch_result_line(v: &Value) -> String {
     let lang = crate::i18n::current();
     let written = v["files"].as_array().map_or(0, Vec::len) as u64;
@@ -1081,11 +1087,12 @@ fn confirm_generic_command(app: &mut PhotocraftApp, d: Dialog) -> Result<Value, 
     if result.is_ok() && cmd == "view.newGuideLayout" {
         app.ui.view.guide_layout = params;
     }
+    // A batch that runs as a job says so when it ends (`jobs_ui`).
     if cmd == "file.automate.batch"
         && let Ok(v) = &result
+        && v.get("job").is_none()
     {
-        app.ui.status = batch_result_line(v);
-        app.ui.status_error = v["files"].as_array().is_none_or(Vec::is_empty) && v["errors"].as_array().is_some_and(|e| !e.is_empty());
+        batch_status(app, v);
     }
     if result.is_ok() {
         if crate::adjust_dialog::owns(&d.fields) {

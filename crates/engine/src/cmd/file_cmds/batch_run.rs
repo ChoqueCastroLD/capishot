@@ -113,29 +113,35 @@ pub(crate) fn process_files(
     save: SaveOpts,
     suffix: &str,
     f: &dyn Fn(&mut Session) -> Result<()>,
-) -> Value {
+) -> Result<Value> {
     let inputs: Vec<BatchInput> = inputs.iter().map(|path| BatchInput { path: path.clone(), rel_dir: String::new() }).collect();
-    process_tree(s, &inputs, output, format, save, suffix, &|scratch, _| f(scratch).map(|()| false))
+    process_tree(s.prefs().raw_defaults.resolution, &inputs, output, format, save, suffix, &crate::jobs::JobCtx::new(), &|scratch, _| f(scratch).map(|()| false))
 }
 
 /// [`process_files`] for inputs from subfolders: each result goes to its input's relative folder
 /// under `output` (created as needed), so `a/x.png` and `b/x.png` don't collide. `f` gets the
 /// output path and returns `true` when it wrote the result there itself (Batch writes what a
-/// recorded save marked); otherwise the active document is saved after it.
+/// recorded save marked); otherwise the active document is saved after it. A raw opens at
+/// `raw_ppi` (the user's Raw Defaults); progress and cancellation go through `ctx`.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn process_tree(
-    s: &Session,
+    raw_ppi: f64,
     inputs: &[BatchInput],
     output: &str,
     format: &str,
     save: SaveOpts,
     suffix: &str,
+    ctx: &crate::jobs::JobCtx,
     f: &dyn Fn(&mut Session, &str) -> Result<bool>,
-) -> Value {
-    let outputs = inputs.iter().map(|BatchInput { path, rel_dir }| {
-        let ext = if format == "same" { same_format(path) } else { format.trim_start_matches('.').to_ascii_lowercase() };
-        (path.as_str(), join(&join(output, rel_dir), &format!("{}{suffix}.{ext}", stem(path))))
-    });
-    process_outputs(s, outputs, save, f)
+) -> Result<Value> {
+    let outputs: Vec<(&str, String)> = inputs
+        .iter()
+        .map(|BatchInput { path, rel_dir }| {
+            let ext = if format == "same" { same_format(path) } else { format.trim_start_matches('.').to_ascii_lowercase() };
+            (path.as_str(), join(&join(output, rel_dir), &format!("{}{suffix}.{ext}", stem(path))))
+        })
+        .collect();
+    process_outputs(raw_ppi, &outputs, save, ctx, f)
 }
 
 /// The extension a batch output takes with Format "Same": the input's own, except for formats
@@ -178,39 +184,42 @@ fn same_format_takes_the_file_names_extension() {
     assert_eq!(same_format("/in/.hidden"), "png");
 }
 
-fn process_outputs<'a>(
-    s: &Session,
-    outputs: impl IntoIterator<Item = (&'a str, String)>,
-    save: SaveOpts,
-    f: &dyn Fn(&mut Session, &str) -> Result<bool>,
-) -> Value {
-    // The scratch sessions have default preferences; a raw opens at the user's Raw Defaults.
-    let raw_ppi = s.prefs().raw_defaults.resolution;
+/// Each input, one after the other: progress after each (`ctx`, with the next file's name), and
+/// a cancel stops before the next file and within a step that checks it (the steps run under
+/// `ctx`); what was written by then stays.
+fn process_outputs(raw_ppi: f64, outputs: &[(&str, String)], save: SaveOpts, ctx: &crate::jobs::JobCtx, f: &dyn Fn(&mut Session, &str) -> Result<bool>) -> Result<Value> {
     let mut files = Vec::new();
     let mut errors = Vec::new();
     let mut written = OutputClaims::default();
-    for (path, out) in outputs {
+    let total = outputs.len().max(1) as f32;
+    for (i, (path, out)) in outputs.iter().enumerate() {
+        ctx.check()?;
+        ctx.progress(i as f32 / total, &file_name(path));
         let r = (|| -> Result<()> {
-            written.check(&out).map_err(EngineError::Other)?;
+            written.check(out).map_err(EngineError::Other)?;
             let bytes = read_file(path)?;
+            // The scratch sessions have default preferences; a raw opens at the user's Raw Defaults.
             let mut scratch = Session::new();
+            scratch.set_inline_job_ctx(Some(ctx.clone()));
             let doc = import_at_raw_ppi(raw_ppi, &file_name(path), &bytes)?;
             scratch.add_document(doc, Some(path.to_string()));
-            if !f(&mut scratch, &out)? {
+            if !f(&mut scratch, out)? {
                 let d = scratch.active().ok_or(EngineError::NoDocument)?;
-                save_doc(&d.doc, &out, save)?;
+                save_doc(&d.doc, out, save)?;
             }
             Ok(())
         })();
         match r {
             Ok(()) => {
-                written.record(&out, path);
-                files.push(out);
+                written.record(out, path);
+                files.push(out.clone());
             }
+            Err(EngineError::Cancelled) => return Err(EngineError::Cancelled),
             Err(e) => errors.push(json!({"file": path, "error": e.to_string()})),
         }
     }
-    json!({"files": files, "errors": errors})
+    ctx.progress(1.0, "");
+    Ok(json!({"files": files, "errors": errors}))
 }
 
 /// The output paths a batch run has written, so a later input whose output name matches an
@@ -388,6 +397,44 @@ pub(super) fn batch(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let names = batch_naming::plan(&inputs, &output, &format, p)?;
     let authorize = s.authorize;
+    let raw_ppi = s.prefs().raw_defaults.resolution;
+    // The files are read, played and written on a worker, a file at a time with progress and Esc
+    // to cancel (cancelling keeps what was written): a folder of pages held the window for 13 to
+    // 23 s. Inline when the session runs commands inline (scripts, a batch inside a played action).
+    crate::jobs::run(
+        s,
+        "Batch",
+        false,
+        move |ctx| {
+            let (r, carried) = batch_files(BatchRun { steps, actions, authorize, playback_steps, save, raw_ppi }, &inputs, names, &output, &format, ctx);
+            r.map(|mut r| {
+                r["skipped"] = Value::Array(skipped);
+                (r, carried)
+            })
+        },
+        |s, (r, carried): (Value, u64)| {
+            if s.actions.playing > 0 {
+                s.actions.playback_steps = carried;
+            }
+            Ok(r)
+        },
+    )
+}
+
+/// What every file of a batch plays and how it is written.
+struct BatchRun {
+    steps: Vec<(String, Value)>,
+    actions: crate::actions_cmds::ActionState,
+    authorize: Option<fn(&str, &Value) -> Result<()>>,
+    playback_steps: u64,
+    save: SaveOpts,
+    raw_ppi: f64,
+}
+
+/// Plays `run.steps` on each input and writes its result ([`batch`]), with the playback steps the
+/// files spent (carried from one to the next, failed or not, and back to the session).
+fn batch_files(run: BatchRun, inputs: &[BatchInput], names: Option<Vec<String>>, output: &str, format: &str, ctx: &crate::jobs::JobCtx) -> (Result<Value>, u64) {
+    let BatchRun { steps, actions, authorize, playback_steps, save, raw_ppi } = run;
     // Each input runs in its own scratch session, so what the played steps spend is carried from
     // one input to the next (failed or not) and back to this session, not restarted per input.
     let carried = std::cell::Cell::new(playback_steps);
@@ -426,13 +473,11 @@ pub(super) fn batch(s: &mut Session, p: &Value) -> Result<Value> {
         result
     };
     let r = match names {
-        Some(names) => process_outputs(s, inputs.iter().map(|i| i.path.as_str()).zip(names), save, &run),
-        None => process_tree(s, &inputs, &output, &format, save, "", &run),
+        Some(names) => {
+            let outputs: Vec<(&str, String)> = inputs.iter().map(|i| i.path.as_str()).zip(names).collect();
+            process_outputs(raw_ppi, &outputs, save, ctx, &run)
+        }
+        None => process_tree(raw_ppi, inputs, output, format, save, "", ctx, &run),
     };
-    if s.actions.playing > 0 {
-        s.actions.playback_steps = carried.get();
-    }
-    let mut r = r;
-    r["skipped"] = Value::Array(skipped);
-    Ok(r)
+    (r, carried.get())
 }
