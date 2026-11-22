@@ -935,16 +935,17 @@ pub(crate) fn with_text_targets(
         check_text_unlocked(doc, *id)?;
     }
     let damage = s.edit(label, |doc, _| {
-        let (dpi, format) = (doc.resolution_dpi, doc.pixel_format());
+        let (dpi, format, canvas) = (doc.resolution_dpi, doc.pixel_format(), doc.bounds());
         let mut damage = Some(photocraft_geom::Rect::EMPTY);
         for id in &ids {
-            let Some(LayerContent::Text(t)) = doc.layer_mut(*id).map(|l| &mut l.content) else { return Err(EngineError::NoLayer(*id)) };
-            let before = t.cache.as_ref().map(|c| c.tile_bounds());
+            let l = doc.layer_mut(*id).ok_or(EngineError::NoLayer(*id))?;
+            let before = Rendering::of(l, canvas);
+            let LayerContent::Text(t) = &mut l.content else { return Err(EngineError::NoLayer(*id)) };
             let range = if p.get("layers").is_none() || p.get("layer").is_some() { range_param(&t.text, p) } else { (0, t.text.len()) };
             f(t, range)?;
             refresh_at(dpi, format, t);
             // An unknown old/new cache retains Session.edit's full-refresh fallback.
-            damage = damage.zip(before).zip(t.cache.as_ref().map(|c| c.tile_bounds())).map(|((all, a), b)| all.union(&a).union(&b));
+            damage = damage.zip(before.damage(l, canvas)).map(|(all, d)| all.union(&d));
         }
         Ok(damage)
     })?;

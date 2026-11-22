@@ -237,3 +237,57 @@ fn typing_timing_report() {
     }
 }
 
+/// Changing the style (Character panel, options bar) lays out each layer it changes once and
+/// leaves the other type layers' renderings as they were: the edited layer while typing, then
+/// three selected layers. On a92ad8384: 3 layouts for each layer changed.
+#[test]
+fn set_style_lays_out_each_layer_it_changes_once() {
+    let mut h = harness(Device::Cpu).expect("the CPU canvas");
+    let first = styled_page(h.state_mut());
+    h.state_mut().sync_views();
+    h.state_mut().run("layer.select", json!({"layer": first.0})).expect("select");
+    h.run_steps(10);
+    crate::type_tool::edit_active(h.state_mut()).expect("edit");
+    h.run_steps(5);
+    let layouts = |h: &Harness| counter(h.state(), "layouts");
+    let renderings = |h: &Harness| -> Vec<(LayerId, Option<photocraft_raster::Surface>)> {
+        let doc = &h.state().session.active().expect("doc").doc;
+        doc.walk()
+            .iter()
+            .filter_map(|(_, _, l)| match &l.content {
+                photocraft_doc::LayerContent::Text(t) => Some((l.id, t.cache.clone())),
+                _ => None,
+            })
+            .collect()
+    };
+    let changed = |before: &[(LayerId, Option<photocraft_raster::Surface>)], after: &[(LayerId, Option<photocraft_raster::Surface>)]| -> Vec<LayerId> {
+        // Drawn again: its pixels aren't the same tiles any more.
+        let same = |x: &photocraft_raster::Surface, y: &photocraft_raster::Surface| x.tile_count() == y.tile_count() && x.tiles().zip(y.tiles()).all(|(p, q)| p.0 == q.0 && std::sync::Arc::ptr_eq(p.1, q.1));
+        before.iter().zip(after).filter(|(a, b)| !a.1.as_ref().zip(b.1.as_ref()).is_some_and(|(x, y)| same(x, y))).map(|(a, _)| a.0).collect()
+    };
+    for size in [44, 36, 52] {
+        let (l0, r0) = (layouts(&h), renderings(&h));
+        h.state_mut().run("type.setStyle", json!({"layer": first.0, "size": size})).expect("size");
+        h.step();
+        h.step();
+        assert_eq!(layouts(&h) - l0, 1, "size {size}: one layout");
+        assert_eq!(changed(&r0, &renderings(&h)), vec![first], "size {size}: only the edited layer drawn again");
+    }
+    crate::type_tool::commit(h.state_mut());
+    h.run_steps(3);
+    let ids: Vec<LayerId> = renderings(&h).iter().map(|r| r.0).skip(10).step_by(7).take(3).collect();
+    for (i, id) in ids.iter().enumerate() {
+        h.state_mut().run("layer.select", json!({"layer": id.0, "mode": if i == 0 { "replace" } else { "add" }})).expect("select");
+    }
+    h.run_steps(3);
+    let (l0, r0) = (layouts(&h), renderings(&h));
+    h.state_mut().run("type.setStyle", json!({"color": "#c02020"})).expect("colour");
+    h.step();
+    h.step();
+    assert_eq!(layouts(&h) - l0, 3, "one layout for each of the three");
+    let mut drawn = changed(&r0, &renderings(&h));
+    drawn.sort_by_key(|l| l.0);
+    let mut want = ids.clone();
+    want.sort_by_key(|l| l.0);
+    assert_eq!(drawn, want, "only the three drawn again");
+}
