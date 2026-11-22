@@ -39,6 +39,7 @@ pub mod bounds;
 mod camera_raw;
 mod fx;
 pub mod health;
+pub mod lut;
 pub mod plan;
 mod prefix;
 
@@ -634,7 +635,9 @@ pub struct Compositor {
     temps: Vec<(Tex, u64)>,
     patterns: HashMap<String, (u64, Tex)>,
     /// LUT textures by content hash, and the frame that last used them.
-    lut_cache: HashMap<u64, ((wgpu::Texture, wgpu::TextureView), u64)>,
+    /// The textures of the plans' tables, by the address of their rows (held, so an address is
+    /// one table for as long as its texture is kept), with the frame that last used each.
+    lut_cache: HashMap<usize, (lut::Lut, (wgpu::Texture, wgpu::TextureView), u64)>,
     /// The colour mode of the document being encoded: patterns paint in it
     /// (`photocraft_compose::pattern::pattern_rgba`).
     pattern_mode: photocraft_color::ColorMode,
@@ -1526,7 +1529,7 @@ impl Compositor {
         stats.evicted += self.evict().0;
         self.temps.retain(|(_, used)| frame.saturating_sub(*used) < 240);
         let lut_age = if self.lut_cache.len() > 64 { 1 } else { 240 };
-        self.lut_cache.retain(|_, (_, used)| frame.saturating_sub(*used) < lut_age);
+        self.lut_cache.retain(|_, (_, _, used)| frame.saturating_sub(*used) < lut_age);
         Ok(stats)
     }
 
@@ -1626,14 +1629,12 @@ impl Compositor {
             .iter()
             .map(|p| {
                 let rows = p.lut.as_ref()?;
-                // The same table (an unchanged Curves or gradient) is uploaded once, not per frame.
-                let key = rows
-                    .iter()
-                    .flat_map(|r| r.iter())
-                    .fold(0xcbf2_9ce4_8422_2325u64 ^ rows.len() as u64, |h, v| (h ^ u64::from(v.to_bits())).wrapping_mul(0x100_0000_01b3));
-                let entry = self.lut_cache.entry(key).or_insert_with(|| (lut_texture(device, queue, rows), frame));
-                entry.1 = frame;
-                Some(entry.0.clone())
+                // The same table (an unchanged Curves or gradient: the plans share its rows) is
+                // uploaded once, not per frame.
+                let key = Arc::as_ptr(rows) as usize;
+                let entry = self.lut_cache.entry(key).or_insert_with(|| (rows.clone(), lut_texture(device, queue, rows), frame));
+                entry.2 = frame;
+                Some(entry.1.clone())
             })
             .collect();
         let patterns = plan.passes.iter().map(|p| p.pattern.map(|pat| self.pattern_view(device, queue, pat))).collect();

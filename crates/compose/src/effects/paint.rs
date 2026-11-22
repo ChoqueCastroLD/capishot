@@ -167,9 +167,12 @@ pub fn gradient_t(style: GradientStyle, angle: f32, scale: f32, reverse: bool, o
     if reverse { 1.0 - t } else { t }
 }
 
-/// Samples colour and opacity stops at `t`.
-pub fn sample_gradient(g: &Gradient, t: f32) -> [f32; 4] {
-    PreparedGradient::new(g).sample(t)
+/// Colour and opacity at `n` evenly spaced positions from 0 to 1 (a table of the gradient): the
+/// stops are converted once for all of them.
+pub fn gradient_samples(g: &Gradient, n: usize) -> Vec<[f32; 4]> {
+    let prepared = PreparedGradient::new(g);
+    let last = n.saturating_sub(1).max(1) as f32;
+    (0..n).map(|k| prepared.sample(k as f32 / last)).collect()
 }
 
 // Prepared only for one paint call: CMYK conversions must use that call's active profile.

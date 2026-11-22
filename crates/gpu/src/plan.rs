@@ -198,7 +198,7 @@ pub struct Pass<'a> {
     /// Extra shader flags (`F_KNOCKOUT`, …).
     pub flags: u32,
     /// 4096-entry LUT rows (Levels / Curves / Gradient map / gradient stops).
-    pub lut: Option<Vec<[f32; 4096]>>,
+    pub lut: Option<crate::lut::Lut>,
     pub gradient: bool,
     /// Effect map sampled by `FxPaint`.
     pub map: Option<MapRef>,
@@ -1221,15 +1221,22 @@ impl<'a> Planner<'a> {
                 // position hash, see the shader).
                 let quantum = photocraft_compose::adjustment_quantum(self.cx.depth).unwrap_or(0.0);
                 p.params[2] = [offset.0, offset.1, quantum, if *dither { 1.0 } else { 0.0 }];
-                let ramp = photocraft_compose::gradient_fill::Ramp::new(f);
-                let mut rows = vec![[0.0f32; 4096]; 4];
-                for k in 0..4096 {
-                    let v = ramp.as_ref().map_or([0.0; 4], |r| r.sample(k as f32 / 4095.0));
-                    for (ch, row) in rows.iter_mut().enumerate() {
-                        row[k] = v[ch];
-                    }
-                }
-                p.lut = Some(rows);
+                p.lut = crate::lut::shared(
+                    |s| matches!(s, crate::lut::Source::Fill(kept) if kept == f),
+                    || crate::lut::Source::Fill(f.clone()),
+                    || {
+                        let ramp = photocraft_compose::gradient_fill::Ramp::new(f);
+                        let mut rows = vec![[0.0f32; 4096]; 4];
+                        for k in 0..4096 {
+                            let v = ramp.as_ref().map_or([0.0; 4], |r| r.sample(k as f32 / 4095.0));
+                            for (ch, row) in rows.iter_mut().enumerate() {
+                                row[k] = v[ch];
+                            }
+                        }
+                        (0, [[0.0; 4]; 4], Some(rows))
+                    },
+                )
+                .2;
             }
             // Pattern fills fall back to the CPU compositor (see `check`).
             Fill::Pattern { .. } => {}
@@ -1289,7 +1296,12 @@ impl<'a> Planner<'a> {
         }
         let mut p = Pass::new(Kernel::Adjust, 0);
         p.a = Some(src);
-        let (kind, params, lut) = adjustment_program(adj, self.cx.transfer, self.cx.depth);
+        let (transfer, depth) = (self.cx.transfer, self.cx.depth);
+        let (kind, params, lut) = crate::lut::shared(
+            |s| matches!(s, crate::lut::Source::Adjust(a, t, d) if a == adj && *t == transfer && *d == depth),
+            || crate::lut::Source::Adjust(adj.clone(), transfer, depth),
+            || adjustment_program(adj, transfer, depth),
+        );
         p.adjust_kind = kind;
         p.params = params;
         p.lut = lut;
@@ -1712,13 +1724,13 @@ impl<'a> Planner<'a> {
                 p.params[2][0] = offset.0;
                 p.params[2][1] = offset.1;
                 p.params[2][2] = 1.0;
-                p.lut = Some(gradient_rows(g));
+                p.lut = gradient_lut(g);
             }
             Paint::GlowGradient(g, gain) => {
                 // effects::paint_glow: the gradient at 1 - strength, opaque from 1 / gain.
                 p.params[0][0] = *gain;
                 p.params[2][2] = 4.0;
-                p.lut = Some(gradient_rows(g));
+                p.lut = gradient_lut(g);
             }
             Paint::Pattern(pat, pl) => {
                 p.params[2][2] = 2.0;
@@ -2010,16 +2022,25 @@ pub fn adjustment_program(adj: &Adjustment, transfer: Transfer, depth: photocraf
     }
 }
 
-/// A gradient's colour and alpha as four 4096-entry LUT rows (`lut_tex`).
-fn gradient_rows(g: &Gradient) -> Vec<[f32; 4096]> {
-    let mut rows = vec![[0.0f32; 4096]; 4];
-    for k in 0..4096 {
-        let v = photocraft_compose::effects::sample_gradient(g, k as f32 / 4095.0);
-        for (ch, row) in rows.iter_mut().enumerate() {
-            row[k] = v[ch];
-        }
-    }
-    rows
+/// A gradient's colour and alpha as four 4096-entry LUT rows (`lut_tex`), shared by the plans
+/// that paint with these stops (`crate::lut`).
+fn gradient_lut(g: &Gradient) -> Option<crate::lut::Lut> {
+    crate::lut::shared(
+        |s| matches!(s, crate::lut::Source::Gradient(stops, opacity) if *stops == g.stops && *opacity == g.opacity_stops),
+        || crate::lut::Source::Gradient(g.stops.clone(), g.opacity_stops.clone()),
+        || {
+            let mut rows = vec![[0.0f32; 4096]; 4];
+            for (k, v) in photocraft_compose::effects::gradient_samples(g, 4096).into_iter().enumerate() {
+                for (row, v) in rows.iter_mut().zip(v) {
+                    if let Some(o) = row.get_mut(k) {
+                        *o = v;
+                    }
+                }
+            }
+            (0, [[0.0; 4]; 4], Some(rows))
+        },
+    )
+    .2
 }
 
 /// Linear interpolation between LUT entries cannot preserve a discontinuity. Let the canvas
@@ -2080,6 +2101,53 @@ mod tests {
     use super::*;
     use photocraft_color::{Color, ColorMode, SampleType};
     use photocraft_geom::Size;
+
+    /// A plan is made for every composite: the tables of a document's gradients and tone curves
+    /// are computed by the first and shared by the rest (12 to 31 ms of every composite on the
+    /// owner's credits PSD went to sampling its gradients again).
+    #[test]
+    fn a_second_plan_computes_no_table_and_shares_the_firsts_rows() {
+        use photocraft_doc::{FxCommon, Gradient, GradientStyle};
+        let mut doc = Document::with_background("page", Size::new(64, 64), ColorMode::Rgb, SampleType::U8, Color::WHITE);
+        let fmt = doc.pixel_format();
+        // Stops no other test uses: the tables are kept process-wide.
+        let stops = |seed: f32| vec![(0.0, Color::rgb(seed, 0.137, 0.911)), (1.0, Color::rgb(0.613, seed, 0.277))];
+        let mut styled = Layer::raster("overlay", fmt);
+        if let Some(s) = styled.surface_mut() {
+            s.fill_rect(Rect::new(8, 8, 40, 40), &photocraft_raster::from_rgba(&fmt, [1.0, 0.2, 0.1, 1.0]));
+        }
+        styled.effects.items.push(Effect::GradientOverlay {
+            common: FxCommon::new(BlendMode::Normal, 1.0),
+            gradient: Gradient { stops: stops(0.4321), ..Default::default() },
+            dither: false,
+            interpolation: None,
+        });
+        // The fill under the styled layer: an opaque fill over it would leave it out of the plan.
+        doc.layers.push(Layer::new("fill", LayerContent::Fill(Fill::gradient(stops(0.8765), 0.0, 1.0, GradientStyle::Linear, false))));
+        doc.layers.push(styled);
+        doc.layers.push(Layer::new("map", LayerContent::Adjustment(Adjustment::GradientMap { stops: vec![(0.0, [0.1234, 0.0, 0.0]), (1.0, [1.0, 0.9876, 1.0])], reverse: false, dither: false })));
+        let before = crate::lut::built_here();
+        let tables: Vec<crate::lut::Lut> = plan(&doc).expect("a plan").passes.iter().filter_map(|p| p.lut.clone()).collect();
+        assert_eq!(tables.len(), 3, "the overlay's, the fill's and the map's table");
+        assert_eq!(crate::lut::built_here() - before, 3, "tables computed by the first plan");
+        for _ in 0..5 {
+            let again = plan(&doc).expect("a plan");
+            let shared: Vec<&crate::lut::Lut> = again.passes.iter().filter_map(|p| p.lut.as_ref()).collect();
+            assert_eq!(shared.len(), tables.len());
+            for (a, b) in tables.iter().zip(shared) {
+                assert!(std::sync::Arc::ptr_eq(a, b), "a later plan made its own rows");
+            }
+        }
+        assert_eq!(crate::lut::built_here() - before, 3, "a later plan computed a table again");
+        // Other stops are another table; the first is still shared.
+        if let Some(Effect::GradientOverlay { gradient, .. }) = doc.layers.get_mut(2).and_then(|l| l.effects.items.first_mut()) {
+            gradient.stops = stops(0.5555);
+        }
+        let edited: Vec<crate::lut::Lut> = plan(&doc).expect("a plan").passes.iter().filter_map(|p| p.lut.clone()).collect();
+        assert_eq!(crate::lut::built_here() - before, 4, "the edited gradient's table alone");
+        let kept = edited.iter().filter(|l| tables.iter().any(|t| std::sync::Arc::ptr_eq(t, l))).count();
+        assert_eq!(kept, 2, "the fill's and the map's rows are the first plan's");
+    }
 
     #[test]
     fn native_cmyk_fills_fall_back_only_without_a_valid_cache() {
