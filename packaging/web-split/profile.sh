@@ -9,7 +9,9 @@
 # go to memory, shared by its workers), serves it, runs the basic page flows (profile-flow.mjs:
 # desktop and phone, in Spanish, English and Portuguese) and writes every function they never ran
 # to cold-functions.txt.gz (st) or cold-functions-threads.txt.gz, and the commands they ran to
-# hot-commands.txt (or -threads): those run at once, the rest wait for the chunks. The list is by name, so it keeps working across builds: a
+# hot-commands.txt (or -threads): those run at once, the rest wait for the chunks. The page is served
+# under Capishot's host name (mapped to this machine), so what runs only there, such as the usage
+# statistics, is profiled as it runs for people. The list is by name, so it keeps working across builds: a
 # function renamed or added since stays in the first-load module until the next profile. Run it
 # again when the first-load module has grown, or after changes to what the first frames or the
 # basic tools run (a function the page needs before its chunk arrived is fetched synchronously,
@@ -65,7 +67,7 @@ sleep 1
 # URL with a query (?r=: what a retry or the fall back to the single-threaded build opens).
 for run in desktop:es-ES: phone:en-US:?r=1 desktop:pt-BR:?r=1 phone:es-ES: desktop:en-US: phone:pt-BR:?r=1 phone360:es-ES:; do
   IFS=: read -r mode lang query <<<"$run"
-  node "$HERE/profile-flow.mjs" "http://127.0.0.1:$port/$query" "$WORK/$mode-$lang${query:+-q}.prof" "$mode" "$lang"
+  node "$HERE/profile-flow.mjs" "http://capichan.com:$port/$query" "$WORK/$mode-$lang${query:+-q}.prof" "$mode" "$lang"
 done
 # shellcheck disable=SC2086
 "$SPLIT" --merge-profiles $F "$WORK"/*.prof -o "$WORK/all.prof"

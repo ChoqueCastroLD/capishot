@@ -3,7 +3,16 @@
 import { chromium } from 'playwright-core';
 import fs from 'node:fs';
 const [url, out, mode = 'desktop', locale = 'es-ES'] = process.argv.slice(2);
-const b = await chromium.launch({ executablePath: process.env.CHROME, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+// The page is served locally under Capishot's own host name (profile.sh), so what runs only there
+// (the usage statistics, from the first frame) is profiled too: a start that called them loaded
+// chunks synchronously. The name resolves to this machine, and its plain-HTTP origin counts as
+// secure (cross-origin isolation needs one).
+const origin = new URL(url).origin;
+const host = new URL(url).hostname;
+const b = await chromium.launch({
+  executablePath: process.env.CHROME,
+  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', `--host-resolver-rules=MAP ${host} 127.0.0.1`, `--unsafely-treat-insecure-origin-as-secure=${origin}`],
+});
 const phone = mode.startsWith('phone');
 const small = mode === 'phone360';
 const ctx = await b.newContext(phone
