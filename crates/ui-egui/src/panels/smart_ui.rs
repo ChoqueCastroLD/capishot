@@ -98,6 +98,17 @@ pub fn paint_badge(painter: &egui::Painter, center: egui::Pos2, color: Color32) 
 }
 
 /// Paint the Smart Filters header and one row per filter of Smart Object `l` (top filter first), with their drag, drop and click handling; actions go to `actions`.
+/// The height of the rows [`filter_rows`] draws under `l`, each followed by `spacing` (none for a
+/// layer without Smart Filters).
+pub fn filter_rows_height(size: LayerThumbnailSize, pro: bool, l: &Layer, spacing: f32) -> f32 {
+    let LayerContent::Smart(sm) = &l.content else { return 0.0 };
+    if sm.smart_filters.is_empty() {
+        return 0.0;
+    }
+    let (header_height, _) = smart_filters_header_geometry(size, pro);
+    header_height + spacing + sm.smart_filters.len() as f32 * (SUB_ROW_H + spacing)
+}
+
 pub fn filter_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, doc: &Document, l: &Layer, depth: usize, actions: &mut Vec<(String, Value)>) {
     let LayerContent::Smart(sm) = &l.content else { return };
     if sm.smart_filters.is_empty() {

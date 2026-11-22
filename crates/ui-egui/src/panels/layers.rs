@@ -103,7 +103,10 @@ fn inactive_blend_rows(ui: &mut egui::Ui, pro: bool) {
 
 pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     // A new active layer opens its parent groups and is scrolled into view (#152).
-    let reveal = crate::layer_reveal::track(app, ui.ctx());
+    let reveal = {
+        let _s = crate::perf_span::span("layers.reveal");
+        crate::layer_reveal::track(app, ui.ctx())
+    };
     let Some(st) = app.session.active() else {
         empty(ui, tl!("No document"));
         return;
@@ -121,6 +124,7 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         app.reorder_preview = None;
     }
     if t.pro && app.ui.layers_panel_options.show_filters {
+        let _s = crate::perf_span::span("layers.filter");
         crate::layer_filter_ui::bar(app, ui);
         ui.add_space(4.0);
     }
@@ -252,7 +256,7 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         .max_height(rows_h)
         .min_scrolled_height(if fill { rows_h } else { 0.0 })
         .auto_shrink([false, !fill])
-        .show(ui, |ui| {
+        .show_viewport(ui, |ui, viewport| {
             // The drag keys are set only by actual layer-row and fx drags, not clicks or
             // ordinary scrolling. The ScrollArea applies this to its own content.
             // An fx drag that never saw its release (the panel was hidden) must not outlive the button.
@@ -276,41 +280,80 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             let filter = crate::layer_filter_ui::Filter::of(&app.ui);
             let fx_collapsed = app.session.active().map(|d| d.fx_collapsed.clone()).unwrap_or_default();
             crate::layer_row_ui::begin(ui.ctx());
-            // The drawn rows, top to bottom (#1721): the space between them and below the last
-            // one is a drop zone too.
-            let mut drawn: Vec<(LayerId, Rect)> = Vec::new();
-            for &(depth, l) in &rows {
-                // Select › Isolate Layers.
-                if !photocraft_engine::select_extra_cmds::isolation_shows(&doc, &isolated, l.id) {
+            // Select › Isolate Layers, then the panel's filter.
+            let listed: Vec<(usize, &Layer)> =
+                rows.iter().copied().filter(|(_, l)| photocraft_engine::select_extra_cmds::isolation_shows(&doc, &isolated, l.id) && filter.shows(l)).collect();
+            // Only the rows in view are laid out (with their effect and Smart Filter rows); the
+            // others keep their place as space. A layout of hundreds of layers built every row
+            // each frame, so the panel's frame grew with the document instead of the view. Each
+            // layer's rows get their own id scope, so their widgets keep their state however
+            // many rows above are skipped.
+            let spacing = ui.spacing().item_spacing.y;
+            let pro = Tokens::get(&ctx).pro;
+            let row_h = super::layer_row::row_height(app, pro);
+            let thumbnails = app.ui.layers_panel_options.thumbnail_size;
+            let height = |l: &Layer| {
+                let open = !fx_collapsed.contains(&l.id);
+                let fx = if open && !l.effects.items.is_empty() { super::layer_drag::effect_rows_height(l, spacing) } else { 0.0 };
+                let filters = if open { crate::smart_ui::filter_rows_height(thumbnails, pro, l, spacing) } else { 0.0 };
+                row_h + spacing + fx + filters
+            };
+            // Rows drawn wherever they are: the one being renamed, the one to reveal, the one
+            // whose menu is open and the ones being dragged (their widgets carry that state).
+            let dragged = ctx.data(|d| {
+                [
+                    d.get_temp::<u64>(egui::Id::unique("layer-drag")),
+                    d.get_temp::<FxDrag>(fx_drag_key()).map(|f| f.0),
+                    d.get_temp::<MaskDrag>(mask_drag_key()).map(|m| m.0),
+                    d.get_temp::<crate::smart_ui::FilterDrag>(crate::smart_ui::drag_key()).map(|f| f.0),
+                ]
+            });
+            let kept = |id: LayerId| {
+                crate::layer_row_ui::renaming(&ctx) == Some(id.0) || reveal == Some(id) || menu_row(&ctx) == Some(id) || dragged.contains(&Some(id.0))
+            };
+            forget_menu_row(&ctx);
+            let origin = ui.cursor().top();
+            let mut skipped = 0.0;
+            // The drawn rows, top to bottom (#1721), with their place in `listed`: the space
+            // between two neighbours and below the last one is a drop zone too.
+            let mut drawn: Vec<(usize, LayerId, Rect)> = Vec::new();
+            for (i, &(depth, l)) in listed.iter().enumerate() {
+                let h = height(l);
+                let top = ui.cursor().top() + skipped - origin;
+                if !(top < viewport.max.y && top + h > viewport.min.y) && !kept(l.id) {
+                    skipped += h;
                     continue;
                 }
-                if !filter.shows(l) {
-                    continue;
-                }
+                ui.add_space(std::mem::take(&mut skipped));
                 let row = RowSel { selected: selection.contains(&l.id), primary: active == Some(l.id), multi: selection.len() > 1 };
-                let top = ui.cursor().top();
-                drawn.push((l.id, layer_row(app, &ctx, ui, &doc, l, depth, row, &mut actions)));
-                if reveal == Some(l.id) {
-                    crate::layer_reveal::scroll_to_row(ui, top);
-                }
-                if !l.effects.items.is_empty() && fx_collapsed.iter().all(|id| *id != l.id) {
-                    effect_rows(app, ui, l, depth, &mut actions);
-                }
-                if !fx_collapsed.contains(&l.id) {
-                    crate::smart_ui::filter_rows(app, ui, &doc, l, depth, &mut actions);
-                }
+                ui.scope_builder(egui::UiBuilder::new().scope_id(ui.scope_id().with(("layer-rows-of", l.id.0))), |ui| {
+                    let top = ui.cursor().top();
+                    let rect = layer_row(app, &ctx, ui, &doc, l, depth, row, &mut actions);
+                    drawn.push((i, l.id, rect));
+                    if reveal == Some(l.id) {
+                        crate::layer_reveal::scroll_to_row(ui, top);
+                    }
+                    if !l.effects.items.is_empty() && fx_collapsed.iter().all(|id| *id != l.id) {
+                        effect_rows(app, ui, l, depth, &mut actions);
+                    }
+                    if !fx_collapsed.contains(&l.id) {
+                        crate::smart_ui::filter_rows(app, ui, &doc, l, depth, &mut actions);
+                    }
+                });
             }
+            ui.add_space(skipped);
+            app.perf_counters.rows_listed += listed.len() as u64;
             // The bottom of everything drawn: the last layer's effect and Smart Filter rows sit
             // under its own row (#8764).
             let rows_bottom = ui.min_rect().bottom();
             // #1721: the list takes drops everywhere, not only on a row (Photoshop): the space
             // between two rows lands above the lower one, the empty space below the bottom-most
             // row below it. Both copy with ⌥ held, move without.
-            for w in drawn.windows(2) {
-                let gap = Rect::from_min_max(pos2(w[0].1.left(), w[0].1.bottom()), pos2(w[0].1.right(), w[1].1.top()));
-                layer_drop_zone(app, &ctx, ui, gap, (w[1].0, w[1].1), "above", &mut actions);
+            for w in drawn.windows(2).filter(|w| w[0].0 + 1 == w[1].0) {
+                let gap = Rect::from_min_max(pos2(w[0].2.left(), w[0].2.bottom()), pos2(w[0].2.right(), w[1].2.top()));
+                layer_drop_zone(app, &ctx, ui, gap, (w[1].1, w[1].2), "above", &mut actions);
             }
-            if let Some(&(last, last_rect)) = drawn.last() {
+            if let Some(&(_, last, last_rect)) = drawn.last().filter(|d| d.0 + 1 == listed.len()) {
                 let below = Rect::from_min_max(pos2(last_rect.left(), last_rect.bottom()), pos2(last_rect.right(), ui.clip_rect().bottom()));
                 layer_drop_zone(app, &ctx, ui, below, (last, last_rect), "below", &mut actions);
                 // A click on that empty space deselects every layer, as in Photoshop (#8100). It
@@ -323,10 +366,10 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             // Tab / ⇧Tab in a rename: rename the layer below / above next, as in Photoshop. The
             // Background isn't renamed in place (double-clicking it converts it), so it ends there.
             if let Some((from, up)) = crate::layer_row_ui::take_next_rename(ui.ctx())
-                && let Some(at) = drawn.iter().position(|(id, _)| id.0 == from)
-                && let Some(&(next, _)) = if up { at.checked_sub(1).and_then(|i| drawn.get(i)) } else { drawn.get(at + 1) }
-                && let Some(l) = doc.layer(next).filter(|l| !crate::doc_props_ui::is_background(&doc, l))
-                && let Some(done) = crate::layer_row_ui::start_rename(ui.ctx(), next.0, &l.name)
+                && let Some(at) = listed.iter().position(|(_, l)| l.id.0 == from)
+                && let Some(&(_, l)) = if up { at.checked_sub(1).and_then(|i| listed.get(i)) } else { listed.get(at + 1) }
+                && !crate::doc_props_ui::is_background(&doc, l)
+                && let Some(done) = crate::layer_row_ui::start_rename(ui.ctx(), l.id.0, &l.name)
             {
                 actions.push(done);
             }
@@ -557,6 +600,25 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         }
         let _ = app.run(&id, p);
     }
+}
+
+fn menu_row_id() -> egui::Id {
+    egui::Id::unique("layers-menu-row")
+}
+
+/// The layer whose row had its menu open last frame: drawn wherever it is scrolled, or the menu
+/// would close with it.
+fn menu_row(ctx: &egui::Context) -> Option<LayerId> {
+    ctx.data(|d| d.get_temp::<u64>(menu_row_id())).map(LayerId)
+}
+
+fn forget_menu_row(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.remove::<u64>(menu_row_id()));
+}
+
+/// A row drew its open menu this frame ([`menu_row`]).
+pub(super) fn note_menu_row(ctx: &egui::Context, layer: LayerId) {
+    ctx.data_mut(|d| d.insert_temp(menu_row_id(), layer.0));
 }
 
 pub(super) fn footer_label(command: &str) -> &'static str {

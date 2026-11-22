@@ -67,6 +67,8 @@ struct Key {
     /// Layers panel rows visited at all (laid out, or only given their place).
     visited: u64,
     thumbs: u64,
+    /// Channels panel composites made whole.
+    channels_full: u64,
     spans: Vec<(&'static str, f64)>,
 }
 
@@ -85,9 +87,11 @@ struct Typed {
 struct Typing {
     /// Keys a frame (a slow device's frame takes several of a fast typist's keys).
     per_frame: usize,
+    /// The Layers card's tab shown (0 Layers, 1 Channels).
+    tab: usize,
 }
 
-const ONE_A_FRAME: Typing = Typing { per_frame: 1 };
+const ONE_A_FRAME: Typing = Typing { per_frame: 1, tab: 0 };
 
 fn counter(app: &PhotocraftApp, name: &str) -> u64 {
     app.perf_counters.snapshot().iter().find(|c| c.0 == name).map_or(0, |c| c.1)
@@ -111,7 +115,7 @@ fn type_on(device: Device, page: fn(&mut PhotocraftApp) -> Option<LayerId>, text
     let ctx = h.ctx.clone();
     let b = h.state().session.active().and_then(|st| st.doc.layer(id)).and_then(photocraft_engine::layer_multi_cmds::layer_bounds).expect("bounds");
     let center = [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2 + 300];
-    let (req, _rx) = crate::control::ControlRequest::new("ui.set", json!({"zoom": 1.0, "center": center}));
+    let (req, _rx) = crate::control::ControlRequest::new("ui.set", json!({"zoom": 1.0, "center": center, "dockTabs": {"layers": how.tab}}));
     crate::control::handle(h.state_mut(), &ctx, &req);
     h.run_steps(10);
     if device != Device::Cpu && !gpu_drawing(&mut h, device) {
@@ -135,7 +139,8 @@ fn type_on(device: Device, page: fn(&mut PhotocraftApp) -> Option<LayerId>, text
     for c in chars.chunks(how.per_frame) {
         let app = h.state();
         let visited = |app: &PhotocraftApp| counter(app, "rows_drawn") + counter(app, "rows_skipped");
-        let (l0, px0, r0, v0, t0) = (counter(app, "layouts"), app.perf.refreshed_px, counter(app, "rows_drawn"), visited(app), counter(app, "thumbs"));
+        let (l0, px0, r0, v0, t0, c0) =
+            (counter(app, "layouts"), app.perf.refreshed_px, counter(app, "rows_drawn"), visited(app), counter(app, "thumbs"), counter(app, "channel_thumbs_full"));
         for c in c {
             h.event(Event::Text(c.to_string()));
         }
@@ -152,6 +157,7 @@ fn type_on(device: Device, page: fn(&mut PhotocraftApp) -> Option<LayerId>, text
             rows: counter(app, "rows_drawn") - r0,
             visited: visited(app) - v0,
             thumbs: counter(app, "thumbs") - t0,
+            channels_full: counter(app, "channel_thumbs_full") - c0,
             spans,
         });
     }
@@ -183,13 +189,14 @@ fn report(device: Device, name: &str, t: &Typed) {
     for (i, k) in t.keys.iter().enumerate() {
         let spans: Vec<String> = k.spans.iter().map(|(n, ms)| format!("{n} {ms:.1}")).collect();
         eprintln!(
-            "  key {i}: {:.1} ms, {} layouts, {} px, {} rows ({} visited), {} thumbs [{}]",
+            "  key {i}: {:.1} ms, {} layouts, {} px, {} rows ({} visited), {} thumbs, {} channel composites [{}]",
             k.ms,
             k.layouts,
             k.px,
             k.rows,
             k.visited,
             k.thumbs,
+            k.channels_full,
             spans.join(", ")
         );
     }
@@ -198,8 +205,9 @@ fn report(device: Device, name: &str, t: &Typed) {
 const TEXT: &str = "Y ENTONCES DIJO ALGO";
 
 /// One layout per keystroke (the edit's; `type.info` and the caret overlay reuse it), the canvas
-/// composites what the new glyph changed (not the line's whole extent). On a92ad8384 (before): 3
-/// layouts a key and the layer's extent.
+/// composites what the new glyph changed (not the line's whole extent), and the Layers panel
+/// visits only the rows in view. On a92ad8384 (before): 3 layouts a key, the layer's extent, and
+/// every row of the panel each frame.
 #[test]
 fn a_keystroke_lays_out_its_layer_once_and_redraws_what_it_changed() {
     let t = type_on(Device::Cpu, |app| Some(styled_page(app)), TEXT, ONE_A_FRAME).expect("the CPU canvas");
@@ -207,6 +215,7 @@ fn a_keystroke_lays_out_its_layer_once_and_redraws_what_it_changed() {
     for (i, k) in t.keys.iter().enumerate() {
         assert_eq!(k.layouts, 1, "key {i}: one layout");
         assert!(k.px * 3 <= t.extent, "key {i}: {} px composited, the layer's extent is {} px", k.px, t.extent);
+        assert!(k.visited <= t.rows_in_view + 2, "key {i}: {} Layers rows visited, {} in view", k.visited, t.rows_in_view);
     }
 }
 
@@ -214,7 +223,7 @@ fn a_keystroke_lays_out_its_layer_once_and_redraws_what_it_changed() {
 /// canvas composites what both changed. On a92ad8384: 6 layouts.
 #[test]
 fn keys_typed_in_one_frame_redraw_only_what_they_changed() {
-    let t = type_on(Device::Cpu, |app| Some(styled_page(app)), TEXT, Typing { per_frame: 2 }).expect("the CPU canvas");
+    let t = type_on(Device::Cpu, |app| Some(styled_page(app)), TEXT, Typing { per_frame: 2, tab: 0 }).expect("the CPU canvas");
     report(Device::Cpu, "50 styled type layers, 2 keys a frame", &t);
     for (i, k) in t.keys.iter().enumerate() {
         assert_eq!(k.layouts, 2, "frame {i}: a layout per key");
@@ -222,11 +231,22 @@ fn keys_typed_in_one_frame_redraw_only_what_they_changed() {
     }
 }
 
+/// With the Channels tab in front, a keystroke updates its thumbnails where the glyph landed:
+/// the document isn't composited whole for them.
+#[test]
+fn typing_with_the_channels_tab_shown_composites_no_whole_thumbnail() {
+    let t = type_on(Device::Cpu, |app| Some(styled_page(app)), "ABC", Typing { per_frame: 1, tab: 1 }).expect("the CPU canvas");
+    report(Device::Cpu, "50 styled type layers, Channels tab", &t);
+    for (i, k) in t.keys.iter().enumerate() {
+        assert_eq!(k.channels_full, 0, "key {i}: the Channels thumbnails composited the whole page");
+    }
+}
+
 #[test]
 #[ignore = "timing report"]
 fn typing_timing_report() {
     for device in [Device::Cpu, Device::Gpu] {
-        for (name, how) in [("", ONE_A_FRAME), (", 2 keys a frame", Typing { per_frame: 2 })] {
+        for (name, how) in [("", ONE_A_FRAME), (", Channels tab", Typing { per_frame: 1, tab: 1 }), (", 2 keys a frame", Typing { per_frame: 2, tab: 0 })] {
             if let Some(t) = type_on(device, |app| Some(styled_page(app)), TEXT, how) {
                 report(device, &format!("50 styled type layers{name}"), &t);
             }

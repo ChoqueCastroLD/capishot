@@ -301,6 +301,14 @@ pub(super) fn fx_drop(ctx: &egui::Context, ui: &egui::Ui, l: &Layer, rect: Rect,
 
 /// Photoshop shows a layer's effects as indented sub-rows ("Effects", then each effect). The eye
 /// on "Effects" shows or hides them all, the eye on an effect's row just that one (#1622).
+/// The height of an effect row.
+const FX_ROW_H: f32 = 22.0;
+
+/// The height of the rows [`effect_rows`] draws under `l`, each followed by `spacing`.
+pub(super) fn effect_rows_height(l: &Layer, spacing: f32) -> f32 {
+    (1 + l.effects.items.len()) as f32 * (FX_ROW_H + spacing)
+}
+
 pub(super) fn effect_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, l: &Layer, depth: usize, actions: &mut Vec<(String, Value)>) {
     let t = Tokens::get(ui.ctx());
     let indent = 30.0 + depth as f32 * 14.0 + 34.0;
@@ -312,7 +320,7 @@ pub(super) fn effect_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, l: &Layer,
         rows.push((tl!(e.label()).into(), e.enabled(), kind));
     }
     for (i, (name, on, kind)) in rows.into_iter().enumerate() {
-        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click_and_drag());
+        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), FX_ROW_H), Sense::click_and_drag());
         // Drag the row onto another layer to move its effects there, ⌥-drag to copy them.
         if resp.drag_started() {
             start_fx_drag(ui.ctx(), l.id, i.checked_sub(1));

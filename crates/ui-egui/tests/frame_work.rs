@@ -107,11 +107,13 @@ fn an_idle_app_asks_for_no_frames() {
 fn the_layers_panel_lays_out_only_the_rows_in_view() {
     let (mut h, _) = app(200);
     let _ = h.try_run();
-    let (drawn, skipped) = (counter(&h, "rows_drawn"), counter(&h, "rows_skipped"));
+    let (drawn, skipped, listed) = (counter(&h, "rows_drawn"), counter(&h, "rows_skipped"), counter(&h, "rows_listed"));
     h.step();
     let rows = counter(&h, "rows_drawn") - drawn;
     assert!(rows < 60, "a frame laid out {rows} of ~220 rows");
-    assert!(counter(&h, "rows_skipped") - skipped > 100, "rows out of view only keep their place");
+    assert!(counter(&h, "rows_listed") - listed > 200, "every layer is listed");
+    // Rows out of view are space: not visited at all, not even to keep their place.
+    assert!(counter(&h, "rows_skipped") - skipped <= 2, "rows out of view were visited");
 }
 
 /// A brush stroke over 40 frames: the chrome is repainted from its last shapes on nearly every

@@ -113,6 +113,13 @@ pub(super) fn paint_clipping_indicator(painter: &egui::Painter, at: Pos2, color:
     painter.add(egui::Shape::line(vec![at + vec2(2.0, 0.0), tip, at + vec2(8.0, 0.0)], stroke));
 }
 
+/// A layer row's height: the Layers Panel Options thumbnail size's, at least a finger's 48 pt on
+/// a touch screen.
+pub(super) fn row_height(app: &PhotocraftApp, pro: bool) -> f32 {
+    let (_, row_h) = crate::layers_panel_ui::thumbnail_geometry(app.ui.layers_panel_options.thumbnail_size, pro);
+    if crate::touch_ui::active(app) { row_h.max(48.0) } else { row_h }
+}
+
 /// One row of the Layers panel for `l`, `depth` levels inside groups or artboards: it paints the
 /// row, queues what a click or drag on it asks for in `actions`, and returns the row's rect.
 #[allow(clippy::too_many_arguments)]
@@ -129,10 +136,8 @@ pub(super) fn layer_row(
     let selected = row.selected;
     let t = Tokens::get(ctx);
     // The Layers Panel Options thumbnail size controls rows and both layer/mask thumbnails.
-    let (base, row_h) = crate::layers_panel_ui::thumbnail_geometry(app.ui.layers_panel_options.thumbnail_size, t.pro);
-    // A finger's row: 48 pt on a touch screen.
-    let row_h = if crate::touch_ui::active(app) { row_h.max(48.0) } else { row_h };
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click_and_drag());
+    let (base, _) = crate::layers_panel_ui::thumbnail_geometry(app.ui.layers_panel_options.thumbnail_size, t.pro);
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_height(app, t.pro)), Sense::click_and_drag());
     // With thumbnails off no mask thumbnail is drawn, so none may keep catching drags from older frames.
     if base == 0.0 {
         crate::mask_thumbs_ui::forget(ctx, l.id.0);
@@ -264,6 +269,9 @@ pub(super) fn layer_row(
         actions.push(done);
     }
     row_context_menu(app, ui, &rc, &eye_resp, actions);
+    if resp.sheet_menu_opened() {
+        super::layers::note_menu_row(ctx, l.id);
+    }
     rect
 }
 

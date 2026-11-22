@@ -386,89 +386,127 @@ impl PhotocraftApp {
             self.channel_thumbs = None;
             return Vec::new();
         };
-        let (id, doc) = (st.doc.id, st.doc.clone());
+        let (id, doc, revision) = (st.doc.id, st.doc.clone(), st.revision);
         // View-only commands bump revision without changing pixels. Keeping a Weak pins allocation
         // identity against address reuse without retaining the document's pixel data.
         let snapshot = std::sync::Arc::downgrade(&doc);
         let show_color = self.session.prefs().interface.show_channels_in_color;
+        let size = photocraft_compose::thumbnail_size(&doc, CHANNEL_SIDE);
+        // This document's textures are updated in place; its composite counts while the colour
+        // setting and the size it was made for hold.
+        let mut prev = self.channel_thumbs.take().filter(|c| c.doc == id);
+        let fits = |c: &ChannelThumbs| c.in_color == show_color && c.composite.width == size.0 && c.composite.height == size.1;
         // A step that changes only the selection (a marquee, Deselect) makes a new snapshot with
         // the same pixels: keep the thumbnails, a full composite at 56 px costs ~0.7 s on a
         // layered 20 MP document (#4518).
-        let current = match &mut self.channel_thumbs {
-            Some((d, old, in_color, _)) if *d == id && *in_color == show_color => {
-                let same = old.ptr_eq(&snapshot) || old.upgrade().is_some_and(|prev| same_but_selection(&prev, &doc));
-                if same {
-                    *old = snapshot.clone();
-                }
-                same
-            }
-            _ => false,
-        };
-        if !current {
-            let comp = photocraft_compose::thumbnail(&doc, 56);
-            let (w, h) = (comp.width as usize, comp.height as usize);
-            let side = w.max(h);
-            let make = |f: &dyn Fn(&[u8]) -> egui::Color32, name: &str| {
-                let mut px = vec![egui::Color32::TRANSPARENT; side * side];
-                let (ox, oy) = ((side - w) / 2, (side - h) / 2);
-                for y in 0..h {
-                    for x in 0..w {
-                        let o = (y * w + x) * 4;
-                        px[(y + oy) * side + x + ox] = f(&comp.pixels[o..o + 4]);
-                    }
-                }
-                (format!("chan-{name}"), egui::ColorImage::new([side, side], px))
-            };
-            let fmt = doc.pixel_format();
-            let colors = fmt.mode.color_channels();
-            let mut texs = vec![make(&|p| egui::Color32::from_rgb(p[0], p[1], p[2]), "composite")];
-            if colors > 1 {
-                for k in 0..colors {
-                    let cmyk = fmt.mode == photocraft_doc::ColorMode::Cmyk;
-                    texs.push(make(
-                        &|p| {
-                            let rgba = [p[0], p[1], p[2], 255].map(|v| f32::from(v) / 255.0);
-                            let x = photocraft_raster::from_rgba(&fmt, rgba)[k];
-                            let g = if cmyk { 1.0 - x } else { x };
-                            let byte = (g.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
-                            channel_tint(fmt.mode, k, byte, show_color)
-                        },
-                        &format!("c{k}"),
-                    ));
-                }
-            }
-            // Alpha channels and the Quick Mask, sampled at thumbnail resolution.
-            let (dw, dh) = (doc.size.width.max(1) as f32, doc.size.height.max(1) as f32);
-            for (i, ch) in doc.channels.iter().chain(doc.quick_mask.as_ref()).enumerate() {
-                let mut px = vec![egui::Color32::TRANSPARENT; side * side];
-                let (ox, oy) = ((side - w) / 2, (side - h) / 2);
-                for y in 0..h {
-                    for x in 0..w {
-                        let sx = ((x as f32 + 0.5) * dw / w as f32) as i32;
-                        let sy = ((y as f32 + 0.5) * dh / h as f32) as i32;
-                        let v = ch.surface.sample_channel(sx, sy, 0);
-                        px[(y + oy) * side + x + ox] = egui::Color32::from_gray((v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8);
-                    }
-                }
-                texs.push((format!("chan-a{i}"), egui::ColorImage::new([side, side], px)));
-            }
-            // Update the textures already uploaded rather than allocating new ones.
-            let mut handles = match self.channel_thumbs.take() {
-                Some((d, _, _, h)) if d == id => h,
-                _ => Vec::new(),
-            };
-            handles.truncate(texs.len());
-            for (i, (name, image)) in texs.into_iter().enumerate() {
-                match handles.get_mut(i) {
-                    Some(h) => h.set(image, egui::TextureOptions::LINEAR),
-                    None => handles.push(ctx.load_texture(name, image, egui::TextureOptions::LINEAR)),
-                }
-            }
-            self.channel_thumbs = Some((id, snapshot, show_color, handles));
+        if let Some(mut c) = prev.take_if(|c| fits(c) && (c.snapshot.ptr_eq(&snapshot) || c.snapshot.upgrade().is_some_and(|old| same_but_selection(&old, &doc)))) {
+            c.snapshot = snapshot;
+            c.revision = revision;
+            let ids = c.textures.iter().map(|t| t.id()).collect();
+            self.channel_thumbs = Some(c);
+            return ids;
         }
-        self.channel_thumbs.as_ref().map(|(_, _, _, t)| t.iter().map(|t| t.id()).collect()).unwrap_or_default()
+        // The composite: only where the edits since it changed pixels (a keystroke, a stroke),
+        // whole when that isn't known. Composited whole on every edit, a page with styled type
+        // spent its frames in the Channels tab while typing.
+        let kept = prev.as_ref().filter(|c| fits(c));
+        let damage = kept.and_then(|c| st.damage_since(c.revision));
+        let _s = perf_span::span("channels.thumbs");
+        let composite = match (kept, damage) {
+            (Some(c), Some(d)) => {
+                let mut img = c.composite.clone();
+                if !d.is_empty() {
+                    let buf = photocraft_compose::render_reduced_damage(&doc, size.0, size.1, d);
+                    let part = buf.to_rgba8();
+                    let (w, x0, y0) = (img.width as usize, buf.rect.x0.max(0) as usize, buf.rect.y0.max(0) as usize);
+                    for (y, row) in part.pixels.chunks_exact(part.width as usize * 4).enumerate() {
+                        let at = ((y0 + y) * w + x0) * 4;
+                        if let Some(dst) = img.pixels.get_mut(at..at + row.len()) {
+                            dst.copy_from_slice(row);
+                        }
+                    }
+                }
+                img
+            }
+            _ => {
+                self.perf_counters.channel_thumbs_full += 1;
+                photocraft_compose::thumbnail(&doc, CHANNEL_SIDE)
+            }
+        };
+        let (w, h) = (composite.width as usize, composite.height as usize);
+        let side = w.max(h);
+        let make = |f: &dyn Fn(&[u8]) -> egui::Color32, name: &str| {
+            let mut px = vec![egui::Color32::TRANSPARENT; side * side];
+            let (ox, oy) = ((side - w) / 2, (side - h) / 2);
+            for y in 0..h {
+                for x in 0..w {
+                    let o = (y * w + x) * 4;
+                    px[(y + oy) * side + x + ox] = f(&composite.pixels[o..o + 4]);
+                }
+            }
+            (format!("chan-{name}"), egui::ColorImage::new([side, side], px))
+        };
+        let fmt = doc.pixel_format();
+        let colors = fmt.mode.color_channels();
+        let mut texs = vec![make(&|p| egui::Color32::from_rgb(p[0], p[1], p[2]), "composite")];
+        if colors > 1 {
+            for k in 0..colors {
+                let cmyk = fmt.mode == photocraft_doc::ColorMode::Cmyk;
+                texs.push(make(
+                    &|p| {
+                        let rgba = [p[0], p[1], p[2], 255].map(|v| f32::from(v) / 255.0);
+                        let x = photocraft_raster::from_rgba(&fmt, rgba)[k];
+                        let g = if cmyk { 1.0 - x } else { x };
+                        let byte = (g.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+                        channel_tint(fmt.mode, k, byte, show_color)
+                    },
+                    &format!("c{k}"),
+                ));
+            }
+        }
+        // Alpha channels and the Quick Mask, sampled at thumbnail resolution (a few thousand
+        // samples each: not part of the composite, so its damage doesn't cover them).
+        let (dw, dh) = (doc.size.width.max(1) as f32, doc.size.height.max(1) as f32);
+        for (i, ch) in doc.channels.iter().chain(doc.quick_mask.as_ref()).enumerate() {
+            let mut px = vec![egui::Color32::TRANSPARENT; side * side];
+            let (ox, oy) = ((side - w) / 2, (side - h) / 2);
+            for y in 0..h {
+                for x in 0..w {
+                    let sx = ((x as f32 + 0.5) * dw / w as f32) as i32;
+                    let sy = ((y as f32 + 0.5) * dh / h as f32) as i32;
+                    let v = ch.surface.sample_channel(sx, sy, 0);
+                    px[(y + oy) * side + x + ox] = egui::Color32::from_gray((v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8);
+                }
+            }
+            texs.push((format!("chan-a{i}"), egui::ColorImage::new([side, side], px)));
+        }
+        // Update the textures already uploaded rather than allocating new ones.
+        let mut textures = prev.map(|c| c.textures).unwrap_or_default();
+        textures.truncate(texs.len());
+        for (i, (name, image)) in texs.into_iter().enumerate() {
+            match textures.get_mut(i) {
+                Some(h) => h.set(image, egui::TextureOptions::LINEAR),
+                None => textures.push(ctx.load_texture(name, image, egui::TextureOptions::LINEAR)),
+            }
+        }
+        let ids = textures.iter().map(|t| t.id()).collect();
+        self.channel_thumbs = Some(ChannelThumbs { doc: id, snapshot, revision, in_color: show_color, composite, textures });
+        ids
     }
 }
+
+/// The Channels panel's thumbnails of a document, and the composite they are made from.
+pub(crate) struct ChannelThumbs {
+    doc: DocId,
+    snapshot: std::sync::Weak<Document>,
+    revision: u64,
+    in_color: bool,
+    composite: photocraft_raster::Rgba8Image,
+    textures: Vec<egui::TextureHandle>,
+}
+
+/// The longest side of the Channels panel's thumbnails.
+const CHANNEL_SIDE: u32 = 56;
 
 /// Whether `new` differs from `old` at most in its selection, so every composite and channel
 /// thumbnail of it is unchanged. Tiles compare by pointer first, so this costs little.

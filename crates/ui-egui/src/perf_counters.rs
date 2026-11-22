@@ -14,14 +14,19 @@ pub struct PerfCounters {
     pub thumbs_deferred: u64,
     /// Layers panel rows laid out in full (visible rows; off-screen rows only keep their place).
     pub rows_drawn: u64,
-    /// Layers panel rows that only kept their place (scrolled out of view).
+    /// Layers panel rows that only kept their place (scrolled out of view, kept for their state).
     pub rows_skipped: u64,
+    /// Layers listed by the Layers panel, drawn or not (what `rows_drawn` is out of).
+    pub rows_listed: u64,
     /// Navigator thumbnail recomputes.
     pub navigator: u64,
     /// Navigator images composited whole (a new document, a history jump), not just an edit's area.
     pub navigator_full: u64,
     /// Histogram panel recomputes.
     pub histogram: u64,
+    /// Channels panel composites made whole (a new document, an edit whose area isn't known),
+    /// not just the area an edit changed.
+    pub channel_thumbs_full: u64,
     /// Move drag frames whose preview reused the last frame's document (only the moving layers
     /// copied again).
     pub move_preview_reused: u64,
@@ -46,9 +51,11 @@ impl PerfCounters {
             ("thumbs_deferred", self.thumbs_deferred),
             ("rows_drawn", self.rows_drawn),
             ("rows_skipped", self.rows_skipped),
+            ("rows_listed", self.rows_listed),
             ("navigator", self.navigator),
             ("navigator_full", self.navigator_full),
             ("histogram", self.histogram),
+            ("channel_thumbs_full", self.channel_thumbs_full),
             ("move_preview_reused", self.move_preview_reused),
             ("snap_builds", self.snap_builds),
             ("move_split", self.move_split),

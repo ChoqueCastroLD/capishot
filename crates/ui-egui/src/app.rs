@@ -23,6 +23,7 @@ mod prefs;
 mod screenshot;
 mod targets;
 mod thumbs;
+pub(crate) use thumbs::ChannelThumbs;
 mod view;
 mod window;
 

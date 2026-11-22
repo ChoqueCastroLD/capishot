@@ -717,7 +717,7 @@ pub struct PhotocraftApp {
     /// `editor.showDocument`, `document.prewarm` and the GPU memory budget (`doc_switch`).
     pub(crate) doc_switch: doc_switch::DocSwitch,
     /// Channel thumbnails for one document snapshot; view-only revisions reuse their pixels.
-    channel_thumbs: Option<(DocId, std::sync::Weak<Document>, bool, Vec<egui::TextureHandle>)>,
+    channel_thumbs: Option<app::ChannelThumbs>,
     /// Channels panel overlays / channel views drawn over the canvas, per document id.
     pub(crate) channel_views: HashMap<u64, channel_view::Cache>,
     /// Selection outline keyed by (document, mask identity × step × visible region).
@@ -888,6 +888,8 @@ mod navigator_gpu_tests;
 mod type_drag_gpu_tests;
 #[cfg(test)]
 mod type_keystroke_tests;
+#[cfg(test)]
+mod close_and_job_tests;
 #[cfg(test)]
 mod text_select_drag_tests;
 #[cfg(test)]
