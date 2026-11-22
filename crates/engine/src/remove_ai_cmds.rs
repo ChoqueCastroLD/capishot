@@ -261,6 +261,33 @@ mod tests {
         assert!(red_at(&s, 31, 22));
     }
 
+    /// A clean of many separate blobs is many tiles. Each tile's request was made from inside the
+    /// answer to the one before, so a model run stayed on the stack per tile: a clean of a
+    /// 200-layer page's lettering overflowed a 1 MB stack (the main thread's on Windows) at about
+    /// 40 tiles.
+    #[test]
+    fn the_tiles_of_a_clean_run_one_after_another_not_one_inside_another() {
+        use std::sync::atomic::Ordering;
+        let fake = Arc::new(FakeInpainter::default());
+        let mut s = page(fake.clone(), true);
+        s.execute("file.new", json!({"width": 1600, "height": 1600, "background": "white"})).unwrap();
+        let spots: Vec<(i32, i32)> = (0..6).flat_map(|j| (0..6).map(move |i| (120 + i * 260, 120 + j * 260))).collect();
+        s.edit("blobs", |doc, active| {
+            let surf = doc.layer_mut(active.unwrap()).unwrap().surface_mut().unwrap();
+            for (x, y) in &spots {
+                surf.fill_rect(Rect::new(x - 4, y - 4, x + 4, y + 4), &[1.0, 0.0, 0.0, 1.0]);
+            }
+            Ok(())
+        })
+        .unwrap();
+        let strokes: Vec<Value> = spots.iter().map(|(x, y)| json!([[x - 3, y], [x + 3, y]])).collect();
+        s.execute(ID, json!({"strokes": strokes, "size": 14})).unwrap();
+        let tiles = fake.sizes.lock().unwrap().len();
+        assert!(tiles >= 30, "a tile per blob: {tiles}");
+        assert!(spots.iter().all(|(x, y)| !red_at(&s, *x, *y)), "every blob is gone");
+        assert_eq!(fake.deepest.load(Ordering::SeqCst), 1, "requests one inside another");
+    }
+
     #[test]
     fn the_selection_without_strokes_and_the_cpu_without_a_gpu() {
         let fake = Arc::new(FakeInpainter::default());

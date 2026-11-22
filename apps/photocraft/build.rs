@@ -18,6 +18,10 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
         println!("cargo:rustc-link-arg-bins=/DELAYLOAD:windows.data.pdf.dll");
         println!("cargo:rustc-link-arg-bins=delayimp.lib");
+        // The main thread's stack: 8 MB as on Linux and macOS, where the suite runs, instead of
+        // the linker's 1 MB (reserved address space; pages are committed as they are touched). A
+        // frame of the app with a command run in it used over 600 KB of it.
+        println!("cargo:rustc-link-arg-bins=/STACK:8388608");
     }
     let mut res = winresource::WindowsResource::new();
     res.set_icon("../../assets/app-icon/photocraft.ico")

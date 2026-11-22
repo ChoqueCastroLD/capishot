@@ -138,22 +138,15 @@ pub struct FakeInpainter {
     pub sizes: std::sync::Mutex<Vec<(usize, usize)>>,
     /// Report this [`Hooks::fell_back`] for every request that may use the GPU (not `cpu`).
     pub fallback: Option<Fallback>,
+    /// Requests running now: more than one when a request's `done` made the next.
+    pub running: std::sync::atomic::AtomicUsize,
+    /// The most requests that ever ran one inside another.
+    pub deepest: std::sync::atomic::AtomicUsize,
 }
 
-impl Inpainter for FakeInpainter {
-    fn model_state(&self) -> ModelState {
-        self.state.clone().unwrap_or(ModelState::Ready)
-    }
-
-    fn model_state_of(&self, _model: &str) -> ModelState {
-        self.model_state()
-    }
-
-    fn device(&self) -> String {
-        "test".into()
-    }
-
-    fn run(&self, req: Request, hooks: Arc<dyn Hooks>, done: Done) {
+impl FakeInpainter {
+    /// One request, answered before it returns.
+    fn answer(&self, req: Request, hooks: Arc<dyn Hooks>, done: Done) {
         *self.last.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((req.model, req.cpu));
         self.sizes.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((req.tile.w, req.tile.h));
         if hooks.cancelled() {
@@ -192,5 +185,27 @@ impl Inpainter for FakeInpainter {
         }
         hooks.progress(1.0, "");
         done(Ok(out));
+    }
+}
+
+impl Inpainter for FakeInpainter {
+    fn model_state(&self) -> ModelState {
+        self.state.clone().unwrap_or(ModelState::Ready)
+    }
+
+    fn model_state_of(&self, _model: &str) -> ModelState {
+        self.model_state()
+    }
+
+    fn device(&self) -> String {
+        "test".into()
+    }
+
+    fn run(&self, req: Request, hooks: Arc<dyn Hooks>, done: Done) {
+        use std::sync::atomic::Ordering;
+        let depth = self.running.fetch_add(1, Ordering::SeqCst) + 1;
+        self.deepest.fetch_max(depth, Ordering::SeqCst);
+        self.answer(req, hooks, done);
+        self.running.fetch_sub(1, Ordering::SeqCst);
     }
 }

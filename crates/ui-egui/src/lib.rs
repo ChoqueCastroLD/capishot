@@ -893,6 +893,8 @@ mod type_keystroke_tests;
 #[cfg(test)]
 mod close_and_job_tests;
 #[cfg(test)]
+mod clean_undo_bubble_tests;
+#[cfg(test)]
 mod text_select_drag_tests;
 #[cfg(test)]
 mod nonmodal_bar_tests;

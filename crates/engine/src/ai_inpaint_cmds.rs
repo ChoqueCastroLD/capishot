@@ -303,70 +303,111 @@ struct FillState {
     finish: FillDone,
 }
 
+/// Whose turn it is to start the next tile, between [`fill_step`] and the answer to its request.
+enum Turn {
+    /// The request is being made: an answer now leaves the state here for [`fill_step`]'s loop.
+    Asking,
+    /// The answer came inside the request, with the state to go on from.
+    Answered(Box<FillState>),
+    /// The request returned without an answer: the answer starts the next tile itself.
+    Later,
+}
+
+/// Runs the tiles from `st.next` on, one request after another. An inpainter may answer inside
+/// `run` (the native ones) or later (the browser's worker): an answer inside `run` comes back to
+/// this loop instead of starting the next tile from within the answer, which nested one model
+/// run per tile and overflowed the stack on a clean of many tiles (1 MB on the main thread of
+/// Windows, 2 MB on a job's).
 fn fill_step(mut st: FillState) {
-    // The next tile with something to fill (a split tile whose hole the ones before it filled has none).
-    let (t, input, weights) = loop {
-        let Some(t) = st.plan.get(st.next).cloned() else {
-            let FillState { rgb, finish, opts, fell_back, trail, .. } = st;
-            let t = trail.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            let run = FillRun { model: opts.model, cpu: opts.run.choice.cpu || t.cpu, fell_back: fell_back || t.fell_back, guard: opts.run.guard };
-            drop(t);
-            return finish(Ok((rgb, run)));
-        };
-        if let Err(e) = st.ctx.check() {
-            return (st.finish)(Err(e));
-        }
-        let cut = match (t.split, st.split.as_ref()) {
-            (true, Some(sp)) => sp.extract(&st.rgb, &st.cover, &t).map(|r| r.map(|(i, w)| (i, Some(w)))),
-            (true, None) => Err(LamaError::Input("a split tile without its state".into())),
-            (false, _) => tiles::extract(&st.rgb, &st.cover, st.w, st.h, &t).map(|i| Some((i, None))),
-        };
-        match cut {
-            Ok(Some((input, weights))) => break (t, input, weights),
-            Ok(None) => {
-                st.next += 1;
-                st.ctx.progress(st.next as f32 / st.plan.len() as f32, "");
+    loop {
+        // The next tile with something to fill (a split tile whose hole the ones before it filled has none).
+        let (t, input, weights) = loop {
+            let Some(t) = st.plan.get(st.next).cloned() else {
+                let FillState { rgb, finish, opts, fell_back, trail, .. } = st;
+                let t = trail.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let run = FillRun { model: opts.model, cpu: opts.run.choice.cpu || t.cpu, fell_back: fell_back || t.fell_back, guard: opts.run.guard };
+                drop(t);
+                return finish(Ok((rgb, run)));
+            };
+            if let Err(e) = st.ctx.check() {
+                return (st.finish)(Err(e));
             }
-            Err(e) => return (st.finish)(Err(bad(e.to_string()))),
+            let cut = match (t.split, st.split.as_ref()) {
+                (true, Some(sp)) => sp.extract(&st.rgb, &st.cover, &t).map(|r| r.map(|(i, w)| (i, Some(w)))),
+                (true, None) => Err(LamaError::Input("a split tile without its state".into())),
+                (false, _) => tiles::extract(&st.rgb, &st.cover, st.w, st.h, &t).map(|i| Some((i, None))),
+            };
+            match cut {
+                Ok(Some((input, weights))) => break (t, input, weights),
+                Ok(None) => {
+                    st.next += 1;
+                    st.ctx.progress(st.next as f32 / st.plan.len() as f32, "");
+                }
+                Err(e) => return (st.finish)(Err(bad(e.to_string()))),
+            }
+        };
+        let n = st.plan.len() as f32;
+        let i = st.next;
+        let (a, b) = (i as f32 / n, (i + 1) as f32 / n);
+        let status = if st.plan.len() > 1 { format!("{LABEL} ({} of {})", i + 1, st.plan.len()) } else { LABEL.to_string() };
+        let tile = (st.plan.len() > 1).then_some((i + 1, st.plan.len()));
+        let hooks = Arc::new(JobHooks { ctx: st.ctx.clone(), lo: a, hi: b, status, tile, trail: st.trail.clone() });
+        let svc = st.svc.clone();
+        let req = st.opts.request(input);
+        let turn = Arc::new(std::sync::Mutex::new(Turn::Asking));
+        let answer = turn.clone();
+        svc.run(
+            req,
+            hooks,
+            Box::new(move |r| {
+                let Some(next) = after_tile(st, &t, weights, b, r) else { return };
+                let mut turn = answer.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                if matches!(*turn, Turn::Asking) {
+                    *turn = Turn::Answered(Box::new(next));
+                } else {
+                    drop(turn);
+                    fill_step(next);
+                }
+            }),
+        );
+        let mut turn = turn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        match std::mem::replace(&mut *turn, Turn::Later) {
+            Turn::Answered(next) => st = *next,
+            Turn::Asking | Turn::Later => return,
+        }
+    }
+}
+
+/// A tile's answer pasted into the fill: the state to go on from, or `None` when the fill ended
+/// here (its `finish` was called with the error).
+fn after_tile(mut st: FillState, t: &tiles::Tile, weights: Option<Vec<f32>>, done: f32, r: std::result::Result<Vec<f32>, LamaError>) -> Option<FillState> {
+    let out = match r {
+        Ok(out) => out,
+        // Once more on the CPU; a CPU run that failed this way only got there on threads.
+        Err(LamaError::Gpu(why)) if !st.opts.run.choice.cpu || !st.fell_back => return gpu_fallback(st, &why),
+        Err(e) => {
+            (st.finish)(Err(lama_err(e)));
+            return None;
         }
     };
-    let n = st.plan.len() as f32;
-    let i = st.next;
-    let (a, b) = (i as f32 / n, (i + 1) as f32 / n);
-    let status = if st.plan.len() > 1 { format!("{LABEL} ({} of {})", i + 1, st.plan.len()) } else { LABEL.to_string() };
-    let tile = (st.plan.len() > 1).then_some((i + 1, st.plan.len()));
-    let hooks = Arc::new(JobHooks { ctx: st.ctx.clone(), lo: a, hi: b, status, tile, trail: st.trail.clone() });
-    let svc = st.svc.clone();
-    let req = st.opts.request(input);
-    svc.run(
-        req,
-        hooks,
-        Box::new(move |r| {
-            let out = match r {
-                Ok(out) => out,
-                // Once more on the CPU; a CPU run that failed this way only got there on threads.
-                Err(LamaError::Gpu(why)) if !st.opts.run.choice.cpu || !st.fell_back => return gpu_fallback(st, &why),
-                Err(e) => return (st.finish)(Err(lama_err(e))),
-            };
-            let pasted = match (weights, st.split.as_mut()) {
-                (Some(wts), Some(sp)) => sp.paste(&mut st.rgb, &t, &out, &wts),
-                _ => tiles::paste(&mut st.rgb, &st.binary, st.w, st.h, &t, &out),
-            };
-            if let Err(e) = pasted {
-                return (st.finish)(Err(lama_err(e)));
-            }
-            st.ctx.progress(b, "");
-            st.next += 1;
-            fill_step(st);
-        }),
-    );
+    let pasted = match (weights, st.split.as_mut()) {
+        (Some(wts), Some(sp)) => sp.paste(&mut st.rgb, t, &out, &wts),
+        _ => tiles::paste(&mut st.rgb, &st.binary, st.w, st.h, t, &out),
+    };
+    if let Err(e) = pasted {
+        (st.finish)(Err(lama_err(e)));
+        return None;
+    }
+    st.ctx.progress(done, "");
+    st.next += 1;
+    Some(st)
 }
 
 /// The GPU couldn't run the model: the rest of the job runs on the CPU, with the model the
 /// user's Quality picks there (Auto: MI-GAN, when it is here or may be downloaded; else the same
 /// model). A model change starts the tiles over, so one result never mixes two models (the
 /// pixels filled so far are in the hole: the new model doesn't see them, and overwrites them).
-fn gpu_fallback(mut st: FillState, why: &str) {
+fn gpu_fallback(mut st: FillState, why: &str) -> Option<FillState> {
     let run = crate::ai_cmds::on_cpu(&st.opts.run);
     let mut model = st.opts.model;
     if !st.opts.pinned {
@@ -388,16 +429,25 @@ fn gpu_fallback(mut st: FillState, why: &str) {
         }
         st.plan = match tiles::plan(&st.cover, st.w, st.h, &st.opts.tiles) {
             Ok(p) if !p.is_empty() => p,
-            Ok(_) => return (st.finish)(Err(bad("nothing to clean: the area is empty"))),
-            Err(e) => return (st.finish)(Err(bad(e.to_string()))),
+            Ok(_) => {
+                (st.finish)(Err(bad("nothing to clean: the area is empty")));
+                return None;
+            }
+            Err(e) => {
+                (st.finish)(Err(bad(e.to_string())));
+                return None;
+            }
         };
         st.split = match split_state(&st.plan, st.w, st.h, &st.opts) {
             Ok(sp) => sp,
-            Err(e) => return (st.finish)(Err(e)),
+            Err(e) => {
+                (st.finish)(Err(e));
+                return None;
+            }
         };
         st.next = 0;
     }
-    fill_step(st);
+    Some(st)
 }
 
 /// Interleaved RGB (0..=1) of pixels in `fmt`.
