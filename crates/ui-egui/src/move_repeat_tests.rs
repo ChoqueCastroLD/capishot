@@ -506,8 +506,7 @@ fn repeat(device: Device, page: Page, rounds: usize, moves: i32, rest: bool) -> 
         run.worst_mismatch * 100.0,
         run.fx_rebuilt
     );
-    let (frame_gpu, piece_gpu) = crate::gpu_canvas::drag_gpu_ms();
-    eprintln!("GPU {device:?} {page:?} rest {rest}: last drag frame {frame_gpu:?} ms on the GPU (timestamp queries), last cache piece {piece_gpu:?} ms to complete");
+    eprintln!("GPU {device:?} {page:?} rest {rest}: last cache piece {:?} ms from submission to completion", crate::gpu_canvas::piece_gpu_ms());
     Some(run)
 }
 

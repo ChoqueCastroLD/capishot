@@ -78,6 +78,11 @@ pub(crate) struct MovePreview {
     /// `shown` is the unmoved document because the GPU canvas's drag cache draws the move
     /// ([`gpu_lazy_failed`] when it didn't).
     gpu_lazy: bool,
+    /// The drag cache failed to draw this drag once ([`gpu_lazy_failed`]): the rest of the drag is
+    /// a moved copy. Asked again each frame, a cache that said it was ready but couldn't draw the
+    /// view (made for another level) made the canvas redraw the page in a loop that never ended:
+    /// the window froze, then Windows closed it (0.13.33-0.13.34, an RTX 3060 Ti).
+    lazy_failed: bool,
 }
 
 impl MovePreview {
@@ -149,7 +154,7 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Do
         let bounds = bounds.map(|b| moving.iter().filter_map(|id| shape_reach(doc.layer(*id)?, canvas)).fold(b, |acc, r| acc.union(&r)));
         let in_place = in_place_ok(app, &doc, &moving);
         app.move_preview =
-            Some(MovePreview { doc: doc_id, revision, ids, moving, bounds, canvas, offsets: Vec::new(), shown: None, floating: false, in_place, gpu_lazy: false });
+            Some(MovePreview { doc: doc_id, revision, ids, moving, bounds, canvas, offsets: Vec::new(), shown: None, floating: false, in_place, gpu_lazy: false, lazy_failed: false });
     }
     let p = app.move_preview.as_mut()?;
     if offset == (0, 0) && p.offsets.is_empty() {
@@ -162,7 +167,7 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Do
     // The GPU canvas's drag cache is ready for these layers (`gpu_canvas::above`): it shifts
     // them itself, effects and all, so the preview is the document as it is too (no moved copy
     // of a layer with effects, nor its effects drawn again, per frame).
-    let gpu_lazy = !p.floating && app.gpu.as_ref().is_some_and(|g| g.drag_ready_for(&doc, &p.ids));
+    let gpu_lazy = !p.floating && !p.lazy_failed && app.gpu.as_ref().is_some_and(|g| g.drag_ready_for(&doc, &p.ids));
     let p = app.move_preview.as_mut()?;
     p.gpu_lazy = gpu_lazy;
     let lazy = lazy || gpu_lazy;
@@ -260,6 +265,7 @@ pub(crate) fn gpu_lazy_failed(app: &mut PhotocraftApp) -> bool {
     match app.move_preview.as_mut() {
         Some(p) if p.gpu_lazy && !p.in_place => {
             p.gpu_lazy = false;
+            p.lazy_failed = true;
             p.shown = None;
             p.offsets.clear();
             true
@@ -430,6 +436,7 @@ fn floating_doc(app: &mut PhotocraftApp, idx: usize) -> Option<(Arc<Document>, u
             floating: true,
             in_place: false,
             gpu_lazy: false,
+            lazy_failed: false,
         });
     }
     if offset == (0, 0) && app.move_preview.as_ref().is_none_or(|p| p.offsets.is_empty()) {

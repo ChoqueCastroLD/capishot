@@ -63,10 +63,11 @@ pub fn available() -> std::result::Result<(), String> {
     environment().map(|_| ())
 }
 
-/// The intra-op threads of a CPU session asked for `asked` (0: ONNX Runtime's default, one per
-/// physical core). With 4 logical cores or fewer, 0 leaves one core to the app's window: with
-/// every core on the model its frames took 300 ms to 2 s for the whole run (usage statistics:
-/// a 2-core A6-9225 during Remove with AI, 389 frozen frames in a day).
+/// The threads of an AI job on the CPU asked for `asked` (0: the default, one per core). On a
+/// machine with 2 cores, and only there, 0 leaves one core to the app's window, even if the job
+/// takes longer (the owner's decision): with both cores on the model its frames took 300 ms to 2 s
+/// for the whole run (usage statistics: a 2-core A6-9225 during Remove with AI, 389 frozen frames
+/// in a day). Manga LaMa, the text mask and upscaling on the CPU all take their threads from here.
 pub fn cpu_threads(asked: usize) -> usize {
     leave_one_core(asked, std::thread::available_parallelism().map_or(0, std::num::NonZeroUsize::get))
 }
@@ -75,7 +76,7 @@ pub fn cpu_threads(asked: usize) -> usize {
 pub fn leave_one_core(asked: usize, logical: usize) -> usize {
     match (asked, logical) {
         (a, _) if a > 0 => a,
-        (_, 1..=4) => (logical - 1).max(1),
+        (_, 1 | 2) => 1,
         _ => 0,
     }
 }
@@ -85,8 +86,8 @@ mod tests {
     #[test]
     fn small_machines_keep_a_core_for_the_window() {
         use super::leave_one_core;
-        assert_eq!(leave_one_core(0, 2), 1);
-        assert_eq!(leave_one_core(0, 4), 3);
+        assert_eq!(leave_one_core(0, 2), 1, "2 cores: one for the window");
+        assert_eq!(leave_one_core(0, 4), 0, "4 cores: all of them (ONNX Runtime's default)");
         assert_eq!(leave_one_core(0, 1), 1);
         assert_eq!(leave_one_core(0, 8), 0, "ONNX Runtime's own default");
         assert_eq!(leave_one_core(0, 0), 0);

@@ -1500,7 +1500,7 @@ impl Compositor {
                             h.wait(device, Some(prev));
                         }
                         None => {
-                            let _ = device.poll(wgpu::PollType::Wait { submission_index: Some(prev), timeout: None });
+                            let _ = device.poll(wgpu::PollType::Wait { submission_index: Some(prev), timeout: Some(health::GPU_WAIT_LIMIT) });
                         }
                     }
                 }
@@ -2862,7 +2862,8 @@ pub fn render_to_vec_lod(
         Some(h) if !h.wait(device, None) => return Err(Unsupported(h.fault().map_or_else(|| "GPU device lost".into(), |f| f.to_string()))),
         Some(_) => {}
         None => {
-            let _ = device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None });
+            // Not mapped unless the wait finished: reading them then would panic.
+            device.poll(wgpu::PollType::Wait { submission_index: None, timeout: Some(health::GPU_WAIT_LIMIT) }).map_err(|e| Unsupported(format!("GPU wait failed: {e}")))?;
         }
     }
     let w = rect.width() as usize;

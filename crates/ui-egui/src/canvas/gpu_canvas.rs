@@ -36,11 +36,10 @@ pub use photocraft_gpu::{DeviceHealth, Fault};
 
 mod above;
 mod pages;
-mod timing;
 mod view_sets;
 
 pub(crate) use above::moves_with_layer;
-pub use above::{DragMode, drag_frames, drag_gpu_ms, set_above_cache};
+pub use above::{DragMode, drag_frames, piece_gpu_ms, set_above_cache};
 pub use view_sets::{MAX_VIEW_SETS, ViewSwitch, same_but_visibility, same_pixels, visibility_only};
 
 /// Default tile side; documents up to this size (and the device limit) use a single texture.
@@ -491,11 +490,24 @@ impl GpuCanvas {
         r.callback_resources.canvas(self.id).and_then(|res| res.moving.get(&key).cloned())
     }
 
-    /// Whether the drag cache is ready for `ids` moving on `doc` as it is (the Move preview can
-    /// then show the document unmoved and let the cache shift them: `move_ui::display_doc`).
+    /// Whether the drag cache is ready for `ids` moving on `doc` as it is, at the level a drag
+    /// draws at in the view ([`GpuCanvas::set_drag_level`]): the Move preview can then show the
+    /// document unmoved and let the cache shift them (`move_ui::display_doc`).
     pub fn drag_ready_for(&self, doc: &photocraft_doc::Document, ids: &[photocraft_doc::LayerId]) -> bool {
         let r = self.rs.renderer.read();
-        r.callback_resources.canvas(self.id).is_some_and(|res| res.drag.as_ref().is_some_and(|c| c.ready_for(doc, ids)))
+        r.callback_resources.canvas(self.id).is_some_and(|res| {
+            let max = res.docs.get(&doc.id.0).map_or(0, DocTextures::max_level);
+            let level = res.drag_level.get(&doc.id.0).copied().unwrap_or(0).min(max).min(photocraft_gpu::MAX_LOD);
+            res.drag.as_ref().is_some_and(|c| c.ready_for(doc, ids, level))
+        })
+    }
+
+    /// The level a Move drag on document `key` draws at in the view (the level it samples).
+    pub fn set_drag_level(&self, key: u64, level: u32) {
+        let mut r = self.rs.renderer.write();
+        if let Some(res) = r.callback_resources.canvas_mut(self.id) {
+            res.drag_level.insert(key, level);
+        }
     }
 
     /// GPU bytes of the drag cache (tests and diagnostics).
@@ -616,6 +628,20 @@ impl GpuCanvas {
             return false;
         }
         true
+    }
+
+    /// Keep the compositor "being made" until the returned sender is dropped or sends one: every
+    /// frame meanwhile is composited on the CPU into the GPU canvas's textures, as on a device
+    /// whose pipelines never finish building (tests).
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn hold_compositor(&self) -> std::sync::mpsc::Sender<Result<photocraft_gpu::Compositor, photocraft_gpu::Unsupported>> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut r = self.rs.renderer.write();
+        if let Some(res) = r.callback_resources.canvas_mut(self.id) {
+            res.compositor = None;
+            res.building = Some(std::sync::Mutex::new(rx));
+        }
+        tx
     }
 
     /// Pipelines the compositor has built (`None` before it is made; tests and diagnostics).
@@ -1825,9 +1851,10 @@ pub fn use_adapter_limits_with(setup: &mut egui_wgpu::WgpuSetup, on_adapter: imp
     if let egui_wgpu::WgpuSetup::CreateNew(create) = setup {
         create.device_descriptor = std::sync::Arc::new(move |adapter| {
             on_adapter(adapter);
-            // Timestamp queries where the adapter has them: the drag cache's GPU time (`timing`).
-            let required_features = adapter.features() & wgpu::Features::TIMESTAMP_QUERY;
-            wgpu::DeviceDescriptor { label: Some("photocraft wgpu device"), required_features, required_limits: device_limits(adapter), ..Default::default() }
+            // No optional features: timestamp queries (0.13.32-0.13.34, the drag frames' GPU time)
+            // resolved queries a frame hadn't written when it drew no tile; on an RTX 3060 Ti
+            // (Vulkan) moving a text layer froze the window, then the app died.
+            wgpu::DeviceDescriptor { label: Some("photocraft wgpu device"), required_limits: device_limits(adapter), ..Default::default() }
         });
     }
 }
@@ -2833,6 +2860,8 @@ struct Resources {
     /// Documents the view has shown (`GpuCanvas::note_shown`): a set made for one again is never
     /// left with blank parts ([`Stale::blank`]).
     shown: std::collections::HashSet<u64>,
+    /// The level a Move drag draws at, per document ([`GpuCanvas::set_drag_level`]).
+    drag_level: HashMap<u64, u32>,
     /// The layers a Move drag moves ([`GpuCanvas::set_moving`]; empty without one).
     moving: HashMap<u64, (Vec<photocraft_doc::LayerId>, (i32, i32))>,
     /// The last drag that ended: document, layers and the offset it moved them by.
@@ -2853,8 +2882,6 @@ struct Resources {
     apply_pipeline: wgpu::RenderPipeline,
     apply_pipeline_high: Option<wgpu::RenderPipeline>,
     drag_bgl: wgpu::BindGroupLayout,
-    /// GPU time of drag frames (timestamp queries, where the device has them).
-    timer: Option<timing::GpuTimer>,
     drag_pipeline: wgpu::RenderPipeline,
     drag_pipeline_high: Option<wgpu::RenderPipeline>,
     /// Passes of the last plan the compositor ran (sizes refinement pieces).
@@ -2885,6 +2912,7 @@ impl Resources {
         if self.drag.as_ref().is_some_and(|m| keys.contains(&m.doc())) {
             self.drag = None;
         }
+        self.drag_level.retain(|k, _| !keys.contains(k));
     }
 }
 
@@ -3197,6 +3225,7 @@ impl Resources {
             reduced_at: f64::NEG_INFINITY,
             shown: Default::default(),
             moving: HashMap::new(),
+            drag_level: HashMap::new(),
             released: None,
             cost_rate: 0.0,
             piece_rate: 0.0,
@@ -3208,7 +3237,6 @@ impl Resources {
             apply_pipeline,
             apply_pipeline_high,
             drag_bgl,
-            timer: timing::GpuTimer::new(device, queue),
             drag_pipeline,
             drag_pipeline_high,
             last_passes: 1,

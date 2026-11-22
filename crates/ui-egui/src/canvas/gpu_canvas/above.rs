@@ -137,9 +137,9 @@ impl DragCache {
         self.ready()
     }
 
-    /// Ready for `ids` moving on `doc` as it is (whatever the view).
-    pub(super) fn ready_for(&self, doc: &Document, ids: &[LayerId]) -> bool {
-        self.ready() && self.doc == doc.id.0 && self.ids == ids && self.layers == doc.layers
+    /// Ready for `ids` moving on `doc` as it is, at `level` (whatever the view).
+    pub(super) fn ready_for(&self, doc: &Document, ids: &[LayerId], level: u32) -> bool {
+        self.ready() && self.level == level && self.doc == doc.id.0 && self.ids == ids && self.layers == doc.layers
     }
 
     /// Whether the images show `doc` (with `ids` moving) for a view of `view` at `level`.
@@ -316,16 +316,13 @@ pub fn set_above_cache(on: bool) {
 static SPRITE_FRAMES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static LAYERED_FRAMES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// GPU milliseconds of the last drag frame measured (timestamp queries; f64 bits, 0: none) and of
-/// the last cache piece (from its submission to the GPU's completion).
-static DRAG_GPU_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Milliseconds from the last cache piece's submission to the GPU's completion (f64 bits, 0: none).
 static PIECE_GPU_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// GPU time of the last drag frame measured with timestamp queries, and of the last cache piece
-/// (submission to completion), in milliseconds (tests and diagnostics; `None`: not measured).
-pub fn drag_gpu_ms() -> (Option<f64>, Option<f64>) {
-    let get = |a: &std::sync::atomic::AtomicU64| Some(f64::from_bits(a.load(std::sync::atomic::Ordering::Relaxed))).filter(|v| *v > 0.0);
-    (get(&DRAG_GPU_MS), get(&PIECE_GPU_MS))
+/// How long the last cache piece took from its submission to the GPU's completion, in
+/// milliseconds (tests and diagnostics; `None`: not measured yet).
+pub fn piece_gpu_ms() -> Option<f64> {
+    Some(f64::from_bits(PIECE_GPU_MS.load(std::sync::atomic::Ordering::Relaxed))).filter(|v| *v > 0.0)
 }
 
 /// Drag frames drawn from the cache so far: (one-draw sprite frames, layered frames).
@@ -808,10 +805,6 @@ fn draw_sprite(device: &wgpu::Device, queue: &wgpu::Queue, res: &Resources, key:
     let (sx, sy) = (cache.sprite_at.0 >> level, cache.sprite_at.1 >> level);
     let view = cache.view;
     let record = crate::perf_span::span("drag.record");
-    if let Some(ms) = res.timer.as_ref().and_then(super::timing::GpuTimer::take) {
-        DRAG_GPU_MS.store(ms.to_bits(), std::sync::atomic::Ordering::Relaxed);
-    }
-    let timer = res.timer.as_ref().filter(|t| t.free());
     let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("pc_drag_frame") });
     let tiles: Vec<_> = d
         .tiles
@@ -823,8 +816,7 @@ fn draw_sprite(device: &wgpu::Device, queue: &wgpu::Queue, res: &Resources, key:
             (!r.is_empty()).then_some((t, target, tx, ty, r))
         })
         .collect();
-    let last = tiles.len().saturating_sub(1);
-    for (i, (t, target, tx, ty, r)) in tiles.into_iter().enumerate() {
+    for (t, target, tx, ty, r) in tiles {
         let words: [i32; 8] = [tx - view.x0, ty - view.y0, i32::from(encode_srgb), keep_hdr, tx - sx - ox, ty - sy - oy, i32::from(above), i32::from(affine)];
         let bytes: Vec<u8> = words.iter().flat_map(|v| v.to_le_bytes()).collect();
         let entry = cache.binds.entry(t.rect).or_insert_with(|| {
@@ -860,7 +852,7 @@ fn draw_sprite(device: &wgpu::Device, queue: &wgpu::Queue, res: &Resources, key:
                 ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
             })],
             depth_stencil_attachment: None,
-            timestamp_writes: timer.and_then(|t| t.writes(i == 0, i == last)),
+            timestamp_writes: None,
             occlusion_query_set: None,
             multiview_mask: None,
         });
@@ -869,17 +861,11 @@ fn draw_sprite(device: &wgpu::Device, queue: &wgpu::Queue, res: &Resources, key:
         pass.set_scissor_rect((r.x0 - tx) as u32, (r.y0 - ty) as u32, r.width(), r.height());
         pass.draw(0..3, 0..1);
     }
-    if let Some(t) = timer {
-        t.resolve(&mut enc);
-    }
     let buf = enc.finish();
     drop(record);
     // On a software adapter (lavapipe) the draw runs here, on the CPU; on a GPU it is queued.
     let _s = crate::perf_span::span("drag.submit");
     queue.submit([buf]);
-    if let Some(t) = timer {
-        t.submitted();
-    }
     true
 }
 

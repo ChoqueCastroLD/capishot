@@ -6,6 +6,17 @@ Every change to the stable API is listed here with the commit to pin. Breaking c
 may change in any commit; their changes are listed under **Experimental**. A change to the
 `[patch]` pins (README.md) is listed too: copy the blocks again when you move the pin.
 
+## API_VERSION 1, behaviour (Move drags never loop, bounded GPU waits, AI on 2 cores)
+
+- No API change. A Move drag whose cache, made ahead at another level, couldn't draw the view no
+  longer redraws the page in a loop that never ends (0.13.33-0.13.34: the window froze, then
+  Windows closed the app, on an RTX 3060 Ti): the cache made ahead is made at the level drags
+  draw at, a drag's preview falls back to a moved copy once for the rest of the drag, and a frame
+  retries at most once. The drag cache no longer uses GPU timestamp queries. A wait for queued GPU
+  work never lasts more than 3 s; past it the GPU is no longer used (the CPU draws).
+- AI jobs on the CPU (Manga LaMa, the text mask, upscaling) leave one core to the window on
+  machines with 2 cores, and only there.
+
 ## API_VERSION 1, behaviour (effect maps within budget, compositor made ahead)
 
 - No API change. The GPU compositor builds layer-effect maps only for the layers a render draws,

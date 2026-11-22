@@ -212,6 +212,10 @@ impl NativeUpscaler {
         let status = format!("Upscaling with {title} ({device})");
         let progress = TileHooks { hooks, lo: 0.1, status };
         let tiles = req.opts.tiles.unwrap_or_else(|| if req.opts.cpu { default_tiles(req.model) } else { gpu_tiles(req.model) });
+        // On 2 cores, one left to the window (`photocraft_ai_ort::cpu_threads`).
+        #[cfg(feature = "directml")]
+        let threads = photocraft_ai_ort::cpu_threads(req.opts.threads);
+        #[cfg(not(feature = "directml"))]
         let threads = req.opts.threads;
         let run = || block_on(upscale(&rt, loaded, &req.input, tiles, &progress));
         // CPU threads: a pool of that size for this run (0: rayon's global pool, one per core).

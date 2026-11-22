@@ -497,6 +497,13 @@ pub(crate) fn effect_reach(layers: &[photocraft_doc::Layer]) -> i32 {
 /// the view gets there, and both are brought to full size once the edits pause (`catch_up`,
 /// which asks `ctx` for the frames it needs).
 pub(super) fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, level: u32, sample_level: u32, ctx: &egui::Context) -> bool {
+    ensure_gpu_once(app, idx, visible, level, sample_level, ctx, true)
+}
+
+/// [`ensure_gpu`]; `retry`: whether a Move preview the refresh didn't draw the way it counted on
+/// may be drawn again in this frame as a moved copy (once: the copy is what the canvas draws
+/// then, whatever it is; a retry that could recur redrew the page in a loop that never ended).
+fn ensure_gpu_once(app: &mut PhotocraftApp, idx: usize, visible: DRect, level: u32, sample_level: u32, ctx: &egui::Context, retry: bool) -> bool {
     let Some(gpu) = app.gpu.clone() else { return false };
     let Some((revision, last_damage, id)) = app
         .session
@@ -539,6 +546,7 @@ pub(super) fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, le
     // one large edits take while zoomed out: the layers that don't move stay sharp.
     let dragging = !moving.is_empty();
     gpu.set_moving(id.0, moving, offset);
+    gpu.set_drag_level(id.0, sample_level);
     let level = if dragging || gpu.release_pending(id.0) { sample_level } else { level };
     let cache = app.canvases.entry((id, GPU_OUTPUT)).or_insert(CanvasCache { scale: 1.0, ..Default::default() });
     let present = cache.on_gpu && gpu.has(id.0, size);
@@ -602,7 +610,10 @@ pub(super) fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, le
         if c.px > 0 {
             app.perf.record(if c.refined { "gpu-refine" } else { "gpu-catch-up" }, c.px, c.composite_ms, 0.0);
         }
-        prepare_drag_ahead(app, &gpu, &doc, idx, need, display.as_deref(), plain && !gesture, ctx);
+        // At the level a drag draws at (the view's): a cache made at the coarser level large edits
+        // take while zoomed out was never one a drag could draw from.
+        let ahead = crate::gpu_canvas::ViewNeed { level: sample_level, ..need };
+        prepare_drag_ahead(app, &gpu, &doc, idx, ahead, display.as_deref(), plain && !gesture, ctx);
         if let Some(ms) = c.again_ms {
             ctx.request_repaint_after(std::time::Duration::from_secs_f64(ms.max(0.0) / 1000.0));
         }
@@ -685,7 +696,7 @@ pub(super) fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, le
         // What was left out of date is brought up to date on the following frames.
         ctx.request_repaint_after(std::time::Duration::from_secs_f64(crate::gpu_canvas::REFINE_DELAY_MS / 1000.0));
     }
-    if preview_needs_copy(app, idx, &r, raw_key) {
+    if preview_needs_copy(app, idx, &r, raw_key, retry) {
         // The Move preview counted on drawing the layers from where they are (in place, or the
         // drag cache), which this refresh didn't: this frame (and the rest of the drag) from a
         // moved copy instead, in full, now. Handing the frame to the CPU canvas showed its tiles
@@ -693,7 +704,7 @@ pub(super) fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, le
         if let Some(cache) = app.canvases.get_mut(&(id, GPU_OUTPUT)) {
             cache.on_gpu = false;
         }
-        return ensure_gpu(app, idx, visible, level, sample_level, ctx);
+        return ensure_gpu_once(app, idx, visible, level, sample_level, ctx, false);
     }
     if r.kind == "lost" || r.kind == crate::gpu_canvas::REFRESH_OVER_BUDGET {
         // The device is gone (`gpu_status` then drops the GPU canvas) or the canvas is over the
@@ -728,9 +739,10 @@ pub(super) fn ensure_gpu(app: &mut PhotocraftApp, idx: usize, visible: DRect, le
 /// Whether refresh `r` of document `idx` (preview key `raw_key`) didn't draw a Move preview the
 /// way it counted on (the drag cache, or the layers in place on the GPU compositor): the preview
 /// becomes a moved copy ([`crate::move_ui::gpu_lazy_failed`], [`crate::move_ui::in_place_failed`]).
-fn preview_needs_copy(app: &mut PhotocraftApp, idx: usize, r: &crate::gpu_canvas::Refresh, raw_key: u64) -> bool {
-    (r.kind != crate::gpu_canvas::DRAG_CACHE_KIND && raw_key != 0 && crate::move_ui::gpu_lazy_failed(app))
-        || (!r.kind.starts_with("gpu") && crate::move_ui::drawn_in_place(app, idx) && crate::move_ui::in_place_failed(app))
+/// Never on a frame's second try (`retry` off): what it drew then is the frame.
+fn preview_needs_copy(app: &mut PhotocraftApp, idx: usize, r: &crate::gpu_canvas::Refresh, raw_key: u64, retry: bool) -> bool {
+    retry && ((r.kind != crate::gpu_canvas::DRAG_CACHE_KIND && raw_key != 0 && crate::move_ui::gpu_lazy_failed(app))
+        || (!r.kind.starts_with("gpu") && crate::move_ui::drawn_in_place(app, idx) && crate::move_ui::in_place_failed(app)))
 }
 
 /// The budget of an idle frame for making the drag cache ahead (milliseconds).

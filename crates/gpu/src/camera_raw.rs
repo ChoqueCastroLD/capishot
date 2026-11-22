@@ -294,7 +294,7 @@ impl CameraRawDevelop {
                 }
             }
             None => {
-                device.poll(wgpu::PollType::Wait { submission_index: Some(index), timeout: None }).map_err(|e| Unsupported(format!("GPU wait failed: {e}")))?;
+                device.poll(wgpu::PollType::Wait { submission_index: Some(index), timeout: Some(crate::health::GPU_WAIT_LIMIT) }).map_err(|e| Unsupported(format!("GPU wait failed: {e}")))?;
             }
         }
         let mut out = Vec::with_capacity(source.len());

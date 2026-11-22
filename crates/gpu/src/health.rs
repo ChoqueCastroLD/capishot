@@ -252,14 +252,24 @@ impl DeviceHealth {
 
     /// Like [`Self::wait`], but returns whether the wait completed: `false` also when the poll
     /// itself failed, so the work may still be running.
+    ///
+    /// Never longer than [`GPU_WAIT_LIMIT`]: work that hasn't finished by then never will (a
+    /// GPU that hung), and a wait without a limit froze the window until the app was killed
+    /// (0.13.33-0.13.34, moving a text layer on an RTX 3060 Ti). The device is then marked
+    /// [`STOPPED`] and nothing waits on it again (the CPU draws).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn wait_idle(&self, device: &wgpu::Device, index: Option<wgpu::SubmissionIndex>) -> bool {
         if !self.is_ok() {
             return false;
         }
-        let poll = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| device.poll(wgpu::PollType::Wait { submission_index: index, timeout: None })));
+        let poll = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| device.poll(wgpu::PollType::Wait { submission_index: index, timeout: Some(GPU_WAIT_LIMIT) })));
         match poll {
             Ok(Ok(_)) => self.is_ok(),
+            Ok(Err(wgpu::PollError::Timeout)) => {
+                log::error!("gpu: queued work didn't finish within {} s; the GPU is no longer used", GPU_WAIT_LIMIT.as_secs());
+                self.mark(Fault::Lost(STOPPED.into()));
+                false
+            }
             Ok(Err(e)) => {
                 log::warn!("wgpu poll: {e}");
                 false
@@ -281,6 +291,13 @@ impl DeviceHealth {
         }
     }
 }
+
+/// The longest a wait for queued GPU work may take ([`DeviceHealth::wait_idle`]): a GPU that
+/// hasn't finished by then has hung (Windows resets a GPU after 2 s without progress).
+pub const GPU_WAIT_LIMIT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// The fault of a GPU whose work didn't finish within [`GPU_WAIT_LIMIT`].
+pub const STOPPED: &str = "the GPU stopped finishing its work";
 
 /// The fault a wgpu error stands for. Errors about invalid or lost objects follow a device loss
 /// whose callback may not have run yet (it fires on the next poll), so they count as a loss
