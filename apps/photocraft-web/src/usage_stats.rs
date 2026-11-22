@@ -51,6 +51,16 @@ struct State {
 thread_local! {
     static STATE: RefCell<Option<State>> = const { RefCell::new(None) };
     static LAST_MEMORY: Cell<f64> = const { Cell::new(0.0) };
+    /// The page's startup, until a session records it (the preference is read once the app runs).
+    static BOOT: Cell<Option<telemetry::Boot>> = const { Cell::new(None) };
+}
+
+/// The page's startup times: recorded now if a session is recording, else by the session that
+/// starts later in this page (never by a later page).
+pub fn record_boot(boot: telemetry::Boot) {
+    if telemetry::with(|r| r.boot(&boot)).is_none() {
+        BOOT.with(|b| b.set(Some(boot)));
+    }
 }
 
 /// Called once at startup with the canvas backend (`webgpu`, `webgl`, `cpu`), the GPU vendor class
@@ -112,6 +122,9 @@ fn start_session(mut env: Environment) {
     set_crash_target(Some((install.as_str(), session.as_str())));
     let mut recorder = Recorder::new(&install, &session, js_sys::Date::now());
     recorder.event(telemetry::session_start_event(&env));
+    if let Some(boot) = BOOT.with(Cell::take) {
+        recorder.boot(&boot);
+    }
     // The previous page died without closing (out of memory, a renderer crash): its last
     // command, tool and memory high-water mark (breadcrumb.rs).
     for e in crate::breadcrumb::take_events() {

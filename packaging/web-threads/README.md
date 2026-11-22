@@ -147,7 +147,7 @@ Before building a release of either web build ([`docs/releasing.md`](../../docs/
    `CHROME=<chromium> CAPISHOT_PROFILE_PAGE=<a page image> packaging/web-split/profile.sh st`, then
    the same with `threads`.
 2. Build both from the same commit (Trunk for `st/`, then `build.sh`) and run the checks below,
-   `e2e/load-failures.mjs` included.
+   `e2e/load-failures.mjs` and `e2e/boot-time.mjs` included.
 
 ## Browser checks (`e2e/`)
 
@@ -168,6 +168,11 @@ Chromium in `CHROME`):
   (the reload message after one retry), chunks arriving late (a command waits for its chunk, no
   synchronous load on the page) or never (the command fails cleanly with a Retry notice), and a
   failed last-resort synchronous load (`?split=sync`: the toast). Works on either build.
+- `e2e/boot-time.mjs`: the time to the app's first frame (cold or warm cache, the page's thread
+  slowed down 4×), median, p99 and max over a few runs, and that no part of the module is loaded
+  synchronously on the page's thread while it starts. That fails when the split's profile no
+  longer matches the code: run `packaging/web-split/profile.sh` again. The usage statistics report
+  the same time (`perf` op `app.boot.syncChunks`) from real browsers.
 - `e2e/hidden-tab-boot.mjs`: the app opened in a background tab (never shown) boots, `window.photocraft`
   appears and answers commands. Raw DevTools protocol (Playwright keeps its pages visible), so it needs
   only Node and a Chromium: `CHROME=<chromium> node e2e/hidden-tab-boot.mjs <url>`.

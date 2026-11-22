@@ -37,6 +37,9 @@
 //! Without a schema change (the collector refuses a whole batch for an unknown event or field), a
 //! canvas press a tool dropped goes out as a `command` with the id `toolDrop.<reason>.tool.<Name>`
 //! and source `tool` ([`Recorder::tool_drop`]): the reason is a fixed code, never free text.
+//! Likewise the web page's startup goes out as `perf` events with fixed ops `app.boot.*`
+//! ([`Recorder::boot`]): when the module ran, when the first frame was drawn, and the time the
+//! page's thread spent loading parts of the module synchronously.
 //! Never: file names, paths, layer or font names, document content, typed text, error messages.
 //! [`Recorder::take_batch`] enforces it a last time: an event with a field outside [`FIELDS`] or a
 //! value that looks like a path or a file name is dropped.
@@ -746,6 +749,19 @@ impl Recorder {
             e["mp"] = json!(mp_bucket_of(mp));
         }
         self.event(e);
+    }
+
+    /// The web page's startup ([`Boot`]): `perf` events with fixed ops, whatever their time
+    /// (not only the slow ones): `app.boot.wasm` (the module compiled and running),
+    /// `app.boot.firstFrame` (the app's first frame drawn) and, when there was any,
+    /// `app.boot.syncChunks` (the page's thread loading parts of the module synchronously).
+    pub fn boot(&mut self, boot: &Boot) {
+        let ops = [("app.boot.wasm", boot.wasm_ms), ("app.boot.firstFrame", boot.first_frame_ms), ("app.boot.syncChunks", boot.sync_chunks_ms)];
+        for (op, ms) in ops {
+            if ms.is_finite() && ms > 0.0 {
+                self.event(json!({"e": "perf", "op": op, "ms": round_ms(ms)}));
+            }
+        }
     }
 
     /// The page's main thread was blocked for `ms` (`longtask`: the browser saw a long task;
@@ -1567,6 +1583,18 @@ pub struct AiStages {
     pub load: Option<f64>,
     pub infer: Option<f64>,
     pub post: Option<f64>,
+}
+
+/// A web page's startup, ms since navigation ([`Recorder::boot`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Boot {
+    /// The module compiled and its code running.
+    pub wasm_ms: f64,
+    /// The app's first frame drawn.
+    pub first_frame_ms: f64,
+    /// Spent by the page's thread loading parts of the module synchronously before that (a split
+    /// profile that no longer matches the code: packaging/web-split/profile.sh).
+    pub sync_chunks_ms: f64,
 }
 
 /// The `phase` of a long task from `start` for `ms` (the app's clock), reported at the end

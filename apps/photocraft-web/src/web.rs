@@ -1610,7 +1610,9 @@ impl eframe::App for WebShell {
                 photocraft_ui_egui::telemetry::leave_stage(photocraft_ui_egui::telemetry::Stage::FirstFrame);
             }
             if self.startup_frames == 2 {
-                crate::startup::report();
+                if let Some((wasm_ms, first_frame_ms)) = crate::startup::report() {
+                    crate::usage_stats::record_boot(photocraft_ui_egui::telemetry::Boot { wasm_ms, first_frame_ms, sync_chunks_ms: crate::code_split::sync_load_ms() });
+                }
                 crate::code_split::first_frame();
             }
         }

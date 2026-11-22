@@ -66,3 +66,17 @@ pub fn first_frame() {
         let _ = f.call0(&api);
     }
 }
+
+/// The time the page's thread has spent loading chunks synchronously (a call into a chunk that
+/// had not arrived), in ms. Before the first frame it should be none: the split's profile keeps
+/// what the startup runs in the first-load module (packaging/web-split/profile.sh), and a stale
+/// profile shows up here.
+pub fn sync_load_ms() -> f64 {
+    let Some(api) = api() else { return 0.0 };
+    Reflect::get(&api, &JsValue::from_str("state"))
+        .and_then(|state| Reflect::get(&state, &JsValue::from_str("syncMs")))
+        .ok()
+        .and_then(|v| v.as_f64())
+        .filter(|ms| ms.is_finite() && *ms > 0.0)
+        .unwrap_or(0.0)
+}

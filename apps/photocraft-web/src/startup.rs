@@ -19,10 +19,11 @@ pub fn mark(step: &'static str) {
 }
 
 /// Logs the steps recorded so far as one line (step at time since navigation, and the time
-/// since the previous step), once: later calls do nothing.
-pub fn report() {
+/// since the previous step), once: later calls do nothing. Returns when the module started
+/// running and when the last step was reached (ms since navigation), for the usage statistics.
+pub fn report() -> Option<(f64, f64)> {
     let marks = MARKS.with_borrow_mut(std::mem::take);
-    let Some(&(_, first)) = marks.first() else { return };
+    let &(_, first) = marks.first()?;
     let mut line = format!("photocraft-web: startup: wasm running at {first:.0} ms");
     let mut prev = first;
     for (step, t) in marks.iter().skip(1) {
@@ -30,4 +31,5 @@ pub fn report() {
         prev = *t;
     }
     log::info!("{line}");
+    Some((first, prev))
 }

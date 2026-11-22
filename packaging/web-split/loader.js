@@ -14,6 +14,9 @@ const __split = {
     chunks: __SPLIT_CHUNKS__, tableName: __SPLIT_TABLE__, hot: new Set(__SPLIT_HOT__),
     loaded: Object.create(null), modules: Object.create(null), pending: Object.create(null), downloads: Object.create(null),
     prefetching: false, calls: 0, syncLoads: 0,
+    // Time the page's thread spent in synchronous loads (download, compile, instantiate), ms: the
+    // app reports it with its startup (telemetry `perf` op `app.boot.syncChunks`).
+    syncMs: 0,
 };
 
 function __splitAddImports(imports) {
@@ -84,6 +87,8 @@ function __splitInstalled(c, module) {
 function __splitLoad(c) {
     if (__split.loaded[c]) return;
     let module = __split.modules[c];
+    const page = typeof document !== 'undefined';
+    const t0 = page ? performance.now() : 0;
     try {
         if (!module) {
             __split.syncLoads++;
@@ -93,6 +98,8 @@ function __splitLoad(c) {
     } catch (e) {
         if (typeof document !== 'undefined' && self.capishotBoot && self.capishotBoot.chunkFailed) self.capishotBoot.chunkFailed(e, true);
         throw e;
+    } finally {
+        if (page) __split.syncMs += performance.now() - t0;
     }
     __splitInstalled(c, module);
 }

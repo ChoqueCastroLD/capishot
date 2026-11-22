@@ -194,6 +194,8 @@ never counted. On the desktop, `DO_NOT_TRACK=1` or `CAPISHOT_TELEMETRY_URL=off` 
   session.
 - The command ids and tools you use, counted (never their settings), and how long they took: p50,
   p95 and max per tool and command, with a page-size range.
+- In the browser, how long the app took to start: when its code was running, when its first frame
+  was drawn, and the time spent waiting for parts of its code.
 - AI runs: the model, where it ran (CPU, DirectML, wgpu, …), the region's size range, how long it
   took, whether it fell back.
 - Opened, saved and exported file *kinds* (`psd`, `png`, …) with size and layer-count ranges and

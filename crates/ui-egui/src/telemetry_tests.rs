@@ -176,6 +176,21 @@ fn only_slow_commands_are_sampled_a_few_per_batch() {
 }
 
 #[test]
+fn a_web_startup_is_reported_whatever_its_time_and_passes_the_privacy_filter() {
+    let mut r = Recorder::new("a", "s", 0.0);
+    r.boot(&Boot { wasm_ms: 41.6, first_frame_ms: 2310.2, sync_chunks_ms: 0.0 });
+    let b = batch(&mut r);
+    let perf = events(&b, "perf");
+    let ops: Vec<(&str, u64)> = perf.iter().map(|e| (e["op"].as_str().unwrap_or(""), e["ms"].as_u64().unwrap_or(0))).collect();
+    assert_eq!(ops, [("app.boot.wasm", 42), ("app.boot.firstFrame", 2310)], "fast steps too; no sync loads, no event for them");
+    r.boot(&Boot { wasm_ms: 900.0, first_frame_ms: 33_000.0, sync_chunks_ms: 4_200.4 });
+    let b = batch(&mut r);
+    assert!(events(&b, "perf").iter().any(|e| e["op"] == "app.boot.syncChunks" && e["ms"] == 4200));
+    r.boot(&Boot { wasm_ms: f64::NAN, first_frame_ms: -1.0, sync_chunks_ms: f64::INFINITY });
+    assert!(r.is_empty(), "no event from times that aren't");
+}
+
+#[test]
 fn buckets_and_kinds() {
     assert_eq!(file_kind("Capítulo 12/página 3.PSD"), "psd");
     assert_eq!(file_kind("a.jpeg"), "jpg");
