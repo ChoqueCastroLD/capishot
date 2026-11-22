@@ -665,6 +665,7 @@ fn update_transport(_flatpak_id: Option<&std::ffi::OsStr>) -> Option<photocraft_
 pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) -> Services {
     let clip: Rc<RefCell<Option<arboard::Clipboard>>> = Rc::default();
     let clip_unreadable: Rc<Cell<bool>> = Rc::default();
+    let prefs_writer = crate::prefs_writer::PrefsWriter::new(|text| write_atomic(&prefs_file().ok_or("no config directory")?, text.as_bytes()));
     let automation_read = automation.clone().map(|workspace| {
         Box::new(move |path: &str| {
             let bytes = workspace.read(path).map_err(|error| error.to_string())?;
@@ -790,13 +791,26 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
             })
         }),
         clipboard_unreadable: Some(Box::new(move || clip_unreadable.get())),
-        load_prefs: Some(Box::new(|| std::fs::read_to_string(prefs_file()?).ok())),
+        // The text on its way to the file, when one is: the file itself is a write behind then.
+        load_prefs: Some(Box::new({
+            let writer = prefs_writer.clone();
+            move || writer.latest().or_else(|| std::fs::read_to_string(prefs_file()?).ok())
+        })),
         photoshop_shortcuts: Some(Box::new(|| crate::photoshop_settings::live_keyboard_shortcuts(&|k| std::env::var_os(k)))),
-        save_prefs: Some(Box::new(|text: &str| write_atomic(&prefs_file().ok_or("no config directory")?, text.as_bytes()))),
-        // A burst of changes (switching tools, dragging a panel) is written once, a second after
-        // it: each write is a durable file replace on the window's thread, which took 300 ms to
-        // over a second on Windows (usage statistics: `prefs.persist`, 0.13.25). Pending changes
-        // are written when the app closes (`tool_memory::save_on_exit`).
+        // Each write is a durable file replace, 300 ms to over a second on Windows (usage
+        // statistics: `prefs.persist`, 0.13.25): made off the window's thread (`prefs_writer`).
+        save_prefs: Some(Box::new({
+            let writer = prefs_writer.clone();
+            move |text: &str| writer.save(text)
+        })),
+        prefs_save_failed: Some(Box::new({
+            let writer = prefs_writer.clone();
+            move || writer.take_failure()
+        })),
+        prefs_flush: Some(Box::new(move || prefs_writer.flush())),
+        // A burst of changes (switching tools, dragging a panel) is merged and handed over once,
+        // a second after it. Pending changes are written when the app closes
+        // (`tool_memory::save_on_exit`).
         prefs_debounce_s: 1.0,
         load_typer: Some(Box::new(|| std::fs::read_to_string(typer_file()?).ok())),
         save_typer: Some(Box::new(|text: &str| {

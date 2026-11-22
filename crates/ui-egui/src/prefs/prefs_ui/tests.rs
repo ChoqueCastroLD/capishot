@@ -872,6 +872,85 @@ fn failed_preference_saves_are_retried() {
     assert!(app.ui.notices.is_empty(), "the notice goes once preferences are saved");
 }
 
+/// The desktop app writes the file off the window's thread: `save_prefs` hands the text over and
+/// a failure comes later (`Services::prefs_save_failed`). It is told and retried as a failure in
+/// the frame is, and closing the app waits for the write.
+#[test]
+fn a_write_that_fails_after_it_was_handed_over_is_retried() {
+    let store = Arc::new(Mutex::new(None::<String>));
+    // What a write handed over does when it runs: `Some(error)` fails it.
+    let later: Arc<Mutex<Option<String>>> = Arc::default();
+    let queued: Arc<Mutex<Vec<String>>> = Arc::default();
+    let failed: Arc<Mutex<Option<String>>> = Arc::default();
+    let flushed = Arc::new(Mutex::new(0));
+    // The writer's thread, run by hand: writes what was handed over, or records its failure.
+    let run = {
+        let (store, later, queued, failed) = (store.clone(), later.clone(), queued.clone(), failed.clone());
+        move || {
+            for text in queued.lock().unwrap().drain(..) {
+                match later.lock().unwrap().clone() {
+                    Some(e) => *failed.lock().unwrap() = Some(e),
+                    None => *store.lock().unwrap() = Some(text),
+                }
+            }
+        }
+    };
+    let services = crate::Services {
+        load_prefs: Some(Box::new({
+            let (store, queued) = (store.clone(), queued.clone());
+            move || queued.lock().unwrap().last().cloned().or_else(|| store.lock().unwrap().clone())
+        })),
+        save_prefs: Some(Box::new({
+            let queued = queued.clone();
+            move |text| {
+                queued.lock().unwrap().push(text.to_string());
+                Ok(())
+            }
+        })),
+        prefs_save_failed: Some(Box::new({
+            let failed = failed.clone();
+            move || failed.lock().unwrap().take()
+        })),
+        prefs_flush: Some(Box::new({
+            let (run, flushed) = (run.clone(), flushed.clone());
+            move || {
+                run();
+                *flushed.lock().unwrap() += 1;
+            }
+        })),
+        ..Default::default()
+    };
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), services);
+    tick(&mut app, &egui::Context::default());
+    run();
+    app.run("prefs.set", json!({"values": {"interface.theme": "softDark"}})).unwrap();
+    // Handed over: nothing to wait for, and the frame didn't write.
+    assert_eq!(persist(&mut app, 100.0), None);
+    assert_eq!(queued.lock().unwrap().len(), 1);
+    assert!(!app.ui.status_error);
+    // The write fails off the frame: the next frame tells the user and schedules a retry.
+    *later.lock().unwrap() = Some("storage is full".into());
+    run();
+    assert_eq!(persist(&mut app, 101.0), Some(SAVE_RETRY_S));
+    assert!(app.ui.status.starts_with("Couldn't save preferences: storage is full") && app.ui.status_error);
+    assert_eq!(persist(&mut app, 101.5), Some(SAVE_RETRY_S - 0.5), "not due yet");
+    // Storage works again: the change is handed over again without another edit, and written.
+    *later.lock().unwrap() = None;
+    assert_eq!(persist(&mut app, 101.0 + SAVE_RETRY_S), None);
+    run();
+    assert_eq!(stored(&store)["interface"]["theme"], "softDark");
+    assert_eq!(persist(&mut app, 110.0), None, "nothing left to save");
+    // Closing: the last change is on disk when the exit save returns.
+    app.run("prefs.set", json!({"values": {"interface.theme": "classic"}})).unwrap();
+    crate::tool_memory::save_on_exit(&mut app).unwrap();
+    assert_eq!(*flushed.lock().unwrap(), 1);
+    assert_eq!(stored(&store)["interface"]["theme"], "classic");
+    // And a write that fails at exit is the exit save's error.
+    app.run("prefs.set", json!({"values": {"interface.theme": "pro"}})).unwrap();
+    *later.lock().unwrap() = Some("storage is full".into());
+    assert_eq!(crate::tool_memory::save_on_exit(&mut app), Err("storage is full".into()));
+}
+
 #[test]
 fn auto_scale_preserves_system_scale() {
     use prefs::UiScale::Auto;

@@ -60,6 +60,7 @@ mod recovery;
 // Save As through the desktop portal, which reports the file type picked (#6121).
 #[cfg(target_os = "linux")]
 mod portal_save;
+mod prefs_writer;
 mod presentation;
 // The print portal needs the session bus (zbus, Linux only); its pure helpers are tested everywhere.
 #[cfg(any(target_os = "linux", test))]

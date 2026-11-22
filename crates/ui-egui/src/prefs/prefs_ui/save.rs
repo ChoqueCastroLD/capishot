@@ -107,6 +107,13 @@ pub fn prefs_pending(app: &PhotocraftApp) -> bool {
 
 fn persist_at(app: &mut PhotocraftApp, now: f64, force: bool) -> Option<f64> {
     let rev = app.session.prefs.rev();
+    // A write handed over earlier failed off the frame: what it carried is not saved, and
+    // nothing is known of what storage holds. The retry below writes this instance's whole.
+    if let Some(e) = app.services.prefs_save_failed.as_mut().and_then(|failed| failed()) {
+        let rt = &mut app.prefs_rt;
+        (rt.saved_rev, rt.saved_value, rt.saved_text, rt.saved_tree) = (rev.wrapping_sub(1), None, None, None);
+        return Some(save_failed(app, now, rev, e));
+    }
     if rev == app.prefs_rt.saved_rev {
         app.prefs_rt.pending_since = None;
         return None;
@@ -151,25 +158,29 @@ fn persist_at(app: &mut PhotocraftApp, now: f64, force: bool) -> Option<f64> {
             }
             None
         }
-        Err(e) => {
-            let r = &mut app.prefs_rt.save_retry;
-            r.failures = r.failures.saturating_add(1);
-            (r.tried_at, r.tried_rev) = (now, rev);
-            let delay = (SAVE_RETRY_S * 2f64.powi(r.failures.min(16) as i32 - 1)).min(SAVE_RETRY_MAX_S);
-            r.at = now + delay;
-            let failures = r.failures;
-            if failures == 1 {
-                let template = "Couldn't save preferences: {error}. Retrying…";
-                app.ui.status = crate::i18n::fmt(tl!(template), &[("error", &e)]);
-                app.ui.status_error = true;
-            } else if failures == SAVE_NOTICE_AFTER {
-                let lines = vec![e, "Capishot keeps retrying; until a save succeeds, preference changes are lost when it closes.".into()];
-                let id = crate::notices::post(app, "Preferences can't be saved", lines, true, None);
-                app.prefs_rt.save_retry.notice = Some(id);
-            }
-            Some(delay)
-        }
+        Err(e) => Some(save_failed(app, now, rev, e)),
     }
+}
+
+/// A write of revision `rev` failed with `e` at `now`: tell the user (the status line first, a
+/// notice once it keeps failing) and say how long to wait before the next try.
+fn save_failed(app: &mut PhotocraftApp, now: f64, rev: u64, e: String) -> f64 {
+    let r = &mut app.prefs_rt.save_retry;
+    r.failures = r.failures.saturating_add(1);
+    (r.tried_at, r.tried_rev) = (now, rev);
+    let delay = (SAVE_RETRY_S * 2f64.powi(r.failures.min(16) as i32 - 1)).min(SAVE_RETRY_MAX_S);
+    r.at = now + delay;
+    let failures = r.failures;
+    if failures == 1 {
+        let template = "Couldn't save preferences: {error}. Retrying…";
+        app.ui.status = crate::i18n::fmt(tl!(template), &[("error", &e)]);
+        app.ui.status_error = true;
+    } else if failures == SAVE_NOTICE_AFTER {
+        let lines = vec![e, "Capishot keeps retrying; until a save succeeds, preference changes are lost when it closes.".into()];
+        let id = crate::notices::post(app, "Preferences can't be saved", lines, true, None);
+        app.prefs_rt.save_retry.notice = Some(id);
+    }
+    delay
 }
 
 /// Write `ours` over the stored preferences, keeping what another instance (a second browser

@@ -163,7 +163,15 @@ pub(crate) fn save_on_exit(app: &mut PhotocraftApp) -> Result<(), String> {
     let ctx = egui::Context::default();
     crate::last_brush::persist(app, &ctx);
     persist(app, &ctx);
-    crate::prefs_ui::save_preferences(app)
+    crate::prefs_ui::save_preferences(app)?;
+    // Where the write is made off this thread, the app closes once it is on disk.
+    if let Some(flush) = app.services.prefs_flush.as_mut() {
+        flush();
+    }
+    match app.services.prefs_save_failed.as_mut().and_then(|failed| failed()) {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
 }
 
 /// Restore the selected tool before the first frame and its options field by field.

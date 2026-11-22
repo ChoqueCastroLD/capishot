@@ -477,6 +477,12 @@ pub struct Services {
     /// the web (see `prefs_ui`).
     pub load_prefs: Option<LoadTextFn>,
     pub save_prefs: Option<SaveTextFn>,
+    /// Where `save_prefs` only hands the text over and the write is made later (the desktop app
+    /// writes off the window's thread): the error of a write that failed since, once.
+    pub prefs_save_failed: Option<Box<dyn FnMut() -> Option<String>>>,
+    /// Wait for the writes `save_prefs` handed over (the app is closing). `None`: `save_prefs`
+    /// has written when it returns.
+    pub prefs_flush: Option<Box<dyn FnMut()>>,
     /// Seconds to wait after a preference change before writing (a burst writes once); 0 writes
     /// in the frame of the change. The web waits: its storage write blocks the page.
     pub prefs_debounce_s: f64,
