@@ -519,6 +519,12 @@ fn apply_lines(s: &mut Session, p: &Value) -> Result<Value> {
     }))
 }
 
+/// Half the sides of the windows around a text's ink Align looks for its bubble in when the
+/// cached page is stale, smallest first (beyond the ink, in pixels): a bubble seldom reaches past
+/// a few hundred pixels around its text, and the largest bubble the wand takes
+/// ([`bubble::MAX_BUBBLE_PIXELS`], about 1200 x 1250) fits the second.
+const ALIGN_WINDOWS: [i32; 2] = [384, 1024];
+
 fn align(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "typer.align";
     let tolerance = support::num_param(p, "tolerance", CMD, 0.0, 255.0)?.map_or(bubble::WAND_TOLERANCE, |t| t as f32);
@@ -547,15 +553,19 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
             Err(e) => Err(e),
             Ok(None) => {
                 if page.is_none() {
-                    page = Some(page_image(s)?);
+                    page = Some(support::page_near(s, &ALIGN_WINDOWS)?);
                 }
-                match &page {
-                    Some(pg) => support::bubble_for_ink(pg, &ink, support::layer_size_px(&doc, *id), tolerance).map_err(str::to_string),
+                match &mut page {
+                    Some(pg) => support::bubble_near_ink(pg, &ALIGN_WINDOWS, &ink, support::layer_size_px(&doc, *id), tolerance).map_err(str::to_string),
                     None => Err("noSelection".into()),
                 }
             }
         };
         plan.push((*id, target));
+    }
+    // A page composited whole for a bubble no window held is kept for the next scan.
+    if let Some(support::PageSource::Page(p)) = page {
+        support::install_page(s, p);
     }
     if plan.iter().all(|(_, r)| r.is_err()) {
         let first = plan.into_iter().find_map(|(_, r)| r.err()).unwrap_or_else(|| "noSelection".into());

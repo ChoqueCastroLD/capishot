@@ -758,3 +758,64 @@ fn typer_align_timing() {
     }
     eprintln!("typer.align: {:.1} ms per layer", t.elapsed().as_secs_f64() * 1e3 / (n * ids.len()) as f64);
 }
+
+/// Align on a large page whose cached page image is stale (just opened, or after a cleaning
+/// stroke) composites a window around each text, not the page (4.2 s on a 24 MP page for one
+/// bubble), and finds the same bubble as on the whole page: a small bubble in the first window, a
+/// large one in the second, and one past both on the whole page, which is then kept.
+#[test]
+fn align_on_a_stale_large_page_reads_windows_around_the_text() {
+    let small = B { cx: 1500.0, cy: 2000.0, rx: 150.0, ry: 100.0, tail: true };
+    let large = B { cx: 1500.0, cy: 800.0, rx: 700.0, ry: 450.0, tail: false };
+    let huge = B { cx: 1500.0, cy: 3300.0, rx: 1350.0, ry: 560.0, tail: false };
+    let build = || {
+        let mut s = Session::new();
+        s.add_document(page(3000, 4000, &[small, large, huge]), None);
+        s.execute("typer.library.import", json!({"json": library(), "now": 1})).unwrap();
+        // Text the size of its bubble (a bubble over 60 times its text is no bubble).
+        let ids: Vec<u64> = [(small, 18, 140.0), (large, 80, 600.0), (huge, 80, 600.0)]
+            .iter()
+            .map(|(b, size, w)| {
+                let p = json!({"text": "Off centre words", "box": [b.cx - w / 2.0 - 40.0, b.cy - 50.0, w, 200], "size": size, "align": "center"});
+                s.execute("type.create", p).unwrap()["layer"].as_u64().unwrap()
+            })
+            .collect();
+        (s, ids)
+    };
+    let (mut whole, whole_ids) = build();
+    page_image(&mut whole).unwrap();
+    let (mut s, ids) = build();
+    assert!(!support::page_cached(&s));
+    for (i, (id, on_whole)) in ids.iter().zip(&whole_ids).enumerate() {
+        whole.execute("typer.align", json!({"layers": [on_whole]})).unwrap();
+        let r = s.execute("typer.align", json!({"layers": [id]})).unwrap();
+        assert_eq!(r["errors"], json!([]), "{r}");
+        assert_eq!(ink_center(&s, *id), ink_center(&whole, *on_whole), "layer {id}: the same place as on the whole page");
+        let b = [small, large, huge][i];
+        assert!(near(ink_center(&s, *id), (b.cx, b.cy), 1.5), "layer {id}: {:?}", ink_center(&s, *id));
+        // The windows held the first two bubbles: nothing of the page was kept.
+        assert_eq!(support::page_cached(&s), i == 2, "after layer {id}");
+    }
+}
+
+/// Align right after a 4000 x 6000 page opens (nothing of it composited yet): the time of that
+/// call, median, p99 and max over runs (`cargo test -p photocraft-engine --lib -- --ignored
+/// typer_align_stale_page_timing --nocapture`).
+#[test]
+#[ignore = "timing"]
+fn typer_align_stale_page_timing() {
+    let b = B { cx: 2000.0, cy: 3000.0, rx: 220.0, ry: 150.0, tail: true };
+    let doc = page(4000, 6000, &[b]);
+    let mut times = Vec::new();
+    for _ in 0..7 {
+        let mut s = Session::new();
+        s.add_document(doc.clone(), None);
+        let id = new_type(&mut s, "Off centre", b.cx - 70.0, b.cy - 30.0, Some(150.0));
+        let t = std::time::Instant::now();
+        s.execute("typer.align", json!({"layers": [id]})).unwrap();
+        times.push(t.elapsed().as_secs_f64() * 1e3);
+        assert!(near(ink_center(&s, id), (b.cx, b.cy), 1.5));
+    }
+    times.sort_by(f64::total_cmp);
+    eprintln!("typer.align on a stale 24 MP page: median {:.1} ms, p99 {:.1}, max {:.1}", times[times.len() / 2], times[times.len() - 1], times[times.len() - 1]);
+}

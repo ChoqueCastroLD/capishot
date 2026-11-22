@@ -116,31 +116,72 @@ pub(crate) enum PageWork {
 /// seconds per Bubble Text Remover click compositing the whole page after the previous click's
 /// change.
 pub(crate) fn page_work(s: &mut Session) -> Result<PageWork> {
+    let (doc_id, stripped, area, plan) = page_plan(s)?;
+    let base = match plan {
+        PagePlan::Ready(p) => return Ok(PageWork::Ready(p)),
+        PagePlan::Patch(r) => s.typer.place.page.take().map(|old| (old.img, r)),
+        PagePlan::Whole => None,
+    };
+    Ok(PageWork::Composite { doc_id, stripped: Arc::new(stripped), area, base })
+}
+
+/// What making the page image current takes, decided without compositing (or taking) anything.
+enum PagePlan {
+    /// The cached page is current.
+    Ready(PageImage),
+    /// The cached page, composited again in this part (at most half of it).
+    Patch(photocraft_geom::Rect),
+    /// The whole page.
+    Whole,
+}
+
+/// The active document's id, its page without type and that page's box, and [`PagePlan`].
+fn page_plan(s: &Session) -> Result<(DocId, Document, photocraft_geom::Rect, PagePlan)> {
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let doc_id = d.doc.id;
     let stripped = without_text(&d.doc);
     let area = stripped.bounds();
-    let mut patch = None;
+    let mut plan = PagePlan::Whole;
     if let Some(p) = &s.typer.place.page
         && p.doc_id == doc_id
     {
         if crate::layer_multi_cmds::same_pixels(&p.stripped, &stripped) {
-            return Ok(PageWork::Ready(p.clone()));
-        }
-        if p.area == area
+            plan = PagePlan::Ready(p.clone());
+        } else if p.area == area
             && let Some(r) = crate::layer_multi_cmds::step_damage(&p.stripped, &stripped)
         {
             let r = r.intersect(&p.area);
             if u64::from(r.width()) * u64::from(r.height()) * 2 <= u64::from(area.width()) * u64::from(area.height()) {
-                patch = Some(r);
+                plan = PagePlan::Patch(r);
             }
         }
     }
-    let base = match patch {
-        Some(r) => s.typer.place.page.take().map(|old| (old.img, r)),
-        None => None,
-    };
-    Ok(PageWork::Composite { doc_id, stripped: Arc::new(stripped), area, base })
+    Ok((doc_id, stripped, area, plan))
+}
+
+/// The page where a bubble is looked for around a spot: the cached page when it is current or
+/// little of it changed (made current, as [`page_image`]), else nothing composited yet
+/// ([`PageSource::Windows`]): a window around the spot is enough for most bubbles, and Align on a
+/// 24 MP page spent 4 s compositing all of it for one.
+pub(crate) fn page_near(s: &mut Session, windows: &[i32]) -> Result<PageSource> {
+    let (doc_id, stripped, area, plan) = page_plan(s)?;
+    let pixels = |r: &photocraft_geom::Rect| u64::from(r.width()) * u64::from(r.height());
+    // A window costs about this much to composite; what is smaller to patch is patched.
+    let largest = windows.iter().map(|h| (2 * u64::from(h.unsigned_abs()) + 1).pow(2)).max().unwrap_or(0);
+    match plan {
+        PagePlan::Ready(p) => Ok(PageSource::Page(p)),
+        PagePlan::Patch(r) if pixels(&r) <= largest => page_image(s).map(PageSource::Page),
+        _ if pixels(&area) <= 2 * largest => page_image(s).map(PageSource::Page),
+        // The cache stays as it is (stale, patched by whoever needs the whole page).
+        _ => Ok(PageSource::Windows(PageWork::Composite { doc_id, stripped: Arc::new(stripped), area, base: None })),
+    }
+}
+
+/// Where [`page_near`] finds bubbles.
+pub(crate) enum PageSource {
+    Page(PageImage),
+    /// Windows of the page ([`PageWork::window`]); the whole page when no window holds the bubble.
+    Windows(PageWork),
 }
 
 impl PageWork {
@@ -701,14 +742,70 @@ pub fn layer_ink(doc: &Document, id: LayerId) -> Option<Rect> {
 /// The bubble around a type layer: the wand just left of its ink on the page image (D1), opened.
 /// `Err(code)` with TypeR's error code when there is none.
 pub fn bubble_for_ink(page: &PageImage, ink: &Rect, size_px: f64, tolerance: f32) -> std::result::Result<bubble::Opened, &'static str> {
+    bubble_for_ink_in(page, page.rect(), ink, size_px, tolerance).unwrap_or(Err("noSelection"))
+}
+
+/// [`bubble_for_ink`] on `page`, a window of the page `whole`: `None` when the wand region comes
+/// within reach of a side of the window inside the page (it may go on past it, and the outline
+/// is probed 3 px out), so only the whole page can say. Otherwise the same answer as on the page.
+fn bubble_for_ink_in(page: &PageImage, whole: Rect, ink: &Rect, size_px: f64, tolerance: f32) -> Option<std::result::Result<bubble::Opened, &'static str>> {
     let seed = bubble::seed_left_of(ink);
     // The lobe of a double bubble that holds the text, judged with its outline (WP4).
-    let (mask, outline) = bubble::wand_bubble(&page.img, page.area, seed, tolerance, Some(ink.center())).ok_or("noSelection")?;
-    let o = bubble::opened_bounds(&mask).ok_or("noSelection")?;
-    let judge = bubble::Judge { text: Some((ink, size_px)), seed: bubble::pixel(&page.img, page.area, seed), page: Some(page.rect()), outline: Some(outline) };
-    match judge.verdict(&o) {
+    let Some((mask, outline)) = bubble::wand(&page.img, page.area, seed, tolerance).map(|m| {
+        let outline = bubble::outline_dark(&m, &page.img, page.area);
+        (m, outline)
+    }) else {
+        // The seed is off the page (or off a window that holds the whole page's side there).
+        return (page.rect() == whole).then_some(Err("noSelection"));
+    };
+    if page.rect() != whole && reaches_window_side(&mask, page.area, whole) {
+        return None;
+    }
+    let mask = photocraft_typer::pagedetect::lobe_at(&mask, ink.center().0, ink.center().1).unwrap_or(mask);
+    let Some(o) = bubble::opened_bounds(&mask) else { return Some(Err("noSelection")) };
+    let judge = bubble::Judge { text: Some((ink, size_px)), seed: bubble::pixel(&page.img, page.area, seed), page: Some(whole), outline: Some(outline) };
+    Some(match judge.verdict(&o) {
         None => Ok(o),
         Some(why) => Err(why),
+    })
+}
+
+/// Whether `mask` comes within the outline probe's reach (3 px) of a side of `win` that is inside
+/// the page `whole`.
+fn reaches_window_side(mask: &Mask, win: photocraft_geom::Rect, whole: Rect) -> bool {
+    let Some(b) = mask.bounds() else { return false };
+    let reach = 4;
+    let (px0, py0) = (whole.x.round() as i32, whole.y.round() as i32);
+    let (px1, py1) = ((whole.x + whole.width).round() as i32, (whole.y + whole.height).round() as i32);
+    (win.x0 > px0 && b.x0 - reach < win.x0)
+        || (win.y0 > py0 && b.y0 - reach < win.y0)
+        || (win.x1 < px1 && b.x1 + reach > win.x1)
+        || (win.y1 < py1 && b.y1 + reach > win.y1)
+}
+
+/// [`bubble_for_ink`] on what [`page_near`] gave: in windows of `windows` half-sides around the
+/// text (`page` composited there only) while one holds the bubble, else on the whole page, which
+/// `page` then becomes (`Page`) so the next text reads it.
+pub(crate) fn bubble_near_ink(page: &mut PageSource, windows: &[i32], ink: &Rect, size_px: f64, tolerance: f32) -> std::result::Result<bubble::Opened, &'static str> {
+    if let PageSource::Windows(work) = page {
+        let Some((area, _)) = work.stale_area() else { return Err("noSelection") };
+        let whole = Rect::new(f64::from(area.x0), f64::from(area.y0), f64::from(area.width()), f64::from(area.height()));
+        let (cx, cy) = ink.center();
+        let (hw, hh) = ((ink.width / 2.0).ceil() as i32, (ink.height / 2.0).ceil() as i32);
+        let (cx, cy) = (cx.round() as i32, cy.round() as i32);
+        for &half in windows {
+            let win = photocraft_geom::Rect::new(cx - hw - half, cy - hh - half, cx + hw + half + 1, cy + hh + half + 1).intersect(&area);
+            let Some(wp) = work.window(win) else { continue };
+            if let Some(r) = bubble_for_ink_in(&wp, whole, ink, size_px, tolerance) {
+                return r;
+            }
+        }
+        let Some(full) = work.window(area) else { return Err("noSelection") };
+        *page = PageSource::Page(full);
+    }
+    match page {
+        PageSource::Page(p) => bubble_for_ink(p, ink, size_px, tolerance),
+        PageSource::Windows(_) => Err("noSelection"),
     }
 }
 
