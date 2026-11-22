@@ -568,8 +568,10 @@ fn long_orientation_reads_and_rewrites_in_both_byte_orders() {
         }
         // A LONG 6 in a JPEG opens upright.
         let jpeg = encode(&gray(32, 16, vec![90; 32 * 16]), Format::Jpeg, &EncodeOptions::default()).unwrap();
-        let img = decode(&jpeg_with_exif(&jpeg, &ifd(big, &[long(6)], &[]))).unwrap();
+        let turned = jpeg_with_exif(&jpeg, &ifd(big, &[long(6)], &[]));
+        let img = decode(&turned).unwrap();
         assert_eq!(img.dimensions(), (16, 32));
+        assert_eq!(probe_size(&turned).unwrap(), (16, 32), "the header probe turns upright too");
         let kept = img.meta.exif.as_deref().unwrap();
         assert_eq!(kept.strip_prefix(b"Exif\0\0").unwrap_or(kept), &ifd(big, &[long(1)], &[])[..]);
     }
@@ -580,7 +582,7 @@ fn long_orientation_reads_and_rewrites_in_both_byte_orders() {
 #[test]
 fn probe_size_matches_decode() {
     let img = synth(7, 5, ChannelLayout::Rgb, SampleType::U8, 3, 0.0);
-    let probed = [Format::WebP, Format::Gif, Format::Bmp, Format::Tga, Format::Qoi, Format::Hdr, Format::Ico, Format::OpenExr];
+    let probed = [Format::Png, Format::Jpeg, Format::WebP, Format::Gif, Format::Bmp, Format::Tga, Format::Qoi, Format::Hdr, Format::Ico, Format::OpenExr];
     assert!(probed.iter().all(|f| rw_formats().contains(f)));
     for format in rw_formats() {
         let bytes = encode(&img, format, &EncodeOptions::default()).unwrap();

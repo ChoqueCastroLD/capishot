@@ -876,6 +876,7 @@ fn a_set_of_background_opens_keeps_its_order_however_they_finish() {
         texture: None,
         quiet: false,
         bytes: 0,
+        reserve: 0,
     };
     app.jobs.opens.extend((0..4).map(tab));
     // f1 opened at once (a preset file, say, or background jobs off for it).
@@ -894,11 +895,11 @@ fn a_set_of_background_opens_keeps_its_order_however_they_finish() {
         jobs_ui::finish_open_tab(&mut app, &tab, &json!({"document": index, "docId": id.0})).unwrap();
     }
     assert_eq!(doc_names(&app), ["existing.psd", "f0.psd", "f1.psd", "f2.psd", "f3.psd"]);
-    assert_eq!(app.session.active().map(|d| d.doc.name.as_str()), Some("f2.psd"), "the one that just opened is active");
+    assert_eq!(app.session.active().map(|d| d.doc.name.as_str()), Some("f0.psd"), "the set's first page shows, the rest open behind it");
     assert_eq!(app.ui.views.len(), 5, "views follow their documents");
     assert!(app.jobs.batches.is_empty(), "forgotten once every member opened");
     // A tab with a slot (dropped on the tabs) keeps it; one from a forgotten set goes to the end.
-    let dropped = OpenTab { job: JobId(200), name: "dropped.psd".into(), path: None, slot: Some(0), order: None, preview: None, texture: None, quiet: false, bytes: 0 };
+    let dropped = OpenTab { job: JobId(200), name: "dropped.psd".into(), path: None, slot: Some(0), order: None, preview: None, texture: None, quiet: false, bytes: 0, reserve: 0 };
     let index = app.session.add_document(Document::new("dropped.psd", Size::new(4, 4), ColorMode::Rgb, SampleType::U8), None);
     let id = app.session.documents()[index].doc.id;
     jobs_ui::finish_open_tab(&mut app, &dropped, &json!({"document": index, "docId": id.0})).unwrap();
@@ -912,6 +913,7 @@ fn a_set_of_background_opens_keeps_its_order_however_they_finish() {
         texture: None,
         quiet: false,
         bytes: 0,
+        reserve: 0,
     };
     let index = app.session.add_document(Document::new("late.psd", Size::new(4, 4), ColorMode::Rgb, SampleType::U8), None);
     let id = app.session.documents()[index].doc.id;
@@ -1125,6 +1127,7 @@ fn twelve_dropped_contents_open_as_tabs_in_natural_order_whatever_order_they_fin
 /// Finishes the one background open running and lets the next start, as frames do.
 fn land_next(app: &mut PhotocraftApp) {
     let tab = app.jobs.opens.remove(0);
+    app.jobs.shown_before = crate::jobs_ui::shown(app);
     let v = app.session.wait_job(tab.job).unwrap();
     crate::jobs_ui::finish_open_tab(app, &tab, &v).unwrap();
     crate::jobs_ui::pump_opens(app);
@@ -1204,4 +1207,166 @@ fn a_damaged_file_in_a_set_does_not_stop_the_queue() {
     crate::jobs_ui::pump_opens(&mut app);
     land_next(&mut app);
     assert_eq!(doc_names(&app), ["b.png"]);
+}
+
+/// Where the web picker hands over each file it reads, once File › Open's dialog has answered.
+type ArrivingTo = Rc<RefCell<Option<file_dialog::ArrivingSender>>>;
+
+/// An app whose File › Open was answered with `names`, their contents to come one at a time as
+/// the browser reads them (`arriving`), with background decodes or not.
+fn app_arriving(names: &[&str], background: bool) -> (PhotocraftApp, ArrivingTo) {
+    let (mut app, _) = app_with(Vec::new());
+    app.background_jobs = background;
+    let to: ArrivingTo = Rc::default();
+    let (t, names) = (to.clone(), names.iter().map(|n| n.to_string()).collect::<Vec<_>>());
+    app.services.file_dialog = Some(Box::new(move |request, _, reply| {
+        assert!(matches!(request, FileDialogRequest::Open { multiple: true, arriving: true, .. }), "{request:?}");
+        *t.borrow_mut() = Some(reply.arriving(names.clone()));
+    }));
+    app.open_dialog_file().unwrap();
+    answer(&mut app);
+    assert!(to.borrow().is_some(), "File › Open takes the files as they arrive");
+    (app, to)
+}
+
+/// The file at `index` of the answer is read.
+fn arrive(to: &ArrivingTo, index: usize, bytes: Vec<u8>) -> bool {
+    to.borrow().as_ref().unwrap().send(index, bytes)
+}
+
+/// What a frame does with the files read and the queue.
+fn frame_opens(app: &mut PhotocraftApp) {
+    crate::jobs_ui::take_arrived(app);
+    crate::jobs_ui::pump_opens(app);
+}
+
+/// The background open of the file named `name` lands.
+fn land(app: &mut PhotocraftApp, name: &str) {
+    let i = app.jobs.opens.iter().position(|o| o.name == name).unwrap_or_else(|| panic!("{name} is not opening"));
+    let tab = app.jobs.opens.remove(i);
+    // As a frame does: what shows is noted before the job's document is added.
+    app.jobs.shown_before = crate::jobs_ui::shown(app);
+    let v = app.session.wait_job(tab.job).unwrap();
+    crate::jobs_ui::finish_open_tab(app, &tab, &v).unwrap();
+}
+
+#[test]
+fn picked_files_start_opening_as_each_is_read_and_keep_name_order() {
+    // The web picker read every file before the first opened: 28 s of a phone's storage with
+    // nothing shown, then every page at once.
+    let (mut app, to) = app_arriving(&["c_10.png", "a_2.png", "b_1.png"], true);
+    assert!(app.jobs.opens.is_empty() && app.session.documents().is_empty());
+    assert!(arrive(&to, 1, png_bytes(8, 8)));
+    frame_opens(&mut app);
+    assert_eq!(app.jobs.opens.iter().map(|o| o.name.as_str()).collect::<Vec<_>>(), ["a_2.png"], "the first file read opens while the rest are read");
+    land(&mut app, "a_2.png");
+    assert_eq!(doc_names(&app), ["a_2.png"]);
+    // Later files land in whatever order: the tabs read in name order.
+    assert!(arrive(&to, 0, png_bytes(8, 8)));
+    frame_opens(&mut app);
+    land(&mut app, "c_10.png");
+    let active = |app: &PhotocraftApp| app.session.active().map(|st| st.doc.name.clone()).unwrap();
+    assert_eq!(active(&app), "a_2.png", "the first page stays shown: the others open in their tabs");
+    // A page the user goes to stays shown as the rest land.
+    app.session.set_active(1);
+    assert!(arrive(&to, 2, png_bytes(8, 8)));
+    frame_opens(&mut app);
+    land(&mut app, "b_1.png");
+    assert_eq!(active(&app), "c_10.png");
+    assert_eq!(doc_names(&app), ["a_2.png", "b_1.png", "c_10.png"]);
+    assert!(app.jobs.arriving.is_empty() && app.jobs.batches.is_empty() && app.jobs.opens.is_empty());
+}
+
+#[test]
+fn picked_files_opened_on_this_thread_open_one_a_frame() {
+    let (mut app, to) = app_arriving(&["p1.png", "p2.png", "p3.png"], false);
+    for i in 0..3 {
+        assert!(arrive(&to, i, b"x".to_vec()));
+    }
+    frame_opens(&mut app);
+    assert_eq!(doc_names(&app), ["p1.png"], "one decode on the page's thread per frame");
+    frame_opens(&mut app);
+    frame_opens(&mut app);
+    assert_eq!(doc_names(&app), ["p1.png", "p2.png", "p3.png"]);
+    assert!(app.jobs.arriving.is_empty() && app.jobs.batches.is_empty());
+}
+
+#[test]
+fn files_a_reader_never_hands_over_are_reported() {
+    let (mut app, to) = app_arriving(&["p1.png", "p2.png", "p3.png"], false);
+    assert!(arrive(&to, 0, b"x".to_vec()));
+    // The reader stopped (the page lost the files): the rest are named, not lost silently.
+    to.borrow_mut().take();
+    frame_opens(&mut app);
+    frame_opens(&mut app);
+    assert_eq!(doc_names(&app), ["p1.png"]);
+    let errors: Vec<_> = app.ui.notices.iter().filter(|n| n.error).map(|n| format!("{} {:?}", n.title, n.lines)).collect();
+    assert_eq!(errors.len(), 2, "{errors:?}");
+    assert!(errors.iter().all(|e| e.contains("could not be read")) && errors[0].contains("p2.png") && errors[1].contains("p3.png"), "{errors:?}");
+    assert!(app.jobs.arriving.is_empty() && app.jobs.batches.is_empty());
+}
+
+#[test]
+fn a_small_device_decodes_a_set_side_by_side_within_its_budget() {
+    // Before: one file at a time whatever the device had room for.
+    let (mut app, _) = app_with(Vec::new());
+    app.background_jobs = true;
+    app.jobs.open_budget = Some(1 << 30);
+    app.jobs.open_parallel = 2;
+    let files: Vec<(String, Vec<u8>)> = (1..=4).map(|i| (format!("p{i}.png"), png_bytes(64, 64))).collect();
+    app.open_contents_in_order(files);
+    assert_eq!((app.jobs.opens.len(), app.jobs.queued.len()), (2, 2), "two decodes at once");
+    land(&mut app, "p2.png");
+    crate::jobs_ui::pump_opens(&mut app);
+    assert_eq!(app.jobs.opens.iter().map(|o| o.name.as_str()).collect::<Vec<_>>(), ["p1.png", "p3.png"]);
+    for name in ["p1.png", "p3.png"] {
+        land(&mut app, name);
+    }
+    crate::jobs_ui::pump_opens(&mut app);
+    land(&mut app, "p4.png");
+    crate::jobs_ui::pump_opens(&mut app);
+    assert_eq!(doc_names(&app), ["p1.png", "p2.png", "p3.png", "p4.png"]);
+    assert_eq!(app.session.active().map(|st| st.doc.name.as_str()), Some("p1.png"), "the first page stays shown");
+    assert!(app.jobs.batches.is_empty() && app.jobs.queued.is_empty() && app.ui.notices.iter().all(|n| !n.error));
+    assert_eq!(app.jobs.queue_started, 0, "the set is over: the next one counts from 1");
+
+    // Room for what one decode may hold: the second waits for the first (it isn't refused).
+    let (mut app, _) = app_with(Vec::new());
+    app.background_jobs = true;
+    app.jobs.open_parallel = 2;
+    let page = png_bytes(64, 64);
+    let reserve = page.len() as u64 + 2 * 64 * 64 * 4;
+    app.jobs.open_budget = Some(reserve + 64 * 64 * 4);
+    app.open_contents_in_order(vec![("a.png".into(), page.clone()), ("b.png".into(), page)]);
+    assert_eq!((app.jobs.opens.len(), app.jobs.queued.len()), (1, 1));
+    crate::jobs_ui::pump_opens(&mut app);
+    assert_eq!((app.jobs.opens.len(), app.jobs.queued.len()), (1, 1), "it waits");
+    assert!(app.ui.notices.iter().all(|n| !n.error), "a decode running isn't a reason to refuse");
+    land(&mut app, "a.png");
+    // Room for the second page once the first is in.
+    app.jobs.open_budget = Some(app.session.pixel_bytes() as u64 + 64 * 64 * 4);
+    crate::jobs_ui::pump_opens(&mut app);
+    land(&mut app, "b.png");
+    assert_eq!(doc_names(&app), ["a.png", "b.png"]);
+    assert!(app.ui.notices.iter().all(|n| !n.error));
+}
+
+#[test]
+fn past_the_budget_the_files_still_being_read_are_named_and_their_reading_stops() {
+    let (mut app, to) = app_arriving(&["p1.png", "p2.png", "p3.png", "p4.png"], true);
+    app.jobs.open_budget = Some(1);
+    app.jobs.open_parallel = 2;
+    assert!(arrive(&to, 0, png_bytes(64, 64)));
+    assert!(arrive(&to, 1, png_bytes(64, 64)));
+    frame_opens(&mut app);
+    // The first document of an empty session always opens; the second waits for it to land.
+    assert_eq!((app.jobs.opens.len(), app.jobs.queued.len()), (1, 1));
+    land(&mut app, "p1.png");
+    frame_opens(&mut app);
+    assert_eq!(doc_names(&app), ["p1.png"]);
+    let notice = app.ui.notices.iter().find(|n| n.error).expect("a notice");
+    assert!(notice.title.contains('1') && notice.title.contains('4'), "{notice:?}");
+    assert_eq!(notice.lines[1..], ["p2.png", "p3.png", "p4.png"], "{notice:?}");
+    assert!(!arrive(&to, 2, png_bytes(64, 64)), "nobody takes the rest: the reading stops");
+    assert!(app.jobs.arriving.is_empty() && app.jobs.queued.is_empty() && app.jobs.batches.is_empty());
 }

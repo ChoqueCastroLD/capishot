@@ -26,6 +26,24 @@ pub(crate) fn dpi_of_ppm(ppm: u32) -> f32 {
     if (whole / f64::from(METERS_PER_INCH)).round() == f64::from(ppm) { whole as f32 } else { dpi as f32 }
 }
 
+/// The stored size and EXIF block [`decode`] would find, from the chunks before the image data:
+/// the same header checks, without inflating pixels.
+pub(crate) fn probe(bytes: &[u8], limits: &Limits) -> Result<(u32, u32, Option<Vec<u8>>), CodecError> {
+    let mut decoder = png::Decoder::new_with_limits(Cursor::new(bytes), png::Limits { bytes: limits.alloc_usize() });
+    decoder.set_ignore_text_chunk(true);
+    let (w, h) = {
+        let info = decoder.read_header_info().map_err(map_png_err)?;
+        let (w, h) = info.size();
+        limits.check_bytes(w, h, 8)?;
+        let stored = u64::from(w).saturating_mul(u64::from(h)).saturating_mul(info.bits_per_pixel() as u64).div_ceil(8);
+        Limits::check_plausible(stored, bytes.len(), 1100)?;
+        (w, h)
+    };
+    // eXIf comes before the image data, which `read_info` stops at.
+    let reader = decoder.read_info().map_err(map_png_err)?;
+    Ok((w, h, reader.info().exif_metadata.as_ref().map(|c| c.to_vec())))
+}
+
 pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError> {
     let mut input = Cursor::new(bytes);
     let mut decoder = png::Decoder::new_with_limits(&mut input, png::Limits { bytes: limits.alloc_usize() });

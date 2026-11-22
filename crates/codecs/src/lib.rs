@@ -114,7 +114,7 @@ pub fn decode_as_with(format: Format, bytes: &[u8], opts: &DecodeOptions) -> Res
 }
 
 /// The upright pixel size [`decode`] would return, read from the file's header without decoding
-/// pixels, for WebP, OpenEXR (flat) and the GIF/BMP/TGA/ICO/QOI/HDR family. It runs the same
+/// pixels, for PNG, JPEG, WebP, OpenEXR (flat) and the GIF/BMP/TGA/ICO/QOI/HDR family. It runs the same
 /// header reads and size checks as the decoder (default [`Limits`]) and swaps the size for an
 /// EXIF orientation of 5–8, so wherever [`decode`] succeeds the two agree. Other formats (and
 /// deep EXR or AVIF) return [`CodecError::Unsupported`]: decode those to learn their size.
@@ -127,6 +127,8 @@ pub fn probe_size(bytes: &[u8]) -> Result<(u32, u32), CodecError> {
     let (w, h, exif) = match format {
         Format::WebP => webp::probe(bytes, l)?,
         Format::OpenExr => exr::probe(bytes, l).map(|(w, h)| (w, h, None))?,
+        Format::Png => png::probe(bytes, l)?,
+        Format::Jpeg => jpeg::probe(bytes)?,
         Format::Gif | Format::Bmp | Format::Tga | Format::Ico | Format::Qoi | Format::Hdr | Format::Avif => via_image::probe(format, bytes, l)?,
         _ => return Err(CodecError::unsupported(format, "no header-only size probe")),
     };

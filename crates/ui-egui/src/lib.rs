@@ -107,7 +107,7 @@ use serde_json::{Value, json};
 
 pub use control::{ControlRequest, ControlResponse};
 pub use file_dialog::{FileDialogAnswer, FileDialogFn, FileDialogReply, FileDialogRequest};
-pub use file_open::OsEvent;
+pub use file_open::{OsEvent, natural_cmp};
 pub use state::{Tool, UiState};
 
 mod app;

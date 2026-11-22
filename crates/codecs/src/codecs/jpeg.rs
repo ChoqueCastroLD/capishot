@@ -242,6 +242,20 @@ fn decode_craft_jpeg(bytes: &[u8], limits: &Limits, adobe_transform: Option<u8>)
 /// truncated or not, are far above this.
 const MAX_PIXELS_PER_BYTE: u64 = 2048;
 
+/// The stored size and EXIF block [`decode`] would find, from the marker segments before the
+/// first scan (its frame header), without decoding pixels. A height left to a DNL marker (0 in
+/// the frame header) is only known by decoding.
+pub(crate) fn probe(bytes: &[u8]) -> Result<(u32, u32, Option<Vec<u8>>), CodecError> {
+    if !bytes.starts_with(&[0xFF, 0xD8]) {
+        return Err(err("not a JPEG"));
+    }
+    let meta = scan_metadata(bytes);
+    match meta.frame {
+        Some((w, h, _)) if w > 0 && h > 0 => Ok((w, h, meta.exif)),
+        _ => Err(err("no frame header before the image data")),
+    }
+}
+
 pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError> {
     let (end, scan_bytes) = data_end(bytes);
     if end == DataEnd::Empty {

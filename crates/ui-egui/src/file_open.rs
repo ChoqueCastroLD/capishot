@@ -205,35 +205,67 @@ impl PhotocraftApp {
     pub fn open_contents_in_order(&mut self, mut files: Vec<(String, Vec<u8>)>) -> usize {
         files.sort_by(|a, b| natural_cmp(&a.0, &b.0));
         let batch = crate::jobs_ui::begin_batch(self);
-        // A phone or small device: one at a time, as each lands (`jobs_ui::pump_opens`).
-        if self.jobs.open_budget.is_some() {
-            let opened = files.len();
-            for (seq, (name, bytes)) in files.into_iter().enumerate() {
-                self.jobs.queued.push_back(crate::jobs_ui::QueuedOpen { name, bytes, order: crate::jobs_ui::OpenOrder { batch, seq } });
-            }
-            crate::jobs_ui::pump_opens(self);
-            return opened;
-        }
         let mut opened = 0;
         for (seq, (name, bytes)) in files.into_iter().enumerate() {
-            let order = crate::jobs_ui::OpenOrder { batch, seq };
-            let pending = self.jobs.opens.len();
-            let documents = self.session.documents().len();
-            match self.open_owned(&name, bytes) {
-                Ok(_) => {
-                    opened += 1;
-                    match self.jobs.opens.get_mut(pending) {
-                        Some(tab) => tab.order = Some(order),
-                        // Only a document opened at once takes a place (a font or preset file doesn't).
-                        None if self.session.documents().len() > documents => crate::jobs_ui::opened_in_order(&mut self.jobs, order),
-                        None => {}
-                    }
-                }
-                Err(e) => self.open_failed(&name, &e),
-            }
+            opened += usize::from(self.open_member(name, bytes, crate::jobs_ui::OpenOrder { batch, seq }));
         }
+        crate::jobs_ui::pump_opens(self);
         crate::jobs_ui::end_batch(&mut self.jobs);
         opened
+    }
+
+    /// File › Open on the web: the chosen files open as each one is read, in name order
+    /// ([`natural_cmp`]) like [`Self::open_contents_in_order`], so the first page shows while the
+    /// rest are still being read ([`crate::jobs_ui::take_arrived`] takes them each frame).
+    pub(crate) fn open_arriving(&mut self, files: crate::file_dialog::Arriving) {
+        let mut by_name: Vec<usize> = (0..files.names.len()).collect();
+        by_name.sort_by(|a, b| natural_cmp(&files.names[*a], &files.names[*b]));
+        let mut seqs = vec![0; by_name.len()];
+        for (seq, index) in by_name.into_iter().enumerate() {
+            seqs[index] = seq;
+        }
+        let batch = crate::jobs_ui::begin_batch(self);
+        self.jobs.arriving.push(crate::jobs_ui::ArrivingSet::new(files, batch, seqs));
+        crate::jobs_ui::take_arrived(self);
+    }
+
+    /// A member of a set of files handed over as contents: queued on a small device
+    /// ([`crate::jobs_ui::pump_opens`] starts it), opened (or started in the background) now
+    /// elsewhere. False when it failed (reported).
+    pub(crate) fn open_member(&mut self, name: String, bytes: Vec<u8>, order: crate::jobs_ui::OpenOrder) -> bool {
+        if self.jobs.open_budget.is_some() {
+            // In name order, wherever it arrived from.
+            let at = self.jobs.queued.iter().position(|q| q.order.batch == order.batch && q.order.seq > order.seq).unwrap_or(self.jobs.queued.len());
+            self.jobs.queued.insert(at, crate::jobs_ui::QueuedOpen { name, bytes, order });
+            return true;
+        }
+        let (pending, documents, before) = (self.jobs.opens.len(), self.session.documents().len(), crate::jobs_ui::shown(self));
+        let focus = self.jobs.focus;
+        match self.open_owned(&name, bytes) {
+            Ok(_) => {
+                match self.jobs.opens.get_mut(pending) {
+                    Some(tab) => {
+                        tab.order = Some(order);
+                        // The canvas keeps showing the set's first page (or its card): the others
+                        // open in their tabs.
+                        if order.seq > 0 {
+                            self.jobs.focus = focus;
+                        }
+                    }
+                    // Only a document opened at once takes a place (a font or preset file doesn't).
+                    None if self.session.documents().len() > documents => {
+                        crate::jobs_ui::opened_in_order(&mut self.jobs, order);
+                        crate::jobs_ui::queue_landed(self, order.seq, before);
+                    }
+                    None => {}
+                }
+                true
+            }
+            Err(e) => {
+                self.open_failed(&name, &e);
+                false
+            }
+        }
     }
 
     /// Show the document already open from the file at `path`, or its tab while it is still
@@ -467,7 +499,7 @@ impl PhotocraftApp {
 /// Order names like a file browser does: runs of digits by their value (`File_2` before
 /// `File_10`), everything else case-insensitively; names equal that way fall back to the exact
 /// text so the order is total.
-pub(crate) fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+pub fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     let (mut x, mut y) = (a.chars().peekable(), b.chars().peekable());
     loop {

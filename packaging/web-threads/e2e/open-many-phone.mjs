@@ -283,6 +283,8 @@ let hang = 0;
 let open = [];
 let refused = null;
 let shot = false;
+// When the first document is in (the picker hands each file over as it is read).
+let firstMs = null;
 const deadline = Date.now() + Number(process.env.OPEN_S || '600') * 1000;
 const doneWhen = names.length;
 while (Date.now() < deadline && !s.crashed) {
@@ -290,6 +292,7 @@ while (Date.now() < deadline && !s.crashed) {
   if (r && r.hang) { hang++; console.log(`main thread: no answer in ${hangS} s (at ${Math.round((Date.now() - started) / 1000)} s)`); if (hang >= 3) break; continue; }
   const u = (r && (r.result || r)) || {};
   open = ((u.session && u.session.documents) || []).map((d) => (typeof d === 'string' ? d : d.name || d.title));
+  if (open.length && firstMs === null) firstMs = Date.now() - started;
   if (open.length > arrivals.length) { arrivals.push(...open.slice(arrivals.length).map((n) => ({ n, s: Math.round((Date.now() - started) / 1000) }))); console.log('open', Math.round((Date.now() - started) / 1000), 's:', open.join(', '), 'wasm', await wasmMB(), 'rss', procMB()); }
   const jobs = await s.req('jobs.list');
   const running = (((jobs && (jobs.result || jobs).jobs) || [])).filter((j) => j.state === 'running');
@@ -309,7 +312,7 @@ const worst = long.reduce((m, l) => Math.max(m, l.ms), 0);
 clearInterval(sampler);
 const wasm = await wasmMB();
 const events = beacons.filter((e) => ['unclean_exit', 'gpu_lost', 'doc_open'].includes(e.e));
-console.log(JSON.stringify({ gb, build: st ? 'st' : 'threads', how, images: names.length, openMs, base, peakMB: peak, wasm, worstTask: worst, longOver: long.filter((l) => l.ms > limit).map((l) => l.ms), events: events.slice(0, 12).map((e) => `${e.e} ${JSON.stringify(e.data || e).slice(0, 110)}`) }));
+console.log(JSON.stringify({ gb, build: st ? 'st' : 'threads', how, images: names.length, firstMs, openMs, base, peakMB: peak, wasm, worstTask: worst, longOver: long.filter((l) => l.ms > limit).map((l) => l.ms), events: events.slice(0, 12).map((e) => `${e.e} ${JSON.stringify(e.data || e).slice(0, 110)}`) }));
 const want = [...names].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 ok('no crash', !s.crashed);
 ok('the main thread answers', hang === 0, `(${hang} silences of ${hangS} s)`);

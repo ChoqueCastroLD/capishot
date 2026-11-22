@@ -26,7 +26,10 @@ use crate::file_open::display_name;
 pub enum FileDialogRequest {
     /// Files to read: several for File › Open, one for a command that reads a file (Place,
     /// scripts, notes, presets). Starts in `initial_dir` (the last-used folder, UI-217-3).
-    Open { multiple: bool, initial_dir: Option<String>, extensions: Option<Vec<String>> },
+    /// `arriving`: the asker takes the files one at a time as they are read
+    /// ([`FileDialogAnswer::Arriving`]), so a shell that hands over contents may answer before
+    /// it has read them all.
+    Open { multiple: bool, initial_dir: Option<String>, extensions: Option<Vec<String>>, arriving: bool },
     /// Which folder to read from. Starts in `initial_dir` when available.
     Folder { initial_dir: Option<String> },
     /// Where to write, starting from `suggested` (a file name, or the document's own path).
@@ -42,6 +45,9 @@ pub enum FileDialogAnswer {
     Contents(String, Vec<u8>),
     /// Several chosen files' names and contents, in order (the web's multi-select File › Open).
     ContentsMany(Vec<(String, Vec<u8>)>),
+    /// Several chosen files' names now, each one's contents as soon as it is read (the web's
+    /// File › Open, which asks with `arriving`): the first page opens while the rest are read.
+    Arriving(Arriving),
     /// The path to save to (desktop), or the download's name (web).
     SaveTo(String),
     /// The selected folder's path (desktop).
@@ -64,6 +70,83 @@ impl FileDialogReply {
         // Nothing is waiting any more when the app has quit meanwhile.
         let _ = self.tx.send(answer);
         self.ctx.request_repaint();
+    }
+}
+
+impl FileDialogReply {
+    /// Answers with the chosen files' `names` (in the order picked) and returns where each one's
+    /// contents go once read ([`FileDialogAnswer::Arriving`]).
+    pub fn arriving(self, names: Vec<String>) -> ArrivingSender {
+        let (tx, rx) = mpsc::channel();
+        let ctx = self.ctx.clone();
+        self.send(Some(FileDialogAnswer::Arriving(Arriving { names, rx: std::sync::Arc::new(std::sync::Mutex::new(rx)) })));
+        ArrivingSender { tx, ctx }
+    }
+}
+
+/// A file's contents, by its index in [`Arriving::names`].
+pub type ArrivedFile = (usize, Vec<u8>);
+
+/// Files chosen in a picker that hands them over as they are read: their names at once, then
+/// each one's contents ([`ArrivingSender::send`]). Dropping the sender before every file was sent
+/// ends the set (the rest are reported as unread).
+#[derive(Clone)]
+pub struct Arriving {
+    pub names: Vec<String>,
+    rx: std::sync::Arc<std::sync::Mutex<Receiver<ArrivedFile>>>,
+}
+
+impl Arriving {
+    /// The files read since the last call, and whether more may come.
+    pub(crate) fn take(&self) -> (Vec<ArrivedFile>, bool) {
+        let rx = self.rx.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut got = Vec::new();
+        loop {
+            match rx.try_recv() {
+                Ok(file) => got.push(file),
+                Err(TryRecvError::Empty) => return (got, true),
+                Err(TryRecvError::Disconnected) => return (got, false),
+            }
+        }
+    }
+
+    /// The one file read next (`None`: nothing yet), and whether more may come.
+    pub(crate) fn take_one(&self) -> (Option<ArrivedFile>, bool) {
+        match self.rx.lock().unwrap_or_else(std::sync::PoisonError::into_inner).try_recv() {
+            Ok(file) => (Some(file), true),
+            Err(TryRecvError::Empty) => (None, true),
+            Err(TryRecvError::Disconnected) => (None, false),
+        }
+    }
+}
+
+impl std::fmt::Debug for Arriving {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Arriving").field("names", &self.names).finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for Arriving {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.rx, &other.rx)
+    }
+}
+
+impl Eq for Arriving {}
+
+/// Where a picker that answered with [`FileDialogAnswer::Arriving`] hands over each file it reads.
+pub struct ArrivingSender {
+    tx: Sender<ArrivedFile>,
+    ctx: egui::Context,
+}
+
+impl ArrivingSender {
+    /// The file at `index` of the answer's names; false once nobody takes them any more (the set
+    /// was cancelled or the rest don't fit), so the reading can stop.
+    pub fn send(&self, index: usize, contents: Vec<u8>) -> bool {
+        let taken = self.tx.send((index, contents)).is_ok();
+        self.ctx.request_repaint();
+        taken
     }
 }
 
@@ -234,7 +317,7 @@ impl PhotocraftApp {
     ) -> Result<Value, String> {
         let initial_dir = last_used_dir(&self.ui.recent_files);
         let extensions = (!extensions.is_empty()).then(|| extensions.iter().map(|s| (*s).to_string()).collect());
-        self.ask_file(FileDialogRequest::Open { multiple: false, initial_dir, extensions }, move |app, answer| {
+        self.ask_file(FileDialogRequest::Open { multiple: false, initial_dir, extensions, arriving: false }, move |app, answer| {
             let (name, bytes) = read_picked(answer)?;
             then(app, name, bytes)
         })
@@ -250,10 +333,12 @@ impl PhotocraftApp {
     ) -> Result<Value, String> {
         let initial_dir = last_used_dir(&self.ui.recent_files);
         let extensions = (!extensions.is_empty()).then(|| extensions.iter().map(|s| (*s).to_string()).collect());
-        self.ask_file(FileDialogRequest::Open { multiple: true, initial_dir, extensions }, move |app, answer| {
+        self.ask_file(FileDialogRequest::Open { multiple: true, initial_dir, extensions, arriving: false }, move |app, answer| {
             let files = match answer {
                 FileDialogAnswer::Contents(name, bytes) => vec![(name, bytes)],
                 FileDialogAnswer::ContentsMany(files) => files,
+                // Not asked for (`arriving: false`).
+                FileDialogAnswer::Arriving(_) => return Err(UNEXPECTED.into()),
                 FileDialogAnswer::Paths(paths) => paths
                     .into_iter()
                     .map(|path| {
@@ -273,13 +358,14 @@ impl PhotocraftApp {
     /// File › Open: opens every chosen file, reporting each failure (see [`Self::open_paths`]).
     pub fn open_dialog_file(&mut self) -> Result<Value, String> {
         let initial_dir = last_used_dir(&self.ui.recent_files);
-        self.ask_file(FileDialogRequest::Open { multiple: true, initial_dir, extensions: None }, |app, answer| {
+        self.ask_file(FileDialogRequest::Open { multiple: true, initial_dir, extensions: None, arriving: true }, |app, answer| {
             match answer {
                 FileDialogAnswer::Paths(paths) => {
                     app.open_paths(&paths);
                 }
                 FileDialogAnswer::Contents(name, bytes) => app.open_contents(vec![(name, bytes)]),
                 FileDialogAnswer::ContentsMany(files) => app.open_contents(files),
+                FileDialogAnswer::Arriving(files) => app.open_arriving(files),
                 FileDialogAnswer::SaveTo(_) | FileDialogAnswer::FolderTo(_) | FileDialogAnswer::Unavailable(_) => return Err(UNEXPECTED.into()),
             }
             Ok(Value::Null)
@@ -291,7 +377,7 @@ impl PhotocraftApp {
     pub(crate) fn open_dialog_file_deep(&mut self) -> Result<Value, String> {
         let initial_dir = last_used_dir(&self.ui.recent_files);
         let extensions = Some(vec!["exr".to_string()]);
-        self.ask_file(FileDialogRequest::Open { multiple: true, initial_dir, extensions }, |app, answer| {
+        self.ask_file(FileDialogRequest::Open { multiple: true, initial_dir, extensions, arriving: false }, |app, answer| {
             match answer {
                 FileDialogAnswer::Paths(paths) => {
                     for path in paths {
@@ -308,6 +394,7 @@ impl PhotocraftApp {
                         app.open_failed(&name, "opening as deep needs the file on disk");
                     }
                 }
+                FileDialogAnswer::Arriving(_) => return Err(UNEXPECTED.into()),
                 FileDialogAnswer::SaveTo(_) | FileDialogAnswer::FolderTo(_) | FileDialogAnswer::Unavailable(_) => return Err(UNEXPECTED.into()),
             }
             Ok(Value::Null)
@@ -433,6 +520,7 @@ fn read_picked(answer: FileDialogAnswer) -> Result<(String, Vec<u8>), String> {
     match answer {
         FileDialogAnswer::Contents(name, bytes) => Ok((name, bytes)),
         FileDialogAnswer::ContentsMany(files) => files.into_iter().next().ok_or_else(|| CANCELLED.into()),
+        FileDialogAnswer::Arriving(_) => Err(UNEXPECTED.into()),
         FileDialogAnswer::Paths(paths) => {
             let path = paths.into_iter().next().ok_or(CANCELLED)?;
             let bytes = photocraft_format::read_file(std::path::Path::new(&path)).map_err(|e| format!("{}: {e}", display_name(&path)))?;

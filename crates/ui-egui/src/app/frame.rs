@@ -147,6 +147,8 @@ impl PhotocraftApp {
         if !arrived.is_empty() {
             self.open_contents_in_order(arrived);
         }
+        // The web picker's files, as each is read.
+        crate::jobs_ui::take_arrived(self);
         crate::jobs_ui::pump_opens(self);
         // Web drops onto the canvas, read since the last frame: placed below, one at a time.
         let to_place: Vec<(String, Vec<u8>)> =

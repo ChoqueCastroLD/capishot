@@ -362,6 +362,11 @@ impl Boot {
         app.stepped_opens = !app.background_jobs;
         // A host page decides what it opens and keeps open.
         app.jobs.open_budget = if hosted { None } else { open_budget() };
+        // Within it, a set's files decode on the workers side by side, leaving one for the frames.
+        #[cfg(target_feature = "atomics")]
+        {
+            app.jobs.open_parallel = rayon::current_num_threads().saturating_sub(1).max(1);
+        }
         // Reloaded after the graphics context was lost (gpu_lost.rs): what was open comes back.
         let lost_notice = crate::gpu_lost::take_notice();
         if (app.session.prefs().file_handling.recover_on_launch || lost_notice.is_some()) && photopea.is_none() && !hosted {
@@ -1872,7 +1877,7 @@ fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig
         file_dialog: Some(Box::new(|request, _parent, reply| match request {
             // The browser's file picker hands over the files' contents, not paths. File › Open
             // asks for several files (`multiple`), each opened in its own tab.
-            FileDialogRequest::Open { multiple, extensions, .. } => wasm_bindgen_futures::spawn_local(async move {
+            FileDialogRequest::Open { multiple, extensions, arriving, .. } => wasm_bindgen_futures::spawn_local(async move {
                 let dialog = if let Some(exts) = extensions {
                     rfd::AsyncFileDialog::new().add_filter("Supported Files", &exts)
                 } else {
@@ -1881,6 +1886,39 @@ fn services(inbox: Inbox, photopea: Option<crate::embed_protocol::PhotopeaConfig
                 photocraft_ui_egui::telemetry::set_page_stage(Some(photocraft_ui_egui::telemetry::Stage::Picker));
                 let answer = if multiple {
                     match dialog.pick_files().await {
+                        // File › Open takes each file as it is read, in name order: the first page
+                        // opens while the rest are read (reading 60 pages off a phone's storage took
+                        // 28 s, with nothing shown until the last).
+                        Some(mut picked) if arriving && !picked.is_empty() => {
+                            picked.sort_by(|a, b| photocraft_ui_egui::natural_cmp(&a.file_name(), &b.file_name()));
+                            photocraft_ui_egui::telemetry::set_page_stage(Some(photocraft_ui_egui::telemetry::Stage::Reading));
+                            let to = reply.arriving(picked.iter().map(rfd::FileHandle::file_name).collect());
+                            // The next pages are read while one is handed over: each read hands the
+                            // page's thread back to its frames, and one read at a time took 30 s for
+                            // 96 pages at CPU 4x. A file bigger than a slice is read in slices, alone.
+                            let start = |f: &rfd::FileHandle| (f.inner().size() as usize <= READ_CHUNK).then(|| f.inner().array_buffer());
+                            let mut ahead: std::collections::VecDeque<Option<js_sys::Promise>> = picked.iter().take(READ_AHEAD).map(start).collect();
+                            for (i, file) in picked.iter().enumerate() {
+                                let read = ahead.pop_front().flatten();
+                                if let Some(next) = picked.get(i + READ_AHEAD) {
+                                    ahead.push_back(start(next));
+                                }
+                                let bytes = match read {
+                                    Some(p) => match wasm_bindgen_futures::JsFuture::from(p).await {
+                                        Ok(buf) => js_sys::Uint8Array::new(&buf).to_vec(),
+                                        // As `read_file` does when a read fails: again, in slices.
+                                        Err(_) => read_file(file).await,
+                                    },
+                                    None => read_file(file).await,
+                                };
+                                // Nobody takes the rest (cancelled, or they don't fit): stop reading.
+                                if !to.send(i, bytes) {
+                                    break;
+                                }
+                            }
+                            photocraft_ui_egui::telemetry::set_page_stage(None);
+                            return;
+                        }
                         Some(picked) if !picked.is_empty() => {
                             photocraft_ui_egui::telemetry::set_page_stage(Some(photocraft_ui_egui::telemetry::Stage::Reading));
                             let mut files = Vec::with_capacity(picked.len());
@@ -1981,6 +2019,10 @@ fn download(path: &str, bytes: &[u8]) -> Result<(), String> {
 /// Bytes copied into the app's memory per task when a file is read: a 70 MB page copied in one go
 /// held a phone's page for over half a second.
 const READ_CHUNK: usize = 8 << 20;
+
+/// Files of a picked set File › Open reads at once, ahead of the one it hands over (each at most
+/// [`READ_CHUNK`]: 32 MB of the browser's memory at most).
+const READ_AHEAD: usize = 4;
 
 /// A picked file's bytes, read a slice at a time ([`read_blob`]).
 async fn read_file(file: &rfd::FileHandle) -> Vec<u8> {

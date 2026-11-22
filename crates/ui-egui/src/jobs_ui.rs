@@ -72,6 +72,9 @@ pub struct OpenTab {
     /// The file's size when its bytes were handed over (0: the worker reads a path), for the usage
     /// statistics.
     pub bytes: usize,
+    /// Memory its decode may take while it runs, for a set opening within
+    /// [`JobsUi::open_budget`] ([`pump_opens`]); 0 elsewhere.
+    pub reserve: u64,
 }
 
 /// An opening file's preview on the GPU, and its document's size.
@@ -204,11 +207,18 @@ pub struct JobsUi {
     /// Pixel memory the open documents may take on a device whose browser kills a page early (the
     /// web shell sets it on a phone or 4 GB device). Set: files open one at a time ([`pump_opens`]).
     pub open_budget: Option<u64>,
+    /// How many files of a set decode at once within [`Self::open_budget`] (the web shell: its
+    /// worker pool's threads but one, which frames need); 0 counts as 1.
+    pub open_parallel: usize,
     /// Files of a set waiting for their turn ([`pump_opens`]).
     pub(crate) queued: std::collections::VecDeque<QueuedOpen>,
-    /// Members of the running queue so far, and the first's document, which stays shown.
+    /// Sets whose files are still being read ([`PhotocraftApp::open_arriving`]).
+    pub(crate) arriving: Vec<ArrivingSet>,
+    /// Members of the running queue so far.
     pub(crate) queue_started: usize,
-    pub(crate) queue_first: Option<DocId>,
+    /// The document of the first member (in its set's order) of the sets opening, which stays
+    /// shown while the others land, and its place in its set.
+    pub(crate) queue_first: Option<(DocId, usize)>,
     /// When the last frame's step of the jobs done a step at a time started, and how long it
     /// took (see [`STEP_BUDGET_MS`]).
     stepped: Option<(f64, f64)>,
@@ -238,6 +248,9 @@ pub struct JobsUi {
     outcomes: Vec<(JobId, OpenOutcome)>,
     /// An open whose document is in place but not drawn yet ([`landing`]).
     pub(crate) landing: Option<Landing>,
+    /// What the canvas showed before this frame's finished jobs were applied (applying an open
+    /// makes its document active): a member of a set lands behind it ([`queue_landed`]).
+    pub(crate) shown_before: Shown,
 }
 
 /// How long an open's preview or card may stand in for its landed document's canvas (ms).
@@ -586,6 +599,7 @@ fn start_open_inner(app: &mut PhotocraftApp, name: &str, path: Option<String>, s
                 texture: None,
                 quiet: false,
                 bytes,
+                reserve: 0,
             });
             app.jobs.focus = Some(job);
             app.ui.chrome.home = None;
@@ -601,6 +615,80 @@ pub(crate) struct QueuedOpen {
     pub(crate) name: String,
     pub(crate) bytes: Vec<u8>,
     pub(crate) order: OpenOrder,
+}
+
+/// A set of files the picker hands over as it reads them ([`PhotocraftApp::open_arriving`]).
+pub(crate) struct ArrivingSet {
+    files: crate::file_dialog::Arriving,
+    batch: u64,
+    /// Each file's place in the set (name order), by its index in the picker's answer.
+    seqs: Vec<usize>,
+    /// Whether each file has been handed over.
+    arrived: Vec<bool>,
+}
+
+impl ArrivingSet {
+    pub(crate) fn new(files: crate::file_dialog::Arriving, batch: u64, seqs: Vec<usize>) -> Self {
+        let arrived = vec![false; seqs.len()];
+        Self { files, batch, seqs, arrived }
+    }
+
+    /// The names of the files not handed over yet, in name order.
+    fn waiting(&self) -> Vec<String> {
+        let mut left: Vec<(usize, &String)> =
+            self.files.names.iter().zip(&self.seqs).zip(&self.arrived).filter(|(_, arrived)| !**arrived).map(|((name, seq), _)| (*seq, name)).collect();
+        left.sort_unstable();
+        left.into_iter().map(|(_, name)| name.clone()).collect()
+    }
+}
+
+/// Files of the sets being read that haven't arrived yet.
+fn arriving_count(jobs: &JobsUi) -> usize {
+    jobs.arriving.iter().map(|a| a.arrived.iter().filter(|x| !**x).count()).sum()
+}
+
+/// Every frame: the files of a picked set read since the last frame open (or join the queue on a
+/// small device), in the set's order. Opening at once on this thread (no background jobs, no
+/// queue) takes one a frame, so a set never holds the page for more than a file's decode.
+pub(crate) fn take_arrived(app: &mut PhotocraftApp) {
+    if app.jobs.arriving.is_empty() {
+        return;
+    }
+    let one_a_frame = !app.background_jobs && app.jobs.open_budget.is_none();
+    let mut i = 0;
+    while i < app.jobs.arriving.len() {
+        let set = &app.jobs.arriving[i];
+        let (got, more) = if one_a_frame {
+            let (file, more) = set.files.take_one();
+            (file.into_iter().collect(), more)
+        } else {
+            set.files.take()
+        };
+        let (batch, files) = (set.batch, set.files.clone());
+        for (index, bytes) in got {
+            let (Some(name), Some(seq)) = (files.names.get(index), app.jobs.arriving[i].seqs.get(index).copied()) else { continue };
+            if let Some(arrived) = app.jobs.arriving[i].arrived.get_mut(index) {
+                *arrived = true;
+            }
+            app.open_member(name.clone(), bytes, OpenOrder { batch, seq });
+        }
+        let set = &app.jobs.arriving[i];
+        let done = set.arrived.iter().all(|a| *a);
+        if done || !more {
+            // A reader that stopped early: what it never handed over is said, not lost silently.
+            let unread = if done { Vec::new() } else { set.waiting() };
+            app.jobs.arriving.remove(i);
+            for name in unread {
+                app.open_failed(&name, tl!("the file could not be read"));
+            }
+        } else {
+            i += 1;
+        }
+        if one_a_frame {
+            break;
+        }
+    }
+    end_batch(&mut app.jobs);
 }
 
 /// Bytes the pixels of a file's first layer take, from its header (`None`: its format doesn't say
@@ -621,70 +709,134 @@ fn fits_budget(used: u64, estimate: Option<u64>, budget: u64, first: bool) -> bo
     first || used.saturating_add(estimate.unwrap_or(0)) <= budget
 }
 
-/// On a small device the next waiting file opens once the one before has landed: one decode and one
-/// copy of its file at a time, and frames in between, so a set of big pages neither piles up in
-/// memory nor holds the page. Files past [`JobsUi::open_budget`] stay closed and a notice says which.
+/// Memory a file's decode may hold while it runs: the file, the decoded image and the document's
+/// copy of it.
+fn decode_reserve(bytes: &[u8], estimate: Option<u64>) -> u64 {
+    (bytes.len() as u64).saturating_add(estimate.unwrap_or(0).saturating_mul(2))
+}
+
+/// On a small device the waiting files of a set open in order, [`JobsUi::open_parallel`] decodes at
+/// a time on the workers and only while what they may hold fits [`JobsUi::open_budget`] with what is
+/// open: a set of big pages neither piles up in memory nor holds the page. Files past the budget stay
+/// closed and a notice says which.
 pub(crate) fn pump_opens(app: &mut PhotocraftApp) {
-    if app.jobs.queued.is_empty() || !app.jobs.opens.is_empty() || app.jobs.landing.is_some() {
-        return;
-    }
-    let Some(next) = app.jobs.queued.pop_front() else { return };
-    let total = app.jobs.queue_started + 1 + app.jobs.queued.len();
-    let empty = app.session.visible_count() == 0;
-    if let Some(budget) = app.jobs.open_budget
-        && !fits_budget(app.session.pixel_bytes() as u64, estimated_pixel_bytes(&next.bytes), budget, empty)
-    {
-        let left: Vec<String> = std::iter::once(next.name).chain(app.jobs.queued.drain(..).map(|q| q.name)).collect();
-        let opened = total - left.len();
-        let title = crate::i18n::fmt(tl!("Opened {opened} of {total}: not enough memory for the rest"), &[("opened", &opened.to_string()), ("total", &total.to_string())]);
-        let mut lines = vec![tl!("This device could close the page with more open. Close some documents, then open these again:").to_string()];
-        lines.extend(left);
-        notices::post(app, title, lines, true, None);
-        finish_queue(app);
-        return;
-    }
-    app.jobs.queue_started += 1;
-    let (seq, started, documents, pending) = (next.order.seq, app.jobs.queue_started, app.session.documents().len(), app.jobs.opens.len());
-    let name = next.name.clone();
-    match app.open_owned(&next.name, next.bytes) {
-        Ok(_) => match app.jobs.opens.get_mut(pending) {
-            Some(tab) => tab.order = Some(OpenOrder { batch: next.order.batch, seq }),
-            None if app.session.documents().len() > documents => {
-                opened_in_order(&mut app.jobs, next.order);
-                queue_landed(app);
+    loop {
+        if app.jobs.queued.is_empty() {
+            // The set is over once nothing of it is opening or still being read.
+            if app.jobs.queue_started > 0 && app.jobs.opens.is_empty() && app.jobs.arriving.is_empty() {
+                finish_queue(app);
             }
-            None => {}
-        },
-        Err(e) => app.open_failed(&name, &e),
-    }
-    if app.jobs.opens.len() > pending {
-        if app.jobs.queue_first.is_some() {
-            // The first page stays on screen: the tab strip shows this one opening.
-            app.jobs.focus = None;
+            return;
         }
-        if total > 1 {
-            app.ui.status = crate::i18n::fmt(tl!("Opening {name} ({n} of {total})…"), &[("name", &name), ("n", &started.to_string()), ("total", &total.to_string())]);
+        if app.jobs.landing.is_some() || app.jobs.opens.len() >= app.jobs.open_parallel.max(1) {
+            return;
         }
-    }
-    if app.jobs.queued.is_empty() && app.jobs.opens.is_empty() {
-        finish_queue(app);
-    } else {
+        let Some(next) = app.jobs.queued.front() else { return };
+        let estimate = estimated_pixel_bytes(&next.bytes);
+        let reserve = decode_reserve(&next.bytes, estimate);
+        let used = app.session.pixel_bytes() as u64;
+        let empty = app.session.visible_count() == 0;
+        if let Some(budget) = app.jobs.open_budget {
+            let decoding: u64 = app.jobs.opens.iter().map(|o| o.reserve).sum();
+            if !app.jobs.opens.is_empty() && used.saturating_add(decoding).saturating_add(reserve) > budget {
+                // The decodes running give memory back as they land: wait for them.
+                return;
+            }
+            if app.jobs.opens.is_empty() && !fits_budget(used, estimate, budget, empty) {
+                refuse_rest(app);
+                return;
+            }
+        }
+        let Some(next) = app.jobs.queued.pop_front() else { return };
+        app.jobs.queue_started += 1;
+        let total = app.jobs.queue_started + app.jobs.queued.len() + arriving_count(&app.jobs);
+        let (seq, started, documents, pending) = (next.order.seq, app.jobs.queue_started, app.session.documents().len(), app.jobs.opens.len());
+        let name = next.name.clone();
+        let before = shown(app);
+        match app.open_owned(&next.name, next.bytes) {
+            Ok(_) => match app.jobs.opens.get_mut(pending) {
+                Some(tab) => {
+                    tab.order = Some(OpenOrder { batch: next.order.batch, seq });
+                    tab.reserve = reserve;
+                }
+                None if app.session.documents().len() > documents => {
+                    opened_in_order(&mut app.jobs, next.order);
+                    queue_landed(app, seq, before);
+                }
+                None => {}
+            },
+            Err(e) => app.open_failed(&name, &e),
+        }
+        let in_background = app.jobs.opens.len() > pending;
+        if in_background {
+            if app.jobs.queue_first.is_some() {
+                // The first page stays on screen: the tab strip shows this one opening.
+                app.jobs.focus = None;
+            }
+            if total > 1 {
+                app.ui.status = crate::i18n::fmt(tl!("Opening {name} ({n} of {total})…"), &[("name", &name), ("n", &started.to_string()), ("total", &total.to_string())]);
+            }
+        }
         end_batch(&mut app.jobs);
+        if !in_background {
+            // Opened on this thread: the next one waits for the next frame.
+            return;
+        }
     }
 }
 
-/// A queued member landed: the set's first document stays the one shown, so each page isn't drawn
-/// and uploaded as it arrives.
-fn queue_landed(app: &mut PhotocraftApp) {
-    let Some(document) = app.session.active().map(|st| st.doc.id) else { return };
-    match app.jobs.queue_first {
-        None => app.jobs.queue_first = Some(document),
-        Some(first) => {
-            if let Some(i) = app.session.documents().iter().position(|st| st.doc.id == first) {
-                app.session.set_active(i);
-                app.sync_views();
-            }
+/// The next waiting file doesn't fit with what is open: it and every file after it (those still
+/// being read too) stay closed, and a notice names them.
+fn refuse_rest(app: &mut PhotocraftApp) {
+    let mut left: Vec<String> = app.jobs.queued.drain(..).map(|q| q.name).collect();
+    // Dropping a set being read stops its reading.
+    for set in std::mem::take(&mut app.jobs.arriving) {
+        left.extend(set.waiting());
+    }
+    let total = app.jobs.queue_started + left.len();
+    let opened = app.jobs.queue_started;
+    let title = crate::i18n::fmt(tl!("Opened {opened} of {total}: not enough memory for the rest"), &[("opened", &opened.to_string()), ("total", &total.to_string())]);
+    let mut lines = vec![tl!("This device could close the page with more open. Close some documents, then open these again:").to_string()];
+    lines.extend(left);
+    notices::post(app, title, lines, true, None);
+    finish_queue(app);
+}
+
+/// What the canvas showed before a member of a set landed ([`queue_landed`]).
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Shown {
+    doc: Option<DocId>,
+    /// An opening file's card (the set's first, still opening).
+    card: bool,
+}
+
+/// What the canvas shows now.
+pub(crate) fn shown(app: &PhotocraftApp) -> Shown {
+    Shown { doc: app.session.active().map(|st| st.doc.id), card: app.jobs.focus.is_some() }
+}
+
+/// A member of a set landed (now the active document): the set's first document (in its order)
+/// shows, and later members open in their tabs behind what is shown, so each page isn't drawn and
+/// uploaded as it arrives and a page the user went to stays. Decodes side by side can land out of
+/// order: an earlier member landing later takes the first's place.
+pub(crate) fn queue_landed(app: &mut PhotocraftApp, seq: usize, before: Shown) {
+    let Some(landed) = app.session.active().map(|st| st.doc.id) else { return };
+    let first = app.jobs.queue_first;
+    let show = match first {
+        Some((_, at)) if at < seq => before.doc.unwrap_or(landed),
+        _ => {
+            app.jobs.queue_first = Some((landed, seq));
+            // The first page takes over from its card or from the set's page shown so far, not
+            // from a page the user went to.
+            let earlier = first.map(|(doc, _)| doc);
+            if before.card || before.doc.is_none() || before.doc == earlier { landed } else { before.doc.unwrap_or(landed) }
         }
+    };
+    if show != landed
+        && let Some(i) = app.session.documents().iter().position(|st| st.doc.id == show)
+    {
+        app.session.set_active(i);
+        app.sync_views();
     }
 }
 
@@ -692,6 +844,13 @@ fn finish_queue(app: &mut PhotocraftApp) {
     app.jobs.queue_started = 0;
     app.jobs.queue_first = None;
     end_batch(&mut app.jobs);
+}
+
+/// The files of the set `batch` waiting or still being read stay closed (a set being read stops
+/// its reading once dropped).
+fn drop_set(jobs: &mut JobsUi, batch: u64) {
+    jobs.queued.retain(|q| q.order.batch != batch);
+    jobs.arriving.retain(|a| a.batch != batch);
 }
 
 /// Start a set of files opened together: the `batch` of their [`OpenOrder`]s. Its tabs follow the
@@ -714,8 +873,14 @@ pub(crate) fn opened_in_order(jobs: &mut JobsUi, order: OpenOrder) {
 
 /// Every member of the set has been started: forget it unless some are still opening.
 pub(crate) fn end_batch(jobs: &mut JobsUi) {
-    let (opens, queued) = (&jobs.opens, &jobs.queued);
-    jobs.batches.retain(|b| opens.iter().any(|o| o.order.is_some_and(|x| x.batch == b.id)) || queued.iter().any(|q| q.order.batch == b.id));
+    let (opens, queued, arriving) = (&jobs.opens, &jobs.queued, &jobs.arriving);
+    jobs.batches.retain(|b| {
+        opens.iter().any(|o| o.order.is_some_and(|x| x.batch == b.id)) || queued.iter().any(|q| q.order.batch == b.id) || arriving.iter().any(|a| a.batch == b.id)
+    });
+    if jobs.batches.is_empty() {
+        // The next set shows its own first page.
+        jobs.queue_first = None;
+    }
 }
 
 /// The tab position for a member of a set that just opened: after the members before it that
@@ -732,8 +897,12 @@ fn batch_slot(jobs: &mut JobsUi, order: OpenOrder) -> Option<usize> {
 pub(crate) fn finish_open_tab(app: &mut PhotocraftApp, tab: &OpenTab, v: &Value) -> Result<(), String> {
     let slot = tab.slot.or_else(|| tab.order.and_then(|o| batch_slot(&mut app.jobs, o)));
     let r = finish_open(app, &tab.name, tab.path.as_deref(), v, slot);
-    if app.jobs.open_budget.is_some() && r.is_ok() && tab.order.is_some() {
-        queue_landed(app);
+    if let Some(order) = tab.order
+        && r.is_ok()
+    {
+        queue_landed(app, order.seq, app.jobs.shown_before);
+        // Another job applied in the same frame lands behind what shows now.
+        app.jobs.shown_before = shown(app);
     }
     end_batch(&mut app.jobs);
     r
@@ -892,6 +1061,7 @@ pub(crate) fn tick_events(app: &mut PhotocraftApp, ctx: &egui::Context) -> Vec<J
     } else {
         app.jobs.stepped = None;
     }
+    app.jobs.shown_before = shown(app);
     let events = {
         let _s = crate::perf_span::span("jobs.apply");
         app.session.poll_jobs()
@@ -1081,9 +1251,8 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
             }
             JobOutcome::Cancelled => {
                 // Esc on a set stops the set.
-                if tab.order.is_some() {
-                    let batch = tab.order.map(|o| o.batch);
-                    app.jobs.queued.retain(|q| Some(q.order.batch) != batch);
+                if let Some(order) = tab.order {
+                    drop_set(&mut app.jobs, order.batch);
                 }
                 app.ui.status = crate::i18n::fmt(tl!("Cancelled opening {name}"), &[("name", &tab.name)]);
                 app.ui.status_error = false;

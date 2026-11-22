@@ -2254,6 +2254,7 @@
 	Cancel opening	Cancelar apertura
 	Cancelled opening {name}	Se canceló la apertura de {name}
 	Opened {opened} of {total}: not enough memory for the rest	Se abrieron {opened} de {total}: no hay memoria para el resto
+	the file could not be read	no se pudo leer el archivo
 	This device could close the page with more open. Close some documents, then open these again:	Este dispositivo podría cerrar la página con más abiertos. Cierra algunos documentos y vuelve a abrir estos:
 	Opening {name} ({n} of {total})…	Abriendo {name} ({n} de {total})…
 	Damaged Photoshop document	Documento de Photoshop dañado

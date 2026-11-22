@@ -109,12 +109,12 @@ pub fn is_page_file(name: &str) -> bool {
 pub fn pick(app: &mut PhotocraftApp) {
     let initial_dir = crate::file_dialog::last_used_dir(&app.ui.recent_files);
     let extensions = Some(PAGE_EXTS.iter().map(|e| (*e).to_string()).collect());
-    let r = app.ask_file(FileDialogRequest::Open { multiple: true, initial_dir, extensions }, |app, answer| {
+    let r = app.ask_file(FileDialogRequest::Open { multiple: true, initial_dir, extensions, arriving: false }, |app, answer| {
         let (names, files) = match answer {
             FileDialogAnswer::Paths(paths) => (paths, Vec::new()),
             FileDialogAnswer::Contents(name, bytes) => (vec![name.clone()], vec![(name, bytes)]),
             FileDialogAnswer::ContentsMany(files) => (files.iter().map(|(n, _)| n.clone()).collect(), files),
-            FileDialogAnswer::SaveTo(_) | FileDialogAnswer::FolderTo(_) | FileDialogAnswer::Unavailable(_) => {
+            FileDialogAnswer::SaveTo(_) | FileDialogAnswer::FolderTo(_) | FileDialogAnswer::Unavailable(_) | FileDialogAnswer::Arriving(_) => {
                 return Err("the file dialog gave an unexpected answer".into());
             }
         };
