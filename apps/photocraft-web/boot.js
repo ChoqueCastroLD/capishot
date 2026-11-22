@@ -369,7 +369,8 @@
       if (crashes.held.length < 3) crashes.held.push(ev);
       return;
     }
-    if (crashes.sent >= 5) return;
+    // An automated browser (our tests against the live site) reports nothing, as in the app.
+    if (crashes.sent >= 5 || navigator.webdriver) return;
     crashes.sent++;
     try {
       const body = JSON.stringify({ v: 8, client: 'web', iid: crashes.iid, sid: crashes.sid, seq: 1, events: [ev] });

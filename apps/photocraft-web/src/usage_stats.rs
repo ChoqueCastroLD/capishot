@@ -157,7 +157,7 @@ pub fn send_crash(event: &Value) -> bool {
     let Some(target) = target.as_ref() else { return false };
     let Some(body) = telemetry::crash_batch(&target.install_id, &target.session_id, "web", event) else { return false };
     if let Some(window) = web_sys::window() {
-        return window.navigator().send_beacon_with_opt_str(&target.url, Some(&body)).unwrap_or(false);
+        return !automated(&window) && window.navigator().send_beacon_with_opt_str(&target.url, Some(&body)).unwrap_or(false);
     }
     // A worker has no `sendBeacon`. A `keepalive` fetch outlives the trap that follows the panic.
     let global = js_sys::global();
@@ -190,10 +190,20 @@ pub fn flush_now() {
     flush();
 }
 
+/// A browser driven by automation (`navigator.webdriver`: our own end-to-end tests and profiling
+/// runs against the live site, agents). Everything is recorded as for a person, so the same code
+/// runs, but nothing is sent: those runs showed up as dozens of installs with freezes.
+fn automated(window: &web_sys::Window) -> bool {
+    Reflect::get(&window.navigator(), &JsValue::from_str("webdriver")).ok().and_then(|v| v.as_bool()) == Some(true)
+}
+
 /// Send what is waiting. Fire and forget: a failure drops the batch.
 fn flush() {
     let Some(body) = telemetry::take_batch() else { return };
     let Some(window) = web_sys::window() else { return };
+    if automated(&window) {
+        return;
+    }
     if window.navigator().send_beacon_with_opt_str(ENDPOINT, Some(&body)).unwrap_or(false) {
         return;
     }
