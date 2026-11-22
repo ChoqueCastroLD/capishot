@@ -6,6 +6,19 @@ Every change to the stable API is listed here with the commit to pin. Breaking c
 may change in any commit; their changes are listed under **Experimental**. A change to the
 `[patch]` pins (README.md) is listed too: copy the blocks again when you move the pin.
 
+## API_VERSION 1, behaviour (effect maps within budget, compositor made ahead)
+
+- No API change. The GPU compositor builds layer-effect maps only for the layers a render draws,
+  and keeps them within its memory budget (`set_memory_budget`: a quarter for caches, now three
+  quarters of that for effect maps): over it, what only rebuilding needs goes first, the maps that
+  draw last. A refresh composites what the view shows in its frame and the margin around it in
+  pieces over the next frames.
+- **Experimental**: `photocraft_ui_egui::gpu_canvas::build_pipelines_ahead(true)` before a view
+  is made: its compositor and every pipeline are built on a worker thread (natively), the CPU
+  compositor drawing until they are. Off by default.
+- The CPU canvas draws a Move drag's release from the drag's split, composited exactly once the
+  edits pause.
+
 ## API_VERSION 1, behaviour (no frame mixes states of a page)
 
 - No API change. The canvas never shows part of what the view shows at an older state of the
