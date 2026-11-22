@@ -289,13 +289,15 @@ impl GpuCanvas {
 
     /// Create pipelines and register resources with the egui renderer.
     pub fn new(rs: &RenderState) -> Self {
-        // The compositor's work shows in the frame's spans (freeze reports name it).
-        photocraft_gpu::set_span_hook(|name| Box::new(crate::perf_span::span(name)));
         Self::with_tile(rs, None)
     }
 
     /// Like [`GpuCanvas::new`] with a preferred texture tile side (`PHOTOCRAFT_GPU_TILE` wins).
     pub fn with_tile(rs: &RenderState, tile: Option<u32>) -> Self {
+        // The compositor's work shows in the frame's spans (freeze reports name it). Here, the one
+        // constructor every canvas goes through: the app makes its canvas with a tile side, and with
+        // the hook in `new` alone its frames named none of the compositor's parts.
+        photocraft_gpu::set_span_hook(|name| Box::new(crate::perf_span::span(name)));
         let max = rs.device.limits().max_texture_dimension_2d;
         let env_tile = std::env::var("PHOTOCRAFT_GPU_TILE").ok().and_then(|v| v.parse::<u32>().ok());
         let tile = env_tile.or(tile).unwrap_or(DEFAULT_TILE).clamp(64, max);
@@ -872,6 +874,8 @@ impl GpuCanvas {
         let fresh = res.docs.get(&key).is_none_or(|d| d.size != size || d.format != format);
         let region = if fresh && !partial { doc.bounds() } else { region.intersect(&doc.bounds()) };
         // Checked before allocating a new canvas texture only: `render` plans (and refuses) itself.
+        // A document's first composite: checking the GPU can draw it and making its canvas textures.
+        let target_span = crate::perf_span::span("gpu.target");
         if fresh && let Err(e) = comp.supports(doc) {
             res.compositor = Some(comp);
             return Err(e);
@@ -903,6 +907,7 @@ impl GpuCanvas {
             res.compositor = Some(comp);
             return Err(photocraft_gpu::Unsupported(format!("no {format:?} canvas texture or pipeline")));
         };
+        drop(target_span);
         let bgl = &res.encode_bgl;
         // A float canvas keeps values above 1.0 (32-bit documents, for the 32-bit preview).
         let keep_hdr = i32::from(format == FORMAT_HIGH);
@@ -4001,6 +4006,8 @@ fn fs(in: V) -> @location(0) vec4<f32> {
 mod mip_tests;
 #[cfg(test)]
 mod pipelines_ahead_tests;
+#[cfg(test)]
+mod span_hook_tests;
 
 #[cfg(test)]
 mod tests {

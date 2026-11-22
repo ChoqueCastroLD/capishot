@@ -188,7 +188,7 @@ impl SlowFrames {
         self.prev_ui_ms = Some(s.ui_ms);
         if let Some(line) = self.push(&s) {
             // What the frame spent its time on (the largest spans), as the web's watchdog says.
-            let spans: Vec<String> = crate::perf_span::frame().iter().take(6).filter(|(_, t)| *t >= 1.0).map(|(n, t)| format!("{n} {t:.0}")).collect();
+            let spans: Vec<String> = crate::perf_span::frame().iter().take(10).filter(|(_, t)| *t >= 0.5).map(|(n, t)| format!("{n} {t:.0}")).collect();
             if spans.is_empty() {
                 log::info!("{line}");
             } else {

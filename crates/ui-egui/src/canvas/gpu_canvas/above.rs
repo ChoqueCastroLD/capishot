@@ -469,7 +469,10 @@ impl GpuCanvas {
                 failed = true;
                 break;
             };
-            if render_into(device, queue, res, &mut comp, src, unlevel(piece, level).intersect(&src.bounds()), level, map, cache.format).is_err() {
+            let render_span = crate::perf_span::span("drag.render");
+            let rendered = render_into(device, queue, res, &mut comp, src, unlevel(piece, level).intersect(&src.bounds()), level, map, cache.format);
+            drop(render_span);
+            if rendered.is_err() {
                 failed = true;
                 break;
             }
