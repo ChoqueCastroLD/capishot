@@ -271,6 +271,16 @@ fn opaque_background(bg: &Layer, canvas: Rect, mode: photocraft_color::ColorMode
     true
 }
 
+/// Where the sprite of the run `layers` starts (document pixels, on the level's grid) and its
+/// rect (level pixels from there): the run's whole extent, past the canvas edges too.
+fn sprite_extent(layers: &[Layer], level: u32) -> ((i32, i32), Rect) {
+    let step = 1i32 << level;
+    let all = Rect::new(i32::MIN / 4, i32::MIN / 4, i32::MAX / 4, i32::MAX / 4);
+    let extent = layers.iter().filter_map(|l| photocraft_compose::change_bounds(l, all)).fold(Rect::EMPTY, |a, b| if a.is_empty() { b } else { a.union(&b) });
+    let (sx, sy) = (extent.x0.div_euclid(step) * step, extent.y0.div_euclid(step) * step);
+    ((sx, sy), Rect::new(0, 0, (extent.x1 - sx + step - 1) / step, (extent.y1 - sy + step - 1) / step))
+}
+
 /// Level pixels to document pixels.
 fn unlevel(r: Rect, level: u32) -> Rect {
     Rect::new(r.x0 << level, r.y0 << level, r.x1 << level, r.y1 << level)
@@ -500,11 +510,7 @@ impl GpuCanvas {
         let format = if res.encode_pipeline_high.is_some() && !small { FORMAT_HIGH } else { FORMAT };
         let above = doc.layers.get(top..)?.iter().any(|l| draws(l, 0));
         // The sprite: the moving unit's whole extent, on the level's grid.
-        let step = 1i32 << level;
-        let all = Rect::new(i32::MIN / 4, i32::MIN / 4, i32::MAX / 4, i32::MAX / 4);
-        let extent = doc.layers.get(root..top)?.iter().filter_map(|l| photocraft_compose::change_bounds(l, all)).fold(Rect::EMPTY, |a, b| if a.is_empty() { b } else { a.union(&b) });
-        let (sx, sy) = (extent.x0.div_euclid(step) * step, extent.y0.div_euclid(step) * step);
-        let sprite_rect = Rect::new(0, 0, (extent.x1 - sx + step - 1) / step, (extent.y1 - sy + step - 1) / step);
+        let ((sx, sy), sprite_rect) = sprite_extent(doc.layers.get(root..top)?, level);
         let fits = |r: Rect| !r.is_empty() && r.width() <= side && r.height() <= side;
         let mut want: Vec<(Kind, Rect)> = Vec::new();
         match mode {
@@ -539,20 +545,7 @@ impl GpuCanvas {
         if res.canvas_bytes().saturating_add(bytes) > res.canvas_budget {
             return None;
         }
-        let make = |rect: Rect| {
-            let t = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("pc_drag_cache"),
-                size: wgpu::Extent3d { width: rect.width(), height: rect.height(), depth_or_array_layers: 1 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
-                view_formats: &[],
-            });
-            let view = t.create_view(&Default::default());
-            Map { _texture: t, view, rect }
-        };
+        let make = |rect: Rect| new_map(device, rect, format);
         let get = |k: Kind| want.iter().find(|(w, _)| *w == k).map(|(_, r)| make(*r));
         let todo = want.iter().flat_map(|(k, r)| bands(*r, PIECE_PX).into_iter().map(move |b| (*k, b))).collect();
         Some(DragCache {
@@ -620,11 +613,12 @@ impl GpuCanvas {
     /// A drag of `ids` on document `doc` (key) ended moved by `offset` (`doc` is the document
     /// after it): when the cache shows the document before it, it shows `doc` too, its run only
     /// shifted (`moves_with_layer`); it is kept for `doc` (the release frame, and a drag of the
-    /// same layers again, come from it at once). Whether it was.
+    /// same layers again, come from it at once). A cache still being made is kept too (what is
+    /// drawn of it stays right): it goes on in the next idle frames. Whether it was kept.
     pub(super) fn rebase_drag(&self, doc: &Document, ids: &[LayerId], offset: (i32, i32)) -> bool {
         let mut renderer = self.rs.renderer.write();
         let Some(res) = renderer.callback_resources.canvas_mut(self.id) else { return false };
-        let Some(c) = res.drag.as_mut().filter(|c| c.doc == doc.id.0 && c.ids == ids && c.ready()) else { return false };
+        let Some(c) = res.drag.as_mut().filter(|c| c.doc == doc.id.0 && c.ids == ids) else { return false };
         let step = 1i32 << c.level;
         let same_shape = c.layers.len() == doc.layers.len() && c.shell == shell_of(doc);
         let unmoved = |r: std::ops::Range<usize>| c.layers.get(r.clone()).zip(doc.layers.get(r)).is_some_and(|(a, b)| a == b);
@@ -645,10 +639,41 @@ impl GpuCanvas {
             c.layers = doc.layers.clone();
             c.sprite_at = (c.sprite_at.0 + offset.0, c.sprite_at.1 + offset.1);
             c.binds.clear();
-        } else {
+            return true;
+        }
+        // The run looks different where it landed (a shape cut at the canvas edge renders again,
+        // its effects with it): the images of what didn't move stay, and only the run's are made
+        // again (a piece per idle frame, as ahead), so a drag of it again doesn't wait for the
+        // whole cache (2-3 s of layers below and above on a 4000x6000 page of 80 layers).
+        let keep = c.mode != DragMode::Layered && same_shape && unmoved(0..c.root) && unmoved(c.top..c.layers.len());
+        let remade = keep && doc.layers.get(c.root..c.top).is_some_and(|run| {
+            let (at, rect) = sprite_extent(run, c.level);
+            let side = self.rs.device.limits().max_texture_dimension_2d;
+            if rect.is_empty() || rect.width() > side || rect.height() > side {
+                return false;
+            }
+            let (device, format) = (&self.rs.device, c.format);
+            // New images: a render leaves what it skips (nothing there) as it was.
+            for m in [&mut c.sprite, &mut c.sprite_black, &mut c.sprite_white] {
+                if m.is_some() {
+                    *m = Some(new_map(device, rect, format));
+                }
+            }
+            c.sprite_at = at;
+            c.layers = doc.layers.clone();
+            c.binds.clear();
+            let kinds = [Kind::Sprite, Kind::SpriteBlack, Kind::SpriteWhite];
+            c.todo.retain(|(k, _)| !kinds.contains(k));
+            let held: Vec<Kind> = kinds.into_iter().filter(|k| c.map(*k).is_some()).collect();
+            for k in held {
+                c.todo.extend(bands(rect, PIECE_PX).into_iter().map(|b| (k, b)));
+            }
+            true
+        });
+        if !remade || res.canvas_bytes() > res.canvas_budget {
             res.drag = None;
         }
-        ok
+        false
     }
 
     /// The frame of a release (no drag on `doc` any more): when the drag that ended can be
@@ -687,6 +712,22 @@ impl GpuCanvas {
         res.compositor = Some(comp);
         ok && apply_layered(device, queue, res, doc.id.0, cache, photocraft_gpu::level_rect(region, cache.level).intersect(&cache.view), encode_srgb)
     }
+}
+
+/// An empty cache image covering `rect`.
+fn new_map(device: &wgpu::Device, rect: Rect, format: wgpu::TextureFormat) -> Map {
+    let t = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("pc_drag_cache"),
+        size: wgpu::Extent3d { width: rect.width(), height: rect.height(), depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    let view = t.create_view(&Default::default());
+    Map { _texture: t, view, rect }
 }
 
 /// Composite `region` (document pixels) of `doc` at `level` with `comp` into `map`, stored

@@ -520,9 +520,9 @@ fn check(device: Device, page: Page) {
     let Some(run) = repeat(device, page, 1, 9, true) else { return };
     assert!(run.worst_mismatch < 0.02, "{device:?} {page:?}: a frame {:.1}% off the composite at its offset", run.worst_mismatch * 100.0);
     if page == Page::Manga {
-        // Reported, not held to the bars yet: on a 4000x6000 page of 80 layers the effect cache's
-        // budget doesn't hold every layer's maps at once, and a drag of a shape layer isn't
-        // rebased (its outline is drawn again at the new place). See the dev log.
+        // Reported, not held to the bars yet: with 4 GB the effect budget doesn't hold the maps of
+        // every styled layer the view shows on a 4000x6000 page of 80 layers, and lavapipe
+        // rasterizes its whole-view frames on the CPU. See the dev log.
         return;
     }
     if device == Device::Cpu {

@@ -224,6 +224,7 @@ impl PhotocraftApp {
             perf_counters: Default::default(),
             chrome_freeze: Default::default(),
             cpu_move_split: None,
+            cpu_released: None,
             stroke_trace: stroke_trace::StrokeTrace::from_env(),
             render_path: Default::default(),
             slow_frames: Default::default(),

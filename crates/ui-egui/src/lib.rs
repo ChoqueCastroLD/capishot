@@ -755,6 +755,10 @@ pub struct PhotocraftApp {
     /// The CPU canvas drew this Move drag (document, revision) from its split composites on this
     /// frame (`move_cpu`): the next frames' preview needn't shift the full-resolution layers.
     pub(crate) cpu_move_split: Option<(DocId, u64, u64)>,
+    /// A Move drag the canvas showed at its last offset was committed (document, the moving
+    /// layers, the offset): the CPU canvas rebases its split on the result
+    /// (`move_cpu::Split::rebase`) instead of compositing the release's area again.
+    pub(crate) cpu_released: Option<(DocId, Vec<photocraft_doc::LayerId>, (i32, i32))>,
     /// Per-frame stroke timings for latency reports (`PHOTOCRAFT_STROKE_TRACE`, see `stroke_trace`).
     pub stroke_trace: stroke_trace::StrokeTrace,
     /// Why each document's view is drawn on the CPU, and the history of changes (`render_path`).

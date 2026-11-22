@@ -60,6 +60,13 @@ pub(crate) struct Split {
     above_tiles: HashMap<DRect, (Buffer, Buffer)>,
     /// The one-blit path ([`Blit`]), when the drag can take it.
     blit: Option<Blit>,
+    /// The document the split was made from (its last rebase's) and where in its open stack the
+    /// run starts and ends ([`Split::rebase`]).
+    base: Arc<Document>,
+    run: (usize, usize),
+    /// Where the moving layers stand relative to the split's images (document pixels, a multiple
+    /// of the level's factor): the offsets of the drags it was rebased on, added to each frame's.
+    origin: (i32, i32),
 }
 
 /// A drag whose moving run is one layer that composites as its own image over the rest
@@ -294,12 +301,53 @@ impl Split {
             below_tiles: HashMap::new(),
             above_tiles: HashMap::new(),
             blit,
+            base: base.clone(),
+            run: (start, end),
+            origin: (0, 0),
         })
+    }
+
+    /// The drag this split drew ended, and `layer.translate` committed its offset `offset` as
+    /// revision `revision` of `doc`: when `doc` is the split's document with the run only shifted
+    /// by it (the other layers the same ones, an offset on the level's pixel grid), the
+    /// split is kept for `doc`, as the GPU canvas's drag cache is (`gpu_canvas::above`): the
+    /// release's tiles and a drag of the same layers again are drawn from it at once, instead of
+    /// compositing the stack again (100-160 ms a frame on a credits page). Whether it was.
+    pub(crate) fn rebase(&mut self, doc: &Arc<Document>, revision: u64, offset: (i32, i32)) -> bool {
+        let f = i32::try_from(self.middle.2).unwrap_or(i32::MAX);
+        let (start, end) = self.run;
+        if f <= 0 || offset.0 % f != 0 || offset.1 % f != 0 || doc.id != self.key.0 || doc.size != self.base.size {
+            return false;
+        }
+        let (was, now) = (open_stack(&self.base.layers), open_stack(&doc.layers));
+        let same = |a: &[&Layer], b: &[&Layer]| a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x == y);
+        let all = DRect::new(i32::MIN / 4, i32::MIN / 4, i32::MAX / 4, i32::MAX / 4);
+        let shifted = |a: &[&Layer], b: &[&Layer]| {
+            a.len() == b.len()
+                && a.iter().zip(b).all(|(x, y)| x.id == y.id && photocraft_compose::change_bounds(x, all).map(|r| r.translate(offset.0, offset.1)) == photocraft_compose::change_bounds(y, all))
+        };
+        let ok = was.len() == now.len()
+            && same(was.get(..start).unwrap_or_default(), now.get(..start).unwrap_or_default())
+            && same(was.get(end..).unwrap_or_default(), now.get(end..).unwrap_or_default())
+            && shifted(was.get(start..end).unwrap_or_default(), now.get(start..end).unwrap_or_default());
+        if ok {
+            self.key.1 = revision;
+            self.base = doc.clone();
+            self.origin = (self.origin.0 + offset.0, self.origin.1 + offset.1);
+        }
+        ok
     }
 
     /// Whether this split is the one for `plan` at `level`.
     pub(crate) fn is_for(&self, plan: &Plan, level: u32) -> bool {
-        self.key.0 == plan.doc && self.key.1 == plan.revision && self.key.2 == plan.ids && self.key.3 == level
+        // A later revision whose layers are the same ones (the history step a move leaves, a
+        // selection) still has this split's stack.
+        self.moves(plan.doc, &plan.ids, level) && (self.key.1 == plan.revision || Arc::ptr_eq(&self.base, &plan.base) || self.base.layers == plan.base.layers)
+    }
+
+    /// Whether this split moves `ids` of document `doc` at `level` (whatever its state).
+    pub(crate) fn moves(&self, doc: DocId, ids: &[LayerId], level: u32) -> bool {
+        self.key.0 == doc && self.key.2 == ids && self.key.3 == level
     }
 
     /// Composite `jobs` (each a level rect and the tile rect it lies in) of the preview `moved`:
@@ -310,7 +358,8 @@ impl Split {
         // preview shows the layer on the level's pixel grid; the release composites it exactly).
         let (d, moving, f) = &self.middle;
         let lv = |v: i32| (f64::from(v) / *f as f64).round() as i32;
-        let middle = photocraft_engine::layer_multi_cmds::moved(d, moving, lv(offset.0), lv(offset.1)).ok()?;
+        let (ox, oy) = (offset.0 + self.origin.0, offset.1 + self.origin.1);
+        let middle = photocraft_engine::layer_multi_cmds::moved(d, moving, lv(ox), lv(oy)).ok()?;
         self.fill(jobs);
         let backdrops: Vec<Buffer> = jobs.iter().map(|(r, held)| crop(self.below_tiles.get(held), *r)).collect();
         let mut out = photocraft_compose::render_rects_over(&middle, backdrops);
@@ -334,7 +383,7 @@ impl Split {
         self.blit.as_ref().filter(|b| b.ready())?;
         let f = self.middle.2;
         let lv = |v: i32| (f64::from(v) / f as f64).round() as i32;
-        let (ox, oy) = (lv(offset.0), lv(offset.1));
+        let (ox, oy) = (lv(offset.0 + self.origin.0), lv(offset.1 + self.origin.1));
         self.fill(jobs);
         let blit = self.blit.as_mut()?;
         let mut out = Vec::with_capacity(jobs.len());

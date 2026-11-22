@@ -507,6 +507,7 @@ pub(crate) fn finish(app: &mut PhotocraftApp, dx: f64, dy: f64) {
         return;
     }
     let Some(p) = shown else { return };
+    app.cpu_released = Some((p.doc, p.ids.clone(), at));
     crate::canvas::shown_as_document(app, p.doc, is_preview_key);
 }
 

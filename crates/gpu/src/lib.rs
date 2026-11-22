@@ -323,9 +323,28 @@ struct FxEntry {
     progs: Vec<ProgState>,
     last_used: u64,
     stamp: u64,
+    /// The CPU shape and the distance fields were let go to fit the effect budget
+    /// ([`Compositor::evict`]): the maps still draw; a change other than a move builds them
+    /// again. `shape_hash` stands in for the shape to tell a move.
+    compact: bool,
+    shape_hash: u64,
 }
 
 impl FxEntry {
+    /// Let go of what only building the maps again needs (the CPU shape, the distance fields),
+    /// keeping what draws (the shape texture and the maps). Returns the bytes freed.
+    fn compact(&mut self) -> usize {
+        if self.compact {
+            return 0;
+        }
+        let before = self.bytes();
+        self.shape_hash = hash_shape(&self.shape_cpu);
+        self.shape_cpu = Vec::new();
+        self.fields.clear();
+        self.compact = true;
+        before.saturating_sub(self.bytes())
+    }
+
     fn bytes(&self) -> usize {
         self.shape.bytes()
             + self.shape_cpu.len() * 4
@@ -860,11 +879,14 @@ impl Compositor {
     }
 
     /// Set the GPU memory the compositor may hold for layer pages and caches together
-    /// (a quarter of it, at most [`FX_BUDGET`], for effect maps and lower-stack chunks). Uploads and evicted pages in
+    /// (a quarter of it, at most [`FX_BUDGET`], for effect maps and lower-stack chunks, three to one). Uploads and evicted pages in
     /// flight during a refresh stay within about a quarter more.
     pub fn set_memory_budget(&mut self, bytes: u64) {
         let caches = (FX_BUDGET as u64).min(bytes / 4);
-        self.prefix.set_budget((caches / 2).min(prefix::MAX_BYTES));
+        // Three quarters of it for effect maps: they are what a frame can't draw without (a
+        // lower-stack chunk only saves recompositing), and a page of styled balloons and type
+        // needs every one of the view's at once (at 4 GB half of it held two or three layers').
+        self.prefix.set_budget((caches / 4).min(prefix::MAX_BYTES));
         self.fx_budget = caches.saturating_sub(self.prefix.budget());
         self.resident_budget = bytes.saturating_sub(caches);
     }
@@ -1255,11 +1277,20 @@ impl Compositor {
         let checkpoint = if flush { self.prefix.prepare(doc, &plan, moved_root, level) } else { None };
 
         // Effect maps of whole regions first (they may render group shapes through sub-plans);
-        // regions larger than the limit are built per cell below.
+        // regions larger than the limit are built per cell below. Only the layers whose effects
+        // reach what this render draws: the chunks it records (`region` grown to the chunk grid,
+        // as `fill_prefix` grows them). Syncing every effect layer of the document on each render
+        // made a piece of a 4000x6000 page of 80 layers build (and, past the effect budget, evict
+        // and build again) the maps of layers nowhere near it.
+        let drawn = {
+            let step = i32::try_from(self.chunk).unwrap_or(i32::MAX).saturating_mul(1 << level.min(MAX_LOD)).max(1);
+            let g = |v: i32| v.div_euclid(step).saturating_mul(step);
+            Rect::new(g(region.x0), g(region.y0), g(region.x1.saturating_add(step - 1)), g(region.y1.saturating_add(step - 1)))
+        };
         let paged: Vec<bool> = plan.fx.iter().map(|f| self.fx_paged(f.region)).collect();
         let aprons: Vec<i32> = plan.fx.iter().zip(&paged).map(|(f, &pg)| if pg { Self::fx_apron(doc, f) } else { 0 }).collect();
         for (f, &pg) in plan.fx.iter().zip(&paged) {
-            if !pg {
+            if !pg && !f.region.intersect(&drawn).is_empty() {
                 let _s = span("gpu.fx");
                 self.sync_fx(device, queue, encoder, doc, f, (f.layer.id, None), f.region, &mut stats);
             }
@@ -1397,6 +1428,22 @@ impl Compositor {
         }
         let mut total = self.fx_cache_bytes();
         let fx_budget = usize::try_from(self.fx_budget).unwrap_or(usize::MAX);
+        if total > fx_budget {
+            // First what only building the maps again needs, least recently used first (the
+            // maps keep drawing; an effect map set is a fraction of its distance fields and CPU
+            // shape): at 4 GB the budget held two or three layers' whole state, and a drag cache
+            // build on a page of many styled layers drew hundreds of maps again.
+            let mut lru: Vec<(u64, u64, FxKey)> = self.fx.iter().filter(|(_, e)| !e.compact).map(|(k, e)| (e.last_used, e.stamp, *k)).collect();
+            lru.sort_unstable();
+            for (_, _, k) in lru {
+                if total <= fx_budget {
+                    break;
+                }
+                if let Some(e) = self.fx.get_mut(&k) {
+                    total = total.saturating_sub(e.compact());
+                }
+            }
+        }
         if total > fx_budget {
             let (frame, stamp) = (self.frame, self.stamp);
             let mut lru: Vec<((u64, u64), FxKey)> = self
@@ -1986,6 +2033,13 @@ impl Compositor {
         let frame = self.frame;
         let (rw, rh) = (region.width(), region.height());
 
+        // The programs, and the distance fields they read (max reach per field). Filled shapes
+        // stroke their outline (the effect shape); others estimate it.
+        let vector_shape = matches!(layer.content, LayerContent::Shape(_)) && photocraft_compose::effect_outline(layer).is_none();
+        let anchor = layer.effects.reference.unwrap_or((f64::from(f.bounds.x0), f64::from(f.bounds.y0)));
+        let progs: Vec<fx::MapProgram> =
+            layer.effects.items.iter().filter(|e| e.enabled()).map(|e| fx::program_with(e, &doc.global_light, vector_shape, &doc.patterns, anchor)).collect();
+
         // What changed: everything (new settings / size), the position only, some tiles, or
         // nothing.
         let mut damage = Rect::EMPTY;
@@ -1994,7 +2048,6 @@ impl Compositor {
         if prev == Some(region)
             && let Some(e) = self.fx.get(&key)
         {
-            rebuild = false;
             for (old, cur) in e.tiles.iter().zip([content_src, mask_src]) {
                 let d = match (old, cur) {
                     (Some(o), Some(s)) => fx::damage(o, s),
@@ -2005,6 +2058,9 @@ impl Compositor {
                 damage = if damage.is_empty() { d } else { damage.union(&d) };
             }
             damage = damage.intersect(&region);
+            // A compacted entry has nothing to update its maps from: built again when they change.
+            let same_progs = e.progs.len() == progs.len() && e.progs.iter().zip(&progs).all(|(a, b)| b.maps == 0 || (a.key == b.key && a.maps.len() == b.maps));
+            rebuild = e.compact && (!damage.is_empty() || !same_progs);
         } else if let Some(old) = prev
             && (old.width(), old.height()) == (rw, rh)
             && !region.is_empty()
@@ -2013,7 +2069,7 @@ impl Compositor {
             // moved unchanged with it, every map is still exact.
             let v = fx::shape(doc, layer, region);
             if let Some(e) = self.fx.get_mut(&key)
-                && v == e.shape_cpu
+                && (if e.compact { hash_shape(&v) == e.shape_hash } else { v == e.shape_cpu })
             {
                 e.region = region;
                 rebuild = false;
@@ -2037,6 +2093,8 @@ impl Compositor {
                     progs: Vec::new(),
                     last_used: frame,
                     stamp: 0,
+                    compact: false,
+                    shape_hash: 0,
                 },
             );
             damage = region;
@@ -2063,12 +2121,10 @@ impl Compositor {
             staged += v.len() as u64 * 4;
         }
 
-        // Programs, and the distance fields they read (max reach per field).
-        // Filled shapes stroke their outline (the effect shape); others estimate it.
-        let vector_shape = matches!(layer.content, LayerContent::Shape(_)) && photocraft_compose::effect_outline(layer).is_none();
-        let anchor = layer.effects.reference.unwrap_or((f64::from(f.bounds.x0), f64::from(f.bounds.y0)));
-        let progs: Vec<fx::MapProgram> =
-            layer.effects.items.iter().filter(|e| e.enabled()).map(|e| fx::program_with(e, &doc.global_light, vector_shape, &doc.patterns, anchor)).collect();
+        if e.compact {
+            // Kept or moved: the maps are as they were.
+            return;
+        }
         let want = field_reaches(&progs);
         e.fields.retain(|k, _| want.contains_key(k));
         for (&kind, &reach) in &want {
@@ -2191,6 +2247,17 @@ impl Compositor {
         }
         self.kit.run(device, queue, encoder, &draws);
     }
+}
+
+/// A hash of an effect shape's coverage (a compacted entry's stand-in for it).
+fn hash_shape(v: &[f32]) -> u64 {
+    use std::hash::Hasher;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    h.write_usize(v.len());
+    for x in v {
+        h.write_u32(x.to_bits());
+    }
+    h.finish()
 }
 
 /// A start time when `PHOTOCRAFT_FX_TRACE=1` (it prints the CPU time of effect shapes and

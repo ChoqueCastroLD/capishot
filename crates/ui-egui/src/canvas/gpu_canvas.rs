@@ -993,11 +993,19 @@ impl GpuCanvas {
             // (`Stale::blank`): everything else the view shows is drawn in this frame, so no
             // frame shows part of it at an older state. A Move drag on a slow GPU drew one piece
             // per frame and left the others at older offsets for the whole drag (vertical bands,
-            // 0.13.28). Without blank parts it is one composite, the lower-stack cache filled.
+            // 0.13.28). Without blank parts what the view shows is one composite, the lower-stack
+            // cache filled; the margin drawn ahead around it (not shown) goes in pieces within the
+            // frame's work too (a release of a 4000x6000 layer composited 6.5 MP, the view and its
+            // margin, in one frame: 5 s on lavapipe with 4 GB).
             let blank = self.blank_now(key, bounds);
             let mut later = later;
             let mut r: Result<photocraft_gpu::Stats, photocraft_gpu::Unsupported> = Ok(photocraft_gpu::Stats { level, ..Default::default() });
-            let parts = if blank.is_empty() { vec![now].into_iter().filter(|p| !p.is_empty()).collect() } else { pieces(now, n.visible) };
+            let parts: Vec<photocraft_geom::Rect> = if blank.is_empty() {
+                let shown = now.intersect(&n.visible);
+                std::iter::once(shown).filter(|p| !p.is_empty()).chain(subtract(now, n.visible).into_iter().flat_map(|m| pieces(m, n.visible))).collect()
+            } else {
+                pieces(now, n.visible)
+            };
             // A split refresh draws each piece once, as the catch-up does: no whole-chunk fill
             // of the lower-stack cache (it would read, and upload, far more than the piece).
             let whole = parts.len() <= 1;
@@ -1033,7 +1041,7 @@ impl GpuCanvas {
             let drag_ready = split.is_some();
             let composing = now_ms();
             for (i, p) in parts.into_iter().enumerate() {
-                if i > 0 && now_ms() - t0 >= frame_work_ms() && covered(p, &blank) {
+                if i > 0 && now_ms() - t0 >= frame_work_ms() && (covered(p, &blank) || p.intersect(&n.visible).is_empty()) {
                     later.push(p);
                     continue;
                 }
@@ -1257,9 +1265,19 @@ impl GpuCanvas {
         let mut more = false;
         for r in urgent {
             let level = if area(r) >= LOD_MIN_PX { need.level } else { 0 };
-            let parts = if blank.is_empty() { vec![r] } else { pieces(r, need.visible) };
+            // What the view shows goes whole; the margin drawn ahead around it (for a pan) and
+            // blank parts in pieces within the frame's work. The margin a drag's frames left for
+            // later went whole on the frame after (4-6.5 MP of a 4000x6000 page of 80 layers the
+            // view didn't show: 0.9-2.7 s on lavapipe, the press of the next drag).
+            let shown = r.intersect(&need.visible);
+            let parts: Vec<photocraft_geom::Rect> = if blank.is_empty() {
+                std::iter::once(shown).filter(|p| !p.is_empty()).chain(subtract(r, need.visible).into_iter().flat_map(|m| pieces(m, need.visible))).collect()
+            } else {
+                pieces(r, need.visible)
+            };
             'parts: for p in parts {
-                if out.px > 0 && now_ms() - t0 >= frame_work_ms() && covered(p, &blank) {
+                let waits = covered(p, &blank) || p.intersect(&need.visible).is_empty();
+                if out.px > 0 && now_ms() - t0 >= frame_work_ms() && waits {
                     more = true;
                     continue;
                 }
@@ -1273,7 +1291,7 @@ impl GpuCanvas {
                         let mut rest = p;
                         while cpu_rows(rest) != rest {
                             rest = photocraft_geom::Rect::new(rest.x0, cpu_rows(rest).y1, rest.x1, rest.y1);
-                            if covered(rest, &blank) {
+                            if covered(rest, &blank) || rest.intersect(&need.visible).is_empty() {
                                 more = true;
                                 continue 'parts;
                             }

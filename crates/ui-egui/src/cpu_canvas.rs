@@ -52,6 +52,9 @@ struct TileTex {
     dirty: Option<DRect>,
     /// Frame this tile was last drawn on screen.
     used: u64,
+    /// Drawn from a rebased Move split (`move_cpu::Split::rebase`): the document as it is, in 8
+    /// bits with type edges approximated; composited exactly once the edits pause.
+    approx: bool,
 }
 
 /// One document's CPU canvas on one display (lives in `canvas::CanvasCache`).
@@ -73,6 +76,9 @@ pub struct TileCanvas {
     move_split: Option<crate::move_cpu::Split>,
     /// The split made ahead (the Move tool, no drag) is ready for the view (tests).
     pub(crate) ahead_ready: bool,
+    /// When tiles drawn from a rebased split may be composited exactly (`now_ms`): once the
+    /// edits have paused this long.
+    refine_after: f64,
 }
 
 /// Missing tiles composited in the background: the canvas keeps drawing (other levels stand in)
@@ -275,6 +281,10 @@ const SPLIT_AHEAD_MS: f64 = 6.0;
 /// The budget of a drag frame for the split's sprite while it isn't ready (milliseconds).
 const DRAG_BAND_MS: f64 = 2.0;
 
+/// How long the edits must pause before tiles drawn from a rebased Move split are composited
+/// exactly (milliseconds): a drag that follows at once keeps the frame's time.
+const REFINE_AFTER_MS: f64 = 400.0;
+
 fn render_level(doc: &Document, source: Option<&Document>, f: i64, rects: &[DRect]) -> Vec<photocraft_compose::Buffer> {
     match source {
         Some(src) => photocraft_compose::render_rects(src, rects),
@@ -342,6 +352,7 @@ pub fn paint(
         .then(|| crate::move_ui::press_targets(app, idx))
         .filter(|ids| !ids.is_empty())
         .map(|ids| crate::move_cpu::Plan { base: doc.clone(), ids, doc: id, revision, offset: (0, 0) });
+    let released = app.cpu_released.take_if(|r| r.0 == id);
     let tex_budget = texture_budget(app);
     let mip_budget = mip_budget(app);
     let cache = app.canvases.entry(key).or_default();
@@ -357,6 +368,17 @@ pub fn paint(
     if move_plan.is_none() && ahead.is_none() {
         tc.move_split = None;
     }
+    // A drag this canvas showed was committed at the offset it showed: the split is rebased on
+    // the result and draws the release's tiles (`move_cpu::Split::rebase`), as the drag's frames
+    // were drawn; they are composited exactly once the edits pause.
+    // (The split checks itself that `doc` is its document with the run only shifted.)
+    let release_plan = released.and_then(|(_, ids, offset)| {
+        let split = tc.move_split.as_mut()?;
+        (split.moves(id, &ids, level) && split.rebase(&doc, revision, offset)).then(|| crate::move_cpu::Plan { base: doc.clone(), ids, doc: id, revision, offset: (0, 0) })
+    });
+    if move_plan.is_some() || release_plan.is_some() {
+        tc.refine_after = crate::gpu_canvas::now_ms() + REFINE_AFTER_MS;
+    }
     let now = (revision, preview_key ^ display_key);
     if tc.shown != Some(now) {
         tc.invalidate(if tc.shown.is_some() { damage } else { None });
@@ -368,11 +390,11 @@ pub fn paint(
             Ok(done) => {
                 if p.state == now && p.level == level {
                     for (k, held, img) in done {
-                        if tc.tiles.get(&k).is_some_and(|t| t.dirty.is_none() && t.held == held) {
+                        if tc.tiles.get(&k).is_some_and(|t| t.dirty.is_none() && t.held == held && !t.approx) {
                             continue;
                         }
                         let tex = ctx.load_texture(format!("cpu-tile-{}-{}-{}-{}-{}", id.0, key.1, k.level, k.tx, k.ty), img, TextureOptions::LINEAR);
-                        tc.tiles.insert(k, TileTex { tex, held, dirty: None, used: frame });
+                        tc.tiles.insert(k, TileTex { tex, held, dirty: None, used: frame, approx: false });
                     }
                 }
                 tc.pending = None;
@@ -406,6 +428,27 @@ pub fn paint(
                     }
                 }
             }
+        }
+    }
+    // Tiles drawn from a rebased split, composited exactly once the edits pause and the split
+    // for the next drag is made (as missing tiles are: on the worker pool, or in the frame's
+    // budget). Each replaces its tile whole.
+    let idle = move_plan.is_none()
+        && release_plan.is_none()
+        && stale.is_empty()
+        && missing.is_empty()
+        && (ahead.is_none() || tc.ahead_ready)
+        && !ctx.input(|i| i.pointer.any_down());
+    let approx: Vec<Job> = want
+        .iter()
+        .filter_map(|k| tc.tiles.get(k).filter(|t| t.approx).map(|t| Job::Full(*k, t.held)))
+        .collect();
+    if !approx.is_empty() {
+        let wait = tc.refine_after - crate::gpu_canvas::now_ms();
+        if !idle || wait > 0.0 {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait.max(16.0) / 1000.0));
+        } else if tc.pending.is_none() {
+            missing = approx;
         }
     }
     drop(setup);
@@ -481,7 +524,8 @@ pub fn paint(
         // A Move drag: only the moving layers are re-blended over cached composites (`move_cpu`).
         let mut split_bufs = None;
         let mut blits = None;
-        if let Some(plan) = move_plan.as_ref().filter(|_| faithful) {
+        let mut from_split = false;
+        if let Some(plan) = move_plan.as_ref().or(release_plan.as_ref()).filter(|_| faithful) {
             let held: Vec<(DRect, DRect)> = jobs
                 .iter()
                 .map(|j| match j {
@@ -522,6 +566,7 @@ pub fn paint(
             }
             if blits.is_some() || split_bufs.is_some() {
                 move_split_frames += 1;
+                from_split = true;
             }
         }
         let images: Vec<(DRect, egui::ColorImage)> = if let Some(b) = blits {
@@ -549,6 +594,7 @@ pub fn paint(
         };
         let c1 = crate::gpu_canvas::now_ms();
         composite_ms += c1 - c0;
+        let approx = release_plan.is_some() && from_split;
         for (job, (rect, img)) in jobs.into_iter().zip(images) {
             px += u64::from(rect.width()) * u64::from(rect.height());
             match job {
@@ -558,10 +604,11 @@ pub fn paint(
                             t.tex.set(img, TextureOptions::LINEAR);
                             t.held = held;
                             t.dirty = None;
+                            t.approx = approx;
                         }
                         _ => {
                             let tex = ctx.load_texture(format!("cpu-tile-{}-{}-{}-{}-{}", id.0, key.1, k.level, k.tx, k.ty), img, TextureOptions::LINEAR);
-                            tc.tiles.insert(k, TileTex { tex, held, dirty: None, used: frame });
+                            tc.tiles.insert(k, TileTex { tex, held, dirty: None, used: frame, approx });
                         }
                     }
                 }
@@ -571,6 +618,7 @@ pub fn paint(
                             t.tex.set_partial([(part.x0 - t.held.x0) as usize, (part.y0 - t.held.y0) as usize], img, TextureOptions::LINEAR);
                         }
                         t.dirty = None;
+                        t.approx |= approx;
                     }
                 }
             }
