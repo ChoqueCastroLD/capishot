@@ -37,6 +37,10 @@ await ctx.addInitScript(() => {
 });
 const p = await ctx.newPage();
 p.on('pageerror', (e) => console.log('PAGEERROR', e.message.slice(0, 200)));
+// The phones run on a page thread slowed down 6 times, as a weak phone's: what runs only when
+// frames are slow (the freeze reports, work spread over frames) is profiled too. A weak device's
+// first slow frame called into a chunk, loaded synchronously, the frame slower still.
+if (phone) await (await ctx.newCDPSession(p)).send('Emulation.setCPUThrottlingRate', { rate: 6 });
 await p.goto(url);
 await p.waitForFunction(() => self.photocraft && self.photocraft.request, null, { timeout: 300000 });
 const req = (m, pr = {}) => p.evaluate(([m, pr]) => self.photocraft.request(m, pr).then((r) => r, (e) => ({ err: String(e) })), [m, pr]);
