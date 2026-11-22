@@ -370,6 +370,29 @@ struct Kit {
     dummy: wgpu::TextureView,
 }
 
+/// Builds a compositor's pipelines ahead ([`Compositor::prebuild`]): they land in the cache the
+/// compositor reads, so its renders find them built.
+pub struct Prebuild {
+    kit: Kit,
+    acc_format: wgpu::TextureFormat,
+}
+
+impl Prebuild {
+    /// Build every kernel's pipeline not built yet: the compositing kernels for the accumulation
+    /// format, the effect-map kernels for both map formats. One a driver can't build is left for
+    /// the render that needs it (which then falls back as before). Returns how many are built.
+    pub fn run(&self, device: &wgpu::Device) -> usize {
+        let mut built = 0;
+        for k in Kernel::DRAWN {
+            let formats: &[wgpu::TextureFormat] = if k.is_map() { &[MAP32, MAP16] } else { std::slice::from_ref(&self.acc_format) };
+            for &f in formats {
+                built += usize::from(self.kit.pipeline(device, k, f).is_ok());
+            }
+        }
+        built
+    }
+}
+
 /// One draw of an effect-map kernel (outside the chunk loop).
 struct MapDraw {
     kernel: Kernel,
@@ -778,6 +801,19 @@ impl Compositor {
     pub fn warm(&self, device: &wgpu::Device, i: usize) -> Result<(), Unsupported> {
         let Some(&k) = [Kernel::Content, Kernel::Blend, Kernel::LayerBlend].get(i) else { return Ok(()) };
         self.kit.pipeline(device, k, self.acc_format).map(|_| ())
+    }
+
+    /// What builds every other pipeline this compositor (and its clones' renders) may draw with,
+    /// ahead of the renders that need them ([`Prebuild::run`], on a worker thread natively). Built
+    /// on first use instead, a page's first layer effect or adjustment held its frame while the
+    /// driver compiled the shader (D3D12: 0.3 to 2 s each on an integrated GPU).
+    pub fn prebuild(&self) -> Prebuild {
+        Prebuild { kit: self.kit.clone(), acc_format: self.acc_format }
+    }
+
+    /// How many pipelines are built (diagnostics and tests).
+    pub fn pipelines_built(&self) -> usize {
+        self.kit.pipelines.lock().unwrap_or_else(std::sync::PoisonError::into_inner).len()
     }
 
     /// Create a compositor whose accumulation/render-target format is `acc_format`. Pass

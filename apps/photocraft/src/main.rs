@@ -627,6 +627,9 @@ fn main() -> eframe::Result {
                     && std::env::var_os("PHOTOCRAFT_CPU_CANVAS").is_none()
                     && app.session.prefs().performance.effective_rendering_mode() != photocraft_engine::prefs::RenderingMode::Cpu
                 {
+                    // The compositor's shaders are built on a worker from here on, not on the
+                    // frame of the first page opened.
+                    photocraft_ui_egui::gpu_canvas::build_pipelines_ahead(true);
                     app.set_wgpu(rs);
                 } else {
                     // The window still draws with wgpu: record its errors instead of panicking,

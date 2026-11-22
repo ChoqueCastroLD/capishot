@@ -313,6 +313,10 @@ impl GpuCanvas {
         let health = watched.unwrap_or_else(|| photocraft_gpu::DeviceHealth::watch(&rs.device));
         let mut res = Resources::new(&rs.device, &rs.queue, rs.target_format, high != HighPolicy::Off);
         res.health = health.clone();
+        #[cfg(not(target_arch = "wasm32"))]
+        if PIPELINES_AHEAD.load(std::sync::atomic::Ordering::Relaxed) && rs.adapter.get_info().backend != wgpu::Backend::Gl {
+            res.building = build_ahead(rs);
+        }
         res.separate_mip_targets = rs.adapter.get_info().backend == wgpu::Backend::Dx12;
         let id = NEXT_CANVAS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         {
@@ -566,6 +570,22 @@ impl GpuCanvas {
         let now = now_ms();
         let mut renderer = self.rs.renderer.write();
         let Some(res) = renderer.callback_resources.canvas_mut(self.id) else { return false };
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(rx) = &res.building {
+            let got = rx.lock().unwrap_or_else(std::sync::PoisonError::into_inner).try_recv();
+            match got {
+                Err(std::sync::mpsc::TryRecvError::Empty) => return true,
+                Ok(Ok(comp)) => res.compositor = Some(comp),
+                Ok(Err(e)) => {
+                    log::warn!("{e}; using the CPU compositor");
+                    res.compositor_failed = Some(e);
+                }
+                // The worker died: the compositor is made on first use, as without it.
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {}
+            }
+            res.building = None;
+            return false;
+        }
         let Some(w) = res.warming.as_mut() else { return false };
         if !w.clock.due(now) {
             return true;
@@ -598,6 +618,12 @@ impl GpuCanvas {
         true
     }
 
+    /// Pipelines the compositor has built (`None` before it is made; tests and diagnostics).
+    pub fn pipelines_built(&self) -> Option<usize> {
+        let r = self.rs.renderer.read();
+        r.callback_resources.canvas(self.id)?.compositor.as_ref().map(photocraft_gpu::Compositor::pipelines_built)
+    }
+
     /// A WebGL pipeline took this long (ms, over [`SLOW_PIPELINE_MS`]) to build: the canvas
     /// stays on the CPU.
     pub fn slow_pipelines(&self) -> Option<f64> {
@@ -613,7 +639,7 @@ impl GpuCanvas {
         }
         let r = self.rs.renderer.read();
         let Some(res) = r.callback_resources.canvas(self.id) else { return false };
-        if res.compositor_failed.is_some() || res.warming.is_some() {
+        if res.compositor_failed.is_some() || res.warming.is_some() || res.building_ahead() {
             return false;
         }
         match &res.compositor {
@@ -739,6 +765,10 @@ impl GpuCanvas {
         // WebGL builds each pipeline as a program compiled and linked on the spot (seconds on a
         // weak GPU, and several in one frame made Chrome drop the context): they are built one
         // at a time in later frames (`warm_up`) and the CPU compositor draws until then.
+        #[cfg(not(target_arch = "wasm32"))]
+        if res.building.is_some() {
+            return Err(photocraft_gpu::Unsupported(WARMING_UP.into()));
+        }
         if res.compositor.is_none() && self.rs.adapter.get_info().backend == wgpu::Backend::Gl {
             if res.warming.is_none() {
                 let comp = {
@@ -2493,6 +2523,50 @@ pub const OVER_BUDGET: &str = "layers exceed the GPU memory budget; full refresh
 /// The canvas's GPU pipelines are still being built (WebGL): the CPU draws until then.
 pub const WARMING_UP: &str = "the GPU canvas is still getting ready; drawing on the CPU";
 
+#[cfg(not(target_arch = "wasm32"))]
+static PIPELINES_AHEAD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Natively: GPU canvases made from now on build the compositor (its shader module, then every
+/// pipeline it may draw with) on a worker thread as soon as they are made, and draw on the CPU
+/// compositor until it is ready ([`GpuCanvas::warm_up`] hands it over). Made on the frame that
+/// first needed it, its module and first pipelines held that frame 1.3 to 2.4 s on D3D12 (an RTX
+/// 3060 or 4050 laptop too, the first page opened), up to 19 s on an HD 520, and each pipeline
+/// built later held another frame. The app shells turn it on; off (the default), a library user
+/// that draws at once (tests, benches) builds them on first use.
+pub fn build_pipelines_ahead(on: bool) {
+    #[cfg(not(target_arch = "wasm32"))]
+    PIPELINES_AHEAD.store(on, std::sync::atomic::Ordering::Relaxed);
+    #[cfg(target_arch = "wasm32")]
+    let _ = on;
+}
+
+/// The compositor being made on a worker ([`build_ahead`]): a channel the canvas's resources
+/// (shared with the paint callback, so `Sync`) poll.
+#[cfg(not(target_arch = "wasm32"))]
+type Building = std::sync::Mutex<std::sync::mpsc::Receiver<Result<photocraft_gpu::Compositor, photocraft_gpu::Unsupported>>>;
+
+/// Start making `rs`'s compositor on a worker thread ([`build_pipelines_ahead`]); `None` when no
+/// thread can start (it is made on first use then).
+#[cfg(not(target_arch = "wasm32"))]
+fn build_ahead(rs: &RenderState) -> Option<Building> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (device, format) = (rs.device.clone(), photocraft_gpu::Compositor::preferred_acc_format(&rs.adapter));
+    std::thread::Builder::new()
+        .name("gpu-pipelines".into())
+        .spawn(move || {
+            let t0 = now_ms();
+            let comp = photocraft_gpu::Compositor::try_new_with_format(&device, format);
+            let rest = comp.as_ref().ok().map(photocraft_gpu::Compositor::prebuild);
+            let first = now_ms() - t0;
+            // The canvas can draw with the first ones while the rest are built.
+            let _ = tx.send(comp);
+            let n = rest.map_or(0, |p| p.run(&device));
+            log::info!("gpu canvas: compositor ready in {first:.0} ms, {n} pipelines in {:.0} ms", now_ms() - t0);
+        })
+        .ok()?;
+    Some(std::sync::Mutex::new(rx))
+}
+
 /// A WebGL pipeline that takes longer than this to build marks the GPU too slow for the canvas.
 pub const SLOW_PIPELINE_MS: f64 = 2000.0;
 
@@ -2731,6 +2805,11 @@ struct Resources {
     /// WebGL: the compositor while its first pipelines are built, one at a time in later frames
     /// ([`GpuCanvas::warm_up`]); the CPU compositor draws meanwhile.
     warming: Option<Warming>,
+    /// Natively, with [`build_pipelines_ahead`]: the compositor being made on a worker thread from
+    /// the canvas's creation (its module and first pipelines, then every other pipeline); the
+    /// CPU compositor draws until it arrives.
+    #[cfg(not(target_arch = "wasm32"))]
+    building: Option<Building>,
     /// WebGL: a pipeline took longer than [`SLOW_PIPELINE_MS`] to build (ms): the canvas stays
     /// on the CPU, and the app keeps it there on this device.
     slow_pipelines: Option<f64>,
@@ -2954,6 +3033,14 @@ fn pipeline(
 }
 
 impl Resources {
+    /// Whether the compositor is still being made on a worker thread ([`build_pipelines_ahead`]).
+    fn building_ahead(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        return self.building.is_some();
+        #[cfg(target_arch = "wasm32")]
+        false
+    }
+
     fn new(device: &wgpu::Device, queue: &wgpu::Queue, target: wgpu::TextureFormat, high: bool) -> Self {
         let module =
             device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("pc_canvas"), source: wgpu::ShaderSource::Wgsl(CANVAS_WGSL.into()) });
@@ -3094,6 +3181,8 @@ impl Resources {
             compositor: None,
             compositor_failed: None,
             warming: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            building: None,
             slow_pipelines: None,
             health: photocraft_gpu::DeviceHealth::new(),
             compositor_budget: None,
@@ -3878,6 +3967,8 @@ fn fs(in: V) -> @location(0) vec4<f32> {
 
 #[cfg(test)]
 mod mip_tests;
+#[cfg(test)]
+mod pipelines_ahead_tests;
 
 #[cfg(test)]
 mod tests {
