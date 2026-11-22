@@ -55,6 +55,10 @@ fn errors_carry_a_class_never_the_message() {
     assert_eq!(error_kind("unsupported: CMYK 32-bit"), "unsupported");
     assert_eq!(error_kind("no document open"), "no_document");
     assert_eq!(error_kind("radius must be between 0.1 and 1000"), "invalid_params");
+    // A click with no bubble under it, or a bubble over art: the page, not a failure.
+    assert_eq!(error_kind("noBubble (tooSmall): the bubble is too small"), "no_target");
+    assert_eq!(error_kind("noBubble (beyondWindow): no bubble found here: the light area reaches past the window"), "no_target");
+    assert_eq!(error_kind("notPlain: the background of this bubble is not plain"), "no_target");
     assert_eq!(error_kind("PSD: unexpected end of data"), "decode");
     assert_eq!(error_kind("the user cancelled"), "cancelled");
     assert_eq!(error_kind("“Remove with AI” is still running on this document; wait for it to finish or cancel it (Esc)"), "busy");

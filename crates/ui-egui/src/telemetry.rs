@@ -1075,6 +1075,10 @@ pub fn error_kind(message: &str) -> &'static str {
         "notextlayer:",
         "notext:",
         "nobubble:",
+        // Bubble Type and the Bubble Text Remover say why in brackets ("noBubble (tooSmall): …"),
+        // and a bubble over art or screentone is the page's state too.
+        "nobubble (",
+        "notplain:",
         "doesn't cover anything",
         "outside the canvas",
         "nothing is left around",
