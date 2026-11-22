@@ -828,20 +828,21 @@ fn with_text_layer<R>(s: &mut Session, p: &Value, label: &str, f: impl FnOnce(&m
     let id = layer_id(s, p)?;
     check_text_unlocked(&s.active().ok_or(EngineError::NoDocument)?.doc, id)?;
     let (r, damage) = s.edit(label, |doc, _| {
-        let (dpi, format) = (doc.resolution_dpi, doc.pixel_format());
+        let (dpi, format, canvas) = (doc.resolution_dpi, doc.pixel_format(), doc.bounds());
         let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
         let auto_named = is_auto_named(l);
+        let before = Rendering::of(l, canvas);
         let LayerContent::Text(t) = &mut l.content else {
             return Err(EngineError::Other(format!("layer {} is {} {} layer, not a type layer", id.0, l.content.article(), l.content.kind_name())));
         };
-        let before = t.cache.as_ref().map(|c| c.tile_bounds());
         let mut rename = None;
         let r = f(t, dpi, &mut rename)?;
         refresh_at(dpi, format, t);
-        // Only this layer's pixels changed: the canvas recomposites their old and new area
-        // instead of the whole document (#124). Unknown old pixels mean a full refresh.
-        let damage = before.zip(t.cache.as_ref().map(|c| c.tile_bounds())).map(|(a, b)| a.union(&b));
         let name = rename.or_else(|| auto_named.then(|| layer_name(&t.text)));
+        // Only this layer's pixels changed, and only where its new rendering differs from the
+        // old: the canvas recomposites that instead of the whole document (#124) or the layer's
+        // whole extent (a keystroke at the end of a line draws one more glyph).
+        let damage = before.damage(l, canvas);
         if let Some(n) = name {
             l.name = n;
         }
@@ -851,6 +852,36 @@ fn with_text_layer<R>(s: &mut Session, p: &Value, label: &str, f: impl FnOnce(&m
         s.hint_damage(d);
     }
     Ok(r)
+}
+
+/// A type layer's rendering before an edit draws it again, to tell what the edit changed.
+struct Rendering {
+    pixels: Option<photocraft_raster::Surface>,
+    /// The frame its effects are laid out over, when one of them spans it (a Gradient Overlay).
+    frame: Option<photocraft_geom::Rect>,
+}
+
+impl Rendering {
+    fn of(l: &Layer, canvas: photocraft_geom::Rect) -> Self {
+        let pixels = match &l.content {
+            LayerContent::Text(t) => t.cache.clone(),
+            _ => None,
+        };
+        Self { pixels, frame: photocraft_compose::effects::spans_frame(l).then(|| photocraft_compose::effects_frame(l, canvas)) }
+    }
+
+    /// The document pixels the layer's new rendering `l` changed: where its old and new pixels
+    /// differ (empty when they don't), or, when an effect laid out over the layer's frame saw
+    /// that frame move, all of the old and new frames. `None` when the old pixels or the new
+    /// aren't known (the whole document then).
+    fn damage(&self, l: &Layer, canvas: photocraft_geom::Rect) -> Option<photocraft_geom::Rect> {
+        let LayerContent::Text(t) = &l.content else { return None };
+        let changed = self.pixels.as_ref()?.diff_bounds(t.cache.as_ref()?)?;
+        match self.frame {
+            Some(old) if old != photocraft_compose::effects_frame(l, canvas) => Some(changed.union(&old).union(&photocraft_compose::effects_frame(l, canvas))),
+            _ => Some(changed),
+        }
+    }
 }
 
 /// Direct formatting follows the selected Type layers, while an explicit layer or character

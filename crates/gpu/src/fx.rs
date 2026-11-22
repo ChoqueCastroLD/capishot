@@ -561,18 +561,36 @@ pub(crate) fn snapshot(s: &Surface) -> Tiles {
     s.tiles().map(|(c, t)| (*c, t.clone())).collect()
 }
 
-/// Union of the tiles that differ between `old` and `s`.
+/// Where `layer`'s effect shape changed with one of its sources (content or mask, `s`, last seen
+/// as `old`): the pixels that differ ([`damage`]), grown by the mask's feather when `s` is the
+/// mask (the shape there is the mask blurred).
+pub(crate) fn source_damage(layer: &Layer, old: &Tiles, s: &Surface) -> Rect {
+    let d = damage(old, s);
+    let feather = layer.mask.as_ref().filter(|m| std::ptr::eq(&m.surface, s)).map_or(0.0, |m| m.feather);
+    if feather > 0.0 && !d.is_empty() { photocraft_vector::feather::grow(d, photocraft_vector::feather::feather_sigma(feather)) } else { d }
+}
+
+/// The pixels that differ between the tiles `old` and `s`: a tile drawn again counts only
+/// where its pixels changed (a type layer is rendered anew on every keystroke, one glyph more).
 pub(crate) fn damage(old: &Tiles, s: &Surface) -> Rect {
+    let (bpp, blank) = (s.format().bytes_per_pixel(), s.default_bytes());
     let mut d = Rect::EMPTY;
-    let mut add = |r: Rect| d = if d.is_empty() { r } else { d.union(&r) };
+    let mut add = |c: &TileCoord, b: Option<(u16, u16, u16, u16)>| {
+        if let Some((x0, y0, x1, y1)) = b {
+            let o = c.rect();
+            d = d.union(&Rect::new(x0.into(), y0.into(), x1.into(), y1.into()).translate(o.x0, o.y0));
+        }
+    };
     for (c, t) in s.tiles() {
-        if old.get(c).is_none_or(|o| !Arc::ptr_eq(o, t)) {
-            add(c.rect());
+        match old.get(c) {
+            Some(o) if Arc::ptr_eq(o, t) => {}
+            Some(o) => add(c, o.diff_bounds(t, bpp)),
+            None => add(c, t.content_bounds(blank)),
         }
     }
-    for c in old.keys() {
+    for (c, o) in old {
         if s.tile(*c).is_none() {
-            add(c.rect());
+            add(c, o.content_bounds(blank));
         }
     }
     d

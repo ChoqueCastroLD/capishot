@@ -167,7 +167,6 @@ fn free_caches(app: &mut PhotocraftApp, id: DocId) {
     }
     app.navigator_textures.remove(&id);
     app.navigator_pending.remove(&id);
-    app.navigator_damage.remove(&id);
     app.navigator_bands.remove(&id);
     app.navigator_gpu.remove(&id);
     app.display_memo.remove(&id);

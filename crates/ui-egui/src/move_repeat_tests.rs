@@ -19,7 +19,7 @@ use crate::canvas::ViewXform;
 type Harness = egui_kittest::Harness<'static, PhotocraftApp>;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Device {
+pub(crate) enum Device {
     Gpu,
     SlowGpu,
     LowMemoryGpu,
@@ -37,9 +37,9 @@ enum Page {
 }
 
 /// His file (read only: opened, never saved).
-const PSD: &str = "/root/capi-workers/naxu-psd/creditos villana.psd";
+pub(crate) const PSD: &str = "/root/capi-workers/naxu-psd/creditos villana.psd";
 
-fn harness(device: Device) -> Option<Harness> {
+pub(crate) fn harness(device: Device) -> Option<Harness> {
     std::panic::catch_unwind(move || {
         egui_kittest::Harness::builder()
             .with_size(egui::vec2(2300.0, 1400.0))
@@ -66,7 +66,7 @@ fn harness(device: Device) -> Option<Harness> {
     .ok()
 }
 
-fn layer_id(v: serde_json::Value) -> LayerId {
+pub(crate) fn layer_id(v: serde_json::Value) -> LayerId {
     LayerId(v["layer"].as_u64().expect("a layer id"))
 }
 
@@ -82,7 +82,7 @@ fn fill(app: &mut PhotocraftApp, rect: [i32; 4], color: &str) {
 }
 
 /// A new layer of uneven colour stripes over `w` x `h`, transparent gaps between. Its id.
-fn stripes(app: &mut PhotocraftApp, name: &str, w: i32, h: i32, seed: i32) -> LayerId {
+pub(crate) fn stripes(app: &mut PhotocraftApp, name: &str, w: i32, h: i32, seed: i32) -> LayerId {
     app.run("layer.new.layer", json!({"name": name})).expect("a layer");
     app.session
         .edit("stripes", |doc, a| {
@@ -104,7 +104,7 @@ fn stripes(app: &mut PhotocraftApp, name: &str, w: i32, h: i32, seed: i32) -> La
 }
 
 /// Type with Outer Glow, Gradient Overlay and Stroke, as his "capitulo 1".
-fn styled_text(app: &mut PhotocraftApp, x: u32, y: u32, text: &str, size: u32) -> LayerId {
+pub(crate) fn styled_text(app: &mut PhotocraftApp, x: u32, y: u32, text: &str, size: u32) -> LayerId {
     let l = layer_id(app.run("type.create", json!({"x": x, "y": y, "text": text, "size": size, "color": "#ffffff"})).expect("type"));
     app.run("layer.layerStyle.outerGlow", json!({"layer": l.0})).expect("outer glow");
     app.run("layer.layerStyle.gradientOverlay", json!({"layer": l.0, "from": "#e0e0e0", "to": "#808080"})).expect("gradient overlay");
@@ -228,6 +228,31 @@ fn psd(app: &mut PhotocraftApp) -> Option<Targets> {
     Some(Targets { text, shape, smart, bottom })
 }
 
+/// Waits for the GPU compositor to warm up and draw the active document (a GPU device only).
+/// False, with a note, when it doesn't draw here: the caller skips.
+pub(crate) fn gpu_drawing(h: &mut Harness, device: Device) -> bool {
+    let doc_id = h.state().session.active().expect("doc").doc.id;
+    for _ in 0..600 {
+        let Some(g) = h.state().gpu.clone() else { break };
+        let doc = h.state().session.active().expect("doc").doc.clone();
+        if g.supports(&doc) {
+            if !h.state().perf.last_refresh.starts_with("gpu") {
+                g.evict(doc_id.0);
+                h.run_steps(4);
+            }
+            break;
+        }
+        g.warm_up();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        h.step();
+    }
+    if device != Device::Cpu && !h.state().perf.last_refresh.starts_with("gpu") {
+        eprintln!("skipping: the GPU compositor isn't drawing here ({})", h.state().perf.last_refresh);
+        return false;
+    }
+    true
+}
+
 pub(crate) fn screen(h: &Harness, x: f32, y: f32) -> egui::Pos2 {
     ViewXform::active(h.state()).expect("a view").to_screen(x, y)
 }
@@ -284,7 +309,7 @@ fn mismatch(h: &mut Harness, want: &[[u8; 4]], region: Rect, pointer: egui::Pos2
     bad as f64 / n.max(1) as f64
 }
 
-fn pct(v: &[f64], p: f64) -> f64 {
+pub(crate) fn pct(v: &[f64], p: f64) -> f64 {
     let mut v = v.to_vec();
     v.sort_by(f64::total_cmp);
     v.get(((v.len() as f64 - 1.0) * p).round() as usize).copied().unwrap_or(0.0)
@@ -344,23 +369,7 @@ fn repeat(device: Device, page: Page, rounds: usize, moves: i32, rest: bool) -> 
     let (req, _rx) = crate::control::ControlRequest::new("ui.set", json!({"zoom": 1.0, "center": center}));
     crate::control::handle(h.state_mut(), &ctx, &req);
     h.run_steps(20);
-    let doc_id = h.state().session.active().expect("doc").doc.id;
-    for _ in 0..600 {
-        let Some(g) = h.state().gpu.clone() else { break };
-        let doc = h.state().session.active().expect("doc").doc.clone();
-        if g.supports(&doc) {
-            if !h.state().perf.last_refresh.starts_with("gpu") {
-                g.evict(doc_id.0);
-                h.run_steps(4);
-            }
-            break;
-        }
-        g.warm_up();
-        std::thread::sleep(std::time::Duration::from_millis(5));
-        h.step();
-    }
-    if device != Device::Cpu && !h.state().perf.last_refresh.starts_with("gpu") {
-        eprintln!("skipping: the GPU compositor isn't drawing here ({})", h.state().perf.last_refresh);
+    if !gpu_drawing(&mut h, device) {
         return None;
     }
     // Settle (the page drawn in full, nothing left to refine), then go: no idle frame from here.

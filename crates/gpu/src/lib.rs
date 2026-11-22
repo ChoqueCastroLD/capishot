@@ -267,7 +267,8 @@ impl Tex {
             r.width(),
             r.height(),
             format,
-            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            // Copied from too: an effect region that grows keeps the maps it shares ([`FxEntry::resize`]).
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
         )
     }
     /// Upload R32F values (row-major over `r`) into this region-space texture at `r`.
@@ -331,6 +332,94 @@ struct FxEntry {
 }
 
 impl FxEntry {
+    /// Move to `region` (the layer's pixels grew or shrank: type, each keystroke), keeping
+    /// everything the old and new regions share: the shape, the distance fields and the maps are
+    /// copied into textures of the new size. Returns the kept part; the rest of `region` is left
+    /// for the caller to compute.
+    fn resize(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, region: Rect) -> Rect {
+        let (old, kept) = (self.region, self.region.intersect(&region));
+        // Its own submission: the shape and fields are then written through the queue, which
+        // lands before anything recorded in the frame's encoder; a copy recorded there would
+        // overwrite what was written over the kept part.
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("pc_fx_keep") });
+        let mut moved = |from: &Tex, label: &str, format: wgpu::TextureFormat| {
+            let to = Tex::map(device, label, region, format);
+            if !kept.is_empty() {
+                encoder.copy_texture_to_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &from.texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d { x: (kept.x0 - old.x0) as u32, y: (kept.y0 - old.y0) as u32, z: 0 },
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &to.texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d { x: (kept.x0 - region.x0) as u32, y: (kept.y0 - region.y0) as u32, z: 0 },
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    wgpu::Extent3d { width: kept.width(), height: kept.height(), depth_or_array_layers: 1 },
+                );
+            }
+            to
+        };
+        self.shape = moved(&self.shape, "pc_fx_shape", MAP32);
+        for (_, t) in self.fields.values_mut() {
+            *t = moved(t, "pc_fx_field", MAP32);
+        }
+        for p in &mut self.progs {
+            for m in p.maps.iter_mut().flatten() {
+                *m = moved(m, "pc_fx_map", MAP16);
+            }
+        }
+        queue.submit([encoder.finish()]);
+        let (w, ow) = (region.width() as usize, old.width() as usize);
+        let mut shape = vec![0.0; w * region.height() as usize];
+        if !kept.is_empty() {
+            let n = kept.width() as usize;
+            for y in kept.y0..kept.y1 {
+                let from = (y - old.y0) as usize * ow + (kept.x0 - old.x0) as usize;
+                let to = (y - region.y0) as usize * w + (kept.x0 - region.x0) as usize;
+                if let (Some(src), Some(dst)) = (self.shape_cpu.get(from..from + n), shape.get_mut(to..to + n)) {
+                    dst.copy_from_slice(src);
+                }
+            }
+        }
+        self.shape_cpu = shape;
+        self.region = region;
+        kept
+    }
+
+    /// Whether [`Self::grow_to`] can keep this entry's maps for the shape sources `now`: it
+    /// has its CPU shape and distance fields, and the same sources as when it was made.
+    fn can_grow(&self, now: [Option<&photocraft_raster::Surface>; 2]) -> bool {
+        !self.compact && self.tiles.iter().zip(now).all(|(o, c)| o.is_some() == c.is_some())
+    }
+
+    /// [`Self::resize`] to `region`, and what is left to compute there: the pixels of the shape
+    /// sources `now` (content, mask) that changed since the maps were made, and what the new
+    /// region adds around the part kept.
+    fn grow_to(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, layer: &Layer, now: [Option<&photocraft_raster::Surface>; 2], region: Rect) -> Rect {
+        let kept = self.resize(device, queue, region);
+        let mut damage = Rect::EMPTY;
+        for (old, cur) in self.tiles.iter().zip(now) {
+            if let (Some(o), Some(s)) = (old, cur) {
+                damage = damage.union(&fx::source_damage(layer, o, s));
+            }
+        }
+        for r in [
+            Rect::new(region.x0, region.y0, region.x1, kept.y0),
+            Rect::new(region.x0, kept.y1, region.x1, region.y1),
+            Rect::new(region.x0, kept.y0, kept.x0, kept.y1),
+            Rect::new(kept.x1, kept.y0, region.x1, kept.y1),
+        ] {
+            if r.x0 < r.x1 && r.y0 < r.y1 {
+                damage = damage.union(&r);
+            }
+        }
+        damage.intersect(&region)
+    }
+
     /// Let go of what only building the maps again needs (the CPU shape, the distance fields),
     /// keeping what draws (the shape texture and the maps). Returns the bytes freed.
     fn compact(&mut self) -> usize {
@@ -2086,7 +2175,7 @@ impl Compositor {
         {
             for (old, cur) in e.tiles.iter().zip([content_src, mask_src]) {
                 let d = match (old, cur) {
-                    (Some(o), Some(s)) => fx::damage(o, s),
+                    (Some(o), Some(s)) => fx::source_damage(layer, o, s),
                     (None, None) => Rect::EMPTY,
                     // A source appeared or vanished (the key changes with it too).
                     _ => region,
@@ -2110,6 +2199,19 @@ impl Compositor {
                 e.region = region;
                 rebuild = false;
             }
+        }
+        // The region grew or shrank with the layer's own pixels (a keystroke adds a glyph): what
+        // both regions share is kept; what changed in it and what the new region adds are
+        // computed. Built again whole, every keystroke recomputed the shape and the distance
+        // fields of the whole line on the CPU.
+        if rebuild
+            && let Some(old) = prev
+            && !region.is_empty()
+            && !old.intersect(&region).is_empty()
+            && let Some(e) = self.fx.get_mut(&key).filter(|e| e.can_grow([content_src, mask_src]))
+        {
+            damage = e.grow_to(device, queue, layer, [content_src, mask_src], region);
+            rebuild = false;
         }
         if rebuild {
             FX_BUILDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

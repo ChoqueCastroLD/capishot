@@ -361,3 +361,32 @@ fn painting_command_hints_cover_their_changed_tiles() {
         assert!(unchanged_outside(&before, &doc(&s), d), "{cmd}: pixels changed outside {d:?}");
     }
 }
+
+/// Typing at the end of a line draws one more glyph: the damage is that glyph and its stroke, not
+/// the whole line (each keystroke recomposited the layer's whole extent, rounded out to tiles).
+/// With a Gradient Overlay laid over the layer's frame, a frame that grows repaints all of it.
+#[test]
+fn typing_at_the_end_of_a_line_damages_the_new_glyph_not_the_line() {
+    let mut s = session(1800, 500);
+    let text = "UNA LÍNEA BASTANTE LARGA DE TEXTO";
+    let ty = s.execute("type.create", json!({"x": 40, "y": 250, "text": text, "size": 48})).unwrap()["layer"].as_u64().unwrap();
+    s.execute("layer.layerStyle.stroke", json!({"layer": ty, "size": 4})).unwrap();
+    let line = |d: &Document| photocraft_compose::change_bounds(d.layer(LayerId(ty)).unwrap(), d.bounds()).unwrap();
+    let before = doc(&s);
+    let end = text.chars().count();
+    s.execute("type.edit", json!({"layer": ty, "replace": {"start": end, "end": end, "text": "S"}})).unwrap();
+    assert_eq!(s.damage_misses, 0);
+    let d = damage(&s).expect("a bounded keystroke");
+    assert!(unchanged_outside(&before, &doc(&s), d), "pixels changed outside {d:?}");
+    assert!(d.width() * 5 < line(&doc(&s)).width(), "the damage {d:?} is the new glyph, not the line {:?}", line(&doc(&s)));
+    // A space draws nothing.
+    s.execute("type.edit", json!({"layer": ty, "replace": {"start": end + 1, "end": end + 1, "text": " "}})).unwrap();
+    assert_eq!(damage(&s), Some(Rect::EMPTY));
+    s.execute("layer.layerStyle.gradientOverlay", json!({"layer": ty})).unwrap();
+    let before = doc(&s);
+    s.execute("type.edit", json!({"layer": ty, "replace": {"start": end + 2, "end": end + 2, "text": "X"}})).unwrap();
+    assert_eq!(s.damage_misses, 0);
+    let d = damage(&s).expect("a bounded keystroke");
+    assert!(unchanged_outside(&before, &doc(&s), d), "the gradient changed outside {d:?}");
+    assert!(d.contains_rect(&line(&before)), "the whole frame: {d:?}");
+}

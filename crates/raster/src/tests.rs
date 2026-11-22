@@ -977,6 +977,26 @@ fn content_bounds_with_tile_skipping() {
     assert_eq!(s.content_bounds(), Rect::new(-700, 0, 2000, 4001));
 }
 
+#[test]
+fn diff_bounds_finds_exactly_the_pixels_that_changed() {
+    let mut a = Surface::new(PixelFormat::RGBA8);
+    a.fill_rect(Rect::new(10, 20, 600, 90), &[0.2, 0.3, 0.4, 1.0]);
+    assert_eq!(a.diff_bounds(&a.clone()), Some(Rect::EMPTY), "shared tiles");
+    // Drawn again from scratch (no tile shared), one glyph more: only that glyph.
+    let mut b = Surface::new(PixelFormat::RGBA8);
+    b.fill_rect(Rect::new(10, 20, 600, 90), &[0.2, 0.3, 0.4, 1.0]);
+    assert_eq!(a.diff_bounds(&b), Some(Rect::EMPTY), "the same pixels in other tiles");
+    b.fill_rect(Rect::new(600, 30, 640, 80), &[0.9, 0.1, 0.1, 1.0]);
+    assert_eq!(a.diff_bounds(&b), Some(Rect::new(600, 30, 640, 80)));
+    assert_eq!(b.diff_bounds(&a), Some(Rect::new(600, 30, 640, 80)), "either way");
+    // A tile only one side has, against the other's default pixel; a tile row below.
+    b.fill_rect(Rect::new(-300, 700, -290, 705), &[1.0, 1.0, 1.0, 1.0]);
+    assert_eq!(a.diff_bounds(&b), Some(Rect::new(-300, 30, 640, 705)));
+    let other = Surface::with_default(PixelFormat::RGBA8, &[1.0, 1.0, 1.0, 1.0]);
+    assert_eq!(a.diff_bounds(&other), None, "another default pixel");
+    assert_eq!(a.diff_bounds(&Surface::new(PixelFormat::GRAY8)), None, "another format");
+}
+
 /// Large regions read and write their tiles in parallel (tile-row bands, tiles taken out and
 /// put back): every value, every tile and every shared tile must be what row-by-row (serial)
 /// calls leave, for every depth, a non-zero default pixel, missing and shared tiles.

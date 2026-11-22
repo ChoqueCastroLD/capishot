@@ -55,6 +55,8 @@ impl PerfCounters {
             ("crop_beyond_async", self.crop_beyond_async),
             ("chrome_reused", self.chrome_reused),
             ("frames", self.frames),
+            // Process-wide (the type engine is shared): read as differences like the rest.
+            ("layouts", photocraft_text::layouts()),
         ]
     }
 }

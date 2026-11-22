@@ -68,6 +68,10 @@ pub fn rect_to(sink: &mut impl LineSink, xf: &Xform, x0: f64, y0: f64, x1: f64, 
     }
 }
 
+/// Cells after each accumulator row: a segment at the row's right edge spills its remainder
+/// into the next two cells, which then belong to that row alone.
+const ROW_PAD: usize = 2;
+
 /// Coverage accumulation buffer of `width × height` pixels.
 pub struct Coverage {
     pub width: usize,
@@ -78,7 +82,7 @@ pub struct Coverage {
 impl Coverage {
     /// A zeroed accumulator, or `None` when its bytes cannot be reserved.
     pub fn try_new(width: usize, height: usize) -> Option<Self> {
-        let n = width.checked_mul(height)?.checked_add(2)?;
+        let n = width.checked_add(ROW_PAD)?.checked_mul(height)?;
         let mut acc = Vec::new();
         acc.try_reserve_exact(n).ok()?;
         acc.resize(n, 0.0);
@@ -107,7 +111,7 @@ impl Coverage {
             x -= y0 * dxdy;
         }
         let ye = y1.min(h);
-        let stride = self.width;
+        let stride = self.width + ROW_PAD;
         let mut y = ys;
         let mut row = ys.floor() as usize;
         while y < ye {
@@ -159,10 +163,15 @@ impl Coverage {
         let n = self.width * self.height;
         let mut out = Vec::new();
         out.try_reserve_exact(n).ok()?;
-        let mut sum = 0.0f32;
-        for v in &self.acc[..n] {
-            sum += v;
-            out.push(sum.abs().min(1.0));
+        // Each row sums on its own, from zero: with one running sum over the whole buffer, a
+        // row's rounding error carried into every row after it, so drawing the same glyphs in a
+        // wider or taller buffer (one more letter typed) changed pixels anywhere by a level.
+        for row in self.acc.chunks_exact(self.width + ROW_PAD) {
+            let mut sum = 0.0f32;
+            for v in &row[..self.width] {
+                sum += v;
+                out.push(sum.abs().min(1.0));
+            }
         }
         Some(out)
     }

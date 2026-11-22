@@ -42,12 +42,11 @@ fn a_history_jump_redraws_in_bands_within_the_frame_budget() {
     let (mut app, ctx) = app();
     super::navigator_texture(&mut app, &ctx, 0).unwrap();
     let full = app.perf_counters.navigator_full;
-    // An edit whose area isn't known (several revisions in one step): a whole new image.
+    // An edit whose area isn't known: a whole new image.
     app.run("select.rect", json!({"x": 10, "y": 10, "width": 40, "height": 40})).unwrap();
     app.run("edit.fill", json!({"color": "#ff0000"})).unwrap();
     app.sync_views();
-    let id = app.session.active().unwrap().doc.id;
-    app.navigator_damage.get_mut(&id).unwrap().area = None;
+    app.session.active_mut().unwrap().last_damage = None;
     let mut frames = 0;
     loop {
         let t0 = std::time::Instant::now();

@@ -170,6 +170,27 @@ impl Tile {
     }
 }
 
+impl Tile {
+    /// Tile-local half-open bounds `(x0, y0, x1, y1)` of the pixels that differ between this
+    /// tile and `other` (a tile of the same format), or `None` when they are the same.
+    pub fn diff_bounds(&self, other: &Tile, bpp: usize) -> Option<(u16, u16, u16, u16)> {
+        if bpp == 0 || self.data.len() != other.data.len() {
+            return None;
+        }
+        let row = TILE_SIZE as usize * bpp;
+        let (mut x0, mut y0, mut x1, mut y1) = (usize::MAX, usize::MAX, 0usize, 0usize);
+        for (y, (a, b)) in self.data.chunks_exact(row).zip(other.data.chunks_exact(row)).enumerate() {
+            let Some(first) = first_difference(a, b) else { continue };
+            let Some(last) = last_difference(a, b) else { continue };
+            x0 = x0.min(first / bpp);
+            x1 = x1.max(last / bpp + 1);
+            y0 = y0.min(y);
+            y1 = y + 1;
+        }
+        (x0 != usize::MAX).then_some((x0 as u16, y0 as u16, x1 as u16, y1 as u16))
+    }
+}
+
 /// Bytes compared at once while looking for a difference in a tile row.
 const DIFF_BLOCK: usize = 64;
 
@@ -597,6 +618,37 @@ impl Surface {
     /// Coarse bounds: union of allocated tile rects.
     pub fn tile_bounds(&self) -> Rect {
         self.tiles.keys().fold(Rect::EMPTY, |r, c| r.union(&c.rect()))
+    }
+
+    /// Exact bounds of the pixels that differ between this surface and `other`: empty when they
+    /// read the same everywhere. Tiles they share are skipped; a tile only one has is compared
+    /// with the other's default pixel. `None` when their formats or default pixels differ (every
+    /// pixel may).
+    pub fn diff_bounds(&self, other: &Surface) -> Option<Rect> {
+        if self.format != other.format || self.default_pixel != other.default_pixel {
+            return None;
+        }
+        let bpp = self.format.bytes_per_pixel();
+        let mut out = Rect::EMPTY;
+        let mut add = |c: &TileCoord, b: Option<(u16, u16, u16, u16)>| {
+            if let Some((x0, y0, x1, y1)) = b {
+                let r = Rect::new(x0.into(), y0.into(), x1.into(), y1.into()).translate(c.rect().x0, c.rect().y0);
+                out = if out.is_empty() { r } else { out.union(&r) };
+            }
+        };
+        for (c, a) in &self.tiles {
+            match other.tiles.get(c) {
+                Some(b) if Arc::ptr_eq(a, b) => {}
+                Some(b) => add(c, a.diff_bounds(b, bpp)),
+                None => add(c, a.content_bounds(&self.default_pixel)),
+            }
+        }
+        for (c, b) in &other.tiles {
+            if !self.tiles.contains_key(c) {
+                add(c, b.content_bounds(&other.default_pixel));
+            }
+        }
+        Some(out)
     }
 
     /// Exact bounds of pixels that differ from the default pixel.

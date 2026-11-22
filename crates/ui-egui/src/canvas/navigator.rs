@@ -34,49 +34,6 @@ pub fn navigator_waits_for_gpu(_app: &PhotocraftApp, _idx: usize, _ctx: &egui::C
     false
 }
 
-/// What changed in a document since the Navigator's image of it: the revision that image shows
-/// (`base`), the last revision seen (`seen`) and the area the edits between them changed (`None`:
-/// not known, the whole image). Kept by [`navigator_track`] every frame, so an edit that takes
-/// several revisions (a Move commits its drag in two or three steps) still updates only the area
-/// it touched; with the last edit's damage alone, it recomposited the whole document on the UI
-/// thread, hundreds of milliseconds on a large page in the browser.
-pub(crate) struct NavigatorDamage {
-    base: u64,
-    seen: u64,
-    area: Option<DRect>,
-}
-
-/// Every frame: note each document's edits since the Navigator's image (see [`NavigatorDamage`]).
-pub(crate) fn navigator_track(app: &mut PhotocraftApp) {
-    for st in app.session.documents() {
-        let Some(d) = app.navigator_damage.get_mut(&st.doc.id) else { continue };
-        if d.seen == st.revision {
-            continue;
-        }
-        d.area = match (d.area, st.last_damage) {
-            (Some(a), Some(b)) if d.seen + 1 == st.revision => Some(union(a, b)),
-            _ => None,
-        };
-        d.seen = st.revision;
-    }
-}
-
-fn union(a: DRect, b: DRect) -> DRect {
-    if a.is_empty() {
-        b
-    } else if b.is_empty() {
-        a
-    } else {
-        a.union(&b)
-    }
-}
-
-/// The area to update in the Navigator's image of `id`, at revision `base`, to show `revision`:
-/// `None` when only a whole new image will do.
-fn navigator_damage(app: &PhotocraftApp, id: photocraft_doc::DocId, base: u64, revision: u64) -> Option<DRect> {
-    app.navigator_damage.get(&id).filter(|d| d.base == base && d.seen == revision).and_then(|d| d.area)
-}
-
 /// A Navigator image being brought up to date a band of rows per frame (an edit's area, or the
 /// whole image on the page of the single-threaded build, where no worker can take it): the image
 /// keeps what it showed until each band is redrawn, and no frame spends more than
@@ -110,8 +67,7 @@ type NavigatorUpdate = (Option<[usize; 2]>, egui::ColorImage);
 
 pub fn navigator_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize) -> Option<egui::TextureId> {
     // Keyed by the document snapshot, not its revision: selecting a layer changes no pixels.
-    let (snapshot, id, revision, last_damage) =
-        app.session.documents().get(idx).map(|st| (std::sync::Arc::downgrade(&st.doc), st.doc.id, st.revision, st.last_damage))?;
+    let (snapshot, id, revision) = app.session.documents().get(idx).map(|st| (std::sync::Arc::downgrade(&st.doc), st.doc.id, st.revision))?;
     // While a gesture on the canvas is under way the Navigator keeps its image: nothing a panel
     // shows may cost a frame of the drag (it catches up on release). Before anything else, even
     // the document it would show (during a Move, the drag's preview).
@@ -146,8 +102,9 @@ pub fn navigator_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usiz
     // for a rename, a selection or a new empty layer). A thumbnail composite of the whole
     // document on every edit cost a full-resolution CPU composite on the UI thread.
     let size = photocraft_compose::thumbnail_size(&doc, NAVIGATOR_SIDE);
-    let tracked = cached.as_ref().and_then(|(_, _, rev, _)| navigator_damage(app, id, *rev, revision));
-    let damage = tracked.or(last_damage.filter(|_| cached.as_ref().is_some_and(|(_, _, rev, _)| rev.checked_add(1) == Some(revision))));
+    // Every edit since the image's revision, however many: a Move commits its drag in two or
+    // three steps, and with the last one's area alone the whole document was composited again.
+    let damage = cached.as_ref().and_then(|(_, _, rev, _)| app.session.documents().get(idx)?.damage_since(*rev));
     // No pixel changed since the image's state (a layer selected, a rename, a selection): there
     // is nothing to draw, whatever the revisions say.
     let damage = damage.or_else(|| {
@@ -161,7 +118,6 @@ pub fn navigator_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usiz
         && let Some((_, _, _, t)) = &cached
     {
         app.navigator_textures.insert(id, (snapshot, preview_key, revision, t.clone()));
-        shown(app, id, revision);
         return Some(t.id());
     }
     // The image is there at this size and preview, on the single-threaded build: update the area
@@ -190,7 +146,6 @@ pub fn navigator_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usiz
                 t.set_partial(at, part, TextureOptions::LINEAR);
                 app.perf.span("navigator", crate::gpu_canvas::now_ms() - t0);
                 app.navigator_textures.insert(id, (snapshot, preview_key, revision, t.clone()));
-                shown(app, id, revision);
                 return Some(t.id());
             }
             Some(Some((None, image))) => {
@@ -243,13 +198,7 @@ pub fn navigator_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usiz
     };
     app.perf.span("navigator", crate::gpu_canvas::now_ms() - t0);
     app.navigator_textures.insert(id, (snapshot, preview_key, revision, tex.clone()));
-    shown(app, id, revision);
     Some(tex.id())
-}
-
-/// The Navigator's image of `id` now shows `revision`: edits are tracked from there.
-fn shown(app: &mut PhotocraftApp, id: photocraft_doc::DocId, revision: u64) {
-    app.navigator_damage.insert(id, NavigatorDamage { base: revision, seen: revision, area: Some(DRect::EMPTY) });
 }
 
 /// Whole Navigator images are composited off the UI thread where there is another one.
@@ -304,7 +253,6 @@ fn navigator_bands(
     }
     if bands.next >= region.y1 {
         app.navigator_textures.insert(id, (snapshot, key, bands.revision, t.clone()));
-        shown(app, id, bands.revision);
     } else {
         app.navigator_bands.insert(id, bands);
         ctx.request_repaint();

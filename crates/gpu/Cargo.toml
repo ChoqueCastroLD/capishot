@@ -15,6 +15,8 @@ photocraft-raster = { workspace = true }
 photocraft-doc = { workspace = true }
 photocraft-compose = { workspace = true }
 photocraft-algo = { workspace = true }
+# A feathered mask's reach (effect damage).
+photocraft-vector = { workspace = true }
 bytemuck = { workspace = true }
 # Same major version as eframe's wgpu so the app's device can be shared.
 wgpu = { version = "30", default-features = false, features = ["std", "wgsl"] }
@@ -27,8 +29,6 @@ rayon = { workspace = true }
 [dev-dependencies]
 wgpu = { version = "30" }
 pollster = "1"
-# Shape layers in the effect parity tests.
-photocraft-vector = { workspace = true }
 
 # The browser threads build (wasm with `atomics`, packaging/web-threads) takes the rayon paths too.
 [target.'cfg(all(target_arch = "wasm32", target_feature = "atomics"))'.dependencies]

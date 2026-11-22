@@ -60,7 +60,6 @@ impl PhotocraftApp {
             canvases: HashMap::new(),
             navigator_textures: HashMap::new(),
             navigator_pending: HashMap::new(),
-            navigator_damage: HashMap::new(),
             navigator_bands: HashMap::new(),
             typer_page: None,
             display_memo: HashMap::new(),

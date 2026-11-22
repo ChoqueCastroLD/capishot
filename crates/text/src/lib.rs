@@ -30,6 +30,7 @@ pub mod hyphen;
 /// Type in a path (`TextShape::InPath`): Capishot's own, with an inset and vertical alignment.
 pub mod in_path;
 pub mod layout;
+mod layout_memo;
 pub mod optical;
 pub mod psd;
 mod psd_path;
@@ -50,7 +51,7 @@ pub use craft_fonts::{CRAFT_FONTS, CraftFont};
 pub use font_class::{FamilyTraits, FontClass, FontFormat};
 pub use fonts::{FaceInfo, FontDb, ResolvedFont};
 pub use layout::{
-    ClusterInfo, LineInfo, PlacedGlyph, TextLayout, byte_index, char_index, hit_char, line_edge, line_index, line_step, text_point_inside, word_boundary,
+    ClusterInfo, LineInfo, PlacedGlyph, TextLayout, byte_index, char_index, hit_char, layouts, line_edge, line_index, line_step, text_point_inside, word_boundary,
 };
 pub use render::Rendered;
 
@@ -58,6 +59,8 @@ pub use render::Rendered;
 pub struct TextEngine {
     pub fonts: FontDb,
     layouter: layout::Layouter,
+    /// The layouts made last ([`layout_memo`]): asked again for an unchanged layer, a copy.
+    memo: layout_memo::Memo,
 }
 
 impl Default for TextEngine {
@@ -102,17 +105,19 @@ pub fn fit_perspective(layout: &TextLayout, layer: &mut TextLayer) -> bool {
 impl TextEngine {
     /// Bundled fonts only: deterministic output (tests, web).
     pub fn new() -> Self {
-        Self { fonts: FontDb::new(), layouter: layout::Layouter::new() }
+        Self { fonts: FontDb::new(), layouter: layout::Layouter::new(), memo: Default::default() }
     }
 
     /// Bundled plus installed system fonts (native desktop).
     pub fn with_system_fonts() -> Self {
-        Self { fonts: FontDb::with_system_fonts(), layouter: layout::Layouter::new() }
+        Self { fonts: FontDb::with_system_fonts(), layouter: layout::Layouter::new(), memo: Default::default() }
     }
 
     /// Lays out a text layer (text space: pixels, before `layer.transform`).
+    /// A layer laid out again with nothing it depends on changed is a copy of the last layout.
     pub fn layout(&mut self, layer: &TextLayer, dpi: f32) -> TextLayout {
-        self.layouter.layout(&mut self.fonts, layer, dpi)
+        let layouter = &mut self.layouter;
+        self.memo.get(&mut self.fonts, layer, dpi, |fonts| layouter.layout(fonts, layer, dpi))
     }
 
     /// Kerning (1/1000 em) between the character starting at byte `at` and the next one, as

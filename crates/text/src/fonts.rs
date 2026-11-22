@@ -544,6 +544,11 @@ impl FontDb {
         self.missing_glyph_protection = on;
     }
 
+    /// Have the installed fonts been scanned ([`Self::load_system_fonts`])?
+    pub(crate) fn system_loaded(&self) -> bool {
+        self.system_loaded
+    }
+
     /// Is missing glyph protection on?
     pub fn missing_glyph_protection(&self) -> bool {
         self.missing_glyph_protection

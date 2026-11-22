@@ -505,11 +505,29 @@ pub(crate) fn hint_misses(before: &Document, after: &Document, hint: Rect) -> us
     for (_, _, y) in after.walk() {
         let Some(x) = before.layer(y.id) else { continue };
         layer_pixels_cmp(x, y, &mut |p, q, _| {
-            each_changed_tile(p, q, |t| misses += usize::from(t.intersect(&hint).is_empty()));
+            each_changed_tile(p, q, |t| {
+                // A tile drawn again with the same pixels (a type layer rendered anew) changed
+                // nothing a hint must cover.
+                let changed = tile_change(p, q, t);
+                misses += usize::from(!changed.is_empty() && changed.intersect(&hint).is_empty());
+            });
             true
         });
     }
     misses
+}
+
+/// The pixels of tile `t` (its document rect) that differ between `a` and `b`.
+#[cfg(any(test, debug_assertions))]
+fn tile_change(a: &photocraft_raster::Surface, b: &photocraft_raster::Surface, t: Rect) -> Rect {
+    let c = photocraft_geom::TileCoord::containing(t.x0, t.y0);
+    let local = match (a.tile(c), b.tile(c)) {
+        (Some(x), Some(y)) => x.diff_bounds(y, a.format().bytes_per_pixel()),
+        (Some(x), None) => x.content_bounds(b.default_bytes()),
+        (None, Some(y)) => y.content_bounds(a.default_bytes()),
+        (None, None) => None,
+    };
+    local.map_or(Rect::EMPTY, |(x0, y0, x1, y1)| Rect::new(x0.into(), y0.into(), x1.into(), y1.into()).translate(t.x0, t.y0))
 }
 
 /// `hint`, a command's own rect for pixels it changed in one of `doc`'s layers, grown as far as

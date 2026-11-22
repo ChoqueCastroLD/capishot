@@ -380,8 +380,6 @@ pub struct PhotocraftApp {
     navigator_textures: HashMap<DocId, canvas::NavigatorCache>,
     /// Navigator images being composited on the worker pool (the browser threads build).
     navigator_pending: HashMap<DocId, canvas::NavigatorPending>,
-    /// Edits since each Navigator image (`canvas::navigator_track`).
-    navigator_damage: HashMap<DocId, canvas::NavigatorDamage>,
     /// Navigator images being redrawn a band per frame (the single-threaded browser build).
     navigator_bands: HashMap<DocId, canvas::NavigatorBands>,
     /// TypeR's page image being composited off the frame (`typer::shaper_ui`).
@@ -888,6 +886,8 @@ mod move_repeat_tests;
 mod navigator_gpu_tests;
 #[cfg(test)]
 mod type_drag_gpu_tests;
+#[cfg(test)]
+mod type_keystroke_tests;
 #[cfg(test)]
 mod text_select_drag_tests;
 #[cfg(test)]

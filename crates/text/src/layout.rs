@@ -272,6 +272,15 @@ const RLM: &str = "\u{200F}";
 /// A line break inside a paragraph (Shift+Return), stored as U+0003 in PSD type.
 pub(crate) const FORCED_LINE_BREAK: char = '\u{3}';
 
+/// Type layers laid out by this process, every engine and thread ([`crate::layouts`]).
+static LAYOUTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// How many type layouts this process has made so far (monotonic): what an edit costs in
+/// layouts, read as a difference (the app's per-gesture counters, tests).
+pub fn layouts() -> u64 {
+    LAYOUTS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 pub(crate) struct Layouter {
     lcx: LayoutContext<RunBrush>,
     optical: crate::optical::Cache,
@@ -283,6 +292,7 @@ impl Layouter {
     }
 
     pub fn layout(&mut self, fonts: &mut FontDb, t: &TextLayer, dpi: f32) -> TextLayout {
+        LAYOUTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mut fit = Fit::default();
         let mut first = self.layout_pass(fonts, t, dpi, None, &mut fit);
         first.overflow = fit.overflow;

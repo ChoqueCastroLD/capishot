@@ -358,8 +358,11 @@ pub(crate) fn damage_since(app: &PhotocraftApp, idx: usize, seen: (u64, u64), no
         };
         return Some(if r.is_empty() { r } else { r.inflate(effect_reach(&st.doc.layers)) });
     }
-    if seen.1 == now.1 ^ display_key && seen.0 + 1 == now.0 {
-        return last_damage;
+    // Every revision since the cache showed `seen` (two keystrokes typed in one frame are two):
+    // what they changed together, when each one's area is known.
+    if seen.1 == now.1 ^ display_key && seen.0 < now.0 {
+        let st = app.session.documents().get(idx)?;
+        return st.damage_since(seen.0).map(|r| if r.is_empty() { r } else { r.inflate(effect_reach(&st.doc.layers)) });
     }
     if seen.0 == now.0
         && let Some(st) = app.session.documents().get(idx)

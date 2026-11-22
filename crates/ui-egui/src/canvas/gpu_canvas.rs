@@ -1895,6 +1895,9 @@ pub struct Perf {
     pub last_refresh: &'static str,
     /// Pixels in the last refresh.
     pub last_refresh_px: u64,
+    /// Pixels in every refresh so far (monotonic): what an edit cost the canvas, as a difference.
+    #[serde(skip)]
+    pub refreshed_px: u64,
     /// Mip level the last GPU refresh composited at (0: full size; above it a zoomed-out view's).
     pub last_refresh_level: u32,
     /// Whether the GPU canvas path is active.
@@ -2098,6 +2101,7 @@ impl Perf {
         self.stage.refresh(kind, px, composite_ms, upload_ms);
         self.last_refresh = kind;
         self.last_refresh_px = px;
+        self.refreshed_px += px;
         self.composite_ms = composite_ms;
         self.upload_ms = upload_ms;
         if !kind.starts_with("gpu") {

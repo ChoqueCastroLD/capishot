@@ -1,5 +1,8 @@
 use super::{Arc, Document, History, LayerId, LayerTarget, channel_cmds, float_cmds, history_cmds, layer_multi_cmds, symmetry_cmds};
 
+/// Revisions [`DocState::damage_since`] knows the damage of.
+const DAMAGE_LOG: usize = 32;
+
 /// Per-document editing state.
 #[derive(Clone, Debug)]
 pub struct DocState {
@@ -29,6 +32,11 @@ pub struct DocState {
     pub view_revision: u64,
     /// Area changed by the latest revision (None = assume everything changed).
     pub last_damage: Option<photocraft_geom::Rect>,
+    /// The areas the revisions before `revision` changed, oldest first: `(revision, its
+    /// last_damage)`, noted as each one is left ([`Self::bump_revision`]). A cache that last
+    /// showed an older revision redraws their union ([`Self::damage_since`]), not the whole
+    /// document: two keystrokes typed in one frame of a slow device are two revisions.
+    damage_log: std::collections::VecDeque<(u64, Option<photocraft_geom::Rect>)>,
     /// Coalescing key of the latest history step (see [`Session::execute`]'s `coalesce` param).
     pub coalesce: Option<String>,
     /// Channels panel: targeted channel and eye toggles (view state, not history).
@@ -116,6 +124,7 @@ impl DocState {
             psd_cache: Default::default(),
             view_revision: 0,
             last_damage: None,
+            damage_log: Default::default(),
             coalesce: None,
             channel_view: Default::default(),
             isolated_layers: Vec::new(),
@@ -158,10 +167,42 @@ impl DocState {
     /// Move to the next revision; `keep_clean` (from [`Self::keeps_clean`]) moves the saved
     /// revision with it.
     pub(crate) fn bump_revision(&mut self, keep_clean: bool) {
+        // A revision set back (a batch rolled back) leaves older entries meaningless.
+        if self.damage_log.back().is_some_and(|e| e.0 >= self.revision) {
+            self.damage_log.clear();
+        }
+        if self.damage_log.len() == DAMAGE_LOG {
+            self.damage_log.pop_front();
+        }
+        self.damage_log.push_back((self.revision, self.last_damage));
         self.revision += 1;
         if keep_clean {
             self.saved_revision = self.revision;
         }
+    }
+    /// The area the revisions after `seen` up to this one changed: their damage's union
+    /// (empty when nothing drew), `None` when any of them could have changed everything or
+    /// isn't known (a revision moved without [`Self::bump_revision`], or older than the log).
+    pub fn damage_since(&self, seen: u64) -> Option<photocraft_geom::Rect> {
+        if seen > self.revision || self.revision - seen > DAMAGE_LOG as u64 + 1 {
+            return None;
+        }
+        let mut area = photocraft_geom::Rect::EMPTY;
+        let mut add = |d: Option<photocraft_geom::Rect>| {
+            let d = d?;
+            if !d.is_empty() {
+                area = if area.is_empty() { d } else { area.union(&d) };
+            }
+            Some(())
+        };
+        if seen < self.revision {
+            add(self.last_damage)?;
+        }
+        for r in seen + 1..self.revision {
+            let at = self.damage_log.binary_search_by_key(&r, |e| e.0).ok()?;
+            add(self.damage_log.get(at)?.1)?;
+        }
+        Some(area)
     }
     /// The targeted layers, as history stores them with each state.
     pub(crate) fn layer_target(&self) -> LayerTarget {
@@ -300,3 +341,47 @@ pub struct CopiedStyle {
 /// Cut aren't: whether they have anything to copy (a selection over transparent pixels, a group
 /// or fill layer) is known only when they run.
 pub const PRECHECKED: &[&str] = &["layer.new.layer", "layer.new.group", "layer.new.groupFromLayers", "layer.new.layerFromBackground"];
+
+#[cfg(test)]
+mod tests {
+    use photocraft_geom::Rect;
+    use serde_json::json;
+
+    use crate::Session;
+
+    fn edit(s: &mut Session, layer: u64, text: &str) -> Rect {
+        s.execute("type.edit", json!({"layer": layer, "replace": {"start": 1, "end": 1, "text": text}})).expect("edit");
+        s.active().expect("doc").last_damage.expect("a bounded edit")
+    }
+
+    #[test]
+    fn damage_since_unions_the_revisions_a_cache_did_not_show() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 800, "height": 600})).expect("doc");
+        let a = s.execute("type.create", json!({"x": 20, "y": 60, "text": "A", "size": 24})).expect("type")["layer"].as_u64().expect("id");
+        let b = s.execute("type.create", json!({"x": 400, "y": 500, "text": "B", "size": 24})).expect("type")["layer"].as_u64().expect("id");
+        let seen = s.active().expect("doc").revision;
+        let first = edit(&mut s, a, "x");
+        let second = edit(&mut s, b, "y");
+        let st = s.active().expect("doc");
+        assert_eq!(st.revision, seen + 2);
+        assert!(!first.is_empty() && !second.is_empty() && !first.contains_rect(&second));
+        assert_eq!(st.damage_since(seen), Some(first.union(&second)), "both keystrokes' areas");
+        assert_eq!(st.damage_since(seen + 1), Some(second));
+        assert_eq!(st.damage_since(st.revision), Some(Rect::EMPTY));
+        assert_eq!(st.damage_since(st.revision + 1), None, "a revision not reached yet");
+        // A step that could have changed everything: no span over it is known.
+        let before = st.revision;
+        edit(&mut s, a, "z");
+        s.active_mut().expect("doc").last_damage = None;
+        let third = edit(&mut s, b, "w");
+        let st = s.active().expect("doc");
+        assert_eq!(st.damage_since(before), None);
+        assert_eq!(st.damage_since(before + 1), Some(third));
+        // Older than the log: unknown.
+        for _ in 0..40 {
+            edit(&mut s, a, "q");
+        }
+        assert_eq!(s.active().expect("doc").damage_since(seen), None);
+    }
+}

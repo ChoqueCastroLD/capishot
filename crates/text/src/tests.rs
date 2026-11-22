@@ -432,7 +432,7 @@ fn truetype_collections_load() {
     assert!(names.iter().any(|n| n == "Inter") && names.iter().any(|n| n == "JetBrains Mono"), "{names:?}");
     assert_eq!(db.faces("JetBrains Mono").len(), before + 1);
     // Layout with the TTC-backed face works.
-    let mut e = TextEngine { fonts: db, layouter: crate::layout::Layouter::new() };
+    let mut e = TextEngine { fonts: db, layouter: crate::layout::Layouter::new(), memo: Default::default() };
     let t = styled("mono", CharStyle { font_family: "JetBrains Mono".into(), ..Default::default() });
     let l = e.layout(&t, 72.0);
     assert!(l.glyphs.iter().all(|g| g.id != 0));
