@@ -94,7 +94,7 @@ await step('reopen', async () => { await p.evaluate(([b, n]) => self.photocraft.
 await sleep(2000);
 // The profile: wasm-split's __write_profile into a buffer from the module's allocator (profile.sh
 // makes the glue keep the page's instance in self.__wasm).
-const prof = await p.evaluate(() => {
+const profile = (page) => page.evaluate(() => {
   const w = self.__wasm;
   const size = 8 * 1024 * 1024;
   const ptr = w.__wbindgen_malloc(size, 1);
@@ -102,7 +102,22 @@ const prof = await p.evaluate(() => {
   const bytes = new Uint8Array(w.memory.buffer, ptr, n).slice();
   return Array.from(bytes);
 });
+const prof = await profile(p);
 fs.writeFileSync(out, Buffer.from(prof));
 fs.writeFileSync(`${out}.commands`, (await p.evaluate(() => [...self.__asked].join('\n'))) + '\n');
 console.log('profile bytes', prof.length);
+// A returning visit: the same browser storage (the preferences, panel layout, presets and fonts
+// the visit above left) read at start-up, which a first visit never does. Most starts are
+// returning visits: theirs loaded chunks synchronously before the first frame.
+await p.close();
+const again = await ctx.newPage();
+if (phone) await (await ctx.newCDPSession(again)).send('Emulation.setCPUThrottlingRate', { rate: 6 });
+await again.goto(url);
+await again.waitForFunction(() => self.photocraft && self.photocraft.request, null, { timeout: 300000 });
+await again.waitForTimeout(4000);
+await again.evaluate(([b, n]) => self.photocraft.open(new Uint8Array(b), n), [page, pageName]).catch(() => {});
+await again.waitForTimeout(3000);
+const back = await profile(again);
+fs.writeFileSync(out.replace(/\.prof$/, '-return.prof'), Buffer.from(back));
+console.log('returning visit profile bytes', back.length);
 await b.close();
