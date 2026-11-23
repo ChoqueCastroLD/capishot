@@ -461,6 +461,37 @@ impl Split {
         ok
     }
 
+    /// The tiles of `old`'s below that this split's below shows too, copied: `old` was made for
+    /// the same document at the same level and the layers below its run are the ones below this
+    /// one's (an edit that changed the run and layers over it: the box of Free Transform hides
+    /// the layer and what covers it). The frame the split is made for then composites nothing
+    /// below the run.
+    pub(crate) fn inherit(&mut self, old: &Split) {
+        if old.key.0 != self.key.0 || old.key.3 != self.key.3 || old.lo != self.lo || !same_frame(&old.base, &self.base) {
+            return;
+        }
+        let (was, now) = (open_stack(&old.base.layers), open_stack(&self.base.layers));
+        if was.get(..self.lo).is_none_or(|a| now.get(..self.lo) != Some(a)) {
+            return;
+        }
+        for (rect, tile) in &old.below_tiles {
+            if self.bytes().saturating_add(area(*rect) * 16) > self.budget {
+                break;
+            }
+            self.below_tiles.insert(*rect, tile.clone());
+        }
+    }
+
+    /// The layers this split is around.
+    pub(crate) fn ids(&self) -> &[LayerId] {
+        &self.key.2
+    }
+
+    /// Whether this split is of document `doc` at `level`.
+    pub(crate) fn of(&self, doc: DocId, level: u32) -> bool {
+        self.key.0 == doc && self.key.3 == level
+    }
+
     /// Whether this split is the one for `plan` at `level`.
     pub(crate) fn is_for(&self, plan: &Plan, level: u32) -> bool {
         // A later revision whose layers are the same ones (the history step a move leaves, a
@@ -995,5 +1026,40 @@ mod tests {
         assert_eq!(split.bytes(), 0);
         split.set_budget(tile, &[right]);
         assert!(split.fill(&[(right, right)], true));
+    }
+
+    /// A split made again around the run and the layers over it (they were hidden: the box of
+    /// Free Transform) takes the below's tiles of the one before, and composites nothing for them.
+    #[test]
+    fn a_split_with_the_same_below_inherits_its_tiles() {
+        let (d, ink, over) = inked();
+        let base = Arc::new(d);
+        let plan = Plan { base: base.clone(), ids: vec![ink], doc: base.id, revision: 1, offset: (0, 0) };
+        let mut split = Split::new(&plan, 0, &mut |d| d.clone()).expect("splittable");
+        let all = DRect::new(0, 0, 300, 200);
+        assert!(split.fill(&[(all, all)], true));
+        let mut hidden = (*base).clone();
+        for id in [ink].iter().chain(&over) {
+            hidden.layer_mut(*id).unwrap().visible = false;
+        }
+        let hidden = Arc::new(hidden);
+        let Update::Elsewhere(changed) = split.update(&hidden, 2, &mut |d| d.clone()) else { panic!("layers of the top changed") };
+        assert_eq!(changed.len(), 4);
+        let plan = Plan { base: hidden.clone(), ids: changed, doc: base.id, revision: 2, offset: (0, 0) };
+        let mut under = Split::new(&plan, 0, &mut |d| d.clone()).expect("splittable");
+        under.inherit(&split);
+        let here = photocraft_compose::composites_here();
+        let (got, mapped) = under.render((0, 0), &[(all, all)], false).expect("rendered");
+        assert_eq!(photocraft_compose::composites_here() - here, 1, "the below came with the old split's tiles");
+        assert!(!mapped);
+        assert_eq!(got[0], photocraft_compose::render(&hidden, all));
+        // Another document's split, or one with other layers below, gives nothing.
+        let mut other = (*base).clone();
+        other.layers[1].opacity = 0.5;
+        let other = Arc::new(other);
+        let plan = Plan { base: other.clone(), ids: vec![ink], doc: base.id, revision: 3, offset: (0, 0) };
+        let mut apart = Split::new(&plan, 0, &mut |d| d.clone()).expect("splittable");
+        apart.inherit(&split);
+        assert_eq!(apart.bytes(), 0);
     }
 }

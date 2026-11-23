@@ -113,7 +113,8 @@ impl Bench {
         self.frame(name, act);
         let mut shown = None;
         for _ in 0..120 {
-            if shown.is_none() && crate::cpu_canvas::shows_document(self.h.state()) {
+            let made = self.h.state().transform_preview.as_ref().is_none_or(|pv| pv.made());
+            if shown.is_none() && made && crate::cpu_canvas::shows_document(self.h.state()) {
                 shown = Some(t.elapsed().as_secs_f64() * 1000.0);
             }
             if shown.is_some() && crate::cpu_canvas::settled(self.h.state()) {
@@ -222,6 +223,19 @@ fn edits(path: &str, zoom: f64) -> Option<Vec<(&'static str, f64, f64)>> {
             b.run(name, "layer.arrange.bringForward", json!({}));
             b.run(name, "layer.arrange.sendBackward", json!({}));
         }
+        // Free Transform: the box opens (Ctrl+T) and closes (Esc). Its images are made on another
+        // thread, as in the app; `CPU_EDIT_PERF_BOX_IN_FRAME` makes them in the frame, as before.
+        crate::transform_tool::set_off_frame(std::env::var_os("CPU_EDIT_PERF_BOX_IN_FRAME").is_none());
+        for (name, id) in [("transform open type", t.text), ("transform open page-size", t.big)] {
+            b.app().run("layer.select", json!({"layer": id.0})).expect("select");
+            b.settle();
+            b.action(name, |h| {
+                let ctx = h.ctx.clone();
+                crate::transform_tool::begin(h.state_mut(), &ctx).expect("the box");
+            });
+            b.action("transform cancel", |h| crate::transform_tool::cancel(h.state_mut()));
+        }
+        crate::transform_tool::set_off_frame(false);
         // Free Transform commit.
         for (name, id) in [("transform commit type", t.text), ("transform commit page-size", t.big)] {
             b.app().run("layer.select", json!({"layer": id.0})).expect("select");
@@ -281,4 +295,73 @@ fn edits_on_his_file_on_the_cpu_canvas_stay_within_a_frame() {
 #[test]
 fn edits_on_the_200_layer_page_on_the_cpu_canvas_are_reported() {
     on_the_apps_stack(|| edits(PAGE200, 0.5));
+}
+
+/// Ctrl+T on the GPU canvas (his file, a type layer and the layer as large as the page): the
+/// frame that opens the box and the frames until its images are made, with the images made off
+/// the frame (the app) and in it (as before). Reported; skips without a GPU adapter.
+#[test]
+fn opening_the_transform_box_on_the_gpu_canvas_is_reported() {
+    on_the_apps_stack(|| {
+        let _gpu = photocraft_testkit::gpu_lock();
+        if !std::path::Path::new(PSD).exists() {
+            return;
+        }
+        let Some(mut h) = harness(Device::Gpu) else { return };
+        {
+            let app = h.state_mut();
+            app.background_jobs = false;
+            app.open_path(PSD).expect("open");
+            app.sync_views();
+            app.ui.extras.rulers = false;
+        }
+        h.run_steps(20);
+        if !crate::move_repeat_tests::gpu_drawing(&mut h, Device::Gpu) {
+            return;
+        }
+        h.run_steps(40);
+        let t = targets(h.state());
+        for off_frame in [true, false, true, false] {
+            crate::transform_tool::set_off_frame(off_frame);
+            for (name, id) in [("type", t.text), ("page-size", t.big)] {
+                h.state_mut().run("layer.select", json!({"layer": id.0})).expect("select");
+                h.run_steps(30);
+                let mut frames = Vec::new();
+                let start = std::time::Instant::now();
+                let ctx = h.ctx.clone();
+                crate::transform_tool::begin(h.state_mut(), &ctx).expect("the box");
+                h.step();
+                frames.push(start.elapsed().as_secs_f64() * 1000.0);
+                let mut made_after = None;
+                for _ in 0..600 {
+                    if made_after.is_none() && h.state().transform_preview.as_ref().is_none_or(|pv| pv.made()) {
+                        made_after = Some(start.elapsed().as_secs_f64() * 1000.0);
+                        // The frames that draw the box for the first time.
+                        for _ in 0..3 {
+                            let f = std::time::Instant::now();
+                            h.step();
+                            frames.push(f.elapsed().as_secs_f64() * 1000.0);
+                        }
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                    let f = std::time::Instant::now();
+                    h.step();
+                    frames.push(f.elapsed().as_secs_f64() * 1000.0);
+                }
+                eprintln!(
+                    "BOX gpu {name:<10} images {}: the frame of Ctrl+T {:>6.1} ms, worst frame {:>6.1} ms, median {:>5.1} ms, box drawn after {:>6.1} ms ({} frames)",
+                    if off_frame { "off the frame" } else { "in the frame " },
+                    frames[0],
+                    pct(&frames, 1.0),
+                    pct(&frames, 0.5),
+                    made_after.unwrap_or(f64::INFINITY),
+                    frames.len()
+                );
+                crate::transform_tool::cancel(h.state_mut());
+                h.run_steps(10);
+            }
+        }
+        crate::transform_tool::set_off_frame(false);
+    });
 }

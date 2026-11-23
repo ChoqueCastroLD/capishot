@@ -161,6 +161,7 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> (std::sync::Ar
     if let Some(shown) = crate::blend_preview::display_doc(app, idx) {
         return shown;
     }
+    crate::transform_tool::land(app);
     crate::transform_tool::follow_edits(app);
     crate::transform_tool::refresh_vector_type(app);
     // The brush throttles its tail preview between pointer moves; the frame shows it complete.
@@ -180,6 +181,7 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> (std::sync::Ar
     if let (Some(t), Some(pv)) = (&app.ui.transform, &app.transform_preview)
         && app.session.active_index() == Some(idx)
         && pv.doc.id == st.doc.id
+        && pv.made()
         && st.doc.layer(photocraft_doc::LayerId(t.layer)).is_some()
     {
         let drawn = pv.vector_type.as_ref().map_or(0, |v| v.drawn);

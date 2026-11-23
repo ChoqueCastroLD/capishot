@@ -38,7 +38,9 @@ pub(crate) use begin::begin_content_aware;
 pub(crate) use begin::moving_layers;
 #[cfg(test)]
 pub(crate) use begin::moving_texel;
-pub use begin::{WARP_ONE_LAYER, begin, begin_copy, begin_placed, begin_selection, begin_type_perspective, begin_warp, enter_warp, leave_warp, warps_type};
+pub use begin::{WARP_ONE_LAYER, begin, begin_copy, begin_placed, begin_selection, begin_type_perspective, begin_warp, enter_warp, land, leave_warp, warps_type};
+#[cfg(test)]
+pub(crate) use begin::set_off_frame;
 pub(crate) use begin::{refresh_vector_type, vectorize_type_box};
 pub(crate) use commit::{SAVE_FOR_WEB, committing, nudge};
 pub use commit::{cancel, commit, end_if_left, follow_edits, intercept, is_enabled, on_job_event, track_steps};
@@ -149,6 +151,18 @@ pub struct TransformPreview {
     /// Type in perspective: the box started as a quad, and the preview draws the text itself
     /// through the box's map, sharp, instead of resampling its pixels ([`refresh_vector_type`]).
     pub(crate) vector_type: Option<VectorType>,
+    /// The images the box draws with are still being made off the frame ([`begin`]): until they
+    /// are, the canvas shows the document as it is and the box opens over it; box and canvas
+    /// change together in the frame that finds them made ([`land`]).
+    pending: Option<std::sync::mpsc::Receiver<preview::Built>>,
+}
+
+impl TransformPreview {
+    /// Whether the box's images are made: the canvas shows the document under the box and the
+    /// box draws the moving pixels. Until then the canvas shows the document as it is.
+    pub(crate) fn made(&self) -> bool {
+        self.pending.is_none()
+    }
 }
 
 /// A handle of the box is being dragged (the press that grabbed it hasn't been released).

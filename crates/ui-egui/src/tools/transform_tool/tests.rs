@@ -1956,6 +1956,62 @@ fn free_transform_keeps_the_layer_under_the_layers_over_it() {
     cancel(&mut app);
 }
 
+/// Ctrl+T with the app's threads: the frame that opens the box composites nothing and reads no
+/// pixels (the layers covering the moving one were composited in it, 0.1 to 1.1 s on a page of
+/// many layers). The box is open at once over the canvas as it is; when the images are made, the
+/// canvas shows the document under the box and the box draws the moving pixels and what covers
+/// them, from the same frame on.
+#[test]
+fn the_box_opens_at_once_and_its_images_are_made_off_the_frame() {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+    app.session.execute("file.new", json!({"width": 64, "height": 64, "background": "white"})).unwrap();
+    for (rect, color) in [(photocraft_geom::Rect::new(8, 8, 24, 24), [1.0, 0.0, 0.0, 1.0]), (photocraft_geom::Rect::new(16, 16, 40, 40), [0.0, 0.0, 1.0, 1.0])] {
+        app.session.execute("layer.new.layer", json!({})).unwrap();
+        app.session
+            .edit("paint", |doc, a| {
+                doc.layer_mut(a.unwrap()).unwrap().surface_mut().unwrap().fill_rect(rect, &color);
+                Ok(())
+            })
+            .unwrap();
+    }
+    let (red, blue) = {
+        let doc = &app.session.active().unwrap().doc;
+        (doc.layers[1].id, doc.layers[2].id)
+    };
+    app.session.execute("layer.select", json!({"layer": red.0})).unwrap();
+    let ctx = gpu_ctx();
+    set_off_frame(true);
+    let here = photocraft_compose::composites_here();
+    begin(&mut app, &ctx).unwrap();
+    assert_eq!(photocraft_compose::composites_here() - here, 0, "nothing composited in the call that opens the box");
+    assert!(app.ui.transform.is_some(), "the box is open");
+    let live = app.session.active().unwrap().doc.clone();
+    // (The thread may be done already; what the canvas shows goes by `made`.)
+    if !app.transform_preview.as_ref().unwrap().made() {
+        let (shown, key) = crate::canvas::display_doc(&mut app, 0);
+        if !app.transform_preview.as_ref().unwrap().made() {
+            assert!(Arc::ptr_eq(&shown, &live) && key == 0, "until its images are made the canvas shows the document as it is");
+        }
+    }
+    for _ in 0..5000 {
+        land(&mut app);
+        if app.transform_preview.as_ref().unwrap().made() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    set_off_frame(false);
+    let (shown, key) = crate::canvas::display_doc(&mut app, 0);
+    let pv = app.transform_preview.as_ref().unwrap();
+    assert!(pv.made(), "the images were made");
+    assert!(Arc::ptr_eq(&shown, &pv.doc) && key != 0, "the canvas shows the document under the box");
+    assert!(!pv.doc.layer(red).unwrap().visible && !pv.doc.layer(blue).unwrap().visible);
+    assert_eq!(pv.texture.size(), [16, 16], "the moving pixels");
+    let (texture, rect) = pv.above.as_ref().and_then(|a| a.shown.as_ref()).expect("the layer covering it");
+    assert_eq!((*rect, texture.size()), (photocraft_geom::Rect::new(16, 16, 40, 40), [24, 24]));
+    cancel(&mut app);
+}
+
 #[test]
 fn plain_layers_from_the_top_cover_the_moving_one() {
     use photocraft_color::BlendMode;

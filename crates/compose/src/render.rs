@@ -29,7 +29,7 @@ thread_local! {
 }
 
 /// How many composites this thread has asked for so far ([`render`], [`render_rects`],
-/// [`render_rects_over`]; monotonic, read as a difference): what a frame composited on the
+/// [`render_rects_over`], [`render_bands`]; monotonic, read as a difference): what a frame composited on the
 /// window's own thread, whatever the worker pool did meanwhile (the app's tests).
 pub fn composites_here() -> u64 {
     COMPOSITES_HERE.with(std::cell::Cell::get)
@@ -391,6 +391,7 @@ pub fn render_bands<E>(doc: &Document, rect: Rect, band_rows: i32, mut sink: imp
     if rect.is_empty() {
         return Ok(());
     }
+    count_composite();
     // Keep prepared pixels and compiled vector masks across bands without retaining any rendered band.
     let patterns = pattern::PreparedPatterns::new(&doc.patterns, pattern::PREPARED_PATTERN_BYTES).in_mode(doc.pixel_format().mode);
     let cx = Ctx::for_doc(doc, &patterns);

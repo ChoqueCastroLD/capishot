@@ -1,7 +1,7 @@
 use super::commit::{cancel, commit, start_steps};
 #[cfg(test)]
 use super::draw::texture_quad;
-use super::preview::{Above, preview_image};
+use super::preview::{Above, Built, composite_image, preview_image};
 use super::{
     Arc, BezierMesh, CAS_ONLY_SCALES, Color32, DocId, Document, Follow, Homography, LOCKED, LayerContent, LayerId, MadeLayer, PhotocraftApp, Several, Steps,
     TransformPreview, TransformSession, Warp, WarpStyle, corners, json,
@@ -62,13 +62,30 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String>
     // egui reports the renderer's limit in the app; offscreen harnesses only through the device.
     let max_side = ctx.input(|i| i.max_texture_side).max(app.gpu.as_ref().map_or(1, |g| g.max_texture_side()));
     // The layers covering the moving pixels draw over them instead of under them.
-    let above = Above::new(ctx, format!("transform-{session}-above"), &doc, id, max_side);
+    let (covering, up) = Above::plan(&doc, id);
+    let above = Above::planned(ctx, format!("transform-{session}-above"), max_side, covering);
     above.hide_in(&mut pd.layers);
     // A style is drawn again from the pixels as the box moves them, so they are read without it.
     // Not for the selected part of a layer: its style belongs to that part and the rest together.
     let styled = lifted.is_none() && photocraft_compose::effects::has_effects(layer);
-    let (image, uv) = preview_image(&doc, id, lifted.as_ref(), b, max_side, styled);
-    let texture = crate::transform_tex::PreviewTextures::new(ctx, format!("transform-{session}"), image, uv);
+    // The moving pixels are read and the covering layers composited off the frame (in the frame
+    // of Ctrl+T they took 0.1 to 1.1 s on a page of many layers): the box opens at once over the
+    // canvas as it is, and both change in the frame that finds the images made ([`land`]).
+    let (tx, pending) = std::sync::mpsc::channel();
+    {
+        let (doc, lifted, wake) = (doc.clone(), lifted.clone(), ctx.clone());
+        off_frame(move || {
+            let (image, uv) = preview_image(&doc, id, lifted.as_ref(), b, max_side, styled);
+            let above = up.map(|(up, rect)| {
+                let (image, uv) = composite_image(&up, rect, max_side);
+                (image, uv, rect)
+            });
+            // (The box may be closed by now: nothing to tell.)
+            let _ = tx.send(Built { image, uv, above });
+            wake.request_repaint();
+        });
+    }
+    let texture = crate::transform_tex::PreviewTextures::new(ctx, format!("transform-{session}"), egui::ColorImage::new([1, 1], vec![egui::Color32::TRANSPARENT]), [1.0, 1.0]);
     app.transform_preview = Some(TransformPreview {
         session,
         doc: Arc::new(pd),
@@ -90,6 +107,7 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String>
         content_aware: None,
         several: None,
         vector_type: None,
+        pending: Some(pending),
     });
     app.ui.transform = Some(TransformSession {
         session,
@@ -113,7 +131,64 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String>
         make_vector_type(app);
     }
     start_steps(app);
+    // (Made already where no other thread makes them: the single-threaded browser build.)
+    land(app);
     Ok(())
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests make a box's images in the call that opens it, so they see them at once; one that
+    /// follows the frames sets this to make them on another thread, as the app does.
+    static OFF_FRAME: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Make a box's images on another thread, as the app does (tests).
+#[cfg(test)]
+pub(crate) fn set_off_frame(on: bool) {
+    OFF_FRAME.with(|o| o.set(on));
+}
+
+/// Runs `f` off the frame, on another thread, where there is one for it (`jobs_ui::OFF_THREAD`);
+/// in the call otherwise.
+fn off_frame(f: impl FnOnce() + Send + 'static) {
+    #[cfg(test)]
+    if OFF_FRAME.with(std::cell::Cell::get) {
+        std::thread::spawn(f);
+        return;
+    }
+    if crate::jobs_ui::OFF_THREAD {
+        crate::jobs_ui::off_thread(f);
+    } else {
+        f();
+    }
+}
+
+/// The images of the box that opened are made ([`begin`]): from this frame on the box draws the
+/// moving pixels with the layers covering them over it, and the canvas shows the document under
+/// it. Called before the canvas reads the preview.
+pub fn land(app: &mut PhotocraftApp) {
+    let Some(pv) = app.transform_preview.as_mut() else { return };
+    let Some(pending) = &pv.pending else { return };
+    match pending.try_recv() {
+        Ok(built) => {
+            pv.pending = None;
+            if let Some(a) = pv.above.as_mut() {
+                pv.texture = crate::transform_tex::PreviewTextures::new(&a.ctx, format!("transform-{}", pv.session), built.image, built.uv);
+                if let Some((image, uv, rect)) = built.above {
+                    a.show(image, uv, rect);
+                }
+            }
+        }
+        // (A page isn't woken from a worker in the browser: looked at again in a moment.)
+        Err(std::sync::mpsc::TryRecvError::Empty) => {
+            if let Some(a) = &pv.above {
+                a.ctx.request_repaint_after(std::time::Duration::from_millis(16));
+            }
+        }
+        // Whatever made them died: without its pixels the box can't show the layer.
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => cancel(app),
+    }
 }
 
 /// Turn the open box over a type layer into a vector one ([`super::VectorType`]): the box is the
@@ -143,9 +218,11 @@ fn make_vector_type(app: &mut PhotocraftApp) {
     t.rect = [min[0], min[1], max[0], max[1]];
     t.quad = quad;
     t.pivot = [(min[0] + max[0]) / 2.0, (min[1] + max[1]) / 2.0];
-    // The layer in its place in the stack: nothing hidden, nothing drawn over it apart.
+    // The layer in its place in the stack: nothing hidden, nothing drawn over it apart (and no
+    // image of its pixels to wait for).
     pv.doc = st.doc.clone();
     pv.above = None;
+    pv.pending = None;
     if let Some(f) = pv.follow.as_mut() {
         f.hidden.clear();
     }
@@ -254,6 +331,7 @@ fn begin_several(app: &mut PhotocraftApp, ctx: &egui::Context, doc: Arc<Document
         content_aware: None,
         several: Some(several),
         vector_type: None,
+        pending: None,
     });
     app.ui.transform = Some(TransformSession {
         session,
@@ -384,6 +462,7 @@ pub(crate) fn begin_content_aware(
         styled: None,
         several: None,
         vector_type: None,
+        pending: None,
     });
     app.ui.transform = Some(TransformSession {
         session,
@@ -555,6 +634,7 @@ fn begin_lone(
         content_aware: None,
         several: None,
         vector_type: None,
+        pending: None,
     });
     app.ui.transform = Some(TransformSession {
         session,
@@ -611,6 +691,7 @@ fn begin_path(app: &mut PhotocraftApp, ctx: &egui::Context, params: serde_json::
         committing: None,
         several: None,
         vector_type: None,
+        pending: None,
     });
     app.ui.transform = Some(TransformSession {
         session,
@@ -699,6 +780,7 @@ pub fn begin_selection(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(
         content_aware: None,
         several: None,
         vector_type: None,
+        pending: None,
     });
     app.ui.transform = Some(TransformSession {
         session,

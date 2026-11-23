@@ -87,6 +87,10 @@ pub struct TileCanvas {
     /// The cached composites below and above the layers an edit changes (`move_cpu`); with the
     /// batch in flight while one is.
     split: Option<Split>,
+    /// The split from before the Free Transform box opened, kept while it is open (the two
+    /// within the one budget) for the frame it closes in: the document is then the one it was
+    /// made for, with the layer where the box left it.
+    spare: Option<Split>,
     /// The batch the worker pool is compositing.
     flight: Option<Flight>,
     /// The layers the frame asked the split to be around (the Move tool's press targets, else the
@@ -100,6 +104,8 @@ pub struct TileCanvas {
     pub(crate) ahead_ready: bool,
     /// The split is the one a Move press would drag (`move_ui`'s lazy preview).
     split_ready: bool,
+    /// The Free Transform box stood in for a layer of the document in the last frame.
+    stood_in: bool,
     /// When tiles drawn through a split's top map may be composited exactly (`now_ms`): once the
     /// edits have paused this long.
     refine_after: f64,
@@ -312,6 +318,13 @@ const AHEAD_FLIGHT_MS: f64 = 12.0;
 #[cfg(not(test))]
 const FLIGHT_WAIT_MS: f64 = 4.0;
 
+/// How long the frame in which the Free Transform box starts or stops standing in for a layer
+/// waits for its batch (milliseconds). The box draws the moving pixels over a canvas that leaves
+/// the layer out, from that very frame, and they are gone in the frame it closes: with the
+/// canvas a frame behind, the layer would show twice, or not at all. So those two frames take the
+/// composite, as every edit's frame used to; never longer than this.
+const HANDOVER_WAIT_MS: f64 = 2000.0;
+
 /// The budget of a drag frame for the split's sprite while it isn't ready (milliseconds).
 const DRAG_BAND_MS: f64 = 2.0;
 
@@ -387,6 +400,10 @@ struct Batch {
     display: Option<Arc<photocraft_engine::display_color::CanvasDisplay>>,
     levels: Arc<wasm_sync::Mutex<Levels>>,
     split: Option<Split>,
+    /// The split before `split` ([`TileCanvas::spare`]).
+    spare: Option<Split>,
+    /// The Free Transform box opens or closes in this frame ([`HANDOVER_WAIT_MS`]).
+    handover: bool,
     through: Through,
     /// The split's tiles to make ahead (the tiles in view), for about `ahead_ms`; `sprite`: the
     /// image a Move drag would blit too.
@@ -403,6 +420,7 @@ struct Batch {
 /// What a [`Batch`] made.
 struct Drawn {
     split: Option<Split>,
+    spare: Option<Split>,
     tiles: Vec<(Job, egui::ColorImage)>,
     from_split: bool,
     /// Drawn through the split's top map: composited exactly once the edits pause.
@@ -430,6 +448,7 @@ fn draw(mut b: Batch) -> Drawn {
     };
     let held: Vec<(DRect, DRect)> = b.jobs.iter().map(|(j, h)| (j.rect(), *h)).collect();
     let mut split = b.split.take();
+    let mut spare = b.spare.take();
     let mut anchor = None;
     let mut images: Option<Vec<egui::ColorImage>> = None;
     let mut bufs = None;
@@ -473,11 +492,30 @@ fn draw(mut b: Batch) -> Drawn {
             Through::Edit { ids, id, revision } => {
                 let plan = |ids: &[LayerId]| Plan { base: b.doc.clone(), ids: ids.to_vec(), doc: *id, revision: *revision, offset: (0, 0) };
                 let kept = split.as_mut().filter(|s| s.moves(*id, ids, level)).map(|s| s.update(&b.doc, *revision, &mut reduce));
+                // The Free Transform box closed: the split from before it opened, when it holds
+                // for the document (the layer is back, moved or not).
+                let back = b.handover && spare.as_mut().filter(|s| s.of(*id, level)).is_some_and(|s| s.update(&b.doc, *revision, &mut reduce) == Update::Held);
+                let mut kept_spare = false;
                 match kept {
+                    _ if back => {
+                        split = spare.take();
+                        anchor = split.as_ref().map(|s| s.ids().to_vec());
+                    }
                     Some(Update::Held) => {}
-                    // An edit somewhere else: the split made again around what it changed.
+                    // An edit somewhere else: the split made again around what it changed, with
+                    // the tiles of the old one's below when its below is the same. When the box
+                    // opened (it hides the layer and what covers it), the old one is kept for
+                    // the frame it closes in.
                     Some(Update::Elsewhere(changed)) if !changed.is_empty() => {
-                        split = Split::new(&plan(&changed), level, &mut reduce);
+                        let mut new = Split::new(&plan(&changed), level, &mut reduce);
+                        if let (Some(new), Some(old)) = (new.as_mut(), split.as_ref()) {
+                            new.set_budget(if b.handover { b.budget / 2 } else { b.budget }, &b.view);
+                            new.inherit(old);
+                        }
+                        let old = std::mem::replace(&mut split, new);
+                        if b.handover {
+                            (spare, kept_spare) = (old, true);
+                        }
                         anchor = Some(changed);
                     }
                     _ => {
@@ -485,8 +523,17 @@ fn draw(mut b: Batch) -> Drawn {
                         anchor = Some(ids.clone());
                     }
                 }
+                // (A spare the closing box didn't take back is of no use.)
+                if b.handover && !kept_spare {
+                    spare = None;
+                }
+                // Two splits share the budget.
+                let budget = if spare.is_some() { b.budget / 2 } else { b.budget };
+                if let Some(s) = spare.as_mut() {
+                    s.set_budget(budget, &b.view);
+                }
                 if let Some(s) = split.as_mut() {
-                    s.set_budget(b.budget, &b.view);
+                    s.set_budget(budget, &b.view);
                     current = true;
                     if !held.is_empty()
                         && let Some((drawn, mapped)) = s.render((0, 0), &held, b.maps)
@@ -546,7 +593,7 @@ fn draw(mut b: Batch) -> Drawn {
         }
     }
     let tiles = b.jobs.iter().map(|(j, _)| *j).zip(images.unwrap_or_default()).collect();
-    Drawn { split, tiles, from_split, approx, anchor, ahead_done, ms: crate::gpu_canvas::now_ms() - t0 }
+    Drawn { split, spare, tiles, from_split, approx, anchor, ahead_done, ms: crate::gpu_canvas::now_ms() - t0 }
 }
 
 /// A batch on the worker pool: the frame that sent it went on without it.
@@ -561,6 +608,29 @@ struct Flight {
     anchor: Vec<LayerId>,
     /// Tells a batch that only makes the split ahead to stop: an edit is waiting for the split.
     stop: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Flight {
+    /// What the batch made, when it is done (`Err`: it was lost); `wait`: this frame waits for
+    /// it ([`HANDOVER_WAIT_MS`]) where the thread may.
+    fn find(&self, wait: bool) -> Option<Result<Drawn, ()>> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if wait {
+            let _s = crate::perf_span::span("cpu.wait");
+            return match self.rx.recv_timeout(std::time::Duration::from_secs_f64(HANDOVER_WAIT_MS / 1000.0)) {
+                Ok(d) => Some(Ok(d)),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Some(Err(())),
+            };
+        }
+        #[cfg(target_arch = "wasm32")]
+        let _ = wait;
+        match self.rx.try_recv() {
+            Ok(d) => Some(Ok(d)),
+            Err(std::sync::mpsc::TryRecvError::Empty) => None,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(Err(())),
+        }
+    }
 }
 
 /// What a split's tiles were made ahead for: the state the canvas showed (revision, preview
@@ -626,7 +696,7 @@ impl TileCanvas {
         if let Some(a) = d.anchor.filter(|_| self.anchor == anchor) {
             self.anchor = a;
         }
-        self.split = d.split;
+        (self.split, self.spare) = (d.split, d.spare);
         if d.ahead_done && ahead.is_some() {
             self.ahead = ahead;
         }
@@ -767,6 +837,8 @@ pub fn paint(
         Some(app.session.documents().get(idx).map(|st| st.selected_layers()).unwrap_or_default())
     };
     let released = app.cpu_released.take_if(|r| r.0 == id);
+    // The Free Transform box draws this document's moving pixels itself (`transform_tool`).
+    let stands_in = app.transform_preview.as_ref().is_some_and(|pv| pv.doc.id == id && pv.made());
     let tex_budget = texture_budget(app);
     let mip_budget = mip_budget(app);
     let split_budget = split_budget(app);
@@ -788,6 +860,9 @@ pub fn paint(
         tc.anchor.clone_from(w);
     }
     let now = (revision, preview_key ^ display_key);
+    // The Free Transform box starts or stops standing in for the layer in this frame: the frame
+    // waits for its tiles ([`HANDOVER_WAIT_MS`]).
+    let handover = std::mem::replace(&mut tc.stood_in, stands_in) != stands_in;
     if tc.shown != Some(now) {
         tc.invalidate(if tc.shown.is_some() { damage } else { None });
         tc.shown = Some(now);
@@ -795,10 +870,13 @@ pub fn paint(
     let mut stats = Stats::default();
     // The batch in flight, when the pool is done with it: its tiles in place of the ones shown.
     if let Some(fl) = tc.flight.take() {
-        match fl.rx.try_recv() {
-            Ok(d) => tc.land(ctx, key, d, Sent { fresh: fl.state == now && fl.level == level, ahead: fl.ahead, anchor: fl.anchor }, &mut stats),
-            Err(std::sync::mpsc::TryRecvError::Empty) => tc.flight = Some(fl),
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => tc.grounded(),
+        if handover {
+            fl.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        match fl.find(handover) {
+            Some(Ok(d)) => tc.land(ctx, key, d, Sent { fresh: fl.state == now && fl.level == level, ahead: fl.ahead, anchor: fl.anchor }, &mut stats),
+            Some(Err(())) => tc.grounded(),
+            None => tc.flight = Some(fl),
         }
     }
     // A drag this canvas showed was committed at the offset it showed: the split is rebased on
@@ -915,6 +993,8 @@ pub fn paint(
             display: display.clone(),
             levels: tc.levels.clone(),
             split: tc.split.take(),
+            spare: tc.spare.take(),
+            handover,
             through: through.clone(),
             ahead: Vec::new(),
             ahead_ms: 0.0,
@@ -924,7 +1004,7 @@ pub fn paint(
             view: view.clone(),
         };
         let anchor = tc.anchor.clone();
-        if let Some(d) = tc.send(ctx, batch, now, None, wait) {
+        if let Some(d) = tc.send(ctx, batch, now, None, wait.map(|ms| if handover { HANDOVER_WAIT_MS } else { ms })) {
             tc.land(ctx, key, d, Sent { fresh: true, ahead: None, anchor }, &mut stats);
         }
     } else if matches!(through, Through::Edit { .. }) && stale.is_empty() && missing.is_empty() && tc.flight.is_none() && tc.pending.is_none() && !tc.ahead_ready && !pointer_down {
@@ -938,6 +1018,8 @@ pub fn paint(
             display: None,
             levels: tc.levels.clone(),
             split: tc.split.take(),
+            spare: tc.spare.take(),
+            handover: false,
             through: through.clone(),
             ahead: view.clone(),
             ahead_ms: if wait.is_some() { AHEAD_FLIGHT_MS } else { SPLIT_AHEAD_MS },
@@ -972,6 +1054,8 @@ pub fn paint(
             display: display.clone(),
             levels: tc.levels.clone(),
             split: tc.split.take(),
+            spare: tc.spare.take(),
+            handover: false,
             through,
             ahead: Vec::new(),
             ahead_ms: 0.0,
@@ -1533,5 +1617,37 @@ mod tests {
         assert!(shows_document(&app));
         assert_eq!(off(&app, &mirror), 0, "composited for real: no map of the new top yet");
         assert_eq!(canvas(&app).anchor, vec![top]);
+    }
+
+    /// The frames in which the Free Transform box opens and closes wait for their tiles,
+    /// whatever the pool's wait: the box draws the moving pixels over a canvas that leaves the
+    /// layer out, from the frame it opens to the frame it closes, so a canvas a frame behind
+    /// would show the layer twice, or not at all.
+    #[test]
+    fn the_frames_the_transform_box_opens_and_closes_in_show_their_tiles() {
+        let mut app = stacked();
+        let ctx = egui::Context::default();
+        let mut mirror = HashMap::new();
+        settle(&mut app, &ctx, &mut mirror);
+        // (No wait: an edit's own frame never has its tiles.)
+        set_flight_wait(Some(0.0));
+        let against = |app: &PhotocraftApp, mirror: &HashMap<egui::TextureId, (usize, usize, Vec<[u8; 4]>)>, doc: &Document| {
+            let mut worst = 0u8;
+            for t in canvas(app).tiles.values() {
+                let want = photocraft_compose::render(doc, t.held).to_premultiplied_rgba8();
+                let (_, _, got) = &mirror[&t.tex.id()];
+                worst = worst.max(got.iter().zip(&want).flat_map(|(a, b)| (0..4).map(move |c| a[c].abs_diff(b[c]))).max().unwrap_or(0));
+            }
+            worst
+        };
+        crate::transform_tool::begin(&mut app, &ctx).unwrap();
+        apply(&mut mirror, &frame(&mut app, &ctx, 1.0, [600.0, 450.0]));
+        let under = app.transform_preview.as_ref().unwrap().doc.clone();
+        assert!(against(&app, &mirror, &under) <= 1, "the frame the box opens in shows the canvas without the layer");
+        crate::transform_tool::cancel(&mut app);
+        apply(&mut mirror, &frame(&mut app, &ctx, 1.0, [600.0, 450.0]));
+        let doc = app.session.documents()[0].doc.clone();
+        assert!(against(&app, &mirror, &doc) <= 1, "the frame it closes in shows the layer again");
+        set_flight_wait(None);
     }
 }

@@ -91,6 +91,10 @@ pub(super) fn front_vertices(h: &Homography, n: usize) -> Vec<bool> {
 /// Photoshop. The box, handles and reference point are [`draw_overlay`], drawn over the guides.
 pub fn draw_content(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform) {
     let (Some(t), Some(pv)) = (&app.ui.transform, &app.transform_preview) else { return };
+    // Its images still being made: the canvas shows the layer where it is.
+    if !pv.made() {
+        return;
+    }
     let output = crate::monitor_status::view_display(app, painter.ctx());
     let (display, _) = crate::canvas::canvas_display(app, &pv.doc, output);
     // Selection tint and lone mask/channel values are UI diagnostics, not document colors.
