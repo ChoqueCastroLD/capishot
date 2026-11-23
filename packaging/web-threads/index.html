@@ -51,6 +51,8 @@
       }
     }).catch(() => {});
     const boot = self.capishotBoot;
+    // (A boot.js from the browser's cache may predate it.)
+    if (boot && boot.watchBuild) boot.watchBuild(version);
     const loading = document.getElementById('photocraft_loading');
     const status = document.getElementById('photocraft_status');
     // Where the single-threaded build sits relative to this page (build.sh: PHOTOCRAFT_WEB_FALLBACK),

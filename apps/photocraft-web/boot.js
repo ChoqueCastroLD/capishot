@@ -33,19 +33,22 @@
       loading: 'Loading Capishot…', download: 'Downloading Capishot', preparing: 'Preparing Capishot…', starting: 'Starting Capishot…',
       failed: "Capishot didn't load completely.", memory: "This device doesn't have enough free memory for Capishot. Close other tabs or apps and try again.",
       reload: 'Reload', details: 'Details', stage: 'Stage', error: 'Error', loaded: 'Downloaded', build: 'Build', threadsFirst: 'Threads build first',
-      chunk: "Couldn't load a part of Capishot (network). Try again", retry: 'Try again',
+      chunk: "Couldn't load a part of Capishot (network). Try again", retry: 'Try again', close: 'Close',
+      newBuild: 'A new version of Capishot is out, with fixes. Save your work and reload.',
     },
     es: {
       loading: 'Cargando Capishot…', download: 'Descargando Capishot', preparing: 'Preparando Capishot…', starting: 'Iniciando Capishot…',
       failed: 'No se pudo cargar Capishot por completo.', memory: 'Tu dispositivo no tiene memoria suficiente para Capishot. Cierra otras pestañas o apps e inténtalo de nuevo.',
       reload: 'Recargar', details: 'Detalles', stage: 'Etapa', error: 'Error', loaded: 'Descargado', build: 'Versión', threadsFirst: 'Antes, la versión con hilos',
-      chunk: 'No se pudo cargar una parte de Capishot (red). Reintenta', retry: 'Reintentar',
+      chunk: 'No se pudo cargar una parte de Capishot (red). Reintenta', retry: 'Reintentar', close: 'Cerrar',
+      newBuild: 'Hay una versión nueva de Capishot, con arreglos. Guarda tu trabajo y recarga.',
     },
     pt: {
       loading: 'Carregando o Capishot…', download: 'Baixando o Capishot', preparing: 'Preparando o Capishot…', starting: 'Iniciando o Capishot…',
       failed: 'Não foi possível carregar o Capishot por completo.', memory: 'Este dispositivo não tem memória livre suficiente para o Capishot. Feche outras abas ou apps e tente de novo.',
       reload: 'Recarregar', details: 'Detalhes', stage: 'Etapa', error: 'Erro', loaded: 'Baixado', build: 'Versão', threadsFirst: 'Antes, a versão com threads',
-      chunk: 'Não foi possível carregar uma parte do Capishot (rede). Tente de novo', retry: 'Tentar de novo',
+      chunk: 'Não foi possível carregar uma parte do Capishot (rede). Tente de novo', retry: 'Tentar de novo', close: 'Fechar',
+      newBuild: 'Há uma versão nova do Capishot, com correções. Salve seu trabalho e recarregue.',
     },
   };
   const text = TEXT[lang] || TEXT.en;
@@ -332,21 +335,56 @@
       r.stage = 'chunk';
       beacon(r);
     }
-    if (!sync || el('photocraft_chunk_failed')) return;
+    if (sync) toast('photocraft_chunk_failed', text.chunk, text.retry);
+  };
+  // A toast at the bottom of the page whose button reloads (crash recovery brings the documents
+  // back). One of each `id`; `closable`: with a button that only closes it.
+  const toast = (id, message, button, closable) => {
+    if (el(id)) return;
     const box = document.createElement('div');
-    box.id = 'photocraft_chunk_failed';
+    box.id = id;
     box.setAttribute('role', 'alert');
     box.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:2147483647;max-width:calc(100vw - 32px);'
       + 'display:flex;gap:12px;align-items:center;padding:12px 16px;border-radius:12px;background:#2a2a2a;color:#eee;'
       + 'font:14px system-ui,sans-serif;box-shadow:0 4px 18px rgba(0,0,0,.4)';
     const p = document.createElement('span');
-    p.textContent = text.chunk;
+    p.textContent = message;
     const b = document.createElement('button');
-    b.textContent = text.retry;
+    b.textContent = button;
     b.style.cssText = 'font:14px system-ui,sans-serif;padding:8px 16px;border-radius:16px;border:0;background:#3b82f6;color:#fff;flex:none';
     b.onclick = () => location.reload();
     box.append(p, b);
+    if (closable) {
+      const x = document.createElement('button');
+      x.textContent = '×';
+      x.setAttribute('aria-label', text.close);
+      x.style.cssText = 'font:18px system-ui,sans-serif;padding:4px 8px;border:0;background:none;color:#aaa;flex:none;cursor:pointer';
+      x.onclick = () => box.remove();
+      box.append(x);
+    }
     (document.body || document.documentElement).append(box);
+  };
+  // A tab left open keeps the build it loaded, without the fixes published since (a page loading
+  // again is handled by the page itself). Every 15 minutes, and when the tab comes back to the
+  // front, the page as it is now says which build is current: when it's another, a toast offers
+  // to reload, once per newer build. Never in the way: nothing waits for this, and with no network nothing happens.
+  const watchBuild = (version) => {
+    let last = 0;
+    let offered = '';
+    const check = () => {
+      if (el('photocraft_new_build') || Date.now() - last < 60000) return;
+      last = Date.now();
+      fetch(location.pathname + location.search, { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
+        const current = (html.match(/const version = '([^']+)'/) || [])[1];
+        // Once per newer build: closed, it comes back only for the next one.
+        if (current && current !== version && current !== offered) {
+          offered = current;
+          toast('photocraft_new_build', text.newBuild, text.reload, true);
+        }
+      }).catch(() => {});
+    };
+    setInterval(check, 15 * 60 * 1000);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
   };
 
   // `crash` (kind `js`): at most a few per page, none before the app says statistics are on (held
@@ -423,7 +461,7 @@
     jsCrash(err, at ? at[1] : '', at ? Number(at[2]) : -1);
   });
 
-  self.capishotBoot = { stage, progress, counted, fail, build, state, chunkFailed };
+  self.capishotBoot = { stage, progress, counted, fail, build, state, chunkFailed, watchBuild };
   // The pre-boot.js name, still called by older pages' scripts.
   self.capishotLoadFailed = (why) => fail(why instanceof Error ? why : new Error(String(why)));
 })();
