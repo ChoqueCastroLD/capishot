@@ -330,6 +330,13 @@ const DRAG_BAND_MS: f64 = 2.0;
 /// exactly (milliseconds): an edit that follows at once keeps the pool's time.
 const REFINE_AFTER_MS: f64 = 400.0;
 
+/// Texture bytes a frame uploads for the tiles of a batch that landed (about 15 whole tiles). A
+/// batch with more is uploaded into new textures over the next frames while the canvas goes on
+/// showing the tiles it has, and they all replace those in the frame the last one is uploaded:
+/// a page-size edit uploaded its 10 MB of tiles in the frame it landed in (11 to 39 ms of a frame
+/// on this server, more on a phone's WebGL).
+pub(crate) const UPLOAD_BUDGET: usize = 4 << 20;
+
 /// Composite `rects` (level pixels at factor `f`) from `source` (the reduced document), or
 /// without one by reducing the full-resolution composite of `doc`.
 fn render_level(doc: &Document, source: Option<&Document>, f: i64, rects: &[DRect]) -> Vec<photocraft_compose::Buffer> {
@@ -600,7 +607,10 @@ fn draw(mut b: Batch) -> Drawn {
 
 /// A batch on the worker pool: the frame that sent it went on without it.
 struct Flight {
-    rx: std::sync::mpsc::Receiver<Drawn>,
+    /// Where the batch comes from (`None`: it is here, being uploaded: [`Flight::staged`]).
+    rx: Option<std::sync::mpsc::Receiver<Drawn>>,
+    /// The batch, once here, while its tiles are uploaded over frames.
+    staged: Option<Staged>,
     /// The (revision, preview key) and level it draws.
     state: (u64, u64),
     level: u32,
@@ -615,14 +625,76 @@ struct Flight {
     under_box: Option<bool>,
 }
 
-impl Flight {
-    /// What the batch made, when it is done (`Err`: it was lost).
-    fn find(&self) -> Option<Result<Drawn, ()>> {
-        match self.rx.try_recv() {
-            Ok(d) => Some(Ok(Drawn { held_ms: 0.0, ..d })),
-            Err(std::sync::mpsc::TryRecvError::Empty) => None,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(Err(())),
+/// A batch that is here, its tiles' textures made a frame's [`UPLOAD_BUDGET`] at a time.
+struct Staged {
+    d: Drawn,
+    /// The textures made so far for its tiles, in order (`None` for a part of a tile: it is
+    /// uploaded into the tile's texture when the batch lands).
+    made: Vec<Option<egui::TextureHandle>>,
+}
+
+impl Staged {
+    fn new(d: Drawn) -> Self {
+        Staged { made: Vec::with_capacity(d.tiles.len()), d }
+    }
+
+    /// Upload the next tiles within what is left of the frame's budget (`spent`, bytes, which it
+    /// adds to; a frame that has spent nothing uploads at least one). Whether all are uploaded.
+    fn upload(&mut self, ctx: &egui::Context, name: (DocId, u32), spent: &mut usize) -> bool {
+        while let Some((job, img)) = self.d.tiles.get_mut(self.made.len()) {
+            let Job::Full(k, _) = *job else {
+                self.made.push(None);
+                continue;
+            };
+            let bytes = img.size[0] * img.size[1] * 4;
+            if *spent > 0 && *spent + bytes > UPLOAD_BUDGET {
+                return false;
+            }
+            *spent += bytes;
+            // (The image is the texture's now: what lands is its texture.)
+            self.made.push(Some(load_tile(ctx, name, k, std::mem::take(img))));
         }
+        true
+    }
+}
+
+/// Texture bytes of the whole tiles of `d`.
+fn full_bytes(d: &Drawn) -> usize {
+    d.tiles.iter().filter(|(j, _)| matches!(j, Job::Full(..))).map(|(_, img)| img.size[0] * img.size[1] * 4).sum()
+}
+
+fn load_tile(ctx: &egui::Context, name: (DocId, u32), k: TileKey, img: egui::ColorImage) -> egui::TextureHandle {
+    ctx.load_texture(format!("cpu-tile-{}-{}-{}-{}-{}", name.0.0, name.1, k.level, k.tx, k.ty), img, TextureOptions::LINEAR)
+}
+
+impl Flight {
+    /// What the batch made, its textures made, when it is done (`Err`: it was lost). A batch
+    /// with more texture bytes than the frame has left of its [`UPLOAD_BUDGET`] (`spent`) is
+    /// uploaded over the next frames first.
+    fn find(&mut self, ctx: &egui::Context, name: (DocId, u32), spent: &mut usize) -> Option<Result<(Drawn, Vec<Option<egui::TextureHandle>>), ()>> {
+        if self.staged.is_none() {
+            let d = match self.rx.as_ref()?.try_recv() {
+                Ok(d) => Drawn { held_ms: 0.0, ..d },
+                Err(std::sync::mpsc::TryRecvError::Empty) => return None,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => return Some(Err(())),
+            };
+            if *spent + full_bytes(&d) <= UPLOAD_BUDGET {
+                return Some(Ok((d, Vec::new())));
+            }
+            self.rx = None;
+            self.staged = Some(Staged::new(d));
+        } else if let Some(st) = self.staged.take_if(|st| st.made.is_empty() && *spent + full_bytes(&st.d) <= UPLOAD_BUDGET) {
+            // (Handed over here whole: it fits the frame.)
+            return Some(Ok((st.d, Vec::new())));
+        }
+        let st = self.staged.as_mut()?;
+        if !st.upload(ctx, name, spent) {
+            // (The rest in the next frame, at once.)
+            ctx.request_repaint();
+            return None;
+        }
+        let st = self.staged.take()?;
+        Some(Ok((st.d, st.made)))
     }
 }
 
@@ -686,13 +758,14 @@ impl TileCanvas {
         }
         #[cfg(target_arch = "wasm32")]
         let _ = wait;
-        self.flight = Some(Flight { rx, state, level, ahead, anchor: self.anchor.clone(), stop, under_box });
+        self.flight = Some(Flight { rx: Some(rx), staged: None, state, level, ahead, anchor: self.anchor.clone(), stop, under_box });
         None
     }
 
     /// What a batch made, into the canvas: all its tiles in this frame (the canvas never shows
-    /// part of an edit), the split back.
-    fn land(&mut self, ctx: &egui::Context, name: (DocId, u32), d: Drawn, sent: Sent, stats: &mut Stats) {
+    /// part of an edit), the split back. `made`: the textures of its whole tiles, uploaded over
+    /// the frames before ([`Staged`]; empty: they are made now).
+    fn land(&mut self, ctx: &egui::Context, name: (DocId, u32), d: Drawn, made: Vec<Option<egui::TextureHandle>>, sent: Sent, stats: &mut Stats) {
         let t0 = crate::gpu_canvas::now_ms();
         let Sent { fresh, ahead, anchor } = sent;
         // (Not when the frames asked for other layers meanwhile: the next batch goes around those.)
@@ -707,25 +780,30 @@ impl TileCanvas {
             self.refine_after = t0 + REFINE_AFTER_MS;
         }
         let frame = self.frame;
-        let load = |k: TileKey, img: egui::ColorImage| ctx.load_texture(format!("cpu-tile-{}-{}-{}-{}-{}", name.0.0, name.1, k.level, k.tx, k.ty), img, TextureOptions::LINEAR);
         stats.from_split |= d.from_split && !d.tiles.is_empty();
         stats.composite_ms += d.held_ms;
         stats.pool_ms += (d.ms - d.held_ms).max(0.0);
+        let mut made = made.into_iter();
         for (job, img) in d.tiles {
-            stats.px += img.size[0] as u64 * img.size[1] as u64;
+            let r = job.rect();
+            stats.px += u64::from(r.width()) * u64::from(r.height());
+            // The tile's texture uploaded in earlier frames (`Staged`), or made now.
+            let staged = made.next().flatten();
             match job {
                 Job::Full(k, held) => match self.tiles.get_mut(&k) {
-                    Some(t) if t.tex.size() == img.size => {
+                    Some(t) if staged.is_none() && t.tex.size() == img.size => {
                         t.tex.set(img, TextureOptions::LINEAR);
                         (t.held, t.drawing, t.approx) = (held, None, d.approx);
                     }
                     // What changed while the batch was in flight is still to draw.
                     Some(t) => {
                         let dirty = t.dirty;
-                        self.tiles.insert(k, TileTex { tex: load(k, img), held, dirty, drawing: None, used: frame, approx: d.approx });
+                        let tex = staged.unwrap_or_else(|| load_tile(ctx, name, k, img));
+                        self.tiles.insert(k, TileTex { tex, held, dirty, drawing: None, used: frame, approx: d.approx });
                     }
                     None if fresh => {
-                        self.tiles.insert(k, TileTex { tex: load(k, img), held, dirty: None, drawing: None, used: frame, approx: d.approx });
+                        let tex = staged.unwrap_or_else(|| load_tile(ctx, name, k, img));
+                        self.tiles.insert(k, TileTex { tex, held, dirty: None, drawing: None, used: frame, approx: d.approx });
                     }
                     None => {}
                 },
@@ -746,6 +824,24 @@ impl TileCanvas {
             }
         }
         stats.upload_ms += crate::gpu_canvas::now_ms() - t0;
+    }
+
+    /// The batch in flight, into the canvas when it is here and its textures are made within the
+    /// frame's [`UPLOAD_BUDGET`] (`spent`); else it stays in flight. `shows` is the state and
+    /// level the canvas shows now.
+    fn take_flight(&mut self, ctx: &egui::Context, key: (DocId, u32), shows: ((u64, u64), u32), spent: &mut usize, stats: &mut Stats) {
+        let Some(mut fl) = self.flight.take() else { return };
+        match fl.find(ctx, key, spent) {
+            Some(Ok((d, made))) => {
+                if made.is_empty() {
+                    *spent += full_bytes(&d);
+                }
+                self.under_box = fl.under_box.unwrap_or(self.under_box);
+                self.land(ctx, key, d, made, Sent { fresh: (fl.state, fl.level) == shows, ahead: fl.ahead, anchor: fl.anchor }, stats);
+            }
+            Some(Err(())) => self.grounded(),
+            None => self.flight = Some(fl),
+        }
     }
 
     /// The batch in flight was lost (its worker died): what it was drawing is still to draw.
@@ -875,20 +971,16 @@ pub fn paint(
         tc.shown = Some(now);
     }
     let mut stats = Stats::default();
-    // The batch in flight, when the pool is done with it: its tiles in place of the ones shown.
-    if let Some(fl) = tc.flight.take() {
-        if handover {
-            fl.stop.store(true, std::sync::atomic::Ordering::Relaxed);
-        }
-        match fl.find() {
-            Some(Ok(d)) => {
-                tc.under_box = fl.under_box.unwrap_or(tc.under_box);
-                tc.land(ctx, key, d, Sent { fresh: fl.state == now && fl.level == level, ahead: fl.ahead, anchor: fl.anchor }, &mut stats);
-            }
-            Some(Err(())) => tc.grounded(),
-            None => tc.flight = Some(fl),
-        }
+    // Texture bytes this frame uploaded for batches' tiles ([`UPLOAD_BUDGET`]).
+    let mut spent = 0;
+    // The batch in flight, when the pool is done with it and its textures are uploaded: its
+    // tiles in place of the ones shown.
+    if let Some(fl) = tc.flight.as_ref()
+        && handover
+    {
+        fl.stop.store(true, std::sync::atomic::Ordering::Relaxed);
     }
+    tc.take_flight(ctx, key, (now, level), &mut spent, &mut stats);
     // A drag this canvas showed was committed at the offset it showed: the split is rebased on
     // the result and draws the release's tiles (`move_cpu::Split::rebase`), as the drag's frames
     // were drawn; they are composited exactly once the edits pause.
@@ -1019,8 +1111,10 @@ pub fn paint(
         };
         let anchor = tc.anchor.clone();
         if let Some(d) = tc.send(ctx, batch, now, None, wait) {
-            tc.under_box = stands_in;
-            tc.land(ctx, key, d, Sent { fresh: true, ahead: None, anchor }, &mut stats);
+            // Done in the frame's wait: shown now, or once its textures are uploaded.
+            let stop = Arc::default();
+            tc.flight = Some(Flight { rx: None, staged: Some(Staged::new(d)), state: now, level, ahead: None, anchor, stop, under_box: Some(stands_in) });
+            tc.take_flight(ctx, key, (now, level), &mut spent, &mut stats);
         }
     } else if matches!(through, Through::Edit { .. }) && stale.is_empty() && missing.is_empty() && tc.flight.is_none() && tc.pending.is_none() && !tc.ahead_ready && !pointer_down {
         // Nothing to draw: the split's tiles for the view, made ahead a few at a time.
@@ -1047,7 +1141,7 @@ pub fn paint(
         let anchor = tc.anchor.clone();
         if let Some(d) = tc.send(ctx, batch, now, Some(ahead.clone()), wait.map(|_| 0.0)) {
             more_ahead = !d.ahead_done;
-            tc.land(ctx, key, d, Sent { fresh: true, ahead: Some(ahead.clone()), anchor }, &mut stats);
+            tc.land(ctx, key, d, Vec::new(), Sent { fresh: true, ahead: Some(ahead.clone()), anchor }, &mut stats);
         }
     }
     // Missing tiles while the frame has time (at least one batch), where there is no pool: the
@@ -1080,7 +1174,7 @@ pub fn paint(
             view: view.clone(),
         };
         let anchor = tc.anchor.clone();
-        tc.land(ctx, key, draw(batch), Sent { fresh: true, ahead: None, anchor }, &mut stats);
+        tc.land(ctx, key, draw(batch), Vec::new(), Sent { fresh: true, ahead: None, anchor }, &mut stats);
     }
     // Missing tiles left: composited on the worker pool while the frame goes on.
     if pooled && rest.peek().is_some() && tc.pending.is_none() {
@@ -1337,6 +1431,7 @@ fn draw_tile(painter: &egui::Painter, xf: &ViewXform, tex: &egui::TextureHandle,
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::collections::HashSet;
 
     fn app(w: u32, h: u32) -> PhotocraftApp {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
@@ -1424,12 +1519,16 @@ mod tests {
         assert!(app.perf.last_refresh_px < 64 * 64, "{}", app.perf.last_refresh_px);
         assert!(delta.set.iter().all(|(_, d)| d.iter().all(|d| d.pos.is_some())), "partial uploads only");
         assert_eq!(canvas(&app).tile_count(), before);
-        // An edit with no damage rectangle redraws every tile in view, whole.
+        // An edit with no damage rectangle redraws every tile in view, whole (uploaded over two
+        // frames: more than a frame's budget).
         app.session.active_mut().unwrap().last_damage = None;
         app.session.active_mut().unwrap().revision += 1;
-        let delta = frame(&mut app, &ctx, 1.0, [600.0, 450.0]);
-        assert_eq!(delta.set.len(), before);
-        assert!(delta.set.iter().all(|(_, d)| d.iter().all(|d| d.pos.is_none())));
+        let mut set = frame(&mut app, &ctx, 1.0, [600.0, 450.0]).set;
+        assert!(!shows_document(&app) && !set.is_empty());
+        set.extend(frame(&mut app, &ctx, 1.0, [600.0, 450.0]).set);
+        assert!(shows_document(&app));
+        assert_eq!(set.len(), before);
+        assert!(set.iter().all(|(_, d)| d.iter().all(|d| d.pos.is_none())));
     }
 
     /// Texture contents rebuilt from a frame's uploads (whole and partial), by texture.
@@ -1595,10 +1694,14 @@ mod tests {
 
     /// The largest difference between the tiles' textures and the exact composite (8-bit steps).
     fn off(app: &PhotocraftApp, mirror: &HashMap<egui::TextureId, (usize, usize, Vec<[u8; 4]>)>) -> u8 {
-        let doc = app.session.documents()[0].doc.clone();
+        off_from(app, mirror, &app.session.documents()[0].doc.clone())
+    }
+
+    /// [`off`] from the composite of `doc`.
+    fn off_from(app: &PhotocraftApp, mirror: &HashMap<egui::TextureId, (usize, usize, Vec<[u8; 4]>)>, doc: &Document) -> u8 {
         let mut worst = 0;
         for t in canvas(app).tiles.values() {
-            let want = photocraft_compose::render(&doc, t.held).to_premultiplied_rgba8();
+            let want = photocraft_compose::render(doc, t.held).to_premultiplied_rgba8();
             let (_, _, got) = &mirror[&t.tex.id()];
             worst = worst.max(got.iter().zip(&want).flat_map(|(a, b)| (0..4).map(move |c| a[c].abs_diff(b[c]))).max().unwrap_or(0));
         }
@@ -1619,24 +1722,38 @@ mod tests {
         settle(&mut app, &ctx, &mut mirror);
         assert_eq!(off(&app, &mirror), 0, "the page before the edit");
         let tiles = canvas(&app).tile_count();
-        let here = photocraft_compose::composites_here();
+        let page: usize = canvas(&app).tiles.values().map(|t| t.held.width() as usize * t.held.height() as usize * 4).sum();
+        assert!(page > UPLOAD_BUDGET, "a page of more texture than a frame uploads ({page} bytes)");
+        let before = app.session.documents()[0].doc.clone();
+        // (Less the test's own composites.)
+        let mut here = photocraft_compose::composites_here();
         let (held, pool) = (app.perf.stage.composite_ms, app.perf.stage.pool_ms);
         app.run("edit.fill", json!({"contents": "color", "color": "#22aa55", "opacity": 80})).unwrap();
         let mut frames = 0;
-        let whole = loop {
+        let mut uploading = 0;
+        let mut uploaded = HashSet::new();
+        loop {
             let delta = frame(&mut app, &ctx, 1.0, [600.0, 450.0]);
             frames += 1;
             assert!(frames < 5000, "the edit never showed");
-            if delta.set.is_empty() {
-                assert!(!shows_document(&app), "nothing drawn yet: the canvas still shows the page before the edit");
-                std::thread::sleep(std::time::Duration::from_millis(1));
-                continue;
-            }
+            let bytes: usize = delta.set.iter().flat_map(|(_, d)| d).map(|d| d.image.width() * d.image.height() * 4).sum();
+            assert!(bytes <= UPLOAD_BUDGET, "a frame uploaded {bytes} bytes of tiles");
+            uploaded.extend(delta.set.iter().map(|(id, _)| *id));
             apply(&mut mirror, &delta);
-            break delta;
-        };
-        assert_eq!(whole.set.len(), tiles, "every tile of the page in the same frame");
-        assert!(shows_document(&app));
+            if shows_document(&app) {
+                break;
+            }
+            // Not there yet, or its textures on their way: the canvas shows the page before the edit, all of it.
+            uploading += usize::from(!delta.set.is_empty());
+            assert!(canvas(&app).tiles.values().all(|t| !uploaded.contains(&t.tex.id())), "no tile of the edit shows before the others");
+            let checks = photocraft_compose::composites_here();
+            assert_eq!(off_from(&app, &mirror, &before), 0, "the page before the edit");
+            here += photocraft_compose::composites_here() - checks;
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(uploading >= 1, "the tiles were uploaded over more than one frame");
+        assert!(canvas(&app).tiles.values().all(|t| uploaded.contains(&t.tex.id())), "every tile of the page in the same frame");
+        assert_eq!(canvas(&app).tile_count(), tiles);
         assert_eq!(photocraft_compose::composites_here() - here, 0, "nothing composited on the window's thread");
         // The frames' record says so too: the pool's time isn't counted as the frame's (a frame
         // of 4 ms that landed a batch was logged as a stall of the 370 ms the pool had taken).
