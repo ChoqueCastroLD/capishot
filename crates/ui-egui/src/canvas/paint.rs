@@ -10,6 +10,11 @@ use super::{Color32, DRect, Document, Mesh, PhotocraftApp, Pos2, Rect, Stroke, T
 
 /// A texture mapped over the `size` document area starting at `origin` (follows a rotated view).
 pub(super) fn paint_mapped_image_at(painter: &egui::Painter, xf: &ViewXform, tex: egui::TextureId, uv: Rect, origin: [f32; 2], size: [f32; 2], tint: Color32) {
+    painter.add(mapped_image_at(xf, tex, uv, origin, size, tint));
+}
+
+/// The shape [`paint_mapped_image_at`] draws.
+fn mapped_image_at(xf: &ViewXform, tex: egui::TextureId, uv: Rect, origin: [f32; 2], size: [f32; 2], tint: Color32) -> egui::Shape {
     let ([x, y], [w, h]) = (origin, size);
     let pts = [xf.to_screen(x, y), xf.to_screen(x + w, y), xf.to_screen(x + w, y + h), xf.to_screen(x, y + h)];
     let uvs = [uv.min, pos2(uv.max.x, uv.min.y), uv.max, pos2(uv.min.x, uv.max.y)];
@@ -19,7 +24,7 @@ pub(super) fn paint_mapped_image_at(painter: &egui::Painter, xf: &ViewXform, tex
     }
     mesh.add_triangle(0, 1, 2);
     mesh.add_triangle(0, 2, 3);
-    painter.add(egui::Shape::mesh(mesh));
+    egui::Shape::mesh(mesh)
 }
 
 /// The GPU canvas view, then its View › Pattern Preview copies (#1067): the same texture drawn
@@ -60,14 +65,8 @@ pub(super) fn paint_cpu_document(
     let origin = [bounds.x0 as f32, bounds.y0 as f32];
     let img_rect = xf.doc_rect(bounds);
     match checker {
-        Some((checker_id, square)) if !opaque || tex.is_none() => {
-            if rotated {
-                let tiles = vec2(size[0], size[1]) / (2.0 * square);
-                paint_mapped_image_at(painter, xf, checker_id, Rect::from_min_max(Pos2::ZERO, pos2(tiles.x, tiles.y)), origin, size, Color32::WHITE);
-            } else {
-                let tiles = img_rect.size() / (2.0 * square);
-                painter.image(checker_id, img_rect, Rect::from_min_max(Pos2::ZERO, pos2(tiles.x, tiles.y)), Color32::WHITE);
-            }
+        Some(c) if !opaque || tex.is_none() => {
+            painter.add(checker_shape(xf, bounds, rotated, c));
         }
         // On software window adapters this hidden full-canvas pass is CPU rasterization too.
         // Keep the white-background branch unchanged (its antialiased outer edge is visible).
@@ -87,6 +86,20 @@ pub(super) fn paint_cpu_document(
             let uv = if xf.flip { Rect::from_min_max(pos2(1.0, 0.0), pos2(0.0, 1.0)) } else { Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)) };
             painter.image(tex, img_rect, uv, Color32::WHITE);
         }
+    }
+}
+
+/// The transparency checkerboard (`checker`: texture and square side) under document area
+/// `bounds`, as [`paint_cpu_document`] draws it.
+pub(super) fn checker_shape(xf: &ViewXform, bounds: DRect, rotated: bool, (checker_id, square): (egui::TextureId, f32)) -> egui::Shape {
+    let size = [bounds.width() as f32, bounds.height() as f32];
+    if rotated {
+        let tiles = vec2(size[0], size[1]) / (2.0 * square);
+        mapped_image_at(xf, checker_id, Rect::from_min_max(Pos2::ZERO, pos2(tiles.x, tiles.y)), [bounds.x0 as f32, bounds.y0 as f32], size, Color32::WHITE)
+    } else {
+        let img_rect = xf.doc_rect(bounds);
+        let tiles = img_rect.size() / (2.0 * square);
+        egui::Shape::image(checker_id, img_rect, Rect::from_min_max(Pos2::ZERO, pos2(tiles.x, tiles.y)), Color32::WHITE)
     }
 }
 

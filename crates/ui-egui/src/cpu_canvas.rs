@@ -67,6 +67,14 @@ struct TileTex {
     /// Drawn through a split's top map (`move_cpu`): the document as it is, within a rounding
     /// step, type edges approximated; composited exactly once the edits pause.
     approx: bool,
+    /// Every pixel of the texture is opaque (a part drawn into it can only clear this; a whole
+    /// image sets it again).
+    opaque: bool,
+}
+
+/// Whether every pixel of a tile's image is opaque (checked where the image is made).
+fn opaque(img: &egui::ColorImage) -> bool {
+    img.pixels.iter().all(|p| p.a() == u8::MAX)
 }
 
 /// One document's CPU canvas on one display (lives in `canvas::CanvasCache`).
@@ -134,7 +142,7 @@ struct Pending {
     /// The (revision, preview key) and level they were composited for.
     state: (u64, u64),
     level: u32,
-    rx: std::sync::mpsc::Receiver<Vec<(TileKey, DRect, egui::ColorImage)>>,
+    rx: std::sync::mpsc::Receiver<Vec<(TileKey, DRect, egui::ColorImage, bool)>>,
 }
 
 /// Whether there is a worker pool to composite on, off the UI thread (the threads build, desktop).
@@ -438,7 +446,8 @@ struct Batch {
 struct Drawn {
     split: Option<Split>,
     spare: Option<Split>,
-    tiles: Vec<(Job, egui::ColorImage)>,
+    /// Each job's image, and whether it is all opaque.
+    tiles: Vec<(Job, egui::ColorImage, bool)>,
     from_split: bool,
     /// Made for a frame under the pointer (a drag, a press): shown in the frame that finds it.
     live: bool,
@@ -615,7 +624,11 @@ fn draw(mut b: Batch) -> Drawn {
             }
         }
     }
-    let tiles = b.jobs.iter().map(|(j, _)| *j).zip(images.unwrap_or_default()).collect();
+    let tiles = b.jobs.iter().map(|(j, _)| *j).zip(images.unwrap_or_default()).map(|(j, img)| {
+        let o = opaque(&img);
+        (j, img, o)
+    });
+    let tiles = tiles.collect();
     let ms = crate::gpu_canvas::now_ms() - t0;
     Drawn { split, spare, tiles, from_split, live, approx, anchor, ahead_done, ms, held_ms: ms }
 }
@@ -656,7 +669,7 @@ impl Staged {
     /// Upload the next tiles within what is left of the frame's budget (`spent`, bytes, which it
     /// adds to; a frame that has spent nothing uploads at least one). Whether all are uploaded.
     fn upload(&mut self, ctx: &egui::Context, name: (DocId, u32), spent: &mut usize) -> bool {
-        while let Some((job, img)) = self.d.tiles.get_mut(self.made.len()) {
+        while let Some((job, img, _)) = self.d.tiles.get_mut(self.made.len()) {
             let Job::Full(k, _) = *job else {
                 self.made.push(None);
                 continue;
@@ -675,7 +688,7 @@ impl Staged {
 
 /// Texture bytes of the whole tiles of `d`.
 fn full_bytes(d: &Drawn) -> usize {
-    d.tiles.iter().filter(|(j, _)| matches!(j, Job::Full(..))).map(|(_, img)| img.size[0] * img.size[1] * 4).sum()
+    d.tiles.iter().filter(|(j, _, _)| matches!(j, Job::Full(..))).map(|(_, img, _)| img.size[0] * img.size[1] * 4).sum()
 }
 
 /// Whether batch `d` is shown in the frame that finds it (`spent`: bytes this frame uploaded so
@@ -809,7 +822,7 @@ impl TileCanvas {
         stats.composite_ms += d.held_ms;
         stats.pool_ms += (d.ms - d.held_ms).max(0.0);
         let mut made = made.into_iter();
-        for (job, img) in d.tiles {
+        for (job, img, opaque) in d.tiles {
             let r = job.rect();
             stats.px += u64::from(r.width()) * u64::from(r.height());
             // The tile's texture uploaded in earlier frames (`Staged`), or made now.
@@ -818,17 +831,17 @@ impl TileCanvas {
                 Job::Full(k, held) => match self.tiles.get_mut(&k) {
                     Some(t) if staged.is_none() && t.tex.size() == img.size => {
                         t.tex.set(img, TextureOptions::LINEAR);
-                        (t.held, t.drawing, t.approx) = (held, None, d.approx);
+                        (t.held, t.drawing, t.approx, t.opaque) = (held, None, d.approx, opaque);
                     }
                     // What changed while the batch was in flight is still to draw.
                     Some(t) => {
                         let dirty = t.dirty;
                         let tex = staged.unwrap_or_else(|| load_tile(ctx, name, k, img));
-                        self.tiles.insert(k, TileTex { tex, held, dirty, drawing: None, used: frame, approx: d.approx });
+                        self.tiles.insert(k, TileTex { tex, held, dirty, drawing: None, used: frame, approx: d.approx, opaque });
                     }
                     None if fresh => {
                         let tex = staged.unwrap_or_else(|| load_tile(ctx, name, k, img));
-                        self.tiles.insert(k, TileTex { tex, held, dirty: None, drawing: None, used: frame, approx: d.approx });
+                        self.tiles.insert(k, TileTex { tex, held, dirty: None, drawing: None, used: frame, approx: d.approx, opaque });
                     }
                     None => {}
                 },
@@ -837,6 +850,7 @@ impl TileCanvas {
                         let fits = part.intersect(&t.held) == part && [part.width() as usize, part.height() as usize] == img.size;
                         if fits && !part.is_empty() {
                             t.tex.set_partial([(part.x0 - t.held.x0) as usize, (part.y0 - t.held.y0) as usize], img, TextureOptions::LINEAR);
+                            t.opaque &= opaque;
                         }
                         let drawing = t.drawing.take();
                         if !fits {
@@ -921,7 +935,9 @@ pub(crate) fn set_flight_wait(ms: Option<f64>) {
 }
 
 /// Draw document `idx`'s CPU canvas: tiles in view at the zoom's level, composited as needed.
-/// `zoom` is device pixels per document pixel (`View::zoom`).
+/// `zoom` is device pixels per document pixel (`View::zoom`). Whether the tiles drawn cover what
+/// the view shows of the page with opaque pixels: the transparency checkerboard under them then
+/// can't show, and isn't drawn (`canvas::paint`).
 #[expect(clippy::cognitive_complexity, reason = "the tile pipeline in frame order")]
 #[allow(clippy::too_many_arguments)]
 pub fn paint(
@@ -933,12 +949,12 @@ pub fn paint(
     output: Option<u32>,
     zoom: f32,
     visible: DRect,
-) {
+) -> bool {
     let target = {
         let _s = crate::perf_span::span("cpu.target");
         crate::canvas::cpu_target(app, idx, output)
     };
-    let Some(target) = target else { return };
+    let Some(target) = target else { return false };
     let crate::canvas::CpuTarget { doc, revision, preview_key, display, display_key, damage, id } = target;
     let size = [doc.size.width, doc.size.height];
     let level = level_for(zoom, size);
@@ -1034,12 +1050,12 @@ pub fn paint(
         match p.rx.try_recv() {
             Ok(done) => {
                 if p.state == now && p.level == level {
-                    for (k, held, img) in done {
+                    for (k, held, img, opaque) in done {
                         if tc.tiles.get(&k).is_some_and(|t| t.dirty.is_none() && t.drawing.is_none() && t.held == held && !t.approx) {
                             continue;
                         }
                         let tex = ctx.load_texture(format!("cpu-tile-{}-{}-{}-{}-{}", id.0, key.1, k.level, k.tx, k.ty), img, TextureOptions::LINEAR);
-                        tc.tiles.insert(k, TileTex { tex, held, dirty: None, drawing: None, used: frame, approx: false });
+                        tc.tiles.insert(k, TileTex { tex, held, dirty: None, drawing: None, used: frame, approx: false, opaque });
                     }
                 }
                 tc.pending = None;
@@ -1229,7 +1245,15 @@ pub fn paint(
             let source = faithful.then(|| reduced(&levels, &doc, level));
             let rects: Vec<DRect> = jobs.iter().map(|(_, r)| *r).collect();
             let bufs = render_level(&doc, source.as_deref(), f, &rects);
-            let done = jobs.into_iter().zip(bufs).map(|((k, held), b)| (k, held, tile_image(display.as_deref(), &b))).collect();
+            let done = jobs
+                .into_iter()
+                .zip(bufs)
+                .map(|((k, held), b)| {
+                    let img = tile_image(display.as_deref(), &b);
+                    let o = opaque(&img);
+                    (k, held, img, o)
+                })
+                .collect();
             #[cfg(test)]
             pace.hold();
             let _ = tx.send(done);
@@ -1265,7 +1289,7 @@ pub fn paint(
     }
     app.perf_counters.move_split += u64::from(stats.from_split);
     app.cpu_move_split = split_ready.then_some((id, revision, app.frame));
-    let Some(tc) = app.canvases.get_mut(&key).and_then(|c| c.tiles.as_mut()) else { return };
+    let Some(tc) = app.canvases.get_mut(&key).and_then(|c| c.tiles.as_mut()) else { return false };
     tc.xf = Some(*xf);
     // The page before a size change, until the new one in view is all here.
     if tc.before.is_some() && !want.iter().all(|k| tc.tiles.get(k).is_some_and(|t| t.dirty.is_none() && t.drawing.is_none())) {
@@ -1283,7 +1307,7 @@ pub fn paint(
         }
         ctx.request_repaint_after(std::time::Duration::from_millis(16));
         tc.evict(tex_budget);
-        return;
+        return false;
     }
     tc.before = None;
     // Draw: a tile not drawn yet at this level shows from the nearest level that has its area.
@@ -1308,6 +1332,8 @@ pub fn paint(
             draw_tile(painter, xf, &t.tex, t.held, f, own);
         }
     }
+    // Every tile in view drawn at this level and opaque: nothing under them shows.
+    let covered = shown == want.len() && want.iter().all(|k| tc.tiles.get(k).is_some_and(|t| t.opaque));
     if more || (shown < want.len() && tc.pending.is_none()) {
         ctx.request_repaint();
     }
@@ -1319,6 +1345,27 @@ pub fn paint(
     {
         l.mips.trim(mip_budget);
     }
+    covered
+}
+
+/// Whether every tile of every CPU canvas holds only opaque pixels (tests).
+#[cfg(test)]
+pub(crate) fn tiles_opaque(app: &PhotocraftApp) -> bool {
+    app.canvases.values().filter_map(|c| c.tiles.as_ref()).all(|tc| !tc.tiles.is_empty() && tc.tiles.values().all(|t| t.opaque))
+}
+
+/// Set (`Some`) or put back each tile's opacity (tests: a frame drawn as if no tile were known
+/// to be opaque). Returns what it replaced.
+#[cfg(test)]
+pub(crate) fn swap_tile_opacity(app: &mut PhotocraftApp, to: &dyn Fn(TileKey, bool) -> bool) -> Vec<(TileKey, bool)> {
+    let mut was = Vec::new();
+    for tc in app.canvases.values_mut().filter_map(|c| c.tiles.as_mut()) {
+        for (k, t) in &mut tc.tiles {
+            was.push((*k, t.opaque));
+            t.opaque = to(*k, t.opaque);
+        }
+    }
+    was
 }
 
 /// Whether document `idx`'s CPU canvas on `output` holds every tile `visible` needs at `zoom`'s

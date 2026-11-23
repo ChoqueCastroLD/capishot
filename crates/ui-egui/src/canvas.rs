@@ -554,13 +554,25 @@ fn paint_canvas(app: &mut PhotocraftApp, ui: &egui::Ui, view: &View, xf: ViewXfo
         }
         let rotated = view.rotation.abs() > 0.05;
         let checkerboard = app.session.prefs().transparency_and_gamut.square().map(|square| (checker(app, ctx), square));
-        paint_cpu_document(painter, &xf, doc.bounds(), rotated, checkerboard, None, false);
         let _s = crate::perf_span::span("canvas.cpu");
-        crate::cpu_canvas::paint(app, ctx, painter, &xf, idx, output, render_zoom, visible_doc_rect(&xf));
-        for &c in &pattern {
-            let pxf = pattern_xf(&xf, c, size);
-            paint_cpu_document(painter, &pxf, doc.bounds(), rotated, checkerboard, None, false);
-            crate::cpu_canvas::paint(app, ctx, painter, &pxf, idx, output, render_zoom, visible_doc_rect(&pxf));
+        // The checkerboard only where the tiles don't cover the page opaquely: its place under
+        // them is kept, and filled once they are drawn. On a software window adapter the hidden
+        // full-page pass cost 5 ms a frame (24 MP page at 1440x900 on llvmpipe).
+        for c in std::iter::once(None).chain(pattern.iter().map(Some)) {
+            let pxf = c.map_or(xf, |c| pattern_xf(&xf, *c, size));
+            let under = match checkerboard {
+                Some(_) => Some(painter.add(egui::Shape::Noop)),
+                None => {
+                    paint_cpu_document(painter, &pxf, doc.bounds(), rotated, None, None, false);
+                    None
+                }
+            };
+            let covered = crate::cpu_canvas::paint(app, ctx, painter, &pxf, idx, output, render_zoom, visible_doc_rect(&pxf));
+            // (Pattern Preview keeps its copies' checkerboards: their repeated quads aren't
+            // proven to cover the same pixels on every adapter.)
+            if let (Some(slot), Some(board), false) = (under, checkerboard, covered && !app.ui.view.pattern_preview) {
+                painter.set(slot, paint::checker_shape(&pxf, doc.bounds(), rotated, board));
+            }
         }
     } else {
         // A filter preview on the CPU canvas (it may change the canvas size: Image › Rotation).

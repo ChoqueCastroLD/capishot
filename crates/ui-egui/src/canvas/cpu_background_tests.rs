@@ -91,23 +91,16 @@ fn harness(size: [u32; 2], background: &str) -> Option<Harness> {
 }
 
 fn assert_fixture(h: &Harness, background: &str) {
-    let key = cache_key(h.state().session.documents()[0].doc.id, None);
     assert!(h.state().session.prefs().transparency_and_gamut.square().is_some());
-    assert_eq!(h.state().canvases[&key].texture_opaque, background == "white", "fixture opacity");
+    assert_eq!(crate::cpu_canvas::tiles_opaque(h.state()), background == "white", "fixture opacity");
 }
 
-/// Draw the unchanged reference path by temporarily disabling only the opacity guarantee.
+/// Draw the unchanged reference path by temporarily disabling only the opacity guarantee: no
+/// tile of the CPU canvas known to be opaque.
 fn reference_frame(h: &mut Harness) {
-    let flags: Vec<_> = h.state().canvases.iter().map(|(k, c)| (*k, c.texture_opaque)).collect();
-    for c in h.state_mut().canvases.values_mut() {
-        c.texture_opaque = false;
-    }
+    let was: std::collections::HashMap<_, _> = crate::cpu_canvas::swap_tile_opacity(h.state_mut(), &|_, _| false).into_iter().collect();
     h.step();
-    for (k, opaque) in flags {
-        if let Some(c) = h.state_mut().canvases.get_mut(&k) {
-            c.texture_opaque = opaque;
-        }
-    }
+    crate::cpu_canvas::swap_tile_opacity(h.state_mut(), &|k, o| was.get(&k).copied().unwrap_or(o));
 }
 
 #[test]
@@ -257,3 +250,4 @@ fn cpu_canvas_background_benchmark() {
         std::fs::write(dir.join("cpu-background-benchmark.json"), report).unwrap();
     }
 }
+
