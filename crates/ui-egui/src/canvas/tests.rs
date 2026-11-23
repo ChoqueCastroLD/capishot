@@ -2891,3 +2891,49 @@ fn crop_reduces_the_page_only_for_pixels_past_the_canvas() {
     assert_eq!(proxy.size, photocraft_doc::Size::new(32, 24));
     assert!(super::paint::beyond_proxy(&doc, 1, &super::paint::ring(extent, doc.bounds())).is_none(), "factor 1 reads the page itself");
 }
+
+/// A selection's outline is traced by another thread: the trace reads the mask over the whole
+/// view (135 ms of the frame after Select All on a 1080p page on the owner's PC). Until it is in,
+/// a new selection shows no outline of the one before, and the same selection seen somewhere
+/// else (a pan) keeps the outline it has.
+#[test]
+fn a_selection_outline_is_traced_off_the_frame() {
+    let ctx = egui::Context::default();
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+    app.run("file.new", json!({"width": 4000, "height": 3000})).unwrap();
+    app.run("select.rect", json!({"x": 100, "y": 100, "width": 400, "height": 300})).unwrap();
+    app.run("view.actualPixels", json!({})).unwrap();
+    app.sync_views();
+    let mut view = app.ui.views[0].clone();
+    let frame = |app: &mut PhotocraftApp, view: &crate::state::View| {
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            canvas_view(app, ui, 0, Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0)), view.clone(), false);
+        });
+        out.textures_delta.clear();
+    };
+    // (Tests trace in the frame unless they ask: the outline is there at once.)
+    frame(&mut app, &view);
+    let before = app.outline_cache.clone().expect("the outline").2;
+    crate::outline::set_off_frame(true);
+    let here = crate::outline::traced_here();
+    let started = std::time::Instant::now();
+    let mut next = |app: &mut PhotocraftApp, view: &crate::state::View, shown: &std::sync::Arc<Vec<crate::outline::Segment>>, keeps: bool| loop {
+        frame(app, view);
+        match &app.outline_cache {
+            Some((_, _, segs)) if !std::sync::Arc::ptr_eq(segs, shown) => break segs.clone(),
+            Some(_) => assert!(keeps, "the outline of the selection before is shown for the new one"),
+            None => assert!(!keeps, "the selection lost its outline while it was traced again"),
+        }
+        assert!(started.elapsed() < std::time::Duration::from_secs(30), "the outline was never traced");
+    };
+    // Another selection: nothing of the old one meanwhile.
+    app.run("select.all", json!({})).unwrap();
+    let all = next(&mut app, &view, &before, false);
+    assert!(!all.is_empty());
+    // The same selection, another part of the page: the outline it has until the new one is in.
+    view.center = [3000.0, 2200.0];
+    let panned = next(&mut app, &view, &all, true);
+    assert!(!panned.is_empty());
+    crate::outline::set_off_frame(false);
+    assert_eq!(crate::outline::traced_here() - here, 0, "the window's thread traced nothing");
+}

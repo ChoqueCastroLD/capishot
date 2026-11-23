@@ -314,25 +314,28 @@ fn paint_selection_outline(app: &mut PhotocraftApp, input: SelectionPaintInput<'
         let fresh = matches!(&app.outline_cache, Some((d, k, _)) if *d == input.doc.id && *k == key);
         if !fresh {
             let t0 = crate::gpu_canvas::now_ms();
-            let b = carried_bounds.unwrap_or_else(|| app.cached_bounds(bounds_key, sel).intersect(&vis));
-            // Filters can occupy every worker in Rayon's global pool. A parallel scan here would
-            // block the UI thread waiting for those workers, preventing job cancellation (#1554).
-            // In the browser threads build the pool also runs the canvas tiles, the Navigator and
-            // TypeR's page, which no job counts: the page thread would wait behind them (a
-            // marquee's commit froze 170 ms there), so it traces serially, as the
-            // single-threaded build does in well under a frame.
-            let mut segs = if app.session.has_jobs() || crate::jobs_ui::POOL_THREADS {
-                crate::outline::outline_scaled_serial(sel, b, step)
-            } else {
-                crate::outline::outline_scaled(sel, b, step)
-            };
-            if k > 1 {
-                let s = i32::try_from(k).unwrap_or(1);
-                let up = |p: [i32; 2]| [p[0].saturating_mul(s), p[1].saturating_mul(s)];
-                segs.iter_mut().for_each(|(a, b)| (*a, *b) = (up(*a), up(*b)));
+            let of = crate::surface_fingerprint(sel);
+            // The outline of another selection isn't this one's; the same selection traced for
+            // another part of the view (a pan, a zoom) goes on showing until the new trace is in.
+            if app.outline_of != of || app.outline_cache.as_ref().is_some_and(|(d, _, _)| *d != input.doc.id) {
+                app.outline_cache = None;
+            }
+            // The trace reads the mask over the whole view (135 ms of a frame for Select All on
+            // a 1080p page on the owner's PC, more behind a busy worker pool): another thread
+            // makes it, and the frame that finds it made draws it (this one when it is quick).
+            if app.outline_job.as_ref().is_none_or(|j| j.doc != input.doc.id || j.key != key) {
+                let b = carried_bounds.unwrap_or_else(|| app.cached_bounds(bounds_key, sel).intersect(&vis));
+                // In the browser's threads build the pool also runs the canvas tiles, the Navigator
+                // and TypeR's page, which no job counts: serial there too.
+                let serial = app.session.has_jobs() || crate::jobs_ui::POOL_THREADS;
+                app.outline_job = Some(crate::outline::Tracing::start(input.ctx, input.doc.id, key, sel.clone(), b, step, k, serial));
+            }
+            if let Some(segs) = app.outline_job.as_ref().and_then(crate::outline::Tracing::take) {
+                app.outline_job = None;
+                app.outline_of = of;
+                app.outline_cache = Some((input.doc.id, key, std::sync::Arc::new(segs)));
             }
             app.perf.span("outline", crate::gpu_canvas::now_ms() - t0);
-            app.outline_cache = Some((input.doc.id, key, std::sync::Arc::new(segs)));
         }
         // Under Content-Aware Move's Transform On Drop box the ants are drawn where it puts them.
         if let Some((_, _, segs)) = app.outline_cache.as_ref().filter(|_| !crate::cam_transform::active(app)) {

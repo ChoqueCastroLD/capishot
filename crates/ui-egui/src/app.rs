@@ -143,6 +143,8 @@ impl PhotocraftApp {
             proxy: None,
             proxy_uploaded: None,
             outline_cache: None,
+            outline_job: None,
+            outline_of: 0,
             filter_preview: None,
             smart_filter_targets: Default::default(),
             #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]

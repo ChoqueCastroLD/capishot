@@ -48,6 +48,8 @@ impl Bench {
         crate::cpu_canvas::set_flight_wait(Some(4.0));
         // Strokes rendered on the worker pool, as in the app (tests render them in the frame).
         crate::canvas::set_strokes_off_frame(true);
+        // Selection outlines traced off the frame, as in the app (tests trace them in the frame).
+        crate::outline::set_off_frame(true);
         {
             let app = h.state_mut();
             app.background_jobs = false;

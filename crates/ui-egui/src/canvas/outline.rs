@@ -10,6 +10,109 @@ use photocraft_raster::Surface;
 /// A boundary segment in document pixel coordinates (axis-aligned).
 pub type Segment = ([i32; 2], [i32; 2]);
 
+/// How long a frame waits for the outline it asked for (milliseconds): a small selection's shows
+/// in the frame that made it, as when the frame traced it itself.
+const WAIT_MS: u64 = 2;
+
+/// A selection's outline being traced off the window's thread ([`Tracing::start`]).
+pub(crate) struct Tracing {
+    pub(crate) doc: photocraft_doc::DocId,
+    /// What the canvas keys the outline by (the mask, the step and the part of the view).
+    pub(crate) key: u64,
+    rx: std::sync::mpsc::Receiver<Vec<Segment>>,
+}
+
+impl Tracing {
+    /// Trace `mask` over `bounds` at `step` on a thread of its own (in the call where there is
+    /// none), its segments scaled by `k` (Select and Mask's reduced proxy). `serial`: without the
+    /// worker pool, which jobs can occupy to the last worker (#1554: the trace would wait for
+    /// them, and the ants of a view panned meanwhile with it).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn start(ctx: &egui::Context, doc: photocraft_doc::DocId, key: u64, mask: Surface, bounds: Rect, step: u32, k: u32, serial: bool) -> Self {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let trace = move |mask: &Surface| {
+            let mut segs = if serial { outline_scaled_serial(mask, bounds, step) } else { outline_scaled(mask, bounds, step) };
+            if k > 1 {
+                let s = i32::try_from(k).unwrap_or(1);
+                let up = |p: [i32; 2]| [p[0].saturating_mul(s), p[1].saturating_mul(s)];
+                segs.iter_mut().for_each(|(a, b)| (*a, *b) = (up(*a), up(*b)));
+            }
+            segs
+        };
+        let started = off_frame() && {
+            let (mask, tx, wake) = (mask.clone(), tx.clone(), ctx.clone());
+            on_a_thread(move || {
+                // (The selection may be another by now: nothing to tell.)
+                let _ = tx.send(trace(&mask));
+                wake.request_repaint();
+            })
+        };
+        if !started {
+            let _ = tx.send(trace(&mask));
+        }
+        Self { doc, key, rx }
+    }
+
+    /// The outline, when it is traced (waiting [`WAIT_MS`] for it where the thread may wait).
+    pub(crate) fn take(&self) -> Option<Vec<Segment>> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.rx.recv_timeout(std::time::Duration::from_millis(WAIT_MS)).ok()
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.rx.try_recv().ok()
+        }
+    }
+}
+
+/// Run `f` on another thread: one of its own natively, the worker pool in the browser's threads
+/// build. False when there is none to run it (then `f` wasn't run).
+fn on_a_thread(f: impl FnOnce() + Send + 'static) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::thread::Builder::new().name("selection-outline".into()).spawn(f).is_ok()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        crate::cpu_canvas::spawn(f);
+        true
+    }
+}
+
+/// Whether outlines are traced off the window's thread: where there is another to trace on.
+fn off_frame() -> bool {
+    #[cfg(test)]
+    {
+        OFF_FRAME.with(std::cell::Cell::get)
+    }
+    #[cfg(not(test))]
+    {
+        crate::cpu_canvas::POOL
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests trace in the frame, so they read an outline the frame they ask for it; one that
+    /// follows the frames traces on the pool, as the app does ([`set_off_frame`]).
+    static OFF_FRAME: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Outlines this thread traced.
+    static TRACED_HERE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Trace outlines on the worker pool, as the app does (tests).
+#[cfg(test)]
+pub(crate) fn set_off_frame(on: bool) {
+    OFF_FRAME.with(|o| o.set(on));
+}
+
+/// How many outlines this thread has traced (tests).
+#[cfg(test)]
+pub(crate) fn traced_here() -> u64 {
+    TRACED_HERE.with(std::cell::Cell::get)
+}
+
 /// Bound a whole-selection trace, including offscreen pixels carried into view by a transform.
 /// Include grid alignment and the two padding cells in the budget; ordinary traces keep their step.
 pub(crate) fn bounded_step(bounds: Rect, mut step: u32) -> u32 {
@@ -42,6 +145,8 @@ pub fn outline_scaled_serial(mask: &Surface, bounds: Rect, step: u32) -> Vec<Seg
 }
 
 fn outline_scaled_impl(mask: &Surface, bounds: Rect, step: u32, parallel: bool) -> Vec<Segment> {
+    #[cfg(test)]
+    TRACED_HERE.with(|c| c.set(c.get() + 1));
     if bounds.is_empty() {
         return Vec::new();
     }

@@ -728,6 +728,9 @@ pub struct PhotocraftApp {
     pub(crate) channel_views: HashMap<u64, channel_view::Cache>,
     /// Selection outline keyed by (document, mask identity × step × visible region).
     pub(crate) outline_cache: Option<(DocId, u64, std::sync::Arc<Vec<outline::Segment>>)>,
+    /// The outline being traced off the window's thread, and the selection the cached one is of.
+    pub(crate) outline_job: Option<outline::Tracing>,
+    pub(crate) outline_of: u64,
     /// GPU canvas renderer, when running on the wgpu backend (see [`Self::set_wgpu`]). Dropped
     /// for the rest of the session when the device is lost (see `gpu_status`).
     gpu: Option<gpu_canvas::GpuCanvas>,
