@@ -1020,20 +1020,24 @@ impl GpuCanvas {
         let ready =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| comp.prepare_fx(&self.rs.device, &self.rs.queue, doc, region, &mut || now_ms() < until)));
         res.compositor = Some(comp);
-        let ready = match ready {
+        match ready {
             Ok(r) => r.unwrap_or(true),
             Err(_) => {
                 // As a composite's panic: the device is taken as lost (the app goes to the CPU canvas).
                 self.health.mark(photocraft_gpu::Fault::Lost("the GPU compositor stopped (internal error)".into()));
                 true
             }
-        };
-        // Maps built ahead can be evicted before they are used when the effect cache's budget
-        // (a phone's) can't hold the maps of the region and of what is drawn meanwhile: then the
-        // pieces stop waiting for them and build them as they are drawn, as before, rather than
-        // never showing.
-        res.fx_waits = if ready { 0 } else { res.fx_waits.saturating_add(1) };
-        ready || res.fx_waits > MAX_FX_WAITS
+        }
+    }
+
+    /// The side of the pieces of document `key` a frame composites with `blank` parts left: sized
+    /// from the measured cost ([`piece_side`]) while a page shown before fills in behind the page
+    /// before it ([`Before`]), [`PIECE`] otherwise (a page just opened shows what is drawn of it,
+    /// so it fills in fewer, larger pieces).
+    fn fill_side(&self, key: u64, blank: &[photocraft_geom::Rect]) -> i32 {
+        let r = self.rs.renderer.read();
+        let res = r.callback_resources.canvas(self.id);
+        res.filter(|res| !blank.is_empty() && res.shown.contains(&key)).map_or(PIECE, |res| piece_side(res.cost_rate))
     }
 
     /// Whether document `key`'s set is filling from blank where a view still shows nothing of it
@@ -1119,7 +1123,7 @@ impl GpuCanvas {
             let blank = self.blank_now(key, bounds, format);
             let mut later = later;
             let mut r: Result<photocraft_gpu::Stats, photocraft_gpu::Unsupported> = Ok(photocraft_gpu::Stats { level, ..Default::default() });
-            let side = self.with_doc(key, |res, _| piece_side(res.cost_rate)).unwrap_or(PIECE);
+            let side = self.fill_side(key, &blank);
             let parts: Vec<photocraft_geom::Rect> = if blank.is_empty() {
                 let shown = now.intersect(&n.visible);
                 std::iter::once(shown).filter(|p| !p.is_empty()).chain(subtract(now, n.visible).into_iter().flat_map(|m| pieces(m, n.visible, side))).collect()
@@ -1387,6 +1391,7 @@ impl GpuCanvas {
         // frame until it's done; everything else in this frame, so the view never shows part of
         // it at an older state (a pan into a region an edit deferred, a kept view set restored).
         let blank = self.blank_now(key, bounds, self.format_for(doc.depth, [doc.size.width, doc.size.height]));
+        let side = self.fill_side(key, &blank);
         let mut more = false;
         // Parts that may wait wait for their effect maps, built first within the frame's work.
         let may_wait = |p: photocraft_geom::Rect| covered(p, &blank) || p.intersect(&need.visible).is_empty();
@@ -1403,10 +1408,10 @@ impl GpuCanvas {
             let parts: Vec<photocraft_geom::Rect> = if blank.is_empty() {
                 std::iter::once(shown)
                     .filter(|p| !p.is_empty())
-                    .chain(subtract(r, need.visible).into_iter().flat_map(|m| pieces(m, need.visible, piece_side(cost_rate))))
+                    .chain(subtract(r, need.visible).into_iter().flat_map(|m| pieces(m, need.visible, side)))
                     .collect()
             } else {
-                pieces(r, need.visible, piece_side(cost_rate))
+                pieces(r, need.visible, side)
             };
             'parts: for p in parts {
                 let waits = may_wait(p);
@@ -1418,8 +1423,8 @@ impl GpuCanvas {
                 match self.composite_lod_with(doc, p, encode_srgb, level, true, false) {
                     Ok(st) => {
                         out.px += st.pixels.max(1);
-                        // What compositing costs here (sizes the next pieces).
-                        if st.pixels > 0 {
+                        // What compositing costs here (sizes the next pieces of a page filling in).
+                        if st.pixels > 0 && !blank.is_empty() {
                             let rate = (now_ms() - piece_t0) / st.pixels as f64;
                             self.with_doc(key, |res, _| res.cost_rate = if res.cost_rate > 0.0 { res.cost_rate * 0.6 + rate * 0.4 } else { rate });
                         }
@@ -2438,11 +2443,6 @@ pub const REFINE_DELAY_MS: f64 = 120.0;
 /// [`Refresh::kind`] of a frame drawn from the drag cache (`above`).
 pub const DRAG_CACHE_KIND: &str = "gpu-drag-cache";
 
-/// Frames in a row pieces wait for effect maps built ahead before they build them as they are
-/// drawn ([`GpuCanvas::fill_ready`]): far more than building a page's maps takes (his PSD: 5 to
-/// 10 frames), so it only ends a wait that can't end.
-const MAX_FX_WAITS: u32 = 120;
-
 /// The compositing a refinement piece aims at (milliseconds).
 const REFINE_FRAME_MS: f64 = 12.0;
 
@@ -2957,8 +2957,6 @@ struct Resources {
     /// Where each view last drew a document's set (canvas rect and parameters, by view key): a
     /// set replaced for a new page size is drawn there until the new one shows ([`Before`]).
     drawn: HashMap<u64, (egui::Rect, ViewParams)>,
-    /// Frames in a row whose pieces waited for effect maps ([`GpuCanvas::fill_ready`]).
-    fx_waits: u32,
     out_linear: bool,
     /// Build each mip level in a scratch texture and copy it back instead of rendering into
     /// the level directly (DX12 only: works around reduced-preview corruption on Intel drivers).
@@ -3355,7 +3353,6 @@ impl Resources {
             view_sets: Vec::new(),
             views: HashMap::new(),
             drawn: HashMap::new(),
-            fx_waits: 0,
             out_linear: target.is_srgb(),
             separate_mip_targets: false,
             compositor: None,

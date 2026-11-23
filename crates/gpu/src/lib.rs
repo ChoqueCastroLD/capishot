@@ -682,6 +682,8 @@ pub struct Compositor {
     health: Option<DeviceHealth>,
     /// Layers drawn from an already resident surface at an offset ([`Compositor::set_translated`]).
     translated: Vec<Translated>,
+    /// The effect maps [`Compositor::prepare_fx`] built since it last found them all current.
+    prepared: std::collections::HashSet<FxKey>,
 }
 
 /// A layer surface the document shows as another surface moved by a whole-pixel offset (a Move
@@ -977,6 +979,7 @@ impl Compositor {
             cmyk: 0,
             health: None,
             translated: Vec::new(),
+            prepared: std::collections::HashSet::new(),
         }
         .with_texture_limit(device.limits().max_texture_dimension_2d)
     }
@@ -1335,11 +1338,14 @@ impl Compositor {
 
     /// Build, or bring up to date, the effect maps a render of `region` of `doc` would build,
     /// one layer at a time, asking `more` before each layer after the first that needed work
-    /// whether there is time for another: whether they are all current then (a render of `region` builds none). Maps
-    /// larger than a page (built per cell as a render goes) are left to the render. A caller
-    /// filling a new page in pieces over frames builds the maps first, within each frame's work,
-    /// and composites once they are all there: one frame built every styled layer's maps (their
-    /// shapes and distance fields on the CPU), 40 to 150 ms on his PSD.
+    /// whether there is time for another: whether they are all current then (a render of
+    /// `region` builds none). Maps larger than a page (built per cell as a render goes) are left
+    /// to the render. A caller filling a new page in pieces over frames builds the maps first,
+    /// within each frame's work, and composites once they are all there: one frame built every
+    /// styled layer's maps (their shapes and distance fields on the CPU), 40 to 150 ms on his PSD.
+    /// Also true when a layer's maps built by an earlier call had to be built again (the effect
+    /// cache let them go for what was drawn meanwhile: it can't hold them all, so building ahead
+    /// can't end, and the render builds them as it goes).
     pub fn prepare_fx(
         &mut self,
         device: &wgpu::Device,
@@ -1376,9 +1382,18 @@ impl Compositor {
                 let _s = span("gpu.fx");
                 let before = (stats.fx_shapes, stats.fx_programs);
                 self.sync_fx(device, queue, &mut encoder, doc, f, (f.layer.id, None), f.region, &mut stats);
-                worked |= (stats.fx_shapes, stats.fx_programs) != before;
+                if (stats.fx_shapes, stats.fx_programs) != before {
+                    worked = true;
+                    if !self.prepared.insert((f.layer.id, None)) {
+                        // Built again: the cache can't keep what is built ahead.
+                        break;
+                    }
+                }
             }
             queue.submit([encoder.finish()]);
+            if done {
+                self.prepared.clear();
+            }
             Ok(done)
         })
     }
