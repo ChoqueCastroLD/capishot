@@ -301,34 +301,152 @@ pub fn bubble_clicks(d: &Detection, ids: &[u32]) -> Vec<([f64; 2], Vec<u32>)> {
     out.into_iter().map(|(_, b, v)| ([f64::from(b[0] + b[2]) / 2.0, f64::from(b[1] + b[3]) / 2.0], v)).collect()
 }
 
+/// A command a clean still has to run ([`Clean`]).
+enum Todo {
+    /// The history step the rest joins.
+    Step,
+    /// The Bubble Text Remover's click at `seed` for the pieces `group` of one bubble.
+    Bubble { seed: [f64; 2], group: Vec<u32>, grow: usize, new_layer: bool, sample_all: bool },
+    /// The pieces a step cleans with `command`, and the bubbles the remover refused before it:
+    /// selected, then cleaned.
+    Rest { ids: Vec<u32>, grow: usize, command: &'static str, params: Value },
+}
+
+/// What the command a clean is waiting for cleans.
+enum Ran {
+    Bubble { group: Vec<u32>, grow: usize },
+    Rest { reach: Vec<bool>, refused: Vec<u32> },
+    /// The step the rest joins, or the deselect at the end.
+    Other,
+}
+
+/// A clean under way (`select.cleanPieces`): the commands it still has to run, one after another
+/// ([`crate::jobs::Sequence`]), and what the ones that ran cleaned.
+struct Clean {
+    doc: photocraft_doc::DocId,
+    d: Arc<Detection>,
+    /// The history step every command of the clean joins.
+    key: String,
+    area: Rect,
+    plan: std::collections::VecDeque<Todo>,
+    /// How many commands the plan had.
+    planned: usize,
+    running: Option<Ran>,
+    /// Bubbles the remover refused, for the step's AI clean.
+    refused: Vec<u32>,
+    /// The pixels cleaned so far.
+    gone: Vec<bool>,
+    done: Vec<Value>,
+    deselected: bool,
+}
+
+impl Clean {
+    fn clean(&mut self, reach: &[bool]) {
+        for (g, r) in self.gone.iter_mut().zip(reach) {
+            *g |= *r;
+        }
+    }
+}
+
+impl crate::jobs::Sequence for Clean {
+    fn next(&mut self, s: &mut Session, last: Option<Result<Value>>) -> Result<crate::jobs::Next> {
+        use crate::jobs::Next;
+        match (self.running.take(), last) {
+            (Some(Ran::Bubble { group, grow }), Some(Ok(v))) => {
+                self.done.push(v);
+                let reach = selection_mask(&self.d, &group, grow);
+                self.clean(&reach);
+            }
+            // Not a plain bubble, or not one: its pieces go to the step's AI clean.
+            (Some(Ran::Bubble { group, .. }), _) => self.refused.extend(group),
+            (Some(Ran::Rest { reach, refused }), Some(Ok(mut r))) => {
+                if !refused.is_empty() {
+                    r["bubblesToAi"] = json!(refused);
+                }
+                self.done.push(r);
+                self.clean(&reach);
+            }
+            (Some(_), Some(Err(e))) => return Err(e),
+            _ => {}
+        }
+        if s.active().map(|st| st.doc.id) != Some(self.doc) {
+            return Err(EngineError::Other("the clean stopped: its document isn't the one in front any more".into()));
+        }
+        while let Some(todo) = self.plan.pop_front() {
+            match todo {
+                Todo::Step => {
+                    self.running = Some(Ran::Other);
+                    return Ok(Next::Run(STEP, json!({"label": "Clean Text", "coalesce": self.key})));
+                }
+                Todo::Bubble { seed, group, grow, new_layer, sample_all } => {
+                    self.running = Some(Ran::Bubble { group, grow });
+                    return Ok(Next::Run(crate::bubble_text_cmds::ID, json!({"x": seed[0], "y": seed[1], "newLayer": new_layer, "sampleAll": sample_all, "coalesce": self.key})));
+                }
+                Todo::Rest { mut ids, grow, command, params } => {
+                    let refused = std::mem::take(&mut self.refused);
+                    ids.extend(refused.iter().copied());
+                    if ids.is_empty() {
+                        continue;
+                    }
+                    let reach = selection_mask(&self.d, &ids, grow);
+                    let mask: Vec<f32> = reach.iter().map(|v| if *v { 1.0 } else { 0.0 }).collect();
+                    s.coalesce_request = Some(self.key.clone());
+                    let selected = crate::selection_cmds::set_selection(s, "Text Selection", self.area, mask, sel::SelectionMode::Replace);
+                    s.coalesce_request = None;
+                    selected?;
+                    self.running = Some(Ran::Rest { reach, refused });
+                    return Ok(Next::Run(command, params));
+                }
+            }
+        }
+        if !std::mem::replace(&mut self.deselected, true) && s.active().is_some_and(|st| st.doc.selection.is_some()) {
+            self.running = Some(Ran::Other);
+            return Ok(Next::Run("select.deselect", json!({"coalesce": self.key})));
+        }
+        let (d, gone) = (&self.d, &self.gone);
+        let left = d.clipped(|x, y| !gone[y * d.width + x]);
+        let pieces = pieces_json(&left);
+        if left.regions.is_empty() {
+            s.forget_text_detection();
+        } else {
+            s.set_text_detection(Arc::new(left));
+        }
+        Ok(Next::Done(json!({"steps": std::mem::take(&mut self.done), "pieces": pieces})))
+    }
+
+    fn progress(&self) -> f32 {
+        1.0 - self.plan.len() as f32 / self.planned.max(1) as f32
+    }
+}
+
 /// `select.cleanPieces`: each step cleans its pieces in its own way, as the tool's Clean does. What
 /// was cleaned leaves the pieces; the answer has those left, with new ids. The whole clean is one
 /// history step, named Clean Text: every command it runs joins it (`coalesce`), so one undo
 /// brings the page back (each bubble, selection and fill used to be a step of its own, and an
 /// undo after a clean on a new layer took back the last of them and left the layer).
+///
+/// Started as a job ([`Session::start`]: the app, hosts, the control channel) it is one, as the
+/// tool's Clean: this checks the steps and returns, and the bubble clicks and fills run as jobs
+/// of their own one after another ([`crate::jobs::run_sequence`]), so the thread that started it
+/// is never held (a clean of a page took 1 to 42 s in one frame). Run inline it returns when
+/// the clean is done.
 fn clean_pieces(s: &mut Session, p: &Value) -> Result<Value> {
     let bad = |m: &str| EngineError::BadParams { cmd: CLEAN.into(), msg: m.into() };
-    if cfg!(target_arch = "wasm32") {
+    // Inline, the browser can't wait for the model's answer; as a job it needn't.
+    if cfg!(target_arch = "wasm32") && !s.started_as_job() {
         return Err(bad("in the browser, run select.textPieces and the clean of each step and wait for it"));
     }
     let d = s.text_detection().ok_or_else(|| bad("detect the text first (select.detectText)"))?;
+    let st = s.active().ok_or(EngineError::NoDocument)?;
+    let (doc, revision) = (st.doc.id, st.revision);
     let steps = p.get("steps").and_then(Value::as_array).filter(|a| !a.is_empty()).ok_or_else(|| bad("\"steps\" must be a list of what to clean and how"))?;
     let area = Rect::new(0, 0, i32::try_from(d.width).unwrap_or(i32::MAX), i32::try_from(d.height).unwrap_or(i32::MAX));
     let px = |v: &Value, key: &str| v.get(key).and_then(Value::as_f64).map(|v| v.round().max(0.0) as usize);
     let default = px(p, "grow").unwrap_or_else(|| default_grow(d.width, d.height));
     room_for(MASK_BYTES_PER_PIXEL * (d.width * d.height) as u64)?;
-    let mut gone = vec![false; d.width * d.height];
-    let mut done = Vec::with_capacity(steps.len());
+    let key = p.get("coalesce").and_then(Value::as_str).map_or_else(|| format!("{CLEAN}.{revision}"), str::to_string);
+    let mut plan = std::collections::VecDeque::new();
     let mut taken = std::collections::HashSet::new();
-    let key = p.get("coalesce").and_then(Value::as_str).map_or_else(|| format!("{CLEAN}.{}", s.active().map_or(0, |st| st.revision)), str::to_string);
-    // The step the rest joins, made when there is something to clean.
-    let mut begun = false;
-    let mut begin = |s: &mut Session| -> Result<()> {
-        if !std::mem::replace(&mut begun, true) {
-            s.execute(STEP, json!({"label": "Clean Text", "coalesce": key}))?;
-        }
-        Ok(())
-    };
     for step in steps {
         let ids = piece_ids(&d, step).ok_or_else(|| bad("a step's \"pieces\" must be a list of ids, \"all\" or \"suggested\""))?;
         // "all" and "suggested" mean those no earlier step took; ids are taken as they're given.
@@ -338,7 +456,6 @@ fn clean_pieces(s: &mut Session, p: &Value) -> Result<Value> {
             continue;
         }
         let grow = px(step, "grow").unwrap_or(default);
-        begin(s)?;
         let mut params = json!({"output": step.get("output").or(p.get("output")).cloned().unwrap_or_else(|| json!("current")), "coalesce": key});
         for key in ["layerName", "keepActive", "color", "byBlocks", "sampleAllLayers", "allowDownload"] {
             if let Some(v) = step.get(key).or(p.get(key)) {
@@ -354,56 +471,27 @@ fn clean_pieces(s: &mut Session, p: &Value) -> Result<Value> {
             Some("ai" | "fill" | "color") => (Vec::new(), ids),
             _ => return Err(bad("a step's \"method\" must be \"ai\", \"fill\", \"color\", \"bubble\" or \"auto\"")),
         };
-        let mut refused = Vec::new();
         let new_layer = params["output"].as_str().is_some_and(|o| o != "current");
         let sample_all = params.get("sampleAllLayers").and_then(Value::as_bool).unwrap_or(false);
         for (seed, group) in bubble_clicks(&d, &bubbles) {
-            match s.execute(crate::bubble_text_cmds::ID, json!({"x": seed[0], "y": seed[1], "newLayer": new_layer, "sampleAll": sample_all, "coalesce": key})) {
-                Ok(v) => {
-                    done.push(v);
-                    for (g, r) in gone.iter_mut().zip(&selection_mask(&d, &group, grow)) {
-                        *g |= *r;
-                    }
-                }
-                Err(_) => refused.extend(group),
+            plan.push_back(Todo::Bubble { seed, group, grow, new_layer, sample_all });
+        }
+        let command = match method {
+            Some(m @ ("fill" | "color")) => {
+                params["method"] = json!(m);
+                crate::ai_inpaint_cmds::quick::ID
             }
-        }
-        let (command, quick) = match method {
-            Some(m @ ("fill" | "color")) => (crate::ai_inpaint_cmds::quick::ID, Some(m)),
-            _ => (crate::remove_ai_cmds::ID, None),
+            _ => crate::remove_ai_cmds::ID,
         };
-        let mut rest = rest;
-        rest.extend(refused.iter().copied());
-        if rest.is_empty() {
-            continue;
-        }
-        let reach = selection_mask(&d, &rest, grow);
-        let mask: Vec<f32> = reach.iter().map(|v| if *v { 1.0 } else { 0.0 }).collect();
-        s.coalesce_request = Some(key.clone());
-        crate::selection_cmds::set_selection(s, "Text Selection", area, mask, sel::SelectionMode::Replace)?;
-        if let Some(m) = quick {
-            params["method"] = json!(m);
-        }
-        let mut r = s.execute(command, params)?;
-        if !refused.is_empty() {
-            r["bubblesToAi"] = json!(refused);
-        }
-        done.push(r);
-        for (g, r) in gone.iter_mut().zip(&reach) {
-            *g |= *r;
-        }
+        plan.push_back(Todo::Rest { ids: rest, grow, command, params });
     }
-    if s.active().is_some_and(|st| st.doc.selection.is_some()) {
-        s.execute("select.deselect", json!({"coalesce": key}))?;
+    // The step the rest joins, when there is something to clean.
+    if !plan.is_empty() {
+        plan.push_front(Todo::Step);
     }
-    let left = d.clipped(|x, y| !gone[y * d.width + x]);
-    let pieces = pieces_json(&left);
-    if left.regions.is_empty() {
-        s.forget_text_detection();
-    } else {
-        s.set_text_detection(Arc::new(left));
-    }
-    Ok(json!({"steps": done, "pieces": pieces}))
+    let gone = vec![false; d.width * d.height];
+    let clean = Clean { doc, d, key, area, planned: plan.len(), plan, running: None, refused: Vec::new(), gone, done: Vec::new(), deselected: false };
+    crate::jobs::run_sequence(s, "Clean Text", clean)
 }
 
 /// `select.textStep`: a history step that changes nothing in the document, for what the Text
@@ -604,7 +692,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Clean Text",
             menu: &[],
             shortcut: None,
-            params: r##"{"steps": [{"pieces": [id, …] | "all" | "suggested", "method": "ai" (Manga LaMa, edit.removeAi) | "fill" (content-aware) | "color" (flat) | "bubble" (the Bubble Text Remover, edit.removeBubbleText, one click per bubble; a bubble it refuses goes to AI, listed in the AI step's "bubblesToAi") | "auto" (each piece's "method" from select.detectText: "bubble" in a plain speech bubble, else "ai"), "grow"?: px, "output"?: "current" (default) | "new" | "single", "layerName"?, "color"?: "#rrggbb" (default: the colour around each blob)}, …], "grow"?: px, "output"?, "layerName"?}: cleans the pieces found by select.detectText, each step in its own way and in order ("all" and "suggested": those no earlier step took); what's cleaned leaves the pieces and the answer lists those left, with new ids. Not in the browser: there, select.textPieces and then edit.removeAi or edit.cleanQuick, waiting for each"##,
+            params: r##"{"steps": [{"pieces": [id, …] | "all" | "suggested", "method": "ai" (Manga LaMa, edit.removeAi) | "fill" (content-aware) | "color" (flat) | "bubble" (the Bubble Text Remover, edit.removeBubbleText, one click per bubble; a bubble it refuses goes to AI, listed in the AI step's "bubblesToAi") | "auto" (each piece's "method" from select.detectText: "bubble" in a plain speech bubble, else "ai"), "grow"?: px, "output"?: "current" (default) | "new" | "single", "layerName"?, "color"?: "#rrggbb" (default: the colour around each blob)}, …], "grow"?: px, "output"?, "layerName"?}: cleans the pieces found by select.detectText, each step in its own way and in order ("all" and "suggested": those no earlier step took); what's cleaned leaves the pieces and the answer lists those left, with new ids. One history step (Clean Text): one undo takes the whole clean back. Started in the background (the app, a host, the control channel) it is a job whose bubble clicks and fills run as jobs of their own, one after another: the answer comes when the job ends, and cancelling it stops what is left. Run inline in the browser it is refused (start it as a job there, or run select.textPieces and then edit.removeAi or edit.cleanQuick, waiting for each)"##,
             enabled: has_masker,
             journal: false,
             run: clean_pieces,
@@ -842,6 +930,88 @@ mod tests {
         let past = s.active().unwrap().history.past_len();
         assert!(s.execute(CLEAN, json!({"steps": [{"pieces": "all", "method": "fill"}]})).is_err(), "nothing left to clean");
         assert_eq!(s.active().unwrap().history.past_len(), past);
+    }
+
+    /// A page with the two blobs found, an inpainter, and a clean of both: one flat, one with AI
+    /// on a new layer.
+    fn ai_clean() -> (Session, Value) {
+        let mut s = page();
+        s.set_inpainter(Some(Arc::new(photocraft_ai_lama::service::FakeInpainter::default())));
+        let r = s.execute(DETECT, json!({})).unwrap();
+        let first = r["pieces"].as_array().unwrap().iter().find(|p| p["box"][0] == 20).unwrap()["id"].clone();
+        let steps = json!([{"pieces": [first], "method": "color", "color": "#00ff00"}, {"pieces": "all", "method": "ai", "output": "new", "layerName": "AI Clean"}]);
+        (s, json!({"steps": steps}))
+    }
+
+    /// Polls until job `id` has ended: every job that ended on the way.
+    fn poll_to_end(s: &mut Session, id: crate::jobs::JobId) -> Vec<crate::jobs::JobEvent> {
+        let mut events = Vec::new();
+        for _ in 0..20_000 {
+            events.extend(s.poll_jobs());
+            if events.iter().any(|e| e.id == id) {
+                return events;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        panic!("the clean never ended: {events:?}");
+    }
+
+    /// Started as a job (the app, a host, a script through the control channel) the clean returns
+    /// at once with nothing run yet; its fills then run as jobs of their own, one after another,
+    /// as the polls find them done; it ends with the same answer, the same pixels and the same
+    /// one history step as the clean run inline.
+    #[test]
+    fn started_as_a_job_a_clean_holds_no_one_and_ends_as_the_inline_one() {
+        use crate::jobs::{JobOutcome, Started};
+        let (mut inline, params) = ai_clean();
+        let answer = inline.execute(CLEAN, params.clone()).unwrap();
+        let (mut s, params) = ai_clean();
+        let st = s.active().unwrap();
+        let (before, past) = (st.doc.clone(), st.history.past_len());
+        let Started::Job(job) = s.start(CLEAN, params).unwrap() else { panic!("a clean started in the background is a job") };
+        assert!(Arc::ptr_eq(&s.active().unwrap().doc, &before), "nothing ran in the call that started it");
+        assert_eq!(s.job(job).map(|j| j.label), Some("Clean Text".to_string()));
+        let events = poll_to_end(&mut s, job);
+        assert!(events.iter().any(|e| e.command == crate::remove_ai_cmds::ID && matches!(e.outcome, JobOutcome::Done(_))), "the AI fill ran as a job of its own: {events:?}");
+        let ended = events.iter().find(|e| e.id == job).unwrap();
+        assert_eq!(ended.command, CLEAN);
+        let JobOutcome::Done(out) = &ended.outcome else { panic!("the clean ended {:?}", ended.outcome) };
+        assert_eq!(out["pieces"], answer["pieces"]);
+        assert_eq!(out["steps"].as_array().map(Vec::len), Some(2));
+        assert!(!s.has_jobs());
+        let st = s.active().unwrap();
+        let all = Rect::new(0, 0, 300, 200);
+        assert_eq!(photocraft_compose::render(&st.doc, all), photocraft_compose::render(&inline.active().unwrap().doc, all), "the same page as the clean run inline");
+        assert!(st.doc.selection.is_none());
+        assert_eq!(st.doc.layers.len(), before.layers.len() + 1);
+        assert_eq!(st.history.past_len(), past + 1, "one step: {:?}", st.history.entries());
+        s.execute("edit.undo", json!({})).unwrap();
+        assert!(photocraft_engine_same(&s.active().unwrap().doc, &before));
+    }
+
+    /// Waiting for the clean's job (a script's default) runs its commands to the end.
+    #[test]
+    fn waiting_for_a_clean_job_runs_it_to_the_end() {
+        let (mut s, params) = ai_clean();
+        let crate::jobs::Started::Job(job) = s.start(CLEAN, params).unwrap() else { panic!("a job") };
+        let out = s.wait_job(job).unwrap();
+        assert_eq!(out["steps"].as_array().map(Vec::len), Some(2));
+        assert_eq!(out["pieces"], json!([]));
+        assert!(!s.has_jobs() && s.text_detection().is_none());
+    }
+
+    /// A clean cancelled before its commands ran runs none of them.
+    #[test]
+    fn a_cancelled_clean_job_runs_nothing_more() {
+        let (mut s, params) = ai_clean();
+        let before = s.active().unwrap().doc.clone();
+        let crate::jobs::Started::Job(job) = s.start(CLEAN, params).unwrap() else { panic!("a job") };
+        assert!(s.cancel_job(job));
+        let events: Vec<_> = (0..50).flat_map(|_| s.poll_jobs()).collect();
+        assert!(events.iter().all(|e| e.id == job && e.outcome == crate::jobs::JobOutcome::Cancelled), "{events:?}");
+        assert!(!s.has_jobs());
+        assert!(Arc::ptr_eq(&s.active().unwrap().doc, &before), "the page is as it was");
+        assert!(s.text_detection().is_some(), "and its pieces");
     }
 
     fn photocraft_engine_same(a: &photocraft_doc::Document, b: &photocraft_doc::Document) -> bool {

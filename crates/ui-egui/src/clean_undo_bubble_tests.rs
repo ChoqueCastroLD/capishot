@@ -156,3 +156,44 @@ fn detect_clean_undo_and_two_bubble_clicks_on_200_layers_on_the_cpu_canvas() {
 fn detect_clean_undo_and_two_bubble_clicks_on_200_layers_on_the_gpu_canvas() {
     the_steps(Device::Gpu);
 }
+
+/// `select.cleanPieces` run as a command in the app (a script, a host) is a job, as the tool's
+/// Clean: the call returns at once with the page untouched, the frames go on while its fills run
+/// as jobs of their own, and the clean lands as one history step.
+#[test]
+fn a_clean_run_as_a_command_is_a_job_and_the_frames_go_on() {
+    let _gpu = photocraft_testkit::gpu_lock();
+    let Some(mut h) = harness(Device::Cpu) else { return };
+    {
+        let app = h.state_mut();
+        page(app);
+        app.session.set_text_masker(Some(Arc::new(Dark)));
+        app.session.set_inpainter(Some(Arc::new(FakeInpainter::default())));
+        app.sync_views();
+        app.background_jobs = false;
+        app.run("select.detectText", json!({})).expect("detect");
+        app.background_jobs = true;
+    }
+    frames(&mut h, 10);
+    let st = h.state().session.active().expect("doc");
+    let (before, layers, last) = (st.doc.clone(), st.doc.walk().len(), st.history.entries().last().cloned());
+    let started = h.state_mut().run("select.cleanPieces", json!({"steps": [{"pieces": "all", "method": "ai", "output": "new"}]})).expect("clean");
+    assert_eq!(started["pending"], true, "a job, not an answer: {started}");
+    assert!(Arc::ptr_eq(&h.state().session.active().expect("doc").doc, &before), "nothing ran in the call");
+    let mut n = 0;
+    while h.state().session.has_jobs() {
+        frames(&mut h, 1);
+        n += 1;
+        assert!(n < 5000, "the clean never ended");
+    }
+    frames(&mut h, 4);
+    assert!(n > 1, "frames went on while it ran");
+    let st = h.state().session.active().expect("doc");
+    assert_eq!(st.doc.walk().len(), layers + 1, "the clean is on a new layer");
+    let steps = st.history.entries();
+    assert_eq!(steps.last().map(String::as_str), Some("Clean Text"));
+    assert_eq!(steps.iter().rev().nth(1), last.as_ref(), "one history step after what was there: {steps:?}");
+    h.state_mut().run("edit.undo", json!({})).expect("undo");
+    frames(&mut h, 4);
+    assert_eq!(h.state().session.active().expect("doc").doc.walk().len(), layers, "one undo takes it back");
+}

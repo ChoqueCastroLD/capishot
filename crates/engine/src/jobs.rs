@@ -318,11 +318,74 @@ pub struct Jobs {
     inline: Option<JobCtx>,
     /// Jobs done a step at a time on this thread ([`Session::start_stepped_job`]).
     steppers: Vec<(JobId, Stepper)>,
+    /// Jobs made of commands run one after another ([`run_sequence`]).
+    sequences: Vec<Chain>,
 }
 
 /// One step of a [`Session::start_stepped_job`]: true once the job has delivered its result (or
 /// was cancelled).
 type Stepper = Box<dyn FnMut(&dyn Fn() -> bool) -> bool + Send>;
+
+/// What a [`Sequence`] does next.
+pub(crate) enum Next {
+    /// Run this command (as a job when it is one) and come back with how it ended.
+    Run(&'static str, Value),
+    /// The sequence is over: the result of the command that ran it.
+    Done(Value),
+}
+
+/// A command made of other commands run one after another, each waited for before the next: a
+/// clean of several pieces, each selected and then filled by a job of its own.
+pub(crate) trait Sequence: Send {
+    /// What to run next. `last` is how the command the call before asked for ended (`None` on
+    /// the first call). Edits made here are made between the commands (a selection for the next
+    /// one). An error ends the sequence with it.
+    fn next(&mut self, s: &mut Session, last: Option<Result<Value>>) -> Result<Next>;
+    /// How far along it is, 0 to 1 (the job's progress).
+    fn progress(&self) -> f32;
+}
+
+/// The parent job's context and how to end it, once its worker has handed them over.
+type Handed = Arc<wasm_sync::Mutex<Option<(JobCtx, Completion<Value>)>>>;
+
+/// A [`Sequence`] running as a job ([`run_sequence`]).
+struct Chain {
+    /// The job that stands for the whole sequence: its card, progress, Esc and result.
+    parent: JobId,
+    steps: Box<dyn Sequence>,
+    /// The job of the command the sequence asked for last, while it runs.
+    child: Option<JobId>,
+    handed: Handed,
+    /// How the sequence ended, until the parent job can be told.
+    result: Option<Result<Value>>,
+}
+
+/// Run a command that is a [`Sequence`] of others. Started with [`Session::start`] it is a job:
+/// this returns at once, and each of its commands is started as a job of its own (when it is
+/// one) by [`Session::poll_jobs`] once the one before has ended, so the thread that polls never
+/// waits for any of them. The job has no lock on the document (its commands take theirs); it
+/// ends with the sequence's result, fails with its error, and cancelling it (or one of its
+/// commands) cancels the rest. Run inline ([`Session::execute`]), the commands run here one
+/// after another and this returns the result.
+pub(crate) fn run_sequence(s: &mut Session, label: &str, mut steps: impl Sequence + 'static) -> Result<Value> {
+    if !s.jobs.spawn {
+        let mut last = None;
+        loop {
+            match steps.next(s, last.take())? {
+                Next::Run(id, params) => last = Some(s.execute(id, params)),
+                Next::Done(v) => return Ok(v),
+            }
+        }
+    }
+    let handed: Handed = Arc::default();
+    let put = Arc::clone(&handed);
+    let started = run_async(s, label, false, move |ctx, done| *put.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((ctx.clone(), done)), |_, v: Value| Ok(v))?;
+    let Some(parent) = s.jobs.pending.as_ref().map(|job| job.id) else {
+        return Err(EngineError::Other(format!("`{label}` could not start as a job")));
+    };
+    s.jobs.sequences.push(Chain { parent, steps: Box::new(steps), child: None, handed, result: None });
+    Ok(started)
+}
 
 const RECENT: usize = 16;
 
@@ -1375,12 +1438,108 @@ impl Session {
         }
         #[cfg(not(target_arch = "wasm32"))]
         self.jobs.draining.retain(|h| !h.is_finished());
+        self.advance_sequences();
         std::mem::take(&mut self.jobs.events)
+    }
+
+    /// Whether the command running now was started as a job ([`Session::start`]) rather than
+    /// run inline.
+    pub(crate) fn started_as_job(&self) -> bool {
+        self.jobs.spawn
+    }
+
+    /// How the ended job `id` ended: its result, its error, or [`EngineError::Cancelled`].
+    fn job_outcome(&self, id: JobId) -> Result<Value> {
+        match self.jobs.recent.iter().rev().find(|j| j.id == id) {
+            Some(j) if j.state == "done" => Ok(j.result.clone().unwrap_or(Value::Null)),
+            Some(j) if j.state == "cancelled" => Err(EngineError::Cancelled),
+            Some(j) => Err(EngineError::Other(j.error.clone().unwrap_or_else(|| "the job failed".into()))),
+            None => Err(EngineError::Other(format!("no job {}", id.0))),
+        }
+    }
+
+    /// Move the sequences on ([`run_sequence`]): one whose command has ended is asked for the
+    /// next and that is started; one that is over ends its job.
+    fn advance_sequences(&mut self) {
+        if self.jobs.sequences.is_empty() {
+            return;
+        }
+        let running = |s: &Session, id: JobId| s.jobs.running.iter().any(|r| r.id == id);
+        let mut kept = Vec::new();
+        for mut chain in std::mem::take(&mut self.jobs.sequences) {
+            if !running(self, chain.parent) {
+                // Cancelled: the command under way goes with it.
+                if let Some(child) = chain.child {
+                    self.cancel_job(child);
+                }
+                continue;
+            }
+            if chain.child.is_some_and(|child| running(self, child)) {
+                kept.push(chain);
+                continue;
+            }
+            if chain.result.is_none() {
+                let mut last = chain.child.take().map(|child| self.job_outcome(child));
+                chain.result = loop {
+                    // A command of it cancelled (Esc): the whole sequence is.
+                    if matches!(last, Some(Err(EngineError::Cancelled))) {
+                        break Some(Err(EngineError::Cancelled));
+                    }
+                    match chain.steps.next(self, last.take()) {
+                        Ok(Next::Run(id, params)) => match self.start(id, params) {
+                            Ok(Started::Job(child)) => {
+                                chain.child = Some(child);
+                                break None;
+                            }
+                            Ok(Started::Done(v)) => last = Some(Ok(v)),
+                            Err(e) => last = Some(Err(e)),
+                        },
+                        Ok(Next::Done(v)) => break Some(Ok(v)),
+                        Err(e) => break Some(Err(e)),
+                    }
+                };
+            }
+            let mut handed = chain.handed.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some((ctx, _)) = handed.as_ref() {
+                ctx.progress(chain.steps.progress(), "");
+            }
+            // (Not handed over yet: its worker is starting. The result waits for the next poll.)
+            if chain.result.is_some()
+                && let Some((_, done)) = handed.take()
+            {
+                drop(handed);
+                match chain.result.take() {
+                    Some(Err(EngineError::Cancelled)) => {
+                        self.cancel_job(chain.parent);
+                    }
+                    Some(r) => done.finish(r),
+                    None => {}
+                }
+                continue;
+            }
+            drop(handed);
+            kept.push(chain);
+        }
+        kept.append(&mut self.jobs.sequences);
+        self.jobs.sequences = kept;
     }
 
     /// Block until job `id` ends, apply it, and return its result (the control channel's and
     /// MCP's default `wait`, and the CLI). `Err(Cancelled)` if it was cancelled.
     pub fn wait_job(&mut self, id: JobId) -> Result<Value> {
+        // A sequence's commands are run to the end here, one after another.
+        while self.jobs.sequences.iter().any(|c| c.parent == id) {
+            self.advance_sequences();
+            match self.jobs.sequences.iter().find(|c| c.parent == id).map(|c| c.child) {
+                Some(Some(child)) => {
+                    // (How it ended is read by the sequence.)
+                    let _ = self.wait_job(child);
+                }
+                // Its worker is handing the job over.
+                Some(None) => std::thread::yield_now(),
+                None => break,
+            }
+        }
         // A job done a step at a time is done here, to the end.
         if let Some(i) = self.jobs.steppers.iter().position(|(j, _)| *j == id) {
             let (_, mut step) = self.jobs.steppers.remove(i);
@@ -1422,12 +1581,7 @@ impl Session {
             let r = job.rx.recv().unwrap_or_else(|_| stopped());
             self.finish_job(job, r);
         }
-        match self.jobs.recent.iter().rev().find(|j| j.id == id) {
-            Some(j) if j.state == "done" => Ok(j.result.clone().unwrap_or(Value::Null)),
-            Some(j) if j.state == "cancelled" => Err(EngineError::Cancelled),
-            Some(j) => Err(EngineError::Other(j.error.clone().unwrap_or_else(|| "the job failed".into()))),
-            None => Err(EngineError::Other(format!("no job {}", id.0))),
-        }
+        self.job_outcome(id)
     }
 
     /// Cancel job `id`: it stops at its next check, its result is discarded and the document
