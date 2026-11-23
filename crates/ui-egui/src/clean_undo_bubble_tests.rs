@@ -1,9 +1,10 @@
 //! The steps after which the published 0.13.35 ended on a 200-layer page in CPU mode: Text
 //! Selection's detect, a clean of every piece with AI on a new layer (`select.cleanPieces`), an
-//! undo, and two clicks of the Bubble Text Remover. The clean asked for each tile from inside the
-//! answer to the one before, a model run deep in the stack per tile, on the window's thread (1 MB
-//! on Windows): here the app goes through the steps, drawing frames between them, on the CPU
-//! canvas and on the GPU one, and no request runs inside another.
+//! undo (of the whole clean: it is one history step), and two clicks of the Bubble Text Remover.
+//! The clean asked for each tile from inside the answer to the one before, a model run deep in
+//! the stack per tile, on the window's thread (1 MB on Windows): here the app goes through the
+//! steps, drawing frames between them, on the CPU canvas and on the GPU one, and no request runs
+//! inside another.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -132,26 +133,11 @@ fn the_steps(device: Device) {
     assert_eq!(fake.deepest.load(Ordering::SeqCst), 1, "a tile's request ran inside another's answer");
     frames(&mut h, 10);
     assert_eq!(h.state().session.active().expect("doc").doc.walk().len(), layers + 1, "the clean is on a new layer");
-    // One undo, as the measurement made: it takes back the command's last step (its deselect),
-    // and the clean stays. The clicks answer: painted, or refused for what the clean left.
+    // One undo takes the whole clean back, its layer with it: the clean is one history step.
     h.state_mut().run("edit.undo", json!({})).expect("undo");
     frames(&mut h, 10);
-    for (i, b) in BUBBLES.into_iter().enumerate() {
-        match click(h.state_mut(), b) {
-            Ok(r) => assert!(r["pixels"].as_u64().is_some_and(|p| p > 0), "click {}: {r}", i + 1),
-            Err(e) => assert!(["noText", "notPlain", "noBubble"].iter().any(|k| e.contains(k)), "click {}: {e}", i + 1),
-        }
-        frames(&mut h, 10);
-    }
-    // Back to before the clean: each click paints over its bubble's lettering on a new layer.
-    for _ in 0..8 {
-        if h.state().session.active().expect("doc").doc.walk().len() == layers {
-            break;
-        }
-        h.state_mut().run("edit.undo", json!({})).expect("undo");
-        frames(&mut h, 4);
-    }
-    assert_eq!(h.state().session.active().expect("doc").doc.walk().len(), layers, "the undos take the clean and the clicks away");
+    assert_eq!(h.state().session.active().expect("doc").doc.walk().len(), layers, "one undo takes the clean away");
+    // Each click paints over its bubble's lettering on a new layer.
     for (i, b) in BUBBLES.into_iter().enumerate() {
         let r = click(h.state_mut(), b).unwrap_or_else(|e| panic!("click {}: {e}", i + 1));
         assert!(r["pixels"].as_u64().is_some_and(|p| p > 1000), "click {}: the lettering is painted over: {r}", i + 1);

@@ -302,7 +302,10 @@ pub fn bubble_clicks(d: &Detection, ids: &[u32]) -> Vec<([f64; 2], Vec<u32>)> {
 }
 
 /// `select.cleanPieces`: each step cleans its pieces in its own way, as the tool's Clean does. What
-/// was cleaned leaves the pieces; the answer has those left, with new ids.
+/// was cleaned leaves the pieces; the answer has those left, with new ids. The whole clean is one
+/// history step, named Clean Text: every command it runs joins it (`coalesce`), so one undo
+/// brings the page back (each bubble, selection and fill used to be a step of its own, and an
+/// undo after a clean on a new layer took back the last of them and left the layer).
 fn clean_pieces(s: &mut Session, p: &Value) -> Result<Value> {
     let bad = |m: &str| EngineError::BadParams { cmd: CLEAN.into(), msg: m.into() };
     if cfg!(target_arch = "wasm32") {
@@ -317,6 +320,15 @@ fn clean_pieces(s: &mut Session, p: &Value) -> Result<Value> {
     let mut gone = vec![false; d.width * d.height];
     let mut done = Vec::with_capacity(steps.len());
     let mut taken = std::collections::HashSet::new();
+    let key = p.get("coalesce").and_then(Value::as_str).map_or_else(|| format!("{CLEAN}.{}", s.active().map_or(0, |st| st.revision)), str::to_string);
+    // The step the rest joins, made when there is something to clean.
+    let mut begun = false;
+    let mut begin = |s: &mut Session| -> Result<()> {
+        if !std::mem::replace(&mut begun, true) {
+            s.execute(STEP, json!({"label": "Clean Text", "coalesce": key}))?;
+        }
+        Ok(())
+    };
     for step in steps {
         let ids = piece_ids(&d, step).ok_or_else(|| bad("a step's \"pieces\" must be a list of ids, \"all\" or \"suggested\""))?;
         // "all" and "suggested" mean those no earlier step took; ids are taken as they're given.
@@ -326,7 +338,8 @@ fn clean_pieces(s: &mut Session, p: &Value) -> Result<Value> {
             continue;
         }
         let grow = px(step, "grow").unwrap_or(default);
-        let mut params = json!({"output": step.get("output").or(p.get("output")).cloned().unwrap_or_else(|| json!("current"))});
+        begin(s)?;
+        let mut params = json!({"output": step.get("output").or(p.get("output")).cloned().unwrap_or_else(|| json!("current")), "coalesce": key});
         for key in ["layerName", "keepActive", "color", "byBlocks", "sampleAllLayers", "allowDownload"] {
             if let Some(v) = step.get(key).or(p.get(key)) {
                 params[key] = v.clone();
@@ -345,7 +358,7 @@ fn clean_pieces(s: &mut Session, p: &Value) -> Result<Value> {
         let new_layer = params["output"].as_str().is_some_and(|o| o != "current");
         let sample_all = params.get("sampleAllLayers").and_then(Value::as_bool).unwrap_or(false);
         for (seed, group) in bubble_clicks(&d, &bubbles) {
-            match s.execute(crate::bubble_text_cmds::ID, json!({"x": seed[0], "y": seed[1], "newLayer": new_layer, "sampleAll": sample_all})) {
+            match s.execute(crate::bubble_text_cmds::ID, json!({"x": seed[0], "y": seed[1], "newLayer": new_layer, "sampleAll": sample_all, "coalesce": key})) {
                 Ok(v) => {
                     done.push(v);
                     for (g, r) in gone.iter_mut().zip(&selection_mask(&d, &group, grow)) {
@@ -366,6 +379,7 @@ fn clean_pieces(s: &mut Session, p: &Value) -> Result<Value> {
         }
         let reach = selection_mask(&d, &rest, grow);
         let mask: Vec<f32> = reach.iter().map(|v| if *v { 1.0 } else { 0.0 }).collect();
+        s.coalesce_request = Some(key.clone());
         crate::selection_cmds::set_selection(s, "Text Selection", area, mask, sel::SelectionMode::Replace)?;
         if let Some(m) = quick {
             params["method"] = json!(m);
@@ -380,7 +394,7 @@ fn clean_pieces(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     if s.active().is_some_and(|st| st.doc.selection.is_some()) {
-        s.execute("select.deselect", json!({}))?;
+        s.execute("select.deselect", json!({"coalesce": key}))?;
     }
     let left = d.clipped(|x, y| !gone[y * d.width + x]);
     let pieces = pieces_json(&left);
@@ -797,6 +811,37 @@ mod tests {
         assert!(photocraft_engine_same(&doc, &st.doc));
         s.undo();
         assert_eq!(s.active().unwrap().history.current_id(), id, "undo brings back the id");
+    }
+
+    /// A clean of several steps, one of them on a new layer, is one history step: one undo brings
+    /// the page back (no layer of the clean left on it), one redo the clean.
+    #[test]
+    fn a_clean_of_several_steps_is_one_history_step() {
+        let mut s = page();
+        let r = s.execute(DETECT, json!({})).unwrap();
+        let id = |x: i64| r["pieces"].as_array().unwrap().iter().find(|p| p["box"][0] == x).unwrap()["id"].clone();
+        let st = s.active().unwrap();
+        let (before, past, at) = (st.doc.clone(), st.history.past_len(), st.history.current_id());
+        let steps = json!([{"pieces": [id(20)], "method": "color", "color": "#00ff00"}, {"pieces": "all", "method": "fill", "output": "new", "layerName": "AI Clean"}]);
+        let out = s.execute(CLEAN, json!({"steps": steps})).unwrap();
+        assert_eq!(out["steps"].as_array().unwrap().len(), 2);
+        let st = s.active().unwrap();
+        let cleaned = st.doc.clone();
+        assert_eq!(cleaned.layers.len(), before.layers.len() + 1, "the second step's layer");
+        assert!(!crate::layer_multi_cmds::same_pixels(&before, &cleaned));
+        assert_eq!(st.history.past_len(), past + 1, "one step: {:?}", st.history.entries());
+        assert_eq!(st.history.undo_label(), Some("Clean Text"));
+        s.execute("edit.undo", json!({})).unwrap();
+        let st = s.active().unwrap();
+        assert_eq!(st.history.current_id(), at);
+        assert_eq!(st.doc.layers.len(), before.layers.len(), "the clean's layer went with it");
+        assert!(photocraft_engine_same(&before, &st.doc));
+        s.execute("edit.redo", json!({})).unwrap();
+        assert!(photocraft_engine_same(&cleaned, &s.active().unwrap().doc));
+        // A clean with nothing to do leaves no step.
+        let past = s.active().unwrap().history.past_len();
+        assert!(s.execute(CLEAN, json!({"steps": [{"pieces": "all", "method": "fill"}]})).is_err(), "nothing left to clean");
+        assert_eq!(s.active().unwrap().history.past_len(), past);
     }
 
     fn photocraft_engine_same(a: &photocraft_doc::Document, b: &photocraft_doc::Document) -> bool {

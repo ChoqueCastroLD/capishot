@@ -2336,6 +2336,40 @@ mod tests {
         assert!(app.session.text_detection().is_none_or(|d| d.regions.is_empty()), "nothing left after it");
     }
 
+    /// A Clean of several pieces with AI on a new layer is one history step too: one Undo takes
+    /// the clean and its layer away, one Redo brings both back.
+    #[test]
+    fn one_undo_takes_back_an_ai_clean_on_a_new_layer() {
+        let (mut app, doc) = bubble_page();
+        let ctx = egui::Context::default();
+        app.ui.tool_options.clean_output = "new".into();
+        if let Some(p) = app.text_select.docs.get_mut(&doc) {
+            p.method.fill(CleanMethod::Ai);
+        }
+        tool_step(&mut app);
+        sync(&mut app);
+        let st = app.session.active().unwrap();
+        let (layers, past) = (st.doc.walk().len(), st.history.past_len());
+        assert!(app.text_select.docs[&doc].chosen.iter().filter(|c| **c).count() > 1, "several pieces");
+        act(&mut app, &ctx, Act::Clean);
+        for _ in 0..12 {
+            sync(&mut app);
+        }
+        assert!(app.text_select.run_key.is_none(), "the run ended");
+        assert!(ink(&app, 185, 160) > 0.9, "the bubble is clean");
+        let st = app.session.active().unwrap();
+        assert_eq!(st.doc.walk().len(), layers + 1, "on a layer of its own");
+        assert_eq!(st.history.past_len(), past + 1, "one step: {:?}", st.history.entries());
+        app.session.execute("edit.undo", json!({})).unwrap();
+        sync(&mut app);
+        assert_eq!(app.session.active().unwrap().doc.walk().len(), layers, "the clean's layer went with it");
+        assert!(ink(&app, 185, 160) < 0.1, "the letters are back");
+        app.session.execute("edit.redo", json!({})).unwrap();
+        sync(&mut app);
+        assert_eq!(app.session.active().unwrap().doc.walk().len(), layers + 1);
+        assert!(ink(&app, 185, 160) > 0.9);
+    }
+
     /// A bubble the Bubble Text Remover refuses goes to AI, and the status says so.
     #[test]
     fn a_refused_bubble_goes_to_ai() {
