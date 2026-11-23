@@ -55,7 +55,7 @@ impl Worker {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let job = JobCtx::new();
         let work = job.clone();
-        let waker = Waker::new(ctx);
+        let waker = crate::window_wake::WindowWake::new(&ctx);
         spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| compute(&work))).map_err(|_| "Filter preview failed".to_string());
             let _ = tx.send(result);
@@ -95,27 +95,6 @@ impl Worker {
         };
         let key = self.running.take()?.key;
         Some((key, result))
-    }
-}
-
-/// Repaints the UI when a preview lands. In the browser the egui context can't move to a worker;
-/// there the canvas asks for a frame every 16 ms while a preview runs, which polls the result.
-struct Waker(#[cfg(not(target_arch = "wasm32"))] egui::Context);
-
-impl Waker {
-    #[cfg(not(target_arch = "wasm32"))]
-    fn new(ctx: egui::Context) -> Self {
-        Self(ctx)
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    fn new(_: egui::Context) -> Self {
-        Self()
-    }
-
-    fn wake(&self) {
-        #[cfg(not(target_arch = "wasm32"))]
-        self.0.request_repaint();
     }
 }
 

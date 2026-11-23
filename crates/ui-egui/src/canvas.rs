@@ -335,6 +335,8 @@ fn paint_selection_outline(app: &mut PhotocraftApp, input: SelectionPaintInput<'
                 app.outline_job = None;
                 app.outline_of = of;
                 app.outline_cache = Some((input.doc.id, key, std::sync::Arc::new(segs)));
+            } else {
+                crate::window_wake::poll(input.ctx);
             }
             app.perf.span("outline", crate::gpu_canvas::now_ms() - t0);
         }

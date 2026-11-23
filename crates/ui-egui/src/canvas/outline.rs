@@ -40,11 +40,11 @@ impl Tracing {
             segs
         };
         let started = off_frame() && {
-            let (mask, tx, wake) = (mask.clone(), tx.clone(), ctx.clone());
+            let (mask, tx, wake) = (mask.clone(), tx.clone(), crate::window_wake::WindowWake::new(ctx));
             on_a_thread(move || {
                 // (The selection may be another by now: nothing to tell.)
                 let _ = tx.send(trace(&mask));
-                wake.request_repaint();
+                wake.wake();
             })
         };
         if !started {

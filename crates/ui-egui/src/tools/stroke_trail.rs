@@ -53,7 +53,7 @@ pub struct Trail {
     /// The window the trail is drawn in, woken when the job has stamped something: the frame
     /// that handed the points over may have drawn the trail before, and nothing else would
     /// draw it again once the pointer stops.
-    wake: Option<egui::Context>,
+    wake: Option<crate::window_wake::WindowWake>,
 }
 
 /// The mask's pixels and the stroke that stamps them.
@@ -93,7 +93,7 @@ fn lock<T>(m: &wasm_sync::Mutex<T>) -> impl std::ops::DerefMut<Target = T> + '_ 
 
 /// The job: stamp what the frames handed over, in order, until nothing is left, and wake the
 /// window to show it.
-fn work(queue: &wasm_sync::Mutex<Queue>, mask: &wasm_sync::Mutex<Mask>, wake: Option<&egui::Context>) {
+fn work(queue: &wasm_sync::Mutex<Queue>, mask: &wasm_sync::Mutex<Mask>, wake: Option<&crate::window_wake::WindowWake>) {
     loop {
         // (The mask is taken before the queue is let go: whoever finds the queue empty and then
         // takes the mask sees every stamp done.)
@@ -107,8 +107,8 @@ fn work(queue: &wasm_sync::Mutex<Queue>, mask: &wasm_sync::Mutex<Mask>, wake: Op
         stamp(&mut m);
         m.make_upload();
         drop(m);
-        if let Some(ctx) = wake {
-            ctx.request_repaint();
+        if let Some(w) = wake {
+            w.wake();
         }
     }
 }
@@ -232,7 +232,7 @@ impl Trail {
     /// A frame that finds the job stamping draws the trail as it was and comes back.
     pub fn draw(&mut self, painter: &egui::Painter, doc_rect: Rect, flip: bool, color: Color32) {
         let opts = TextureOptions::LINEAR;
-        self.wake.get_or_insert_with(|| painter.ctx().clone());
+        self.wake.get_or_insert_with(|| crate::window_wake::WindowWake::new(painter.ctx()));
         let upload = self.mask.try_lock().ok().and_then(|mut m| m.upload.take());
         let tex = self.tex.get_or_insert_with(|| painter.ctx().load_texture("stroke-trail", ColorImage::filled([self.w, self.h], Color32::TRANSPARENT), opts));
         if let Some((r, img)) = upload {

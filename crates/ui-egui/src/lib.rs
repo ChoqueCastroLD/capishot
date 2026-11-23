@@ -96,6 +96,7 @@ pub mod user_fonts_ui;
 mod view_scroll;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod win_update;
+pub(crate) mod window_wake;
 pub mod zip_export_ui;
 
 use std::collections::HashMap;

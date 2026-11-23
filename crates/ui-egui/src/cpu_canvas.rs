@@ -746,7 +746,7 @@ impl TileCanvas {
         let (level, stop) = (batch.level, batch.stop.clone());
         let under_box = (!batch.jobs.is_empty()).then_some(self.stood_in);
         let (tx, rx) = std::sync::mpsc::channel();
-        let wake = ctx.clone();
+        let wake = crate::window_wake::WindowWake::new(ctx);
         spawn(move || {
             #[cfg(test)]
             let pace = Pace::start();
@@ -754,10 +754,7 @@ impl TileCanvas {
             #[cfg(test)]
             pace.hold();
             let _ = tx.send(drawn);
-            // (The browser's page isn't woken from a worker: it looks again in a moment.)
-            if cfg!(not(target_arch = "wasm32")) {
-                wake.request_repaint();
-            }
+            wake.wake();
         });
         // The page's own thread can't wait in the browser: it finds the tiles in its next frame.
         #[cfg(not(target_arch = "wasm32"))]

@@ -73,7 +73,7 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String>
     // canvas as it is, and both change in the frame that finds the images made ([`land`]).
     let (tx, pending) = std::sync::mpsc::channel();
     {
-        let (doc, lifted, wake) = (doc.clone(), lifted.clone(), ctx.clone());
+        let (doc, lifted, wake) = (doc.clone(), lifted.clone(), crate::window_wake::WindowWake::new(ctx));
         // (A hidden layer's box draws its bare pixels: `draw::styled_frame`.)
         let style_of = (styled && layer.visible).then(|| layer.clone());
         // The view the box opens in: its first textures are made for it, off the frame too.
@@ -99,7 +99,7 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String>
             pace.hold();
             // (The box may be closed by now: nothing to tell.)
             let _ = tx.send(Built { moving, styled, above });
-            wake.request_repaint();
+            wake.wake();
         });
     }
     let texture = crate::transform_tex::PreviewTextures::new(ctx, format!("transform-{session}"), egui::ColorImage::new([1, 1], vec![egui::Color32::TRANSPARENT]), [1.0, 1.0]);
