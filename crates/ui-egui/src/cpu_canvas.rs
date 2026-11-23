@@ -440,6 +440,8 @@ struct Drawn {
     spare: Option<Split>,
     tiles: Vec<(Job, egui::ColorImage)>,
     from_split: bool,
+    /// Made for a frame under the pointer (a drag, a press): shown in the frame that finds it.
+    live: bool,
     /// Drawn through the split's top map: composited exactly once the edits pause.
     approx: bool,
     /// The layers the split is around now, when the batch made or used one.
@@ -455,6 +457,7 @@ struct Drawn {
 /// Composite a batch. Runs on a pool worker or, without a pool, in the frame.
 fn draw(mut b: Batch) -> Drawn {
     let t0 = crate::gpu_canvas::now_ms();
+    let live = b.maps;
     let level = b.level;
     let f = 1i64 << level;
     let faithful = level == 0 || photocraft_compose::proxy::lod_faithful(&b.doc);
@@ -614,7 +617,7 @@ fn draw(mut b: Batch) -> Drawn {
     }
     let tiles = b.jobs.iter().map(|(j, _)| *j).zip(images.unwrap_or_default()).collect();
     let ms = crate::gpu_canvas::now_ms() - t0;
-    Drawn { split, spare, tiles, from_split, approx, anchor, ahead_done, ms, held_ms: ms }
+    Drawn { split, spare, tiles, from_split, live, approx, anchor, ahead_done, ms, held_ms: ms }
 }
 
 /// A batch on the worker pool: the frame that sent it went on without it.
@@ -675,6 +678,13 @@ fn full_bytes(d: &Drawn) -> usize {
     d.tiles.iter().filter(|(j, _)| matches!(j, Job::Full(..))).map(|(_, img)| img.size[0] * img.size[1] * 4).sum()
 }
 
+/// Whether batch `d` is shown in the frame that finds it (`spent`: bytes this frame uploaded so
+/// far), else its textures are uploaded over the next frames ([`Staged`]). A drag's frame always
+/// is: a frame behind the pointer would show the layer at an older offset.
+fn lands_whole(d: &Drawn, spent: usize) -> bool {
+    d.live || spent + full_bytes(d) <= UPLOAD_BUDGET
+}
+
 fn load_tile(ctx: &egui::Context, name: (DocId, u32), k: TileKey, img: egui::ColorImage) -> egui::TextureHandle {
     ctx.load_texture(format!("cpu-tile-{}-{}-{}-{}-{}", name.0.0, name.1, k.level, k.tx, k.ty), img, TextureOptions::LINEAR)
 }
@@ -690,12 +700,12 @@ impl Flight {
                 Err(std::sync::mpsc::TryRecvError::Empty) => return None,
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => return Some(Err(())),
             };
-            if *spent + full_bytes(&d) <= UPLOAD_BUDGET {
+            if lands_whole(&d, *spent) {
                 return Some(Ok((d, Vec::new())));
             }
             self.rx = None;
             self.staged = Some(Staged::new(d));
-        } else if let Some(st) = self.staged.take_if(|st| st.made.is_empty() && *spent + full_bytes(&st.d) <= UPLOAD_BUDGET) {
+        } else if let Some(st) = self.staged.take_if(|st| st.made.is_empty() && lands_whole(&st.d, *spent)) {
             // (Handed over here whole: it fits the frame.)
             return Some(Ok((st.d, Vec::new())));
         }
