@@ -170,17 +170,22 @@ fn render_ramp<const N: usize>(f: &Fill, rect: Rect, frame: Rect, ramp: Option<R
             }
         }
     };
+    // Rows in parallel only where that pays: a small fill (a Layers panel thumbnail, 64 x 64) is
+    // made by the thread that asks for it in a few microseconds, and handed to the worker pool it
+    // would wait for the pool's busy workers. The window's thread waited 80 ms for a gradient
+    // thumbnail while the pool composited an edit.
     #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
-    {
+    if px.len() >= crate::PARALLEL_PIXELS {
         use rayon::prelude::*;
         px.par_chunks_mut(w).enumerate().for_each(|(j, out)| row(rect.y0 + j as i32, out));
+        return px;
     }
-    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     for (j, out) in px.chunks_mut(w).enumerate() {
         row(rect.y0 + j as i32, out);
     }
     px
 }
+
 
 fn frame_dims(frame: Rect) -> (f32, f32) {
     (frame.width().max(1) as f32, frame.height().max(1) as f32)
@@ -251,6 +256,30 @@ mod tests {
     use photocraft_doc::Color;
 
     const STYLES: [GradientStyle; 5] = [GradientStyle::Linear, GradientStyle::Radial, GradientStyle::Angle, GradientStyle::Reflected, GradientStyle::Diamond];
+
+    /// A thumbnail-sized fill is made by the thread that asks for it, whatever the worker pool is
+    /// doing: with every worker busy (a weak machine compositing an edit) the window's thread
+    /// waited for one to be free to make a Layers panel thumbnail. Large fills still use the pool,
+    /// with the same pixels.
+    #[test]
+    fn a_small_fill_never_waits_for_a_busy_worker_pool() {
+        let f = Fill::gradient(vec![(0.0, Color::rgb(1.0, 0.0, 0.0)), (1.0, Color::rgb(0.0, 0.0, 1.0))], 30.0, 1.0, GradientStyle::Linear, false);
+        let square = Rect::new(0, 0, 64, 64);
+        let big = Rect::new(0, 0, 512, 512);
+        let want = render(&f, big, big);
+        let g = f.clone();
+        let made = photocraft_testkit::busy_pool::while_busy(std::time::Duration::from_secs(5), move || render(&g, square, square));
+        let px = made.expect("a 64 x 64 fill was made while every worker was busy");
+        assert_eq!(px.len(), 64 * 64);
+        // The same pixels as a fill large enough for the pool, where they overlap.
+        for y in 0..64 {
+            for x in 0..64 {
+                let (a, b) = (render(&f, Rect::new(x, y, x + 1, y + 1), square)[0], px[(y * 64 + x) as usize]);
+                assert_eq!(a, b);
+            }
+        }
+        assert_eq!(render(&f, big, big), want);
+    }
 
     #[test]
     fn native_cmyk_ramp_interpolates_black_and_alpha_separately() {

@@ -534,8 +534,11 @@ fn apply_matrix(m: &Option<(usize, usize, Vec<f32>, Vec<f32>)>, v: &[f32; 16], o
 
 // ------------------------------------------------------------ parallel helpers
 
+/// Fewer pixels are converted by the calling thread (about a millisecond): a parallel pass started
+/// from the window's thread (a panel's preview, a clone overlay on another monitor profile) waits
+/// for a worker of the pool, which can be busy compositing an edit for seconds.
 #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
-const PAR_MIN_PIXELS: usize = 16 * 1024;
+const PAR_MIN_PIXELS: usize = 64 * 1024;
 #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
 const PAR_CHUNK_PIXELS: usize = 8 * 1024;
 

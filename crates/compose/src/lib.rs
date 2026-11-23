@@ -109,6 +109,10 @@ pub fn quantize_rgba8(out: &mut [[u8; 4]], src: &[[f32; 4]]) {
     }
 }
 
+/// Passes over fewer pixels than this run on the calling thread: about a tenth of a millisecond
+/// of work, less than waiting for a busy worker pool costs the window's thread.
+pub const PARALLEL_PIXELS: usize = 1 << 16;
+
 impl Buffer {
     pub fn transparent(rect: Rect) -> Self {
         Self { rect, px: vec![[0.0; 4]; rect.width() as usize * rect.height() as usize] }
@@ -126,12 +130,14 @@ impl Buffer {
         let out = img.pixels.as_chunks_mut::<4>().0;
         // In parallel off wasm: a 24 MP composite took 120 ms on one core (the CPU canvas,
         // previews, thumbnails and 8-bit exports all come through here).
+        // A small one (a thumbnail, a panel's preview) here: started from the window's thread a
+        // parallel pass waits for a worker of the pool, which can be busy compositing for seconds.
         #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
-        {
+        if self.px.len() >= PARALLEL_PIXELS {
             use rayon::prelude::*;
             out.par_chunks_mut(16 * 1024).zip(self.px.par_chunks(16 * 1024)).for_each(|(o, p)| quantize(o, p));
+            return img;
         }
-        #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
         quantize(out, &self.px);
         img
     }

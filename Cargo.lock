@@ -7905,6 +7905,7 @@ dependencies = [
  "photocraft-geom",
  "photocraft-paint",
  "photocraft-raster",
+ "photocraft-testkit",
  "photocraft-vector",
  "proptest",
  "rayon",
@@ -8186,6 +8187,7 @@ name = "photocraft-testkit"
 version = "0.13.38"
 dependencies = [
  "memory-stats",
+ "rayon",
  "serde_json",
 ]
 

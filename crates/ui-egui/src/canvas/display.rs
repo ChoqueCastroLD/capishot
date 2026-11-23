@@ -24,7 +24,9 @@ pub(super) fn checker(app: &mut PhotocraftApp, ctx: &egui::Context) -> egui::Tex
 }
 
 fn buffer_to_image(buf: &photocraft_compose::Buffer) -> egui::ColorImage {
-    // `buf.to_rgba8()` then `color_image`, fused: one parallel pass, no intermediate image.
+    // `buf.to_rgba8()` then `color_image`, fused: one parallel pass, no intermediate image. A
+    // small image here (`photocraft_compose::PARALLEL_PIXELS`): from the window's thread a
+    // parallel pass waits for a worker of the pool, which can be busy compositing for seconds.
     let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
     let mut pixels = vec![egui::Color32::TRANSPARENT; buf.px.len()];
     let convert = |out: &mut [egui::Color32], src: &[[f32; 4]]| {
@@ -33,11 +35,11 @@ fn buffer_to_image(buf: &photocraft_compose::Buffer) -> egui::ColorImage {
         }
     };
     #[cfg(not(target_arch = "wasm32"))]
-    {
+    if pixels.len() >= photocraft_compose::PARALLEL_PIXELS {
         use rayon::prelude::*;
         pixels.par_chunks_mut(16 * 1024).zip(buf.px.par_chunks(16 * 1024)).for_each(|(o, s)| convert(o, s));
+        return egui::ColorImage::new([buf.rect.width() as usize, buf.rect.height() as usize], pixels);
     }
-    #[cfg(target_arch = "wasm32")]
     convert(&mut pixels, &buf.px);
     egui::ColorImage::new([buf.rect.width() as usize, buf.rect.height() as usize], pixels)
 }
@@ -55,11 +57,11 @@ fn color_image(img: &photocraft_raster::Rgba8Image) -> egui::ColorImage {
         }
     };
     #[cfg(not(target_arch = "wasm32"))]
-    {
+    if pixels.len() >= photocraft_compose::PARALLEL_PIXELS {
         use rayon::prelude::*;
         pixels.par_chunks_mut(16 * 1024).zip(src.par_chunks(16 * 1024)).for_each(|(o, s)| convert(o, s));
+        return egui::ColorImage::new(size, pixels);
     }
-    #[cfg(target_arch = "wasm32")]
     convert(&mut pixels, src);
     egui::ColorImage::new(size, pixels)
 }

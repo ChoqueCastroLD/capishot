@@ -113,12 +113,14 @@ const PAR_PIXELS: usize = 16 * 1024;
 /// `f` over matching pieces of `dst` and `src`, in parallel off wasm. The display encodes run on
 /// every canvas upload and preview, and a 24 MP linear document took 350 ms on one core.
 fn par_pixels<D: Send, S: Sync>(dst: &mut [D], src: &[S], f: impl Fn(&mut [D], &[S]) + Sync) {
+    // A small image (a panel's preview, a thumbnail) here: started from the window's thread a
+    // parallel pass waits for a worker of the pool, which can be busy compositing for seconds.
     #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
-    {
+    if dst.len() >= photocraft_compose::PARALLEL_PIXELS {
         use rayon::prelude::*;
         dst.par_chunks_mut(PAR_PIXELS).zip(src.par_chunks(PAR_PIXELS)).for_each(|(d, s)| f(d, s));
+        return;
     }
-    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
     f(dst, src);
 }
 

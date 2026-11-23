@@ -24,6 +24,7 @@ proptest = { workspace = true }
 criterion = { workspace = true }
 photocraft-paint = { workspace = true }
 photocraft-cms = { workspace = true }
+photocraft-testkit = { workspace = true }
 
 [[bench]]
 name = "compose"

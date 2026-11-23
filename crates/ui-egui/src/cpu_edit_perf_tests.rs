@@ -20,12 +20,30 @@ type Harness = egui_kittest::Harness<'static, PhotocraftApp>;
 /// The synthetic 2000x3000 page of 200 layers the owner's PC was measured with.
 const PAGE200: &str = "/root/capi-workers/pc/h/pages/page200.psd";
 
+/// What the kernel says of this thread so far: the time it ran and the time it waited for a core
+/// while ready to run (milliseconds; Linux's `schedstat`). A frame's wall time less its wait for a
+/// core is the frame's own: what it computed and what it was blocked for (a lock, a sleep, a job).
+/// On this shared server the wait for a core is other people's builds.
+fn scheduled() -> Option<(f64, f64)> {
+    let stat = std::fs::read_to_string("/proc/thread-self/schedstat").ok()?;
+    let mut ns = stat.split_whitespace().map(|v| v.parse::<f64>().ok());
+    Some((ns.next()?? / 1e6, ns.next()?? / 1e6))
+}
+
+/// The monotonic clock in seconds, as `perf` stamps its samples (`-k CLOCK_MONOTONIC`).
+fn monotonic() -> f64 {
+    let up = std::fs::read_to_string("/proc/uptime").ok();
+    // (`/proc/uptime` is the boot clock; without a suspend it is the monotonic one.)
+    up.and_then(|u| u.split_whitespace().next()?.parse().ok()).unwrap_or(0.0)
+}
+
 /// The frames of one kind of action.
 #[derive(Default)]
 struct Action {
     name: &'static str,
+    /// Each frame's own time: wall time less the wait for a core ([`scheduled`]).
     ms: Vec<f64>,
-    /// The slowest frame's spans.
+    /// The slowest frame: its spans, and how its wall time splits.
     worst: (f64, String),
     /// From each action to the frame that shows it complete.
     shown_after: Vec<f64>,
@@ -44,6 +62,9 @@ impl Bench {
             return None;
         }
         let mut h = harness(Device::Cpu)?;
+        if std::env::var_os("CPU_EDIT_PERF_TRACE").is_some() {
+            eprintln!("BENCH thread {:?}", std::fs::read_link("/proc/thread-self"));
+        }
         // Edits composited on the worker pool, as in the app (tests composite in the frame).
         crate::cpu_canvas::set_flight_wait(Some(4.0));
         // Strokes rendered on the worker pool, as in the app (tests render them in the frame).
@@ -88,8 +109,13 @@ impl Bench {
         self.h.run_steps(3);
     }
 
-    fn record(&mut self, name: &'static str, ms: f64) {
-        let spans: Vec<String> = crate::perf_span::frame().iter().take(6).map(|(n, ms)| format!("{n} {ms:.1}")).collect();
+    /// A frame of `name` took `wall` ms, of which the thread ran `ran` and waited `queued` for a
+    /// core (`None`: the kernel doesn't say; the wall time is the frame's).
+    fn record(&mut self, name: &'static str, wall: f64, sched: Option<(f64, f64)>) {
+        let (ran, queued) = sched.unwrap_or((wall, 0.0));
+        let ms = (wall - queued).max(0.0);
+        let mut spans: Vec<String> = crate::perf_span::frame().iter().take(6).map(|(n, ms)| format!("{n} {ms:.1}")).collect();
+        spans.push(format!("[wall {wall:.1}: ran {ran:.1}, blocked {:.1}, no core {queued:.1}]", (ms - ran).max(0.0)));
         let a = match self.actions.iter_mut().position(|a| a.name == name) {
             Some(i) => &mut self.actions[i],
             None => {
@@ -106,10 +132,20 @@ impl Bench {
     /// One frame of `name`: `act` (a command, an input event) and the frame that shows it.
     fn frame(&mut self, name: &'static str, act: impl FnOnce(&mut Harness)) {
         crate::perf_span::begin_frame();
-        let t = std::time::Instant::now();
+        let (t, before) = (std::time::Instant::now(), scheduled());
         act(&mut self.h);
         self.h.step();
-        self.record(name, t.elapsed().as_secs_f64() * 1000.0);
+        let wall = t.elapsed().as_secs_f64() * 1000.0;
+        let sched = before.zip(scheduled()).map(|(b, a)| (a.0 - b.0, a.1 - b.1));
+        // For a trace of the run (`perf record -t <thread>`, the thread `Bench::open` names): the
+        // frames over 25 ms of their own, with when they ended (the monotonic clock, seconds).
+        if std::env::var_os("CPU_EDIT_PERF_TRACE").is_some()
+            && let Some((ran, queued)) = sched
+            && wall - queued > 25.0
+        {
+            eprintln!("SLOW {name}: {:.1} ms (ran {ran:.1}, blocked {:.1}), ended at {:.4}", wall - queued, wall - ran - queued, monotonic());
+        }
+        self.record(name, wall, sched);
     }
 
     /// `act`, then the frames until the canvas shows it complete and has nothing left to make

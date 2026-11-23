@@ -374,6 +374,7 @@ impl PhotocraftApp {
                 return;
             }
             if (chrome || tabbed_in) && app.ui.panels.menu_bar {
+                let _s = perf_span::span("ui.title_bar");
                 panels::title_bar(app, ui);
             }
             if (chrome && app.ui.panels.options_bar) || tabbed_in {
@@ -381,9 +382,11 @@ impl PhotocraftApp {
                 panels::options_bar(app, ui);
             }
             if chrome && app.ui.panels.status_bar {
+                let _s = perf_span::span("ui.status_bar");
                 panels::status_bar(app, ui);
             }
             if (chrome && app.ui.panels.toolbar) || tabbed_in {
+                let _s = perf_span::span("ui.toolbar");
                 panels::toolbar(app, ui);
             }
             if (chrome && app.ui.panels.dock) || tabbed_in {
@@ -392,6 +395,7 @@ impl PhotocraftApp {
             }
             // The panel column beside the toolbar (after the right dock, which settles drops).
             if (chrome || tabbed_in) && !custom_dock {
+                let _s = perf_span::span("ui.left_dock");
                 panels::left_dock(app, ui);
             }
         });
