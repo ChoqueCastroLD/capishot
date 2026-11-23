@@ -23,9 +23,26 @@ pub(crate) fn visible_layers(layers: &[Layer]) -> Vec<&Layer> {
     out
 }
 
+thread_local! {
+    /// Composites this thread asked for ([`composites_here`]).
+    static COMPOSITES_HERE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// How many composites this thread has asked for so far ([`render`], [`render_rects`],
+/// [`render_rects_over`]; monotonic, read as a difference): what a frame composited on the
+/// window's own thread, whatever the worker pool did meanwhile (the app's tests).
+pub fn composites_here() -> u64 {
+    COMPOSITES_HERE.with(std::cell::Cell::get)
+}
+
+fn count_composite() {
+    COMPOSITES_HERE.with(|c| c.set(c.get() + 1));
+}
+
 /// Composite the whole document over `rect`, in parallel 256² tiles on
 /// native targets (single-threaded on wasm).
 pub fn render(doc: &Document, rect: Rect) -> Buffer {
+    count_composite();
     render_tiled(doc, rect, RENDER_TILE)
 }
 
@@ -149,6 +166,7 @@ pub(crate) fn render_tiled_with(doc: &Document, rect: Rect, tile: i32, cx: &Ctx)
 /// rendering them in parallel. Each buffer equals [`render`] of its rectangle: a tiled canvas
 /// renders the tiles a frame needs with this.
 pub fn render_rects(doc: &Document, rects: &[Rect]) -> Vec<Buffer> {
+    count_composite();
     let patterns = pattern::PreparedPatterns::new(&doc.patterns, pattern::PREPARED_PATTERN_BYTES).in_mode(doc.pixel_format().mode);
     let cx = Ctx::for_doc(doc, &patterns);
     let union = rects.iter().filter(|r| !r.is_empty()).fold(Rect::EMPTY, |u, r| if u.is_empty() { *r } else { u.union(r) });
@@ -185,6 +203,7 @@ pub fn render_rects(doc: &Document, rects: &[Rect]) -> Vec<Buffer> {
 /// their own rects) instead of the document's empty backdrop: the layers above a cached composite
 /// of the layers below them (a Move drag on the CPU canvas re-blends only the moving layers).
 pub fn render_rects_over(doc: &Document, backdrops: Vec<Buffer>) -> Vec<Buffer> {
+    count_composite();
     let patterns = pattern::PreparedPatterns::new(&doc.patterns, pattern::PREPARED_PATTERN_BYTES).in_mode(doc.pixel_format().mode);
     let cx = Ctx::for_doc(doc, &patterns);
     let union = backdrops.iter().map(|b| b.rect).filter(|r| !r.is_empty()).fold(Rect::EMPTY, |u, r| if u.is_empty() { r } else { u.union(&r) });

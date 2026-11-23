@@ -10,6 +10,14 @@
 //! until they are. Level 0 is the exact composite (`photocraft_compose::render`), so 100% and
 //! closer show the same pixels as before.
 //!
+//! An edit's tiles are composited on the worker pool, all of them in one batch, while the frame
+//! goes on ([`Batch`]): the window's thread only hands the batch over and, when it is done, puts
+//! its textures in place, all in the same frame. The canvas shows the last complete state until
+//! then, never part of an edit, and a frame is never held by a composite. The batch re-blends
+//! only the layers the edit changed, over composites of the layers below and above them kept per
+//! tile at the view's level (`move_cpu::Split`), which are made ahead, off the frame, around the
+//! layers the next edit most likely changes.
+//!
 //! Layer effects and vector masks are scaled with the level ([`photocraft_compose::proxy`]); a
 //! document with a stroked shape layer, whose vector stroke is drawn at render time in document
 //! pixels ([`photocraft_compose::proxy::lod_faithful`]), takes its zoomed-out tiles from the
@@ -20,11 +28,12 @@ use std::sync::{Arc, Weak};
 
 use egui::{Color32, Mesh, Pos2, Rect, TextureOptions, pos2};
 use photocraft_compose::mip::MipCache;
-use photocraft_doc::Document;
+use photocraft_doc::{DocId, Document, LayerId};
 use photocraft_geom::Rect as DRect;
 
 use crate::PhotocraftApp;
 use crate::canvas::ViewXform;
+use crate::move_cpu::{Plan, Split, Update};
 
 /// Tile side in level pixels.
 pub const TILE: i32 = 256;
@@ -50,10 +59,13 @@ struct TileTex {
     held: DRect,
     /// Document pixels that changed since the texture was drawn (`None`: current).
     dirty: Option<DRect>,
+    /// The document pixels of it the batch in flight is drawing (`None`: none; they were `dirty`
+    /// when it left, and are again if it is lost).
+    drawing: Option<DRect>,
     /// Frame this tile was last drawn on screen.
     used: u64,
-    /// Drawn from a rebased Move split (`move_cpu::Split::rebase`): the document as it is, in 8
-    /// bits with type edges approximated; composited exactly once the edits pause.
+    /// Drawn through a split's top map (`move_cpu`): the document as it is, within a rounding
+    /// step, type edges approximated; composited exactly once the edits pause.
     approx: bool,
 }
 
@@ -72,11 +84,23 @@ pub struct TileCanvas {
     pub(crate) level: u32,
     /// Tiles being composited on the worker pool, off the UI thread (threads build, desktop).
     pending: Option<Pending>,
-    /// A Move drag's cached composites below and above the moving layers (`move_cpu`).
-    move_split: Option<crate::move_cpu::Split>,
-    /// The split made ahead (the Move tool, no drag) is ready for the view (tests).
+    /// The cached composites below and above the layers an edit changes (`move_cpu`); with the
+    /// batch in flight while one is.
+    split: Option<Split>,
+    /// The batch the worker pool is compositing.
+    flight: Option<Flight>,
+    /// The layers the frame asked the split to be around (the Move tool's press targets, else the
+    /// selected layers), and the ones it is around: those, or the layers the last edit changed.
+    wanted: Vec<LayerId>,
+    anchor: Vec<LayerId>,
+    /// What the split's tiles for the view were last made ahead for.
+    ahead: Option<Ahead>,
+    /// They are made for what the canvas shows now (the next edit's first frame is drawn from
+    /// them).
     pub(crate) ahead_ready: bool,
-    /// When tiles drawn from a rebased split may be composited exactly (`now_ms`): once the
+    /// The split is the one a Move press would drag (`move_ui`'s lazy preview).
+    split_ready: bool,
+    /// When tiles drawn through a split's top map may be composited exactly (`now_ms`): once the
     /// edits have paused this long.
     refine_after: f64,
 }
@@ -90,9 +114,9 @@ struct Pending {
     rx: std::sync::mpsc::Receiver<Vec<(TileKey, DRect, egui::ColorImage)>>,
 }
 
-/// Whether missing tiles are composited off the UI thread. Tests composite in the frame, so they
-/// see the result at once.
-const ASYNC_TILES: bool = cfg!(all(not(test), any(not(target_arch = "wasm32"), target_feature = "atomics")));
+/// Whether there is a worker pool to composite on, off the UI thread (the threads build, desktop).
+#[cfg(not(test))]
+const POOL: bool = cfg!(any(not(target_arch = "wasm32"), target_feature = "atomics"));
 
 impl std::fmt::Debug for TileCanvas {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -149,11 +173,6 @@ impl TileCanvas {
             };
             t.dirty = Some(t.dirty.map_or(d, |o| o.union(&d)));
         }
-    }
-
-    /// Document `doc` reduced to `level` (cached for the document state).
-    fn reduced(&self, doc: &Arc<Document>, level: u32) -> Arc<Document> {
-        reduced(&self.levels, doc, level)
     }
 }
 
@@ -273,18 +292,35 @@ fn tile_image(display: Option<&photocraft_engine::display_color::CanvasDisplay>,
     egui::ColorImage::new(size, px.into_iter().map(|p| Color32::from_rgba_premultiplied(p[0], p[1], p[2], p[3])).collect())
 }
 
-/// Composite `rects` (level pixels at factor `f`) from `source` (the reduced document), or
-/// without one by reducing the full-resolution composite of `doc`.
-/// The budget of an idle frame for making the Move split ahead (milliseconds).
+/// Budget for the split's tiles (`move_cpu::Split`): float composites below and above the edited
+/// layers for the tiles in view, 48 bytes a pixel at most. A share of the Memory Usage allowance
+/// and of the device's memory, 32-512 MB; a view that needs more is composited whole.
+fn split_budget(app: &PhotocraftApp) -> usize {
+    let allowance = app.session.prefs().performance.history_budget_bytes();
+    let device = crate::gpu_canvas::physical_memory().map_or(usize::MAX, |b| usize::try_from(b / 32).unwrap_or(usize::MAX));
+    (allowance / 8).min(device).clamp(32 << 20, 512 << 20)
+}
+
+/// The budget of a frame for making the split ahead where there is no worker pool (milliseconds).
 const SPLIT_AHEAD_MS: f64 = 6.0;
+
+/// How long a batch on the worker pool goes on making the split ahead (milliseconds): an edit
+/// that comes meanwhile waits for it to come back.
+const AHEAD_FLIGHT_MS: f64 = 12.0;
+
+/// How long a frame waits for an edit's batch before it goes on without it (milliseconds).
+#[cfg(not(test))]
+const FLIGHT_WAIT_MS: f64 = 4.0;
 
 /// The budget of a drag frame for the split's sprite while it isn't ready (milliseconds).
 const DRAG_BAND_MS: f64 = 2.0;
 
-/// How long the edits must pause before tiles drawn from a rebased Move split are composited
-/// exactly (milliseconds): a drag that follows at once keeps the frame's time.
+/// How long the edits must pause before tiles drawn through a split's top map are composited
+/// exactly (milliseconds): an edit that follows at once keeps the pool's time.
 const REFINE_AFTER_MS: f64 = 400.0;
 
+/// Composite `rects` (level pixels at factor `f`) from `source` (the reduced document), or
+/// without one by reducing the full-resolution composite of `doc`.
 fn render_level(doc: &Document, source: Option<&Document>, f: i64, rects: &[DRect]) -> Vec<photocraft_compose::Buffer> {
     match source {
         Some(src) => photocraft_compose::render_rects(src, rects),
@@ -301,11 +337,392 @@ fn render_level(doc: &Document, source: Option<&Document>, f: i64, rects: &[DRec
 }
 
 /// What to draw for one tile.
+#[derive(Clone, Copy)]
 enum Job {
     /// The whole tile (with gutter).
     Full(TileKey, DRect),
     /// Part of an existing tile's texture: level pixels.
     Part(TileKey, DRect),
+}
+
+impl Job {
+    fn key(&self) -> TileKey {
+        match self {
+            Job::Full(k, _) | Job::Part(k, _) => *k,
+        }
+    }
+
+    fn rect(&self) -> DRect {
+        match self {
+            Job::Full(_, r) | Job::Part(_, r) => *r,
+        }
+    }
+}
+
+/// How a batch of tiles is drawn.
+#[derive(Clone)]
+enum Through {
+    /// A Move drag's frame (or, `release`, its release from the split rebased on it): the plan's
+    /// layers at its offset over the split's tiles (`move_cpu`). `lazy`: the document shown is
+    /// the one before the drag, so a frame the split can't draw composites the moved copy.
+    Move { plan: Plan, lazy: bool, release: bool },
+    /// The document as it is, through the split around `ids` where the edit left its tiles
+    /// standing ([`Split::update`]); else through one made again around what the edit changed.
+    Edit { ids: Vec<LayerId>, id: DocId, revision: u64 },
+    /// The exact composite of every layer.
+    Whole,
+}
+
+/// Tiles to composite with everything that takes: drawn on the worker pool while the frame goes
+/// on, or in the frame where there is no pool ([`draw`]).
+struct Batch {
+    doc: Arc<Document>,
+    level: u32,
+    /// Each job with the level pixels its tile holds.
+    jobs: Vec<(Job, DRect)>,
+    /// Whether the maps of the split's top are made for the jobs' tiles that lack one (a drag's
+    /// frames: the ones that follow are drawn from them); else those tiles take the top layers
+    /// composited for real, and their maps are made ahead.
+    maps: bool,
+    display: Option<Arc<photocraft_engine::display_color::CanvasDisplay>>,
+    levels: Arc<wasm_sync::Mutex<Levels>>,
+    split: Option<Split>,
+    through: Through,
+    /// The split's tiles to make ahead (the tiles in view), for about `ahead_ms`; `sprite`: the
+    /// image a Move drag would blit too.
+    ahead: Vec<DRect>,
+    ahead_ms: f64,
+    sprite: bool,
+    /// Set when an edit is waiting for the split: what is made ahead stops at the next tiles.
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    /// The most the split's tiles may hold, and the tiles in view (kept whatever they cost).
+    budget: usize,
+    view: Vec<DRect>,
+}
+
+/// What a [`Batch`] made.
+struct Drawn {
+    split: Option<Split>,
+    tiles: Vec<(Job, egui::ColorImage)>,
+    from_split: bool,
+    /// Drawn through the split's top map: composited exactly once the edits pause.
+    approx: bool,
+    /// The layers the split is around now, when the batch made or used one.
+    anchor: Option<Vec<LayerId>>,
+    /// Nothing is left to make ahead (or no more can be made).
+    ahead_done: bool,
+    ms: f64,
+}
+
+/// Composite a batch. Runs on a pool worker or, without a pool, in the frame.
+fn draw(mut b: Batch) -> Drawn {
+    let t0 = crate::gpu_canvas::now_ms();
+    let level = b.level;
+    let f = 1i64 << level;
+    let faithful = level == 0 || photocraft_compose::proxy::lod_faithful(&b.doc);
+    let levels = b.levels.clone();
+    let mut reduce = |d: &Document| {
+        if level == 0 {
+            return d.clone();
+        }
+        let mut l = levels.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        l.mips.document(d, level)
+    };
+    let held: Vec<(DRect, DRect)> = b.jobs.iter().map(|(j, h)| (j.rect(), *h)).collect();
+    let mut split = b.split.take();
+    let mut anchor = None;
+    let mut images: Option<Vec<egui::ColorImage>> = None;
+    let mut bufs = None;
+    let mut approx = false;
+    // Whether the split shows the batch's document as it is (its tiles can be made ahead).
+    let mut current = false;
+    if faithful {
+        match &b.through {
+            Through::Move { plan, release, .. } => {
+                let kept = split
+                    .as_mut()
+                    .is_some_and(|s| s.is_for(plan, level) || (s.moves(plan.doc, &plan.ids, level) && s.update(&plan.base, plan.revision, &mut reduce) == Update::Held));
+                if !kept {
+                    split = Split::new(plan, level, &mut reduce);
+                }
+                if let Some(s) = split.as_mut() {
+                    s.set_budget(b.budget, &b.view);
+                    anchor = Some(plan.ids.clone());
+                    if !held.is_empty() {
+                        // The one-blit path where the canvas shows the document's values as they are.
+                        if b.display.as_deref().is_none_or(|d| d.is_identity()) && (b.maps || held.iter().all(|h| !s.needs(h.1))) {
+                            images = s.render_rgba8(plan.offset, &held).map(|px| {
+                                let mut out: Vec<egui::ColorImage> = held.iter().map(|_| egui::ColorImage::default()).collect();
+                                crate::move_cpu::each(&mut out, |i, o| {
+                                    if let (Some((r, _)), Some(p)) = (held.get(i), px.get(i)) {
+                                        *o = egui::ColorImage::from_rgba_premultiplied([r.width() as usize, r.height() as usize], p.as_flattened());
+                                    }
+                                });
+                                out
+                            });
+                        }
+                        if images.is_none() {
+                            // Its sprite still being made: a band of it, the frame on the float path.
+                            s.prepare(DRAG_BAND_MS);
+                            bufs = s.render(plan.offset, &held, b.maps).map(|r| r.0);
+                        }
+                        approx = *release;
+                    }
+                }
+            }
+            Through::Edit { ids, id, revision } => {
+                let plan = |ids: &[LayerId]| Plan { base: b.doc.clone(), ids: ids.to_vec(), doc: *id, revision: *revision, offset: (0, 0) };
+                let kept = split.as_mut().filter(|s| s.moves(*id, ids, level)).map(|s| s.update(&b.doc, *revision, &mut reduce));
+                match kept {
+                    Some(Update::Held) => {}
+                    // An edit somewhere else: the split made again around what it changed.
+                    Some(Update::Elsewhere(changed)) if !changed.is_empty() => {
+                        split = Split::new(&plan(&changed), level, &mut reduce);
+                        anchor = Some(changed);
+                    }
+                    _ => {
+                        split = Split::new(&plan(ids), level, &mut reduce);
+                        anchor = Some(ids.clone());
+                    }
+                }
+                if let Some(s) = split.as_mut() {
+                    s.set_budget(b.budget, &b.view);
+                    current = true;
+                    if !held.is_empty()
+                        && let Some((drawn, mapped)) = s.render((0, 0), &held, b.maps)
+                    {
+                        (bufs, approx) = (Some(drawn), mapped);
+                    }
+                }
+            }
+            Through::Whole => {}
+        }
+    }
+    let from_split = images.is_some() || bufs.is_some();
+    if images.is_none() && !held.is_empty() {
+        let bufs = bufs.unwrap_or_else(|| {
+            approx = false;
+            let moved = match &b.through {
+                Through::Move { plan, lazy: true, .. } => photocraft_engine::layer_multi_cmds::moved(&plan.base, &plan.ids, plan.offset.0, plan.offset.1).ok().map(Arc::new),
+                _ => None,
+            };
+            let doc = moved.as_ref().unwrap_or(&b.doc);
+            let source = faithful.then(|| reduced(&b.levels, doc, level));
+            let rects: Vec<DRect> = held.iter().map(|h| h.0).collect();
+            render_level(doc, source.as_deref(), f, &rects)
+        });
+        let mut out: Vec<egui::ColorImage> = bufs.iter().map(|_| egui::ColorImage::default()).collect();
+        let display = b.display.as_deref();
+        crate::move_cpu::each(&mut out, |i, o| {
+            if let Some(buf) = bufs.get(i) {
+                *o = tile_image(display, buf);
+            }
+        });
+        images = Some(out);
+    }
+    // The split's tiles for the rest of the view, and a Move drag's sprite: made now, while
+    // nothing needs them, so the next edit's first frame is drawn from them.
+    let mut ahead_done = true;
+    if let Some(s) = split.as_mut().filter(|_| current && !b.ahead.is_empty()) {
+        let t1 = crate::gpu_canvas::now_ms();
+        if b.sprite {
+            ahead_done = s.prepare(b.ahead_ms);
+        }
+        let todo: Vec<(DRect, DRect)> = b.ahead.iter().filter(|h| s.needs(**h)).map(|h| (*h, *h)).collect();
+        let over = |t1: f64| crate::gpu_canvas::now_ms() - t1 >= b.ahead_ms || b.stop.load(std::sync::atomic::Ordering::Relaxed);
+        // A few tiles at a time, the below's and then the top's maps: an edit that comes
+        // meanwhile waits for one of those at most.
+        'tiles: for some in todo.chunks(rayon_batch()) {
+            for maps in [false, true] {
+                if over(t1) {
+                    ahead_done = false;
+                    break 'tiles;
+                }
+                if !s.fill(some, maps) {
+                    // Past the split's budget: no more can be made.
+                    break 'tiles;
+                }
+            }
+        }
+    }
+    let tiles = b.jobs.iter().map(|(j, _)| *j).zip(images.unwrap_or_default()).collect();
+    Drawn { split, tiles, from_split, approx, anchor, ahead_done, ms: crate::gpu_canvas::now_ms() - t0 }
+}
+
+/// A batch on the worker pool: the frame that sent it went on without it.
+struct Flight {
+    rx: std::sync::mpsc::Receiver<Drawn>,
+    /// The (revision, preview key) and level it draws.
+    state: (u64, u64),
+    level: u32,
+    /// What its tiles made ahead are for ([`TileCanvas::ahead`]).
+    ahead: Option<Ahead>,
+    /// The layers the split was around when it left.
+    anchor: Vec<LayerId>,
+    /// Tells a batch that only makes the split ahead to stop: an edit is waiting for the split.
+    stop: Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// What a split's tiles were made ahead for: the state the canvas showed (revision, preview
+/// key), the layers the split is around, the level and the tiles in view (a hash of them).
+type Ahead = ((u64, u64), Vec<LayerId>, u32, u64);
+
+/// What a batch was sent for, when it lands.
+struct Sent {
+    /// It drew the state and level the canvas shows.
+    fresh: bool,
+    /// What its tiles made ahead are for.
+    ahead: Option<Ahead>,
+    /// The layers the split was around when it left.
+    anchor: Vec<LayerId>,
+}
+
+/// What a frame drew, for the performance readout.
+#[derive(Default)]
+struct Stats {
+    px: u64,
+    composite_ms: f64,
+    upload_ms: f64,
+    from_split: bool,
+}
+
+impl TileCanvas {
+    /// Composite `batch`: on the worker pool, waiting up to `wait` milliseconds for it so that an
+    /// edit the pool composites in that time shows in its own frame (`None`: in the frame). What
+    /// it made when it is done already; else the batch is in flight ([`TileCanvas::flight`]) and
+    /// the frame goes on with the tiles it has.
+    fn send(&mut self, ctx: &egui::Context, batch: Batch, state: (u64, u64), ahead: Option<Ahead>, wait: Option<f64>) -> Option<Drawn> {
+        let Some(wait) = wait else { return Some(draw(batch)) };
+        let (level, stop) = (batch.level, batch.stop.clone());
+        let (tx, rx) = std::sync::mpsc::channel();
+        let wake = ctx.clone();
+        spawn(move || {
+            let _ = tx.send(draw(batch));
+            // (The browser's page isn't woken from a worker: it looks again in a moment.)
+            if cfg!(not(target_arch = "wasm32")) {
+                wake.request_repaint();
+            }
+        });
+        // The page's own thread can't wait in the browser: it finds the tiles in its next frame.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _s = crate::perf_span::span("cpu.wait");
+            if let Ok(d) = rx.recv_timeout(std::time::Duration::from_secs_f64(wait.max(0.0) / 1000.0)) {
+                return Some(d);
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        let _ = wait;
+        self.flight = Some(Flight { rx, state, level, ahead, anchor: self.anchor.clone(), stop });
+        None
+    }
+
+    /// What a batch made, into the canvas: all its tiles in this frame (the canvas never shows
+    /// part of an edit), the split back.
+    fn land(&mut self, ctx: &egui::Context, name: (DocId, u32), d: Drawn, sent: Sent, stats: &mut Stats) {
+        let t0 = crate::gpu_canvas::now_ms();
+        let Sent { fresh, ahead, anchor } = sent;
+        // (Not when the frames asked for other layers meanwhile: the next batch goes around those.)
+        if let Some(a) = d.anchor.filter(|_| self.anchor == anchor) {
+            self.anchor = a;
+        }
+        self.split = d.split;
+        if d.ahead_done && ahead.is_some() {
+            self.ahead = ahead;
+        }
+        if d.approx && !d.tiles.is_empty() {
+            self.refine_after = t0 + REFINE_AFTER_MS;
+        }
+        let frame = self.frame;
+        let load = |k: TileKey, img: egui::ColorImage| ctx.load_texture(format!("cpu-tile-{}-{}-{}-{}-{}", name.0.0, name.1, k.level, k.tx, k.ty), img, TextureOptions::LINEAR);
+        stats.from_split |= d.from_split && !d.tiles.is_empty();
+        stats.composite_ms += d.ms;
+        for (job, img) in d.tiles {
+            stats.px += img.size[0] as u64 * img.size[1] as u64;
+            match job {
+                Job::Full(k, held) => match self.tiles.get_mut(&k) {
+                    Some(t) if t.tex.size() == img.size => {
+                        t.tex.set(img, TextureOptions::LINEAR);
+                        (t.held, t.drawing, t.approx) = (held, None, d.approx);
+                    }
+                    // What changed while the batch was in flight is still to draw.
+                    Some(t) => {
+                        let dirty = t.dirty;
+                        self.tiles.insert(k, TileTex { tex: load(k, img), held, dirty, drawing: None, used: frame, approx: d.approx });
+                    }
+                    None if fresh => {
+                        self.tiles.insert(k, TileTex { tex: load(k, img), held, dirty: None, drawing: None, used: frame, approx: d.approx });
+                    }
+                    None => {}
+                },
+                Job::Part(k, part) => {
+                    if let Some(t) = self.tiles.get_mut(&k) {
+                        let fits = part.intersect(&t.held) == part && [part.width() as usize, part.height() as usize] == img.size;
+                        if fits && !part.is_empty() {
+                            t.tex.set_partial([(part.x0 - t.held.x0) as usize, (part.y0 - t.held.y0) as usize], img, TextureOptions::LINEAR);
+                        }
+                        let drawing = t.drawing.take();
+                        if !fits {
+                            // The tile isn't the one the part was drawn for: its area again.
+                            t.dirty = merge(t.dirty, drawing);
+                        }
+                        t.approx |= d.approx;
+                    }
+                }
+            }
+        }
+        stats.upload_ms += crate::gpu_canvas::now_ms() - t0;
+    }
+
+    /// The batch in flight was lost (its worker died): what it was drawing is still to draw.
+    fn grounded(&mut self) {
+        for t in self.tiles.values_mut() {
+            let drawing = t.drawing.take();
+            t.dirty = merge(t.dirty, drawing);
+        }
+    }
+}
+
+/// The union of two damage rectangles (document pixels).
+fn merge(a: Option<DRect>, b: Option<DRect>) -> Option<DRect> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(if a.is_empty() {
+            b
+        } else if b.is_empty() {
+            a
+        } else {
+            a.union(&b)
+        }),
+        (a, b) => a.or(b),
+    }
+}
+
+/// How long a frame waits for the worker pool to composite an edit's tiles before it goes on
+/// with the tiles it has (milliseconds; `None`: they are composited in the frame, where there is
+/// no pool). An edit the pool composites in this time shows in its own frame; a longer one a
+/// frame or more later, complete, the window never held meanwhile.
+fn flight_wait() -> Option<f64> {
+    #[cfg(test)]
+    {
+        FLIGHT_WAIT.with(|w| w.get())
+    }
+    #[cfg(not(test))]
+    {
+        POOL.then_some(FLIGHT_WAIT_MS)
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests composite in the frame, so they see an edit at once; one that measures frames sets
+    /// the wait the app has ([`set_flight_wait`]).
+    static FLIGHT_WAIT: std::cell::Cell<Option<f64>> = const { std::cell::Cell::new(None) };
+}
+
+/// Composite edits on the worker pool, the frame waiting `ms` for them, as the app does (tests).
+#[cfg(test)]
+pub(crate) fn set_flight_wait(ms: Option<f64>) {
+    FLIGHT_WAIT.with(|w| w.set(ms));
 }
 
 /// Draw document `idx`'s CPU canvas: tiles in view at the zoom's level, composited as needed.
@@ -327,7 +744,7 @@ pub fn paint(
         crate::canvas::cpu_target(app, idx, output)
     };
     let Some(target) = target else { return };
-    let crate::canvas::CpuTarget { mut doc, revision, preview_key, display, display_key, damage, id } = target;
+    let crate::canvas::CpuTarget { doc, revision, preview_key, display, display_key, damage, id } = target;
     let size = [doc.size.width, doc.size.height];
     let level = level_for(zoom, size);
     let key = crate::canvas::cache_key(id, output);
@@ -336,25 +753,26 @@ pub fn paint(
         crate::move_ui::cpu_plan(app, idx, &doc)
     };
     // A lazy Move preview (`move_ui`: the document as it is, the canvas shifting the moving layers
-    // itself) that the split can't draw this frame: shifted here, as `move_ui` would have.
-    let mut lazy = move_plan.as_ref().is_some_and(|p| Arc::ptr_eq(&p.base, &doc) && p.offset != (0, 0));
-    let shift = |doc: &mut Arc<Document>, lazy: &mut bool| {
-        if std::mem::take(lazy)
-            && let Some(p) = move_plan.as_ref()
-            && let Ok(d) = photocraft_engine::layer_multi_cmds::moved(&p.base, &p.ids, p.offset.0, p.offset.1)
-        {
-            *doc = Arc::new(d);
-        }
+    // itself): a frame the split can't draw composites the moved copy, as `move_ui` would have.
+    let lazy = move_plan.as_ref().is_some_and(|p| Arc::ptr_eq(&p.base, &doc) && p.offset != (0, 0));
+    // The layers the split is made around while nothing is dragged: with the Move tool the ones
+    // a press would move, so a drag's first frame is drawn from it as the others are; else the
+    // selected ones, which the next stroke, keystroke or command most likely changes.
+    let move_tool = app.ui.tool == crate::state::Tool::Move && app.drag.is_none();
+    let wanted = if move_plan.is_some() {
+        None
+    } else if move_tool {
+        Some(crate::move_ui::press_targets(app, idx))
+    } else {
+        Some(app.session.documents().get(idx).map(|st| st.selected_layers()).unwrap_or_default())
     };
-    // The Move tool, no drag: the split for the layer a press would move, made ahead in idle
-    // frames (`move_cpu`), so a drag's first frame is drawn from it as the others are.
-    let ahead = (move_plan.is_none() && app.ui.tool == crate::state::Tool::Move && app.drag.is_none())
-        .then(|| crate::move_ui::press_targets(app, idx))
-        .filter(|ids| !ids.is_empty())
-        .map(|ids| crate::move_cpu::Plan { base: doc.clone(), ids, doc: id, revision, offset: (0, 0) });
     let released = app.cpu_released.take_if(|r| r.0 == id);
     let tex_budget = texture_budget(app);
     let mip_budget = mip_budget(app);
+    let split_budget = split_budget(app);
+    let wait = flight_wait();
+    let pooled = wait.is_some();
+    let pointer_down = ctx.input(|i| i.pointer.any_down());
     let cache = app.canvases.entry(key).or_default();
     let tc = cache.tiles.get_or_insert_with(Default::default);
     tc.frame += 1;
@@ -365,24 +783,35 @@ pub fn paint(
         tc.size = size;
         tc.shown = None;
     }
-    if move_plan.is_none() && ahead.is_none() {
-        tc.move_split = None;
-    }
-    // A drag this canvas showed was committed at the offset it showed: the split is rebased on
-    // the result and draws the release's tiles (`move_cpu::Split::rebase`), as the drag's frames
-    // were drawn; they are composited exactly once the edits pause.
-    // (The split checks itself that `doc` is its document with the run only shifted.)
-    let release_plan = released.and_then(|(_, ids, offset)| {
-        let split = tc.move_split.as_mut()?;
-        (split.moves(id, &ids, level) && split.rebase(&doc, revision, offset)).then(|| crate::move_cpu::Plan { base: doc.clone(), ids, doc: id, revision, offset: (0, 0) })
-    });
-    if move_plan.is_some() || release_plan.is_some() {
-        tc.refine_after = crate::gpu_canvas::now_ms() + REFINE_AFTER_MS;
+    if let Some(w) = wanted.as_ref().filter(|w| tc.wanted != **w) {
+        tc.wanted.clone_from(w);
+        tc.anchor.clone_from(w);
     }
     let now = (revision, preview_key ^ display_key);
     if tc.shown != Some(now) {
         tc.invalidate(if tc.shown.is_some() { damage } else { None });
         tc.shown = Some(now);
+    }
+    let mut stats = Stats::default();
+    // The batch in flight, when the pool is done with it: its tiles in place of the ones shown.
+    if let Some(fl) = tc.flight.take() {
+        match fl.rx.try_recv() {
+            Ok(d) => tc.land(ctx, key, d, Sent { fresh: fl.state == now && fl.level == level, ahead: fl.ahead, anchor: fl.anchor }, &mut stats),
+            Err(std::sync::mpsc::TryRecvError::Empty) => tc.flight = Some(fl),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => tc.grounded(),
+        }
+    }
+    // A drag this canvas showed was committed at the offset it showed: the split is rebased on
+    // the result and draws the release's tiles (`move_cpu::Split::rebase`), as the drag's frames
+    // were drawn; they are composited exactly once the edits pause.
+    // (The split checks itself that `doc` is its document with the run only shifted. A split in
+    // flight comes back to an edit of its run, and keeps its tiles for it.)
+    let release_plan = released.and_then(|(_, ids, offset)| {
+        let split = tc.split.as_mut()?;
+        (split.moves(id, &ids, level) && split.rebase(&doc, revision, offset)).then(|| Plan { base: doc.clone(), ids, doc: id, revision, offset: (0, 0) })
+    });
+    if move_plan.is_some() || release_plan.is_some() {
+        tc.refine_after = crate::gpu_canvas::now_ms() + REFINE_AFTER_MS;
     }
     // Tiles the worker pool finished for this state: in place of what stood in for them.
     if let Some(p) = &tc.pending {
@@ -390,11 +819,11 @@ pub fn paint(
             Ok(done) => {
                 if p.state == now && p.level == level {
                     for (k, held, img) in done {
-                        if tc.tiles.get(&k).is_some_and(|t| t.dirty.is_none() && t.held == held && !t.approx) {
+                        if tc.tiles.get(&k).is_some_and(|t| t.dirty.is_none() && t.drawing.is_none() && t.held == held && !t.approx) {
                             continue;
                         }
                         let tex = ctx.load_texture(format!("cpu-tile-{}-{}-{}-{}-{}", id.0, key.1, k.level, k.tx, k.ty), img, TextureOptions::LINEAR);
-                        tc.tiles.insert(k, TileTex { tex, held, dirty: None, used: frame, approx: false });
+                        tc.tiles.insert(k, TileTex { tex, held, dirty: None, drawing: None, used: frame, approx: false });
                     }
                 }
                 tc.pending = None;
@@ -410,17 +839,20 @@ pub fn paint(
     let mut missing = Vec::new();
     let f = 1i64 << level;
     let bounds = level_bounds(size, f);
+    let held_of = |k: TileKey| tile_rect(k, size).inflate(GUTTER).intersect(&bounds);
     for &k in &want {
-        let own = tile_rect(k, size);
-        let held = own.inflate(GUTTER).intersect(&bounds);
-        match tc.tiles.get(&k) {
+        let held = held_of(k);
+        match tc.tiles.get_mut(&k) {
             None => missing.push(Job::Full(k, held)),
+            // In flight.
+            Some(t) if t.drawing.is_some() => {}
             Some(t) if t.held != held => stale.push(Job::Full(k, held)),
             Some(t) => {
                 if let Some(d) = t.dirty {
                     let part = level_rect(d, f).intersect(&t.held);
                     if part.is_empty() {
-                        stale.push(Job::Part(k, part));
+                        // None of it in this tile.
+                        t.dirty = None;
                     } else if u64::from(part.width()) * u64::from(part.height()) * 2 > u64::from(held.width()) * u64::from(held.height()) {
                         stale.push(Job::Full(k, held));
                     } else {
@@ -430,226 +862,140 @@ pub fn paint(
             }
         }
     }
-    // Tiles drawn from a rebased split, composited exactly once the edits pause and the split
-    // for the next drag is made (as missing tiles are: on the worker pool, or in the frame's
+    let view: Vec<DRect> = want.iter().map(|k| held_of(*k)).collect();
+    // What the split's tiles made ahead would be for now, and whether they are made.
+    let ahead: Ahead = {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        want.hash(&mut h);
+        (now, tc.anchor.clone(), level, h.finish())
+    };
+    tc.ahead_ready = tc.ahead.as_ref() == Some(&ahead);
+    let dragging = move_plan.is_some();
+    // Tiles drawn through the split's top map, composited exactly once the edits pause and the
+    // split for the next edit is made (as missing tiles are: on the worker pool, or in the frame's
     // budget). Each replaces its tile whole.
-    let idle = move_plan.is_none()
-        && release_plan.is_none()
-        && stale.is_empty()
-        && missing.is_empty()
-        && (ahead.is_none() || tc.ahead_ready)
-        && !ctx.input(|i| i.pointer.any_down());
-    let approx: Vec<Job> = want
-        .iter()
-        .filter_map(|k| tc.tiles.get(k).filter(|t| t.approx).map(|t| Job::Full(*k, t.held)))
-        .collect();
+    let idle = !dragging && release_plan.is_none() && stale.is_empty() && missing.is_empty() && tc.flight.is_none() && tc.ahead_ready && !pointer_down;
+    let approx: Vec<Job> = want.iter().filter_map(|k| tc.tiles.get(k).filter(|t| t.approx).map(|t| Job::Full(*k, t.held))).collect();
+    let mut refining = false;
     if !approx.is_empty() {
         let wait = tc.refine_after - crate::gpu_canvas::now_ms();
         if !idle || wait > 0.0 {
             ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait.max(16.0) / 1000.0));
         } else if tc.pending.is_none() {
             missing = approx;
+            refining = true;
         }
     }
     drop(setup);
-    if let Some(plan) = ahead.as_ref().filter(|_| stale.is_empty() && missing.is_empty() && tc.pending.is_none()) {
-        let _s = crate::perf_span::span("move.split_ahead");
-        let t0 = crate::gpu_canvas::now_ms();
-        let levels = tc.levels.clone();
-        let mut reduce = |d: &Document| {
-            if level == 0 {
-                return d.clone();
+    let through = match (move_plan.as_ref(), release_plan) {
+        (Some(plan), _) => Through::Move { plan: plan.clone(), lazy, release: false },
+        (None, Some(plan)) => Through::Move { plan, lazy: false, release: true },
+        (None, None) => Through::Edit { ids: tc.anchor.clone(), id, revision },
+    };
+    let mut more_ahead = false;
+    // An edit, or a press that may start one: the batch making the split ahead comes back.
+    if let Some(fl) = tc.flight.as_ref().filter(|fl| fl.ahead.is_some() && (!stale.is_empty() || pointer_down)) {
+        fl.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    // Changed tiles, all of them in one batch: the pool composites them while the frame goes on,
+    // and they replace the ones shown together, in the frame that finds them done (this one when
+    // the pool is quick). One batch at a time: what changes meanwhile goes in the next.
+    if !stale.is_empty() && tc.flight.is_none() {
+        for j in &stale {
+            if let Some(t) = tc.tiles.get_mut(&j.key()) {
+                t.drawing = Some(t.dirty.take().unwrap_or(DRect::EMPTY));
             }
-            let mut l = levels.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            l.mips.document(d, level)
-        };
-        if !tc.move_split.as_ref().is_some_and(|s| s.is_for(plan, level)) {
-            tc.move_split = crate::move_cpu::Split::new(plan, level, &mut reduce);
         }
-        if let Some(split) = tc.move_split.as_mut() {
-            let mut left = !split.prepare(SPLIT_AHEAD_MS);
-            for &k in &want {
-                let held = tile_rect(k, size).inflate(GUTTER).intersect(&bounds);
-                if !split.needs(held) {
-                    continue;
-                }
-                if crate::gpu_canvas::now_ms() - t0 >= SPLIT_AHEAD_MS {
-                    left = true;
-                    break;
-                }
-                split.fill(&[(held, held)]);
-            }
-            tc.ahead_ready = !left;
-            if left {
-                ctx.request_repaint();
-            }
+        let batch = Batch {
+            doc: doc.clone(),
+            level,
+            jobs: stale.iter().map(|j| (*j, held_of(j.key()))).collect(),
+            maps: dragging || pointer_down,
+            display: display.clone(),
+            levels: tc.levels.clone(),
+            split: tc.split.take(),
+            through: through.clone(),
+            ahead: Vec::new(),
+            ahead_ms: 0.0,
+            sprite: false,
+            stop: Arc::default(),
+            budget: split_budget,
+            view: view.clone(),
+        };
+        let anchor = tc.anchor.clone();
+        if let Some(d) = tc.send(ctx, batch, now, None, wait) {
+            tc.land(ctx, key, d, Sent { fresh: true, ahead: None, anchor }, &mut stats);
+        }
+    } else if matches!(through, Through::Edit { .. }) && stale.is_empty() && missing.is_empty() && tc.flight.is_none() && tc.pending.is_none() && !tc.ahead_ready && !pointer_down {
+        // Nothing to draw: the split's tiles for the view, made ahead a few at a time.
+        let _s = crate::perf_span::span("cpu.split_ahead");
+        let batch = Batch {
+            doc: doc.clone(),
+            level,
+            jobs: Vec::new(),
+            maps: false,
+            display: None,
+            levels: tc.levels.clone(),
+            split: tc.split.take(),
+            through: through.clone(),
+            ahead: view.clone(),
+            ahead_ms: if wait.is_some() { AHEAD_FLIGHT_MS } else { SPLIT_AHEAD_MS },
+            sprite: move_tool,
+            stop: Arc::default(),
+            budget: split_budget,
+            view: view.clone(),
+        };
+        // (Off the frame it isn't waited for: nothing of it shows.)
+        let anchor = tc.anchor.clone();
+        if let Some(d) = tc.send(ctx, batch, now, Some(ahead.clone()), wait.map(|_| 0.0)) {
+            more_ahead = !d.ahead_done;
+            tc.land(ctx, key, d, Sent { fresh: true, ahead: Some(ahead.clone()), anchor }, &mut stats);
         }
     }
+    // Missing tiles while the frame has time (at least one batch), where there is no pool: the
+    // rest show from another level and are drawn over the next frames.
     let t0 = crate::gpu_canvas::now_ms();
-    // The document to composite the level from (`None`: reduce the full-resolution composite),
-    // found when a tile needs drawing.
-    let mut source: Option<Option<Arc<Document>>> = None;
-    // Changed tiles first, all of them (an edit shows at once); then missing tiles while the frame
-    // has time (at least one batch).
-    let mut px = 0u64;
-    let mut batches = vec![stale];
-    let batch = rayon_batch();
+    let batch_size = rayon_batch();
     let mut rest = missing.into_iter().peekable();
     let mut first = true;
-    let mut composite_ms = 0.0;
-    let mut upload_ms = 0.0;
-    let mut move_split_frames = 0u64;
-    loop {
-        let jobs = match batches.pop() {
-            Some(j) => j,
-            None => {
-                if ASYNC_TILES || rest.peek().is_none() || (!first && crate::gpu_canvas::now_ms() - t0 > FRAME_BUDGET_MS) {
-                    break;
-                }
-                first = false;
-                rest.by_ref().take(batch).collect()
-            }
+    while !pooled && rest.peek().is_some() && (first || crate::gpu_canvas::now_ms() - t0 <= FRAME_BUDGET_MS) {
+        first = false;
+        let jobs: Vec<(Job, DRect)> = rest.by_ref().take(batch_size).map(|j| (j, j.rect())).collect();
+        // (Through the split only while it is here; exactly when these replace approximate tiles.)
+        let through = if refining || tc.flight.is_some() { Through::Whole } else { through.clone() };
+        let batch = Batch {
+            doc: doc.clone(),
+            level,
+            jobs,
+            maps: false,
+            display: display.clone(),
+            levels: tc.levels.clone(),
+            split: tc.split.take(),
+            through,
+            ahead: Vec::new(),
+            ahead_ms: 0.0,
+            sprite: false,
+            stop: Arc::default(),
+            budget: split_budget,
+            view: view.clone(),
         };
-        if jobs.is_empty() {
-            continue;
-        }
-        let rects: Vec<DRect> = jobs
-            .iter()
-            .map(|j| match j {
-                Job::Full(_, r) | Job::Part(_, r) => *r,
-            })
-            .collect();
-        let c0 = crate::gpu_canvas::now_ms();
-        let faithful = level == 0 || photocraft_compose::proxy::lod_faithful(&doc);
-        // A Move drag: only the moving layers are re-blended over cached composites (`move_cpu`).
-        let mut split_bufs = None;
-        let mut blits = None;
-        let mut from_split = false;
-        if let Some(plan) = move_plan.as_ref().or(release_plan.as_ref()).filter(|_| faithful) {
-            let held: Vec<(DRect, DRect)> = jobs
-                .iter()
-                .map(|j| match j {
-                    Job::Full(_, r) => (*r, *r),
-                    Job::Part(k, r) => (*r, tc.tiles.get(k).map_or(*r, |t| t.held)),
-                })
-                .collect();
-            let levels = tc.levels.clone();
-            let mut reduce = |d: &Document| {
-                if level == 0 {
-                    return d.clone();
-                }
-                let mut l = {
-                    let _s = crate::perf_span::span("cpu.levels_wait");
-                    levels.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
-                };
-                let _s = crate::perf_span::span("cpu.mips");
-                l.mips.document(d, level)
-            };
-            if !tc.move_split.as_ref().is_some_and(|s| s.is_for(plan, level)) {
-                let _s = crate::perf_span::span("move.split_new");
-                tc.move_split = crate::move_cpu::Split::new(plan, level, &mut reduce);
-            }
-            // The one-blit path where the canvas shows the document's values as they are.
-            if display.as_deref().is_none_or(|d| d.is_identity()) {
-                let _s = crate::perf_span::span("move.blit");
-                blits = tc.move_split.as_mut().and_then(|s| s.render_rgba8(plan.offset, &held));
-            }
-            if blits.is_none() {
-                // Its sprite still being made: a band of it this frame, the frame on the float path.
-                if let Some(s) = tc.move_split.as_mut() {
-                    s.prepare(DRAG_BAND_MS);
-                }
-                split_bufs = {
-                    let _s = crate::perf_span::span("move.split_render");
-                    tc.move_split.as_mut().and_then(|s| s.render(plan.offset, &held))
-                };
-            }
-            if blits.is_some() || split_bufs.is_some() {
-                move_split_frames += 1;
-                from_split = true;
-            }
-        }
-        let images: Vec<(DRect, egui::ColorImage)> = if let Some(b) = blits {
-            let _s = crate::perf_span::span("move.blit_images");
-            rects
-                .iter()
-                .zip(b)
-                .map(|(r, px)| (*r, egui::ColorImage::from_rgba_premultiplied([r.width() as usize, r.height() as usize], px.as_flattened())))
-                .collect()
-        } else {
-            let bufs = match split_bufs {
-            Some(b) => b,
-            None => {
-                if lazy {
-                    shift(&mut doc, &mut lazy);
-                    source = None;
-                }
-                let source = source.get_or_insert_with(|| faithful.then(|| tc.reduced(&doc, level)));
-                let _s = crate::perf_span::span("cpu.render");
-                render_level(&doc, source.as_deref(), f, &rects)
-            }
-            };
-            let _s = crate::perf_span::span("cpu.tile_images");
-            bufs.iter().map(|b| (b.rect, tile_image(display.as_deref(), b))).collect()
-        };
-        let c1 = crate::gpu_canvas::now_ms();
-        composite_ms += c1 - c0;
-        let approx = release_plan.is_some() && from_split;
-        for (job, (rect, img)) in jobs.into_iter().zip(images) {
-            px += u64::from(rect.width()) * u64::from(rect.height());
-            match job {
-                Job::Full(k, held) => {
-                    match tc.tiles.get_mut(&k) {
-                        Some(t) if t.tex.size() == img.size => {
-                            t.tex.set(img, TextureOptions::LINEAR);
-                            t.held = held;
-                            t.dirty = None;
-                            t.approx = approx;
-                        }
-                        _ => {
-                            let tex = ctx.load_texture(format!("cpu-tile-{}-{}-{}-{}-{}", id.0, key.1, k.level, k.tx, k.ty), img, TextureOptions::LINEAR);
-                            tc.tiles.insert(k, TileTex { tex, held, dirty: None, used: frame, approx });
-                        }
-                    }
-                }
-                Job::Part(k, part) => {
-                    if let Some(t) = tc.tiles.get_mut(&k) {
-                        if !part.is_empty() {
-                            t.tex.set_partial([(part.x0 - t.held.x0) as usize, (part.y0 - t.held.y0) as usize], img, TextureOptions::LINEAR);
-                        }
-                        t.dirty = None;
-                        t.approx |= approx;
-                    }
-                }
-            }
-        }
-        upload_ms += crate::gpu_canvas::now_ms() - c1;
+        let anchor = tc.anchor.clone();
+        tc.land(ctx, key, draw(batch), Sent { fresh: true, ahead: None, anchor }, &mut stats);
     }
     // Missing tiles left: composited on the worker pool while the frame goes on.
-    if lazy && rest.peek().is_some() {
-        // Missing tiles go to the worker pool with the document as shown.
-        shift(&mut doc, &mut lazy);
-    }
-    // Made ahead counts too: the drag's first frame then shows the document as it is and lets
-    // this canvas shift the moving layers (`move_ui::display_doc`), no moved copy made for it.
-    let split_ready = move_plan.as_ref().or(ahead.as_ref()).is_some_and(|p| tc.move_split.as_ref().is_some_and(|s| s.is_for(p, level)));
-    if ASYNC_TILES && rest.peek().is_some() && tc.pending.is_none() {
-        let jobs: Vec<(TileKey, DRect)> = rest
-            .by_ref()
-            .take(batch * 2)
-            .filter_map(|j| match j {
-                Job::Full(k, held) => Some((k, held)),
-                Job::Part(..) => None,
-            })
-            .collect();
+    if pooled && rest.peek().is_some() && tc.pending.is_none() {
+        let jobs: Vec<(TileKey, DRect)> = rest.by_ref().take(batch_size * 2).map(|j| (j.key(), j.rect())).collect();
         // A level not built yet for this document is reduced on the worker too.
         let faithful = level == 0 || photocraft_compose::proxy::lod_faithful(&doc);
-        let ready = source.clone().flatten();
         let (tx, rx) = std::sync::mpsc::channel();
         tc.pending = Some(Pending { state: now, level, rx });
+        // (A lazy Move preview: the worker composites the document as shown.)
+        let moved = move_plan.as_ref().filter(|_| lazy).map(|p| (p.base.clone(), p.ids.clone(), p.offset));
         let (doc, display, levels) = (doc.clone(), display.clone(), tc.levels.clone());
         spawn(move || {
-            let source = if faithful { Some(ready.unwrap_or_else(|| reduced(&levels, &doc, level))) } else { None };
+            let doc = moved.and_then(|(base, ids, o)| photocraft_engine::layer_multi_cmds::moved(&base, &ids, o.0, o.1).ok().map(Arc::new)).unwrap_or(doc);
+            let source = faithful.then(|| reduced(&levels, &doc, level));
             let rects: Vec<DRect> = jobs.iter().map(|(_, r)| *r).collect();
             let bufs = render_level(&doc, source.as_deref(), f, &rects);
             let done = jobs.into_iter().zip(bufs).map(|((k, held), b)| (k, held, tile_image(display.as_deref(), &b))).collect();
@@ -661,11 +1007,29 @@ pub fn paint(
     if tc.pending.is_some() {
         ctx.request_repaint_after(std::time::Duration::from_millis(20));
     }
-    let more = !ASYNC_TILES && rest.peek().is_some();
-    if px > 0 {
-        app_perf(app, key, px, composite_ms, upload_ms);
+    if tc.flight.is_some() {
+        ctx.request_repaint_after(std::time::Duration::from_millis(8));
     }
-    app.perf_counters.move_split += move_split_frames.min(1);
+    tc.ahead_ready = tc.ahead.as_ref() == Some(&ahead);
+    // More of the split to make ahead, or a batch just landed and the split's tiles are next.
+    if more_ahead || (stats.px > 0 && !tc.ahead_ready && tc.flight.is_none()) {
+        ctx.request_repaint();
+    }
+    let more = !pooled && rest.peek().is_some();
+    // Made ahead counts too: the drag's first frame then shows the document as it is and lets
+    // this canvas shift the moving layers (`move_ui::display_doc`), no moved copy made for it.
+    // (While the split is in flight, what it was before it left.)
+    if let Some(s) = tc.split.as_ref() {
+        let press = move_plan.clone().or_else(|| wanted.filter(|w| move_tool && !w.is_empty()).map(|ids| Plan { base: doc.clone(), ids, doc: id, revision, offset: (0, 0) }));
+        tc.split_ready = press.is_some_and(|p| s.is_for(&p, level));
+    } else if tc.flight.is_none() {
+        tc.split_ready = false;
+    }
+    let split_ready = tc.split_ready;
+    if stats.px > 0 {
+        app.perf.record("tiles", stats.px, stats.composite_ms, stats.upload_ms);
+    }
+    app.perf_counters.move_split += u64::from(stats.from_split);
     app.cpu_move_split = split_ready.then_some((id, revision, app.frame));
     let Some(tc) = app.canvases.get_mut(&key).and_then(|c| c.tiles.as_mut()) else { return };
     // Draw: a tile not drawn yet at this level shows from the nearest level that has its area.
@@ -696,6 +1060,7 @@ pub fn paint(
     // Memory: least recently drawn tiles beyond the budget go; reduced layers past theirs.
     tc.evict(tex_budget);
     if tc.pending.is_none()
+        && tc.flight.is_none()
         && let Ok(mut l) = tc.levels.try_lock()
     {
         l.mips.trim(mip_budget);
@@ -710,8 +1075,30 @@ pub(crate) fn drawn_in(app: &PhotocraftApp, idx: usize, output: Option<u32>, zoo
     let size = [st.doc.size.width, st.doc.size.height];
     let Some(tc) = app.canvases.get(&crate::canvas::cache_key(st.doc.id, output)).and_then(|c| c.tiles.as_ref()) else { return false };
     tc.pending.is_none()
+        && tc.flight.is_none()
         && tc.shown.is_some_and(|(revision, _)| revision == st.revision)
-        && tiles_in(visible.intersect(&st.doc.bounds()), level_for(zoom, size), size).iter().all(|k| tc.tiles.get(k).is_some_and(|t| t.dirty.is_none()))
+        && tiles_in(visible.intersect(&st.doc.bounds()), level_for(zoom, size), size).iter().all(|k| tc.tiles.get(k).is_some_and(|t| t.dirty.is_none() && t.drawing.is_none()))
+}
+
+/// Whether the active document's CPU canvases show its current state complete: no tile in view
+/// changed or in flight (tests).
+#[cfg(test)]
+pub(crate) fn shows_document(app: &PhotocraftApp) -> bool {
+    let Some(st) = app.session.active() else { return true };
+    app.canvases.iter().filter(|(k, _)| k.0 == st.doc.id).filter_map(|(_, c)| c.tiles.as_ref()).all(|tc| {
+        tc.shown.is_some_and(|(revision, _)| revision == st.revision) && tc.tiles.values().all(|t| t.used != tc.frame || (t.dirty.is_none() && t.drawing.is_none()))
+    })
+}
+
+/// Whether they also have nothing left to make: no batch in flight, the split made ahead, no
+/// tile waiting to be composited exactly (tests).
+#[cfg(test)]
+pub(crate) fn settled(app: &PhotocraftApp) -> bool {
+    let Some(st) = app.session.active() else { return true };
+    shows_document(app)
+        && app.canvases.iter().filter(|(k, _)| k.0 == st.doc.id).filter_map(|(_, c)| c.tiles.as_ref()).all(|tc| {
+            tc.pending.is_none() && tc.flight.is_none() && tc.ahead_ready && tc.tiles.values().all(|t| t.used != tc.frame || !t.approx)
+        })
 }
 
 impl TileCanvas {
@@ -734,10 +1121,6 @@ impl TileCanvas {
             }
         }
     }
-}
-
-fn app_perf(app: &mut PhotocraftApp, _key: (photocraft_doc::DocId, u32), px: u64, composite_ms: f64, upload_ms: f64) {
-    app.perf.record("tiles", px, composite_ms, upload_ms);
 }
 
 /// Run `f` on the worker pool.
@@ -954,7 +1337,7 @@ mod tests {
             let doc = app.session.documents()[0].doc.clone();
             let tc = canvas(&app);
             let f = 1i64 << tc.level;
-            let source = (tc.level > 0).then(|| tc.reduced(&doc, tc.level));
+            let source = (tc.level > 0).then(|| reduced(&tc.levels, &doc, tc.level));
             for (k, t) in tc.tiles.iter().filter(|(k, _)| k.level == tc.level) {
                 let (w, h, got) = &mirror[&t.tex.id()];
                 assert_eq!((*w, *h), (t.held.width() as usize, t.held.height() as usize));
@@ -1039,5 +1422,116 @@ mod tests {
         assert!(tiles_in(DRect::new(2000, 0, 3000, 600), 0, size).is_empty());
         let r = tile_rect(TileKey { level: 1, tx: 1, ty: 1 }, size);
         assert_eq!(r, DRect::new(256, 256, 500, 300));
+    }
+
+    /// A 1200 x 900 page: white, an ink layer (selected), and two layers over it (Multiply,
+    /// Screen).
+    fn stacked() -> PhotocraftApp {
+        let mut app = app(1200, 900);
+        let ink = app.session.active().unwrap().active_layer.unwrap();
+        for (name, blend, color) in [("shade", "multiply", "#c0a080"), ("glow", "screen", "#203060")] {
+            app.run("layer.new.layer", json!({"name": name})).unwrap();
+            app.run("select.rect", json!({"x": 200, "y": 100, "width": 800, "height": 600, "mode": "replace"})).unwrap();
+            app.run("edit.fill", json!({"contents": "color", "color": color, "opacity": 60})).unwrap();
+            app.run("select.deselect", json!({})).unwrap();
+            app.run("layer.setProps", json!({"blend": blend})).unwrap();
+        }
+        app.run("layer.select", json!({"layer": ink.0})).unwrap();
+        app
+    }
+
+    /// Frames until the canvas has nothing left to draw or make (the pool's batches landed).
+    fn settle(app: &mut PhotocraftApp, ctx: &egui::Context, mirror: &mut HashMap<egui::TextureId, (usize, usize, Vec<[u8; 4]>)>) {
+        for _ in 0..2000 {
+            apply(mirror, &frame(app, ctx, 1.0, [600.0, 450.0]));
+            if settled(app) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        panic!("the canvas never settled");
+    }
+
+    /// The largest difference between the tiles' textures and the exact composite (8-bit steps).
+    fn off(app: &PhotocraftApp, mirror: &HashMap<egui::TextureId, (usize, usize, Vec<[u8; 4]>)>) -> u8 {
+        let doc = app.session.documents()[0].doc.clone();
+        let mut worst = 0;
+        for t in canvas(app).tiles.values() {
+            let want = photocraft_compose::render(&doc, t.held).to_premultiplied_rgba8();
+            let (_, _, got) = &mirror[&t.tex.id()];
+            worst = worst.max(got.iter().zip(&want).flat_map(|(a, b)| (0..4).map(move |c| a[c].abs_diff(b[c]))).max().unwrap_or(0));
+        }
+        worst
+    }
+
+    /// An edit of a layer as large as the page, with the worker pool as the app has it: the
+    /// window's thread composites nothing (the frame that takes the edit, and every frame until
+    /// it shows, only hand over and look), the canvas shows the page as it was until the edit's
+    /// tiles are all there, and they arrive in one frame, never part of them.
+    #[test]
+    fn an_edit_is_composited_off_the_frame_and_shown_whole() {
+        let mut app = stacked();
+        let ctx = egui::Context::default();
+        // (No wait: the frame never finds the batch done before it goes on.)
+        set_flight_wait(Some(0.0));
+        let mut mirror = HashMap::new();
+        settle(&mut app, &ctx, &mut mirror);
+        assert_eq!(off(&app, &mirror), 0, "the page before the edit");
+        let tiles = canvas(&app).tile_count();
+        let here = photocraft_compose::composites_here();
+        app.run("edit.fill", json!({"contents": "color", "color": "#22aa55", "opacity": 80})).unwrap();
+        let mut frames = 0;
+        let whole = loop {
+            let delta = frame(&mut app, &ctx, 1.0, [600.0, 450.0]);
+            frames += 1;
+            assert!(frames < 5000, "the edit never showed");
+            if delta.set.is_empty() {
+                assert!(!shows_document(&app), "nothing drawn yet: the canvas still shows the page before the edit");
+                std::thread::sleep(std::time::Duration::from_millis(1));
+                continue;
+            }
+            apply(&mut mirror, &delta);
+            break delta;
+        };
+        assert_eq!(whole.set.len(), tiles, "every tile of the page in the same frame");
+        assert!(shows_document(&app));
+        assert_eq!(photocraft_compose::composites_here() - here, 0, "nothing composited on the window's thread");
+        assert!(off(&app, &mirror) <= 1, "the edit as the full composite has it: off by {}", off(&app, &mirror));
+        // Once the edits pause, the tiles drawn through the top's map are the exact composite.
+        std::thread::sleep(std::time::Duration::from_millis(REFINE_AFTER_MS as u64 + 50));
+        settle(&mut app, &ctx, &mut mirror);
+        assert_eq!(off(&app, &mirror), 0);
+        set_flight_wait(None);
+    }
+
+    /// An edit of the selected layer under other layers composites only that layer: the layers
+    /// below it and the ones above were composited ahead, per tile, and the edit's frame is
+    /// drawn from them. A tile the top's map drew is replaced by the exact composite once the
+    /// edits pause.
+    #[test]
+    fn an_edit_under_other_layers_is_drawn_from_the_split() {
+        let mut app = stacked();
+        let ctx = egui::Context::default();
+        let mut mirror = HashMap::new();
+        settle(&mut app, &ctx, &mut mirror);
+        let split = app.perf_counters.move_split;
+        let here = photocraft_compose::composites_here();
+        app.run("paint.stroke", json!({"points": [[300, 200, 1], [900, 700, 1]], "size": 60, "color": "#aa2200"})).unwrap();
+        apply(&mut mirror, &frame(&mut app, &ctx, 1.0, [600.0, 450.0]));
+        assert!(shows_document(&app));
+        assert_eq!(app.perf_counters.move_split - split, 1, "drawn from the split");
+        assert_eq!(photocraft_compose::composites_here() - here, 1, "one composite, of the layer that changed");
+        assert!(off(&app, &mirror) <= 1, "off by {}", off(&app, &mirror));
+        assert!(!settled(&app), "tiles the map drew are still to composite exactly");
+        std::thread::sleep(std::time::Duration::from_millis(REFINE_AFTER_MS as u64 + 50));
+        settle(&mut app, &ctx, &mut mirror);
+        assert_eq!(off(&app, &mirror), 0);
+        // An edit of another layer: the split is made again around it, the frame still exact.
+        let top = app.session.documents()[0].doc.layers.last().unwrap().id;
+        app.run("layer.hideLayers", json!({"layer": top.0})).unwrap();
+        apply(&mut mirror, &frame(&mut app, &ctx, 1.0, [600.0, 450.0]));
+        assert!(shows_document(&app));
+        assert_eq!(off(&app, &mirror), 0, "composited for real: no map of the new top yet");
+        assert_eq!(canvas(&app).anchor, vec![top]);
     }
 }

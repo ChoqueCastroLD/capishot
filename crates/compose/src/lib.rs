@@ -85,7 +85,7 @@ use render::in_blend_space;
 use render::render_tiled_with;
 pub(crate) use render::visible_layers;
 pub use render::{
-    BAND_PIXELS, MAX_RENDER_PIXELS, apply_affine, band_rows_for, cmyk_space, composite_to_surface, composites_affinely, composites_as_over, flatten,
+    BAND_PIXELS, MAX_RENDER_PIXELS, apply_affine, band_rows_for, cmyk_space, composite_to_surface, composites_affinely, composites_as_over, composites_here, flatten,
     flatten_to_surface, over, render, render_bands, render_layer, render_layer_in, render_rects, render_rects_over, render_tiled,
 };
 

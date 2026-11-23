@@ -1,10 +1,12 @@
-//! Move drags on the CPU canvas: each frame re-blends only the moving layers.
+//! Edits on the CPU canvas: each frame re-blends only the layers that change.
 //!
 //! A Move drag shows the document with the moving layers at the pointer (`move_ui`), and the
 //! canvas recomposited the whole stack over where they were and are, every frame: 140 ms a frame
-//! for a layer of a 200-layer 4000 x 6000 page. The layers below the moving run don't change
-//! during the drag, and nor do those above it; so for the drag the CPU canvas keeps, per tile,
-//! made the first time a tile needs them:
+//! for a layer of a 200-layer 4000 x 6000 page. Every other edit did the same over its damage: a
+//! brush dab, a keystroke, hiding a layer, a transform's commit (260 to 340 ms for a layer as large
+//! as a 1920 x 1080 page of 20 layers). The layers below the ones an edit changes don't change with
+//! it, and nor do those above; so the CPU canvas keeps, per tile, made the first time a tile needs
+//! them (or ahead, while nothing else is going on):
 //!
 //! - the composite of the layers below the run (exact: the same stack prefix the full composite
 //!   starts with);
@@ -14,16 +16,22 @@
 //!   `c -> n + m·c` ([`photocraft_compose::apply_affine`]; exact for those modes, type layers'
 //!   anti-aliased edges approximated);
 //!
-//! and per frame composites only the moving run and the layers between it and that top over the
-//! cached below, then applies the top's map. Pixels that aren't opaque (no Background) take the top
+//! and per frame composites only the run and the layers between it and that top over the cached
+//! below, then applies the top's map. Pixels that aren't opaque (no Background) take the top
 //! layers composited for real.
 //!
+//! The split is anchored at the layers that change: a Move drag's moving layers (and, with the
+//! Move tool in hand, the layers a press would move), else the layers the last edit changed or the
+//! selected ones. An edit that changes only layers between the cached below and top keeps the
+//! tiles ([`Split::update`]); one that changes a layer elsewhere is composited whole, once, and
+//! the split is made again around what it changed.
+//!
 //! The stack is seen with mix-free pass-through groups opened up (their children composite
-//! straight into the backdrop, `photocraft_compose`), so a layer in such a group moves as if it
-//! were at the top level. Anything this can't split falls back to the full composite: moving
-//! layers that aren't one contiguous run of that stack, a run clipped to a layer below it, Lab,
-//! 32-bit, CMYK or multichannel documents, spot channels, artboards. The preview is replaced by
-//! the exact composite when the drag ends.
+//! straight into the backdrop, `photocraft_compose`), so a layer in such a group changes as if it
+//! were at the top level. Anything this can't split falls back to the full composite: a run
+//! clipped to a layer below it, Lab, 32-bit, CMYK or multichannel documents, spot channels,
+//! artboards. A tile drawn through the top's map is replaced by the exact composite once the
+//! edits pause.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -32,7 +40,9 @@ use photocraft_compose::Buffer;
 use photocraft_doc::{DocId, Document, Layer, LayerContent, LayerId};
 use photocraft_geom::Rect as DRect;
 
-/// What the move preview shows, for the CPU canvas (from `move_ui::cpu_plan`).
+/// What the canvas shows through a split: a Move preview (from `move_ui::cpu_plan`), or the
+/// document as it is around the layers an edit changes (offset 0).
+#[derive(Clone)]
 pub(crate) struct Plan {
     /// The document before the drag.
     pub base: Arc<Document>,
@@ -44,13 +54,14 @@ pub(crate) struct Plan {
     pub offset: (i32, i32),
 }
 
-/// The drag's cached composites below and above the moving run, at one level.
+/// The cached composites below and above the run of layers that change, at one level.
 pub(crate) struct Split {
     key: (DocId, u64, Vec<LayerId>, u32),
-    /// The per-frame layers (`start..top`) before the drag, reduced to the level once, the layers
-    /// in them that move, and the level's factor: each frame shifts only those, by the offset in
-    /// level pixels (reducing the moved full-resolution layers every frame cost as much as
-    /// compositing them, and the full-resolution moved document isn't needed at all).
+    /// The per-frame layers (`lo..top`) as the split's document has them, reduced to the level
+    /// once, the layers in them that move, and the level's factor: each frame of a drag shifts
+    /// only those, by the offset in level pixels (reducing the moved full-resolution layers every
+    /// frame cost as much as compositing them, and the full-resolution moved document isn't
+    /// needed at all).
     middle: (Document, Vec<LayerId>, i64),
     below: Arc<Document>,
     /// The affine top, and the same layers for pixels that aren't opaque.
@@ -60,13 +71,29 @@ pub(crate) struct Split {
     above_tiles: HashMap<DRect, (Buffer, Buffer)>,
     /// The one-blit path ([`Blit`]), when the drag can take it.
     blit: Option<Blit>,
-    /// The document the split was made from (its last rebase's) and where in its open stack the
-    /// run starts and ends ([`Split::rebase`]).
+    /// The document the split was made from (its last rebase's or update's) and where in its open
+    /// stack the cached below ends (`lo`), the run starts and ends, and the top starts
+    /// ([`Split::rebase`], [`Split::update`]).
     base: Arc<Document>,
+    lo: usize,
     run: (usize, usize),
+    top: usize,
     /// Where the moving layers stand relative to the split's images (document pixels, a multiple
     /// of the level's factor): the offsets of the drags it was rebased on, added to each frame's.
     origin: (i32, i32),
+    /// The most its tiles may hold (bytes): past it a tile isn't made and the frame is composited
+    /// whole ([`Split::set_budget`]).
+    budget: usize,
+}
+
+/// What an edit left of a split ([`Split::update`]).
+#[derive(Debug, PartialEq)]
+pub(crate) enum Update {
+    /// The document differs only between the cached below and top (or not at all): the tiles hold.
+    Held,
+    /// Layers below the run or in the top changed (the layers that differ, in either document):
+    /// the tiles don't hold.
+    Elsewhere(Vec<LayerId>),
 }
 
 /// A drag whose moving run is one layer that composites as its own image over the rest
@@ -235,9 +262,89 @@ fn splittable(doc: &Document) -> bool {
     matches!(doc.mode, ColorMode::Rgb | ColorMode::Grayscale) && doc.depth != SampleType::F32 && doc.channels.is_empty() && !doc.has_artboards()
 }
 
+/// Whether what the composite depends on besides the layers is the same in `a` and `b`.
+fn same_frame(a: &Document, b: &Document) -> bool {
+    a.id == b.id
+        && a.size == b.size
+        && a.mode == b.mode
+        && a.depth == b.depth
+        && a.icc_profile == b.icc_profile
+        && a.global_light == b.global_light
+        && a.patterns == b.patterns
+        && a.color_table == b.color_table
+        && a.duotone == b.duotone
+        && a.channels == b.channels
+        && a.quick_mask == b.quick_mask
+}
+
+/// `shell` (a document without layers) with `layers`.
+fn part(shell: &Document, layers: &[&Layer]) -> Document {
+    let mut d = shell.clone();
+    d.layers = layers.iter().map(|l| (*l).clone()).collect();
+    d
+}
+
+/// The per-frame part `lo..top` of `stack` (the open stack of `base`) reduced to the level, with
+/// the layers of it that move (`ids`, or a moving group's children that stand in the stack) and
+/// the level's factor; and the one-blit path's sprite when the run `start..end` can take it.
+fn middle_of(
+    base: &Document,
+    shell: &Document,
+    stack: &[&Layer],
+    (lo, (start, end), top): (usize, (usize, usize), usize),
+    ids: &[LayerId],
+    level: u32,
+    reduce: &mut dyn FnMut(&Document) -> Document,
+) -> ((Document, Vec<LayerId>, i64), Option<Blit>) {
+    let between = stack.get(lo..top).unwrap_or_default();
+    let d = reduce(&part(shell, between));
+    // What moves inside it: the moving layers themselves where the reduced document has them,
+    // else (a moving group opened up) its children in the stack.
+    let mut moving = Vec::new();
+    for id in ids {
+        if d.layer(*id).is_some() {
+            moving.push(*id);
+        } else if let Some(g) = base.layer(*id) {
+            let mut inside = Vec::new();
+            collect_ids(g, &mut inside);
+            moving.extend(between.iter().map(|l| l.id).filter(|i| inside.contains(i)));
+        }
+    }
+    // The run kept as an image (one layer laid over the rest), or as its affine map (layer
+    // effects, type, clipped layers: anything that changes an opaque backdrop affinely), when it
+    // looks the same wherever it goes and the per-frame part is the run alone (no layer between
+    // the cached below and it, or between it and the top).
+    let mode = base.mode;
+    let run = stack.get(start..end).unwrap_or_default();
+    let shifts = lo == start && top == end && !run.is_empty() && run.first().is_some_and(|l| !l.clipped) && run.iter().all(|l| crate::gpu_canvas::moves_with_layer(l, 0));
+    let over = run.len() == 1 && run.iter().all(|l| photocraft_compose::composites_as_over(l, mode));
+    let affine = run.iter().all(|l| photocraft_compose::composites_affinely(l, mode, true));
+    let blit = (shifts && (over || affine)).then(|| Blit::new(&d, &d.layers, over)).flatten();
+    ((d, moving, 1i64 << level), blit)
+}
+
+/// `f` over `items` with their indices, on the worker pool where this thread may wait for it.
+pub(crate) fn each<T: Send>(items: &mut [T], f: impl Fn(usize, &mut T) + Sync) {
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
+    {
+        // Not from the page's own thread in the browser threads build: it is no pool worker and
+        // would wait for a pool that may be busy for longer than the loop takes on its own.
+        if cfg!(not(target_arch = "wasm32")) || rayon::current_thread_index().is_some() {
+            use rayon::prelude::*;
+            items.par_iter_mut().enumerate().for_each(|(i, t)| f(i, t));
+            return;
+        }
+    }
+    items.iter_mut().enumerate().for_each(|(i, t)| f(i, t));
+}
+
+fn area(r: DRect) -> usize {
+    r.width() as usize * r.height() as usize
+}
+
 impl Split {
-    /// The split for `plan` at `level` (`reduce` makes a level's document), or `None` when the drag
-    /// can't be split.
+    /// The split for `plan` at `level` (`reduce` makes a level's document), or `None` when the
+    /// document can't be split around the plan's layers.
     pub(crate) fn new(plan: &Plan, level: u32, reduce: &mut dyn FnMut(&Document) -> Document) -> Option<Split> {
         let base = &plan.base;
         if !splittable(base) {
@@ -257,42 +364,13 @@ impl Split {
         }
         let mut shell = (**base).clone();
         shell.layers = Vec::new();
-        let part = |layers: &[&Layer]| {
-            let mut d = shell.clone();
-            d.layers = layers.iter().map(|l| (*l).clone()).collect();
-            d
-        };
         if std::env::var_os("PHOTOCRAFT_MOVE_SPLIT_DEBUG").is_some() {
             let blocker = stack.get(top.saturating_sub(1)).map(|l| (l.name.clone(), l.blend, l.content.kind_name()));
             eprintln!("move split: stack {} start {start} end {end} top {top}; highest non-affine {blocker:?}", stack.len());
         }
-        let middle = {
-            let d = reduce(&part(stack.get(start..top).unwrap_or_default()));
-            // What moves inside it: the moving layers themselves where the reduced document has
-            // them, else (a moving group opened up) its children in the stack.
-            let mut moving = Vec::new();
-            for id in &plan.ids {
-                if d.layer(*id).is_some() {
-                    moving.push(*id);
-                } else if let Some(g) = base.layer(*id) {
-                    let mut inside = Vec::new();
-                    collect_ids(g, &mut inside);
-                    moving.extend(stack.get(start..top).unwrap_or_default().iter().map(|l| l.id).filter(|i| inside.contains(i)));
-                }
-            }
-            (d, moving, 1i64 << level)
-        };
-        let below = Arc::new(reduce(&part(stack.get(..start)?)));
-        let above = (top < stack.len()).then(|| Arc::new(reduce(&part(stack.get(top..).unwrap_or_default()))));
-        // The run kept as an image (one layer laid over the rest), or as its affine map (layer
-        // effects, type, clipped layers: anything that changes an opaque backdrop affinely), when
-        // it looks the same wherever it goes; the middle is then the run alone (no layer between
-        // it and the top).
-        let run = stack.get(start..end).unwrap_or_default();
-        let shifts = top == end && !run.is_empty() && run.first().is_some_and(|l| !l.clipped) && run.iter().all(|l| crate::gpu_canvas::moves_with_layer(l, 0));
-        let over = run.len() == 1 && run.iter().all(|l| photocraft_compose::composites_as_over(l, mode));
-        let affine = run.iter().all(|l| photocraft_compose::composites_affinely(l, mode, true));
-        let blit = (shifts && (over || affine)).then(|| Blit::new(&middle.0, &middle.0.layers, over)).flatten();
+        let (middle, blit) = middle_of(base, &shell, &stack, (start, (start, end), top), &plan.ids, level, reduce);
+        let below = Arc::new(reduce(&part(&shell, stack.get(..start)?)));
+        let above = (top < stack.len()).then(|| Arc::new(reduce(&part(&shell, stack.get(top..).unwrap_or_default()))));
         Some(Split {
             key: (plan.doc, plan.revision, plan.ids.clone(), level),
             middle,
@@ -302,9 +380,54 @@ impl Split {
             above_tiles: HashMap::new(),
             blit,
             base: base.clone(),
+            lo: start,
             run: (start, end),
+            top,
             origin: (0, 0),
+            budget: usize::MAX,
         })
+    }
+
+    /// The document is now `doc` (an edit, an undo, a preview of one), revision `revision`: when
+    /// it differs from the split's only in layers between the cached below and top, the split is
+    /// kept for it, with those layers as they are now ([`Update::Held`]: its tiles still show
+    /// what is below and above them). Otherwise the split is left as it was and the layers that
+    /// differ are returned: the caller composites the frame whole and makes a new split.
+    pub(crate) fn update(&mut self, doc: &Arc<Document>, revision: u64, reduce: &mut dyn FnMut(&Document) -> Document) -> Update {
+        if Arc::ptr_eq(&self.base, doc) {
+            self.key.1 = revision;
+            return Update::Held;
+        }
+        let (was, now) = (open_stack(&self.base.layers), open_stack(&doc.layers));
+        let same_below = was.iter().zip(&now).take_while(|(a, b)| a == b).count();
+        let rest = was.len().min(now.len()) - same_below;
+        let same_above = was.iter().rev().zip(now.iter().rev()).take(rest).take_while(|(a, b)| a == b).count();
+        let above = was.len().saturating_sub(self.top);
+        let held = splittable(doc) && same_frame(&self.base, doc) && same_below >= self.lo && same_above >= above;
+        let at = held.then(|| now.len() - above).and_then(|top| run_of(&now, doc, &self.key.2).filter(|r| r.0 >= self.lo && r.1 <= top).map(|run| (run, top)));
+        let Some((run, top)) = at else {
+            let mut ids: Vec<LayerId> = Vec::new();
+            for l in was.get(same_below..was.len() - same_above).into_iter().chain(now.get(same_below..now.len() - same_above)).flatten() {
+                if !ids.contains(&l.id) {
+                    ids.push(l.id);
+                }
+            }
+            return Update::Elsewhere(ids);
+        };
+        if same_below + same_above < was.len().max(now.len()) {
+            let mut shell = (**doc).clone();
+            shell.layers = Vec::new();
+            let level = self.key.3;
+            let (middle, mut blit) = middle_of(doc, &shell, &now, (self.lo, run, top), &self.key.2, level, reduce);
+            // The 8-bit copies of the tiles still hold.
+            if let (Some(new), Some(old)) = (blit.as_mut(), self.blit.take()) {
+                (new.below, new.above) = (old.below, old.above);
+            }
+            (self.middle, self.blit, self.run, self.top, self.origin) = (middle, blit, run, top, (0, 0));
+        }
+        self.base = doc.clone();
+        self.key.1 = revision;
+        Update::Held
     }
 
     /// The drag this split drew ended, and `layer.translate` committed its offset `offset` as
@@ -345,36 +468,48 @@ impl Split {
         self.moves(plan.doc, &plan.ids, level) && (self.key.1 == plan.revision || Arc::ptr_eq(&self.base, &plan.base) || self.base.layers == plan.base.layers)
     }
 
-    /// Whether this split moves `ids` of document `doc` at `level` (whatever its state).
+    /// Whether this split is around `ids` of document `doc` at `level` (whatever its state).
     pub(crate) fn moves(&self, doc: DocId, ids: &[LayerId], level: u32) -> bool {
         self.key.0 == doc && self.key.2 == ids && self.key.3 == level
     }
 
-    /// Composite `jobs` (each a level rect and the tile rect it lies in) of the preview `moved`:
-    /// the cached below, the moving run and what isn't in the affine top over it, then the top.
-    /// `None` when `moved` doesn't have this split's stack (the caller composites it whole).
-    pub(crate) fn render(&mut self, offset: (i32, i32), jobs: &[(DRect, DRect)]) -> Option<Vec<Buffer>> {
+    /// Composite `jobs` (each a level rect and the tile rect it lies in) with the run at
+    /// `offset`: the cached below, the run and what isn't in the affine top over it, then the
+    /// top. The below's tiles are made where missing; the top's maps too with `maps` (a drag's
+    /// frames: the ones that follow are drawn from them), else a tile without its map takes the
+    /// top layers composited for real (an edit costs no more than the whole composite, and its
+    /// maps are made ahead, off the frame). With the buffers, whether a map stood in for the top
+    /// in any (a map is within a float rounding of its layers and approximates type layers'
+    /// anti-aliased edges: such a tile is composited exactly once the edits pause). `None` when
+    /// a tile it needs doesn't fit the budget (the caller composites the frame whole).
+    pub(crate) fn render(&mut self, offset: (i32, i32), jobs: &[(DRect, DRect)], maps: bool) -> Option<(Vec<Buffer>, bool)> {
         // The middle layers shifted by the offset in level pixels (rounded above level 0: the
         // preview shows the layer on the level's pixel grid; the release composites it exactly).
         let (d, moving, f) = &self.middle;
         let lv = |v: i32| (f64::from(v) / *f as f64).round() as i32;
         let (ox, oy) = (offset.0 + self.origin.0, offset.1 + self.origin.1);
         let middle = photocraft_engine::layer_multi_cmds::moved(d, moving, lv(ox), lv(oy)).ok()?;
-        self.fill(jobs);
+        if !self.fill(jobs, maps) {
+            return None;
+        }
         let backdrops: Vec<Buffer> = jobs.iter().map(|(r, held)| crop(self.below_tiles.get(held), *r)).collect();
-        let mut out = photocraft_compose::render_rects_over(&middle, backdrops);
-        if let Some(above) = &self.above {
-            for (b, (_, held)) in out.iter_mut().zip(jobs) {
-                let applied = self.above_tiles.get(held).is_some_and(|(k, w)| photocraft_compose::apply_affine(b, k, w));
-                if !applied {
-                    // Not opaque here: the top layers composited for real.
-                    if let Some(done) = photocraft_compose::render_rects_over(above, vec![std::mem::replace(b, Buffer::transparent(DRect::EMPTY))]).pop() {
-                        *b = done;
-                    }
+        let out = photocraft_compose::render_rects_over(&middle, backdrops);
+        let Some(above) = &self.above else { return Some((out, false)) };
+        let tiles = &self.above_tiles;
+        let mut out: Vec<(Buffer, bool)> = out.into_iter().map(|b| (b, false)).collect();
+        each(&mut out, |i, (b, mapped)| *mapped = jobs.get(i).and_then(|(_, held)| tiles.get(held)).is_some_and(|(k, w)| photocraft_compose::apply_affine(b, k, w)));
+        // No map yet, or not opaque there: the top layers composited for real, in one pass.
+        let real: Vec<usize> = out.iter().enumerate().filter(|(_, o)| !o.1).map(|(i, _)| i).collect();
+        let backdrops: Vec<Buffer> = out.iter_mut().filter(|o| !o.1).map(|o| std::mem::replace(&mut o.0, Buffer::transparent(DRect::EMPTY))).collect();
+        if !real.is_empty() {
+            for (i, done) in real.iter().zip(photocraft_compose::render_rects_over(above, backdrops)) {
+                if let Some(o) = out.get_mut(*i) {
+                    o.0 = done;
                 }
             }
         }
-        Some(out)
+        let mapped = out.iter().any(|o| o.1);
+        Some((out.into_iter().map(|o| o.0).collect(), mapped))
     }
 
     /// [`Split::render`] by the one-blit path, as premultiplied RGBA8 per job: `None` when the
@@ -383,52 +518,15 @@ impl Split {
         self.blit.as_ref().filter(|b| b.ready())?;
         let f = self.middle.2;
         let lv = |v: i32| (f64::from(v) / f as f64).round() as i32;
-        let (ox, oy) = (lv(offset.0 + self.origin.0), lv(offset.1 + self.origin.1));
-        self.fill(jobs);
-        let blit = self.blit.as_mut()?;
-        let mut out = Vec::with_capacity(jobs.len());
-        for (r, held) in jobs {
-            if !blit.below.contains_key(held) {
-                blit.below.insert(*held, self.below_tiles.get(held)?.to_premultiplied_rgba8());
-            }
-            if self.above.is_some() && !blit.above.contains_key(held) {
-                let (k, w) = self.above_tiles.get(held)?;
-                blit.above.insert(*held, (k.to_premultiplied_rgba8(), w.to_premultiplied_rgba8()));
-            }
-            let below = blit.below.get(held)?;
-            let above = blit.above.get(held).filter(|_| self.above.is_some());
-            let (rw, hw, sw) = (r.width() as usize, held.width() as usize, blit.rect.width() as usize);
-            let mut px = vec![[0u8; 4]; rw * r.height() as usize];
-            // The sprite's columns on this job, at the offset.
-            let (sx0, sx1) = (r.x0.max(blit.rect.x0 + ox), r.x1.min(blit.rect.x1 + ox));
-            for y in r.y0..r.y1 {
-                let o = (y - r.y0) as usize * rw;
-                let h = (y - held.y0) as usize * hw + (r.x0 - held.x0) as usize;
-                let row = px.get_mut(o..o + rw)?;
-                let brow = below.get(h..h + rw)?;
-                row.copy_from_slice(brow);
-                let sy = y - oy;
-                if sx0 < sx1 && sy >= blit.rect.y0 && sy < blit.rect.y1 {
-                    let (a, b) = ((sx0 - r.x0) as usize, (sx1 - r.x0) as usize);
-                    let s = (sy - blit.rect.y0) as usize * sw + (sx0 - ox - blit.rect.x0) as usize;
-                    match &blit.white {
-                        None => photocraft_compose::blit::over_row(row.get_mut(a..b)?, brow.get(a..b)?, blit.px.get(s..s + (b - a))?),
-                        Some(white) => {
-                            if !photocraft_compose::blit::affine_row(row.get_mut(a..b)?, blit.px.get(s..s + (b - a))?, white.get(s..s + (b - a))?) {
-                                return None;
-                            }
-                        }
-                    }
-                }
-                if let Some((k, w)) = above
-                    && !photocraft_compose::blit::affine_row(row, k.get(h..h + rw)?, w.get(h..h + rw)?)
-                {
-                    return None;
-                }
-            }
-            out.push(px);
+        let at = (lv(offset.0 + self.origin.0), lv(offset.1 + self.origin.1));
+        if !self.fill(jobs, true) {
+            return None;
         }
-        Some(out)
+        let blit = self.blit.as_ref()?;
+        let top = self.above.is_some();
+        let mut out: Vec<Option<Vec<[u8; 4]>>> = vec![None; jobs.len()];
+        each(&mut out, |i, o| *o = jobs.get(i).and_then(|(r, held)| blit.job(*r, *held, at, top)));
+        out.into_iter().collect()
     }
 
     /// Make the one-blit path's sprite for up to `budget_ms` (a band at least). Whether it is
@@ -447,29 +545,62 @@ impl Split {
 
     /// Whether the tile `held` still has to be made ([`Split::fill`]).
     pub(crate) fn needs(&self, held: DRect) -> bool {
-        !self.below_tiles.contains_key(&held) || (self.above.is_some() && !self.above_tiles.contains_key(&held))
+        (self.below_kept() && !self.below_tiles.contains_key(&held))
+            || (self.above.is_some() && !self.above_tiles.contains_key(&held))
+            || self.blit.as_ref().is_some_and(|b| !b.below.contains_key(&held))
     }
 
-    /// The below's (and the top's maps') tiles `jobs` hold, made where missing.
-    pub(crate) fn fill(&mut self, jobs: &[(DRect, DRect)]) {
+    /// Whether the below's tiles are kept: not when no layer is below the run (a transparent
+    /// tile is all there would be), unless the one-blit path copies from them.
+    fn below_kept(&self) -> bool {
+        !self.below.layers.is_empty() || self.blit.is_some()
+    }
+
+    /// Bytes its tiles hold.
+    pub(crate) fn bytes(&self) -> usize {
+        let below: usize = self.below_tiles.keys().map(|r| area(*r) * 16).sum();
+        let above: usize = self.above_tiles.keys().map(|r| area(*r) * 32).sum();
+        let blit: usize = self.blit.as_ref().map_or(0, |b| b.below.keys().map(|r| area(*r) * 4).sum::<usize>() + b.above.keys().map(|r| area(*r) * 8).sum::<usize>());
+        below + above + blit
+    }
+
+    /// Hold at most `budget` bytes of tiles: when it holds more, the tiles that aren't in `view`
+    /// go (the view's stay whatever they cost; [`Split::fill`] makes no more past the budget).
+    pub(crate) fn set_budget(&mut self, budget: usize, view: &[DRect]) {
+        self.budget = budget;
+        if self.bytes() > budget {
+            self.below_tiles.retain(|r, _| view.contains(r));
+            self.above_tiles.retain(|r, _| view.contains(r));
+            if let Some(b) = self.blit.as_mut() {
+                b.below.retain(|r, _| view.contains(r));
+                b.above.retain(|r, _| view.contains(r));
+            }
+        }
+    }
+
+    /// The below's tiles `jobs` hold (and with `maps` the top's maps), made where missing.
+    /// `false`, with nothing made, when they don't fit the budget.
+    pub(crate) fn fill(&mut self, jobs: &[(DRect, DRect)], maps: bool) -> bool {
         let mut held: Vec<DRect> = jobs.iter().map(|(_, h)| *h).collect();
         held.sort_by_key(|r| (r.y0, r.x0, r.y1, r.x1));
         held.dedup();
-        let new_below: Vec<DRect> = held.iter().copied().filter(|h| !self.below_tiles.contains_key(h)).collect();
+        let new_below: Vec<DRect> = held.iter().copied().filter(|h| self.below_kept() && !self.below_tiles.contains_key(h)).collect();
+        let new_above: Vec<DRect> = held.iter().copied().filter(|h| maps && self.above.is_some() && !self.above_tiles.contains_key(h)).collect();
+        let eight = if self.blit.is_some() { (4, 8) } else { (0, 0) };
+        let more: usize = new_below.iter().map(|r| area(*r) * (16 + eight.0)).sum::<usize>() + new_above.iter().map(|r| area(*r) * (32 + eight.1)).sum::<usize>();
+        if more > 0 && self.bytes().saturating_add(more) > self.budget {
+            return false;
+        }
         if !new_below.is_empty() {
             for b in photocraft_compose::render_rects(&self.below, &new_below) {
                 self.below_tiles.insert(b.rect, b);
             }
         }
-        if let Some(above) = &self.above {
-            let new_above: Vec<DRect> = held.iter().copied().filter(|h| !self.above_tiles.contains_key(h)).collect();
-            if !new_above.is_empty() {
-                let backdrops: Vec<Buffer> =
-                    new_above.iter().flat_map(|r| [Buffer::filled(*r, [0.0, 0.0, 0.0, 1.0]), Buffer::filled(*r, [1.0, 1.0, 1.0, 1.0])]).collect();
-                let mut maps = photocraft_compose::render_rects_over(above, backdrops).into_iter();
-                while let (Some(k), Some(w)) = (maps.next(), maps.next()) {
-                    self.above_tiles.insert(k.rect, (k, w));
-                }
+        if let Some(above) = self.above.as_ref().filter(|_| !new_above.is_empty()) {
+            let backdrops: Vec<Buffer> = new_above.iter().flat_map(|r| [Buffer::filled(*r, [0.0, 0.0, 0.0, 1.0]), Buffer::filled(*r, [1.0, 1.0, 1.0, 1.0])]).collect();
+            let mut maps = photocraft_compose::render_rects_over(above, backdrops).into_iter();
+            while let (Some(k), Some(w)) = (maps.next(), maps.next()) {
+                self.above_tiles.insert(k.rect, (k, w));
             }
         }
         // The one-blit path's 8-bit copies, made with them.
@@ -488,6 +619,47 @@ impl Split {
                 }
             }
         }
+        true
+    }
+}
+
+impl Blit {
+    /// The level rect `r` of the tile `held`, premultiplied RGBA8: the below's copy, the sprite
+    /// at `(ox, oy)` over it, the top's map (`top`: there is one) over that. `None` when a copy
+    /// isn't made yet or a pixel under the top isn't opaque.
+    fn job(&self, r: DRect, held: DRect, (ox, oy): (i32, i32), top: bool) -> Option<Vec<[u8; 4]>> {
+        let below = self.below.get(&held)?;
+        let above = if top { Some(self.above.get(&held)?) } else { None };
+        let (rw, hw, sw) = (r.width() as usize, held.width() as usize, self.rect.width() as usize);
+        let mut px = vec![[0u8; 4]; rw * r.height() as usize];
+        // The sprite's columns on this job, at the offset.
+        let (sx0, sx1) = (r.x0.max(self.rect.x0 + ox), r.x1.min(self.rect.x1 + ox));
+        for y in r.y0..r.y1 {
+            let o = (y - r.y0) as usize * rw;
+            let h = (y - held.y0) as usize * hw + (r.x0 - held.x0) as usize;
+            let row = px.get_mut(o..o + rw)?;
+            let brow = below.get(h..h + rw)?;
+            row.copy_from_slice(brow);
+            let sy = y - oy;
+            if sx0 < sx1 && sy >= self.rect.y0 && sy < self.rect.y1 {
+                let (a, b) = ((sx0 - r.x0) as usize, (sx1 - r.x0) as usize);
+                let s = (sy - self.rect.y0) as usize * sw + (sx0 - ox - self.rect.x0) as usize;
+                match &self.white {
+                    None => photocraft_compose::blit::over_row(row.get_mut(a..b)?, brow.get(a..b)?, self.px.get(s..s + (b - a))?),
+                    Some(white) => {
+                        if !photocraft_compose::blit::affine_row(row.get_mut(a..b)?, self.px.get(s..s + (b - a))?, white.get(s..s + (b - a))?) {
+                            return None;
+                        }
+                    }
+                }
+            }
+            if let Some((k, w)) = above
+                && !photocraft_compose::blit::affine_row(row, k.get(h..h + rw)?, w.get(h..h + rw)?)
+            {
+                return None;
+            }
+        }
+        Some(px)
     }
 }
 
@@ -556,7 +728,8 @@ mod tests {
                 let f = 1i32 << level;
                 let held = DRect::new(0, 0, 300 / f, 200 / f);
                 let jobs = [(DRect::new(10 / f, 20 / f, 200 / f, 150 / f), held), (held, held)];
-                let got = split.render((dx, dy), &jobs).expect("rendered");
+                let (got, mapped) = split.render((dx, dy), &jobs, true).expect("rendered");
+                assert!(mapped, "the top's map stood in for its layers");
                 let full = reduce(&moved);
                 let want = photocraft_compose::render_rects(&full, &jobs.iter().map(|j| j.0).collect::<Vec<_>>());
                 for (g, w) in got.iter().zip(&want) {
@@ -600,7 +773,7 @@ mod tests {
             let moved = photocraft_engine::layer_multi_cmds::moved(&base, &ids, 37, 21).unwrap();
             let all = DRect::new(0, 0, 200, 160);
             let jobs = [(DRect::new(5, 5, 170, 140), all), (all, all)];
-            let got = split.render((37, 21), &jobs).expect("rendered");
+            let got = split.render((37, 21), &jobs, true).expect("rendered").0;
             let want = photocraft_compose::render_rects(&moved, &[jobs[0].0, jobs[1].0]);
             for (g, w) in got.iter().zip(&want) {
                 let worst = g.px.iter().zip(&w.px).flat_map(|(a, b)| (0..4).map(move |c| (a[c] - b[c]).abs())).fold(0.0f32, f32::max);
@@ -695,5 +868,132 @@ mod tests {
         lab.mode = ColorMode::Lab;
         let lab = Arc::new(lab);
         assert!(Split::new(&Plan { base: lab.clone(), ids: vec![a], doc: lab.id, revision: 1, offset: (0, 0) }, 0, &mut |d| d.clone()).is_none(), "Lab");
+    }
+
+    /// A white page, an ink layer, then Normal, Multiply and Screen layers over it (one with a
+    /// drop shadow). The ink layer's id and the ids above it, bottom first.
+    fn inked() -> (Document, LayerId, Vec<LayerId>) {
+        let mut d = Document::with_background("t", Size::new(300, 200), ColorMode::Rgb, SampleType::U8, Color::rgb(1.0, 1.0, 1.0));
+        let fmt = d.pixel_format();
+        let mut under = Layer::raster("under", fmt);
+        under.surface_mut().unwrap().fill_rect(DRect::new(0, 0, 200, 150), &[0.9, 0.8, 0.2, 0.8]);
+        d.insert_above(None, under);
+        let mut ink = Layer::raster("ink", fmt);
+        ink.surface_mut().unwrap().fill_rect(DRect::new(40, 30, 160, 120), &[0.1, 0.3, 0.8, 0.9]);
+        let ink = d.insert_above(None, ink);
+        let mut over = Vec::new();
+        for (i, blend) in [BlendMode::Multiply, BlendMode::Normal, BlendMode::Screen].into_iter().enumerate() {
+            let mut l = Layer::raster(format!("over {i}"), fmt);
+            let x = 30 + i as i32 * 60;
+            l.surface_mut().unwrap().fill_rect(DRect::new(x, 20, x + 110, 170), &[0.8 - 0.2 * i as f32, 0.4, 0.3 + 0.2 * i as f32, 0.5]);
+            l.blend = blend;
+            if i == 1 {
+                l.effects.items = vec![Effect::default_drop_shadow()];
+            }
+            over.push(d.insert_above(None, l));
+        }
+        (d, ink, over)
+    }
+
+    fn worst(got: &Buffer, want: &Buffer) -> f32 {
+        assert_eq!(got.rect, want.rect);
+        got.px.iter().zip(&want.px).flat_map(|(a, b)| (0..4).map(move |c| (a[c] - b[c]).abs())).fold(0.0f32, f32::max)
+    }
+
+    /// Edits of the layers between the cached below and the top (paint on the layer, hide it, a
+    /// new layer over it, an undo back) keep the split and its tiles: each is drawn by
+    /// compositing only those layers, and equals the full composite of the edited document.
+    #[test]
+    fn an_edit_between_the_below_and_the_top_keeps_the_tiles() {
+        let (d, ink, _) = inked();
+        let base = Arc::new(d);
+        let plan = Plan { base: base.clone(), ids: vec![ink], doc: base.id, revision: 1, offset: (0, 0) };
+        let mut split = Split::new(&plan, 0, &mut |d| d.clone()).expect("splittable");
+        let all = DRect::new(0, 0, 300, 200);
+        let jobs = [(all, all)];
+        assert!(split.fill(&jobs, true));
+        assert!(!split.needs(all));
+        let mut painted = (*base).clone();
+        painted.layer_mut(ink).unwrap().surface_mut().unwrap().fill_rect(DRect::new(100, 60, 260, 190), &[0.9, 0.1, 0.1, 1.0]);
+        let mut hidden = painted.clone();
+        hidden.layer_mut(ink).unwrap().visible = false;
+        let mut added = painted.clone();
+        let mut patch = Layer::raster("patch", added.pixel_format());
+        patch.surface_mut().unwrap().fill_rect(DRect::new(10, 10, 90, 90), &[0.0, 0.0, 0.0, 0.7]);
+        added.insert_above(Some(ink), patch);
+        for (revision, edited) in [painted, hidden, added, (*base).clone()].into_iter().enumerate() {
+            let edited = Arc::new(edited);
+            let here = photocraft_compose::composites_here();
+            assert_eq!(split.update(&edited, revision as u64 + 2, &mut |d| d.clone()), Update::Held, "edit {revision}");
+            let (got, mapped) = split.render((0, 0), &jobs, false).expect("rendered");
+            assert!(mapped);
+            assert_eq!(photocraft_compose::composites_here() - here, 1, "the tiles held: only the layers between the below and the top were composited");
+            let want = photocraft_compose::render(&edited, all);
+            assert!(worst(&got[0], &want) <= 1.0 / 255.0, "edit {revision}: off by {}", worst(&got[0], &want));
+        }
+    }
+
+    /// An edit of a layer below the run or in the top doesn't keep the split: the layers that
+    /// differ come back, for a new split around them, and the split stays as it was.
+    #[test]
+    fn an_edit_below_the_run_or_in_the_top_is_elsewhere() {
+        let (d, ink, over) = inked();
+        let base = Arc::new(d);
+        let plan = Plan { base: base.clone(), ids: vec![ink], doc: base.id, revision: 1, offset: (0, 0) };
+        let mut split = Split::new(&plan, 0, &mut |d| d.clone()).expect("splittable");
+        let under = base.layers[1].id;
+        for id in [under, over[2]] {
+            let mut edited = (*base).clone();
+            edited.layer_mut(id).unwrap().opacity = 0.3;
+            assert_eq!(split.update(&Arc::new(edited), 2, &mut |d| d.clone()), Update::Elsewhere(vec![id]));
+            assert!(split.is_for(&plan, 0), "left as it was");
+        }
+        // Two layers swapped: both differ.
+        let mut swapped = (*base).clone();
+        swapped.layers.swap(1, 2);
+        assert_eq!(split.update(&Arc::new(swapped), 2, &mut |d| d.clone()), Update::Elsewhere(vec![under, ink]));
+        // A larger canvas: nothing of the split holds, whatever the layers.
+        let mut resized = (*base).clone();
+        resized.size = Size::new(400, 200);
+        assert_eq!(split.update(&Arc::new(resized), 2, &mut |d| d.clone()), Update::Elsewhere(Vec::new()));
+    }
+
+    /// Without the top's maps a tile takes the top layers composited for real: the exact
+    /// composite, the below's tile kept for the edits that follow, no map made.
+    #[test]
+    fn without_its_map_a_tile_is_the_exact_composite() {
+        let (d, ink, _) = inked();
+        let base = Arc::new(d);
+        let plan = Plan { base: base.clone(), ids: vec![ink], doc: base.id, revision: 1, offset: (0, 0) };
+        let mut split = Split::new(&plan, 0, &mut |d| d.clone()).expect("splittable");
+        let all = DRect::new(0, 0, 300, 200);
+        let (got, mapped) = split.render((0, 0), &[(DRect::new(20, 10, 280, 190), all)], false).expect("rendered");
+        assert!(!mapped);
+        assert_eq!(got[0], photocraft_compose::render(&base, DRect::new(20, 10, 280, 190)));
+        assert!(split.needs(all), "its map is still to make");
+        assert!((300 * 200 * 16..300 * 200 * 32).contains(&split.bytes()), "the below's tile is kept, no map: {}", split.bytes());
+    }
+
+    /// Tiles past the budget aren't made (the frame is composited whole), and a smaller budget
+    /// lets go of the tiles out of view.
+    #[test]
+    fn tiles_stay_within_the_budget() {
+        let (d, ink, _) = inked();
+        let base = Arc::new(d);
+        let plan = Plan { base: base.clone(), ids: vec![ink], doc: base.id, revision: 1, offset: (0, 0) };
+        let mut split = Split::new(&plan, 0, &mut |d| d.clone()).expect("splittable");
+        let (left, right) = (DRect::new(0, 0, 150, 200), DRect::new(150, 0, 300, 200));
+        assert!(split.fill(&[(left, left)], true));
+        let tile = split.bytes();
+        assert!(tile >= 150 * 200 * 48, "a float tile below, two for the top's map: {tile}");
+        split.set_budget(tile, &[]);
+        assert!(!split.fill(&[(right, right)], true), "no room for a second tile");
+        assert!(split.render((0, 0), &[(right, right)], false).is_none());
+        assert_eq!(split.bytes(), tile, "nothing made");
+        // The view moved to the right tile: the left one goes when the budget shrinks under it.
+        split.set_budget(tile - 1, &[right]);
+        assert_eq!(split.bytes(), 0);
+        split.set_budget(tile, &[right]);
+        assert!(split.fill(&[(right, right)], true));
     }
 }
