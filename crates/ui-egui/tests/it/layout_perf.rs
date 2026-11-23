@@ -194,7 +194,14 @@ fn selecting_recomposites_nothing_and_hiding_only_the_layer() {
     assert!(!h.state().perf.spans.contains_key("histogram"), "selecting changed no pixels");
     // Hiding a text layer refreshes its area, not the whole canvas.
     h.state_mut().run("layer.setProps", json!({"layer": k.text.0, "visible": false})).expect("hide");
-    h.run_steps(2);
+    // The CPU canvas composites an edit on the worker pool and shows it whole when it lands.
+    for _ in 0..200 {
+        h.step();
+        if h.state().perf.last_refresh != "untouched" {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     // The GPU canvas refreshes a rect, the CPU canvas (this harness) only the tiles it reaches.
     assert!(matches!(h.state().perf.last_refresh, "rect" | "tiles"), "{}", h.state().perf.last_refresh);
     let d = doc(&h);

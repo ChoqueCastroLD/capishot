@@ -282,6 +282,7 @@ fn on_the_apps_stack<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) 
 /// The owner's bar for CPU mode on his file at 1920x1080: the median frame of every action within
 /// 16 ms and no frame over 33 ms. Timing on a shared server: run alone (not in the `fast` set).
 #[test]
+#[ignore = "a timing bar on a shared machine: run alone with --ignored"]
 fn edits_on_his_file_on_the_cpu_canvas_stay_within_a_frame() {
     let Some(rows) = on_the_apps_stack(|| edits(PSD, 0.7)) else { return };
     if std::env::var_os("CPU_EDIT_PERF_REPORT_ONLY").is_some() {
