@@ -310,9 +310,19 @@ fn the_spot_healing_trail_is_a_dark_half_opaque_tint() {
         app.session.tools.brush.hardness = 1.0;
         let before = render(&mut h);
         drag_to(&mut h, [80.0, 150.0], [320.0, 150.0]);
-        let img = render(&mut h);
         let p = screen(&h, 200.0, 150.0);
-        let (was, now) = (before.luma(p.x as i64, p.y as i64).unwrap_or(0), img.luma(p.x as i64, p.y as i64).unwrap_or(0));
+        let was = before.luma(p.x as i64, p.y as i64).unwrap_or(0);
+        // The trail is stamped off the window's thread: it shows a few frames after the moves.
+        let start = std::time::Instant::now();
+        let mut now = was;
+        while start.elapsed() < Duration::from_secs(1) {
+            now = render(&mut h).luma(p.x as i64, p.y as i64).unwrap_or(0);
+            if now < was {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+            h.run_steps(1);
+        }
         assert!(f32::from(now) < f32::from(was) * 0.6, "spot healing trail on {bg}: luma {was} -> {now}, not dark enough");
         assert!(f32::from(now) > f32::from(was) * 0.4, "spot healing trail on {bg}: luma {was} -> {now}, should stay see-through");
         button(&mut h, 320.0, 150.0, false);

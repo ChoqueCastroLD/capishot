@@ -50,6 +50,10 @@ pub struct Trail {
     /// The trail shows the stroke's dabs, whose brush was handed over ([`Self::feed_dabs`]).
     dabs: bool,
     tex: Option<TextureHandle>,
+    /// The window the trail is drawn in, woken when the job has stamped something: the frame
+    /// that handed the points over may have drawn the trail before, and nothing else would
+    /// draw it again once the pointer stops.
+    wake: Option<egui::Context>,
 }
 
 /// The mask's pixels and the stroke that stamps them.
@@ -87,8 +91,9 @@ fn lock<T>(m: &wasm_sync::Mutex<T>) -> impl std::ops::DerefMut<Target = T> + '_ 
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// The job: stamp what the frames handed over, in order, until nothing is left.
-fn work(queue: &wasm_sync::Mutex<Queue>, mask: &wasm_sync::Mutex<Mask>) {
+/// The job: stamp what the frames handed over, in order, until nothing is left, and wake the
+/// window to show it.
+fn work(queue: &wasm_sync::Mutex<Queue>, mask: &wasm_sync::Mutex<Mask>, wake: Option<&egui::Context>) {
     loop {
         // (The mask is taken before the queue is let go: whoever finds the queue empty and then
         // takes the mask sees every stamp done.)
@@ -101,6 +106,10 @@ fn work(queue: &wasm_sync::Mutex<Queue>, mask: &wasm_sync::Mutex<Mask>) {
         drop(q);
         stamp(&mut m);
         m.make_upload();
+        drop(m);
+        if let Some(ctx) = wake {
+            ctx.request_repaint();
+        }
     }
 }
 
@@ -112,7 +121,7 @@ fn stroke_points(points: &[[f64; 3]]) -> Vec<StrokePoint> {
 impl Trail {
     pub fn new(doc: [u32; 2]) -> Self {
         let mask = Mask::new(doc);
-        Self { doc, k: mask.k, w: mask.w, h: mask.h, mask: Arc::new(wasm_sync::Mutex::new(mask)), queue: Arc::default(), fed: 0, dabs: false, tex: None }
+        Self { doc, k: mask.k, w: mask.w, h: mask.h, mask: Arc::new(wasm_sync::Mutex::new(mask)), queue: Arc::default(), fed: 0, dabs: false, tex: None, wake: None }
     }
 
     /// Hand `stamp` over to be done after the stamps before it: by a job on the worker pool, or
@@ -126,11 +135,11 @@ impl Trail {
         if !start {
             return;
         }
-        let (queue, mask) = (self.queue.clone(), self.mask.clone());
+        let (queue, mask, wake) = (self.queue.clone(), self.mask.clone(), self.wake.clone());
         if crate::canvas::strokes_on_pool() {
-            crate::cpu_canvas::spawn(move || work(&queue, &mask));
+            crate::cpu_canvas::spawn(move || work(&queue, &mask, wake.as_ref()));
         } else {
-            work(&queue, &mask);
+            work(&queue, &mask, None);
         }
     }
 
@@ -223,12 +232,15 @@ impl Trail {
     /// A frame that finds the job stamping draws the trail as it was and comes back.
     pub fn draw(&mut self, painter: &egui::Painter, doc_rect: Rect, flip: bool, color: Color32) {
         let opts = TextureOptions::LINEAR;
+        self.wake.get_or_insert_with(|| painter.ctx().clone());
         let upload = self.mask.try_lock().ok().and_then(|mut m| m.upload.take());
         let tex = self.tex.get_or_insert_with(|| painter.ctx().load_texture("stroke-trail", ColorImage::filled([self.w, self.h], Color32::TRANSPARENT), opts));
         if let Some((r, img)) = upload {
             tex.set_partial([r[0], r[1]], img, opts);
         }
-        if lock(&self.queue).running {
+        // Still stamping, or done since the upload above was looked for: come back for it (the
+        // job wakes the window too, once it knows the window).
+        if lock(&self.queue).running || self.mask.try_lock().map_or(true, |m| m.upload.is_some()) {
             painter.ctx().request_repaint();
         }
         // The mask's last column/row may reach past the document (sizes rounded up).
@@ -447,6 +459,35 @@ mod tests {
                 assert_eq!(t.coverage(x, y), whole.coverage(x, y), "({x}, {y})");
             }
         }
+    }
+
+    /// The job wakes the window when it has stamped the points a frame handed over: a frame that
+    /// found it still stamping (or done a moment after it looked) showed the trail without them,
+    /// and with the pointer held still no other frame came to draw them.
+    #[test]
+    fn the_window_is_woken_when_the_job_has_stamped() {
+        let ctx = egui::Context::default();
+        let mut t = Trail::new([200, 100]);
+        let rect = Rect::from_min_size(pos2(0.0, 0.0), egui::vec2(200.0, 100.0));
+        let frame = |t: &mut Trail| {
+            ctx.run_ui(Default::default(), |ui| t.draw(ui.painter(), rect, false, Color32::BLACK)).textures_delta.clear();
+        };
+        // (egui's first frames ask for more of themselves.)
+        for _ in 0..4 {
+            frame(&mut t);
+        }
+        assert!(!ctx.has_requested_repaint(), "nothing to show yet");
+        crate::canvas::set_strokes_off_frame(true);
+        t.feed_dabs(&[[50.0, 50.0, 1.0], [150.0, 50.0, 1.0]], || BrushSettings { size: 30.0, ..Default::default() });
+        crate::canvas::set_strokes_off_frame(false);
+        let start = std::time::Instant::now();
+        while lock(&t.queue).running && start.elapsed() < std::time::Duration::from_secs(10) {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(!lock(&t.queue).running, "the job stamped");
+        assert!(ctx.has_requested_repaint(), "the job asked for the frame that shows what it stamped");
+        frame(&mut t);
+        assert!(t.mask.try_lock().is_ok_and(|m| m.upload.is_none()), "that frame uploaded it");
     }
 
     #[test]
