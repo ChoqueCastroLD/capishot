@@ -52,22 +52,45 @@ pub(super) fn healing_brush(s: &mut Session, p: &Value) -> Result<Value> {
     let aligned = flag(p, "aligned", true);
     let map = clone_mapping(s, p, &stroke, CMD)?;
     let off = map.offset();
-    let dmg = run_stroke(s, "Healing Brush", id, p, |pre, surf, sel, lock| {
-        let (bounds, mut cov) = coverage(CMD, &stroke)?;
-        if replace {
-            replace_coverage(&mut cov);
-        }
-        let (g, cov) = pad_coverage(bounds, &cov, 2);
-        let fmt = surf.format();
-        let src = clone_sample(pre, id, surf, which, g, &map, false, CMD)?;
-        // The destination the texture is fitted to: the layer itself, or what the user sees when
-        // sampling several layers (so healing onto an empty layer matches the composite).
-        let dst = if which == SampleLayers::Current { Region::read(surf, g) } else { composite_region(pre, id, which, g, fmt) };
-        let mask: Vec<bool> = cov.iter().map(|c| *c > 0.0).collect();
-        let healed = heal_region(&fmt, &src, &dst, &mask);
-        Ok(apply_coverage(surf, g, &cov, stroke.brush.opacity, sel, lock, &healed, mode))
-    })?;
-    Ok(clone_result(dmg, off, aligned, p, &stroke))
+    // A background job when started so (the desktop, the browser threads build): the stroke's
+    // seamless blend runs on a worker against the document as it is, then lands as one step, as
+    // `run_stroke` edits. A release with a large tip held the window for it.
+    let base = s.active().ok_or(EngineError::NoDocument)?.doc.clone();
+    let params = p.clone();
+    let label = "Healing Brush";
+    crate::jobs::run(
+        s,
+        label,
+        true,
+        move |_| {
+            let mut doc = (*base).clone();
+            let pre = &*base;
+            let sel = pre.selection.as_ref();
+            let (surf, lock) = crate::channel_cmds::target_surface(&mut doc, id, &params)?;
+            let (bounds, mut cov) = coverage(CMD, &stroke)?;
+            if replace {
+                replace_coverage(&mut cov);
+            }
+            let (g, cov) = pad_coverage(bounds, &cov, 2);
+            let fmt = surf.format();
+            let src = clone_sample(pre, id, surf, which, g, &map, false, CMD)?;
+            // The destination the texture is fitted to: the layer itself, or what the user sees when
+            // sampling several layers (so healing onto an empty layer matches the composite).
+            let dst = if which == SampleLayers::Current { Region::read(surf, g) } else { composite_region(pre, id, which, g, fmt) };
+            let mask: Vec<bool> = cov.iter().map(|c| *c > 0.0).collect();
+            let healed = heal_region(&fmt, &src, &dst, &mask);
+            let dmg = apply_coverage(surf, g, &cov, stroke.brush.opacity, sel, lock, &healed, mode);
+            Ok((doc, dmg, clone_result(dmg, off, aligned, &params, &stroke)))
+        },
+        move |s, (doc, dmg, result)| {
+            s.edit(label, move |d, _| {
+                *d = doc;
+                Ok(())
+            })?;
+            s.hint_damage(dmg);
+            Ok(result)
+        },
+    )
 }
 
 /// The History Brush's source: the targeted surface (pixels, mask, channel) as it was in History

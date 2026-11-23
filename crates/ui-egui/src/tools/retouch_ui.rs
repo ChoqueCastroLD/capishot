@@ -125,17 +125,31 @@ pub(crate) fn stroke_seed(points: &[[f64; 3]]) -> u64 {
 
 /// Finish a stroke with a retouching tool. Returns false if `tool` isn't one.
 pub fn finish_stroke(app: &mut PhotocraftApp, tool: Tool, points: &[[f64; 3]], mods: egui::Modifiers) -> bool {
+    match stroke_command(app, tool, points, mods) {
+        Some(Some((cmd, p))) => {
+            let _ = commit(app, tool, cmd, p);
+            true
+        }
+        Some(None) => true,
+        None => false,
+    }
+}
+
+/// The command that commits a stroke of retouching tool `tool` along `points`, with its params.
+/// `Some(None)`: the tool finished the stroke itself, or refused it and said why. `None`: `tool`
+/// isn't a retouching tool.
+pub(crate) fn stroke_command(app: &mut PhotocraftApp, tool: Tool, points: &[[f64; 3]], mods: egui::Modifiers) -> Option<Option<(&'static str, Value)>> {
     // Paint mask, then run: the Remove tools' strokes collect into a mask (`remove_mask_ui`).
     if crate::remove_mask_ui::finish_stroke(app, tool, points, mods) {
-        return true;
+        return Some(None);
     }
     let o = app.ui.tool_options.clone();
     let pts = json!(points);
-    let (cmd, mut p): (&str, Value) = match tool {
+    let (cmd, mut p): (&'static str, Value) = match tool {
         Tool::SpotHealing => ("paint.spotHealing", json!({"type": o.spot_type, "sampleAllLayers": o.sample_all.spot_healing})),
         Tool::RemoveAi => {
             crate::remove_ai_ui::finish_stroke(app, points);
-            return true;
+            return Some(None);
         }
         Tool::Remove => ("paint.remove", remove_params(&o)),
         Tool::MixerBrush => ("paint.mixerBrush", json!({})),
@@ -151,7 +165,7 @@ pub fn finish_stroke(app: &mut PhotocraftApp, tool: Tool, points: &[[f64; 3]], m
                 }
                 .into();
                 app.ui.status_error = true;
-                return true;
+                return Some(None);
             };
             (if tool == Tool::Healing { "paint.healingBrush" } else { "paint.cloneStamp" }, p)
         }
@@ -164,10 +178,7 @@ pub fn finish_stroke(app: &mut PhotocraftApp, tool: Tool, points: &[[f64; 3]], m
                 "tolerance": o.art_history_tolerance,
             }),
         ),
-        Tool::Blur | Tool::Sharpen | Tool::Smudge | Tool::Dodge | Tool::Burn | Tool::Sponge => match dab_params(app, tool) {
-            Some(cp) => cp,
-            None => return false,
-        },
+        Tool::Blur | Tool::Sharpen | Tool::Smudge | Tool::Dodge | Tool::Burn | Tool::Sponge => dab_params(app, tool)?,
         Tool::QuickSelection => {
             let size = app.session.tools.brush.size;
             let mode = if mods.alt { "subtract" } else { "add" };
@@ -175,35 +186,61 @@ pub fn finish_stroke(app: &mut PhotocraftApp, tool: Tool, points: &[[f64; 3]], m
             let (sample_all, enhance) = (o.sample_all.quick_selection, o.enhance_edge);
             let r = app.run("select.quick", json!({"points": xy, "size": size, "mode": mode, "enhanceEdge": enhance, "sampleAllLayers": sample_all}));
             report_smart_result(app, r, tl!("Quick Selection found nothing there"));
-            return true;
+            return Some(None);
         }
         Tool::TextSelection => {
             crate::text_select_ui::finish_stroke(app, points, mods);
-            return true;
+            return Some(None);
         }
-        _ => return false,
+        _ => return None,
     };
     p["points"] = pts;
     // The layer mask, an alpha channel or the Quick Mask when targeted, as the Brush paints.
     p["target"] = crate::canvas::paint_target(app);
+    Some(Some((cmd, p)))
+}
+
+/// Run `cmd`, the command that commits a stroke of `tool` ([`stroke_command`]), and take what it
+/// answers. The Healing Brush's blend is a background job where the app runs those: its answer
+/// comes when the job lands ([`on_job_event`]).
+pub(crate) fn commit(app: &mut PhotocraftApp, tool: Tool, cmd: &str, p: Value) -> Result<Value, String> {
     // The AI mode runs only with its model downloaded (else the missing-model dialog).
     let result = crate::ai_model_gate::run(app, cmd, p);
     app.retouch_from_live = matches!(&result, Ok(r) if r.get("fromLive").and_then(Value::as_bool) == Some(true));
-    match result {
-        Ok(r) if matches!(tool, Tool::Healing | Tool::CloneStamp) => {
-            // Aligned: keep the offset for later strokes; non-aligned: every stroke restarts at the source.
-            app.ui.clone_offset = r.get("offset").and_then(|v| serde_json::from_value(v.clone()).ok()).filter(|_| o.clone_aligned);
+    match &result {
+        Ok(r) if tool == Tool::Healing && r.get("job").is_some() => {
+            app.healing_job = r.get("job").and_then(Value::as_u64).map(photocraft_engine::jobs::JobId);
         }
+        Ok(r) if matches!(tool, Tool::Healing | Tool::CloneStamp) => next_clone_offset(app, r),
         Ok(r) if tool == Tool::PatternStamp => {
-            app.ui.pattern_stamp_phase = r.get("phase").and_then(|v| serde_json::from_value(v.clone()).ok()).filter(|_| o.pattern_stamp_aligned);
+            let aligned = app.ui.tool_options.pattern_stamp_aligned;
+            app.ui.pattern_stamp_phase = r.get("phase").and_then(|v| serde_json::from_value(v.clone()).ok()).filter(|_| aligned);
         }
         Ok(_) => {}
         Err(e) => {
-            app.ui.status = remove_refusal(e);
+            app.ui.status = remove_refusal(e.clone());
             app.ui.status_error = true;
         }
     }
-    true
+    result
+}
+
+/// A Clone Stamp or Healing Brush stroke answered `r`. Aligned: keep the offset for later
+/// strokes; non-aligned: every stroke restarts at the source.
+fn next_clone_offset(app: &mut PhotocraftApp, r: &Value) {
+    let aligned = app.ui.tool_options.clone_aligned;
+    app.ui.clone_offset = r.get("offset").and_then(|v| serde_json::from_value(v.clone()).ok()).filter(|_| aligned);
+}
+
+/// The job of a Healing Brush stroke ended ([`commit`]): its answer is taken as when the command
+/// runs in the call.
+pub(crate) fn on_job_event(app: &mut PhotocraftApp, e: &photocraft_engine::jobs::JobEvent) {
+    if app.healing_job.take_if(|job| *job == e.id).is_none() {
+        return;
+    }
+    if let photocraft_engine::jobs::JobOutcome::Done(r) = &e.outcome {
+        next_clone_offset(app, r);
+    }
 }
 
 /// `paint.remove` params from the options bar (without the strokes).

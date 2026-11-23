@@ -408,11 +408,14 @@ pub struct PhotocraftApp {
     /// The tool pointer events go to this frame when it isn't the selected one: the Move tool
     /// while ⌘ is held (`hold_keys::cmd_moves`). Set by the canvas for its gestures, never saved.
     pub(crate) tool_override: Option<state::Tool>,
-    /// Brush/Eraser stroke being drawn, rendered by the engine (see `canvas::LiveStroke`).
+    /// The stroke being drawn, rendered by the engine (see `canvas::LiveStroke`).
     live_stroke: Option<canvas::LiveStroke>,
-    /// A Brush/Eraser stroke released while its job was still rendering it: committed when it
-    /// has landed (see `canvas::LandingStroke`).
+    /// A stroke released while its job was still rendering it, or whose command is a background
+    /// job: committed when it has landed (see `canvas::LandingStroke`).
     landing_stroke: Option<Box<canvas::LandingStroke>>,
+    /// The background job of the Healing Brush stroke just released, whose answer is taken when
+    /// it lands (`retouch_ui::on_job_event`).
+    pub(crate) healing_job: Option<photocraft_engine::jobs::JobId>,
     /// A live stroke just committed with its own pixels: the canvas caches that showed it
     /// refresh only what it drew after the step they showed (`canvas::damage_since`).
     committed_stroke: Option<canvas::CommittedStroke>,

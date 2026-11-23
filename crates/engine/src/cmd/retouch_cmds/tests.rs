@@ -1802,10 +1802,12 @@ fn layer_pixels(s: &Session) -> Vec<f32> {
     st.doc.layer(st.active_layer.unwrap()).unwrap().surface().unwrap().read_region(st.doc.bounds())
 }
 
-/// Draw `points` live as the canvas does (the first with `begin`, the rest in pen batches that
-/// carry tilt and times, which the commands don't take) and offer the stroke to its commit.
+/// Draw `points` live as the canvas does (started with the first, which is pushed like the rest,
+/// in pen batches that carry tilt and times, which the commands don't take; then finished) and
+/// offer the stroke to its commit.
 fn offer_live(s: &mut Session, cmd: &str, points: &[[f64; 2]], hardness: u32, extra: &Value) {
-    let mut live = LiveDab::begin(s, cmd, &dab_opts(&points[..1], hardness, extra)).unwrap();
+    let (mut live, first) = LiveDab::start(s, cmd, &dab_opts(&points[..1], hardness, extra)).unwrap();
+    live.push(&first).unwrap();
     for (i, batch) in points[1..].chunks(2).enumerate() {
         let pts: Vec<_> = batch
             .iter()
@@ -1817,7 +1819,57 @@ fn offer_live(s: &mut Session, cmd: &str, points: &[[f64; 2]], hardness: u32, ex
             .collect();
         live.push(&pts).unwrap();
     }
+    live.finish().unwrap();
     s.offer_live_dab(live).unwrap();
+}
+
+/// The app starts a retouching stroke in the frame of the press and renders it on another thread
+/// (`start`, `push`, `finish`): starting renders nothing, the first point is pushed like the rest,
+/// and the finishing dabs are run once, before the stroke is offered to its commit.
+#[test]
+fn started_retouch_strokes_render_nothing_until_their_points_are_pushed() {
+    let points = [[10.0, 40.0], [100.0, 60.0], [180.0, 40.0]];
+    let (cmd, extra) = dab_cases()[0].clone();
+    let mut s = session(200, 90, 8, "rgb");
+    s.execute("layer.new.layer", json!({})).unwrap();
+    paint_layer(&mut s, texture);
+    let before = layer_pixels(&s);
+    let shown = |doc: &Document, s: &Session| doc.layer(s.active().unwrap().active_layer.unwrap()).unwrap().surface().unwrap().read_region(doc.bounds());
+    let rendered = {
+        s.execute(cmd, dab_opts(&points, 0, &extra)).unwrap();
+        let want = layer_pixels(&s);
+        s.execute("edit.undo", json!({})).unwrap();
+        want
+    };
+
+    let (mut live, first) = LiveDab::start(&s, cmd, &dab_opts(&points[..1], 0, &extra)).unwrap();
+    assert_eq!(first.len(), 1);
+    assert!(live.bounds().is_empty(), "starting renders no dab");
+    assert!(shown(&live.doc, &s) == before);
+    live.push(&first).unwrap();
+    live.push(&points[1..].iter().map(|q| StrokePoint::new(q[0], q[1], 1.0)).collect::<Vec<_>>()).unwrap();
+    assert!(!live.bounds().is_empty());
+    assert!(!live.finish().unwrap().is_empty(), "the finishing dabs are drawn");
+    assert!(shown(&live.doc, &s) == rendered, "the finished stroke shows what the command paints");
+    assert!(live.finish().unwrap().is_empty(), "the finishing dabs are run once");
+    assert!(live.push(&first).is_err(), "a finished stroke takes no more points");
+    s.offer_live_dab(live).unwrap();
+    assert_eq!(s.execute(cmd, dab_opts(&points, 0, &extra)).unwrap()["fromLive"], json!(true));
+    assert!(layer_pixels(&s) == rendered);
+    s.execute("edit.undo", json!({})).unwrap();
+
+    // The Clone Stamp's: the same pixels as the stroke begun with its first point rendered.
+    let clone = json!({"points": [[50, 30]], "source": [20, 20], "size": 14, "hardness": 40, "opacity": 70});
+    let begun = LiveRetouch::begin(&s, "paint.cloneStamp", &clone).unwrap();
+    let (mut live, first) = LiveRetouch::start(&s, "paint.cloneStamp", &clone).unwrap();
+    assert!(live.bounds().is_empty() && live.points().is_empty(), "starting renders no dab");
+    assert!(shown(&live.doc, &s) == before);
+    live.push(&first).unwrap();
+    assert_eq!(live.bounds(), begun.bounds());
+    assert!(shown(&live.doc, &s) == shown(&begun.doc, &s));
+    // What can't be painted is refused at the start, as `begin` refuses it.
+    let bad = json!({"points": [[50, 30]], "size": 14});
+    assert!(LiveRetouch::start(&s, "paint.cloneStamp", &bad).is_err() && LiveRetouch::begin(&s, "paint.cloneStamp", &bad).is_err());
 }
 
 /// Releasing a live Dodge, Burn, Sponge, Blur, Sharpen or Smudge stroke commits the pixels it
@@ -1984,7 +2036,8 @@ fn live_dab_offers_are_refused_or_dropped_when_they_dont_match() {
     s.tools.foreground = [0.9, 0.1, 0.1, 1.0];
     assert!(s.offer_live_dab(live).is_err());
     // Color Replacement's live stroke runs on `LiveDab` too, but its commit renders itself.
-    let live = crate::brush_cmds::live_color_replacement(&s, &json!({"points": points, "color": [1.0, 0.0, 0.0, 1.0]})).unwrap();
+    let (mut live, first) = crate::brush_cmds::live_color_replacement(&s, &json!({"points": points, "color": [1.0, 0.0, 0.0, 1.0]})).unwrap();
+    live.push(&first).unwrap();
     assert!(s.offer_live_dab(live).is_err());
     assert!(s.live_commit.is_none());
 }
@@ -2181,7 +2234,8 @@ fn live_pattern_stamp_matches_the_commit() {
             let pts = |v: &[[f64; 2]]| v.iter().map(|q| StrokePoint::new(q[0], q[1], 1.0)).collect::<Vec<_>>();
             let shown = if impressionist {
                 assert!(LiveRetouch::begin(&s, "paint.patternStamp", &opts(&all[..1])).is_err(), "Impressionist is laid dab by dab");
-                let mut live = live_pattern_impressionist(&s, &opts(&all[..1])).unwrap();
+                let (mut live, first) = live_pattern_impressionist(&s, &opts(&all[..1])).unwrap();
+                live.push(&first).unwrap();
                 live.push(&pts(&all[1..3])).unwrap();
                 live.push(&pts(&all[3..])).unwrap();
                 live.doc.clone()

@@ -225,6 +225,15 @@ impl LiveRetouch {
     /// `paint.historyBrush` or an aligned, non-Impressionist `paint.patternStamp`) from its
     /// params; their `points` are rendered.
     pub fn begin(s: &Session, cmd: &str, p: &Value) -> Result<Self> {
+        let (mut live, pts) = Self::start(s, cmd, p)?;
+        live.push(&pts)?;
+        Ok(live)
+    }
+
+    /// [`begin`](Self::begin) without rendering anything yet: the stroke and the params' `points`,
+    /// for a caller that renders them elsewhere (the app pushes them on another thread, so a
+    /// large tip's first dab doesn't hold the frame of the press).
+    pub fn start(s: &Session, cmd: &str, p: &Value) -> Result<(Self, Vec<StrokePoint>)> {
         has_pixel_layer(s).map_err(EngineError::Other)?;
         if cmd == "paint.patternStamp" {
             let st = pattern_stamp::Setup::parse(s, p)?;
@@ -267,7 +276,8 @@ impl LiveRetouch {
         Self::with_paint(s, cmd, p, stroke, id, paint, mode)
     }
 
-    /// Start a live stroke of `cmd` painting `paint` through `stroke`'s coverage.
+    /// A live stroke of `cmd` painting `paint` through `stroke`'s coverage, and `stroke`'s points
+    /// (not rendered yet).
     fn with_paint(
         s: &Session,
         cmd: &str,
@@ -276,7 +286,7 @@ impl LiveRetouch {
         id: Option<LayerId>,
         paint: LivePaint,
         (mode, replace): (BlendMode, bool),
-    ) -> Result<Self> {
+    ) -> Result<(Self, Vec<StrokePoint>)> {
         let st = s.active().ok_or(EngineError::NoDocument)?;
         let (pre, base) = (st.doc.clone(), (st.doc.id, st.revision));
         let mut doc = (*pre).clone();
@@ -291,7 +301,7 @@ impl LiveRetouch {
             LivePaint::History(src) if src.format() != pre_surf.format() => LivePaint::History(src.convert(pre_surf.format())),
             other => other,
         };
-        let mut live = Self {
+        let live = Self {
             doc: std::sync::Arc::new(doc),
             cmd: cmd.into(),
             renderer,
@@ -310,8 +320,7 @@ impl LiveRetouch {
             brush,
             points: Vec::new(),
         };
-        live.push(&stroke.points)?;
-        Ok(live)
+        Ok((live, stroke.points))
     }
 
     /// Everything the stroke has touched so far.

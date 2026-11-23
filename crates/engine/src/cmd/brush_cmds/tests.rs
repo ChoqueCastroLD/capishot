@@ -262,7 +262,8 @@ fn live_color_replacement_matches_the_commit() {
             let all = [[10.0, 20.0], [30.0, 20.0], [50.0, 20.0], [70.0, 22.0]];
             let pts = |v: &[[f64; 2]]| v.iter().map(|q| StrokePoint::new(q[0], q[1], 1.0)).collect::<Vec<_>>();
             let opts = |p: &[[f64; 2]]| json!({"points": p, "size": 12, "hardness": 50, "sampling": sampling, "tolerance": 30, "target": "pixels"});
-            let mut live = live_color_replacement(&s, &opts(&all[..1])).unwrap();
+            let (mut live, first) = live_color_replacement(&s, &opts(&all[..1])).unwrap();
+            live.push(&first).unwrap();
             live.push(&pts(&all[1..3])).unwrap();
             live.push(&pts(&all[3..])).unwrap();
             let shown = live.doc.clone();

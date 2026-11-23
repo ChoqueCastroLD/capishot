@@ -528,10 +528,11 @@ fn run_inner(app: &mut PhotocraftApp, id: &str, params: Value) -> Result<Value, 
     }
 }
 
-/// The commands of a click, a key or a frame's commit whose pixel work is a job, so that no frame
-/// is held by it (a Paint Bucket click on a page was 80 ms to 1.9 s of `cmd.run` on the window's
-/// thread, a crop up to 760 ms). They land in the order the user did things ([`land_first`]).
-pub(crate) const LAND_FIRST: [&str; 4] = ["paint.bucket", "edit.fill", "select.magicWand", "image.crop"];
+/// The commands of a click, a key, a stroke's release or a frame's commit whose pixel work is a
+/// job, so that no frame is held by it (a Paint Bucket click on a page was 80 ms to 1.9 s of
+/// `cmd.run` on the window's thread, a crop up to 760 ms, a Healing Brush release 325 ms). They
+/// land in the order the user did things ([`land_first`]).
+pub(crate) const LAND_FIRST: [&str; 6] = ["paint.bucket", "edit.fill", "select.magicWand", "image.crop", "paint.healingBrush", "paint.spotHealing"];
 
 /// Command `id` (`None`: a press of a tool) is about to act on the active document while the job
 /// of a click ([`LAND_FIRST`]) is still running on it: the click comes first, as the user did
@@ -1201,6 +1202,10 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
     crate::transform_tool::on_job_event(app, &e);
     // So does a crop's: the view fits what it left, or the frame comes back.
     crate::crop_ui::on_job_event(app, &e);
+    // A Healing Brush stroke's: its blend replaces the stroke the canvas showed, and says where
+    // the next aligned stroke samples.
+    crate::canvas::stroke_job_event(app, &e);
+    crate::retouch_ui::on_job_event(app, &e);
     // An AI run's end: "Done" or its error on the progress card.
     let ai_error = crate::ai_progress::on_event(app, ctx, &e);
     if on_files_event(app, &e) {

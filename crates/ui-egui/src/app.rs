@@ -76,6 +76,7 @@ impl PhotocraftApp {
             tool_override: None,
             live_stroke: None,
             landing_stroke: None,
+            healing_job: None,
             committed_stroke: None,
             retouch_from_live: false,
             dropped_stroke: None,

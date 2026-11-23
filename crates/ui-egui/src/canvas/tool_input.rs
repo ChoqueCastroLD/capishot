@@ -511,7 +511,7 @@ pub fn tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers)
                 if let Some(p) = p
                     && !LiveMixer::defers_to_release(&app.session, &p).is_ok_and(|deferred| deferred)
                 {
-                    if let Err(e) = LiveMixer::begin(&app.session, &p) {
+                    if let Err(e) = LiveMixer::start(&app.session, &p) {
                         app.ui.status = e.to_string();
                         app.ui.status_error = true;
                     }

@@ -47,7 +47,7 @@ fn color_dab(fmt: &PixelFormat, work: &mut Region, fp: &Footprint, strength: f32
 /// brush stroke, capped at full coverage, so Exposure caps a stroke the way Opacity caps a paint
 /// stroke: overlapping dabs and passes within one stroke don't compound the tone curve, and a
 /// new stroke builds on the last.
-fn tone_stroke(fmt: PixelFormat, toned: impl Fn([f32; 3]) -> [f32; 3] + 'static) -> DabEffect {
+fn tone_stroke(fmt: PixelFormat, toned: impl Fn([f32; 3]) -> [f32; 3] + Send + 'static) -> DabEffect {
     /// Side of the cells that remember, per touched pixel, the coverage applied so far and the
     /// original pixel (copied from the working pixels the first time a dab reaches it). Dense
     /// cells rather than a map per pixel: a map lookup per covered pixel made long strokes with
@@ -133,7 +133,7 @@ pub(super) enum DabTool {
 }
 
 /// One dab's edit of the working copy.
-pub(crate) type DabEffect = Box<dyn FnMut(&mut Region, &Footprint)>;
+pub(crate) type DabEffect = Box<dyn FnMut(&mut Region, &Footprint) + Send>;
 
 /// Pixels an effect reads beyond the dab it writes. Smudge's pickup is a fixed-size square,
 /// independent of pressure, roundness and the dab's current angle.
@@ -410,6 +410,8 @@ pub struct LiveDab {
     /// The document and revision the stroke started on, for strokes started from the session's
     /// active document ([`Self::with_effect`]); `None` for strokes on a prepared copy.
     base: Option<(photocraft_doc::DocId, u64)>,
+    /// The finishing dabs are run ([`Self::finish`]).
+    finished: bool,
     /// Every point rendered so far, in order.
     points: Vec<StrokePoint>,
 }
@@ -417,6 +419,15 @@ pub struct LiveDab {
 impl LiveDab {
     /// Start a live stroke of `cmd` from its params; their `points` are rendered.
     pub fn begin(s: &Session, cmd: &str, p: &Value) -> Result<Self> {
+        let (mut live, pts) = Self::start(s, cmd, p)?;
+        live.push(&pts)?;
+        Ok(live)
+    }
+
+    /// [`begin`](Self::begin) without rendering anything yet: the stroke and the params' `points`,
+    /// for a caller that renders them elsewhere (the app pushes them on another thread, so a
+    /// large tip's first dab doesn't hold the frame of the press).
+    pub fn start(s: &Session, cmd: &str, p: &Value) -> Result<(Self, Vec<StrokePoint>)> {
         has_pixel_layer(s).map_err(EngineError::Other)?;
         if sample_all_layers(p) {
             return Err(bad(cmd, "Sample All Layers strokes aren't previewed live"));
@@ -425,13 +436,14 @@ impl LiveDab {
         let (tool, _) = DabTool::parse(s, cmd, p, &stroke)?;
         let (neighborhood, spacing, brush) = (tool.neighborhood(), stroke.brush.spacing, Box::new(stroke.brush.clone()));
         let effect = tool.clone();
-        let mut live = Self::with_neighborhood(s, cmd, p, stroke, id, neighborhood, |pre| effect.effect(pre.format(), spacing))?;
+        let (mut live, pts) = Self::with_neighborhood(s, cmd, p, stroke, id, neighborhood, |pre| effect.effect(pre.format(), spacing))?;
         live.tool = Some((tool, brush));
-        Ok(live)
+        Ok((live, pts))
     }
 
-    /// Start a live stroke of `cmd` that runs `effect` (made from the target before the stroke)
-    /// at each dab of `stroke`, reading `halo` pixels around it. `p` gives the target.
+    /// A live stroke of `cmd` that runs `effect` (made from the target before the stroke) at each
+    /// dab of `stroke`, reading `halo` pixels around it, and `stroke`'s points (not rendered
+    /// yet). `p` gives the target.
     pub(crate) fn with_effect(
         s: &Session,
         cmd: &str,
@@ -440,7 +452,7 @@ impl LiveDab {
         id: Option<LayerId>,
         halo: i32,
         effect: impl FnOnce(&Surface) -> DabEffect,
-    ) -> Result<Self> {
+    ) -> Result<(Self, Vec<StrokePoint>)> {
         Self::with_neighborhood(s, cmd, p, stroke, id, DabNeighborhood::Halo(halo), effect)
     }
 
@@ -452,13 +464,13 @@ impl LiveDab {
         id: Option<LayerId>,
         neighborhood: DabNeighborhood,
         effect: impl FnOnce(&Surface) -> DabEffect,
-    ) -> Result<Self> {
+    ) -> Result<(Self, Vec<StrokePoint>)> {
         let st = s.active().ok_or(EngineError::NoDocument)?;
         let base = (st.doc.id, st.revision);
         let doc = (*st.doc).clone();
-        let mut live = Self::with_neighborhood_on(doc, cmd, p, stroke, id, neighborhood, effect)?;
+        let (mut live, pts) = Self::with_neighborhood_on(doc, cmd, p, stroke, id, neighborhood, effect)?;
         live.base = Some(base);
-        Ok(live)
+        Ok((live, pts))
     }
 
     /// [`Self::with_effect`] on `doc`, a copy of the active document with what the commit's own
@@ -471,7 +483,7 @@ impl LiveDab {
         id: Option<LayerId>,
         halo: i32,
         effect: impl FnOnce(&Surface) -> DabEffect,
-    ) -> Result<Self> {
+    ) -> Result<(Self, Vec<StrokePoint>)> {
         Self::with_neighborhood_on(doc, cmd, p, stroke, id, DabNeighborhood::Halo(halo), effect)
     }
 
@@ -483,7 +495,7 @@ impl LiveDab {
         id: Option<LayerId>,
         neighborhood: DabNeighborhood,
         effect: impl FnOnce(&Surface) -> DabEffect,
-    ) -> Result<Self> {
+    ) -> Result<(Self, Vec<StrokePoint>)> {
         let sel = doc.selection.clone();
         let (surf, lock) = crate::channel_cmds::target_surface(&mut doc, id, p)?;
         let pre_surf = surf.clone();
@@ -492,7 +504,7 @@ impl LiveDab {
         // its accumulated coverage isn't used here, and each effect rasterizes its own footprint.
         let ctx = photocraft_paint::BrushContext::new(&stroke.brush);
         let generator = photocraft_paint::dynamics::DabGenerator::new(&stroke.brush, 1.0);
-        let mut live = Self {
+        let live = Self {
             doc: std::sync::Arc::new(doc),
             cmd: cmd.into(),
             ctx,
@@ -514,17 +526,16 @@ impl LiveDab {
             tail: Rect::EMPTY,
             tool: None,
             base: None,
+            finished: false,
             points: Vec::new(),
         };
-        live.push(&stroke.points)?;
-        Ok(live)
+        Ok((live, stroke.points))
     }
 
-    /// Also show the stroke's finishing dabs (see `preview_tail`).
-    pub(crate) fn with_tail_preview(mut self) -> Result<Self> {
+    /// Also show the stroke's finishing dabs (see `preview_tail`), from its next points on.
+    pub(crate) fn with_tail_preview(mut self) -> Self {
         self.preview_tail = true;
-        self.push(&[])?;
-        Ok(self)
+        self
     }
 
     /// Everything the stroke has touched so far.
@@ -568,6 +579,9 @@ impl LiveDab {
     /// Only the position and pressure of `pts` are used: the commands take no tilt or times.
     pub fn push(&mut self, pts: &[StrokePoint]) -> Result<Rect> {
         crate::brush_cmds::check_coords(pts, &self.cmd)?;
+        if self.finished {
+            return Err(bad(&self.cmd, "the stroke is finished"));
+        }
         let pts: Vec<_> = pts.iter().map(|q| StrokePoint::new(q.x, q.y, q.pressure)).collect();
         self.points.extend_from_slice(&pts);
         self.generator.push(&pts, &mut self.pending, &mut self.dual_pending);
@@ -607,6 +621,25 @@ impl LiveDab {
         Ok(shown.union(&tail_rect))
     }
 
+    /// The stroke ended: run its finishing dabs, so the document shows what the command with the
+    /// same params and points paints. Returns the rectangle that changed. This is the pixel work
+    /// of [`Session::offer_live_dab`], for a caller that does it elsewhere first (the app, off its
+    /// window's thread); a finished stroke takes no more points.
+    pub fn finish(&mut self) -> Result<Rect> {
+        if std::mem::replace(&mut self.finished, true) {
+            return Ok(Rect::EMPTY);
+        }
+        self.generator.finish(&mut self.pending, &mut self.dual_pending);
+        let dmg = self.run_new_dabs();
+        let shown = dmg.union(&std::mem::replace(&mut self.tail, Rect::EMPTY));
+        if !shown.is_empty() {
+            let work = self.work.read(&self.pre_surf, shown);
+            self.show(shown, &work)?;
+        }
+        self.bounds = self.bounds.union(&dmg);
+        Ok(shown)
+    }
+
     /// The finished stroke as its commit would take it over ([`Session::offer_live_dab`]): the
     /// finishing dabs are run, and the pixels are the ones the command with the same params and
     /// points paints. Only while the brush, tool settings and layer are still the ones the stroke
@@ -620,14 +653,7 @@ impl LiveDab {
         if now != tool || stroke.brush != *brush || id != self.id {
             return Err(bad(&self.cmd, "the brush, tool options or layer changed during the stroke"));
         }
-        self.generator.finish(&mut self.pending, &mut self.dual_pending);
-        let dmg = self.run_new_dabs();
-        let shown = dmg.union(&self.tail);
-        if !shown.is_empty() {
-            let work = self.work.read(&self.pre_surf, shown);
-            self.show(shown, &work)?;
-        }
-        self.bounds = self.bounds.union(&dmg);
+        self.finish()?;
         let (surf, _) = crate::channel_cmds::target_surface(std::sync::Arc::make_mut(&mut self.doc), self.id, &self.params)?;
         let surface = surf.clone();
         Ok(crate::brush_cmds::LiveCommit {

@@ -158,6 +158,13 @@ impl LiveMixer {
         Ok(live.core.ctx.brush.size > PREVIEW_SIZE)
     }
 
+    /// [`begin`](Self::begin) without rendering anything yet: the stroke and the params' `points`,
+    /// for a caller that renders them elsewhere (the app pushes them on another thread, so the
+    /// first dab doesn't hold the frame of the press).
+    pub fn start(s: &Session, p: &Value) -> Result<(Self, Vec<StrokePoint>)> {
+        Self::prepare(s, p, true)
+    }
+
     /// Validate the params and capture the document and paint load, without rendering a dab.
     fn prepare(s: &Session, p: &Value, preview_limits: bool) -> Result<(Self, Vec<StrokePoint>)> {
         has_paintable(s).map_err(EngineError::Other)?;

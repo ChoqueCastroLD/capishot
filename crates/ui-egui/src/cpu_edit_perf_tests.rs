@@ -299,6 +299,47 @@ fn edits(path: &str, zoom: f64) -> Option<Vec<(&'static str, f64, f64)>> {
     Some(b.report(&name))
 }
 
+/// The retouching tools drawn across `path` with a large soft tip, on a pixel layer holding the
+/// page (Stamp Visible): a press, twelve moves a frame apart and the release, as the app runs
+/// them (strokes rendered and committed off the window's thread, commands that are jobs as jobs).
+/// `None` when the file isn't here.
+fn retouch(path: &str, zoom: f64) -> Option<Vec<(&'static str, f64, f64)>> {
+    let _gpu = photocraft_testkit::gpu_lock();
+    let mut b = Bench::open(path, zoom)?;
+    let size = b.app().session.active().expect("doc").doc.size;
+    let (w, h) = (size.width as f32, size.height as f32);
+    b.app().run("layer.stampVisible", json!({})).expect("a pixel layer with the page");
+    b.settle();
+    b.app().background_jobs = true;
+    b.app().session.tools.brush.hardness = 0.0;
+    b.app().ui.clone_source = Some([f64::from(w) * 0.6, f64::from(h) * 0.7]);
+    let tools = [
+        ("clone stamp 600 px", Tool::CloneStamp, "paint.cloneStamp", 600.0),
+        ("healing brush 300 px", Tool::Healing, "paint.healingBrush", 300.0),
+        ("spot healing 100 px", Tool::SpotHealing, "paint.spotHealing", 100.0),
+        ("dodge 600 px", Tool::Dodge, "paint.dodge", 600.0),
+        ("burn 600 px", Tool::Burn, "paint.burn", 600.0),
+        ("sponge 600 px", Tool::Sponge, "paint.sponge", 600.0),
+        ("smudge 300 px", Tool::Smudge, "paint.smudge", 300.0),
+        ("blur 300 px", Tool::Blur, "paint.blur", 300.0),
+        ("sharpen 300 px", Tool::Sharpen, "paint.sharpen", 300.0),
+        ("mixer brush 600 px", Tool::MixerBrush, "paint.mixerBrush", 600.0),
+    ];
+    for _ in 0..2 {
+        for (name, tool, cmd, px) in tools {
+            b.app().ui.tool = tool;
+            b.app().session.tools.brush.size = px;
+            let strokes = |b: &mut Bench| b.app().session.journal.iter().filter(|(id, _)| id == cmd).count();
+            let before = strokes(&mut b);
+            b.drag(name, [w * 0.25, h * 0.4], [w * 0.03, h * 0.015], 12);
+            assert_eq!(strokes(&mut b), before + 1, "{name}: the drag committed a stroke");
+        }
+    }
+    b.app().background_jobs = false;
+    let name = std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or(path).to_owned();
+    Some(b.report(&name))
+}
+
 /// `f` on a thread with the stack the app's own thread has (the whole app's frame, unoptimized
 /// in test builds, is deeper than a test thread's 2 MB).
 fn on_the_apps_stack<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
@@ -341,6 +382,19 @@ fn edits_on_his_file_with_a_slow_worker_pool_hold_no_frame() {
     }
     let over: Vec<String> = rows.iter().filter(|(_, _, max)| *max > 33.0).map(|(n, p50, max)| format!("{n}: median {p50:.1} ms, max {max:.1} ms")).collect();
     assert!(over.is_empty(), "a frame's own work over 33 ms with a slow worker pool:\n{}", over.join("\n"));
+}
+
+/// The retouching tools on his file with a large tip: no frame of a stroke renders a dab, so
+/// none is over 33 ms. Timing on a shared server: run alone.
+#[test]
+#[ignore = "a timing bar on a shared machine: run alone with --ignored"]
+fn retouch_strokes_on_his_file_on_the_cpu_canvas_hold_no_frame() {
+    let Some(rows) = on_the_apps_stack(|| retouch(PSD, 0.7)) else { return };
+    if std::env::var_os("CPU_EDIT_PERF_REPORT_ONLY").is_some() {
+        return;
+    }
+    let over: Vec<String> = rows.iter().filter(|(_, _, max)| *max > 33.0).map(|(n, p50, max)| format!("{n}: median {p50:.1} ms, max {max:.1} ms")).collect();
+    assert!(over.is_empty(), "a frame over 33 ms:\n{}", over.join("\n"));
 }
 
 /// The 200-layer page: reported.

@@ -1,9 +1,6 @@
 use super::drag::{Drag, marquee_preview_px, single_line_drag_px};
 use super::selection::finish_selection_drag;
-use super::strokes::{
-    EngineStroke, commit_brush_stroke, feed_live_stroke, live_retouch_command, offer_live_retouch, paint_target, snap_aliased_tip, stroke_params,
-};
-use super::textures::shown_as_document;
+use super::strokes::{commit_brush_stroke, commit_mixer_stroke, commit_retouch_stroke, live_retouch_command, paint_target, rendered_by_command, snap_aliased_tip};
 use super::{PhotocraftApp, Tool, json};
 
 pub(crate) fn finish_gesture(app: &mut PhotocraftApp, d: Drag) {
@@ -28,51 +25,26 @@ pub(crate) fn finish_gesture(app: &mut PhotocraftApp, d: Drag) {
         app.last_stroke_end = Some((st.doc.id, end));
     }
     if d.tool == Tool::MixerBrush {
-        // The release can carry a new endpoint, including moves deferred in this frame.
-        // Feed those samples before offering the already-rendered document for commit.
-        app.drag = Some(d);
-        let deferred = std::mem::replace(&mut app.defer_live_stroke, false);
-        feed_live_stroke(app);
-        app.defer_live_stroke = deferred;
-        let Some(d) = app.drag.take() else { return };
-        let live = app.live_stroke.take();
-        if let Some(l) = live {
-            let (doc, key, steps) = (l.doc, l.key, l.damage.len() as u64);
-            if let EngineStroke::Mixer(mixer) = l.stroke {
-                if l.preview_failed {
-                    let mut p = stroke_params(app, &d, &app.stylus.stroke_points(&d.points));
-                    p["seed"] = json!(mixer.seed);
-                    drop(mixer);
-                    let _ = app.run("paint.mixerBrush", p);
-                    return;
-                }
-                match mixer.prepare_commit(&mut app.session) {
-                    Ok(p) => {
-                        if app.run("paint.mixerBrush", p).is_ok() {
-                            shown_as_document(app, doc, |k| k == 0 || (key..=key + steps).contains(&k));
-                        }
-                    }
-                    Err(e) => {
-                        app.ui.status = e.to_string();
-                        app.ui.status_error = true;
-                    }
-                }
-            }
-        } else {
-            // No preview (a tip above its size): render the whole stroke now.
-            let p = stroke_params(app, &d, &app.stylus.stroke_points(&d.points));
-            let _ = app.run("paint.mixerBrush", p);
-        }
+        return commit_mixer_stroke(app, &d);
+    }
+    // A stroke that draws what its command paints is committed with those pixels, once its job
+    // has rendered all of it.
+    if commit_retouch_stroke(app, &d) {
         return;
     }
-    // A live retouching preview ends here; the commit below replaces it (the Clone Stamp's,
-    // History Brush's and sequential-dab tools' with the pixels it already drew).
-    offer_live_retouch(app, &d);
-    if live_retouch_command(d.tool).is_some() || crate::retouch_ui::dab_params(app, d.tool).is_some() || d.tool == Tool::ColorReplacement {
-        app.live_stroke = None;
-    }
+    // Any other live retouching preview ends here: its command renders the stroke itself.
+    let shown = if live_retouch_command(d.tool).is_some() || crate::retouch_ui::dab_params(app, d.tool).is_some() || d.tool == Tool::ColorReplacement {
+        app.live_stroke.take()
+    } else {
+        None
+    };
+    app.healing_job = None;
     let finished = crate::eraser_ui::finish_stroke(app, d.tool, &d.points) || crate::retouch_ui::finish_stroke(app, d.tool, &d.points, d.modifiers);
     app.session.clear_live_stroke();
+    if let Some(stroke) = shown {
+        let job = app.healing_job;
+        rendered_by_command(app, stroke, &d, job);
+    }
     if finished {
         return;
     }

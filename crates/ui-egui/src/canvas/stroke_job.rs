@@ -1,31 +1,129 @@
-//! A Brush, Pencil or Eraser stroke rendered off the window's thread while it is drawn.
+//! A tool's stroke rendered off the window's thread while it is drawn: the Brush, Pencil and
+//! Eraser, the Mixer Brush, and the retouching tools (Clone Stamp, Healing Brush, History Brush,
+//! Pattern Stamp, Dodge, Burn, Sponge, Blur, Sharpen, Smudge, Color Replacement, Background
+//! Eraser).
 //!
 //! A large soft tip's dab is millions of pixels (a 1200 px soft tip reaches 2075 px across: 4.3
 //! megapixels of coverage, then the same again composited onto the layer), and rendering the
-//! frame's dabs in the frame held it for 70 to 130 ms. The frame now only hands the stroke its
-//! points: a job on the worker pool renders them, every point in the order it was drawn, and
-//! hands back the document with whole dabs. The canvas shows the last document handed back, so
-//! the stroke appears as it lands, never part of a dab, and the window is never held.
+//! frame's dabs in the frame held it for 70 to 130 ms (a 600 px Dodge or a 300 px Sharpen: 160).
+//! The frame now only hands the stroke its points: a job on the worker pool renders them, every
+//! point in the order it was drawn, and hands back the document with whole dabs. The canvas shows
+//! the last document handed back, so the stroke appears as it lands, never part of a dab, and
+//! the window is never held.
 
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender};
 
 use photocraft_doc::Document;
+use photocraft_engine::brush_cmds::mixer_live::LiveMixer;
 use photocraft_engine::brush_cmds::{LiveCommit, LiveStroke};
 use photocraft_engine::paint::StrokePoint;
+use photocraft_engine::retouch_cmds::{LiveDab, LiveRetouch};
 
 use super::DRect;
+
+/// The engine's live stroke of a tool: the Brush, Pencil and Eraser paint dabs; the Clone Stamp,
+/// Healing Brush, History Brush and Pattern Stamp composite their source; Dodge, Burn, Sponge,
+/// Blur, Sharpen, Smudge, Color Replacement and the Background Eraser run their effect dab by
+/// dab; the Mixer Brush carries paint.
+pub(super) enum EngineStroke {
+    Brush(Box<LiveStroke>),
+    Retouch(Box<LiveRetouch>),
+    Dab(Box<LiveDab>),
+    Mixer(Box<LiveMixer>),
+}
+
+/// A stroke that ended, with everything rendered, for its commit.
+pub(super) enum Finished {
+    /// The Brush's, Pencil's or Eraser's pixels (`Session::offer_live_commit`).
+    Brush(Box<LiveCommit>),
+    /// (`Session::offer_live_retouch`.)
+    Retouch(Box<LiveRetouch>),
+    /// With its finishing dabs run (`Session::offer_live_dab`).
+    Dab(Box<LiveDab>),
+    /// (`LiveMixer::prepare_commit`.)
+    Mixer(Box<LiveMixer>),
+}
+
+impl EngineStroke {
+    fn doc(&self) -> &Arc<Document> {
+        match self {
+            Self::Brush(s) => &s.doc,
+            Self::Retouch(s) => &s.doc,
+            Self::Dab(s) => &s.doc,
+            Self::Mixer(s) => &s.doc,
+        }
+    }
+
+    /// The brush engine's strokes can change while the pointer is held still (see
+    /// `LiveStroke::wants_time`); the retouch strokes don't.
+    fn wants_time(&self) -> bool {
+        match self {
+            Self::Brush(s) => s.wants_time(),
+            Self::Mixer(s) => s.wants_time(),
+            Self::Retouch(_) | Self::Dab(_) => false,
+        }
+    }
+
+    fn smoothing_string(&self) -> SmoothingString {
+        match self {
+            Self::Brush(s) => s.smoothing_string(),
+            _ => None,
+        }
+    }
+
+    /// The jitter seed the commit must reuse (the retouching tools' comes from their params).
+    fn seed(&self) -> Option<u64> {
+        match self {
+            Self::Brush(s) => Some(s.seed),
+            Self::Mixer(s) => Some(s.seed),
+            Self::Retouch(_) | Self::Dab(_) => None,
+        }
+    }
+
+    /// Render `pts` after the points before them: what changed. The document then shows the
+    /// stroke as releasing now would leave it (the Brush's smoothing tail up to date).
+    fn step(&mut self, pts: &[StrokePoint]) -> photocraft_engine::Result<DRect> {
+        match self {
+            Self::Brush(s) => {
+                let r = s.push(pts)?;
+                Ok(r.union(&s.finalize_tail()?))
+            }
+            Self::Retouch(s) => s.push(pts),
+            Self::Dab(s) => s.push(pts),
+            Self::Mixer(s) => s.push(pts),
+        }
+    }
+
+    /// The stroke ended: what its commit needs rendered beyond the points (a dab-by-dab stroke's
+    /// finishing dabs), and what that changed.
+    fn end(&mut self) -> photocraft_engine::Result<DRect> {
+        match self {
+            Self::Dab(s) => s.finish(),
+            _ => Ok(DRect::EMPTY),
+        }
+    }
+
+    fn into_finished(self) -> photocraft_engine::Result<Finished> {
+        Ok(match self {
+            Self::Brush(s) => Finished::Brush(Box::new(s.into_commit()?)),
+            Self::Retouch(s) => Finished::Retouch(s),
+            Self::Dab(s) => Finished::Dab(s),
+            Self::Mixer(s) => Finished::Mixer(s),
+        })
+    }
+}
 
 /// How long a frame waits for the points it just handed over (milliseconds). A small tip's dabs
 /// are rendered in a fraction of this, so they show in the frame of the pointer move that drew
 /// them, as when the frame rendered them itself. A frame that finds the points of the frame
-/// before still not rendered doesn't wait at all ([`BrushLive::land`]).
+/// before still not rendered doesn't wait at all ([`StrokeJob::land`]).
 const WAIT_MS: f64 = 2.0;
 
 /// The smoothing string's ends (see `LiveStroke::smoothing_string`).
 type SmoothingString = Option<([f64; 2], [f64; 2])>;
 
-/// How long [`BrushLive::land`] waits for the stroke's job.
+/// How long [`StrokeJob::land`] waits for the stroke's job.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Wait {
     /// Not at all: what is done already.
@@ -41,15 +139,16 @@ enum Landed {
     /// Points rendered: the document with them, complete.
     Step { doc: Arc<Document>, damage: DRect, points: usize, wants_time: bool, string: SmoothingString },
     /// The stroke, finished for its commit.
-    Commit(Box<LiveCommit>),
-    /// The stroke couldn't render its points or finish: its commit renders the stroke itself.
-    Failed,
+    Finished(Finished),
+    /// The stroke couldn't render its points or finish, and why: its commit renders the stroke
+    /// itself.
+    Failed(String),
 }
 
 /// What the frame hands the job.
 struct Queue {
     /// The stroke, while no job is rendering with it.
-    stroke: Option<Box<LiveStroke>>,
+    stroke: Option<EngineStroke>,
     /// Points to render, in the order they were drawn.
     points: Vec<StrokePoint>,
     /// The stroke ended: finish it for its commit once every point is rendered.
@@ -59,14 +158,14 @@ struct Queue {
 }
 
 /// The engine's live stroke, rendered by a job on the worker pool.
-pub(super) struct BrushLive {
+pub(super) struct StrokeJob {
     queue: Arc<wasm_sync::Mutex<Queue>>,
     tx: Sender<Landed>,
     rx: Receiver<Landed>,
     /// The document with the points rendered so far.
     doc: Arc<Document>,
     /// The jitter seed the commit must reuse.
-    pub(super) seed: u64,
+    pub(super) seed: Option<u64>,
     wants_time: bool,
     string: SmoothingString,
     /// Points handed over, and how many of them the document shows.
@@ -76,27 +175,28 @@ pub(super) struct BrushLive {
     mark: usize,
     /// The stroke ended and its commit isn't made yet.
     finishing: bool,
-    failed: bool,
-    commit: Option<Box<LiveCommit>>,
+    /// Why the stroke can't be shown any further.
+    failed: Option<String>,
+    finished: Option<Finished>,
 }
 
-impl BrushLive {
-    pub(super) fn new(stroke: LiveStroke) -> Self {
+impl StrokeJob {
+    pub(super) fn new(stroke: EngineStroke) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
         Self {
-            doc: stroke.doc.clone(),
-            seed: stroke.seed,
+            doc: stroke.doc().clone(),
+            seed: stroke.seed(),
             wants_time: stroke.wants_time(),
             string: stroke.smoothing_string(),
-            queue: Arc::new(wasm_sync::Mutex::new(Queue { stroke: Some(Box::new(stroke)), points: Vec::new(), finish: false, running: false })),
+            queue: Arc::new(wasm_sync::Mutex::new(Queue { stroke: Some(stroke), points: Vec::new(), finish: false, running: false })),
             tx,
             rx,
             sent: 0,
             shown: 0,
             mark: 0,
             finishing: false,
-            failed: false,
-            commit: None,
+            failed: None,
+            finished: None,
         }
     }
 
@@ -121,7 +221,7 @@ impl BrushLive {
     }
 
     /// The stroke ended: once its points are rendered it is finished for its commit
-    /// ([`Self::take_commit`]).
+    /// ([`Self::take_finished`]).
     pub(super) fn finish(&mut self) {
         self.finishing = true;
         self.hand_over(|q| q.finish = true);
@@ -141,17 +241,23 @@ impl BrushLive {
 
     /// Is the job still rendering points or finishing the stroke?
     pub(super) fn in_flight(&self) -> bool {
-        !self.failed && (self.shown < self.sent || self.finishing)
+        self.failed.is_none() && (self.shown < self.sent || self.finishing)
     }
 
     /// The finished stroke, when the job has made it.
-    pub(super) fn take_commit(&mut self) -> Option<Box<LiveCommit>> {
-        self.commit.take()
+    pub(super) fn take_finished(&mut self) -> Option<Finished> {
+        self.finished.take()
+    }
+
+    /// The stroke as the job last left it, while the job isn't rendering with it (tests).
+    #[cfg(test)]
+    pub(super) fn with_stroke<R>(&self, f: impl FnOnce(&EngineStroke) -> R) -> Option<R> {
+        lock(&self.queue).stroke.as_ref().map(f)
     }
 
     /// Take what the job finished: the damage of each step the document now shows more, in
-    /// order. `Err`: the stroke can't be shown (its commit renders it).
-    pub(super) fn land(&mut self, wait: Wait) -> Result<Vec<DRect>, ()> {
+    /// order. `Err`: the stroke can't be shown any further, and why (its commit renders it).
+    pub(super) fn land(&mut self, wait: Wait) -> Result<Vec<DRect>, String> {
         let mut steps = Vec::new();
         while let Ok(landed) = self.rx.try_recv() {
             self.take(landed, &mut steps);
@@ -173,7 +279,10 @@ impl BrushLive {
         if wait == Wait::Frame {
             self.mark = self.sent;
         }
-        if self.failed { Err(()) } else { Ok(steps) }
+        match &self.failed {
+            Some(why) => Err(why.clone()),
+            None => Ok(steps),
+        }
     }
 
     fn take(&mut self, landed: Landed, steps: &mut Vec<DRect>) {
@@ -185,11 +294,11 @@ impl BrushLive {
                 self.string = string;
                 steps.push(damage);
             }
-            Landed::Commit(c) => {
-                self.commit = Some(c);
+            Landed::Finished(f) => {
+                self.finished = Some(f);
                 self.finishing = false;
             }
-            Landed::Failed => self.failed = true,
+            Landed::Failed(why) => self.failed = Some(why),
         }
     }
 }
@@ -237,25 +346,25 @@ fn work(queue: &wasm_sync::Mutex<Queue>, tx: &Sender<Landed>) {
         };
         #[cfg(test)]
         let pace = crate::cpu_canvas::Pace::start();
-        if finish {
-            let commit = stroke.into_commit().map_or(Landed::Failed, |c| Landed::Commit(Box::new(c)));
-            #[cfg(test)]
-            pace.hold();
-            // (The stroke may be dropped by now: nothing to tell.)
-            let _ = tx.send(commit);
-            return;
-        }
-        // The stroke as releasing now would leave it: the smoothing tail up to date in every
-        // document handed back.
-        let step = stroke.push(&points).and_then(|r| Ok(r.union(&stroke.finalize_tail()?)));
+        let step = if finish { stroke.end() } else { stroke.step(&points) };
         #[cfg(test)]
         pace.hold();
-        let Ok(damage) = step else {
-            let _ = tx.send(Landed::Failed);
-            lock(queue).running = false;
-            return;
+        let damage = match step {
+            Ok(damage) => damage,
+            Err(e) => {
+                // (The stroke may be dropped by now: nothing to tell.)
+                let _ = tx.send(Landed::Failed(e.to_string()));
+                lock(queue).running = false;
+                return;
+            }
         };
-        let _ = tx.send(Landed::Step { doc: stroke.doc.clone(), damage, points: points.len(), wants_time: stroke.wants_time(), string: stroke.smoothing_string() });
+        if !finish || !damage.is_empty() {
+            let _ = tx.send(Landed::Step { doc: stroke.doc().clone(), damage, points: points.len(), wants_time: stroke.wants_time(), string: stroke.smoothing_string() });
+        }
+        if finish {
+            let _ = tx.send(stroke.into_finished().map_or_else(|e| Landed::Failed(e.to_string()), Landed::Finished));
+            return;
+        }
         lock(queue).stroke = Some(stroke);
     }
 }
@@ -268,6 +377,12 @@ fn run(pool: bool, f: impl FnOnce() + Send + 'static) {
     } else {
         f();
     }
+}
+
+/// Are strokes rendered on the worker pool (and so is what follows them: the footprint trail of
+/// the tools that show one)?
+pub(crate) fn on_pool() -> bool {
+    wait_ms().is_some()
 }
 
 /// How long a frame waits for the points it handed over (`None`: they are rendered in the frame,

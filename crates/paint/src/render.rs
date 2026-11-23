@@ -113,11 +113,12 @@ fn map_items<T: Sync, R: Send>(items: &[T], pixels: usize, f: impl Fn(&T) -> R +
     items.iter().map(&f).collect()
 }
 thread_local! {
-    /// Dabs this thread rendered into strokes ([`dabs_here`]).
+    /// Dabs this thread rendered, into strokes or as footprints ([`dabs_here`]).
     static DABS_HERE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-/// How many dabs this thread has rendered into strokes so far (monotonic, read as a difference):
+/// How many dabs this thread has rendered so far, into strokes or as the footprints of the tools
+/// that work dab by dab (monotonic, read as a difference):
 /// what a frame rendered on the window's own thread, whatever a stroke's job did meanwhile (the
 /// app's tests).
 pub fn dabs_here() -> u64 {
@@ -489,6 +490,7 @@ impl BrushContext {
 
     /// One dab's dense footprint (for the sequential retouch tools).
     pub fn footprint(&self, d: &Dab, index: usize) -> Footprint {
+        DABS_HERE.with(|c| c.set(c.get() + 1));
         let rect = self.dab_rect(d, false);
         let mut cov = Vec::new();
         self.rasterize(d, false, rect, &mut cov);

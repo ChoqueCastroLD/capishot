@@ -32,6 +32,28 @@ fn target(s: &Session) -> Surface {
     st.doc.layer(st.active_layer.unwrap()).unwrap().surface().unwrap().clone()
 }
 
+/// The app starts the stroke in the frame of the press and renders its points on another
+/// thread: starting renders nothing, and the first point pushed gives the stroke `begin` gives.
+#[test]
+fn a_started_mixer_stroke_renders_nothing_until_its_points_are_pushed() {
+    let s = fixture(PixelFormat::RGBA8);
+    let params = json!({"points":[[40,48]],"seed":47,"size":24,"wet":100,"mix":100,"cleanAfterStroke":false});
+    let id = s.active().unwrap().active_layer.unwrap();
+    let pixels = |live: &LiveMixer| live.doc.layer(id).unwrap().surface().unwrap().read_region(live.doc.bounds());
+    let begun = LiveMixer::begin(&s, &params).unwrap();
+    let (mut live, first) = LiveMixer::start(&s, &params).unwrap();
+    assert_eq!(first.len(), 1);
+    assert!(live.bounds().is_empty(), "starting renders no dab");
+    assert_eq!(pixels(&live), target(&s).read_region(live.doc.bounds()));
+    live.push(&first).unwrap();
+    assert_eq!(live.bounds(), begun.bounds());
+    assert_eq!(pixels(&live), pixels(&begun));
+    // A tip above the preview's size is refused at the start, as `begin` refuses it.
+    let mut big = params.clone();
+    big["size"] = json!(2000);
+    assert!(LiveMixer::start(&s, &big).is_err() && LiveMixer::begin(&s, &big).is_err());
+}
+
 /// All-layer previews match replay and Undo exactly across supported depths without editing source layers.
 #[test]
 fn mixer_live_empty_layer_exact_commit_undo_source_preservation_and_chunking() {

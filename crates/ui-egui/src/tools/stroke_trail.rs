@@ -8,12 +8,31 @@
 //! which is what it removes. It used to be an egui polyline as wide as the brush:
 //! egui tessellates a polyline whose width is much larger than its steps (any zoomed-in drag)
 //! into hard pie wedges fanning out across the canvas (#189), and translucent overlaps doubled up.
+//!
+//! The mask is stamped off the window's thread, as strokes are rendered (`canvas::stroke_job`): a
+//! frame hands the drag's new points over, a job on the worker pool stamps them in order (a large
+//! tip's dabs are megapixels: a 100 px Spot Healing drag on a 1080p page held frames for 50 ms),
+//! and the frame uploads what the job finished. Whoever reads the mask gets all of it stamped.
+
+use std::collections::VecDeque;
+use std::sync::Arc;
 
 use egui::{Color32, ColorImage, Rect, TextureHandle, TextureOptions, pos2};
 use photocraft_paint::{BrushSettings, StrokePoint, StrokeRenderer};
 
 /// Longest side of the mask, in mask pixels (big documents are stamped at a reduced scale).
 const MAX_SIDE: u32 = 1024;
+
+/// One piece of work on the mask, in the order the frames asked for it.
+type Stamp = Box<dyn FnOnce(&mut Mask) + Send>;
+
+/// What the frames handed over and the job hasn't stamped yet.
+#[derive(Default)]
+struct Queue {
+    stamps: VecDeque<Stamp>,
+    /// A job is at work (it takes what arrives meanwhile before it ends).
+    running: bool,
+}
 
 /// A drag's footprint mask.
 pub struct Trail {
@@ -23,14 +42,32 @@ pub struct Trail {
     k: f32,
     w: usize,
     h: usize,
+    /// The mask, shared with the job that stamps it. Locked after `queue` when both are.
+    mask: Arc<wasm_sync::Mutex<Mask>>,
+    queue: Arc<wasm_sync::Mutex<Queue>>,
+    /// Drag points handed over so far.
+    fed: usize,
+    /// The trail shows the stroke's dabs, whose brush was handed over ([`Self::feed_dabs`]).
+    dabs: bool,
+    tex: Option<TextureHandle>,
+}
+
+/// The mask's pixels and the stroke that stamps them.
+struct Mask {
+    /// Document size the mask covers.
+    doc: [u32; 2],
+    k: f32,
+    w: usize,
+    h: usize,
     /// Coverage 0..=255 per mask pixel.
     cov: Vec<u8>,
-    /// Drag points stamped so far.
-    fed: usize,
-    /// Mask pixels changed since the last upload (x0, y0, x1, y1), if any.
+    /// Where the last capsule ended, in mask pixels ([`Trail::feed`]).
+    last: Option<[f64; 2]>,
+    /// Mask pixels changed since the last upload was made (x0, y0, x1, y1), if any.
     dirty: Option<[usize; 4]>,
-    tex: Option<TextureHandle>,
-    /// The stroke's dabs, when the trail shows their coverage ([`Self::feed_dabs`]).
+    /// What the texture hasn't got yet: a rectangle of the mask and its image.
+    upload: Option<([usize; 4], ColorImage)>,
+    /// The stroke's dabs, when the trail shows their coverage ([`Trail::feed_dabs`]).
     dabs: Option<Dabs>,
     /// Coverage earlier strokes in the same mask left (the Remove Tool's waiting strokes); empty
     /// when there are none. A dab stroke's restamp keeps the larger of the two.
@@ -46,16 +83,76 @@ struct Dabs {
     tail: photocraft_geom::Rect,
 }
 
+fn lock<T>(m: &wasm_sync::Mutex<T>) -> impl std::ops::DerefMut<Target = T> + '_ {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The job: stamp what the frames handed over, in order, until nothing is left.
+fn work(queue: &wasm_sync::Mutex<Queue>, mask: &wasm_sync::Mutex<Mask>) {
+    loop {
+        // (The mask is taken before the queue is let go: whoever finds the queue empty and then
+        // takes the mask sees every stamp done.)
+        let mut q = lock(queue);
+        let Some(stamp) = q.stamps.pop_front() else {
+            q.running = false;
+            return;
+        };
+        let mut m = lock(mask);
+        drop(q);
+        stamp(&mut m);
+        m.make_upload();
+    }
+}
+
+/// The points of a drag that can be stamped.
+fn stroke_points(points: &[[f64; 3]]) -> Vec<StrokePoint> {
+    points.iter().filter(|p| p.iter().all(|v| v.is_finite()) && p[0].abs() < 1e7 && p[1].abs() < 1e7).map(|p| StrokePoint::new(p[0], p[1], p[2] as f32)).collect()
+}
+
 impl Trail {
     pub fn new(doc: [u32; 2]) -> Self {
-        let k = doc[0].max(doc[1]).div_ceil(MAX_SIDE).max(1);
-        let (w, h) = (doc[0].div_ceil(k).max(1) as usize, doc[1].div_ceil(k).max(1) as usize);
-        Self { doc, k: k as f32, w, h, cov: vec![0; w * h], fed: 0, dirty: None, tex: None, dabs: None, base: Vec::new() }
+        let mask = Mask::new(doc);
+        Self { doc, k: mask.k, w: mask.w, h: mask.h, mask: Arc::new(wasm_sync::Mutex::new(mask)), queue: Arc::default(), fed: 0, dabs: false, tex: None }
+    }
+
+    /// Hand `stamp` over to be done after the stamps before it: by a job on the worker pool, or
+    /// in the call where strokes are rendered in the frame (`canvas::strokes_on_pool`).
+    fn stamp(&mut self, stamp: impl FnOnce(&mut Mask) + Send + 'static) {
+        let start = {
+            let mut q = lock(&self.queue);
+            q.stamps.push_back(Box::new(stamp));
+            !std::mem::replace(&mut q.running, true)
+        };
+        if !start {
+            return;
+        }
+        let (queue, mask) = (self.queue.clone(), self.mask.clone());
+        if crate::canvas::strokes_on_pool() {
+            crate::cpu_canvas::spawn(move || work(&queue, &mask));
+        } else {
+            work(&queue, &mask);
+        }
+    }
+
+    /// The mask with everything handed over stamped: what the job hasn't taken yet is stamped
+    /// here, after what it is stamping now.
+    fn settled(&self) -> impl std::ops::Deref<Target = Mask> + '_ {
+        loop {
+            let mut q = lock(&self.queue);
+            let Some(stamp) = q.stamps.pop_front() else {
+                let m = lock(&self.mask);
+                return m;
+            };
+            let mut m = lock(&self.mask);
+            drop(q);
+            stamp(&mut m);
+            m.make_upload();
+        }
     }
 
     /// Coverage at a mask pixel (tests).
     pub fn coverage(&self, x: usize, y: usize) -> u8 {
-        if x < self.w && y < self.h { self.cov.get(y * self.w + x).copied().unwrap_or(0) } else { 0 }
+        self.settled().coverage(x, y)
     }
 
     /// Document pixels per mask pixel.
@@ -66,18 +163,9 @@ impl Trail {
     /// Stamp the drag points not seen yet: round footprints of `diameter` document pixels joined
     /// into a capsule per segment (coverage is the max, so overlaps don't add up).
     pub fn feed(&mut self, points: &[[f64; 3]], diameter: f32) {
-        if self.fed >= points.len() {
-            return;
-        }
-        let k = f64::from(self.k);
-        let r = (f64::from(diameter.max(1.0)) / 2.0) / k;
-        let mask = |p: &[f64; 3]| [p[0] / k, p[1] / k];
-        for i in self.fed..points.len() {
-            let Some(b) = points.get(i).map(mask) else { break };
-            let a = i.checked_sub(1).and_then(|j| points.get(j)).map_or(b, mask);
-            self.capsule(a, b, r);
-        }
+        let Some(new) = points.get(self.fed..).filter(|new| !new.is_empty()).map(<[_]>::to_vec) else { return };
         self.fed = points.len();
+        self.stamp(move |m| m.capsules(&new, diameter));
     }
 
     /// Show the coverage the brush's own dabs leave along the drag, as the stroke commit renders
@@ -98,9 +186,11 @@ impl Trail {
     /// [`Self::feed_reach`] for a whole new drag into the same mask (the Remove Tool's waiting
     /// strokes, #6555): the earlier strokes' tint stays under it.
     pub fn feed_stroke_reach(&mut self, points: &[[f64; 3]], brush: impl FnOnce() -> BrushSettings) {
-        self.base.clone_from(&self.cov);
-        self.dabs = None;
-        self.fed = 0;
+        self.stamp(|m| {
+            m.base.clone_from(&m.cov);
+            m.dabs = None;
+        });
+        (self.dabs, self.fed) = (false, 0);
         self.feed_reach(points, brush);
     }
 
@@ -108,8 +198,81 @@ impl Trail {
     /// mask pixel the brush reaches is cleared, as the removal leaves it out (`paint.remove`'s
     /// `erase` strokes).
     pub fn erase_stroke_reach(&mut self, points: &[[f64; 3]], brush: impl FnOnce() -> BrushSettings) {
-        let mut cut = Trail::new(self.doc);
-        cut.feed_reach(points, brush);
+        let (points, brush) = (stroke_points(points), brush());
+        self.stamp(move |m| m.erase(&points, brush));
+        (self.dabs, self.fed) = (false, 0);
+    }
+
+    /// Nothing is tinted.
+    pub fn is_empty(&self) -> bool {
+        self.settled().cov.iter().all(|c| *c == 0)
+    }
+
+    fn feed_dabs_with(&mut self, points: &[[f64; 3]], brush: impl FnOnce() -> BrushSettings, reach: bool) {
+        if self.dabs && self.fed >= points.len() {
+            return;
+        }
+        let brush = (!std::mem::replace(&mut self.dabs, true)).then(brush);
+        let new = stroke_points(points.get(self.fed..).unwrap_or(&[]));
+        self.fed = points.len();
+        self.stamp(move |m| m.stamp_dabs(&new, brush, reach));
+    }
+
+    /// Upload what the job stamped and draw the trail over the document (`doc_rect` = the
+    /// document's screen rectangle, `flip` = mirrored view), tinted `color` where fully covered.
+    /// A frame that finds the job stamping draws the trail as it was and comes back.
+    pub fn draw(&mut self, painter: &egui::Painter, doc_rect: Rect, flip: bool, color: Color32) {
+        let opts = TextureOptions::LINEAR;
+        let upload = self.mask.try_lock().ok().and_then(|mut m| m.upload.take());
+        let tex = self.tex.get_or_insert_with(|| painter.ctx().load_texture("stroke-trail", ColorImage::filled([self.w, self.h], Color32::TRANSPARENT), opts));
+        if let Some((r, img)) = upload {
+            tex.set_partial([r[0], r[1]], img, opts);
+        }
+        if lock(&self.queue).running {
+            painter.ctx().request_repaint();
+        }
+        // The mask's last column/row may reach past the document (sizes rounded up).
+        let (u, v) = (self.doc[0] as f32 / (self.w as f32 * self.k), self.doc[1] as f32 / (self.h as f32 * self.k));
+        let uv = if flip { Rect::from_min_max(pos2(u, 0.0), pos2(0.0, v)) } else { Rect::from_min_max(pos2(0.0, 0.0), pos2(u, v)) };
+        // The texture is the coverage alone (white, premultiplied): the tint multiplies it, so a
+        // premultiplied `color` shows in its own hue at its own opacity.
+        painter.image(tex.id(), doc_rect, uv, color);
+    }
+}
+
+impl Mask {
+    fn new(doc: [u32; 2]) -> Self {
+        let k = doc[0].max(doc[1]).div_ceil(MAX_SIDE).max(1);
+        let (w, h) = (doc[0].div_ceil(k).max(1) as usize, doc[1].div_ceil(k).max(1) as usize);
+        Self { doc, k: k as f32, w, h, cov: vec![0; w * h], last: None, dirty: None, upload: None, dabs: None, base: Vec::new() }
+    }
+
+    fn coverage(&self, x: usize, y: usize) -> u8 {
+        if x < self.w && y < self.h { self.cov.get(y * self.w + x).copied().unwrap_or(0) } else { 0 }
+    }
+
+    /// What changed since the last upload was made joins it: one image of the mask over both.
+    fn make_upload(&mut self) {
+        let Some(mut r) = self.dirty.take() else { return };
+        if let Some((u, _)) = self.upload.take() {
+            r = [r[0].min(u[0]), r[1].min(u[1]), r[2].max(u[2]), r[3].max(u[3])];
+        }
+        self.upload = Some((r, self.image(r)));
+    }
+
+    fn capsules(&mut self, points: &[[f64; 3]], diameter: f32) {
+        let k = f64::from(self.k);
+        let r = (f64::from(diameter.max(1.0)) / 2.0) / k;
+        for p in points {
+            let b = [p[0] / k, p[1] / k];
+            let a = self.last.replace(b).unwrap_or(b);
+            self.capsule(a, b, r);
+        }
+    }
+
+    fn erase(&mut self, points: &[StrokePoint], brush: BrushSettings) {
+        let mut cut = Mask::new(self.doc);
+        cut.stamp_dabs(points, Some(brush), true);
         let Some(r) = cut.dirty else { return };
         for (v, c) in self.cov.iter_mut().zip(&cut.cov) {
             if *c > 0 {
@@ -118,31 +281,15 @@ impl Trail {
         }
         self.base.clear();
         self.dabs = None;
-        self.fed = 0;
         let d = self.dirty.get_or_insert(r);
         *d = [d[0].min(r[0]), d[1].min(r[1]), d[2].max(r[2]), d[3].max(r[3])];
     }
 
-    /// Nothing is tinted.
-    pub fn is_empty(&self) -> bool {
-        self.cov.iter().all(|c| *c == 0)
-    }
-
-    fn feed_dabs_with(&mut self, points: &[[f64; 3]], brush: impl FnOnce() -> BrushSettings, reach: bool) {
-        if self.dabs.is_some() && self.fed >= points.len() {
-            return;
-        }
-        let mut dabs =
-            self.dabs.take().unwrap_or_else(|| Dabs { renderer: StrokeRenderer::new(&brush(), None, 1.0), reach, tail: photocraft_geom::Rect::EMPTY });
-        let new: Vec<StrokePoint> = points
-            .get(self.fed..)
-            .unwrap_or(&[])
-            .iter()
-            .filter(|p| p.iter().all(|v| v.is_finite()) && p[0].abs() < 1e7 && p[1].abs() < 1e7)
-            .map(|p| StrokePoint::new(p[0], p[1], p[2] as f32))
-            .collect();
-        self.fed = points.len();
-        dabs.renderer.push(&new);
+    /// Stamp `new` points of the stroke of dabs; `brush` starts it.
+    fn stamp_dabs(&mut self, new: &[StrokePoint], brush: Option<BrushSettings>, reach: bool) {
+        let started = brush.map(|b| Dabs { renderer: StrokeRenderer::new(&b, None, 1.0), reach, tail: photocraft_geom::Rect::EMPTY });
+        let Some(mut dabs) = self.dabs.take().or(started) else { return };
+        dabs.renderer.push(new);
         let mut changed = dabs.renderer.take_dirty_rect().union(&dabs.tail);
         let tail = dabs.renderer.tail_preview().map(|mut t| (t.take_dirty_rect(), t));
         dabs.tail = tail.as_ref().map_or(photocraft_geom::Rect::EMPTY, |(r, _)| *r);
@@ -248,39 +395,16 @@ impl Trail {
         *d = [d[0].min(x0), d[1].min(y0), d[2].max(x1), d[3].max(y1)];
     }
 
-    fn image(&self, r: [usize; 4], color: Color32) -> ColorImage {
+    /// The mask over `r` as the texture holds it: white at the coverage, premultiplied.
+    fn image(&self, r: [usize; 4]) -> ColorImage {
         let [x0, y0, x1, y1] = r;
         let mut px = Vec::with_capacity((x1 - x0) * (y1 - y0));
-        // `color` is premultiplied (a `gamma_multiply`'d tint): its own hue, not a darker one.
-        let rgb = color.to_srgba_unmultiplied();
         for y in y0..y1 {
             for x in x0..x1 {
-                let c = self.coverage(x, y);
-                px.push(Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], ((u16::from(c) * u16::from(rgb[3])) / 255) as u8));
+                px.push(Color32::from_white_alpha(self.coverage(x, y)));
             }
         }
         ColorImage::new([x1 - x0, y1 - y0], px)
-    }
-
-    /// Upload what changed and draw the trail over the document (`doc_rect` = the document's
-    /// screen rectangle, `flip` = mirrored view), tinted `color` where fully covered.
-    pub fn draw(&mut self, painter: &egui::Painter, doc_rect: Rect, flip: bool, color: Color32) {
-        let opts = TextureOptions::LINEAR;
-        let dirty = self.dirty.take();
-        if self.tex.is_none() {
-            let img = self.image([0, 0, self.w, self.h], color);
-            self.tex = Some(painter.ctx().load_texture("stroke-trail", img, opts));
-        } else if let Some(r) = dirty {
-            let img = self.image(r, color);
-            if let Some(t) = self.tex.as_mut() {
-                t.set_partial([r[0], r[1]], img, opts);
-            }
-        }
-        let Some(t) = &self.tex else { return };
-        // The mask's last column/row may reach past the document (sizes rounded up).
-        let (u, v) = (self.doc[0] as f32 / (self.w as f32 * self.k), self.doc[1] as f32 / (self.h as f32 * self.k));
-        let uv = if flip { Rect::from_min_max(pos2(u, 0.0), pos2(0.0, v)) } else { Rect::from_min_max(pos2(0.0, 0.0), pos2(u, v)) };
-        painter.image(t.id(), doc_rect, uv, Color32::WHITE);
     }
 }
 
@@ -288,19 +412,41 @@ impl Trail {
 mod tests {
     use super::*;
 
-    /// A premultiplied tint (`gamma_multiply`) shows in its own hue at its own opacity: Remove with
-    /// AI's 45 % red came out a dark, nearly black red.
+    /// A premultiplied tint (`gamma_multiply`) shows in its own hue at its own opacity (Remove with
+    /// AI's 45 % red came out a dark, nearly black red): the texture is the coverage alone, opaque
+    /// white on the path, and the tint the trail is drawn with multiplies it.
     #[test]
-    fn a_premultiplied_tint_keeps_its_hue() {
+    fn the_texture_is_the_coverage_alone_for_the_tint_to_multiply() {
         let mut t = Trail::new([100, 100]);
         t.feed(&[[50.0, 50.0, 1.0], [60.0, 50.0, 1.0]], 20.0);
-        let red = Color32::from_rgb(230, 60, 50).gamma_multiply(0.45);
-        let img = t.image([0, 0, t.w, t.h], red);
-        let k = f64::from(t.k);
-        let (x, y) = ((55.0 / k) as usize, (50.0 / k) as usize);
-        let px = img.pixels[y * t.w + x].to_srgba_unmultiplied();
-        assert!(px[0] >= 225 && px[1] <= 65 && px[2] <= 55, "the red itself: {px:?}");
-        assert!((105..=125).contains(&px[3]), "at about 45 %: {px:?}");
+        let m = t.settled();
+        let img = m.image([0, 0, m.w, m.h]);
+        let k = f64::from(m.k);
+        let at = |x: f64, y: f64| img.pixels[(y / k) as usize * m.w + (x / k) as usize];
+        assert_eq!(at(55.0, 50.0), Color32::WHITE, "on the path: the tint itself");
+        assert_eq!(at(55.0, 80.0), Color32::TRANSPARENT, "off it: nothing");
+        assert_eq!(m.upload.as_ref().map(|(r, i)| ((r[2] - r[0]), (r[3] - r[1])) == (i.size[0], i.size[1])), Some(true), "what changed waits for the texture");
+    }
+
+    /// Stamps are done in the order the frames handed them over, whoever does them: the job on
+    /// the worker pool, or the reader that needs the mask whole.
+    #[test]
+    fn stamps_handed_over_while_the_job_works_are_done_in_order() {
+        let pts: Vec<[f64; 3]> = (0..40).map(|i| [20.0 + f64::from(i) * 4.0, 50.0, 1.0]).collect();
+        let brush = BrushSettings { size: 30.0, hardness: 0.0, ..Default::default() };
+        let mut whole = Trail::new([200, 100]);
+        whole.feed_dabs(&pts, || brush.clone());
+        crate::canvas::set_strokes_off_frame(true);
+        let mut t = Trail::new([200, 100]);
+        for n in 1..=pts.len() {
+            t.feed_dabs(&pts[..n], || brush.clone());
+        }
+        crate::canvas::set_strokes_off_frame(false);
+        for y in 0..100 {
+            for x in 0..200 {
+                assert_eq!(t.coverage(x, y), whole.coverage(x, y), "({x}, {y})");
+            }
+        }
     }
 
     #[test]

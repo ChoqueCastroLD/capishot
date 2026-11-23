@@ -165,16 +165,16 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> (std::sync::Ar
     crate::transform_tool::let_go(app);
     crate::transform_tool::follow_edits(app);
     crate::transform_tool::refresh_vector_type(app);
-    // The Brush's points are rendered by its job: the frame shows what has landed, waiting its
-    // share for a stroke that keeps up (`brush_live`).
+    // The stroke's points are rendered by its job: the frame shows what has landed, waiting its
+    // share for a stroke that keeps up (`stroke_job`).
     if live_stroke(app, idx).is_some()
-        && let Some(l) = app.live_stroke.as_mut().filter(|_| app.drag.is_some())
+        && let Some(l) = app.live_stroke.as_mut().filter(|l| app.drag.is_some() && !l.preview_failed)
     {
         let started = crate::gpu_canvas::now_ms();
-        let landed = l.land(super::brush_live::Wait::Frame);
+        let landed = l.land(super::stroke_job::Wait::Frame);
         app.perf.stage.stroke_ms += crate::gpu_canvas::now_ms() - started;
-        if landed.is_err() {
-            app.live_stroke = None;
+        if let Err(why) = landed {
+            super::strokes::preview_failed(app, why);
         }
     }
     let st = &app.session.documents()[idx];

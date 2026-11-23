@@ -1,7 +1,6 @@
 use super::drag::Drag;
-use super::textures::shown_as_document;
 use super::view_xform::ViewXform;
-use super::brush_live::{BrushLive, Wait};
+use super::stroke_job::{EngineStroke, Finished, StrokeJob, Wait};
 use super::{Color32, DRect, PhotocraftApp, Pos2, Stroke, Tool, json};
 
 pub(crate) use crate::clone_overlay::ClonePreviewCache;
@@ -12,75 +11,14 @@ pub(super) fn draw_clone_preview(app: &mut PhotocraftApp, painter: &egui::Painte
     crate::clone_overlay::draw(app, painter, xf, at, output);
 }
 
-/// The engine's live stroke of a tool: the Brush, Pencil and Eraser paint dabs (off the window's
-/// thread: `BrushLive`); the Clone Stamp, Healing Brush and History Brush composite their source.
-pub(super) enum EngineStroke {
-    Brush(BrushLive),
-    Retouch(Box<photocraft_engine::retouch_cmds::LiveRetouch>),
-    Dab(Box<photocraft_engine::retouch_cmds::LiveDab>),
-    Mixer(Box<photocraft_engine::brush_cmds::mixer_live::LiveMixer>),
-}
-
-impl EngineStroke {
-    /// The brush engine's strokes can change while the pointer is held still (see
-    /// `LiveStroke::wants_time`); the retouch strokes don't.
-    pub(super) fn wants_time(&self) -> bool {
-        match self {
-            EngineStroke::Brush(l) => l.wants_time(),
-            EngineStroke::Mixer(l) => l.wants_time(),
-            EngineStroke::Retouch(_) | EngineStroke::Dab(_) => false,
-        }
-    }
-
-    pub(super) fn doc(&self) -> &std::sync::Arc<photocraft_doc::Document> {
-        match self {
-            Self::Brush(s) => s.doc(),
-            Self::Retouch(s) => &s.doc,
-            Self::Dab(s) => &s.doc,
-            Self::Mixer(s) => &s.doc,
-        }
-    }
-    /// What the stroke drew when it began: its first step (`None` for the Brush, whose first
-    /// points land as a step like the rest).
-    fn begun(&self) -> Option<DRect> {
-        match self {
-            Self::Brush(_) => None,
-            Self::Retouch(s) => Some(s.bounds()),
-            Self::Dab(s) => Some(s.bounds()),
-            Self::Mixer(s) => Some(s.bounds()),
-        }
-    }
-    /// Render `pts` in the call: what changed. `None` for the Brush, whose points are handed
-    /// over and land later (`LiveStroke::land`).
-    fn push(&mut self, pts: &[photocraft_engine::paint::StrokePoint]) -> photocraft_engine::Result<Option<DRect>> {
-        Ok(Some(match self {
-            Self::Brush(s) => {
-                s.push(pts);
-                return Ok(None);
-            }
-            Self::Retouch(s) => s.push(pts)?,
-            Self::Mixer(s) => s.push(pts)?,
-            // The sequential-dab commands take position and pressure only (their `points`), so
-            // the live stroke runs exactly the dabs its commit does and can stand in for it.
-            Self::Dab(s) => s.push(&pts.iter().map(|q| photocraft_engine::paint::StrokePoint::new(q.x, q.y, q.pressure)).collect::<Vec<_>>())?,
-        }))
-    }
-    /// The jitter seed the commit must reuse (the Clone Stamp's comes from the session brush).
-    fn seed(&self) -> Option<u64> {
-        match self {
-            Self::Brush(s) => Some(s.seed),
-            Self::Mixer(s) => Some(s.seed),
-            Self::Retouch(_) => None,
-            Self::Dab(_) => None,
-        }
-    }
-}
-
 /// A stroke shown while it is drawn: the engine renders the real result onto a copy of the
-/// document, and the canvas redraws only what each step changed.
+/// document (off the window's thread: `StrokeJob`), and the canvas redraws only what each step
+/// changed.
 pub(crate) struct LiveStroke {
+    /// The stroke can't be shown any further (the Mixer Brush's keeps its last preview; its
+    /// release replays the input without the preview's tile budget).
     pub(super) preview_failed: bool,
-    pub(super) stroke: EngineStroke,
+    pub(super) stroke: StrokeJob,
     pub(super) doc: photocraft_doc::DocId,
     revision: u64,
     /// Preview key of the stroke; step `n` displays as `key + n`.
@@ -102,38 +40,52 @@ impl LiveStroke {
         Some(self.damage.get(seen..)?.iter().fold(DRect::EMPTY, |a, r| a.union(r)))
     }
 
-    /// Render `pts`: in the call, or (the Brush) handed over to its job.
-    fn push(&mut self, pts: &[photocraft_engine::paint::StrokePoint]) -> photocraft_engine::Result<()> {
-        match self.stroke.push(pts)? {
-            Some(r) => self.damage.push(r),
-            // (Rendered in the call where strokes are: the stroke shows it at once.)
-            None => self.land(Wait::No).map_err(|()| photocraft_engine::EngineError::Other("the live stroke can't render its points".into()))?,
-        }
+    /// Hand `pts` over to the stroke's job, and take what it has rendered already (all of it
+    /// where strokes are rendered in the call).
+    fn push(&mut self, pts: &[photocraft_engine::paint::StrokePoint]) -> Result<(), String> {
+        self.stroke.push(pts);
+        self.land(Wait::No)
+    }
+
+    /// The steps the stroke's job finished become steps of the stroke shown. `Err`: the stroke
+    /// can't be shown any further, and why (its commit renders it).
+    pub(super) fn land(&mut self, wait: Wait) -> Result<(), String> {
+        self.damage.extend(self.stroke.land(wait)?);
         Ok(())
     }
 
-    /// The steps the Brush's job finished become steps of the stroke shown. `Err`: the stroke
-    /// can't be shown (its commit renders it).
-    pub(super) fn land(&mut self, wait: Wait) -> Result<(), ()> {
-        if let EngineStroke::Brush(b) = &mut self.stroke {
-            self.damage.extend(b.land(wait)?);
-        }
-        Ok(())
-    }
-
-    /// Is the Brush's job still rendering points of the stroke?
+    /// Is the stroke's job still rendering points of the stroke?
     pub(super) fn in_flight(&self) -> bool {
-        matches!(&self.stroke, EngineStroke::Brush(b) if b.in_flight())
+        self.stroke.in_flight()
+    }
+
+    /// Everything the stroke has drawn so far.
+    fn drawn(&self) -> DRect {
+        self.damage.iter().fold(DRect::EMPTY, |a, r| a.union(r))
     }
 }
 
-/// A Brush, Pencil or Eraser stroke that was released while its job was still rendering: the
-/// canvas keeps showing it as it lands, and it is committed when it is whole (`land_stroke`).
+/// How a released stroke is committed.
+enum Commit {
+    /// The Brush's, Pencil's or Eraser's command with its params, taking the pixels of the job.
+    Brush { cmd: &'static str, params: serde_json::Value },
+    /// A retouching tool's command with its params (`retouch_ui::commit`), taking the pixels of
+    /// the job.
+    Retouch { tool: Tool, cmd: &'static str, params: serde_json::Value },
+    /// `paint.mixerBrush`, taking the pixels of the job; `params` replay the input where the
+    /// preview stopped (its tile budget).
+    Mixer { params: serde_json::Value },
+    /// Its command renders the stroke itself as a background job (the Healing Brush blends the
+    /// whole stroke on release): the canvas shows the stroke as it was drawn until that lands.
+    Job(photocraft_engine::jobs::JobId),
+}
+
+/// A stroke that was released while its job was still rendering, or whose command is a
+/// background job: the canvas keeps showing it as it lands, and it is committed when it is
+/// whole (`land_stroke`).
 pub(crate) struct LandingStroke {
     stroke: LiveStroke,
-    /// The command that commits it and its params.
-    cmd: &'static str,
-    params: serde_json::Value,
+    commit: Commit,
 }
 
 /// A live stroke dropped without committing: document `doc` at `revision` is what it was before
@@ -151,7 +103,7 @@ pub(crate) struct DroppedStroke {
 
 impl DroppedStroke {
     pub(crate) fn of(l: &LiveStroke) -> Self {
-        Self { doc: l.doc, revision: l.revision, key: l.key, steps: l.damage.len() as u64, drawn: l.damage.iter().fold(DRect::EMPTY, |a, r| a.union(r)) }
+        Self { doc: l.doc, revision: l.revision, key: l.key, steps: l.damage.len() as u64, drawn: l.drawn() }
     }
 
     /// What a cache that showed raw preview `key` of the stroke misses now (`None`: it showed
@@ -269,38 +221,44 @@ pub(crate) fn stroke_command(app: &PhotocraftApp, tool: Tool) -> &'static str {
 }
 
 pub(super) fn begin_live_stroke(app: &PhotocraftApp) -> Option<LiveStroke> {
+    use photocraft_engine::retouch_cmds::{LiveDab, LiveRetouch};
     static STROKES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let st = app.session.active()?;
     let d = app.drag.as_ref()?;
-    let mut first = Vec::new();
-    let stroke = if d.tool == Tool::MixerBrush {
+    let s = &app.session;
+    let dab = |(l, pts): (LiveDab, _)| (EngineStroke::Dab(Box::new(l)), pts);
+    let retouch = |(l, pts): (LiveRetouch, _)| (EngineStroke::Retouch(Box::new(l)), pts);
+    // The stroke and the points it starts with: none is rendered here, the press never waits
+    // for a dab.
+    let (stroke, first) = if d.tool == Tool::MixerBrush {
         let points = app.stylus.stroke_points(&d.points);
         let p = stroke_params(app, d, points.get(..1)?);
-        EngineStroke::Mixer(Box::new(photocraft_engine::brush_cmds::mixer_live::LiveMixer::begin(&app.session, &p).ok()?))
+        let (l, pts) = photocraft_engine::brush_cmds::mixer_live::LiveMixer::start(s, &p).ok()?;
+        (EngineStroke::Mixer(Box::new(l)), pts)
     } else if d.tool == Tool::ColorReplacement {
         // The params `retouch_ui::finish_stroke` commits.
         let mut p = crate::retouch_ui::color_replacement_params(app);
         p["points"] = json!(d.points);
-        EngineStroke::Dab(Box::new(photocraft_engine::brush_cmds::live_color_replacement(&app.session, &p).ok()?))
+        dab(photocraft_engine::brush_cmds::live_color_replacement(s, &p).ok()?)
     } else if let Some((cmd, mut p)) = crate::retouch_ui::dab_params(app, d.tool) {
         // The params `retouch_ui::finish_stroke` commits; Sample All Layers isn't previewed.
         p["points"] = json!(d.points);
         p["target"] = paint_target(app);
-        EngineStroke::Dab(Box::new(photocraft_engine::retouch_cmds::LiveDab::begin(&app.session, cmd, &p).ok()?))
+        dab(LiveDab::start(s, cmd, &p).ok()?)
     } else if d.tool == Tool::PatternStamp {
         // The params `retouch_ui::finish_stroke` commits.
         let mut p = crate::retouch_ui::pattern_stamp_params(app, &d.points);
         p["points"] = json!(d.points);
         p["target"] = paint_target(app);
         if app.ui.tool_options.pattern_stamp_impressionist {
-            EngineStroke::Dab(Box::new(photocraft_engine::retouch_cmds::live_pattern_impressionist(&app.session, &p).ok()?))
+            dab(photocraft_engine::retouch_cmds::live_pattern_impressionist(s, &p).ok()?)
         } else {
-            EngineStroke::Retouch(Box::new(photocraft_engine::retouch_cmds::LiveRetouch::begin(&app.session, "paint.patternStamp", &p).ok()?))
+            retouch(LiveRetouch::start(s, "paint.patternStamp", &p).ok()?)
         }
     } else if d.tool == Tool::BackgroundEraser {
         // The params `eraser_ui::finish_stroke` commits (layer pixels only).
         let p = crate::eraser_ui::background_eraser_params(app, &d.points);
-        EngineStroke::Dab(Box::new(photocraft_engine::eraser_cmds::live_background_eraser(&app.session, &p).ok()?))
+        dab(photocraft_engine::eraser_cmds::live_background_eraser(s, &p).ok()?)
     } else if let Some(cmd) = live_retouch_command(d.tool).or_else(|| crate::eraser_ui::erases_to_history(app, d.tool).then_some("paint.historyBrush")) {
         // The params `retouch_ui::finish_stroke` (or `eraser_ui::finish_stroke`) commits.
         let mut p = match d.tool {
@@ -310,25 +268,23 @@ pub(super) fn begin_live_stroke(app: &PhotocraftApp) -> Option<LiveStroke> {
         };
         p["points"] = json!(d.points);
         p["target"] = paint_target(app);
-        EngineStroke::Retouch(Box::new(photocraft_engine::retouch_cmds::LiveRetouch::begin(&app.session, cmd, &p).ok()?))
+        retouch(LiveRetouch::start(s, cmd, &p).ok()?)
     } else {
         let p = stroke_params(app, d, &app.stylus.stroke_points(&d.points));
-        let (stroke, pts) = photocraft_engine::brush_cmds::LiveStroke::start_with(&app.session, stroke_command(app, d.tool), &p).ok()?;
-        first = pts;
-        EngineStroke::Brush(BrushLive::new(stroke))
+        let (l, pts) = photocraft_engine::brush_cmds::LiveStroke::start_with(s, stroke_command(app, d.tool), &p).ok()?;
+        (EngineStroke::Brush(Box::new(l)), pts)
     };
     let n = STROKES.fetch_add(1, std::sync::atomic::Ordering::Relaxed) & 0xff_ffff;
-    let damage = Vec::from_iter(stroke.begun());
     let mut live = LiveStroke {
-        stroke,
+        stroke: StrokeJob::new(stroke),
         doc: st.doc.id,
         revision: st.revision,
         key: (1 << 44) | (n << 20),
-        damage,
+        damage: Vec::new(),
         fed: if d.tool == Tool::MixerBrush { 1 } else { d.points.len() },
         preview_failed: false,
     };
-    // The Brush's first dab is rendered by its job, like the rest: the press never waits for it.
+    // The first dab is rendered by the stroke's job, like the rest.
     if !first.is_empty() {
         live.push(&first).ok()?;
     }
@@ -350,22 +306,13 @@ pub(crate) fn cancel_mixer_on_context_change(app: &mut PhotocraftApp, ctx: &egui
     false
 }
 
-/// Render the drag points the live stroke hasn't seen yet, with the pen pressure, tilt and
-/// rotation the commit's `paint.stroke` gets for them.
-pub(super) fn feed_live_stroke(app: &mut PhotocraftApp) {
-    // A batched move replays several samples in one frame and calls this once at the end, so the
-    // per-sample calls from `tool_event` are skipped (see `canvas_view`).
-    if app.defer_live_stroke {
-        return;
-    }
-    let (Some(l), Some(d)) = (app.live_stroke.as_mut(), app.drag.as_ref()) else { return };
-    if l.preview_failed {
-        return;
-    }
+/// The drag's points from `from` on, with the pen pressure, tilt, rotation and times the commit's
+/// command gets for them (`Stylus::stroke_points`).
+fn drag_points(app: &PhotocraftApp, d: &Drag, from: usize) -> Vec<photocraft_engine::paint::StrokePoint> {
     let pose = &app.stylus.stroke;
-    // The same times `stroke_points` gives the commit (from the drag's first point).
+    // (Times from the drag's first point.)
     let t0 = app.stylus.point_ms(0);
-    let pts: Vec<_> = (l.fed..d.points.len())
+    (from..d.points.len())
         .filter_map(|i| {
             let p = d.points.get(i)?;
             let t = pose.get(i).or(pose.last()).copied().unwrap_or_default();
@@ -374,63 +321,58 @@ pub(super) fn feed_live_stroke(app: &mut PhotocraftApp) {
             sp.time = app.stylus.point_ms(i) - t0;
             Some(sp)
         })
-        .collect();
+        .collect()
+}
+
+/// The stroke being drawn can't be shown any further, and why. The Mixer Brush's keeps its last
+/// preview and its document/revision guard: all input stays in the drag, and the release replays
+/// it without the preview's tile budget. Any other stroke is shown by its commit.
+pub(super) fn preview_failed(app: &mut PhotocraftApp, why: String) {
+    if app.drag.as_ref().is_some_and(|d| d.tool == Tool::MixerBrush) {
+        if let Some(l) = app.live_stroke.as_mut() {
+            l.preview_failed = true;
+        }
+        app.ui.status = why;
+        app.ui.status_error = true;
+    } else {
+        app.live_stroke = None;
+    }
+}
+
+/// Hand the live stroke the drag points it hasn't seen yet.
+pub(super) fn feed_live_stroke(app: &mut PhotocraftApp) {
+    // A batched move replays several samples in one frame and calls this once at the end, so the
+    // per-sample calls from `tool_event` are skipped (see `canvas_view`).
+    if app.defer_live_stroke {
+        return;
+    }
+    let (Some(l), Some(d)) = (app.live_stroke.as_ref(), app.drag.as_ref()) else { return };
+    if l.preview_failed {
+        return;
+    }
+    let pts = drag_points(app, d, l.fed);
     if pts.is_empty() {
         return;
     }
-    l.fed = d.points.len();
+    let fed = d.points.len();
     let started = crate::gpu_canvas::now_ms();
-    match l.push(&pts) {
-        Ok(()) => {}
-        Err(e) => {
-            if d.tool == Tool::MixerBrush {
-                // Keep the last valid preview and its document/revision guard. All input
-                // stays in the drag; release replays it without the preview tile budget.
-                l.preview_failed = true;
-                app.ui.status = e.to_string();
-                app.ui.status_error = true;
-            } else {
-                app.live_stroke = None;
-            }
-        }
-    }
+    let pushed = app.live_stroke.as_mut().map(|l| {
+        l.fed = fed;
+        l.push(&pts)
+    });
     app.perf.stage.stroke_ms += crate::gpu_canvas::now_ms() - started;
+    if let Some(Err(why)) = pushed {
+        preview_failed(app, why);
+    }
 }
 
 /// The points the live retouching stroke has rendered.
 #[cfg(test)]
 pub(crate) fn live_retouch_points(app: &PhotocraftApp) -> Option<Vec<photocraft_engine::paint::StrokePoint>> {
-    match &app.live_stroke.as_ref()?.stroke {
+    app.live_stroke.as_ref()?.stroke.with_stroke(|s| match s {
         EngineStroke::Retouch(l) => Some(l.points().to_vec()),
         _ => None,
-    }
-}
-
-/// Offer the Clone Stamp's or History Brush's live stroke, or a Dodge, Burn, Sponge, Blur, Sharpen
-/// or Smudge one, with the drag points it hasn't rendered yet, to the command
-/// `retouch_ui::finish_stroke` commits, which then takes its pixels instead of rendering the
-/// stroke again.
-pub(super) fn offer_live_retouch(app: &mut PhotocraftApp, d: &Drag) {
-    let dab = crate::retouch_ui::dab_params(app, d.tool).is_some();
-    if !dab && !matches!(d.tool, Tool::CloneStamp | Tool::HistoryBrush) {
-        return;
-    }
-    let Some(LiveStroke { stroke, fed, .. }) = app.live_stroke.take() else { return };
-    let rest: Vec<_> = d.points.get(fed..).unwrap_or_default().iter().map(|q| photocraft_engine::paint::StrokePoint::new(q[0], q[1], q[2] as f32)).collect();
-    // A refused offer (the brush changed mid-stroke, say) leaves the commit to render the stroke.
-    match stroke {
-        EngineStroke::Retouch(mut live) if !dab => {
-            if rest.is_empty() || live.push(&rest).is_ok() {
-                let _ = app.session.offer_live_retouch(*live);
-            }
-        }
-        EngineStroke::Dab(mut live) if dab => {
-            if rest.is_empty() || live.push(&rest).is_ok() {
-                let _ = app.session.offer_live_dab(*live);
-            }
-        }
-        _ => {}
-    }
+    })?
 }
 
 /// A pen tap (a drag still at its one press point when released) paints its dab at the highest
@@ -555,56 +497,132 @@ pub(super) fn draw_smoothing_string(painter: &egui::Painter, xf: &ViewXform, (br
 /// job is still rendering is committed when it has landed (`LandingStroke`): the release never
 /// waits for a large tip's last dabs.
 pub(super) fn commit_brush_stroke(app: &mut PhotocraftApp, d: &Drag) {
-    let live = app.live_stroke.take();
     let cmd = stroke_command(app, d.tool);
     let mut params = stroke_params(app, d, &app.stylus.stroke_points(&d.points));
-    if let Some(seed) = live.as_ref().and_then(|l| l.stroke.seed()) {
-        params["seed"] = json!(seed);
-    }
-    let Some(mut stroke) = live else {
+    let Some(stroke) = app.live_stroke.take() else {
         let _ = app.run(cmd, params);
         return;
     };
-    // Points the live stroke hasn't rendered yet (the release frame's last moves).
-    let t0 = app.stylus.point_ms(0);
-    let rest: Vec<_> = (stroke.fed..d.points.len())
-        .filter_map(|i| {
-            let q = d.points.get(i)?;
-            let t = app.stylus.stroke.get(i).or(app.stylus.stroke.last()).copied().unwrap_or_default();
-            let mut sp = photocraft_engine::paint::StrokePoint::new(q[0], q[1], q[2] as f32);
-            (sp.tilt_x, sp.tilt_y, sp.rotation) = (t[0], t[1], t[2]);
-            sp.time = app.stylus.point_ms(i) - t0;
-            Some(sp)
-        })
-        .collect();
-    // (A live stroke that can't show these points: the commit renders the stroke itself.)
-    let whole = rest.is_empty() || stroke.push(&rest).is_ok();
-    match &mut stroke.stroke {
-        EngineStroke::Brush(b) if whole => b.finish(),
-        _ => return commit_landed(app, stroke, cmd, params, None),
+    if let Some(seed) = stroke.stroke.seed {
+        params["seed"] = json!(seed);
     }
-    app.landing_stroke = Some(Box::new(LandingStroke { stroke, cmd, params }));
+    release(app, stroke, d, Commit::Brush { cmd, params });
+}
+
+/// Commit a Mixer Brush drag as the Brush's is (`commit_brush_stroke`). A tip above the
+/// preview's size has no live stroke: its command renders the whole stroke now.
+pub(super) fn commit_mixer_stroke(app: &mut PhotocraftApp, d: &Drag) {
+    let mut params = stroke_params(app, d, &app.stylus.stroke_points(&d.points));
+    let Some(stroke) = app.live_stroke.take() else {
+        let _ = app.run("paint.mixerBrush", params);
+        return;
+    };
+    if let Some(seed) = stroke.stroke.seed {
+        params["seed"] = json!(seed);
+    }
+    release(app, stroke, d, Commit::Mixer { params });
+}
+
+/// Commit a Clone Stamp, History Brush, Dodge, Burn, Sponge, Blur, Sharpen or Smudge drag whose
+/// live stroke draws what its command paints, as the Brush's is (`commit_brush_stroke`): the
+/// command `retouch_ui::finish_stroke` would run takes the stroke's pixels instead of rendering
+/// it again. `false`: not such a stroke (its command renders it).
+pub(super) fn commit_retouch_stroke(app: &mut PhotocraftApp, d: &Drag) -> bool {
+    let offered = crate::retouch_ui::dab_params(app, d.tool).is_some() || matches!(d.tool, Tool::CloneStamp | Tool::HistoryBrush);
+    if !offered || app.live_stroke.is_none() {
+        return false;
+    }
+    let Some(Some((cmd, params))) = crate::retouch_ui::stroke_command(app, d.tool, &d.points, d.modifiers) else { return false };
+    let Some(stroke) = app.live_stroke.take() else { return false };
+    release(app, stroke, d, Commit::Retouch { tool: d.tool, cmd, params });
+    true
+}
+
+/// The drag ended: the stroke gets its last points (the release frame's moves) and is committed
+/// once its job has rendered all of it, which this frame waits its share for.
+fn release(app: &mut PhotocraftApp, mut stroke: LiveStroke, d: &Drag, commit: Commit) {
+    let rest = drag_points(app, d, stroke.fed);
+    stroke.fed = d.points.len();
+    // (A live stroke that can't show these points: the commit renders the stroke itself.)
+    let whole = !stroke.preview_failed && (rest.is_empty() || stroke.push(&rest).is_ok());
+    if !whole {
+        return commit_landed(app, stroke, commit, None);
+    }
+    stroke.stroke.finish();
+    app.landing_stroke = Some(Box::new(LandingStroke { stroke, commit }));
     land_stroke(app, Wait::Frame);
+}
+
+/// A drag ended whose command renders the stroke itself (the Healing Brush's blend of the whole
+/// stroke, the Pattern Stamp, Color Replacement, the Background Eraser): `stroke` is what the
+/// canvas showed of it, on the document at `revision`. Run now, the command's result replaces it,
+/// and the canvas repaints where either drew. Started as a background job (`job`), the canvas
+/// keeps showing the stroke as it was drawn until the job lands (`on_job_event`).
+pub(super) fn rendered_by_command(app: &mut PhotocraftApp, mut stroke: LiveStroke, d: &Drag, job: Option<photocraft_engine::jobs::JobId>) {
+    let Some(job) = job else { return replaced(app, stroke) };
+    // (The stroke goes on landing what it was handed; it shows the release frame's moves too.)
+    let rest = drag_points(app, d, stroke.fed);
+    stroke.fed = d.points.len();
+    if !rest.is_empty() && !stroke.preview_failed {
+        stroke.stroke.push(&rest);
+    }
+    app.landing_stroke = Some(Box::new(LandingStroke { stroke, commit: Commit::Job(job) }));
+}
+
+/// The command that commits `stroke` rendered it again and made the document's next revision:
+/// a cache that showed any step of the stroke repaints where the stroke drew and where the
+/// command did, not everything. (After anything else the caches find no step of theirs and
+/// repaint whole.)
+fn replaced(app: &mut PhotocraftApp, stroke: LiveStroke) {
+    let drawn = stroke.drawn();
+    let LiveStroke { doc, revision, key, damage, .. } = stroke;
+    let Some(st) = app.session.documents().iter().find(|st| st.doc.id == doc) else { return };
+    if st.revision != revision + 1 {
+        return;
+    }
+    let Some(changed) = st.damage_since(revision) else { return };
+    let relayout = if changed.is_empty() { drawn } else { changed.union(&drawn) };
+    app.committed_stroke = Some(CommittedStroke { doc, revision: st.revision, key, damage, relayout });
+}
+
+/// The job of a command that renders a released stroke itself ended (`rendered_by_command`): what
+/// it made replaces the stroke the canvas showed; a job that failed or was cancelled leaves the
+/// document as it was before the stroke.
+pub(crate) fn on_job_event(app: &mut PhotocraftApp, e: &photocraft_engine::jobs::JobEvent) {
+    let Some(landing) = app.landing_stroke.take_if(|l| matches!(l.commit, Commit::Job(id) if id == e.id)) else { return };
+    if matches!(e.outcome, photocraft_engine::jobs::JobOutcome::Done(_)) {
+        replaced(app, landing.stroke);
+    } else {
+        app.dropped_stroke = Some(DroppedStroke::of(&landing.stroke));
+    }
 }
 
 /// The released stroke's job is done (waiting for it as `wait` says): commit it. Every frame
 /// looks, and so does anything about to edit the document (`Wait::All`: the stroke comes first).
 fn land_stroke(app: &mut PhotocraftApp, wait: Wait) {
     let Some(landing) = app.landing_stroke.as_mut() else { return };
+    // A stroke its command's job renders ends with that job (`on_job_event`), which what edits
+    // the document waits for (`jobs_ui::land_first`): until then it shows what lands of it.
+    if matches!(landing.commit, Commit::Job(_)) {
+        if !landing.stroke.preview_failed && landing.stroke.land(Wait::No).is_err() {
+            landing.stroke.preview_failed = true;
+        }
+        return;
+    }
     let started = crate::gpu_canvas::now_ms();
     let landed = landing.stroke.land(wait);
     app.perf.stage.stroke_ms += crate::gpu_canvas::now_ms() - started;
-    let commit = match &mut landing.stroke.stroke {
-        EngineStroke::Brush(b) if landed.is_ok() => match b.take_commit() {
-            Some(c) => Some(c),
+    let finished = match landed {
+        Ok(()) => match landing.stroke.stroke.take_finished() {
+            Some(f) => Some(f),
             None => return,
         },
         // It can't be shown whole: the commit renders the stroke itself.
-        _ => None,
+        Err(_) => None,
     };
     if let Some(landing) = app.landing_stroke.take() {
-        let LandingStroke { stroke, cmd, params } = *landing;
-        commit_landed(app, stroke, cmd, params, commit);
+        let LandingStroke { stroke, commit } = *landing;
+        commit_landed(app, stroke, commit, finished);
     }
 }
 
@@ -612,7 +630,8 @@ fn land_stroke(app: &mut PhotocraftApp, wait: Wait) {
 /// the points of the stroke being drawn) if not.
 pub(crate) fn land_stroke_in_frame(app: &mut PhotocraftApp, ctx: &egui::Context) {
     land_stroke(app, Wait::No);
-    if app.landing_stroke.is_some() || app.live_stroke.as_ref().is_some_and(LiveStroke::in_flight) {
+    let landing = app.landing_stroke.as_ref().is_some_and(|l| !matches!(l.commit, Commit::Job(_)) || l.stroke.in_flight());
+    if landing || app.live_stroke.as_ref().is_some_and(LiveStroke::in_flight) {
         ctx.request_repaint();
     }
 }
@@ -623,30 +642,51 @@ pub(crate) fn land_stroke_before_edit(app: &mut PhotocraftApp) {
     land_stroke(app, Wait::All);
 }
 
-/// Run the command that commits `stroke`, taking the pixels of `commit` (the live stroke,
-/// finished) when there are any.
-fn commit_landed(app: &mut PhotocraftApp, stroke: LiveStroke, cmd: &'static str, params: serde_json::Value, commit: Option<Box<photocraft_engine::brush_cmds::LiveCommit>>) {
-    let LiveStroke { doc, key, damage, .. } = stroke;
-    let before = app.session.documents().iter().find(|st| st.doc.id == doc).map(|st| st.doc.clone());
-    if let Some(c) = commit {
-        app.session.offer_live_commit(*c);
-    }
+/// Run the command that commits `stroke`, taking the pixels of `finished` (the live stroke, all
+/// of it rendered) when there are any.
+fn commit_landed(app: &mut PhotocraftApp, stroke: LiveStroke, commit: Commit, finished: Option<Finished>) {
+    let before = app.session.documents().iter().find(|st| st.doc.id == stroke.doc).map(|st| st.doc.clone());
     let started = crate::gpu_canvas::now_ms();
-    let result = app.run(cmd, params);
+    // A refused offer (the brush changed mid-stroke, say) leaves the command to render the stroke.
+    let result = match (commit, finished) {
+        (Commit::Brush { cmd, params }, finished) => {
+            if let Some(Finished::Brush(c)) = finished {
+                app.session.offer_live_commit(*c);
+            }
+            app.run(cmd, params)
+        }
+        (Commit::Retouch { tool, cmd, params }, finished) => {
+            let _ = match finished {
+                Some(Finished::Retouch(l)) => app.session.offer_live_retouch(*l),
+                Some(Finished::Dab(l)) => app.session.offer_live_dab(*l),
+                _ => Ok(()),
+            };
+            crate::retouch_ui::commit(app, tool, cmd, params)
+        }
+        (Commit::Mixer { .. }, Some(Finished::Mixer(mixer))) => match mixer.prepare_commit(&mut app.session) {
+            Ok(params) => app.run("paint.mixerBrush", params),
+            Err(e) => {
+                app.ui.status = e.to_string();
+                app.ui.status_error = true;
+                Err(e.to_string())
+            }
+        },
+        (Commit::Mixer { params }, _) => app.run("paint.mixerBrush", params),
+        // (Committed by its job: `on_job_event`.)
+        (Commit::Job(_), _) => return,
+    };
     app.perf.stage.stroke_ms += crate::gpu_canvas::now_ms() - started;
     app.session.clear_live_stroke();
     let Ok(r) = result else { return };
+    if r.get("fromLive").and_then(serde_json::Value::as_bool) != Some(true) {
+        // Rendered again from scratch.
+        return replaced(app, stroke);
+    }
+    let LiveStroke { doc, key, damage, .. } = stroke;
     let after = app.session.documents().iter().find(|st| st.doc.id == doc).map(|st| (st.revision, st.doc.clone()));
-    if r.get("fromLive").and_then(serde_json::Value::as_bool) == Some(true)
-        && let Some((revision, after)) = after
-    {
+    if let Some((revision, after)) = after {
         let relayout = before.map_or(DRect::EMPTY, |b| photocraft_compose::relayout_damage(&b, &after));
         app.committed_stroke = Some(CommittedStroke { doc, revision, key, damage, relayout });
-    } else {
-        // Rendered again from scratch: the commit's damage rect refreshes the stroke.
-        let shown = CommittedStroke { doc, revision: 0, key, damage, relayout: DRect::EMPTY };
-        // Raw preview key 0 = the document itself (its colour display folded in).
-        shown_as_document(app, doc, |k| shown.since(k).is_some());
     }
 }
 

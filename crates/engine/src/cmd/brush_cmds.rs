@@ -958,12 +958,13 @@ fn color_replacement(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// A `paint.colorReplacement` stroke shown while it is drawn: the same params, and the same
 /// recolouring per dab as the commit, so the preview at the last point is the committed result.
-pub fn live_color_replacement(s: &Session, p: &Value) -> Result<crate::retouch_cmds::LiveDab> {
+/// The stroke and the params' `points`, which the caller renders (`LiveDab::push`).
+pub fn live_color_replacement(s: &Session, p: &Value) -> Result<(crate::retouch_cmds::LiveDab, Vec<StrokePoint>)> {
     let (stroke, rs, id) = color_replacement_setup(s, p)?;
-    crate::retouch_cmds::LiveDab::with_effect(s, "paint.colorReplacement", &json!({}), stroke, Some(id), 0, |pre| {
+    let (live, pts) = crate::retouch_cmds::LiveDab::with_effect(s, "paint.colorReplacement", &json!({}), stroke, Some(id), 0, |pre| {
         Box::new(color_replacement_effect(pre.clone(), rs))
-    })?
-    .with_tail_preview()
+    })?;
+    Ok((live.with_tail_preview(), pts))
 }
 
 fn brush_json(b: &BrushSettings) -> Value {

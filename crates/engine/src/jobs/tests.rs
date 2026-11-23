@@ -138,6 +138,9 @@ fn the_click_and_fill_commands_run_as_jobs_with_the_inline_result() {
         ("select.magicWand", json!({"x": 40, "y": 30, "tolerance": 60, "sampleAllLayers": true, "sampleSize": 3}), "Magic Wand"),
         ("image.crop", json!({"x": 30, "y": 20, "width": 200, "height": 120}), "Crop"),
         ("image.crop", json!({"x": -10, "y": 20, "width": 200, "height": 120, "targetWidth": 100, "targetHeight": 60}), "Crop"),
+        // (A stroke's release: the Healing Brush blends the whole stroke then.)
+        ("paint.healingBrush", json!({"points": [[60, 50], [90, 60], [130, 40]], "source": [200, 120], "size": 24, "hardness": 0}), "Healing Brush"),
+        ("paint.healingBrush", json!({"points": [[60, 50], [90, 60]], "source": [200, 120], "size": 24, "mode": "replace", "sampleLayer": "all"}), "Healing Brush"),
     ];
     // (A selection for the Content-Aware fill to fill from its surroundings.)
     let page = || {

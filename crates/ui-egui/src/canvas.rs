@@ -19,7 +19,7 @@ pub mod canvas_autoscroll;
 pub(super) mod canvas_popup;
 pub mod canvas_tool_menu;
 pub mod channel_view;
-mod brush_live;
+mod stroke_job;
 mod cursors;
 mod display;
 mod drag;
@@ -100,9 +100,10 @@ pub(crate) use selection::{floating_outline, selection_drag_delta};
 use start_screen::start_screen_drop_hint;
 #[cfg(test)]
 pub(crate) use strokes::live_doc;
+pub(crate) use stroke_job::on_pool as strokes_on_pool;
 #[cfg(test)]
-pub(crate) use brush_live::set_off_frame as set_strokes_off_frame;
-pub(crate) use strokes::{LandingStroke, land_stroke_before_edit, land_stroke_in_frame};
+pub(crate) use stroke_job::set_off_frame as set_strokes_off_frame;
+pub(crate) use strokes::{LandingStroke, land_stroke_before_edit, land_stroke_in_frame, on_job_event as stroke_job_event};
 pub use strokes::paint_target;
 pub(crate) use strokes::{
     ClonePreviewCache, CommittedStroke, DroppedStroke, LiveStroke, cancel_mixer_on_context_change, freehand_tool, spread_ms, strokes_live,

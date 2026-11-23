@@ -107,8 +107,9 @@ pub(super) fn run(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// A Pattern Stamp stroke with Impressionist on, shown while it is drawn: the same jittered dabs,
 /// laid one by one as the commit lays them (`apply_dab_stroke`), so the preview at the last point
-/// is the committed result. Aligned strokes are live through [`super::LiveRetouch`].
-pub fn live_impressionist(s: &Session, p: &Value) -> Result<super::LiveDab> {
+/// is the committed result. Aligned strokes are live through [`super::LiveRetouch`]. The stroke
+/// and the params' `points`, which the caller renders (`LiveDab::push`).
+pub fn live_impressionist(s: &Session, p: &Value) -> Result<(super::LiveDab, Vec<StrokePoint>)> {
     const CMD: &str = "paint.patternStamp";
     has_pixel_layer(s).map_err(crate::EngineError::Other)?;
     let st = Setup::parse(s, p)?;
@@ -117,7 +118,8 @@ pub fn live_impressionist(s: &Session, p: &Value) -> Result<super::LiveDab> {
     }
     let (stroke, id) = (st.stroke.clone(), st.id);
     let doc = (*s.active().ok_or(crate::EngineError::NoDocument)?.doc).clone();
-    super::LiveDab::with_effect_on(doc, CMD, p, stroke, id, 0, |pre| st.impressionist_effect(pre.format()))?.with_tail_preview()
+    let (live, pts) = super::LiveDab::with_effect_on(doc, CMD, p, stroke, id, 0, |pre| st.impressionist_effect(pre.format()))?;
+    Ok((live.with_tail_preview(), pts))
 }
 
 /// The pattern under destination `rect` in `fmt` (native channels): what an aligned stroke paints

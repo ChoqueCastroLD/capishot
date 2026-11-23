@@ -160,20 +160,21 @@ fn background_eraser(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// A `paint.backgroundEraser` stroke shown while it is drawn: the same params, checks and
 /// erasing per dab as the commit (on a Background already turned into a normal layer), so the
-/// preview at the last point is the committed result.
-pub fn live_background_eraser(s: &Session, p: &Value) -> Result<crate::retouch_cmds::LiveDab> {
+/// preview at the last point is the committed result. The stroke and the params' `points`, which
+/// the caller renders (`LiveDab::push`).
+pub fn live_background_eraser(s: &Session, p: &Value) -> Result<(crate::retouch_cmds::LiveDab, Vec<photocraft_paint::StrokePoint>)> {
     const CMD: &str = "paint.backgroundEraser";
     let (stroke, bs, id) = background_eraser_setup(s, p)?;
     let mut doc = (*s.active().ok_or(EngineError::NoDocument)?.doc).clone();
     doc.layer(id).ok_or(EngineError::NoLayer(id))?;
     crate::extra_cmds::background_to_layer(&mut doc, id);
     let stroke = background_eraser_stroke(&stroke);
-    crate::retouch_cmds::LiveDab::with_effect_on(doc, CMD, &json!({}), stroke, Some(id), 0, |pre| match background_eraser_effect(pre, &bs) {
+    let (live, pts) = crate::retouch_cmds::LiveDab::with_effect_on(doc, CMD, &json!({}), stroke, Some(id), 0, |pre| match background_eraser_effect(pre, &bs) {
         Some(effect) => Box::new(effect),
         // No alpha: the commit erases nothing either.
         None => Box::new(|_: &mut photocraft_paint::retouch::Region, _: &photocraft_paint::retouch::Footprint| {}),
-    })?
-    .with_tail_preview()
+    })?;
+    Ok((live.with_tail_preview(), pts))
 }
 
 /// Eraser-group command specs.
