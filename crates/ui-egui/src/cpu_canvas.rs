@@ -114,6 +114,18 @@ pub struct TileCanvas {
     /// When tiles drawn through a split's top map may be composited exactly (`now_ms`): once the
     /// edits have paused this long.
     refine_after: f64,
+    /// Where the last frame drew the document.
+    xf: Option<ViewXform>,
+    /// The page as it was before its size changed (a crop, its undo, Image or Canvas Size), shown
+    /// where the last frame drew it until the new page's tiles in view are all composited.
+    before: Option<Before>,
+}
+
+/// The tiles of a page whose size changed, as the last frame drew them ([`TileCanvas::before`]).
+struct Before {
+    tiles: Vec<(TileKey, TileTex)>,
+    size: [u32; 2],
+    xf: ViewXform,
 }
 
 /// Missing tiles composited in the background: the canvas keeps drawing (other levels stand in)
@@ -952,7 +964,18 @@ pub fn paint(
     tc.level = level;
     let frame = tc.frame;
     if tc.size != size {
-        tc.tiles.clear();
+        // A page that was shown stays on screen as the last frame drew it until all of the new
+        // one in view is composited: the tiles of a new size come over several frames (on the
+        // pool), and a frame never shows part of them (it showed the canvas blank, then filling).
+        let drawn = std::mem::take(&mut tc.tiles).into_iter().filter(|(_, t)| t.used + 1 == frame);
+        let mut drawn: Vec<(TileKey, TileTex)> = drawn.collect();
+        // (Coarser levels first: finer ones over them, as the frame drew them.)
+        drawn.sort_by_key(|(k, _)| std::cmp::Reverse(k.level));
+        tc.before = match (tc.shown, tc.xf) {
+            (Some(_), Some(xf)) if !drawn.is_empty() => Some(Before { tiles: drawn, size: tc.size, xf }),
+            // (The page before that, still on screen: it stays.)
+            _ => tc.before.take(),
+        };
         tc.size = size;
         tc.shown = None;
     }
@@ -1230,6 +1253,26 @@ pub fn paint(
     app.perf_counters.move_split += u64::from(stats.from_split);
     app.cpu_move_split = split_ready.then_some((id, revision, app.frame));
     let Some(tc) = app.canvases.get_mut(&key).and_then(|c| c.tiles.as_mut()) else { return };
+    tc.xf = Some(*xf);
+    // The page before a size change, until the new one in view is all here.
+    if tc.before.is_some() && !want.iter().all(|k| tc.tiles.get(k).is_some_and(|t| t.dirty.is_none() && t.drawing.is_none())) {
+        for &k in &want {
+            if let Some(t) = tc.tiles.get_mut(&k) {
+                t.used = frame;
+            }
+        }
+        if let Some(b) = &tc.before {
+            let bounds = DRect::new(0, 0, b.size[0] as i32, b.size[1] as i32);
+            for (k, t) in &b.tiles {
+                let f = 1i64 << k.level;
+                draw_tile(painter, &b.xf, &t.tex, t.held, f, scale_rect(tile_rect(*k, b.size), f).intersect(&bounds));
+            }
+        }
+        ctx.request_repaint_after(std::time::Duration::from_millis(16));
+        tc.evict(tex_budget);
+        return;
+    }
+    tc.before = None;
     // Draw: a tile not drawn yet at this level shows from the nearest level that has its area.
     let mut shown = 0usize;
     for &k in &want {
@@ -1284,7 +1327,9 @@ pub(crate) fn drawn_in(app: &PhotocraftApp, idx: usize, output: Option<u32>, zoo
 pub(crate) fn shows_document(app: &PhotocraftApp) -> bool {
     let Some(st) = app.session.active() else { return true };
     app.canvases.iter().filter(|(k, _)| k.0 == st.doc.id).filter_map(|(_, c)| c.tiles.as_ref()).all(|tc| {
-        tc.shown.is_some_and(|(revision, _)| revision == st.revision) && tc.tiles.values().all(|t| t.used != tc.frame || (t.dirty.is_none() && t.drawing.is_none()))
+        tc.before.is_none()
+            && tc.shown.is_some_and(|(revision, _)| revision == st.revision)
+            && tc.tiles.values().all(|t| t.used != tc.frame || (t.dirty.is_none() && t.drawing.is_none()))
     })
 }
 
@@ -1764,6 +1809,59 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(REFINE_AFTER_MS as u64 + 50));
         settle(&mut app, &ctx, &mut mirror);
         assert_eq!(off(&app, &mirror), 0);
+        set_flight_wait(None);
+    }
+
+    /// One frame as [`frame`], and the textures it drew.
+    fn frame_drawn(app: &mut PhotocraftApp, ctx: &egui::Context, center: [f32; 2]) -> HashSet<egui::TextureId> {
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let xf = ViewXform { rect: Rect::from_min_size(Pos2::ZERO, egui::vec2(1000.0, 800.0)), zoom: 1.0, center, flip: false, rotation: 0.0, aspect: 1.0 };
+            let visible = DRect::new((center[0] - 500.0) as i32, (center[1] - 400.0) as i32, (center[0] + 500.0) as i32 + 1, (center[1] + 400.0) as i32 + 1);
+            paint(app, ui.ctx(), ui.painter(), &xf, 0, None, 1.0, visible);
+        });
+        out.textures_delta.clear();
+        out.shapes
+            .iter()
+            .filter_map(|c| match &c.shape {
+                egui::Shape::Mesh(m) => Some(m.texture_id),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A crop (and its undo) changes the page's size: its new tiles are composited on the pool
+    /// over several frames, and until they are all there the canvas shows the page as it was,
+    /// where it was, never a blank or half-drawn canvas. It dropped every tile at once and drew
+    /// the new ones as they came.
+    #[test]
+    fn a_new_page_size_shows_the_page_before_until_its_tiles_are_all_here() {
+        let mut app = stacked();
+        let ctx = egui::Context::default();
+        set_flight_wait(Some(0.0));
+        let mut mirror = HashMap::new();
+        settle(&mut app, &ctx, &mut mirror);
+        for (cmd, params, center) in [
+            ("image.crop", json!({"x": 300, "y": 200, "width": 600, "height": 450}), [300.0, 225.0]),
+            ("edit.undo", json!({}), [600.0, 450.0]),
+        ] {
+            let old: HashSet<egui::TextureId> = canvas(&app).tiles.values().map(|t| t.tex.id()).collect();
+            app.run(cmd, params).unwrap();
+            let mut frames = 0;
+            loop {
+                let drawn = frame_drawn(&mut app, &ctx, center);
+                frames += 1;
+                assert!(frames < 5000, "{cmd}: the new page never showed");
+                assert!(!drawn.is_empty(), "{cmd}: frame {frames} drew nothing");
+                if shows_document(&app) {
+                    assert!(drawn.is_disjoint(&old), "{cmd}: the new page only");
+                    break;
+                }
+                assert!(drawn.is_subset(&old), "{cmd}: frame {frames} drew part of the new page");
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            assert!(frames > 1, "{cmd}: composited on the pool, over frames");
+            settle(&mut app, &ctx, &mut mirror);
+        }
         set_flight_wait(None);
     }
 
