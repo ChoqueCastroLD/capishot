@@ -29,6 +29,12 @@ const MAX_PASS_PIXELS: u64 = MAX_PIXELS * 4;
 /// accumulator and the output surface are both `stride` deep, so a CMYK render reserves several
 /// times what a plain grey one does for the same pixels.
 const MAX_RASTER_BYTES: u64 = if cfg!(target_pointer_width = "64") { 4 << 30 } else { 1 << 30 };
+/// Passes over fewer pixels than this run on the calling thread: a keystroke's raster, started
+/// from the window's thread, waited for the worker pool, which can be busy compositing the canvas
+/// for seconds. A pass is a few nanoseconds a pixel, so a line of type redrawn whole (a centred
+/// line moves with every key: 90 K pixels on his credits PSD) is well under a millisecond on one
+/// thread; only a page-size raster is spread over the pool.
+const PARALLEL_PIXELS: usize = 1 << 20;
 
 /// Whether a `w` x `h` render's peak working bytes fit `max_bytes`: the f32 accumulator and the
 /// output surface (both `stride` deep), plus the coverage buffers live at the peak. A pass peaks
@@ -413,7 +419,7 @@ pub fn rasterize(layout: &TextLayout, transform: &Affine, format: PixelFormat, a
 
 /// [`rasterize`] with the glyph outlines bent by `warp` (Type › Warp Text).
 pub fn rasterize_warped(layout: &TextLayout, transform: &Affine, format: PixelFormat, antialias: AntiAlias, warp: Option<&Warp>) -> Rendered {
-    rasterize_passes(layout, transform, format, antialias, warp, None, true)
+    rasterize_passes(layout, transform, format, antialias, warp, None, true, None)
 }
 
 /// [`rasterize_warped`] in perspective: the outlines go through `persp` as vectors, so the type is
@@ -426,8 +432,126 @@ pub fn rasterize_deformed(
     warp: Option<&Warp>,
     persp: Option<&photocraft_doc::text::TextPerspective>,
 ) -> Rendered {
-    rasterize_passes(layout, transform, format, antialias, warp, persp, true)
+    rasterize_passes(layout, transform, format, antialias, warp, persp, true, None)
 }
+
+/// `base` (an earlier rendering of the layer) with `window` (document pixels) rasterized again
+/// from `layout`: every glyph drawn, clipped to the window, so its pixels are the ones a whole
+/// rendering has there (within a rounding step at its edges). Plain type only: no warp, path or
+/// perspective. `rect` is the window.
+pub(crate) fn rasterize_window(layout: &TextLayout, transform: &Affine, format: PixelFormat, antialias: AntiAlias, base: &Surface, window: Rect) -> Rendered {
+    rasterize_passes(layout, transform, format, antialias, None, None, true, Some((base, window)))
+}
+
+/// What a glyph's pixels depend on, compared by value (floats by their bits): where an edit's
+/// layout differs from the one before ([`changed_rect`]).
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct InkKey {
+    /// The font's bytes (address and length), face index, size, synthetic bold and slant.
+    font: (usize, usize, u32, u32, bool, u32),
+    /// Its variation coordinates (a hash of them).
+    coords: u64,
+    id: u32,
+    at: [u32; 2],
+    orient: u8,
+    /// Colour, faux bold and italic, scales and baseline shift.
+    style: (u8, [u32; 5], bool, bool, [u32; 3]),
+    /// Decorations: their rectangle (glyphs: none).
+    rect: [u32; 4],
+}
+
+fn glyph_key(l: &TextLayout, g: &PlacedGlyph) -> Option<InkKey> {
+    use std::hash::{Hash, Hasher};
+    let f = l.faces.get(g.face as usize)?;
+    let st = l.styles.get(g.style as usize)?;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    f.coords.hash(&mut h);
+    let data: &[u8] = f.font.data.as_ref();
+    Some(InkKey {
+        font: (data.as_ptr() as usize, data.len(), f.font.index, f.size_px.to_bits(), f.embolden, f.skew_deg.to_bits()),
+        coords: h.finish(),
+        id: g.id,
+        at: [g.x.to_bits(), g.y.to_bits()],
+        orient: g.orient as u8,
+        style: color_style(l, st),
+        rect: [0; 4],
+    })
+}
+
+fn color_style(l: &TextLayout, st: &photocraft_doc::text::CharStyle) -> (u8, [u32; 5], bool, bool, [u32; 3]) {
+    let c = &st.color;
+    let shift = st.baseline_shift_pt * l.px_per_pt;
+    let colour = [c.c[0].to_bits(), c.c[1].to_bits(), c.c[2].to_bits(), c.c[3].to_bits(), c.alpha.to_bits()];
+    (c.mode as u8, colour, st.faux_bold, st.faux_italic, [st.horizontal_scale.to_bits(), st.vertical_scale.to_bits(), shift.to_bits()])
+}
+
+/// The document pixels where `new` draws differently from `old` (both drawn through
+/// `transform`, neither warped): the ink of every glyph and decoration one of them has and the
+/// other doesn't, grown by a pixel for antialiasing. Empty when they draw alike; `None` when the
+/// two can't be compared (a style or face missing).
+pub(crate) fn changed_rect(old: &TextLayout, new: &TextLayout, transform: &Affine) -> Option<Rect> {
+    let deco = |l: &TextLayout, d: &crate::layout::DecorationRect| -> Option<InkKey> {
+        let st = l.styles.get(d.style as usize)?;
+        Some(InkKey { font: (0, 0, 0, 0, false, 0), coords: 0, id: u32::MAX, at: [0; 2], orient: 0, style: color_style(l, st), rect: [d.x0.to_bits(), d.y0.to_bits(), d.x1.to_bits(), d.y1.to_bits()] })
+    };
+    // What the old layout draws, by count.
+    let mut left: std::collections::HashMap<InkKey, u32> = std::collections::HashMap::with_capacity(old.glyphs.len() + old.decorations.len());
+    for g in &old.glyphs {
+        *left.entry(glyph_key(old, g)?).or_default() += 1;
+    }
+    for d in &old.decorations {
+        *left.entry(deco(old, d)?).or_default() += 1;
+    }
+    let mut take = |k: InkKey| left.get_mut(&k).filter(|c| **c > 0).map(|c| *c -= 1).is_some();
+    // What the new one draws that the old doesn't.
+    let mut added = only_ink(new);
+    for g in &new.glyphs {
+        if !take(glyph_key(new, g)?) {
+            added.glyphs.push(*g);
+        }
+    }
+    for d in &new.decorations {
+        if !take(deco(new, d)?) {
+            added.decorations.push(*d);
+        }
+    }
+    // What the old one draws that the new doesn't: what is left of it.
+    let mut removed = only_ink(old);
+    for g in &old.glyphs {
+        if left.get_mut(&glyph_key(old, g)?).filter(|c| **c > 0).map(|c| *c -= 1).is_some() {
+            removed.glyphs.push(*g);
+        }
+    }
+    for d in &old.decorations {
+        if left.get_mut(&deco(old, d)?).filter(|c| **c > 0).map(|c| *c -= 1).is_some() {
+            removed.decorations.push(*d);
+        }
+    }
+    let mut r = Rect::EMPTY;
+    for sub in [&added, &removed] {
+        let ink = ink_rect(sub, transform);
+        if !ink.is_empty() {
+            r = if r.is_empty() { ink } else { r.union(&ink) };
+        }
+    }
+    Some(r)
+}
+
+/// `l` without its glyphs and decorations: their faces and styles, to draw some of them.
+fn only_ink(l: &TextLayout) -> TextLayout {
+    TextLayout {
+        faces: l.faces.clone(),
+        glyphs: Vec::new(),
+        decorations: Vec::new(),
+        lines: Vec::new(),
+        clusters: Vec::new(),
+        styles: l.styles.clone(),
+        px_per_pt: l.px_per_pt,
+        vertical: l.vertical,
+        overflow: l.overflow,
+    }
+}
+
 
 /// A type layer's pixels from its layout: its transform, warp or path, and perspective.
 pub fn rasterize_layer(layout: &TextLayout, layer: &photocraft_doc::TextLayer, format: PixelFormat) -> Rendered {
@@ -445,16 +569,21 @@ pub(crate) fn rasterize_passes(
     warp: Option<&Warp>,
     persp: Option<&photocraft_doc::text::TextPerspective>,
     per_colour: bool,
+    window: Option<(&Surface, Rect)>,
 ) -> Rendered {
     let format = PixelFormat { alpha: true, ..format };
-    let rect = ink_rect_deformed(layout, transform, warp, persp);
+    // Again over a window of an earlier rendering: all of the window is written, so what was
+    // drawn there and isn't any more is cleared.
+    let (rect, mut surface) = match window {
+        Some((base, r)) => (r, base.clone()),
+        None => (ink_rect_deformed(layout, transform, warp, persp), Surface::new(format)),
+    };
     let (w, h) = (rect.width() as usize, rect.height() as usize);
-    let mut surface = Surface::new(format);
     if w == 0 || h == 0 || (w as u64) * (h as u64) > MAX_PIXELS {
         return Rendered { surface, rect: Rect::new(0, 0, 0, 0) };
     }
     let colors = visible_color_passes(layout, warp);
-    if colors.is_empty() {
+    if colors.is_empty() && window.is_none() {
         return Rendered { surface, rect: Rect::new(0, 0, 0, 0) };
     }
     let n = format.mode.color_channels();
@@ -510,8 +639,17 @@ pub(crate) fn rasterize_passes(
     }
     // Unpremultiply.
     unpremultiply(&mut acc, n, stride, format.sample);
-    surface.write_region_par(rect, &acc);
-    surface.prune();
+    if w * h >= PARALLEL_PIXELS {
+        surface.write_region_par(rect, &acc);
+    } else {
+        surface.write_region(rect, &acc);
+    }
+    // (Over a window, only its tiles can have become empty.)
+    if window.is_some() {
+        surface.prune_in(rect);
+    } else {
+        surface.prune();
+    }
     Rendered { surface, rect }
 }
 
@@ -542,8 +680,10 @@ fn composite(acc: &mut [f32], width: usize, sub: Rect, cov: &[f32], stride: usiz
         }
     };
     #[cfg(not(target_arch = "wasm32"))]
-    acc.par_chunks_mut(width * stride).skip(y0).take(sh).zip(cov.par_chunks(sw)).for_each(|(a, c)| row(a, c));
-    #[cfg(target_arch = "wasm32")]
+    if sw * sh >= PARALLEL_PIXELS {
+        acc.par_chunks_mut(width * stride).skip(y0).take(sh).zip(cov.par_chunks(sw)).for_each(|(a, c)| row(a, c));
+        return;
+    }
     acc.chunks_mut(width * stride).skip(y0).take(sh).zip(cov.chunks(sw)).for_each(|(a, c)| row(a, c));
 }
 
@@ -561,8 +701,10 @@ fn unpremultiply(acc: &mut [f32], n: usize, stride: usize, sample: SampleType) {
         }
     };
     #[cfg(not(target_arch = "wasm32"))]
-    acc.par_chunks_exact_mut(stride).for_each(one);
-    #[cfg(target_arch = "wasm32")]
+    if acc.len() / stride >= PARALLEL_PIXELS {
+        acc.par_chunks_exact_mut(stride).for_each(one);
+        return;
+    }
     acc.chunks_exact_mut(stride).for_each(one);
 }
 

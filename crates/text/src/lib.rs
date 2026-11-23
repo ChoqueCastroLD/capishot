@@ -61,6 +61,28 @@ pub struct TextEngine {
     layouter: layout::Layouter,
     /// The layouts made last ([`layout_memo`]): asked again for an unchanged layer, a copy.
     memo: layout_memo::Memo,
+    /// The last few layers drawn into their caches ([`TextEngine::render_cache`]), most recent last.
+    drawn: Vec<Drawn>,
+}
+
+/// A rendering [`TextEngine::render_cache`] made: an edit of the same layer redraws only where its
+/// glyphs changed.
+struct Drawn {
+    /// The pixels (sharing their tiles with the layer's cache while it shows them).
+    surface: photocraft_raster::Surface,
+    layout: TextLayout,
+    transform: photocraft_geom::Affine,
+    antialias: photocraft_doc::text::AntiAlias,
+    format: PixelFormat,
+}
+
+/// Renderings kept for [`TextEngine::render_cache`]: the layers being typed in (one, or a few
+/// edited in turn), each holding only tiles its layer shares.
+const DRAWN_KEPT: usize = 3;
+
+/// Whether two surfaces hold the very same tiles (an unchanged copy).
+fn same_tiles(a: &photocraft_raster::Surface, b: &photocraft_raster::Surface) -> bool {
+    a.format() == b.format() && a.tile_count() == b.tile_count() && a.tiles().all(|(c, t)| b.tile(*c).is_some_and(|u| std::sync::Arc::ptr_eq(t, u)))
 }
 
 impl Default for TextEngine {
@@ -105,12 +127,12 @@ pub fn fit_perspective(layout: &TextLayout, layer: &mut TextLayer) -> bool {
 impl TextEngine {
     /// Bundled fonts only: deterministic output (tests, web).
     pub fn new() -> Self {
-        Self { fonts: FontDb::new(), layouter: layout::Layouter::new(), memo: Default::default() }
+        Self { fonts: FontDb::new(), layouter: layout::Layouter::new(), memo: Default::default(), drawn: Vec::new() }
     }
 
     /// Bundled plus installed system fonts (native desktop).
     pub fn with_system_fonts() -> Self {
-        Self { fonts: FontDb::with_system_fonts(), layouter: layout::Layouter::new(), memo: Default::default() }
+        Self { fonts: FontDb::with_system_fonts(), layouter: layout::Layouter::new(), memo: Default::default(), drawn: Vec::new() }
     }
 
     /// Lays out a text layer (text space: pixels, before `layer.transform`).
@@ -185,13 +207,35 @@ impl TextEngine {
         (l, r)
     }
 
-    /// [`TextEngine::render`] for a layer whose text may have grown: type in perspective that
-    /// would reach the map's horizon is fitted back into its quad first ([`fit_perspective`]).
-    pub fn render_fitted(&mut self, layer: &mut TextLayer, dpi: f32, format: PixelFormat) -> (TextLayout, Rendered) {
+    /// Lays out `layer` and draws it into `layer.cache`; type in perspective that would reach
+    /// the map's horizon is fitted back into its quad first ([`fit_perspective`]). When the cache
+    /// holds what this engine drew of the layer last (same transform, antialiasing and format,
+    /// not warped, on a path or in perspective), only the pixels where the glyphs changed are
+    /// rasterized again: a keystroke at the end of a line draws that glyph, not the layer (the
+    /// whole layer took 7 to 11 ms of a keystroke on his credits PSD, all of it in the frame).
+    pub fn render_cache(&mut self, layer: &mut TextLayer, dpi: f32, format: PixelFormat) -> TextLayout {
         let l = self.layout(layer, dpi);
         fit_perspective(&l, layer);
-        let r = render::rasterize_layer(&l, layer, format);
-        (l, r)
+        let plain = layer.perspective.is_none() && render::layout_deform(&l, layer).is_none();
+        let before = layer.cache.as_ref().and_then(|c| self.drawn.iter().position(|d| same_tiles(&d.surface, c)));
+        let before = before.map(|i| self.drawn.remove(i));
+        let window = before
+            .as_ref()
+            .filter(|d| plain && d.transform == layer.transform && d.antialias == layer.antialias && d.format == format)
+            .and_then(|d| Some((&d.surface, render::changed_rect(&d.layout, &l, &layer.transform)?)));
+        let surface = match window {
+            Some((base, w)) if w.is_empty() => base.clone(),
+            Some((base, w)) => render::rasterize_window(&l, &layer.transform, format, layer.antialias, base, w).surface,
+            None => render::rasterize_layer(&l, layer, format).surface,
+        };
+        if plain {
+            self.drawn.push(Drawn { surface: surface.clone(), layout: l.clone(), transform: layer.transform, antialias: layer.antialias, format });
+            if self.drawn.len() > DRAWN_KEPT {
+                self.drawn.remove(0);
+            }
+        }
+        layer.cache = Some(surface);
+        l
     }
 
     /// Re-renders `layer.cache` from its model. Returns the document-space rectangle drawn.

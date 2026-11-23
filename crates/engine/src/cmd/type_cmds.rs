@@ -685,9 +685,10 @@ pub fn refresh_at(dpi: f32, format: PixelFormat, t: &mut TextLayer) {
         t.psd_raw = Some(Arc::new(photocraft_text::psd::build_tysh(t, dpi, layout.bounds())));
         return;
     }
-    let (layout, r) = eng.render_fitted(t, dpi, format);
-    rendered::mark(&r.surface);
-    t.cache = Some(r.surface);
+    let layout = eng.render_cache(t, dpi, format);
+    if let Some(c) = &t.cache {
+        rendered::mark(c);
+    }
     t.psd_raw = Some(Arc::new(photocraft_text::psd::build_tysh(t, dpi, layout.bounds())));
 }
 

@@ -32,6 +32,8 @@ fn parallel_raster_matches_a_single_thread() {
     let no_aa = TextLayer { text: "No AA edge".into(), font_family: "Inter".into(), size_pt: 30.0, antialias: AntiAlias::None, ..Default::default() };
     let cases: Vec<(TextLayer, f32, PixelFormat)> = vec![
         (point("Parallel", 48.0), 72.0, PixelFormat::RGBA8),
+        // Over a million pixels: the passes spread over the pool (smaller ones run on one thread).
+        (point("Parallel", 48.0), 1500.0, PixelFormat::RGBA8),
         (styled("Bold italic", CharStyle { size_pt: 40.0, faux_bold: true, faux_italic: true, ..Default::default() }), 300.0, PixelFormat::RGBA8),
         (no_aa, 150.0, PixelFormat::RGBA16),
         (styled("Wide gamut", CharStyle { size_pt: 36.0, color: Color::rgba(2.5, -0.25, 0.5, 0.4), ..Default::default() }), 96.0, PixelFormat::RGBA32F),
@@ -39,6 +41,7 @@ fn parallel_raster_matches_a_single_thread() {
     ];
     for (layer, dpi, format) in cases {
         let (_, spread) = e.render(&layer, dpi, format);
+        assert!(dpi < 1000.0 || spread.rect.width() * spread.rect.height() > 1 << 20, "{:?}", spread.rect);
         let (_, single) = one.install(|| e.render(&layer, dpi, format));
         assert_eq!(spread.rect, single.rect, "{}", layer.text);
         assert_eq!(spread.surface, single.surface, "{}", layer.text);
@@ -432,7 +435,7 @@ fn truetype_collections_load() {
     assert!(names.iter().any(|n| n == "Inter") && names.iter().any(|n| n == "JetBrains Mono"), "{names:?}");
     assert_eq!(db.faces("JetBrains Mono").len(), before + 1);
     // Layout with the TTC-backed face works.
-    let mut e = TextEngine { fonts: db, layouter: crate::layout::Layouter::new(), memo: Default::default() };
+    let mut e = TextEngine { fonts: db, layouter: crate::layout::Layouter::new(), memo: Default::default(), drawn: Vec::new() };
     let t = styled("mono", CharStyle { font_family: "JetBrains Mono".into(), ..Default::default() });
     let l = e.layout(&t, 72.0);
     assert!(l.glyphs.iter().all(|g| g.id != 0));
@@ -3385,8 +3388,8 @@ fn per_colour_passes_match_full_size_passes() {
         let l = e.layout(t, 72.0);
         let warp = crate::render::layout_deform(&l, t);
         for format in [PixelFormat::RGBA8, PixelFormat::CMYKA8] {
-            let fast = crate::render::rasterize_passes(&l, &t.transform, format, t.antialias, warp.as_ref(), None, true);
-            let full = crate::render::rasterize_passes(&l, &t.transform, format, t.antialias, warp.as_ref(), None, false);
+            let fast = crate::render::rasterize_passes(&l, &t.transform, format, t.antialias, warp.as_ref(), None, true, None);
+            let full = crate::render::rasterize_passes(&l, &t.transform, format, t.antialias, warp.as_ref(), None, false, None);
             assert_eq!(fast.rect, full.rect, "case {k}");
             let (a, b) = (fast.surface.read_region(fast.rect), full.surface.read_region(full.rect));
             assert!(!a.is_empty());
@@ -3757,4 +3760,50 @@ fn unregistering_a_font_leaves_its_installed_copy() {
     e.fonts.unregister_user_font("copy");
     assert_eq!(bold(&mut e), installed, "the installed face stays");
     assert!(e.fonts.has_family(family));
+}
+
+/// The largest difference (8-bit levels) between two renderings over the union of their tiles.
+fn max_level_diff(a: &photocraft_raster::Surface, b: &photocraft_raster::Surface) -> u32 {
+    let r = a.tile_bounds().union(&b.tile_bounds());
+    let (pa, pb) = (a.read_region(r), b.read_region(r));
+    pa.iter().zip(&pb).map(|(x, y)| ((x * 255.0).round() - (y * 255.0).round()).abs() as u32).max().unwrap_or(0)
+}
+
+/// An edit of a layer the engine drew last re-rasterizes only where its glyphs changed: the
+/// tiles away from it are the very tiles the layer had, and every pixel is the one a whole
+/// rendering has (within a level, at the window's edges). Typing, deleting, inserting at a
+/// line's start, recolouring a word; a new transform draws the layer whole.
+#[test]
+fn an_edit_redraws_only_where_its_glyphs_changed() {
+    let format = PixelFormat::RGBA8;
+    let mut e = TextEngine::new();
+    let mut t = point("Primera línea del texto\nsegunda línea del texto\ntercera línea\ncuarta", 96.0);
+    e.render_cache(&mut t, 72.0, format);
+    let whole = |e: &mut TextEngine, t: &TextLayer| crate::render::rasterize_layer(&e.layout(t, 72.0), t, format).surface;
+    let check = |e: &mut TextEngine, t: &mut TextLayer, what: &str, kept: bool| {
+        let before = t.cache.clone().expect("drawn");
+        e.render_cache(t, 72.0, format);
+        let after = t.cache.clone().expect("drawn");
+        let shared = after.tiles().filter(|(c, tile)| before.tile(**c).is_some_and(|b| std::sync::Arc::ptr_eq(b, tile))).count();
+        if kept {
+            assert!(shared * 2 >= after.tile_count(), "{what}: {shared} of {} tiles kept", after.tile_count());
+        }
+        let d = max_level_diff(&after, &whole(e, t));
+        assert!(d <= 1, "{what}: off a whole rendering by {d} levels");
+    };
+    t.text.push('!');
+    check(&mut e, &mut t, "a glyph typed at the end", true);
+    t.text.pop();
+    t.text.pop();
+    check(&mut e, &mut t, "two glyphs deleted", true);
+    t.text.insert_str(t.text.find("cuart").unwrap(), "la ");
+    check(&mut e, &mut t, "a word inserted at a line's start", true);
+    let n = t.text.len();
+    t.runs = vec![
+        TextRun { len: 8, style: CharStyle { color: Color::rgb(0.9, 0.1, 0.1), ..t.char_runs()[0].style.clone() } },
+        TextRun { len: n - 8, style: t.char_runs()[0].style.clone() },
+    ];
+    check(&mut e, &mut t, "a word recoloured", true);
+    t.transform = Affine::translate(3.0, 1.0);
+    check(&mut e, &mut t, "moved: drawn whole", false);
 }

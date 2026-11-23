@@ -390,3 +390,36 @@ fn typing_at_the_end_of_a_line_damages_the_new_glyph_not_the_line() {
     assert!(unchanged_outside(&before, &doc(&s), d), "the gradient changed outside {d:?}");
     assert!(d.contains_rect(&line(&before)), "the whole frame: {d:?}");
 }
+
+/// The type layer's pixels (`id`).
+fn type_pixels(s: &Session, id: u64) -> photocraft_raster::Surface {
+    match &doc(s).layer(LayerId(id)).unwrap().content {
+        LayerContent::Text(t) => t.cache.clone().expect("drawn"),
+        _ => panic!("not a type layer"),
+    }
+}
+
+/// A keystroke rasterizes the type layer again only where its glyphs changed: the tiles of the
+/// lines it didn't touch are the layer's own, shared, not drawn again. The whole layer was
+/// rasterized for every key (7 to 11 ms of the frame on his credits PSD).
+#[test]
+fn a_keystroke_rasterizes_only_where_the_glyphs_changed() {
+    let mut s = session(2400, 1200);
+    let ty = s.execute("type.create", json!({"x": 40, "y": 150, "text": "PRIMERA LÍNEA BASTANTE LARGA\nSEGUNDA LÍNEA DEL GLOBO\nTERCERA LÍNEA DE TEXTO", "size": 96})).unwrap()["layer"].as_u64().unwrap();
+    let before = type_pixels(&s, ty);
+    s.execute("type.insertText", json!({"layer": ty, "text": "S"})).unwrap();
+    let after = type_pixels(&s, ty);
+    let kept = after.tiles().filter(|(c, t)| before.tile(**c).is_some_and(|b| std::sync::Arc::ptr_eq(b, t))).count();
+    assert!(kept * 3 >= after.tile_count() * 2, "{kept} of {} tiles kept", after.tile_count());
+}
+
+/// A keystroke never waits for the worker pool, which can be compositing the canvas for seconds
+/// on a weak machine: the type layer's raster ran its passes on the pool from the window's thread
+/// (21.7 ms of a keystroke's frame blocked under the slow-pool test mode).
+#[test]
+fn a_keystroke_never_waits_for_a_busy_worker_pool() {
+    let mut s = session(2400, 1200);
+    let ty = s.execute("type.create", json!({"x": 40, "y": 300, "text": "UNA LÍNEA BASTANTE LARGA DE TEXTO", "size": 160})).unwrap()["layer"].as_u64().unwrap();
+    let typed = photocraft_testkit::busy_pool::while_busy(std::time::Duration::from_secs(3), move || s.execute("type.insertText", json!({"layer": ty, "text": "S"})).is_ok());
+    assert_eq!(typed, Some(true), "the keystroke waited for the pool");
+}
