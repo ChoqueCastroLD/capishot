@@ -759,10 +759,16 @@ impl TileCanvas {
         // The page's own thread can't wait in the browser: it finds the tiles in its next frame.
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let _s = crate::perf_span::span("cpu.wait");
-            let t0 = crate::gpu_canvas::now_ms();
-            if let Ok(d) = rx.recv_timeout(std::time::Duration::from_secs_f64(wait.max(0.0) / 1000.0)) {
-                return Some(Drawn { held_ms: crate::gpu_canvas::now_ms() - t0, ..d });
+            // Done already: the frame held for nothing. No wait allowed: the frame doesn't wait.
+            if let Ok(d) = rx.try_recv() {
+                return Some(Drawn { held_ms: 0.0, ..d });
+            }
+            if wait > 0.0 {
+                let _s = crate::perf_span::span("cpu.wait");
+                let t0 = crate::gpu_canvas::now_ms();
+                if let Ok(d) = rx.recv_timeout(std::time::Duration::from_secs_f64(wait / 1000.0)) {
+                    return Some(Drawn { held_ms: crate::gpu_canvas::now_ms() - t0, ..d });
+                }
             }
         }
         #[cfg(target_arch = "wasm32")]
