@@ -32,7 +32,8 @@ fn styled_texture_tracks_monitor_changes_without_recoloring_effect_inputs() {
     let mut app = app("rgb", 16);
     let ctx = egui::Context::default();
     crate::transform_tool::begin(&mut app, &ctx).unwrap();
-    ctx.tex_manager().write().take_delta().clear();
+    // (The box opened with its composite made for the monitor it opened on: that upload is the
+    // first monitor's.)
     let raw = composite(&app, 1.0).unwrap().0;
     let mut previous = None;
     for monitor in ["srgb", "display-p3", "srgb"] {
@@ -306,4 +307,29 @@ fn the_canvas_draws_the_styled_preview_and_reuses_it_between_frames() {
 /// The open box's styled frame.
 fn styled_frame(app: &PhotocraftApp, zoom: f32, dragging: bool) -> Option<(&crate::transform_fx::StyledPreview, crate::transform_fx::Frame<'_>)> {
     crate::transform_tool::styled_frame(app, app.ui.transform.as_ref()?, app.transform_preview.as_ref()?, zoom, dragging)
+}
+
+/// A box over a layer with a style opens with the style composited already, by the thread that
+/// makes its images: the frame that first draws it composited the style itself (49 ms of `canvas`
+/// on a 1080p page; 78 ms in a test build), and now only hands the texture to the renderer.
+#[test]
+fn the_first_styled_composite_is_made_off_the_frame() {
+    let mut h = crate::transform_undo_tests::harness();
+    h.state_mut().run("layer.layerStyle.stroke", json!({"size": 4, "color": "#00ff00", "position": "outside"})).unwrap();
+    h.run_steps(2);
+    crate::transform_tool::set_off_frame(true);
+    let here = crate::transform_fx::composed_here();
+    let ctx = h.ctx.clone();
+    crate::menus::invoke(h.state_mut(), &ctx, "edit.freeTransform", json!({})).unwrap();
+    let t = std::time::Instant::now();
+    while !h.state().transform_preview.as_ref().is_some_and(|pv| pv.made()) {
+        assert!(t.elapsed() < std::time::Duration::from_secs(30), "the box's images were never made");
+        h.step();
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    h.run_steps(4);
+    crate::transform_tool::set_off_frame(false);
+    assert!(crate::transform_tool::draws_layer(h.state(), None), "the box draws the layer");
+    assert_eq!(styled_frame(h.state(), 1.0, false).unwrap().0.builds(), 1, "the composite the box opened with is the one it draws");
+    assert_eq!(crate::transform_fx::composed_here() - here, 0, "no frame composited the style");
 }

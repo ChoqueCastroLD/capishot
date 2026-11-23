@@ -74,6 +74,8 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String>
     let (tx, pending) = std::sync::mpsc::channel();
     {
         let (doc, lifted, wake) = (doc.clone(), lifted.clone(), ctx.clone());
+        // (A hidden layer's box draws its bare pixels: `draw::styled_frame`.)
+        let style_of = (styled && layer.visible).then(|| layer.clone());
         // The view the box opens in: its first textures are made for it, off the frame too.
         let view = crate::transform_tex::FirstView {
             zoom: app.session.active_index().and_then(|i| app.ui.views.get(i)).map(|v| v.zoom / app.canvas_ppp() * ctx.pixels_per_point()),
@@ -83,7 +85,12 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String>
             #[cfg(test)]
             let pace = crate::cpu_canvas::Pace::start();
             let (image, uv) = preview_image(&doc, id, lifted.as_ref(), b, max_side, styled);
-            let moving = crate::transform_tex::PreviewTextures::prepare(image, uv, &view);
+            let mut moving = crate::transform_tex::PreviewTextures::prepare(image, uv, &view);
+            // The style over them, as the box's first frame draws it.
+            let styled = style_of.zip(view.zoom).and_then(|(layer, zoom)| {
+                let first = crate::transform_fx::First { doc: &doc, layer: &layer, revision, quad: corners(rect), zoom, display: view.display.as_deref() };
+                crate::transform_fx::StyledPreview::prepare(&first, &mut moving)
+            });
             let above = up.map(|(up, rect)| {
                 let (image, uv) = composite_image(&up, rect, max_side);
                 (crate::transform_tex::PreviewTextures::prepare(image, uv, &view), rect)
@@ -91,7 +98,7 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String>
             #[cfg(test)]
             pace.hold();
             // (The box may be closed by now: nothing to tell.)
-            let _ = tx.send(Built { moving, above });
+            let _ = tx.send(Built { moving, styled, above });
             wake.request_repaint();
         });
     }
@@ -185,6 +192,9 @@ pub fn land(app: &mut PhotocraftApp) {
             pv.pending = None;
             if let Some(a) = pv.above.as_mut() {
                 pv.texture = crate::transform_tex::PreviewTextures::show(&a.ctx, format!("transform-{}", pv.session), built.moving);
+                if let Some((styled, made)) = pv.styled.as_ref().zip(built.styled) {
+                    styled.show(&a.ctx, made);
+                }
                 if let Some((composite, rect)) = built.above {
                     a.show_prepared(composite, rect);
                 }

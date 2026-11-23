@@ -62,6 +62,14 @@ pub struct Prepared {
     upload: Arc<ColorImage>,
 }
 
+impl Prepared {
+    /// Level `n` of the texels' mip chain and its uv extent ([`PreviewTextures::level_image`]);
+    /// the levels it builds stay with the preview.
+    pub(crate) fn level_image(&mut self, n: u32) -> Option<(Arc<ColorImage>, [f32; 2])> {
+        level_of(&mut self.images, self.base_uv, n)
+    }
+}
+
 impl PreviewTextures {
     /// `image` covers the source with `base_uv` of its extent; `name` keys the texture in egui.
     pub fn new(ctx: &egui::Context, name: String, image: ColorImage, base_uv: [f32; 2]) -> Self {

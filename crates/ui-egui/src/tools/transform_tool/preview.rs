@@ -86,6 +86,8 @@ pub(super) struct Above {
 /// pixels, and the composite of the layers covering them with the canvas area it covers.
 pub(super) struct Built {
     pub(super) moving: crate::transform_tex::Prepared,
+    /// The moving pixels with their layer's style, as the box first draws them.
+    pub(super) styled: Option<crate::transform_fx::PreparedStyled>,
     pub(super) above: Option<(crate::transform_tex::Prepared, photocraft_geom::Rect)>,
 }
 

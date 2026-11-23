@@ -30,7 +30,7 @@ use photocraft_doc::{Document, Effect, Layer, LayerContent};
 use photocraft_geom::Rect;
 use photocraft_raster::Surface;
 
-use crate::transform_tex::PreviewTextures;
+use crate::transform_tex::{Prepared, PreviewTextures};
 
 /// What a rebuild should take while the pointer is down (a drag rebuilds every frame), in
 /// milliseconds on the machine [`pixel_cost_ns`] was measured on.
@@ -238,6 +238,8 @@ pub struct Source<'a> {
 /// Composite the moving texels with `work`'s style over `plan.shown`, on transparency. `work`
 /// and `plan` come from [`plan`]; `doc` gives the global light and the patterns.
 pub fn compose(doc: &Document, work: &Layer, plan: &Plan, source: &Source) -> Option<Buffer> {
+    #[cfg(test)]
+    COMPOSED_HERE.with(|c| c.set(c.get() + 1));
     let s = plan.scale;
     let to_quad = Homography::rect_to_quad([0.0, 0.0, 1.0, 1.0], source.quad.map(|q| [q[0] * s, q[1] * s]))?;
     let to_unit = to_quad.inverse()?;
@@ -261,6 +263,18 @@ pub fn compose(doc: &Document, work: &Layer, plan: &Plan, source: &Source) -> Op
         }
     });
     Some(out)
+}
+
+#[cfg(test)]
+thread_local! {
+    static COMPOSED_HERE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// How many styled composites this thread has made (tests: a frame must make none for a box
+/// that just opened).
+#[cfg(test)]
+pub(crate) fn composed_here() -> u64 {
+    COMPOSED_HERE.with(std::cell::Cell::get)
 }
 
 /// Rows composited per parallel band.
@@ -356,6 +370,49 @@ struct Key {
     crisp: bool,
 }
 
+impl Key {
+    fn new(revision: u64, display: Option<&photocraft_engine::display_color::CanvasDisplay>, quad: [[f64; 2]; 4], plan: Plan, level: u32, nearest: bool, zoom: f32) -> Self {
+        let q = quad.map(|q| q.map(f64::to_bits));
+        Key {
+            revision,
+            display_key: display.map_or(0, |d| d.key),
+            quad: [q[0][0], q[0][1], q[1][0], q[1][1], q[2][0], q[2][1], q[3][0], q[3][1]],
+            plan,
+            level,
+            nearest,
+            crisp: plan.scale >= 1.0 && zoom >= CRISP_ZOOM,
+        }
+    }
+}
+
+/// The composite's texels as the canvas shows them: the monitor's colours where it has them.
+fn shown_image(out: &Buffer, display: Option<&photocraft_engine::display_color::CanvasDisplay>) -> ColorImage {
+    match display {
+        Some(d) if !d.is_identity() => crate::canvas::display_image(Some(d), out),
+        _ => image(out),
+    }
+}
+
+/// What a box that opens shows of its styled layer: the box as the layer lies (the transform
+/// scales nothing yet), in the view it opens in.
+pub struct First<'a> {
+    pub doc: &'a Document,
+    pub layer: &'a Layer,
+    /// The document's revision ([`Frame::revision`]).
+    pub revision: u64,
+    pub quad: [[f64; 2]; 4],
+    /// Screen pixels per document pixel.
+    pub zoom: f32,
+    /// The monitor's colours, where the view shows them.
+    pub display: Option<&'a photocraft_engine::display_color::CanvasDisplay>,
+}
+
+/// A styled preview's first composite, made off the frame ([`StyledPreview::prepare`]).
+pub struct PreparedStyled {
+    key: Key,
+    pixels: ColorImage,
+}
+
 struct Shown {
     key: Key,
     tex: TextureHandle,
@@ -397,32 +454,35 @@ impl StyledPreview {
         display: Option<&photocraft_engine::display_color::CanvasDisplay>,
     ) -> Option<(TextureId, [f32; 4])> {
         let (plan, work, level) = frame.plan()?;
-        let crisp = plan.scale >= 1.0 && frame.zoom >= CRISP_ZOOM;
-        let q = frame.quad.map(|q| q.map(f64::to_bits));
-        let key = Key {
-            revision: frame.revision,
-            display_key: display.map_or(0, |d| d.key),
-            quad: [q[0][0], q[0][1], q[1][0], q[1][1], q[2][0], q[2][1], q[3][0], q[3][1]],
-            plan,
-            level,
-            nearest: frame.nearest,
-            crisp,
-        };
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(s) = state.shown.as_ref().filter(|s| s.key == key) {
+        let key = Key::new(frame.revision, display, frame.quad, plan, level, frame.nearest, frame.zoom);
+        if let Some(s) = self.state.lock().unwrap_or_else(PoisonError::into_inner).shown.as_ref().filter(|s| s.key == key) {
             return Some((s.tex.id(), s.rect));
         }
         let out = frame.compose(&plan, &work, level)?;
-        let options = if crisp { TextureOptions::NEAREST } else { TextureOptions::LINEAR };
-        let pixels = match display {
-            Some(d) if !d.is_identity() => crate::canvas::display_image(Some(d), &out),
-            _ => image(&out),
-        };
-        let tex = ctx.load_texture(self.name.clone(), pixels, options);
-        let (id, rect) = (tex.id(), plan.doc_rect());
-        state.shown = Some(Shown { key, tex, rect });
+        Some(self.show(ctx, PreparedStyled { key, pixels: shown_image(&out, display) }))
+    }
+
+    /// The composite a box that opens first draws for `first`, from the moving texels `texels`:
+    /// what [`texture`](Self::texture) would make in the frame of that draw (49 ms for a layer
+    /// with a style on a 1080p page). Any thread; `None` when there is nothing to draw this way.
+    pub fn prepare(first: &First, texels: &mut Prepared) -> Option<PreparedStyled> {
+        let (plan, work) = plan(first.layer, [first.doc.size.width, first.doc.size.height], first.quad, first.zoom, budget(first.layer, false))?;
+        let level = PreviewTextures::choose(plan.scale as f32, 1.0, false).0;
+        let (image, uv) = texels.level_image(level)?;
+        let out = compose(first.doc, &work, &plan, &Source { image: &image, uv, quad: first.quad, nearest: false })?;
+        Some(PreparedStyled { key: Key::new(first.revision, first.display, first.quad, plan, level, false, first.zoom), pixels: shown_image(&out, first.display) })
+    }
+
+    /// Hand a composite to the renderer: the one [`texture`](Self::texture) answers with while
+    /// what it was made for holds.
+    pub fn show(&self, ctx: &egui::Context, p: PreparedStyled) -> (TextureId, [f32; 4]) {
+        let options = if p.key.crisp { TextureOptions::NEAREST } else { TextureOptions::LINEAR };
+        let tex = ctx.load_texture(self.name.clone(), p.pixels, options);
+        let (id, rect) = (tex.id(), p.key.plan.doc_rect());
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.shown = Some(Shown { key: p.key, tex, rect });
         state.builds += 1;
-        Some((id, rect))
+        (id, rect)
     }
 }
 
