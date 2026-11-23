@@ -116,7 +116,8 @@ impl Bench {
         let mut shown = None;
         for _ in 0..120 {
             let made = self.h.state().transform_preview.as_ref().is_none_or(|pv| pv.made());
-            if shown.is_none() && made && crate::cpu_canvas::shows_document(self.h.state()) {
+            let applied = !self.h.state().session.has_jobs();
+            if shown.is_none() && made && applied && crate::cpu_canvas::shows_document(self.h.state()) {
                 shown = Some(t.elapsed().as_secs_f64() * 1000.0);
             }
             if shown.is_some() && crate::cpu_canvas::settled(self.h.state()) {
@@ -238,13 +239,16 @@ fn edits(path: &str, zoom: f64) -> Option<Vec<(&'static str, f64, f64)>> {
             b.action("transform cancel", |h| crate::transform_tool::cancel(h.state_mut()));
         }
         crate::transform_tool::set_off_frame(false);
-        // Free Transform commit.
+        // Free Transform commit: a background job, as in the app (`CPU_EDIT_PERF_INLINE_JOBS` runs
+        // the command in the frame).
+        b.app().background_jobs = std::env::var_os("CPU_EDIT_PERF_INLINE_JOBS").is_none();
         for (name, id) in [("transform commit type", t.text), ("transform commit page-size", t.big)] {
             b.app().run("layer.select", json!({"layer": id.0})).expect("select");
             b.settle();
             b.run(name, "edit.transform", json!({"scaleX": 104, "scaleY": 104}));
             b.run(name, "edit.undo", json!({}));
         }
+        b.app().background_jobs = false;
         // Typing (a character put into the layer's text, as a keystroke commits it).
         b.app().run("layer.select", json!({"layer": t.text.0})).expect("select");
         b.settle();
