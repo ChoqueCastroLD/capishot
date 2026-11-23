@@ -10,6 +10,8 @@ impl PhotocraftApp {
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
         // A stroke released a moment ago and still landing comes before this command.
         crate::canvas::land_stroke_before_edit(self);
+        // So does a click whose job is still running on the document.
+        jobs_ui::land_first(self, Some(id));
         if let Some(result) = delete_layer_prompt::intercept(self, id, &params) {
             return result;
         }

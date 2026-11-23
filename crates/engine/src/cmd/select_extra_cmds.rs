@@ -206,14 +206,32 @@ fn transform_selection(s: &mut Session, p: &Value) -> Result<Value> {
     if h.0.iter().zip(Homography::IDENTITY.0).all(|(a, b)| (a - b).abs() < 1e-12) {
         return Ok(json!({"changed": false, "selected": true}));
     }
+    let shift = whole_shift(&h);
     let selected = s.edit("Transform Selection", |doc, _| {
         if let Some(sel) = &doc.selection {
-            crate::transform_cmds::check_budget(sel.content_bounds(), &h, "selection", sel.format())?;
-            doc.selection = Some(crate::transform_cmds::warp_gray(sel, &h, interp)?).filter(|s| !s.content_bounds().is_empty());
+            let moved = match shift {
+                // Moved by whole pixels (the end of a marquee or lasso drag): its tiles copied, or
+                // shared, where a warp read, resampled and wrote the whole mask (30 to 130 ms).
+                Some((dx, dy)) => sel.translated(dx, dy, sel.content_bounds()),
+                None => {
+                    crate::transform_cmds::check_budget(sel.content_bounds(), &h, "selection", sel.format())?;
+                    crate::transform_cmds::warp_gray(sel, &h, interp)?
+                }
+            };
+            doc.selection = Some(moved).filter(|s| !s.content_bounds().is_empty());
         }
         Ok(doc.selection.is_some())
     })?;
     Ok(json!({"changed": true, "selected": selected, "bounds": bounds_json(s)}))
+}
+
+/// The whole pixels `h` moves everything by, when it does nothing else.
+fn whole_shift(h: &Homography) -> Option<(i32, i32)> {
+    let m = h.0;
+    let plain = [m[0] - 1.0, m[1], m[3], m[4] - 1.0, m[6], m[7], m[8] - 1.0].iter().all(|v| v.abs() < 1e-12);
+    // (Within the canvas limits: a selection can't be moved further than its document is wide.)
+    let whole = |v: f64| (v.fract() == 0.0 && v.abs() <= 1e7).then_some(v as i32);
+    if plain { whole(m[2]).zip(whole(m[5])) } else { None }
 }
 
 fn bounds_json(s: &Session) -> Value {
@@ -391,6 +409,38 @@ mod tests {
     }
 
     /// A misspelt or malformed `reference` is an error, not a silent scale about the centre.
+    /// The end of a marquee or lasso drag moves the selection by whole pixels: its tiles are
+    /// copied (shared, for a move by whole tiles), not read, resampled and written (30 to 130 ms
+    /// on a page), and the values are the ones the resampling gives.
+    #[test]
+    fn a_selection_moved_by_whole_pixels_keeps_its_values_and_shares_whole_tiles() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 1200, "height": 900})).unwrap();
+        s.execute("select.rect", json!({"x": 100, "y": 60, "width": 700, "height": 500})).unwrap();
+        s.execute("select.modify.feather", json!({"radius": 6})).unwrap();
+        let before = s.active().unwrap().doc.selection.clone().unwrap();
+        let area = Rect::new(0, 0, 1200, 900);
+        // By whole tiles: the same tiles, one tile further.
+        s.execute("select.transformSelection", json!({"dx": 256, "dy": 0})).unwrap();
+        let moved = s.active().unwrap().doc.selection.clone().unwrap();
+        assert_eq!(moved.read_region(area.translate(256, 0)), before.read_region(area));
+        let shared = before.tiles().filter(|(c, t)| moved.tile(photocraft_geom::TileCoord::new(c.tx + 1, c.ty)).is_some_and(|m| std::sync::Arc::ptr_eq(m, t))).count();
+        assert_eq!(shared, before.tiles().count(), "every tile shared");
+        // By any whole pixels: what the resampling gives, to a rounding step.
+        s.execute("edit.undo", json!({})).unwrap();
+        s.execute("select.transformSelection", json!({"dx": 37, "dy": -11})).unwrap();
+        let moved = s.active().unwrap().doc.selection.clone().unwrap();
+        assert_eq!(moved.read_region(area.translate(37, -11)), before.read_region(area), "the same values, 37 right and 11 up");
+        let h = Homography([1.0, 0.0, 37.0, 0.0, 1.0, -11.0, 0.0, 0.0, 1.0]);
+        let warped = crate::transform_cmds::warp_gray(&before, &h, Interp::Bilinear).unwrap();
+        let wide = Rect::new(-64, -64, 1300, 1000);
+        let off = moved.read_region(wide).iter().zip(warped.read_region(wide)).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+        assert!(off <= 1.0 / 255.0, "off by {off} from the resampled selection");
+        // Half a pixel is still resampled.
+        assert_eq!(whole_shift(&Homography([1.0, 0.0, 0.5, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0])), None);
+        assert_eq!(whole_shift(&Homography([1.0, 0.0, 3.0, 0.0, 2.0, 0.0, 0.0, 0.0, 1.0])), None);
+    }
+
     #[test]
     fn transform_selection_rejects_an_unknown_reference() {
         let mut s = rect_sel();

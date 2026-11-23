@@ -61,6 +61,9 @@ fn invoke_counted(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params
     if crate::discard_ui::intercept(app, id, &params) {
         return Ok(Value::Null);
     }
+    // A click whose job is still running on the document comes first (the shell's own commands
+    // read the document too: Free Transform's box opens on the layer as the fill left it).
+    crate::jobs_ui::land_first(app, Some(id));
     let r = invoke_unguarded(app, ctx, id, params)?;
     // The palette's empty-query list (UI-217-7); opening the palette isn't a command to recall.
     if id != "edit.search" {

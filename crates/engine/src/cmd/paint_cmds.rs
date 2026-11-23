@@ -64,14 +64,7 @@ fn bucket(s: &mut Session, p: &Value) -> Result<Value> {
     let mode = fill_mode(p)?;
     let all = b(p, "sampleAllLayers", false) && crate::channel_cmds::target_of(p) == crate::channel_cmds::Target::Pixels;
     // Other visible layers can define the region, but the fill still writes only to the target.
-    let region = if all {
-        let (area, img) = crate::selection_cmds::sample_rgba8(s, true)?;
-        let region = photocraft_algo::selection::wand_region(&img, area, (x, y), tol, contiguous, aa);
-        drop(img);
-        region
-    } else {
-        None
-    };
+    let sampled = if all { Some(crate::selection_cmds::Sampled::of(s, true)?) } else { None };
     // Fill source: foreground colour (default) or a pattern (the Paint Bucket "Fill" dropdown).
     let source = p.get("contents").or_else(|| p.get("source")).and_then(Value::as_str).unwrap_or("foreground");
     let pattern = if source == "pattern" {
@@ -85,7 +78,16 @@ fn bucket(s: &mut Session, p: &Value) -> Result<Value> {
     };
     // A foreground picked as CMYK fills a CMYK document with the picked inks (#4196).
     let inks = s.tools.picked_cmyk([c[0], c[1], c[2]]).filter(|_| c[3] >= 1.0 && pattern.is_none());
-    let filled = s.edit("Paint Bucket", |doc, active| {
+    let p = p.clone();
+    // A job when started with `Session::start`: the flood and the fill of a page held the
+    // window 80 ms to 1.9 s a click (68 megapixels), the composite of every layer before them
+    // with Sample All Layers.
+    let fill = move |doc: &mut photocraft_doc::Document, active: &mut Option<photocraft_doc::LayerId>, _: &crate::jobs::JobCtx| {
+        let p = &p;
+        let region = sampled.and_then(|(area, source)| {
+            let img = source.rgba8(area);
+            photocraft_algo::selection::wand_region(&img, area, (x, y), tol, contiguous, aa)
+        });
         let area = doc.bounds();
         let sel = doc.selection.clone();
         let (surf, lock) = crate::channel_cmds::target_surface(doc, *active, p)?;
@@ -111,8 +113,8 @@ fn bucket(s: &mut Session, p: &Value) -> Result<Value> {
         };
         surf.prune();
         Ok(ok)
-    })?;
-    Ok(json!({ "filled": filled }))
+    };
+    crate::jobs::edit_job(s, "Paint Bucket", fill, |filled| json!({ "filled": filled }))
 }
 
 fn gradient(s: &mut Session, p: &Value) -> Result<Value> {

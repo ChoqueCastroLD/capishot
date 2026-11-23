@@ -103,13 +103,14 @@ pub fn fill(s: &mut Session, p: &Value) -> Result<Value> {
     let area = sel.as_ref().map_or(doc_bounds, |m| m.content_bounds().intersect(&doc_bounds));
     let mut out = json!({ "contents": contents });
     let restore = contents == "history";
+    let ready = Prepared::Ready;
     let source = match contents {
-        "foreground" => color_source(s, s.tools.foreground),
-        "background" => color_source(s, s.tools.background),
-        "color" => color_source(s, color_param(CMD, p, "color", s.tools.foreground)?),
-        "black" => Source::Color([0.0, 0.0, 0.0, 1.0]),
-        "gray" => Source::Color([128.0 / 255.0, 128.0 / 255.0, 128.0 / 255.0, 1.0]),
-        "white" => Source::Color([1.0; 4]),
+        "foreground" => ready(color_source(s, s.tools.foreground)),
+        "background" => ready(color_source(s, s.tools.background)),
+        "color" => ready(color_source(s, color_param(CMD, p, "color", s.tools.foreground)?)),
+        "black" => ready(Source::Color([0.0, 0.0, 0.0, 1.0])),
+        "gray" => ready(Source::Color([128.0 / 255.0, 128.0 / 255.0, 128.0 / 255.0, 1.0])),
+        "white" => ready(Source::Color([1.0; 4])),
         "pattern" => {
             let pat = crate::pattern_cmds::resolve_param(s, CMD, p)?;
             let (scale, angle, _, phase) = crate::pattern_cmds::placement(CMD, p)?;
@@ -117,14 +118,14 @@ pub fn fill(s: &mut Session, p: &Value) -> Result<Value> {
             // Photoshop's Fill uses the canvas origin.
             let place = photocraft_compose::pattern::Placement::new(Rect::EMPTY, false, phase, scale, angle);
             out["pattern"] = json!(pat.id);
-            Source::Pixels(area, photocraft_compose::pattern::render(&tile, &place, area))
+            Prepared::Pattern(Box::new((tile, place)))
         }
         "history" => {
             // A History panel row `state` or a `snapshot`, else the History Brush's source.
             let source_doc = crate::history_source_cmds::paint_source(st, p, CMD)?;
             let src = crate::channel_cmds::read_target_surface(source_doc.as_ref(), id, p)
                 .map_err(|_| EngineError::Other("the target did not exist (as pixels, a mask or a channel) in that history state".into()))?;
-            Source::Pixels(area, read_rgba(src, area, "reading Fill's history source")?)
+            Prepared::History(src.clone())
         }
         "contentAware" => {
             let sel = sel.as_ref().ok_or_else(|| EngineError::Other("Content-Aware fill needs a selection".into()))?;
@@ -135,7 +136,7 @@ pub fn fill(s: &mut Session, p: &Value) -> Result<Value> {
             let lid = id.ok_or_else(|| EngineError::Other("no active layer".into()))?;
             let surf = st.doc.layer(lid).and_then(|l| l.surface()).ok_or_else(|| EngineError::Other("Content-Aware fill needs a pixel layer".into()))?;
             let seed = p.get("seed").and_then(Value::as_u64).unwrap_or(1);
-            content_aware(surf, sel, doc_bounds, adapt, seed)?
+            Prepared::ContentAware { surf: surf.clone(), sel: sel.clone(), canvas: doc_bounds, adapt, seed }
         }
         _ => return Err(bad(format!("unknown contents `{contents}`"))),
     };
@@ -144,15 +145,51 @@ pub fn fill(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // The document's own CMYK profile converts the fill colour, like the compositor and brush.
     let cmyk = crate::brush_cmds::doc_cmyk_space(s);
-    photocraft_color::convert::with_cmyk_space(cmyk.as_ref(), || {
-        s.edit("Fill", |doc, _| {
-            let sel = doc.selection.clone();
-            let (surf, lock) = crate::channel_cmds::target_surface(doc, id, p)?;
-            blend_into(surf, area, &source, sel.as_ref(), Blend { mode, opacity, keep_alpha: preserve || lock, restore })?;
-            Ok(())
-        })
-    })?;
-    Ok(out)
+    let p = p.clone();
+    // A job when started with `Session::start`: the pixels a fill reads (a pattern over the
+    // area, a history state, the surroundings of a Content-Aware fill) and the blend of the page
+    // held the window 30 to 350 ms.
+    crate::jobs::edit_job(
+        s,
+        "Fill",
+        move |doc, _, _| {
+            photocraft_color::convert::with_cmyk_space(cmyk.as_ref(), || {
+                let source = source.read(area)?;
+                let sel = doc.selection.clone();
+                let (surf, lock) = crate::channel_cmds::target_surface(doc, id, &p)?;
+                blend_into(surf, area, &source, sel.as_ref(), Blend { mode, opacity, keep_alpha: preserve || lock, restore })
+            })
+        },
+        move |()| out,
+    )
+}
+
+/// A fill's source as the command finds it, before any pixel of it is read ([`Prepared::read`]).
+enum Prepared {
+    Ready(Source),
+    Pattern(Box<(photocraft_compose::pattern::Tile, photocraft_compose::pattern::Placement)>),
+    /// The target as a history state had it.
+    History(Surface),
+    ContentAware {
+        surf: Surface,
+        sel: Surface,
+        canvas: Rect,
+        adapt: bool,
+        seed: u64,
+    },
+}
+
+impl Prepared {
+    /// The source over `area`: the pattern rendered, the history state read, the selection filled
+    /// from its surroundings.
+    fn read(self, area: Rect) -> Result<Source> {
+        match self {
+            Prepared::Ready(source) => Ok(source),
+            Prepared::Pattern(pattern) => Ok(Source::Pixels(area, photocraft_compose::pattern::render(&pattern.0, &pattern.1, area))),
+            Prepared::History(src) => Ok(Source::Pixels(area, read_rgba(&src, area, "reading Fill's history source")?)),
+            Prepared::ContentAware { surf, sel, canvas, adapt, seed } => content_aware(&surf, &sel, canvas, adapt, seed),
+        }
+    }
 }
 
 /// A fill colour: the inks it was picked as when it was picked as CMYK (#4196), else plain sRGB.

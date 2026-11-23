@@ -528,6 +528,27 @@ fn run_inner(app: &mut PhotocraftApp, id: &str, params: Value) -> Result<Value, 
     }
 }
 
+/// The commands of a click, a key or a frame's commit whose pixel work is a job, so that no frame
+/// is held by it (a Paint Bucket click on a page was 80 ms to 1.9 s of `cmd.run` on the window's
+/// thread, a crop up to 760 ms). They land in the order the user did things ([`land_first`]).
+pub(crate) const LAND_FIRST: [&str; 4] = ["paint.bucket", "edit.fill", "select.magicWand", "image.crop"];
+
+/// Command `id` (`None`: a press of a tool) is about to act on the active document while the job
+/// of a click ([`LAND_FIRST`]) is still running on it: the click comes first, as the user did
+/// things, waiting for the rest of it. The engine would refuse the command otherwise, and a second
+/// Paint Bucket click a moment after the first would be lost. Any other job keeps its document
+/// busy, as before.
+pub(crate) fn land_first(app: &mut PhotocraftApp, id: Option<&str>) {
+    let job = match id {
+        Some(id) => app.session.job_in_the_way(id),
+        None => app.session.active_job(),
+    };
+    let Some(job) = job.filter(|j| LAND_FIRST.contains(&j.command.as_str())) else { return };
+    let _s = crate::perf_span::span("jobs.land_first");
+    // (How it ended reaches `on_event` with the next frame's events.)
+    let _ = app.session.wait_job(job.id);
+}
+
 /// The browser threads build runs these as background jobs on its Web Worker pool even without
 /// [`PhotocraftApp::background_jobs`] (the browser's default): the seconds-long fills and graph
 /// cuts at pen-up would otherwise hold the page's main thread. Their results are the same.
@@ -1178,6 +1199,8 @@ fn on_event(app: &mut PhotocraftApp, ctx: &egui::Context, e: JobEvent) {
     }
     // A Free Transform commit's session ends with its job (then reported like any job).
     crate::transform_tool::on_job_event(app, &e);
+    // So does a crop's: the view fits what it left, or the frame comes back.
+    crate::crop_ui::on_job_event(app, &e);
     // An AI run's end: "Done" or its error on the progress card.
     let ai_error = crate::ai_progress::on_event(app, ctx, &e);
     if on_files_event(app, &e) {

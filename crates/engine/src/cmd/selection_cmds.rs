@@ -91,7 +91,7 @@ fn current_mask(doc: &Document) -> (Rect, Vec<f32>) {
 /// composite: a gray layer-mask view, or — with every colour channel hidden — the first
 /// visible alpha, Quick Mask, or the active layer's mask. The Magic Wand selects from this
 /// so a white alpha stays one region instead of breaking up along the RGB underneath.
-fn shown_gray(s: &Session) -> Option<(Rect, Vec<[u8; 4]>)> {
+fn shown_gray(s: &Session) -> Option<(Rect, Sampled)> {
     let st = s.active()?;
     let doc = &st.doc;
     let area = doc.bounds();
@@ -112,28 +112,54 @@ fn shown_gray(s: &Session) -> Option<(Rect, Vec<[u8; 4]>)> {
     } else {
         return None;
     };
-    Some((area, sel::rgba8_image(surf, area)))
+    Some((area, Sampled::Surface(surf.clone())))
 }
 
-/// 8-bit RGBA of the active layer (or the composite with `all_layers`) over the canvas.
-pub(crate) fn sample_rgba8(s: &Session, all_layers: bool) -> Result<(Rect, Vec<[u8; 4]>)> {
-    let d = s.active().ok_or(EngineError::NoDocument)?;
-    let area = d.doc.bounds();
-    let layer = d.active_layer.and_then(|id| d.doc.layer(id)).and_then(|l| l.surface());
-    match (all_layers, layer) {
-        (false, Some(surf)) => Ok((area, sel::rgba8_image(surf, area))),
-        _ => {
-            let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
-            Ok((area, photocraft_compose::render(&d.doc, area).px.iter().map(|p| p.map(q)).collect()))
+/// What a click of the Magic Wand, the Paint Bucket or the Magic Eraser reads its region from,
+/// taken from the session without reading a pixel (a surface shares its tiles, a document its
+/// layers): the read itself, megapixels of it and the composite of every layer with Sample All
+/// Layers, is the command's job to do, on whatever thread it runs.
+pub(crate) enum Sampled {
+    Surface(Surface),
+    Composite(std::sync::Arc<Document>),
+}
+
+impl Sampled {
+    /// The active layer's pixels, or the composite with `all_layers` (or when the active layer
+    /// has no pixels of its own), with the canvas they are read over.
+    pub(crate) fn of(s: &Session, all_layers: bool) -> Result<(Rect, Sampled)> {
+        let d = s.active().ok_or(EngineError::NoDocument)?;
+        let layer = d.active_layer.and_then(|id| d.doc.layer(id)).and_then(|l| l.surface());
+        let source = match (all_layers, layer) {
+            (false, Some(surf)) => Sampled::Surface(surf.clone()),
+            _ => Sampled::Composite(d.doc.clone()),
+        };
+        Ok((d.doc.bounds(), source))
+    }
+
+    /// 8-bit RGBA over `area`.
+    pub(crate) fn rgba8(&self, area: Rect) -> Vec<[u8; 4]> {
+        match self {
+            Sampled::Surface(surf) => sel::rgba8_image(surf, area),
+            Sampled::Composite(doc) => {
+                let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+                photocraft_compose::render(doc, area).px.iter().map(|p| p.map(q)).collect()
+            }
         }
     }
 }
 
+/// 8-bit RGBA of the active layer (or the composite with `all_layers`) over the canvas.
+pub(crate) fn sample_rgba8(s: &Session, all_layers: bool) -> Result<(Rect, Vec<[u8; 4]>)> {
+    let (area, source) = Sampled::of(s, all_layers)?;
+    Ok((area, source.rgba8(area)))
+}
+
 fn magic_wand(s: &mut Session, p: &Value) -> Result<Value> {
     let (x, y) = (f(p, "x", 0.0).floor() as i32, f(p, "y", 0.0).floor() as i32);
-    let (area, img) = match shown_gray(s) {
+    let (area, source) = match shown_gray(s) {
         Some(plane) => plane,
-        None => sample_rgba8(s, b(p, "sampleAllLayers", false))?,
+        None => Sampled::of(s, b(p, "sampleAllLayers", false))?,
     };
     // Sample Size: Point Sample (1) or an N × N average around the click (3, 5, 11, 31, 51, 101).
     let sample = match p.get("sampleSize") {
@@ -143,14 +169,21 @@ fn magic_wand(s: &mut Session, p: &Value) -> Result<Value> {
             _ => return Err(EngineError::BadParams { cmd: "select.magicWand".into(), msg: format!("sampleSize {v} (1|3|5|11|31|51|101)") }),
         },
     };
-    let region = sel::wand_region_sampled(&img, area, (x, y), sample, f(p, "tolerance", 32.0), b(p, "contiguous", true), b(p, "antiAlias", true));
-    drop(img);
-    let m = mode(p);
-    let selected = s.edit("Magic Wand", |doc, _| {
-        doc.selection = sel::combine_region(doc.selection.as_ref(), region.as_ref(), m);
-        Ok(doc.selection.is_some())
-    })?;
-    Ok(json!({ "selected": selected }))
+    let (tolerance, contiguous, anti_alias, m) = (f(p, "tolerance", 32.0), b(p, "contiguous", true), b(p, "antiAlias", true), mode(p));
+    // A job when started with `Session::start`: reading the page (the composite of every layer
+    // with Sample All Layers) and flooding it held the window 40 to 480 ms a click.
+    crate::jobs::edit_job(
+        s,
+        "Magic Wand",
+        move |doc, _, _| {
+            let img = source.rgba8(area);
+            let region = sel::wand_region_sampled(&img, area, (x, y), sample, tolerance, contiguous, anti_alias);
+            drop(img);
+            doc.selection = sel::combine_region(doc.selection.as_ref(), region.as_ref(), m);
+            Ok(doc.selection.is_some())
+        },
+        |selected| json!({ "selected": selected }),
+    )
 }
 
 fn parse_color(p: &Value) -> [f32; 3] {

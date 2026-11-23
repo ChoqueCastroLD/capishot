@@ -110,6 +110,73 @@ fn warp_runs_as_a_job_with_the_inline_result() {
     assert_eq!(pixels(&s), pixels(&inline), "same pixels as the synchronous command");
 }
 
+/// The whole documents of two sessions, pixel for pixel: every layer, and the selection.
+fn same_documents(a: &Session, b: &Session) {
+    let (a, b) = (a.active().unwrap(), b.active().unwrap());
+    assert_eq!(a.doc.size, b.doc.size);
+    let area = a.doc.bounds();
+    assert_eq!(a.doc.layers.len(), b.doc.layers.len());
+    for (la, lb) in a.doc.layers.iter().zip(&b.doc.layers) {
+        assert_eq!(la.surface().map(|s| s.read_region(area)), lb.surface().map(|s| s.read_region(area)), "layer {}", la.name);
+    }
+    let selection = |d: &crate::DocState| d.doc.selection.as_ref().map(|s| s.read_region(area));
+    assert_eq!(selection(a), selection(b), "the selection");
+}
+
+/// The commands whose pixel work held the window on the owner's PC (a Paint Bucket click 80 ms to
+/// 1.9 s, Fill 30 to 350 ms, the Magic Wand 40 to 480 ms, a crop 80 to 760 ms): each is a job
+/// when started as one, the document as it was until the job is applied, and then the document
+/// the synchronous command leaves, one undo step, the same result.
+#[test]
+fn the_click_and_fill_commands_run_as_jobs_with_the_inline_result() {
+    let cases = [
+        ("paint.bucket", json!({"x": 40, "y": 30, "tolerance": 60, "color": "#22aa55"}), "Paint Bucket"),
+        ("paint.bucket", json!({"x": 40, "y": 30, "tolerance": 60, "color": "#22aa55", "sampleAllLayers": true, "contiguous": false}), "Paint Bucket"),
+        ("edit.fill", json!({"contents": "color", "color": "#3366cc", "opacity": 70}), "Fill"),
+        ("edit.fill", json!({"contents": "contentAware", "seed": 3}), "Fill"),
+        ("select.magicWand", json!({"x": 40, "y": 30, "tolerance": 60}), "Magic Wand"),
+        ("select.magicWand", json!({"x": 40, "y": 30, "tolerance": 60, "sampleAllLayers": true, "sampleSize": 3}), "Magic Wand"),
+        ("image.crop", json!({"x": 30, "y": 20, "width": 200, "height": 120}), "Crop"),
+        ("image.crop", json!({"x": -10, "y": 20, "width": 200, "height": 120, "targetWidth": 100, "targetHeight": 60}), "Crop"),
+    ];
+    // (A selection for the Content-Aware fill to fill from its surroundings.)
+    let page = || {
+        let mut s = session(300, 200);
+        s.execute("select.rect", json!({"x": 120, "y": 70, "width": 40, "height": 30})).unwrap();
+        s
+    };
+    for (cmd, params, label) in cases {
+        let mut inline = page();
+        let expected = inline.execute(cmd, params.clone()).unwrap();
+
+        let mut s = page();
+        let before = s.active().unwrap().doc.clone();
+        let steps = s.active().unwrap().history.past_len();
+        let id = job(s.start(cmd, params.clone()).unwrap());
+        assert!(Arc::ptr_eq(&s.active().unwrap().doc, &before), "{cmd} {params}: the document is untouched while the job runs");
+        let e = wait_event(&mut s, id);
+        let JobOutcome::Done(v) = &e.outcome else { panic!("{cmd} {params}: {e:?}") };
+        assert_eq!((v, e.label.as_str(), e.command.as_str()), (&expected, label, cmd), "{cmd} {params}");
+        assert_eq!(s.active().unwrap().history.past_len(), steps + 1, "{cmd} {params}: one undo step");
+        same_documents(&s, &inline);
+        assert!(s.undo());
+        assert!(Arc::ptr_eq(&s.active().unwrap().doc, &before), "{cmd} {params}: undone to the document before");
+    }
+}
+
+/// A crop's job moves the Color Sampler points with their pixels when it is applied, not before.
+#[test]
+fn a_crop_job_moves_the_color_samplers_when_it_lands() {
+    let mut s = session(300, 200);
+    s.execute("view.colorSamplers.add", json!({"x": 100, "y": 80})).unwrap();
+    let [x, y] = s.active().unwrap().color_samplers[0];
+    let id = job(s.start("image.crop", json!({"x": 30, "y": 20, "width": 200, "height": 120})).unwrap());
+    assert_eq!(s.active().unwrap().color_samplers, vec![[x, y]], "not before the crop lands");
+    assert!(matches!(wait_event(&mut s, id).outcome, JobOutcome::Done(_)));
+    assert_eq!(s.active().unwrap().color_samplers, vec![[x - 30.0, y - 20.0]]);
+    assert_eq!(s.active().unwrap().doc.size, photocraft_geom::Size::new(200, 120));
+}
+
 #[test]
 fn a_cancelled_warp_leaves_the_document_unchanged() {
     let mut s = session(1600, 1200);

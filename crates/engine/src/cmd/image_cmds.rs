@@ -656,21 +656,38 @@ fn crop(s: &mut Session, p: &Value) -> Result<Value> {
     if r.is_empty() {
         return Err(EngineError::Other("nothing to crop: pass x/y/width/height or make a selection".into()));
     }
-    s.set_sampler_map(target.sampler_map(r));
+    let map = target.sampler_map(r);
     let extension = s.tools.background;
-    s.edit("Crop", |doc, active| {
-        let original = doc.size;
-        crop_doc(doc, "image.crop", r, delete, extension)?;
-        // A straight crop fills all of the area past the old canvas, pixels an earlier Delete Cropped
-        // Pixels off crop hid there included, as Photoshop does; only a turned frame keeps them (#8060).
-        if content_aware {
-            crate::crop_fill::fill_uncovered(doc, *active, &crate::crop_fill::Coverage::crop(r, original.width, original.height))?;
-        }
-        doc.selection = None;
-        target.apply(doc);
-        Ok(())
-    })?;
-    Ok(crop_result(s, json!({ "x": r.x0, "y": r.y0, "width": r.width(), "height": r.height() })))
+    let st = s.active().ok_or(EngineError::NoDocument)?;
+    let (base, active) = (st.doc.clone(), st.active_layer);
+    // A job when started with `Session::start`: cropping every layer of a page (and resampling
+    // it to a target size, or filling what the frame uncovers) held the window 80 to 760 ms.
+    crate::jobs::run(
+        s,
+        "Crop",
+        true,
+        move |_| {
+            let mut doc = (*base).clone();
+            let original = doc.size;
+            crop_doc(&mut doc, "image.crop", r, delete, extension)?;
+            // A straight crop fills all of the area past the old canvas, pixels an earlier Delete Cropped
+            // Pixels off crop hid there included, as Photoshop does; only a turned frame keeps them (#8060).
+            if content_aware {
+                crate::crop_fill::fill_uncovered(&mut doc, active, &crate::crop_fill::Coverage::crop(r, original.width, original.height))?;
+            }
+            doc.selection = None;
+            target.apply(&mut doc);
+            Ok(doc)
+        },
+        move |s, doc| {
+            s.set_sampler_map(map);
+            s.edit("Crop", move |d, _| {
+                *d = doc;
+                Ok(())
+            })?;
+            Ok(crop_result(s, json!({ "x": r.x0, "y": r.y0, "width": r.width(), "height": r.height() })))
+        },
+    )
 }
 
 /// The Crop tool's W x H x Resolution: the size (px) the cropped area is resampled to and the

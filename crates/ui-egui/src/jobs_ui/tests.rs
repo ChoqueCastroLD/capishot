@@ -1549,3 +1549,133 @@ fn real_psds_open_unmodified() {
     }
     assert!(bad.is_empty(), "{bad:#?}");
 }
+
+/// A bare app over a 320 x 240 page with a layer, background jobs on as in the desktop app.
+fn click_app() -> PhotocraftApp {
+    let mut s = photocraft_engine::Session::new();
+    s.execute("file.new", json!({"width": 320, "height": 240, "background": "white"})).unwrap();
+    s.execute("layer.new.layer", json!({})).unwrap();
+    s.execute("select.rect", json!({"x": 20, "y": 20, "width": 120, "height": 90})).unwrap();
+    s.execute("edit.fill", json!({"color": "#3366cc"})).unwrap();
+    s.execute("select.deselect", json!({})).unwrap();
+    let mut app = PhotocraftApp::new(s, crate::Services::default());
+    app.background_jobs = true;
+    app
+}
+
+/// The frames' part until no job is left: finished jobs applied, their events handled.
+fn land_jobs(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let t = Instant::now();
+    while app.session.has_jobs() {
+        assert!(t.elapsed() < Duration::from_secs(60), "the jobs never ended");
+        crate::jobs_ui::tick_events(app, ctx);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    crate::jobs_ui::tick_events(app, ctx);
+}
+
+fn layer_pixels(app: &PhotocraftApp) -> Vec<f32> {
+    let st = app.session.active().unwrap();
+    st.doc.layer(st.active_layer.unwrap()).unwrap().surface().unwrap().read_region(st.doc.bounds())
+}
+
+/// A Paint Bucket click, a Fill and a Magic Wand click are jobs in the app: the call that runs
+/// them returns with the document untouched (their pixel work, 80 ms to 1.9 s of a frame on the
+/// owner's PC, is another thread's), and the next thing the user does lands after them: a second
+/// click a moment later is not refused or lost, and the result is what the same commands give
+/// one after another.
+#[test]
+fn a_click_is_a_job_and_what_the_user_does_next_lands_after_it() {
+    let steps = [
+        ("paint.bucket", json!({"x": 30, "y": 30, "tolerance": 20, "color": "#22aa55"})),
+        ("paint.bucket", json!({"x": 200, "y": 200, "tolerance": 20, "color": "#aa2200"})),
+        ("select.magicWand", json!({"x": 30, "y": 30, "tolerance": 20})),
+        ("edit.fill", json!({"contents": "color", "color": "#101010", "opacity": 50})),
+        ("edit.undo", json!({})),
+        ("select.inverse", json!({})),
+    ];
+    let mut inline = click_app();
+    inline.background_jobs = false;
+    // The journal and the document after each step run in the call.
+    let mut after = vec![(inline.session.journal.len(), layer_pixels(&inline))];
+    for (cmd, params) in &steps {
+        inline.run(cmd, params.clone()).unwrap();
+        after.push((inline.session.journal.len(), layer_pixels(&inline)));
+    }
+
+    let mut app = click_app();
+    let ctx = egui::Context::default();
+    for (i, (cmd, params)) in steps.iter().enumerate() {
+        let r = app.run(cmd, params.clone()).unwrap_or_else(|e| panic!("{cmd}: {e}"));
+        // A job: what ran before it has landed, and this step not yet.
+        let job = crate::jobs_ui::LAND_FIRST.contains(cmd);
+        assert_eq!(r.get("pending").is_some(), job, "{cmd}: {r}");
+        let landed = &after[if job { i } else { i + 1 }];
+        assert_eq!(app.session.journal.len(), landed.0, "{cmd}");
+        assert!(layer_pixels(&app) == landed.1, "{cmd}: the document in the call");
+    }
+    land_jobs(&mut app, &ctx);
+    let ids = |a: &PhotocraftApp| a.session.journal.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>();
+    assert_eq!(ids(&app), ids(&inline), "every step ran, in the order they were asked for");
+    assert_eq!(layer_pixels(&app), layer_pixels(&inline));
+    let selection = |a: &PhotocraftApp| a.session.active().unwrap().doc.selection.as_ref().map(|s| s.read_region(photocraft_geom::Rect::new(0, 0, 320, 240)));
+    assert_eq!(selection(&app), selection(&inline));
+}
+
+/// A press of a tool starts on the document as the click before it left it.
+#[test]
+fn a_press_lands_the_click_before_it() {
+    let mut app = click_app();
+    let before = app.session.active().unwrap().doc.clone();
+    app.run("paint.bucket", json!({"x": 200, "y": 200, "tolerance": 20, "color": "#aa2200"})).unwrap();
+    assert!(Arc::ptr_eq(&app.session.active().unwrap().doc, &before));
+    crate::jobs_ui::land_first(&mut app, None);
+    assert!(!Arc::ptr_eq(&app.session.active().unwrap().doc, &before), "the fill is in the document the press starts on");
+    assert!(app.session.active_job().is_none());
+    // A command of the shell's own that reads the document waits too; one that only changes the
+    // view doesn't.
+    app.run("paint.bucket", json!({"x": 200, "y": 200, "tolerance": 20, "color": "#0022aa"})).unwrap();
+    crate::jobs_ui::land_first(&mut app, Some("view.zoomIn"));
+    assert!(app.session.active_job().is_some(), "a zoom doesn't wait for the click");
+    crate::jobs_ui::land_first(&mut app, Some("edit.freeTransform"));
+    assert!(app.session.active_job().is_none(), "Free Transform opens on the document the click left");
+    // Any other job keeps its document: a press doesn't wait for a filter.
+    let gate = Arc::new(AtomicBool::new(false));
+    slow_job(&mut app, &gate);
+    crate::jobs_ui::land_first(&mut app, None);
+    assert!(app.session.active_job().is_some());
+    gate.store(true, Ordering::Relaxed);
+    land_jobs(&mut app, &egui::Context::default());
+}
+
+/// The Crop tool's commit is a job: the call returns with the page as it was, no new frame is
+/// made over it meanwhile, and when the crop lands the view fits what it left. A crop that fails
+/// gives the frame back.
+#[test]
+fn a_crop_is_a_job_and_the_view_fits_when_it_lands() {
+    let mut app = click_app();
+    let ctx = egui::Context::default();
+    app.sync_views();
+    app.ui.tool = crate::state::Tool::Crop;
+    app.ui.crop_rect = Some([40.0, 30.0, 240.0, 180.0]);
+    app.ui.views[0].fit_pending = false;
+    crate::canvas::commit_crop(&mut app);
+    assert_eq!(app.session.active().unwrap().doc.size, photocraft_geom::Size::new(320, 240), "not cropped in the call");
+    assert!(!app.ui.views[0].fit_pending);
+    crate::crop_ui::ensure_frame(&mut app);
+    assert_eq!(app.ui.crop_rect, None, "no frame over the page that is being cropped");
+    land_jobs(&mut app, &ctx);
+    assert_eq!(app.session.active().unwrap().doc.size, photocraft_geom::Size::new(200, 150));
+    assert!(app.ui.views[0].fit_pending, "the view fits the cropped page");
+    crate::crop_ui::ensure_frame(&mut app);
+    assert_eq!(app.ui.crop_rect, Some([0.0, 0.0, 200.0, 150.0]), "the next frame is the cropped page's");
+    // Cancelled: the frame is back.
+    app.ui.crop_rect = Some([10.0, 10.0, 100.0, 100.0]);
+    app.crop.default_frame = false;
+    crate::canvas::commit_crop(&mut app);
+    let job = app.session.active_job().expect("the crop's job");
+    assert!(crate::jobs_ui::cancel(&mut app, job.id));
+    land_jobs(&mut app, &ctx);
+    assert_eq!(app.session.active().unwrap().doc.size, photocraft_geom::Size::new(200, 150));
+    assert_eq!(app.ui.crop_rect, Some([10.0, 10.0, 100.0, 100.0]));
+}

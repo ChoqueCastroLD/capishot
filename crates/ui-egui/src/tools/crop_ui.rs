@@ -63,6 +63,8 @@ pub struct CropState {
     redo: Vec<CropStep>,
     /// The frame at the current gesture's press; pushed to `undo` on release when the box changed.
     press_step: Option<CropStep>,
+    /// The crop being applied by a job, with what its frame was ([`committed`]).
+    landing: Option<(photocraft_engine::jobs::JobId, Kept)>,
 }
 
 /// One frame state of the crop box's own Undo/Redo.
@@ -365,6 +367,10 @@ fn frame(app: &mut PhotocraftApp) {
         }
         return;
     }
+    // A crop is being applied: the next frame is for the document it leaves.
+    if app.crop.landing.is_some() {
+        return;
+    }
     // No frame (cancelled or committed): the next one starts upright.
     if app.ui.crop_rect.is_none() && app.crop.drag.is_none() {
         app.ui.crop_angle = 0.0;
@@ -454,11 +460,39 @@ fn apply_step(app: &mut PhotocraftApp, s: CropStep) {
 
 /// The pending frame, its box Undo/Redo and the view's turn, kept while `image.crop` runs so a
 /// refused commit gives them back ([`restore`]).
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Kept {
     step: CropStep,
     undo: Vec<CropStep>,
     redo: Vec<CropStep>,
     view: Option<(f32, [f32; 2])>,
+}
+
+/// `image.crop` took the frame and answered `result`: the view fits the cropped document, now
+/// when the command ran in the call, else when its job has applied it ([`on_job_event`]). Until
+/// then the canvas shows the document as it was, and no new frame is made over it.
+pub(crate) fn committed(app: &mut PhotocraftApp, result: &serde_json::Value, kept: Kept) {
+    match result.get("job").and_then(serde_json::Value::as_u64) {
+        Some(job) => app.crop.landing = Some((photocraft_engine::jobs::JobId(job), kept)),
+        None => {
+            if let Some(i) = app.session.active_index() {
+                app.ui.views[i].fit_pending = true;
+            }
+        }
+    }
+}
+
+/// A crop's job ended: the view of its document fits what the crop left; a crop that failed or
+/// was cancelled gives the frame back for fixing, as one refused in the call does.
+pub(crate) fn on_job_event(app: &mut PhotocraftApp, e: &photocraft_engine::jobs::JobEvent) {
+    let Some((_, kept)) = app.crop.landing.take_if(|(job, _)| *job == e.id) else { return };
+    if !matches!(e.outcome, photocraft_engine::jobs::JobOutcome::Done(_)) {
+        return restore(app, kept);
+    }
+    let view = app.session.documents().iter().position(|st| Some(st.doc.id) == e.document).and_then(|i| app.ui.views.get_mut(i));
+    if let Some(v) = view {
+        v.fit_pending = true;
+    }
 }
 
 pub(crate) fn keep(app: &PhotocraftApp) -> Kept {

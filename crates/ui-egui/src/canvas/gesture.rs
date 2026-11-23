@@ -285,9 +285,8 @@ pub fn commit_crop(app: &mut PhotocraftApp) {
     }
     // W x H x Resolution (#2443): resample to that size and set the resolution.
     crate::crop_size::commit_params(app, &mut p);
-    if app.run("image.crop", p).is_err() {
-        crate::crop_ui::restore(app, kept);
-    } else if let Some(i) = app.session.active_index() {
-        app.ui.views[i].fit_pending = true;
+    match app.run("image.crop", p) {
+        Err(_) => crate::crop_ui::restore(app, kept),
+        Ok(v) => crate::crop_ui::committed(app, &v, kept),
     }
 }

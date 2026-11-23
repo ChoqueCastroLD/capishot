@@ -278,6 +278,21 @@ fn edits(path: &str, zoom: f64) -> Option<Vec<(&'static str, f64, f64)>> {
         b.run("undo", "edit.redo", json!({}));
         b.settle();
     }
+    // The commands of a click and the crop: jobs, as in the app (`CPU_EDIT_PERF_INLINE_JOBS` runs
+    // them in the frame, as before). On a new layer over the page, reading every layer.
+    b.app().run("layer.new.layer", json!({"name": "bucket"})).expect("layer");
+    b.settle();
+    b.app().background_jobs = std::env::var_os("CPU_EDIT_PERF_INLINE_JOBS").is_none();
+    let (cx, cy) = (size.width / 2, size.height / 2);
+    for _ in 0..3 {
+        b.run("paint bucket", "paint.bucket", json!({"x": cx, "y": cy, "tolerance": 32, "sampleAllLayers": true, "color": "#3366cc", "opacity": 40}));
+        b.run("fill", "edit.fill", json!({"contents": "color", "color": "#22aa55", "opacity": 30}));
+        b.run("magic wand", "select.magicWand", json!({"x": cx, "y": cy, "tolerance": 32, "sampleAllLayers": true}));
+        b.run("deselect", "select.deselect", json!({}));
+        b.run("crop", "image.crop", json!({"x": size.width / 4, "y": size.height / 4, "width": cx, "height": cy}));
+        b.run("crop undo", "edit.undo", json!({}));
+    }
+    b.app().background_jobs = false;
     let name = std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or(path).to_owned();
     Some(b.report(&name))
 }

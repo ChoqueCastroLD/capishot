@@ -1664,6 +1664,15 @@ impl Session {
         Some(format!("“{}” is still running on this document; wait for it to finish or cancel it (Esc)", job.label))
     }
 
+    /// The job on the active document that command `id` can't run before: until it ends the
+    /// command is refused ([`Self::job_conflict`]). A command of the shell's own (not in the
+    /// registry: Free Transform's box, a dialog over the document) counts as one that edits.
+    pub fn job_in_the_way(&self, id: &str) -> Option<JobInfo> {
+        let journal = crate::commands::find(id).is_none_or(|spec| spec.journal);
+        self.job_conflict(id, journal)?;
+        self.active_job()
+    }
+
     /// Cancel the jobs editing document `doc` (it is closing).
     pub(crate) fn cancel_jobs_on(&mut self, doc: DocId) {
         let ids: Vec<JobId> = self.jobs.running.iter().filter(|r| r.doc == Some(doc)).map(|r| r.id).collect();
