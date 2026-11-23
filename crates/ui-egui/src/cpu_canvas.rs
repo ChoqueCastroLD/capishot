@@ -122,7 +122,7 @@ struct Pending {
 
 /// Whether there is a worker pool to composite on, off the UI thread (the threads build, desktop).
 #[cfg(not(test))]
-const POOL: bool = cfg!(any(not(target_arch = "wasm32"), target_feature = "atomics"));
+pub(crate) const POOL: bool = cfg!(any(not(target_arch = "wasm32"), target_feature = "atomics"));
 
 impl std::fmt::Debug for TileCanvas {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1209,12 +1209,12 @@ impl TileCanvas {
 
 /// Run `f` on the worker pool.
 #[cfg(any(not(target_arch = "wasm32"), target_feature = "atomics"))]
-fn spawn(f: impl FnOnce() + Send + 'static) {
+pub(crate) fn spawn(f: impl FnOnce() + Send + 'static) {
     rayon::spawn(f);
 }
 
 #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
-fn spawn(f: impl FnOnce() + Send + 'static) {
+pub(crate) fn spawn(f: impl FnOnce() + Send + 'static) {
     f();
 }
 

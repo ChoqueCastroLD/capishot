@@ -55,6 +55,8 @@ fn tool_move(app: &mut PhotocraftApp, x: f64, y: f64, pressure: f32, mods: egui:
 fn preflight_tool_event(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers) -> Option<(bool, egui::Modifiers)> {
     if matches!(ev, ToolEvent::Down { .. }) {
         app.tool_downs = app.tool_downs.wrapping_add(1);
+        // A press starts on the document as the stroke released before it left it.
+        super::strokes::land_stroke_before_edit(app);
     }
     // A press anywhere but on a guide deselects the selected guide (`guide_select`).
     if let ToolEvent::Down { x, y, .. } = ev

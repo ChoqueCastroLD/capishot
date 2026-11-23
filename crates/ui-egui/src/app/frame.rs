@@ -53,6 +53,7 @@ impl PhotocraftApp {
             self.fps = self.fps * 0.9 + (1.0 / dt).min(240.0) * 0.1;
         }
         self.last_frame_time = now;
+        crate::canvas::land_stroke_in_frame(self, ctx);
         {
             let _s = perf_span::span("logic.sync_views");
             self.sync_views();

@@ -8,6 +8,8 @@ use crate::{perf_span, telemetry};
 impl PhotocraftApp {
     /// Run an engine command, reporting errors in the status bar.
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        // A stroke released a moment ago and still landing comes before this command.
+        crate::canvas::land_stroke_before_edit(self);
         if let Some(result) = delete_layer_prompt::intercept(self, id, &params) {
             return result;
         }

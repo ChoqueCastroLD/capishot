@@ -112,6 +112,18 @@ fn map_items<T: Sync, R: Send>(items: &[T], pixels: usize, f: impl Fn(&T) -> R +
     let _ = pixels;
     items.iter().map(&f).collect()
 }
+thread_local! {
+    /// Dabs this thread rendered into strokes ([`dabs_here`]).
+    static DABS_HERE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// How many dabs this thread has rendered into strokes so far (monotonic, read as a difference):
+/// what a frame rendered on the window's own thread, whatever a stroke's job did meanwhile (the
+/// app's tests).
+pub fn dabs_here() -> u64 {
+    DABS_HERE.with(std::cell::Cell::get)
+}
+
 /// Computed tips with a smaller radius (in pixels) are rasterised by area, not at pixel centres.
 const SMALL_TIP_RADIUS: f32 = 3.0;
 /// Sub-pixel sample offsets (a 4×4 grid) for the area coverage of small tips.
@@ -1076,6 +1088,7 @@ impl StrokeRenderer {
     fn raster_pending(&mut self) {
         let mut dabs = std::mem::take(&mut self.dab_buf);
         let mut duals = std::mem::take(&mut self.dual_buf);
+        DABS_HERE.with(|c| c.set(c.get() + (dabs.len() + duals.len()) as u64));
         let wet = self.ctx.brush.wet_edges;
         let mut native = [0.0f32; 8];
         for d in &dabs {

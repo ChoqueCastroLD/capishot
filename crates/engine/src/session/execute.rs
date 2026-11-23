@@ -30,8 +30,14 @@ impl Session {
     /// then says `"fromLive": true`); any other command drops the offer. The command still runs
     /// through the normal dispatch, so authorization, the journal and history are unchanged.
     pub fn offer_live_stroke(&mut self, live: brush_cmds::LiveStroke) -> Result<()> {
-        self.live_commit = Some(live.into_commit()?);
+        self.offer_live_commit(live.into_commit()?);
         Ok(())
+    }
+
+    /// [`Self::offer_live_stroke`] for a stroke finished already
+    /// ([`brush_cmds::LiveStroke::into_commit`], which the app runs off its window's thread).
+    pub fn offer_live_commit(&mut self, commit: brush_cmds::LiveCommit) {
+        self.live_commit = Some(commit);
     }
 
     /// [`Self::offer_live_stroke`] for a live Clone Stamp or History Brush stroke, taken by the

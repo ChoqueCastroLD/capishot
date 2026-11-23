@@ -677,8 +677,18 @@ impl LiveStroke {
     /// Start a live stroke of `cmd`: `paint.stroke` (the Brush and Eraser) or `paint.pencil`.
     /// Committing `cmd` with the same params and `"seed": live.seed` gives the same pixels.
     pub fn begin_with(s: &Session, cmd: &str, p: &Value) -> Result<Self> {
+        let (mut live, pts) = Self::start_with(s, cmd, p)?;
+        live.push(&pts)?;
+        Ok(live)
+    }
+
+    /// [`begin_with`](Self::begin_with) without rendering anything yet: the stroke and the params'
+    /// `points`, for a caller that renders them elsewhere (the app pushes them on another thread,
+    /// so a large tip's first dab doesn't hold the frame of the press).
+    pub fn start_with(s: &Session, cmd: &str, p: &Value) -> Result<(Self, Vec<StrokePoint>)> {
         has_paintable(s).map_err(EngineError::Other)?;
         let pts = parse_points(p, cmd)?;
+        check_coords(&pts, cmd)?;
         let pencil = match cmd {
             "paint.stroke" => false,
             "paint.pencil" => true,
@@ -703,7 +713,7 @@ impl LiveStroke {
         let mirrors: Vec<_> = (0..symmetry.as_ref().map_or(0, |s| s.mirror_count())).map(|_| StrokeRenderer::new(&brush, Some(surf.format()), zoom)).collect();
         let mirror_distinct = vec![false; mirrors.len()];
         let pre = surf.clone();
-        let mut live = Self {
+        let live = Self {
             doc: std::sync::Arc::new(doc),
             seed,
             cmd: cmd.into(),
@@ -724,8 +734,7 @@ impl LiveStroke {
             push_count: 0,
             tail_stale: false,
         };
-        live.push(&pts)?;
-        Ok(live)
+        Ok((live, pts))
     }
 
     /// The stroke as its commit would take it over (see [`LiveCommit`]).

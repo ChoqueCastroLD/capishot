@@ -1291,6 +1291,34 @@ fn a_commit_takes_the_live_strokes_pixels_and_they_equal_a_fresh_render() {
 }
 
 #[test]
+fn a_started_stroke_renders_nothing_until_its_points_are_pushed_and_its_finished_commit_is_taken() {
+    // The app starts the stroke in the frame of the press and renders its points on another
+    // thread (`start_with`, `into_commit`, `offer_live_commit`).
+    let pts = [[10.0, 50.0, 1.0], [60.0, 30.0, 0.7], [120.0, 60.0, 0.9]];
+    let mut s = session(200, 100);
+    let mut p = json!({"brush": {"size": 18, "hardness": 0.0}, "smoothing": 0.0, "target": "pixels", "points": [pts[0]]});
+    let before = photocraft_paint::dabs_here();
+    let (mut live, first) = LiveStroke::start_with(&s, "paint.stroke", &p).unwrap();
+    assert_eq!(photocraft_paint::dabs_here(), before, "starting renders no dab");
+    assert_eq!(first.len(), 1);
+    assert!(live.bounds().is_empty());
+    live.push(&first).unwrap();
+    live.push(&pts[1..].iter().map(|q| StrokePoint::new(q[0], q[1], q[2] as f32)).collect::<Vec<_>>()).unwrap();
+    p["points"] = json!(pts);
+    p["seed"] = json!(live.seed);
+    s.offer_live_commit(live.into_commit().unwrap());
+    let r = s.execute("paint.stroke", p.clone()).unwrap();
+    s.clear_live_stroke();
+    assert_eq!(r["fromLive"], true);
+    let mut fresh = session(200, 100);
+    fresh.execute("paint.stroke", p).unwrap();
+    assert!(same_pixels(&surface(&s), &surface(&fresh), Rect::new(0, 0, 200, 100)));
+    // Coordinates that can't be painted are refused at the start, as `begin_with` refuses them.
+    let bad = json!({"brush": {"size": 18}, "points": [[f64::MAX, 0.0, 1.0]]});
+    assert_eq!(LiveStroke::start_with(&s, "paint.stroke", &bad).is_err(), LiveStroke::begin_with(&s, "paint.stroke", &bad).is_err());
+}
+
+#[test]
 fn an_offer_that_does_not_match_the_commit_is_ignored() {
     let pts = [[10.0, 50.0, 1.0], [60.0, 30.0, 0.7], [120.0, 60.0, 0.9]];
     let base = json!({"brush": {"size": 10}, "smoothing": 0.0, "target": "pixels"});
