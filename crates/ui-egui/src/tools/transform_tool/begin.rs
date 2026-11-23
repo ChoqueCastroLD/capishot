@@ -74,14 +74,20 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String>
     let (tx, pending) = std::sync::mpsc::channel();
     {
         let (doc, lifted, wake) = (doc.clone(), lifted.clone(), ctx.clone());
+        // The view the box opens in: its first textures are made for it, off the frame too.
+        let view = crate::transform_tex::FirstView {
+            zoom: app.session.active_index().and_then(|i| app.ui.views.get(i)).map(|v| v.zoom / app.canvas_ppp() * ctx.pixels_per_point()),
+            display: crate::canvas::canvas_display(app, &doc, crate::monitor_status::view_display(app, ctx)).0,
+        };
         off_frame(move || {
             let (image, uv) = preview_image(&doc, id, lifted.as_ref(), b, max_side, styled);
+            let moving = crate::transform_tex::PreviewTextures::prepare(image, uv, &view);
             let above = up.map(|(up, rect)| {
                 let (image, uv) = composite_image(&up, rect, max_side);
-                (image, uv, rect)
+                (crate::transform_tex::PreviewTextures::prepare(image, uv, &view), rect)
             });
             // (The box may be closed by now: nothing to tell.)
-            let _ = tx.send(Built { image, uv, above });
+            let _ = tx.send(Built { moving, above });
             wake.request_repaint();
         });
     }
@@ -174,9 +180,9 @@ pub fn land(app: &mut PhotocraftApp) {
         Ok(built) => {
             pv.pending = None;
             if let Some(a) = pv.above.as_mut() {
-                pv.texture = crate::transform_tex::PreviewTextures::new(&a.ctx, format!("transform-{}", pv.session), built.image, built.uv);
-                if let Some((image, uv, rect)) = built.above {
-                    a.show(image, uv, rect);
+                pv.texture = crate::transform_tex::PreviewTextures::show(&a.ctx, format!("transform-{}", pv.session), built.moving);
+                if let Some((composite, rect)) = built.above {
+                    a.show_prepared(composite, rect);
                 }
             }
         }

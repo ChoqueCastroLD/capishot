@@ -85,9 +85,8 @@ pub(super) struct Above {
 /// The images a box over one layer draws with, made off the frame ([`super::begin`]): the moving
 /// pixels, and the composite of the layers covering them with the canvas area it covers.
 pub(super) struct Built {
-    pub(super) image: egui::ColorImage,
-    pub(super) uv: [f32; 2],
-    pub(super) above: Option<(egui::ColorImage, [f32; 2], photocraft_geom::Rect)>,
+    pub(super) moving: crate::transform_tex::Prepared,
+    pub(super) above: Option<(crate::transform_tex::Prepared, photocraft_geom::Rect)>,
 }
 
 impl Above {
@@ -134,6 +133,11 @@ impl Above {
     /// The composite of the covering layers over `rect` of the canvas.
     pub(super) fn show(&mut self, image: egui::ColorImage, uv: [f32; 2], rect: photocraft_geom::Rect) {
         self.shown = Some((crate::transform_tex::PreviewTextures::new(&self.ctx, self.name.clone(), image, uv), rect));
+    }
+
+    /// [`show`](Self::show) with the composite's first texture made already (off the frame).
+    pub(super) fn show_prepared(&mut self, composite: crate::transform_tex::Prepared, rect: photocraft_geom::Rect) {
+        self.shown = Some((crate::transform_tex::PreviewTextures::show(&self.ctx, self.name.clone(), composite), rect));
     }
 
     /// Leave the covering layers out of `layers` (the document under the box).

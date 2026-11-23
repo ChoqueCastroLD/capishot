@@ -85,17 +85,36 @@ pub(super) fn front_vertices(h: &Homography, n: usize) -> Vec<bool> {
     (0..=n).flat_map(|j| (0..=n).map(move |i| (i as f64 / n as f64, j as f64 / n as f64))).map(|(u, v)| front * h.w(u, v) > 1e-9).collect()
 }
 
+/// The box whose moving pixels the canvas of display `output` draws in this frame: the open one
+/// once its images are made, and on a canvas drawn in tiles (the CPU canvas, which composites an
+/// edit off the frame) only while the tiles on screen are of the document under the box. There
+/// the box that just closed goes on until the tiles show the document again
+/// ([`super::commit::hand_over`]): the layer never shows twice, and is never missing.
+fn standing_in(app: &PhotocraftApp, output: Option<u32>) -> Option<(&TransformSession, &TransformPreview)> {
+    // (Its images still being made: the canvas shows the layer where it is.)
+    let open = app.ui.transform.as_ref().zip(app.transform_preview.as_ref()).filter(|(_, pv)| pv.made());
+    let closed = app.transform_closed.as_deref().map(|(t, pv)| (t, pv));
+    let doc = closed.or(open)?.1.doc.id;
+    match crate::cpu_canvas::under_box(app, crate::canvas::cache_key(doc, output)) {
+        None => open,
+        Some(true) => closed.or(open),
+        Some(false) => None,
+    }
+}
+
+/// Whether a box draws its moving pixels on the canvas of display `output` in this frame (tests).
+#[cfg(test)]
+pub(crate) fn draws_layer(app: &PhotocraftApp, output: Option<u32>) -> bool {
+    standing_in(app, output).is_some()
+}
+
 /// The moving pixels as the box shows them (warped, skewed or styled), plus the layers above
 /// them. This is image content: the canvas draws it right after the document, under the grid
 /// and guides, so a guide stays visible across a layer being transformed (#5086), as in
 /// Photoshop. The box, handles and reference point are [`draw_overlay`], drawn over the guides.
 pub fn draw_content(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform) {
-    let (Some(t), Some(pv)) = (&app.ui.transform, &app.transform_preview) else { return };
-    // Its images still being made: the canvas shows the layer where it is.
-    if !pv.made() {
-        return;
-    }
     let output = crate::monitor_status::view_display(app, painter.ctx());
+    let Some((t, pv)) = standing_in(app, output) else { return };
     let (display, _) = crate::canvas::canvas_display(app, &pv.doc, output);
     // Selection tint and lone mask/channel values are UI diagnostics, not document colors.
     let display = display.as_deref().filter(|_| !t.selection && t.target.is_none() && t.path.is_none());
@@ -108,8 +127,7 @@ pub fn draw_content(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform
         return;
     }
     let ctx = painter.ctx();
-    let styled =
-        styled_frame(app, xf.zoom * ctx.pixels_per_point(), ctx.input(|i| i.pointer.any_down())).and_then(|(s, frame)| s.texture(ctx, &frame, display));
+    let styled = styled_frame(app, t, pv, xf.zoom * ctx.pixels_per_point(), ctx.input(|i| i.pointer.any_down())).and_then(|(s, frame)| s.texture(ctx, &frame, display));
     if let Some((tex, r)) = styled {
         let mut mesh = egui::Mesh::with_texture(tex);
         for (x, y, u, v) in [(r[0], r[1], 0.0, 0.0), (r[2], r[1], 1.0, 0.0), (r[2], r[3], 1.0, 1.0), (r[0], r[3], 0.0, 1.0)] {
@@ -320,8 +338,13 @@ pub(crate) fn draw_selection(
 /// pixels per document pixel. `None` for a layer without a style (also once it is switched off
 /// while the box is open) or a hidden one: the bare pixels are drawn instead. The style, opacity
 /// and fill are the layer's as they are now, so edits made while the box is open show.
-pub(crate) fn styled_frame(app: &PhotocraftApp, zoom: f32, dragging: bool) -> Option<(&crate::transform_fx::StyledPreview, crate::transform_fx::Frame<'_>)> {
-    let (t, pv) = (app.ui.transform.as_ref()?, app.transform_preview.as_ref()?);
+pub(crate) fn styled_frame<'a>(
+    app: &'a PhotocraftApp,
+    t: &'a TransformSession,
+    pv: &'a TransformPreview,
+    zoom: f32,
+    dragging: bool,
+) -> Option<(&'a crate::transform_fx::StyledPreview, crate::transform_fx::Frame<'a>)> {
     let styled = pv.styled.as_ref().filter(|_| t.warp.is_none())?;
     let st = app.session.active().filter(|st| st.doc.id == pv.doc.id)?;
     let layer = st.doc.layer(LayerId(t.layer)).filter(|l| l.visible && photocraft_compose::effects::has_effects(l))?;

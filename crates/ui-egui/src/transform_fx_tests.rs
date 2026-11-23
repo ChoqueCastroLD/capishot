@@ -39,7 +39,7 @@ fn styled_texture_tracks_monitor_changes_without_recoloring_effect_inputs() {
         app.session.color.settings.monitor_profile = monitor.into();
         let display = app.session.color.canvas_display(&app.session.active().unwrap().doc).unwrap();
         let expected = crate::canvas::display_image(Some(&display), &raw);
-        let (styled, frame) = crate::transform_tool::styled_frame(&app, 1.0, false).unwrap();
+        let (styled, frame) = styled_frame(&app, 1.0, false).unwrap();
         let (id, _) = styled.texture(&ctx, &frame, Some(&display)).unwrap();
         assert_ne!(Some(id), previous, "monitor change invalidates the texture");
         let builds = styled.builds();
@@ -56,7 +56,7 @@ fn styled_texture_tracks_monitor_changes_without_recoloring_effect_inputs() {
 
 /// What the box draws for the styled layer at `zoom`: `None` when it draws the bare pixels.
 fn composite(app: &PhotocraftApp, zoom: f32) -> Option<(Buffer, Plan)> {
-    let (_, frame) = crate::transform_tool::styled_frame(app, zoom, false)?;
+    let (_, frame) = styled_frame(app, zoom, false)?;
     let (plan, work, level) = frame.plan()?;
     Some((frame.compose(&plan, &work, level)?, plan))
 }
@@ -272,7 +272,7 @@ fn the_canvas_draws_the_styled_preview_and_reuses_it_between_frames() {
     h.run_steps(2);
     let steps = h.state().session.active().unwrap().history.entries().len();
     crate::transform_undo_tests::begin(&mut h);
-    let builds = |h: &egui_kittest::Harness<'static, PhotocraftApp>| crate::transform_tool::styled_frame(h.state(), 1.0, false).unwrap().0.builds();
+    let builds = |h: &egui_kittest::Harness<'static, PhotocraftApp>| styled_frame(h.state(), 1.0, false).unwrap().0.builds();
     assert_eq!(builds(&h), 1, "composited when the box opened");
     h.run_steps(5);
     assert_eq!(builds(&h), 1, "and kept while nothing changes");
@@ -301,4 +301,9 @@ fn the_canvas_draws_the_styled_preview_and_reuses_it_between_frames() {
     assert!(app.ui.transform.is_none() && app.transform_preview.is_none());
     let st = app.session.active().unwrap();
     assert!(photocraft_compose::effects::has_effects(st.doc.layer(st.active_layer.unwrap()).unwrap()));
+}
+
+/// The open box's styled frame.
+fn styled_frame(app: &PhotocraftApp, zoom: f32, dragging: bool) -> Option<(&crate::transform_fx::StyledPreview, crate::transform_fx::Frame<'_>)> {
+    crate::transform_tool::styled_frame(app, app.ui.transform.as_ref()?, app.transform_preview.as_ref()?, zoom, dragging)
 }

@@ -162,6 +162,7 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> (std::sync::Ar
         return shown;
     }
     crate::transform_tool::land(app);
+    crate::transform_tool::let_go(app);
     crate::transform_tool::follow_edits(app);
     crate::transform_tool::refresh_vector_type(app);
     // The Brush's points are rendered by its job: the frame shows what has landed, waiting its

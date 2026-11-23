@@ -39,17 +39,58 @@ pub struct PreviewTextures {
 /// A source pixel shown at this many screen pixels or more counts as "zoomed in" (nearest).
 const CRISP_ZOOM: f32 = 2.0;
 
+/// The view a preview is first drawn in: what decides the level, the filter and the colours of
+/// the texture its first draw asks for ([`PreviewTextures::pick_display`]).
+#[derive(Clone, Default)]
+pub struct FirstView {
+    /// Screen pixels per document pixel (`None`: full resolution, as at 100%).
+    pub zoom: Option<f32>,
+    /// The monitor's colours, where the view shows them.
+    pub display: Option<Arc<CanvasDisplay>>,
+}
+
+/// A preview's first texture, made off the frame ([`PreviewTextures::prepare`]): the mip levels
+/// down to the one the view shows and that level in the monitor's colours. The frame that shows
+/// it only hands it to the renderer.
+pub struct Prepared {
+    images: Vec<Arc<ColorImage>>,
+    base_uv: [f32; 2],
+    level: u32,
+    nearest: bool,
+    display_key: u64,
+    uv: [f32; 2],
+    upload: Arc<ColorImage>,
+}
+
 impl PreviewTextures {
     /// `image` covers the source with `base_uv` of its extent; `name` keys the texture in egui.
     pub fn new(ctx: &egui::Context, name: String, image: ColorImage, base_uv: [f32; 2]) -> Self {
-        let image = Arc::new(image);
-        let tex = ctx.load_texture(format!("{name}-0-linear"), Arc::clone(&image), TextureOptions::LINEAR);
+        Self::show(ctx, name, Self::prepare(image, base_uv, &FirstView::default()))
+    }
+
+    /// The texture a preview of `image` is first drawn with in `view`, at the box's own scale of
+    /// 1: everything [`pick_display`](Self::pick_display) would make in the frame of that draw
+    /// (the mip levels of a page shown small, the monitor's colours: 40 to 50 ms for a layer as
+    /// large as a 1080p page, and a second upload of it). Any thread.
+    pub fn prepare(image: ColorImage, base_uv: [f32; 2], view: &FirstView) -> Prepared {
         let base_uv = [base_uv[0].clamp(0.0, 1.0), base_uv[1].clamp(0.0, 1.0)];
+        let mut images = vec![Arc::new(image)];
+        let (level, nearest) = view.zoom.map_or((0, false), |zoom| Self::choose(zoom, 1.0, false));
+        let display = view.display.as_deref().filter(|d| !d.is_identity());
+        let (img, uv) = level_of(&mut images, base_uv, level).unwrap_or_else(|| (Arc::new(ColorImage::new([1, 1], vec![Color32::TRANSPARENT])), base_uv));
+        let upload = display.map_or_else(|| Arc::clone(&img), |d| Arc::new(display_image(&img, d)));
+        Prepared { images, base_uv, level, nearest, display_key: display.map_or(0, |d| d.key), uv, upload }
+    }
+
+    /// The preview with its first texture handed to the renderer.
+    pub fn show(ctx: &egui::Context, name: String, p: Prepared) -> Self {
+        let opts = if p.nearest { TextureOptions::NEAREST } else { TextureOptions::LINEAR };
+        let tex = ctx.load_texture(format!("{name}-{}-{}", p.level, if p.nearest { "nearest" } else { "linear" }), p.upload, opts);
         Self {
             name,
-            images: Mutex::new(vec![image]),
-            base_uv,
-            uploaded: Mutex::new(vec![Level { level: 0, display_key: 0, nearest: false, tex, uv: base_uv }]),
+            images: Mutex::new(p.images),
+            base_uv: p.base_uv,
+            uploaded: Mutex::new(vec![Level { level: p.level, display_key: p.display_key, nearest: p.nearest, tex, uv: p.uv }]),
         }
     }
 
@@ -116,23 +157,28 @@ impl PreviewTextures {
 
     /// Level `n` of the mip chain (built on demand by 2×2 box filtering) and its uv extent.
     pub(crate) fn level_image(&self, n: u32) -> Option<(Arc<ColorImage>, [f32; 2])> {
-        let mut imgs = self.images.lock().unwrap_or_else(PoisonError::into_inner);
-        while imgs.len() <= n as usize {
-            let prev = imgs.last()?;
-            if prev.size[0] <= 1 && prev.size[1] <= 1 {
-                break;
-            }
-            let next = Arc::new(halve(prev));
-            imgs.push(next);
-        }
-        let k = (imgs.len() - 1).min(n as usize);
-        let img = imgs.get(k)?.clone();
-        let base = imgs.first()?.size;
-        // Level k covers size·2^k base texels (the last row/column may be padding).
-        let f = (1u64 << k) as f32;
-        let uv = [self.base_uv[0] * base[0] as f32 / (img.size[0] as f32 * f).max(1.0), self.base_uv[1] * base[1] as f32 / (img.size[1] as f32 * f).max(1.0)];
-        Some((img, [uv[0].min(1.0), uv[1].min(1.0)]))
+        level_of(&mut self.images.lock().unwrap_or_else(PoisonError::into_inner), self.base_uv, n)
     }
+}
+
+/// Level `n` of the mip chain `imgs` (level 0 first; the levels missing are built) and its uv
+/// extent, where level 0's is `base_uv`.
+fn level_of(imgs: &mut Vec<Arc<ColorImage>>, base_uv: [f32; 2], n: u32) -> Option<(Arc<ColorImage>, [f32; 2])> {
+    while imgs.len() <= n as usize {
+        let prev = imgs.last()?;
+        if prev.size[0] <= 1 && prev.size[1] <= 1 {
+            break;
+        }
+        let next = Arc::new(halve(prev));
+        imgs.push(next);
+    }
+    let k = (imgs.len() - 1).min(n as usize);
+    let img = imgs.get(k)?.clone();
+    let base = imgs.first()?.size;
+    // Level k covers size·2^k base texels (the last row/column may be padding).
+    let f = (1u64 << k) as f32;
+    let uv = [base_uv[0] * base[0] as f32 / (img.size[0] as f32 * f).max(1.0), base_uv[1] * base[1] as f32 / (img.size[1] as f32 * f).max(1.0)];
+    Some((img, [uv[0].min(1.0), uv[1].min(1.0)]))
 }
 
 /// Premultiplied preview texels -> straight document values -> monitor values.
@@ -307,6 +353,44 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn a_preview_prepared_for_its_view_is_first_drawn_with_the_texture_made_off_the_frame() {
+        // A page shown at 20% on a wide-gamut monitor: the first draw asked for mip level 2 in
+        // the monitor's colours and made both in its frame, after level 0 had been uploaded.
+        let mut session = photocraft_engine::Session::new();
+        session.execute("file.new", serde_json::json!({"width": 2, "height": 1})).unwrap();
+        let doc = session.active().unwrap().doc.clone();
+        session.color.settings.monitor_profile = "display-p3".into();
+        let p3 = session.color.canvas_display(&doc).unwrap();
+        let raw = ColorImage::new([64, 48], vec![Color32::from_rgb(140, 89, 51); 64 * 48]);
+        let ctx = egui::Context::default();
+        let uploads = |ctx: &egui::Context| {
+            let mut delta = ctx.tex_manager().write().take_delta();
+            let n = delta.set.len();
+            delta.clear();
+            n
+        };
+        uploads(&ctx);
+        let view = FirstView { zoom: Some(0.2), display: Some(p3.clone()) };
+        let made = PreviewTextures::prepare(raw.clone(), [1.0, 1.0], &view);
+        assert_eq!(uploads(&ctx), 0, "preparing touches no texture: it runs on any thread");
+        let t = PreviewTextures::show(&ctx, "made".into(), made);
+        let (first, uv) = t.pick_display(&ctx, 0.2, 1.0, false, Some(&p3));
+        assert_eq!(uploads(&ctx), 1, "one upload, and the first draw makes nothing");
+        assert_eq!(t.uploaded.lock().unwrap().len(), 1);
+        // The same texels as a preview that makes them when it is drawn.
+        let old = PreviewTextures::new(&ctx, "old".into(), raw.clone(), [1.0, 1.0]);
+        let (_, old_uv) = old.pick_display(&ctx, 0.2, 1.0, false, Some(&p3));
+        assert_eq!(uploads(&ctx), 2, "made in the draw: level 0, then the level shown");
+        assert_eq!(uv, old_uv);
+        let level = |t: &PreviewTextures| t.level_image(2).unwrap().0.pixels.clone();
+        assert_eq!(level(&t), level(&old));
+        assert_eq!(t.level_image(0).unwrap().0.pixels, raw.pixels, "the raw levels stay for effects");
+        // Another zoom or filter is made on demand, as before.
+        assert_ne!(t.pick_display(&ctx, 4.0, 1.0, false, Some(&p3)).0, first);
+        ctx.tex_manager().write().take_delta().clear();
+    }
 
     #[test]
     fn level_and_filter_follow_the_on_screen_size() {

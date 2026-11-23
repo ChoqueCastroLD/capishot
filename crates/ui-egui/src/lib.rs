@@ -412,7 +412,7 @@ pub struct PhotocraftApp {
     live_stroke: Option<canvas::LiveStroke>,
     /// A Brush/Eraser stroke released while its job was still rendering it: committed when it
     /// has landed (see `canvas::LandingStroke`).
-    landing_stroke: Option<canvas::LandingStroke>,
+    landing_stroke: Option<Box<canvas::LandingStroke>>,
     /// A live stroke just committed with its own pixels: the canvas caches that showed it
     /// refresh only what it drew after the step they showed (`canvas::damage_since`).
     committed_stroke: Option<canvas::CommittedStroke>,
@@ -620,6 +620,9 @@ pub struct PhotocraftApp {
     pub(crate) hist_uncached: Option<(DocId, u64)>,
     /// Free Transform preview (document without the moving pixels + their texture).
     pub(crate) transform_preview: Option<transform_tool::TransformPreview>,
+    /// The Free Transform box that closed while a canvas drawn in tiles still shows the document
+    /// under it: it draws the layer there until the tiles show it (`transform_tool::hand_over`).
+    pub(crate) transform_closed: Option<Box<(state::TransformSession, transform_tool::TransformPreview)>>,
     /// Move-tool ⇧/⌥ drag state (move_mods).
     pub(crate) move_mods: move_mods::MoveDrag,
     /// Cached document for a modal text Style Options color preview.

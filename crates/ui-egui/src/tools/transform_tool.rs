@@ -42,7 +42,9 @@ pub use begin::{WARP_ONE_LAYER, begin, begin_copy, begin_placed, begin_selection
 #[cfg(test)]
 pub(crate) use begin::set_off_frame;
 pub(crate) use begin::{refresh_vector_type, vectorize_type_box};
-pub(crate) use commit::{SAVE_FOR_WEB, committing, nudge};
+pub(crate) use commit::{SAVE_FOR_WEB, committing, let_go, nudge};
+#[cfg(test)]
+pub(crate) use draw::draws_layer;
 pub use commit::{cancel, commit, end_if_left, follow_edits, intercept, is_enabled, on_job_event, track_steps};
 #[cfg(test)]
 use drag_modes::{HandleIndicator, handle_indicator, keep_convex, turns};

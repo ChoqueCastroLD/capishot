@@ -106,6 +106,11 @@ pub struct TileCanvas {
     split_ready: bool,
     /// The Free Transform box stood in for a layer of the document in the last frame.
     stood_in: bool,
+    /// The tiles on screen are of the document under the Free Transform box (the box draws the
+    /// layer it stands in for over them: [`under_box`]).
+    under_box: bool,
+    /// The app's frame that last drew this canvas.
+    painted: u64,
     /// When tiles drawn through a split's top map may be composited exactly (`now_ms`): once the
     /// edits have paused this long.
     refine_after: f64,
@@ -317,13 +322,6 @@ const AHEAD_FLIGHT_MS: f64 = 12.0;
 /// How long a frame waits for an edit's batch before it goes on without it (milliseconds).
 #[cfg(not(test))]
 const FLIGHT_WAIT_MS: f64 = 4.0;
-
-/// How long the frame in which the Free Transform box starts or stops standing in for a layer
-/// waits for its batch (milliseconds). The box draws the moving pixels over a canvas that leaves
-/// the layer out, from that very frame, and they are gone in the frame it closes: with the
-/// canvas a frame behind, the layer would show twice, or not at all. So those two frames take the
-/// composite, as every edit's frame used to; never longer than this.
-const HANDOVER_WAIT_MS: f64 = 2000.0;
 
 /// The budget of a drag frame for the split's sprite while it isn't ready (milliseconds).
 const DRAG_BAND_MS: f64 = 2.0;
@@ -608,23 +606,14 @@ struct Flight {
     anchor: Vec<LayerId>,
     /// Tells a batch that only makes the split ahead to stop: an edit is waiting for the split.
     stop: Arc<std::sync::atomic::AtomicBool>,
+    /// Its tiles are of the document under the Free Transform box, or of the document itself
+    /// (`None`: it draws no tile).
+    under_box: Option<bool>,
 }
 
 impl Flight {
-    /// What the batch made, when it is done (`Err`: it was lost); `wait`: this frame waits for
-    /// it ([`HANDOVER_WAIT_MS`]) where the thread may.
-    fn find(&self, wait: bool) -> Option<Result<Drawn, ()>> {
-        #[cfg(not(target_arch = "wasm32"))]
-        if wait {
-            let _s = crate::perf_span::span("cpu.wait");
-            return match self.rx.recv_timeout(std::time::Duration::from_secs_f64(HANDOVER_WAIT_MS / 1000.0)) {
-                Ok(d) => Some(Ok(d)),
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Some(Err(())),
-            };
-        }
-        #[cfg(target_arch = "wasm32")]
-        let _ = wait;
+    /// What the batch made, when it is done (`Err`: it was lost).
+    fn find(&self) -> Option<Result<Drawn, ()>> {
         match self.rx.try_recv() {
             Ok(d) => Some(Ok(d)),
             Err(std::sync::mpsc::TryRecvError::Empty) => None,
@@ -664,6 +653,7 @@ impl TileCanvas {
     fn send(&mut self, ctx: &egui::Context, batch: Batch, state: (u64, u64), ahead: Option<Ahead>, wait: Option<f64>) -> Option<Drawn> {
         let Some(wait) = wait else { return Some(draw(batch)) };
         let (level, stop) = (batch.level, batch.stop.clone());
+        let under_box = (!batch.jobs.is_empty()).then_some(self.stood_in);
         let (tx, rx) = std::sync::mpsc::channel();
         let wake = ctx.clone();
         spawn(move || {
@@ -683,7 +673,7 @@ impl TileCanvas {
         }
         #[cfg(target_arch = "wasm32")]
         let _ = wait;
-        self.flight = Some(Flight { rx, state, level, ahead, anchor: self.anchor.clone(), stop });
+        self.flight = Some(Flight { rx, state, level, ahead, anchor: self.anchor.clone(), stop, under_box });
         None
     }
 
@@ -839,6 +829,7 @@ pub fn paint(
     let released = app.cpu_released.take_if(|r| r.0 == id);
     // The Free Transform box draws this document's moving pixels itself (`transform_tool`).
     let stands_in = app.transform_preview.as_ref().is_some_and(|pv| pv.doc.id == id && pv.made());
+    let painted = app.frame;
     let tex_budget = texture_budget(app);
     let mip_budget = mip_budget(app);
     let split_budget = split_budget(app);
@@ -860,9 +851,11 @@ pub fn paint(
         tc.anchor.clone_from(w);
     }
     let now = (revision, preview_key ^ display_key);
-    // The Free Transform box starts or stops standing in for the layer in this frame: the frame
-    // waits for its tiles ([`HANDOVER_WAIT_MS`]).
+    // The Free Transform box starts or stops standing in for the layer in this frame. The tiles
+    // come when the pool has them, like any edit's: the box draws the layer over the canvas only
+    // while its tiles are of the document under the box (`TileCanvas::under_box`).
     let handover = std::mem::replace(&mut tc.stood_in, stands_in) != stands_in;
+    tc.painted = painted;
     if tc.shown != Some(now) {
         tc.invalidate(if tc.shown.is_some() { damage } else { None });
         tc.shown = Some(now);
@@ -873,8 +866,11 @@ pub fn paint(
         if handover {
             fl.stop.store(true, std::sync::atomic::Ordering::Relaxed);
         }
-        match fl.find(handover) {
-            Some(Ok(d)) => tc.land(ctx, key, d, Sent { fresh: fl.state == now && fl.level == level, ahead: fl.ahead, anchor: fl.anchor }, &mut stats),
+        match fl.find() {
+            Some(Ok(d)) => {
+                tc.under_box = fl.under_box.unwrap_or(tc.under_box);
+                tc.land(ctx, key, d, Sent { fresh: fl.state == now && fl.level == level, ahead: fl.ahead, anchor: fl.anchor }, &mut stats);
+            }
             Some(Err(())) => tc.grounded(),
             None => tc.flight = Some(fl),
         }
@@ -976,6 +972,10 @@ pub fn paint(
     if let Some(fl) = tc.flight.as_ref().filter(|fl| fl.ahead.is_some() && (!stale.is_empty() || pointer_down)) {
         fl.stop.store(true, std::sync::atomic::Ordering::Relaxed);
     }
+    // Nothing of the view changed and nothing is on its way: the tiles are of this state.
+    if stale.is_empty() && tc.flight.is_none() {
+        tc.under_box = stands_in;
+    }
     // Changed tiles, all of them in one batch: the pool composites them while the frame goes on,
     // and they replace the ones shown together, in the frame that finds them done (this one when
     // the pool is quick). One batch at a time: what changes meanwhile goes in the next.
@@ -1004,7 +1004,8 @@ pub fn paint(
             view: view.clone(),
         };
         let anchor = tc.anchor.clone();
-        if let Some(d) = tc.send(ctx, batch, now, None, wait.map(|ms| if handover { HANDOVER_WAIT_MS } else { ms })) {
+        if let Some(d) = tc.send(ctx, batch, now, None, wait) {
+            tc.under_box = stands_in;
             tc.land(ctx, key, d, Sent { fresh: true, ahead: None, anchor }, &mut stats);
         }
     } else if matches!(through, Through::Edit { .. }) && stale.is_empty() && missing.is_empty() && tc.flight.is_none() && tc.pending.is_none() && !tc.ahead_ready && !pointer_down {
@@ -1172,6 +1173,14 @@ pub(crate) fn shows_document(app: &PhotocraftApp) -> bool {
     app.canvases.iter().filter(|(k, _)| k.0 == st.doc.id).filter_map(|(_, c)| c.tiles.as_ref()).all(|tc| {
         tc.shown.is_some_and(|(revision, _)| revision == st.revision) && tc.tiles.values().all(|t| t.used != tc.frame || (t.dirty.is_none() && t.drawing.is_none()))
     })
+}
+
+/// Whether the tiles on the screen of canvas `key` are of the document under the Free Transform
+/// box, which then draws the layer it stands in for over them (`None`: the canvas isn't drawn in
+/// tiles, or wasn't in this frame or the one before).
+pub(crate) fn under_box(app: &PhotocraftApp, key: (DocId, u32)) -> Option<bool> {
+    let tc = app.canvases.get(&key)?.tiles.as_ref()?;
+    (tc.painted + 1 >= app.frame).then_some(tc.under_box)
 }
 
 /// Whether they also have nothing left to make: no batch in flight, the split made ahead, no
@@ -1619,12 +1628,12 @@ mod tests {
         assert_eq!(canvas(&app).anchor, vec![top]);
     }
 
-    /// The frames in which the Free Transform box opens and closes wait for their tiles,
-    /// whatever the pool's wait: the box draws the moving pixels over a canvas that leaves the
-    /// layer out, from the frame it opens to the frame it closes, so a canvas a frame behind
-    /// would show the layer twice, or not at all.
+    /// The frames in which the Free Transform box opened and closed waited for their tiles (55 to
+    /// 240 ms of the window held on a page of many layers): now they go on, and the box takes
+    /// over from the canvas, and hands back to it, in the frame the tiles land. In every frame
+    /// either the canvas shows the layer or the box draws it, never both, never neither.
     #[test]
-    fn the_frames_the_transform_box_opens_and_closes_in_show_their_tiles() {
+    fn the_transform_box_takes_over_and_hands_back_when_the_tiles_land() {
         let mut app = stacked();
         let ctx = egui::Context::default();
         let mut mirror = HashMap::new();
@@ -1640,14 +1649,33 @@ mod tests {
             }
             worst
         };
+        let doc = app.session.documents()[0].doc.clone();
+        // Frames until the box draws the layer (`drawn`) or stops: each shows the layer once.
+        let until = |app: &mut PhotocraftApp, mirror: &mut HashMap<egui::TextureId, (usize, usize, Vec<[u8; 4]>)>, under: &Document, drawn: bool| {
+            for _ in 0..2000 {
+                apply(mirror, &frame(app, &ctx, 1.0, [600.0, 450.0]));
+                let box_draws = crate::transform_tool::draws_layer(app, None);
+                assert!(against(app, mirror, if box_draws { under } else { &doc }) <= 1, "the box draws the layer ({box_draws}) and the canvas doesn't, or the other way round");
+                if box_draws == drawn {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            panic!("the tiles never landed");
+        };
         crate::transform_tool::begin(&mut app, &ctx).unwrap();
         apply(&mut mirror, &frame(&mut app, &ctx, 1.0, [600.0, 450.0]));
         let under = app.transform_preview.as_ref().unwrap().doc.clone();
-        assert!(against(&app, &mirror, &under) <= 1, "the frame the box opens in shows the canvas without the layer");
+        assert!(!crate::transform_tool::draws_layer(&app, None), "the frame the box opens in doesn't wait for the canvas under it");
+        assert!(against(&app, &mirror, &doc) <= 1, "the canvas still shows the layer");
+        until(&mut app, &mut mirror, &under, true);
         crate::transform_tool::cancel(&mut app);
         apply(&mut mirror, &frame(&mut app, &ctx, 1.0, [600.0, 450.0]));
-        let doc = app.session.documents()[0].doc.clone();
-        assert!(against(&app, &mirror, &doc) <= 1, "the frame it closes in shows the layer again");
+        assert!(app.ui.transform.is_none() && crate::transform_tool::draws_layer(&app, None), "the frame it closes in doesn't wait: the box that closed still draws the layer");
+        assert!(against(&app, &mirror, &under) <= 1, "over the canvas under it");
+        until(&mut app, &mut mirror, &under, false);
+        apply(&mut mirror, &frame(&mut app, &ctx, 1.0, [600.0, 450.0]));
+        assert!(app.transform_closed.is_none(), "the box that closed is let go");
         set_flight_wait(None);
     }
 }

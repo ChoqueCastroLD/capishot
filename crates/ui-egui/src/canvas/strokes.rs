@@ -583,7 +583,7 @@ pub(super) fn commit_brush_stroke(app: &mut PhotocraftApp, d: &Drag) {
         EngineStroke::Brush(b) if whole => b.finish(),
         _ => return commit_landed(app, stroke, cmd, params, None),
     }
-    app.landing_stroke = Some(LandingStroke { stroke, cmd, params });
+    app.landing_stroke = Some(Box::new(LandingStroke { stroke, cmd, params }));
     land_stroke(app, Wait::Frame);
 }
 
@@ -602,7 +602,8 @@ fn land_stroke(app: &mut PhotocraftApp, wait: Wait) {
         // It can't be shown whole: the commit renders the stroke itself.
         _ => None,
     };
-    if let Some(LandingStroke { stroke, cmd, params }) = app.landing_stroke.take() {
+    if let Some(landing) = app.landing_stroke.take() {
+        let LandingStroke { stroke, cmd, params } = *landing;
         commit_landed(app, stroke, cmd, params, commit);
     }
 }

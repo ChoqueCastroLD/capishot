@@ -24,53 +24,67 @@ pub fn commit(app: &mut PhotocraftApp) {
     let mut preview = app.transform_preview.take();
     if let Some(options) = &t.content_aware {
         crate::cas_transform::commit(app, &t, options);
-        return;
+        return closed(app, t, preview);
     }
     if t.selection {
         let mut p = json!({"rect": t.rect, "interpolation": t.interpolation});
-        match &t.warp {
-            Some(w) if !w.is_identity() => p["warp"] = json!(w),
-            Some(_) => return,
-            None if t.quad == corners(t.rect) => return,
-            None => p["quad"] = json!(t.quad),
-        }
-        if let Err(e) = app.run("select.transformSelection", p) {
-            keep_open(app, t, preview, e);
-        }
-        return;
+        let moved = match &t.warp {
+            Some(w) if !w.is_identity() => {
+                p["warp"] = json!(w);
+                true
+            }
+            Some(_) => false,
+            None if t.quad == corners(t.rect) => false,
+            None => {
+                p["quad"] = json!(t.quad);
+                true
+            }
+        };
+        return match moved.then(|| app.run("select.transformSelection", p)) {
+            Some(Err(e)) => keep_open(app, t, preview, e),
+            _ => closed(app, t, preview),
+        };
     }
     if let Some(target) = &t.path {
         let mut p = target.clone();
-        match &t.warp {
-            Some(w) if w.is_identity() => return,
-            Some(w) => p["warp"] = json!(w),
-            None if t.quad == corners(t.rect) => return,
+        let moved = match &t.warp {
+            Some(w) if w.is_identity() => false,
+            Some(w) => {
+                p["warp"] = json!(w);
+                true
+            }
+            None if t.quad == corners(t.rect) => false,
             // Distort and Perspective map the path through the box (#3027).
-            None => match rect_to_quad_affine(t.rect, t.quad) {
-                Some(a) => p["matrix"] = json!(a.m),
-                None => {
-                    p["rect"] = json!(t.rect);
-                    p["quad"] = json!(t.quad);
+            None => {
+                match rect_to_quad_affine(t.rect, t.quad) {
+                    Some(a) => p["matrix"] = json!(a.m),
+                    None => {
+                        p["rect"] = json!(t.rect);
+                        p["quad"] = json!(t.quad);
+                    }
                 }
-            },
-        }
-        if let Err(e) = app.run("path.transform", p) {
-            keep_open(app, t, preview, e);
-        }
-        return;
+                true
+            }
+        };
+        return match moved.then(|| app.run("path.transform", p)) {
+            Some(Err(e)) => keep_open(app, t, preview, e),
+            _ => closed(app, t, preview),
+        };
     }
     let made = t.made;
+    let from = preview.as_ref().and_then(|pv| pv.vector_type.as_ref()).map(|v| v.from);
+    // Untouched: nothing to do and no history step; a ⌥⌘T copy or a place stays. (Type with a
+    // Warp Text can be warped back to None; the engine skips an unchanged style.)
+    let untouched = match &t.warp {
+        Some(w) => w.is_identity() && !type_layer,
+        None => t.quad == from.unwrap_or_else(|| corners(t.rect)),
+    };
+    if untouched {
+        return closed(app, t, preview);
+    }
     let r = if let Some(w) = &t.warp {
-        // Type with a Warp Text can be warped back to None; the engine skips an unchanged style.
-        if w.is_identity() && !type_layer {
-            return;
-        }
         app.run("edit.transform.warp", json!({"layer": t.layer, "rect": t.rect, "warp": w, "interpolation": t.interpolation}))
     } else {
-        let from = preview.as_ref().and_then(|pv| pv.vector_type.as_ref()).map(|v| v.from);
-        if t.quad == from.unwrap_or_else(|| corners(t.rect)) {
-            return; // untouched: nothing to do and no history step; a ⌥⌘T copy or a place stays
-        }
         let mut p = json!({"rect": t.rect, "quad": t.quad, "interpolation": t.interpolation});
         if let Some(from) = from {
             p["from"] = json!(from);
@@ -99,16 +113,25 @@ pub fn commit(app: &mut PhotocraftApp) {
     let perspective_type = preview.as_ref().is_some_and(|pv| pv.vector_type.is_some())
         && matches!(t.mode, crate::state::TransformMode::Perspective | crate::state::TransformMode::Distort);
     match r {
-        // Nothing changed (an untouched cylinder or Warp Text): no step to fold a copy into, so
-        // it stays its own step, as for an untouched box.
-        Ok(v) if v.get("changed") == Some(&json!(false)) => {}
-        Ok(_) => {
-            if perspective_type && let Some(st) = app.session.active_mut() {
-                st.history.set_current_label("Perspective");
+        Ok(v) => {
+            // Nothing changed (an untouched cylinder or Warp Text): no step to fold a copy into,
+            // so it stays its own step, as for an untouched box.
+            if v.get("changed") != Some(&json!(false)) {
+                if perspective_type && let Some(st) = app.session.active_mut() {
+                    st.history.set_current_label("Perspective");
+                }
+                finish(app, document, LayerId(t.layer), made, true);
             }
-            finish(app, document, LayerId(t.layer), made, true)
+            closed(app, t, preview)
         }
         Err(e) => keep_open(app, t, preview, e),
+    }
+}
+
+/// The box closed with its transform applied (or nothing to apply): see [`hand_over`].
+fn closed(app: &mut PhotocraftApp, t: TransformSession, preview: Option<TransformPreview>) {
+    if let Some(pv) = preview {
+        hand_over(app, t, pv, true);
     }
 }
 
@@ -120,6 +143,37 @@ fn finish(app: &mut PhotocraftApp, document: Option<DocId>, layer: LayerId, made
         fold_made(app, document, layer, made);
     } else {
         take_back_made(app, document, layer);
+    }
+}
+
+/// The box `t` closed, its transform applied (`landed`) or not. A canvas drawn in tiles composites
+/// the document off the frame, so for a few frames it still shows the document under the box:
+/// there the box goes on drawing the layer, as the document now has it, until the tiles show it
+/// (`draw::standing_in`, [`let_go`]). The frame that closes a box never waits for the canvas.
+pub(super) fn hand_over(app: &mut PhotocraftApp, mut t: TransformSession, mut pv: TransformPreview, landed: bool) {
+    // (A layer the box made, cancelled: the document has no such layer to show.)
+    let gone = !landed && t.made.is_some();
+    let under = app.canvases.keys().filter(|k| k.0 == pv.doc.id).any(|k| crate::cpu_canvas::under_box(app, *k) == Some(true));
+    if gone || !under {
+        return;
+    }
+    if !landed {
+        // Back where the box started.
+        if let Some(start) = pv.steps.undo.first().or(pv.steps.settled.as_ref()).cloned() {
+            start.restore(&mut t);
+        }
+    }
+    pv.committing = None;
+    app.transform_closed = Some(Box::new((t, pv)));
+}
+
+/// Every frame: the box that closed stops standing in once no canvas shows the document under
+/// it any more.
+pub(crate) fn let_go(app: &mut PhotocraftApp) {
+    let Some(closed) = &app.transform_closed else { return };
+    let doc = closed.1.doc.id;
+    if !app.canvases.keys().filter(|k| k.0 == doc).any(|k| crate::cpu_canvas::under_box(app, *k) == Some(true)) {
+        app.transform_closed = None;
     }
 }
 
@@ -145,7 +199,9 @@ pub fn on_job_event(app: &mut PhotocraftApp, e: &JobEvent) {
         }
         return;
     }
-    finish(app, Some(pv.doc.id), LayerId(t.layer), t.made, matches!(e.outcome, JobOutcome::Done(_)));
+    let landed = matches!(e.outcome, JobOutcome::Done(_));
+    finish(app, Some(pv.doc.id), LayerId(t.layer), t.made, landed);
+    hand_over(app, t, pv, landed);
 }
 
 /// A commit the engine refused (a result over the pixel budget, #3773): the box stays open as it
@@ -251,10 +307,11 @@ pub fn cancel(app: &mut PhotocraftApp) {
     }
     let transform = app.ui.transform.take();
     let preview = app.transform_preview.take();
-    if let (Some(t), Some(pv)) = (transform, preview)
-        && t.made.is_some()
-    {
-        take_back_made(app, pv.doc.id, LayerId(t.layer));
+    if let (Some(t), Some(pv)) = (transform, preview) {
+        if t.made.is_some() {
+            take_back_made(app, pv.doc.id, LayerId(t.layer));
+        }
+        hand_over(app, t, pv, false);
     }
 }
 
