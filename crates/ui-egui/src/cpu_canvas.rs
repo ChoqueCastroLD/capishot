@@ -427,7 +427,10 @@ struct Drawn {
     anchor: Option<Vec<LayerId>>,
     /// Nothing is left to make ahead (or no more can be made).
     ahead_done: bool,
+    /// What the batch took, and how much of that held the window's thread: all of it when it was
+    /// drawn in the frame, the frame's wait when the pool drew it, none when it landed later.
     ms: f64,
+    held_ms: f64,
 }
 
 /// Composite a batch. Runs on a pool worker or, without a pool, in the frame.
@@ -591,7 +594,8 @@ fn draw(mut b: Batch) -> Drawn {
         }
     }
     let tiles = b.jobs.iter().map(|(j, _)| *j).zip(images.unwrap_or_default()).collect();
-    Drawn { split, spare, tiles, from_split, approx, anchor, ahead_done, ms: crate::gpu_canvas::now_ms() - t0 }
+    let ms = crate::gpu_canvas::now_ms() - t0;
+    Drawn { split, spare, tiles, from_split, approx, anchor, ahead_done, ms, held_ms: ms }
 }
 
 /// A batch on the worker pool: the frame that sent it went on without it.
@@ -615,7 +619,7 @@ impl Flight {
     /// What the batch made, when it is done (`Err`: it was lost).
     fn find(&self) -> Option<Result<Drawn, ()>> {
         match self.rx.try_recv() {
-            Ok(d) => Some(Ok(d)),
+            Ok(d) => Some(Ok(Drawn { held_ms: 0.0, ..d })),
             Err(std::sync::mpsc::TryRecvError::Empty) => None,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(Err(())),
         }
@@ -640,7 +644,10 @@ struct Sent {
 #[derive(Default)]
 struct Stats {
     px: u64,
+    /// Composites that held the frame (drawn in it, or waited for), and the worker pool's time
+    /// for the ones it drew while the frames went on.
     composite_ms: f64,
+    pool_ms: f64,
     upload_ms: f64,
     from_split: bool,
 }
@@ -657,7 +664,12 @@ impl TileCanvas {
         let (tx, rx) = std::sync::mpsc::channel();
         let wake = ctx.clone();
         spawn(move || {
-            let _ = tx.send(draw(batch));
+            #[cfg(test)]
+            let pace = Pace::start();
+            let drawn = draw(batch);
+            #[cfg(test)]
+            pace.hold();
+            let _ = tx.send(drawn);
             // (The browser's page isn't woken from a worker: it looks again in a moment.)
             if cfg!(not(target_arch = "wasm32")) {
                 wake.request_repaint();
@@ -667,8 +679,9 @@ impl TileCanvas {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let _s = crate::perf_span::span("cpu.wait");
+            let t0 = crate::gpu_canvas::now_ms();
             if let Ok(d) = rx.recv_timeout(std::time::Duration::from_secs_f64(wait.max(0.0) / 1000.0)) {
-                return Some(d);
+                return Some(Drawn { held_ms: crate::gpu_canvas::now_ms() - t0, ..d });
             }
         }
         #[cfg(target_arch = "wasm32")]
@@ -696,7 +709,8 @@ impl TileCanvas {
         let frame = self.frame;
         let load = |k: TileKey, img: egui::ColorImage| ctx.load_texture(format!("cpu-tile-{}-{}-{}-{}-{}", name.0.0, name.1, k.level, k.tx, k.ty), img, TextureOptions::LINEAR);
         stats.from_split |= d.from_split && !d.tiles.is_empty();
-        stats.composite_ms += d.ms;
+        stats.composite_ms += d.held_ms;
+        stats.pool_ms += (d.ms - d.held_ms).max(0.0);
         for (job, img) in d.tiles {
             stats.px += img.size[0] as u64 * img.size[1] as u64;
             match job {
@@ -1079,11 +1093,15 @@ pub fn paint(
         let moved = move_plan.as_ref().filter(|_| lazy).map(|p| (p.base.clone(), p.ids.clone(), p.offset));
         let (doc, display, levels) = (doc.clone(), display.clone(), tc.levels.clone());
         spawn(move || {
+            #[cfg(test)]
+            let pace = Pace::start();
             let doc = moved.and_then(|(base, ids, o)| photocraft_engine::layer_multi_cmds::moved(&base, &ids, o.0, o.1).ok().map(Arc::new)).unwrap_or(doc);
             let source = faithful.then(|| reduced(&levels, &doc, level));
             let rects: Vec<DRect> = jobs.iter().map(|(_, r)| *r).collect();
             let bufs = render_level(&doc, source.as_deref(), f, &rects);
             let done = jobs.into_iter().zip(bufs).map(|((k, held), b)| (k, held, tile_image(display.as_deref(), &b))).collect();
+            #[cfg(test)]
+            pace.hold();
             let _ = tx.send(done);
         });
     }
@@ -1113,6 +1131,7 @@ pub fn paint(
     let split_ready = tc.split_ready;
     if stats.px > 0 {
         app.perf.record("tiles", stats.px, stats.composite_ms, stats.upload_ms);
+        app.perf.stage.pooled(stats.pool_ms);
     }
     app.perf_counters.move_split += u64::from(stats.from_split);
     app.cpu_move_split = split_ready.then_some((id, revision, app.frame));
@@ -1225,6 +1244,35 @@ pub(crate) fn spawn(f: impl FnOnce() + Send + 'static) {
 #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
 pub(crate) fn spawn(f: impl FnOnce() + Send + 'static) {
     f();
+}
+
+/// A worker pool several times slower than this machine's, for tests of weak machines (the
+/// owner's PC composites 6 to 8 times slower than the build server): a job holds back what it
+/// made for `slowdown - 1` times what it took, so it reaches the frames as late as it would there.
+#[cfg(test)]
+pub(crate) struct Pace(std::time::Instant);
+
+#[cfg(test)]
+static POOL_SLOWDOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+
+/// Make the worker pool's jobs take `times` as long (tests; 1: as they are).
+#[cfg(test)]
+pub(crate) fn set_pool_slowdown(times: u32) {
+    POOL_SLOWDOWN.store(times.max(1), std::sync::atomic::Ordering::Relaxed);
+}
+
+#[cfg(test)]
+impl Pace {
+    pub(crate) fn start() -> Self {
+        Self(std::time::Instant::now())
+    }
+
+    pub(crate) fn hold(self) {
+        let times = POOL_SLOWDOWN.load(std::sync::atomic::Ordering::Relaxed);
+        if times > 1 {
+            std::thread::sleep(self.0.elapsed() * (times - 1));
+        }
+    }
 }
 
 /// Tiles composited per batch: one per worker in the threads build, a few otherwise.
@@ -1572,6 +1620,7 @@ mod tests {
         assert_eq!(off(&app, &mirror), 0, "the page before the edit");
         let tiles = canvas(&app).tile_count();
         let here = photocraft_compose::composites_here();
+        let (held, pool) = (app.perf.stage.composite_ms, app.perf.stage.pool_ms);
         app.run("edit.fill", json!({"contents": "color", "color": "#22aa55", "opacity": 80})).unwrap();
         let mut frames = 0;
         let whole = loop {
@@ -1589,6 +1638,10 @@ mod tests {
         assert_eq!(whole.set.len(), tiles, "every tile of the page in the same frame");
         assert!(shows_document(&app));
         assert_eq!(photocraft_compose::composites_here() - here, 0, "nothing composited on the window's thread");
+        // The frames' record says so too: the pool's time isn't counted as the frame's (a frame
+        // of 4 ms that landed a batch was logged as a stall of the 370 ms the pool had taken).
+        assert_eq!(app.perf.stage.composite_ms, held, "no composite held a frame");
+        assert!(app.perf.stage.pool_ms > pool, "the batch's time is the pool's");
         assert!(off(&app, &mirror) <= 1, "the edit as the full composite has it: off by {}", off(&app, &mirror));
         // Once the edits pause, the tiles drawn through the top's map are the exact composite.
         std::thread::sleep(std::time::Duration::from_millis(REFINE_AFTER_MS as u64 + 50));

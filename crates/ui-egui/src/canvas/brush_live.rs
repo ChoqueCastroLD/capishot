@@ -235,14 +235,21 @@ fn work(queue: &wasm_sync::Mutex<Queue>, tx: &Sender<Landed>) {
             }
             (stroke, std::mem::take(&mut q.points), finish)
         };
+        #[cfg(test)]
+        let pace = crate::cpu_canvas::Pace::start();
         if finish {
+            let commit = stroke.into_commit().map_or(Landed::Failed, |c| Landed::Commit(Box::new(c)));
+            #[cfg(test)]
+            pace.hold();
             // (The stroke may be dropped by now: nothing to tell.)
-            let _ = tx.send(stroke.into_commit().map_or(Landed::Failed, |c| Landed::Commit(Box::new(c))));
+            let _ = tx.send(commit);
             return;
         }
         // The stroke as releasing now would leave it: the smoothing tail up to date in every
         // document handed back.
         let step = stroke.push(&points).and_then(|r| Ok(r.union(&stroke.finalize_tail()?)));
+        #[cfg(test)]
+        pace.hold();
         let Ok(damage) = step else {
             let _ = tx.send(Landed::Failed);
             lock(queue).running = false;

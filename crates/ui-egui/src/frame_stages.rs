@@ -41,6 +41,10 @@ pub struct FrameStages {
     pub composite_ms: f64,
     /// Canvas conversions and uploads.
     pub upload_ms: f64,
+    /// What the worker pool spent on the canvas composites this frame put on screen (the CPU
+    /// canvas's batches): time of other threads while the frames went on, so no part of
+    /// `frame_ms`.
+    pub pool_ms: f64,
     /// The GPU's own time for a recent composite, when the canvas is on the GPU and it reports one.
     pub gpu_ms: Option<f64>,
     /// eframe's CPU time for the previous frame minus that frame's UI build: tessellation and
@@ -108,7 +112,13 @@ impl FrameStages {
         self.refresh_px += px;
     }
 
-    /// The stages that make up `frame_ms` (`present_ms` belongs to the previous frame).
+    /// Composites the worker pool made, off the window's thread, land in this frame.
+    pub fn pooled(&mut self, ms: f64) {
+        self.pool_ms += ms;
+    }
+
+    /// The stages that make up `frame_ms` (`present_ms` belongs to the previous frame, `pool_ms`
+    /// to other threads).
     pub fn stage_ms(&self) -> f64 {
         self.input_ms + self.command_ms + self.damage_ms + self.composite_ms + self.upload_ms
     }
@@ -126,7 +136,7 @@ impl FrameStages {
         let opt = |v: Option<f64>| v.map_or("-".to_string(), |v| format!("{v:.1}"));
         let command = if self.command.is_empty() { String::new() } else { format!(" ({})", self.command) };
         format!(
-            "slow frame: {:.1} ms on the {} path: input {:.1}, command {:.1}{command}, damage {:.1}, composite {:.1}, upload {:.1}, gpu {}, present {}; refresh {} {} px",
+            "slow frame: {:.1} ms on the {} path: input {:.1}, command {:.1}{command}, damage {:.1}, composite {:.1}, upload {:.1}, gpu {}, present {}; refresh {} {} px; pool {:.1}",
             self.frame_ms,
             self.path,
             self.input_ms,
@@ -138,6 +148,7 @@ impl FrameStages {
             opt(self.present_ms),
             if self.refresh.is_empty() { "none" } else { self.refresh },
             self.refresh_px,
+            self.pool_ms,
         )
     }
 }
@@ -265,6 +276,23 @@ mod tests {
         assert_eq!(s.gpu_ms, None, "no GPU time for a CPU refresh");
         r.finish(frame(100.0, 0.0), 150.0, false, None);
         assert_eq!(r.frames().count(), 0, "exactly 50 ms isn't over");
+    }
+
+    /// A composite the worker pool made while the frames went on is the pool's time: the frame
+    /// that puts it on screen is as long as its own work (the owner's PC, 0.13.37, CPU mode: 32
+    /// frames of about 4 ms were logged as stalls of 180 to 530 ms).
+    #[test]
+    fn the_pools_time_is_no_part_of_the_frame() {
+        let mut r = SlowFrames::default();
+        let mut s = FrameStages::default();
+        s.start(0.0, 0);
+        s.ui_start(1.0, None);
+        s.refresh("tiles", 2_104_192, 0.0, 0.3);
+        s.pooled(370.0);
+        let s = r.finish(s, 4.0, false, None);
+        assert_eq!((s.frame_ms, s.pool_ms), (4.0, 370.0));
+        assert_eq!(r.frames().count(), 0, "not a slow frame");
+        assert!(s.line().ends_with("refresh tiles 2104192 px; pool 370.0"), "{}", s.line());
     }
 
     #[test]

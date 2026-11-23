@@ -80,12 +80,16 @@ pub fn begin(app: &mut PhotocraftApp, ctx: &egui::Context) -> Result<(), String>
             display: crate::canvas::canvas_display(app, &doc, crate::monitor_status::view_display(app, ctx)).0,
         };
         off_frame(move || {
+            #[cfg(test)]
+            let pace = crate::cpu_canvas::Pace::start();
             let (image, uv) = preview_image(&doc, id, lifted.as_ref(), b, max_side, styled);
             let moving = crate::transform_tex::PreviewTextures::prepare(image, uv, &view);
             let above = up.map(|(up, rect)| {
                 let (image, uv) = composite_image(&up, rect, max_side);
                 (crate::transform_tex::PreviewTextures::prepare(image, uv, &view), rect)
             });
+            #[cfg(test)]
+            pace.hold();
             // (The box may be closed by now: nothing to tell.)
             let _ = tx.send(Built { moving, above });
             wake.request_repaint();

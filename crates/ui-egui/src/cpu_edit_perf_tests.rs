@@ -74,7 +74,9 @@ impl Bench {
 
     /// Frames until the canvas has nothing left to draw or make ahead.
     fn settle(&mut self) {
-        for _ in 0..400 {
+        // (A slow worker pool takes seconds over what it makes ahead.)
+        let t = std::time::Instant::now();
+        while t.elapsed() < std::time::Duration::from_secs(30) {
             self.h.step();
             if crate::cpu_canvas::settled(self.h.state()) {
                 break;
@@ -114,9 +116,10 @@ impl Bench {
         let t = std::time::Instant::now();
         self.frame(name, act);
         let mut shown = None;
-        for _ in 0..120 {
+        // (A slow worker pool shows an edit seconds later: the frames go on until it does.)
+        while t.elapsed() < std::time::Duration::from_secs(30) {
             let made = self.h.state().transform_preview.as_ref().is_none_or(|pv| pv.made());
-            let applied = !self.h.state().session.has_jobs();
+            let applied = !self.h.state().session.has_jobs() && self.h.state().landing_stroke.is_none();
             if shown.is_none() && made && applied && crate::cpu_canvas::shows_document(self.h.state()) {
                 shown = Some(t.elapsed().as_secs_f64() * 1000.0);
             }
@@ -296,6 +299,31 @@ fn edits_on_his_file_on_the_cpu_canvas_stay_within_a_frame() {
     }
     let over: Vec<String> = rows.iter().filter(|(_, p50, max)| *p50 > 16.0 || *max > 33.0).map(|(n, p50, max)| format!("{n}: median {p50:.1} ms, max {max:.1} ms")).collect();
     assert!(over.is_empty(), "over the bar (median 16 ms, max 33 ms):\n{}", over.join("\n"));
+}
+
+/// The same bar for a frame's own work on a weak machine: a worker pool of two threads whose
+/// jobs take eight times as long (the owner's PC composites 6 to 8 times slower than the build
+/// server). An edit shows later there; no frame may be held longer for it, which fails as soon as
+/// a frame composites, waits for the pool or makes a page of textures itself. Run alone, in its
+/// own process (the pool's size is the process's): `--ignored --test-threads=1` with this name.
+#[test]
+#[ignore = "a timing bar on a shared machine: run alone with --ignored"]
+fn edits_on_his_file_with_a_slow_worker_pool_hold_no_frame() {
+    let rows = on_the_apps_stack(|| {
+        // (Fails when the pool was made already: the test then runs with this machine's threads.)
+        let two = rayon::ThreadPoolBuilder::new().num_threads(2).build_global().is_ok();
+        eprintln!("EDIT cpu slow pool: {} threads, jobs 8 times as long", if two { 2 } else { rayon::current_num_threads() });
+        crate::cpu_canvas::set_pool_slowdown(8);
+        let rows = edits(PSD, 0.7);
+        crate::cpu_canvas::set_pool_slowdown(1);
+        rows
+    });
+    let Some(rows) = rows else { return };
+    if std::env::var_os("CPU_EDIT_PERF_REPORT_ONLY").is_some() {
+        return;
+    }
+    let over: Vec<String> = rows.iter().filter(|(_, _, max)| *max > 33.0).map(|(n, p50, max)| format!("{n}: median {p50:.1} ms, max {max:.1} ms")).collect();
+    assert!(over.is_empty(), "a frame's own work over 33 ms with a slow worker pool:\n{}", over.join("\n"));
 }
 
 /// The 200-layer page: reported.
