@@ -692,7 +692,11 @@ fn ensure_gpu_once(app: &mut PhotocraftApp, idx: usize, visible: DRect, level: u
     }
     gpu_budget(app, &gpu, idx, partial, visible);
     let r = gpu.refresh_for(id.0, &doc, if partial { damage } else { None }, display.as_deref(), crate::gpu_canvas::reduced_refreshes().then_some(need));
-    if gpu.has_stale(id.0) {
+    if gpu.filling(id.0) {
+        // A page filling from blank (the page before it on screen meanwhile): the next pieces
+        // on the next frame.
+        ctx.request_repaint();
+    } else if gpu.has_stale(id.0) {
         // What was left out of date is brought up to date on the following frames.
         ctx.request_repaint_after(std::time::Duration::from_secs_f64(crate::gpu_canvas::REFINE_DELAY_MS / 1000.0));
     }

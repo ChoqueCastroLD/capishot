@@ -248,7 +248,9 @@ impl GpuCanvas {
         let now = now_ms();
         if let Some(i) = res.view_sets.iter().position(|v| v.key == key && v.set.shows.as_ref().is_some_and(|(d, k)| *k == display && same_view(d, to))) {
             let mut kept = res.view_sets.swap_remove(i);
-            if let Some(old) = res.docs.insert(key, kept.set) {
+            if let Some(mut old) = res.docs.insert(key, kept.set) {
+                // (A page before a size change is never a view to come back to.)
+                old.before = None;
                 kept.set = old;
                 kept.used = now;
                 res.view_sets.push(kept);

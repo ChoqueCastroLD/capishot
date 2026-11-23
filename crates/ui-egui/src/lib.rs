@@ -892,6 +892,8 @@ mod bubble_text_ui_tests;
 #[cfg(test)]
 mod doc_switch_tests;
 #[cfg(test)]
+mod crop_gpu_tests;
+#[cfg(test)]
 mod move_drag_gpu_tests;
 #[cfg(test)]
 mod move_repeat_tests;

@@ -115,7 +115,7 @@ impl GpuCanvas {
         let Some(res) = renderer.callback_resources.canvas_mut(self.id) else { return false };
         let budget = res.canvas_budget;
         if res.docs.get(&key).is_none_or(|d| d.size != size || d.format != format || d.tiles.iter().any(|t| t.page.is_none())) {
-            res.docs.insert(key, DocTextures { size, format, tiles: Vec::new(), stale: Default::default(), shows: None });
+            res.docs.insert(key, DocTextures { size, format, tiles: Vec::new(), stale: Default::default(), shows: None, before: None });
         }
         let Some(d) = res.docs.get_mut(&key) else { return false };
         let replaced = d.tiles.iter().position(|t| t.page.is_some_and(|(id, _)| id == page));

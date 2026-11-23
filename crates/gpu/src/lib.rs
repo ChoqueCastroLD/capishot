@@ -832,6 +832,16 @@ pub fn fx_builds() -> u64 {
     FX_BUILDS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// Layer effect maps written so far, wholly or in part (built, grown, or a damaged part
+/// redrawn), process-wide (tests and diagnostics): each is a layer's shape and distance fields
+/// computed on the CPU.
+static FX_UPDATES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// [`FX_UPDATES`]: layer effect maps written so far.
+pub fn fx_updates() -> u64 {
+    FX_UPDATES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 fn first_error<T>(device: &wgpu::Device, f: impl FnOnce() -> T) -> (T, Option<wgpu::Error>) {
     let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
     let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
@@ -1323,6 +1333,63 @@ impl Compositor {
         Ok(stats)
     }
 
+    /// Build, or bring up to date, the effect maps a render of `region` of `doc` would build,
+    /// one layer at a time, asking `more` before each layer after the first that needed work
+    /// whether there is time for another: whether they are all current then (a render of `region` builds none). Maps
+    /// larger than a page (built per cell as a render goes) are left to the render. A caller
+    /// filling a new page in pieces over frames builds the maps first, within each frame's work,
+    /// and composites once they are all there: one frame built every styled layer's maps (their
+    /// shapes and distance fields on the CPU), 40 to 150 ms on his PSD.
+    pub fn prepare_fx(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        doc: &Document,
+        region: Rect,
+        more: &mut dyn FnMut() -> bool,
+    ) -> Result<bool, Unsupported> {
+        if let Some(f) = self.fault() {
+            return Err(Unsupported(f.to_string()));
+        }
+        let space = photocraft_compose::cmyk_space(doc);
+        self.cmyk = space.as_ref().map_or(0, |s| s.id);
+        photocraft_color::convert::with_cmyk_space(space.as_ref(), || {
+            let region = region.intersect(&doc.bounds());
+            let (moved, _) = self.moved_in_place(doc);
+            let plan = {
+                let _s = span("gpu.plan");
+                plan::plan_moved(doc, Some(&moved))?
+            };
+            self.ensure_pipelines(device, &plan)?;
+            self.check_fx(doc, &plan)?;
+            let drawn = self.drawn_rect(region, 0);
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("pc_fx") });
+            let mut stats = Stats::default();
+            let mut done = true;
+            let mut worked = false;
+            let wanted: Vec<&plan::FxLayer<'_>> = plan.fx.iter().filter(|f| !self.fx_paged(f.region) && !f.region.intersect(&drawn).is_empty()).collect();
+            for f in wanted {
+                if worked && !more() {
+                    done = false;
+                    break;
+                }
+                let _s = span("gpu.fx");
+                let before = (stats.fx_shapes, stats.fx_programs);
+                self.sync_fx(device, queue, &mut encoder, doc, f, (f.layer.id, None), f.region, &mut stats);
+                worked |= (stats.fx_shapes, stats.fx_programs) != before;
+            }
+            queue.submit([encoder.finish()]);
+            Ok(done)
+        })
+    }
+
+    /// `region` grown to the chunk grid of `level`: what a render of it records.
+    fn drawn_rect(&self, region: Rect, level: u32) -> Rect {
+        let step = i32::try_from(self.chunk).unwrap_or(i32::MAX).saturating_mul(1 << level.min(MAX_LOD)).max(1);
+        let g = |v: i32| v.div_euclid(step).saturating_mul(step);
+        Rect::new(g(region.x0), g(region.y0), g(region.x1.saturating_add(step - 1)), g(region.y1.saturating_add(step - 1)))
+    }
+
     /// Like [`Self::render`] but records into `encoder` without submitting.
     pub fn encode(
         &mut self,
@@ -1410,11 +1477,7 @@ impl Compositor {
         // as `fill_prefix` grows them). Syncing every effect layer of the document on each render
         // made a piece of a 4000x6000 page of 80 layers build (and, past the effect budget, evict
         // and build again) the maps of layers nowhere near it.
-        let drawn = {
-            let step = i32::try_from(self.chunk).unwrap_or(i32::MAX).saturating_mul(1 << level.min(MAX_LOD)).max(1);
-            let g = |v: i32| v.div_euclid(step).saturating_mul(step);
-            Rect::new(g(region.x0), g(region.y0), g(region.x1.saturating_add(step - 1)), g(region.y1.saturating_add(step - 1)))
-        };
+        let drawn = self.drawn_rect(region, level);
         let paged: Vec<bool> = plan.fx.iter().map(|f| self.fx_paged(f.region)).collect();
         let aprons: Vec<i32> = plan.fx.iter().zip(&paged).map(|(f, &pg)| if pg { Self::fx_apron(doc, f) } else { 0 }).collect();
         for (f, &pg) in plan.fx.iter().zip(&paged) {
@@ -2254,6 +2317,7 @@ impl Compositor {
         // Shape over the damage (compose's own alpha).
         if !damage.is_empty() {
             stats.fx_shapes += 1;
+            FX_UPDATES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let v = fx::shape(doc, layer, damage);
             fx::paste(&mut e.shape_cpu, region, damage, &v);
             e.shape.write_r32(queue, region, damage, &v);

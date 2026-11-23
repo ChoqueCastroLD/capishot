@@ -52,6 +52,9 @@ struct Action {
 struct Bench {
     h: Harness,
     actions: Vec<Action>,
+    /// Render each frame after it is timed, as the app does (the GPU canvas's paint callbacks
+    /// run then).
+    render: bool,
 }
 
 impl Bench {
@@ -86,7 +89,7 @@ impl Bench {
         let ctx = h.ctx.clone();
         let (req, _rx) = crate::control::ControlRequest::new("ui.set", json!({"zoom": zoom, "center": [size.width / 2, size.height / 2]}));
         crate::control::handle(h.state_mut(), &ctx, &req);
-        let mut b = Bench { h, actions: Vec::new() };
+        let mut b = Bench { h, actions: Vec::new(), render: false };
         b.settle();
         Some(b)
     }
@@ -143,9 +146,13 @@ impl Bench {
             && let Some((ran, queued)) = sched
             && wall - queued > 25.0
         {
-            eprintln!("SLOW {name}: {:.1} ms (ran {ran:.1}, blocked {:.1}), ended at {:.4}", wall - queued, wall - ran - queued, monotonic());
+            let spans: Vec<String> = crate::perf_span::frame().iter().take(8).map(|(n, ms)| format!("{n} {ms:.1}")).collect();
+            eprintln!("SLOW {name}: {:.1} ms (ran {ran:.1}, blocked {:.1}), ended at {:.4}: {}", wall - queued, wall - ran - queued, monotonic(), spans.join(", "));
         }
         self.record(name, wall, sched);
+        if self.render {
+            self.h.render().expect("render");
+        }
     }
 
     /// `act`, then the frames until the canvas shows it complete and has nothing left to make
@@ -506,4 +513,96 @@ fn opening_the_transform_box_on_the_gpu_canvas_is_reported() {
         }
         crate::transform_tool::set_off_frame(false);
     });
+}
+
+/// Whether the GPU canvas shows the active document as it is and has nothing left to draw.
+fn gpu_settled(app: &PhotocraftApp) -> bool {
+    let Some(st) = app.session.active() else { return true };
+    let (Some(gpu), Some(c)) = (app.gpu.as_ref(), app.canvases.get(&(st.doc.id, crate::canvas::GPU_OUTPUT))) else { return false };
+    !app.session.has_jobs() && c.on_gpu && c.revision == st.revision && !gpu.has_stale(st.doc.id.0) && !gpu.shows_before(st.doc.id.0)
+}
+
+/// A crop of his file, its undo and its redo on the GPU canvas (lavapipe here), as the app runs
+/// them (the crop a job): every frame's own time until the canvas is settled, with its spans.
+fn gpu_crops(path: &str, zoom: f64) -> Option<Vec<(&'static str, f64, f64)>> {
+    let _gpu = photocraft_testkit::gpu_lock();
+    if !std::path::Path::new(path).exists() {
+        eprintln!("skipping: {path} isn't here");
+        return None;
+    }
+    let mut h = harness(Device::Gpu)?;
+    {
+        let app = h.state_mut();
+        app.open_path(path).expect("open");
+        app.sync_views();
+        app.ui.extras.rulers = false;
+    }
+    let size = h.state().session.active().expect("doc").doc.size;
+    let ctx = h.ctx.clone();
+    let (req, _rx) = crate::control::ControlRequest::new("ui.set", json!({"zoom": zoom, "center": [size.width / 2, size.height / 2]}));
+    crate::control::handle(h.state_mut(), &ctx, &req);
+    let mut b = Bench { h, actions: Vec::new(), render: true };
+    let settle = |b: &mut Bench| {
+        let t = std::time::Instant::now();
+        while t.elapsed() < std::time::Duration::from_secs(60) && !gpu_settled(b.h.state()) {
+            b.h.step();
+            b.h.render().expect("render");
+        }
+        b.h.run_steps(3);
+    };
+    settle(&mut b);
+    b.app().background_jobs = true;
+    for _ in 0..3 {
+        for (name, cmd, params) in [
+            ("gpu crop", "image.crop", json!({"x": size.width / 4 + 3, "y": size.height / 4 + 5, "width": size.width / 2, "height": size.height / 2})),
+            ("gpu crop undo", "edit.undo", json!({})),
+            ("gpu crop redo", "edit.redo", json!({})),
+        ] {
+            let t = std::time::Instant::now();
+            b.frame(name, |h| {
+                h.state_mut().run(cmd, params).unwrap_or_else(|e| panic!("{cmd}: {e}"));
+            });
+            let mut shown = None;
+            while t.elapsed() < std::time::Duration::from_secs(60) {
+                if gpu_settled(b.h.state()) {
+                    shown = Some(t.elapsed().as_secs_f64() * 1000.0);
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(2));
+                b.frame(name, |_| {});
+            }
+            if let Some(a) = b.actions.iter_mut().find(|a| a.name == name) {
+                a.shown_after.push(shown.unwrap_or(f64::INFINITY));
+            }
+            settle(&mut b);
+        }
+        b.run_undo_to_start();
+    }
+    let name = std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or(path).to_owned();
+    Some(b.report(&name))
+}
+
+impl Bench {
+    /// Back to the file as opened (each round crops it again).
+    fn run_undo_to_start(&mut self) {
+        self.app().run("edit.undo", json!({})).expect("undo");
+        let t = std::time::Instant::now();
+        while t.elapsed() < std::time::Duration::from_secs(60) && !gpu_settled(self.h.state()) {
+            self.h.step();
+            self.h.render().expect("render");
+        }
+    }
+}
+
+/// A crop and its undo and redo on the GPU canvas: the frames each takes until the page shows.
+/// Timing on a shared server: run alone with --ignored.
+#[test]
+#[ignore = "a timing bench on a shared machine: run alone with --ignored"]
+fn crops_on_his_file_on_the_gpu_canvas() {
+    let Some(rows) = on_the_apps_stack(|| gpu_crops(PSD, 0.7)) else { return };
+    if std::env::var_os("CPU_EDIT_PERF_REPORT_ONLY").is_some() {
+        return;
+    }
+    let over: Vec<String> = rows.iter().filter(|(_, _, max)| *max > 33.0).map(|(n, p50, max)| format!("{n}: median {p50:.1} ms, max {max:.1} ms")).collect();
+    assert!(over.is_empty(), "over 33 ms:\n{}", over.join("\n"));
 }

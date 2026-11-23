@@ -887,21 +887,9 @@ impl GpuCanvas {
             res.compositor = Some(comp);
             return Err(photocraft_gpu::Unsupported(OVER_BUDGET.into()));
         }
-        if fresh {
-            // The open documents share the budget (after upstream PhotoCraft #5332): the sets of
-            // the other tabs go first, and are made again when their tab shows.
-            res.docs.remove(&key);
-            res.make_room(canvas_texture_bytes(size, self.tile, texel_bytes(format)));
-            let Some(tex) = DocTextures::new(device, res, size, self.tile, format) else {
-                res.docs.remove(&key);
-                res.compositor = Some(comp);
-                return Err(photocraft_gpu::Unsupported(OVER_CANVAS_BUDGET.into()));
-            };
-            if res.shown.contains(&key) {
-                // Shown before (its set let go to make room): drawn whole, nothing waits.
-                tex.stale().blank.clear();
-            }
-            res.docs.insert(key, tex);
+        if fresh && !self.install_set(res, key, size, format) {
+            res.compositor = Some(comp);
+            return Err(photocraft_gpu::Unsupported(OVER_CANVAS_BUDGET.into()));
         }
         let (Some(pipe), Some(d)) = (res.encode_pipeline(format), res.docs.get(&key)) else {
             res.compositor = Some(comp);
@@ -986,6 +974,76 @@ impl GpuCanvas {
         result
     }
 
+    /// A new display set for document `key` (`size`, `format`) in place of the one it has, if any.
+    /// A page on screen whose size or format changed (a crop, its undo, Image or Canvas Size)
+    /// stays there, as the views drew it, while the new set fills in pieces over the next frames
+    /// ([`Before`]); it showed whole in the frame that made it (every layer uploaded, every
+    /// effect map and the whole view composited in one frame: 0.3 to 0.8 s on his PSD). False
+    /// when the set doesn't fit the canvas budget (nothing is left for the document then).
+    fn install_set(&self, res: &mut Resources, key: u64, size: [u32; 2], format: wgpu::TextureFormat) -> bool {
+        let new_bytes = canvas_texture_bytes(size, self.tile, texel_bytes(format));
+        let before = res.docs.remove(&key).and_then(|old| res.keeps_before(key, &old, new_bytes).then(|| res.before_of(key, old)));
+        // The open documents share the budget (after upstream PhotoCraft #5332): the sets of
+        // the other tabs go first, and are made again when their tab shows.
+        res.make_room(new_bytes.saturating_add(before.as_ref().map_or(0, |b| b.set.bytes())));
+        let Some(mut tex) = DocTextures::new(&self.rs.device, res, size, self.tile, format) else {
+            res.docs.remove(&key);
+            return false;
+        };
+        if before.is_none() && res.shown.contains(&key) {
+            // Shown before (its set let go to make room): drawn whole, nothing waits.
+            tex.stale().blank.clear();
+        }
+        tex.before = before;
+        res.docs.insert(key, tex);
+        true
+    }
+
+    /// For a page filling from blank (just opened, or its size changed): its display set made,
+    /// and the effect maps a composite of `region` needs built first, a layer at a time until
+    /// [`now_ms`] reaches `until` ([`photocraft_gpu::Compositor::prepare_fx`]). Whether `region`
+    /// may be composited now: its composite then builds no maps. One piece of a new page built
+    /// the maps of every styled layer it met (40 to 150 ms in one frame on his PSD). True when
+    /// the GPU compositor can't draw the document (the composite reports why).
+    fn fill_ready(&self, doc: &photocraft_doc::Document, region: photocraft_geom::Rect, until: f64) -> bool {
+        let _s = crate::perf_span::span("canvas.fill_fx");
+        let mut renderer = self.rs.renderer.write();
+        let Some(res) = renderer.callback_resources.canvas_mut(self.id) else { return true };
+        let Ok(mut comp) = self.take_compositor(res, false) else { return true };
+        let (key, size) = (doc.id.0, [doc.size.width, doc.size.height]);
+        let format = self.format_for(doc.depth, size);
+        if res.docs.get(&key).is_none_or(|d| d.size != size || d.format != format) && (comp.supports(doc).is_err() || !self.install_set(res, key, size, format))
+        {
+            res.compositor = Some(comp);
+            return true;
+        }
+        let ready =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| comp.prepare_fx(&self.rs.device, &self.rs.queue, doc, region, &mut || now_ms() < until)));
+        res.compositor = Some(comp);
+        let ready = match ready {
+            Ok(r) => r.unwrap_or(true),
+            Err(_) => {
+                // As a composite's panic: the device is taken as lost (the app goes to the CPU canvas).
+                self.health.mark(photocraft_gpu::Fault::Lost("the GPU compositor stopped (internal error)".into()));
+                true
+            }
+        };
+        // Maps built ahead can be evicted before they are used when the effect cache's budget
+        // (a phone's) can't hold the maps of the region and of what is drawn meanwhile: then the
+        // pieces stop waiting for them and build them as they are drawn, as before, rather than
+        // never showing.
+        res.fx_waits = if ready { 0 } else { res.fx_waits.saturating_add(1) };
+        ready || res.fx_waits > MAX_FX_WAITS
+    }
+
+    /// Whether document `key`'s set is filling from blank where a view still shows nothing of it
+    /// (just opened, or its size changed): its next pieces go on the next frame, not after the
+    /// refinement's delay.
+    pub fn filling(&self, key: u64) -> bool {
+        let r = self.rs.renderer.read();
+        r.callback_resources.canvas(self.id).and_then(|res| res.docs.get(&key)).is_some_and(|d| !d.stale().blank.is_empty())
+    }
+
     /// Bring document `key`'s display texture up to date with `doc`: only `damage` when given (a
     /// brush stroke on an already uploaded document), else everything. The wgpu compositor renders
     /// straight into the texture when it supports the document; otherwise the CPU compositor does.
@@ -1058,14 +1116,15 @@ impl GpuCanvas {
             // cache filled; the margin drawn ahead around it (not shown) goes in pieces within the
             // frame's work too (a release of a 4000x6000 layer composited 6.5 MP, the view and its
             // margin, in one frame: 5 s on lavapipe with 4 GB).
-            let blank = self.blank_now(key, bounds);
+            let blank = self.blank_now(key, bounds, format);
             let mut later = later;
             let mut r: Result<photocraft_gpu::Stats, photocraft_gpu::Unsupported> = Ok(photocraft_gpu::Stats { level, ..Default::default() });
+            let side = self.with_doc(key, |res, _| piece_side(res.cost_rate)).unwrap_or(PIECE);
             let parts: Vec<photocraft_geom::Rect> = if blank.is_empty() {
                 let shown = now.intersect(&n.visible);
-                std::iter::once(shown).filter(|p| !p.is_empty()).chain(subtract(now, n.visible).into_iter().flat_map(|m| pieces(m, n.visible))).collect()
+                std::iter::once(shown).filter(|p| !p.is_empty()).chain(subtract(now, n.visible).into_iter().flat_map(|m| pieces(m, n.visible, side))).collect()
             } else {
-                pieces(now, n.visible)
+                pieces(now, n.visible, side)
             };
             // A split refresh draws each piece once, as the catch-up does: no whole-chunk fill
             // of the lower-stack cache (it would read, and upload, far more than the piece).
@@ -1100,9 +1159,14 @@ impl GpuCanvas {
                 None => parts,
             };
             let drag_ready = split.is_some();
+            // Parts that may wait wait for their effect maps, built first within the frame's work.
+            let may_wait = |p: photocraft_geom::Rect| covered(p, &blank) || p.intersect(&n.visible).is_empty();
+            let fx_region = fill_region(&parts, may_wait, n.visible);
+            let fx_ready = fx_region.is_empty() || self.fill_ready(doc, fx_region, t0 + frame_work_ms());
             let composing = now_ms();
             for (i, p) in parts.into_iter().enumerate() {
-                if i > 0 && now_ms() - t0 >= frame_work_ms() && (covered(p, &blank) || p.intersect(&n.visible).is_empty()) {
+                let waits = may_wait(p);
+                if waits && ((i > 0 && now_ms() - t0 >= frame_work_ms()) || !(fx_ready && fx_region.contains_rect(&p))) {
                     later.push(p);
                     continue;
                 }
@@ -1322,8 +1386,13 @@ impl GpuCanvas {
         // pieces within the frame's work, the big first refresh coming back here frame after
         // frame until it's done; everything else in this frame, so the view never shows part of
         // it at an older state (a pan into a region an edit deferred, a kept view set restored).
-        let blank = self.blank_now(key, bounds);
+        let blank = self.blank_now(key, bounds, self.format_for(doc.depth, [doc.size.width, doc.size.height]));
         let mut more = false;
+        // Parts that may wait wait for their effect maps, built first within the frame's work.
+        let may_wait = |p: photocraft_geom::Rect| covered(p, &blank) || p.intersect(&need.visible).is_empty();
+        let waiting: Vec<photocraft_geom::Rect> = urgent.iter().flat_map(|r| if covered(*r, &blank) { vec![*r] } else { subtract(*r, need.visible) }).collect();
+        let fx_region = fill_region(&waiting, may_wait, need.visible);
+        let fx_ready = fx_region.is_empty() || self.fill_ready(doc, fx_region, t0 + frame_work_ms());
         for r in urgent {
             let level = if area(r) >= LOD_MIN_PX { need.level } else { 0 };
             // What the view shows goes whole; the margin drawn ahead around it (for a pan) and
@@ -1332,18 +1401,29 @@ impl GpuCanvas {
             // view didn't show: 0.9-2.7 s on lavapipe, the press of the next drag).
             let shown = r.intersect(&need.visible);
             let parts: Vec<photocraft_geom::Rect> = if blank.is_empty() {
-                std::iter::once(shown).filter(|p| !p.is_empty()).chain(subtract(r, need.visible).into_iter().flat_map(|m| pieces(m, need.visible))).collect()
+                std::iter::once(shown)
+                    .filter(|p| !p.is_empty())
+                    .chain(subtract(r, need.visible).into_iter().flat_map(|m| pieces(m, need.visible, piece_side(cost_rate))))
+                    .collect()
             } else {
-                pieces(r, need.visible)
+                pieces(r, need.visible, piece_side(cost_rate))
             };
             'parts: for p in parts {
-                let waits = covered(p, &blank) || p.intersect(&need.visible).is_empty();
-                if out.px > 0 && now_ms() - t0 >= frame_work_ms() && waits {
+                let waits = may_wait(p);
+                if waits && ((out.px > 0 && now_ms() - t0 >= frame_work_ms()) || !(fx_ready && fx_region.contains_rect(&p))) {
                     more = true;
                     continue;
                 }
+                let piece_t0 = now_ms();
                 match self.composite_lod_with(doc, p, encode_srgb, level, true, false) {
-                    Ok(st) => out.px += st.pixels.max(1),
+                    Ok(st) => {
+                        out.px += st.pixels.max(1);
+                        // What compositing costs here (sizes the next pieces).
+                        if st.pixels > 0 {
+                            let rate = (now_ms() - piece_t0) / st.pixels as f64;
+                            self.with_doc(key, |res, _| res.cost_rate = if res.cost_rate > 0.0 { res.cost_rate * 0.6 + rate * 0.4 } else { rate });
+                        }
+                    }
                     // The CPU compositor draws the piece (the GPU one isn't ready or can't), in
                     // rows of at most CPU_PIECE_PX; blank rows left come back on the next frame,
                     // any other row goes now.
@@ -1485,10 +1565,16 @@ impl GpuCanvas {
     /// document's current state) don't stop their neighbours from waiting. Without a set: all of
     /// `bounds` for a document never shown (the refresh makes a blank one), nothing for one
     /// shown before.
-    fn blank_now(&self, key: u64, bounds: photocraft_geom::Rect) -> Vec<photocraft_geom::Rect> {
+    fn blank_now(&self, key: u64, bounds: photocraft_geom::Rect, format: wgpu::TextureFormat) -> Vec<photocraft_geom::Rect> {
+        let size = [bounds.width(), bounds.height()];
         let mut r = self.rs.renderer.write();
         let Some(res) = r.callback_resources.canvas_mut(self.id) else { return Vec::new() };
         match res.docs.get(&key) {
+            // A set of another size or format is replaced by a blank one, which the page before
+            // stands in for until the view's part is drawn ([`Before`]).
+            Some(d) if (d.size != size || d.format != format) && res.keeps_before(key, d, canvas_texture_bytes(size, self.tile, texel_bytes(format))) => {
+                vec![bounds]
+            }
             Some(d) => d.stale().blank.clone(),
             None if res.shown.contains(&key) => Vec::new(),
             None => vec![bounds],
@@ -1500,13 +1586,23 @@ impl GpuCanvas {
     /// elsewhere are drawn whole when the view gets there, and a set made for it again after it
     /// was let go is drawn whole too).
     fn note_shown(&self, key: u64, visible: photocraft_geom::Rect) {
-        self.with_doc(key, |res, d| {
-            let mut st = d.stale();
-            if !st.blank_in(visible) {
-                st.blank.clear();
-                res.shown.insert(key);
-            }
-        });
+        let mut r = self.rs.renderer.write();
+        let Some(res) = r.callback_resources.canvas_mut(self.id) else { return };
+        let Some(d) = res.docs.get_mut(&key) else { return };
+        if d.stale().blank_in(visible) {
+            return;
+        }
+        d.stale().blank.clear();
+        // The page before a size change gives way in the same frame.
+        d.before = None;
+        res.shown.insert(key);
+    }
+
+    /// Whether document `key`'s views draw the page before a size change ([`Before`]): the new
+    /// one isn't all there yet where the view shows it.
+    pub fn shows_before(&self, key: u64) -> bool {
+        let r = self.rs.renderer.read();
+        r.callback_resources.canvas(self.id).and_then(|res| res.docs.get(&key)).is_some_and(|d| d.before.is_some())
     }
 
     fn with_doc<T>(&self, key: u64, f: impl FnOnce(&mut Resources, &DocTextures) -> T) -> Option<T> {
@@ -1784,27 +1880,40 @@ pub fn frame_work_ms() -> f64 {
 /// piece uploads a few hundred tiles at most.
 const PIECE: i32 = 1024;
 
-/// `r` cut on a [`PIECE`] grid, the pieces nearest the centre of `visible` first.
-fn pieces(r: photocraft_geom::Rect, visible: photocraft_geom::Rect) -> Vec<photocraft_geom::Rect> {
+/// The side of the pieces a frame composites one after another while its work allows: what
+/// compositing here takes `frame_work_ms()` for at `cost_rate` (milliseconds per pixel, 0 when
+/// not measured yet), on a 256 px grid, at most [`PIECE`]. A fixed 1024 px piece took 250 to 400
+/// ms on lavapipe (a GPU as slow as a weak one): the first piece of a frame always goes.
+fn piece_side(cost_rate: f64) -> i32 {
+    if cost_rate <= 0.0 {
+        return PIECE;
+    }
+    let side = (frame_work_ms() / cost_rate).sqrt();
+    if side.is_finite() { ((side as i32) / 256 * 256).clamp(256, PIECE) } else { PIECE }
+}
+
+/// `r` cut on a grid of `side`, the pieces nearest the centre of `visible` first.
+fn pieces(r: photocraft_geom::Rect, visible: photocraft_geom::Rect, side: i32) -> Vec<photocraft_geom::Rect> {
     if r.is_empty() {
         return Vec::new();
     }
-    if area(r) <= (PIECE as u64) * (PIECE as u64) {
+    let side = side.max(1);
+    if area(r) <= (side as u64) * (side as u64) {
         return vec![r];
     }
     let (cx, cy) = ((i64::from(visible.x0) + i64::from(visible.x1)) / 2, (i64::from(visible.y0) + i64::from(visible.y1)) / 2);
     let mut out = Vec::new();
-    let mut y = r.y0.div_euclid(PIECE) * PIECE;
+    let mut y = r.y0.div_euclid(side) * side;
     while y < r.y1 {
-        let mut x = r.x0.div_euclid(PIECE) * PIECE;
+        let mut x = r.x0.div_euclid(side) * side;
         while x < r.x1 {
-            let p = photocraft_geom::Rect::new(x, y, x.saturating_add(PIECE), y.saturating_add(PIECE)).intersect(&r);
+            let p = photocraft_geom::Rect::new(x, y, x.saturating_add(side), y.saturating_add(side)).intersect(&r);
             if !p.is_empty() {
                 out.push(p);
             }
-            x = x.saturating_add(PIECE);
+            x = x.saturating_add(side);
         }
-        y = y.saturating_add(PIECE);
+        y = y.saturating_add(side);
     }
     let dist = |p: &photocraft_geom::Rect| {
         let (px, py) = ((i64::from(p.x0) + i64::from(p.x1)) / 2, (i64::from(p.y0) + i64::from(p.y1)) / 2);
@@ -1812,6 +1921,16 @@ fn pieces(r: photocraft_geom::Rect, visible: photocraft_geom::Rect) -> Vec<photo
     };
     out.sort_by_key(dist);
     out
+}
+
+/// The parts of `parts` that may wait for a later frame (`waits`: blank, or away from `visible`)
+/// whose effect maps a frame builds before it composites any of them ([`GpuCanvas::fill_ready`]):
+/// those `visible` meets while there are any (the view's part swaps whole first), then the rest.
+/// Empty when none may wait (what must be drawn now builds its maps as it is drawn).
+fn fill_region(parts: &[photocraft_geom::Rect], waits: impl Fn(photocraft_geom::Rect) -> bool, visible: photocraft_geom::Rect) -> photocraft_geom::Rect {
+    let union =
+        |shown: bool| parts.iter().copied().filter(|p| !p.is_empty() && waits(*p) && (!shown || !p.intersect(&visible).is_empty())).reduce(|a, b| a.union(&b));
+    union(true).or_else(|| union(false)).unwrap_or(photocraft_geom::Rect::EMPTY)
 }
 
 /// `total` with the work of another piece of the same refresh.
@@ -2318,6 +2437,11 @@ pub const REFINE_DELAY_MS: f64 = 120.0;
 
 /// [`Refresh::kind`] of a frame drawn from the drag cache (`above`).
 pub const DRAG_CACHE_KIND: &str = "gpu-drag-cache";
+
+/// Frames in a row pieces wait for effect maps built ahead before they build them as they are
+/// drawn ([`GpuCanvas::fill_ready`]): far more than building a page's maps takes (his PSD: 5 to
+/// 10 frames), so it only ends a wait that can't end.
+const MAX_FX_WAITS: u32 = 120;
 
 /// The compositing a refinement piece aims at (milliseconds).
 const REFINE_FRAME_MS: f64 = 12.0;
@@ -2830,6 +2954,11 @@ struct Resources {
     /// Display texture sets kept per layer visibility (`view_sets`), counted in the canvas budget.
     view_sets: Vec<view_sets::ViewSet>,
     views: HashMap<u64, ViewGpu>,
+    /// Where each view last drew a document's set (canvas rect and parameters, by view key): a
+    /// set replaced for a new page size is drawn there until the new one shows ([`Before`]).
+    drawn: HashMap<u64, (egui::Rect, ViewParams)>,
+    /// Frames in a row whose pieces waited for effect maps ([`GpuCanvas::fill_ready`]).
+    fx_waits: u32,
     out_linear: bool,
     /// Build each mip level in a scratch texture and copy it back instead of rendering into
     /// the level directly (DX12 only: works around reduced-preview corruption on Intel drivers).
@@ -2986,6 +3115,18 @@ struct DocTextures {
     /// The document the set shows and the display key it stores it with (see `view_sets`);
     /// `None` when unknown (a new set, a preview).
     shows: Option<(std::sync::Arc<photocraft_doc::Document>, u64)>,
+    /// The set this one replaced when the page's size or format changed (a crop, its undo, Image
+    /// or Canvas Size), drawn where the views last drew it until what the view shows of this one
+    /// is all composited ([`GpuCanvas::note_shown`]): this one fills in pieces over frames, and a
+    /// frame never shows part of it.
+    before: Option<Box<Before>>,
+}
+
+/// A page whose size or format changed, as the views last drew it ([`DocTextures::before`]).
+struct Before {
+    set: DocTextures,
+    /// Each view's last placement of it (view key, canvas rect, parameters).
+    views: Vec<(u64, egui::Rect, ViewParams)>,
 }
 
 struct Tile {
@@ -3213,6 +3354,8 @@ impl Resources {
             docs: HashMap::new(),
             view_sets: Vec::new(),
             views: HashMap::new(),
+            drawn: HashMap::new(),
+            fx_waits: 0,
             out_linear: target.is_srgb(),
             separate_mip_targets: false,
             compositor: None,
@@ -3290,6 +3433,29 @@ fn init_buffer(device: &wgpu::Device, label: &str, contents: &[u8], usage: wgpu:
 }
 
 impl Resources {
+    /// Whether `old`, document `key`'s set, stays on screen while one of `new_bytes` for a new
+    /// page size or format fills in ([`Before`]): a view drew it (or the page before it) last,
+    /// and both sets fit the canvas budget together. Otherwise the new set is drawn whole in the
+    /// frame that makes it (two pages at once don't fit a phone's budget).
+    fn keeps_before(&self, key: u64, old: &DocTextures, new_bytes: u64) -> bool {
+        let kept = match &old.before {
+            Some(b) => b.set.bytes(),
+            None if self.drawn.values().any(|(_, p)| p.doc == key && p.doc_size == old.size) && !old.tiles.is_empty() => old.bytes(),
+            None => return false,
+        };
+        kept.saturating_add(new_bytes) <= self.canvas_budget
+    }
+
+    /// The page to keep on screen when document `key`'s set `old` is replaced ([`Before`]).
+    fn before_of(&self, key: u64, mut old: DocTextures) -> Box<Before> {
+        // (The page before that, still on screen: it stays.)
+        if let Some(b) = old.before.take() {
+            return b;
+        }
+        let views = self.drawn.iter().filter(|(_, (_, p))| p.doc == key && p.doc_size == old.size).map(|(v, (r, p))| (*v, *r, *p)).collect();
+        Box::new(Before { set: old, views })
+    }
+
     /// GPU bytes of the documents' display texture sets.
     fn canvas_bytes(&self) -> u64 {
         self.docs
@@ -3340,6 +3506,7 @@ impl DocTextures {
             .iter()
             .map(|t| (0..t.levels.len() as u32).map(|l| u64::from((t.texture.width() >> l).max(1)) * u64::from((t.texture.height() >> l).max(1)) * bpp).sum::<u64>())
             .fold(0, u64::saturating_add)
+            .saturating_add(self.before.as_ref().map_or(0, |b| b.set.bytes()))
     }
 
     /// The texture set for a `size` canvas, or `None` (nothing created) when it doesn't fit
@@ -3385,7 +3552,7 @@ impl DocTextures {
         let whole = photocraft_geom::Rect::new(0, 0, size[0] as i32, size[1] as i32);
         let mut stale = Stale { blank: vec![whole], ..Stale::default() };
         stale.defer(whole);
-        Some(Self { size, format, tiles, stale: std::sync::Mutex::new(stale), shows: None })
+        Some(Self { size, format, tiles, stale: std::sync::Mutex::new(stale), shows: None, before: None })
     }
 
     fn stale(&self) -> std::sync::MutexGuard<'_, Stale> {
@@ -3691,7 +3858,19 @@ impl CallbackTrait for CanvasCallback {
         if !res.health.is_ok() {
             return Vec::new();
         }
-        let data = self.uniforms(screen.size_in_pixels, screen.pixels_per_point, res.out_linear, &res.style);
+        let key = self.params.view_key;
+        // The page before a size change is drawn where this view drew it last ([`Before`]).
+        let before = res.docs.get(&self.params.doc).and_then(|d| d.before.as_ref()).map(|b| b.views.iter().find(|v| v.0 == key).map(|v| (v.1, v.2)));
+        let data = match before {
+            Some(Some((rect, params))) => CanvasCallback { rect, params }.uniforms(screen.size_in_pixels, screen.pixels_per_point, res.out_linear, &res.style),
+            Some(None) => return Vec::new(),
+            None => {
+                if res.docs.get(&self.params.doc).is_some_and(|d| d.size == self.params.doc_size) {
+                    res.drawn.insert(key, (self.rect, self.params));
+                }
+                self.uniforms(screen.size_in_pixels, screen.pixels_per_point, res.out_linear, &res.style)
+            }
+        };
         let (bgl, sampler) = (&res.view_bgl, &res.sampler);
         let v = res.views.entry(self.params.view_key).or_insert_with(|| {
             let buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -3731,24 +3910,35 @@ impl CallbackTrait for CanvasCallback {
         // Work in whole-screen pixel coordinates; the scissor does the clipping.
         pass.set_viewport(0.0, 0.0, sw as f32, sh as f32, 0.0, 1.0);
         pass.set_scissor_rect(clip.left_px.max(0) as u32, clip.top_px.max(0) as u32, clip.width_px as u32, clip.height_px as u32);
+        // The page before a size change, as this view drew it last ([`Before`]); nothing in a
+        // view that didn't draw it (the new page isn't all there yet).
+        let set = res.docs.get(&self.params.doc);
+        let (set, this) = match set.and_then(|d| d.before.as_ref()) {
+            Some(b) => match b.views.iter().find(|v| v.0 == self.params.view_key) {
+                Some(&(_, rect, params)) => (Some(&b.set), CanvasCallback { rect, params }),
+                None => return,
+            },
+            None => (set, CanvasCallback { rect: self.rect, params: self.params }),
+        };
         pass.set_bind_group(0, &view.bind_group, &[]);
-        if self.params.shadow {
+        if this.params.shadow {
             pass.set_pipeline(&res.shadow_pipeline);
             pass.draw(0..6, 0..1);
         }
-        let Some(doc) = res.docs.get(&self.params.doc) else { return };
-        if doc.size != self.params.doc_size {
+        let Some(doc) = set else { return };
+        if doc.size != this.params.doc_size {
             return;
         }
-        let (origin, scale) = self.placement(info.pixels_per_point);
+        let (origin, scale) = this.placement(info.pixels_per_point);
         let (cx0, cy0) = (clip.left_px as f32, clip.top_px as f32);
         let (cx1, cy1) = (cx0 + clip.width_px as f32, cy0 + clip.height_px as f32);
-        let rot = if self.params.rotation.is_finite() { self.params.rotation } else { 0.0 };
+        let p = &this.params;
+        let rot = if p.rotation.is_finite() { p.rotation } else { 0.0 };
         let (cos, sin) = if rot.abs() < 1e-8 { (1.0, 0.0) } else { (rot.cos(), rot.sin()) };
-        let cen = self.params.center;
-        let [ox, oy] = self.params.offset.map(|v| if v.is_finite() { v } else { 0.0 });
+        let cen = p.center;
+        let [ox, oy] = p.offset.map(|v| if v.is_finite() { v } else { 0.0 });
         pass.set_pipeline(&res.tile_pipeline);
-        pass.set_bind_group(2, res.luts.get(&(self.params.doc, self.params.output)).unwrap_or(&res.identity_lut), &[]);
+        pass.set_bind_group(2, res.luts.get(&(p.doc, p.output)).unwrap_or(&res.identity_lut), &[]);
         for t in &doc.tiles {
             let [tx, ty, tw, th] = t.rect.map(|v| v as f32);
             let (x0, y0, x1, y1) = tile_screen_aabb(origin, scale, cen, cos, sin, [tx + ox, ty + oy, tw, th]);
