@@ -348,10 +348,6 @@ const SPLIT_AHEAD_MS: f64 = 6.0;
 /// that comes meanwhile waits for it to come back.
 const AHEAD_FLIGHT_MS: f64 = 12.0;
 
-/// How long a frame waits for an edit's batch before it goes on without it (milliseconds).
-#[cfg(not(test))]
-const FLIGHT_WAIT_MS: f64 = 4.0;
-
 /// The budget of a drag frame for the split's sprite while it isn't ready (milliseconds).
 const DRAG_BAND_MS: f64 = 2.0;
 
@@ -467,7 +463,7 @@ struct Drawn {
     /// Nothing is left to make ahead (or no more can be made).
     ahead_done: bool,
     /// What the batch took, and how much of that held the window's thread: all of it when it was
-    /// drawn in the frame, the frame's wait when the pool drew it, none when it landed later.
+    /// drawn in the frame, none when the pool drew it.
     ms: f64,
     held_ms: f64,
 }
@@ -769,12 +765,15 @@ struct Stats {
 }
 
 impl TileCanvas {
-    /// Composite `batch`: on the worker pool, waiting up to `wait` milliseconds for it so that an
-    /// edit the pool composites in that time shows in its own frame (`None`: in the frame). What
-    /// it made when it is done already; else the batch is in flight ([`TileCanvas::flight`]) and
-    /// the frame goes on with the tiles it has.
-    fn send(&mut self, ctx: &egui::Context, batch: Batch, state: (u64, u64), ahead: Option<Ahead>, wait: Option<f64>) -> Option<Drawn> {
-        let Some(wait) = wait else { return Some(draw(batch)) };
+    /// Composite `batch`: on the worker pool when `pooled` (else in the frame). What it made when
+    /// it is done already; else the batch is in flight ([`TileCanvas::flight`]) and the frame goes
+    /// on with the tiles it has, never waiting for it: an edit shows in the frame that finds it
+    /// done, whole. (A frame that waited a few milliseconds for the pool slept a whole timer tick
+    /// on Windows: 16 to 25 ms of `cpu.wait` on the owner's PC.)
+    fn send(&mut self, ctx: &egui::Context, batch: Batch, state: (u64, u64), ahead: Option<Ahead>, pooled: bool) -> Option<Drawn> {
+        if !pooled {
+            return Some(draw(batch));
+        }
         let (level, stop) = (batch.level, batch.stop.clone());
         let under_box = (!batch.jobs.is_empty()).then_some(self.stood_in);
         let (tx, rx) = std::sync::mpsc::channel();
@@ -788,23 +787,6 @@ impl TileCanvas {
             let _ = tx.send(drawn);
             wake.wake();
         });
-        // The page's own thread can't wait in the browser: it finds the tiles in its next frame.
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            // Done already: the frame held for nothing. No wait allowed: the frame doesn't wait.
-            if let Ok(d) = rx.try_recv() {
-                return Some(Drawn { held_ms: 0.0, ..d });
-            }
-            if wait > 0.0 {
-                let _s = crate::perf_span::span("cpu.wait");
-                let t0 = crate::gpu_canvas::now_ms();
-                if let Ok(d) = rx.recv_timeout(std::time::Duration::from_secs_f64(wait / 1000.0)) {
-                    return Some(Drawn { held_ms: crate::gpu_canvas::now_ms() - t0, ..d });
-                }
-            }
-        }
-        #[cfg(target_arch = "wasm32")]
-        let _ = wait;
         self.flight = Some(Flight { rx: Some(rx), staged: None, state, level, ahead, anchor: self.anchor.clone(), stop, under_box });
         None
     }
@@ -915,32 +897,30 @@ fn merge(a: Option<DRect>, b: Option<DRect>) -> Option<DRect> {
     }
 }
 
-/// How long a frame waits for the worker pool to composite an edit's tiles before it goes on
-/// with the tiles it has (milliseconds; `None`: they are composited in the frame, where there is
-/// no pool). An edit the pool composites in this time shows in its own frame; a longer one a
-/// frame or more later, complete, the window never held meanwhile.
-fn flight_wait() -> Option<f64> {
+/// Whether edits are composited on the worker pool (`false`: in the frame, where there is no
+/// pool). The frame never waits for the pool: an edit shows in the frame that finds it done.
+fn pooled() -> bool {
     #[cfg(test)]
     {
-        FLIGHT_WAIT.with(|w| w.get())
+        POOLED.with(std::cell::Cell::get)
     }
     #[cfg(not(test))]
     {
-        POOL.then_some(FLIGHT_WAIT_MS)
+        POOL
     }
 }
 
 #[cfg(test)]
 thread_local! {
-    /// Tests composite in the frame, so they see an edit at once; one that measures frames sets
-    /// the wait the app has ([`set_flight_wait`]).
-    static FLIGHT_WAIT: std::cell::Cell<Option<f64>> = const { std::cell::Cell::new(None) };
+    /// Tests composite in the frame, so they see an edit at once; one that measures frames uses
+    /// the pool as the app does ([`set_pooled`]).
+    static POOLED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// Composite edits on the worker pool, the frame waiting `ms` for them, as the app does (tests).
+/// Composite edits on the worker pool, as the app does (tests).
 #[cfg(test)]
-pub(crate) fn set_flight_wait(ms: Option<f64>) {
-    FLIGHT_WAIT.with(|w| w.set(ms));
+pub(crate) fn set_pooled(on: bool) {
+    POOLED.with(|w| w.set(on));
 }
 
 /// Draw document `idx`'s CPU canvas: tiles in view at the zoom's level, composited as needed.
@@ -993,8 +973,7 @@ pub fn paint(
     let tex_budget = texture_budget(app);
     let mip_budget = mip_budget(app);
     let split_budget = split_budget(app);
-    let wait = flight_wait();
-    let pooled = wait.is_some();
+    let pooled = pooled();
     let pointer_down = ctx.input(|i| i.pointer.any_down());
     let cache = app.canvases.entry(key).or_default();
     let tc = cache.tiles.get_or_insert_with(Default::default);
@@ -1171,8 +1150,8 @@ pub fn paint(
             view: view.clone(),
         };
         let anchor = tc.anchor.clone();
-        if let Some(d) = tc.send(ctx, batch, now, None, wait) {
-            // Done in the frame's wait: shown now, or once its textures are uploaded.
+        if let Some(d) = tc.send(ctx, batch, now, None, pooled) {
+            // Drawn in the frame: shown now, or once its textures are uploaded.
             let stop = Arc::default();
             tc.flight = Some(Flight { rx: None, staged: Some(Staged::new(d)), state: now, level, ahead: None, anchor, stop, under_box: Some(stands_in) });
             tc.take_flight(ctx, key, (now, level), &mut spent, &mut stats);
@@ -1192,15 +1171,14 @@ pub fn paint(
             handover: false,
             through: through.clone(),
             ahead: view.clone(),
-            ahead_ms: if wait.is_some() { AHEAD_FLIGHT_MS } else { SPLIT_AHEAD_MS },
+            ahead_ms: if pooled { AHEAD_FLIGHT_MS } else { SPLIT_AHEAD_MS },
             sprite: move_tool,
             stop: Arc::default(),
             budget: split_budget,
             view: view.clone(),
         };
-        // (Off the frame it isn't waited for: nothing of it shows.)
         let anchor = tc.anchor.clone();
-        if let Some(d) = tc.send(ctx, batch, now, Some(ahead.clone()), wait.map(|_| 0.0)) {
+        if let Some(d) = tc.send(ctx, batch, now, Some(ahead.clone()), pooled) {
             more_ahead = !d.ahead_done;
             tc.land(ctx, key, d, Vec::new(), Sent { fresh: true, ahead: Some(ahead.clone()), anchor }, &mut stats);
         }
@@ -1862,8 +1840,7 @@ mod tests {
     fn an_edit_is_composited_off_the_frame_and_shown_whole() {
         let mut app = stacked();
         let ctx = egui::Context::default();
-        // (No wait: the frame never finds the batch done before it goes on.)
-        set_flight_wait(Some(0.0));
+        set_pooled(true);
         let mut mirror = HashMap::new();
         settle(&mut app, &ctx, &mut mirror);
         assert_eq!(off(&app, &mirror), 0, "the page before the edit");
@@ -1910,7 +1887,34 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(REFINE_AFTER_MS as u64 + 50));
         settle(&mut app, &ctx, &mut mirror);
         assert_eq!(off(&app, &mirror), 0);
-        set_flight_wait(None);
+        set_pooled(false);
+    }
+
+    /// No frame waits for the worker pool: one that can't find an edit's batch done goes on with
+    /// the tiles it has, however long the pool takes. (Frames waited 4 ms for it: a whole timer
+    /// tick on Windows, 18 to 25 ms of `cpu.wait` in a reorder or a brush stroke on the owner's PC.)
+    #[test]
+    fn no_frame_waits_for_the_worker_pool() {
+        let mut app = stacked();
+        let ctx = egui::Context::default();
+        set_pooled(true);
+        let mut mirror = HashMap::new();
+        settle(&mut app, &ctx, &mut mirror);
+        // (A pool far slower than the frames: no batch is done before the frame that sent it ends.)
+        set_pool_slowdown(40);
+        app.run("edit.fill", json!({"contents": "color", "color": "#22aa55", "opacity": 80})).unwrap();
+        let mut waited = Vec::new();
+        for _ in 0..4 {
+            crate::perf_span::begin_frame();
+            frame(&mut app, &ctx, 1.0, [600.0, 450.0]);
+            waited.push(crate::perf_span::frame().iter().filter(|(n, _)| n.ends_with("wait")).map(|e| e.1).sum::<f64>());
+        }
+        set_pool_slowdown(1);
+        let worst = waited.iter().copied().fold(0.0, f64::max);
+        assert!(worst < 0.5, "a frame waited {worst:.1} ms for the pool: {waited:?}");
+        settle(&mut app, &ctx, &mut mirror);
+        assert!(shows_document(&app), "the edit shows once the pool is done");
+        set_pooled(false);
     }
 
     /// One frame as [`frame`], and the textures it drew.
@@ -1938,7 +1942,7 @@ mod tests {
     fn a_new_page_size_shows_the_page_before_until_its_tiles_are_all_here() {
         let mut app = stacked();
         let ctx = egui::Context::default();
-        set_flight_wait(Some(0.0));
+        set_pooled(true);
         let mut mirror = HashMap::new();
         settle(&mut app, &ctx, &mut mirror);
         for (cmd, params, center) in [
@@ -1963,7 +1967,7 @@ mod tests {
             assert!(frames > 1, "{cmd}: composited on the pool, over frames");
             settle(&mut app, &ctx, &mut mirror);
         }
-        set_flight_wait(None);
+        set_pooled(false);
     }
 
     /// An edit of the selected layer under other layers composites only that layer: the layers
@@ -2007,8 +2011,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut mirror = HashMap::new();
         settle(&mut app, &ctx, &mut mirror);
-        // (No wait: an edit's own frame never has its tiles.)
-        set_flight_wait(Some(0.0));
+        set_pooled(true);
         let against = |app: &PhotocraftApp, mirror: &HashMap<egui::TextureId, (usize, usize, Vec<[u8; 4]>)>, doc: &Document| {
             let mut worst = 0u8;
             for t in canvas(app).tiles.values() {
@@ -2045,6 +2048,6 @@ mod tests {
         until(&mut app, &mut mirror, &under, false);
         apply(&mut mirror, &frame(&mut app, &ctx, 1.0, [600.0, 450.0]));
         assert!(app.transform_closed.is_none(), "the box that closed is let go");
-        set_flight_wait(None);
+        set_pooled(false);
     }
 }

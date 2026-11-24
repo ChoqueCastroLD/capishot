@@ -69,7 +69,7 @@ impl Bench {
             eprintln!("BENCH thread {:?}", std::fs::read_link("/proc/thread-self"));
         }
         // Edits composited on the worker pool, as in the app (tests composite in the frame).
-        crate::cpu_canvas::set_flight_wait(Some(4.0));
+        crate::cpu_canvas::set_pooled(true);
         // Strokes rendered on the worker pool, as in the app (tests render them in the frame).
         crate::canvas::set_strokes_off_frame(true);
         // Selection outlines traced off the frame, as in the app (tests trace them in the frame).

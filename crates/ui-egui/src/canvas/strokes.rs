@@ -539,7 +539,7 @@ pub(super) fn commit_retouch_stroke(app: &mut PhotocraftApp, d: &Drag) -> bool {
 }
 
 /// The drag ended: the stroke gets its last points (the release frame's moves) and is committed
-/// once its job has rendered all of it, which this frame waits its share for.
+/// in the frame that finds its job has rendered all of it.
 fn release(app: &mut PhotocraftApp, mut stroke: LiveStroke, d: &Drag, commit: Commit) {
     let rest = drag_points(app, d, stroke.fed);
     stroke.fed = d.points.len();
@@ -550,7 +550,7 @@ fn release(app: &mut PhotocraftApp, mut stroke: LiveStroke, d: &Drag, commit: Co
     }
     stroke.stroke.finish();
     app.landing_stroke = Some(Box::new(LandingStroke { stroke, commit }));
-    land_stroke(app, Wait::Frame);
+    land_stroke(app, Wait::No);
 }
 
 /// A drag ended whose command renders the stroke itself (the Healing Brush's blend of the whole

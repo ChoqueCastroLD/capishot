@@ -10,10 +10,6 @@ use photocraft_raster::Surface;
 /// A boundary segment in document pixel coordinates (axis-aligned).
 pub type Segment = ([i32; 2], [i32; 2]);
 
-/// How long a frame waits for the outline it asked for (milliseconds): a small selection's shows
-/// in the frame that made it, as when the frame traced it itself.
-const WAIT_MS: u64 = 2;
-
 /// A selection's outline being traced off the window's thread ([`Tracing::start`]).
 pub(crate) struct Tracing {
     pub(crate) doc: photocraft_doc::DocId,
@@ -53,16 +49,10 @@ impl Tracing {
         Self { doc, key, rx }
     }
 
-    /// The outline, when it is traced (waiting [`WAIT_MS`] for it where the thread may wait).
+    /// The outline, when it is traced. The frame never waits for it: a frame that waited 2 ms
+    /// slept a whole timer tick on Windows (15.6 ms).
     pub(crate) fn take(&self) -> Option<Vec<Segment>> {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            self.rx.recv_timeout(std::time::Duration::from_millis(WAIT_MS)).ok()
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            self.rx.try_recv().ok()
-        }
+        self.rx.try_recv().ok()
     }
 }
 

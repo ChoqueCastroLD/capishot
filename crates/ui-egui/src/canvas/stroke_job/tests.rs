@@ -122,6 +122,34 @@ fn drag(h: &mut Harness<'static, PhotocraftApp>) {
     h.run_steps(1);
 }
 
+/// No frame of a drag waits for the stroke's job: what it rendered shows in the frame that finds
+/// it. (Frames waited 2 ms for a stroke that kept up: a whole timer tick on Windows, 17 to 29 ms of
+/// `stroke.wait` with a 1200 px soft brush on the owner's PC.)
+#[test]
+fn no_frame_of_a_drag_waits_for_the_strokes_job() {
+    let mut h = harness_with(Tool::Brush, 1200.0, true);
+    let mut waited = Vec::new();
+    let mut frame = |h: &mut Harness<'static, PhotocraftApp>| {
+        crate::perf_span::begin_frame();
+        h.run_steps(1);
+        waited.push(crate::perf_span::frame().iter().filter(|(n, _)| n.ends_with("wait")).map(|e| e.1).sum::<f64>());
+    };
+    move_to(&mut h, 300.0, 400.0);
+    frame(&mut h);
+    button(&mut h, 300.0, 400.0, true);
+    frame(&mut h);
+    for i in 1..=12 {
+        move_to(&mut h, 300.0 + 80.0 * i as f32, 400.0 + 30.0 * i as f32);
+        frame(&mut h);
+    }
+    button(&mut h, 1260.0, 760.0, false);
+    frame(&mut h);
+    let worst = waited.iter().copied().fold(0.0, f64::max);
+    assert!(worst < 0.5, "a frame waited {worst:.1} ms for the stroke's job: {waited:?}");
+    land(&mut h);
+    assert_eq!(strokes(h.state()), 1, "the stroke is committed once");
+}
+
 #[test]
 fn the_dabs_are_rendered_off_the_frame_and_the_stroke_is_committed_whole() {
     let mut h = harness();

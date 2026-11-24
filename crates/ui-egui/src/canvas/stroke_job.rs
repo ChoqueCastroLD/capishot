@@ -114,22 +114,17 @@ impl EngineStroke {
     }
 }
 
-/// How long a frame waits for the points it just handed over (milliseconds). A small tip's dabs
-/// are rendered in a fraction of this, so they show in the frame of the pointer move that drew
-/// them, as when the frame rendered them itself. A frame that finds the points of the frame
-/// before still not rendered doesn't wait at all ([`StrokeJob::land`]).
-const WAIT_MS: f64 = 2.0;
-
 /// The smoothing string's ends (see `LiveStroke::smoothing_string`).
 type SmoothingString = Option<([f64; 2], [f64; 2])>;
 
 /// How long [`StrokeJob::land`] waits for the stroke's job.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Wait {
-    /// Not at all: what is done already.
+    /// Not at all: what is done already. A frame never waits for the stroke: the points it
+    /// hands over show in the frame that finds them rendered. (A frame waited 2 ms for a stroke
+    /// that kept up: a whole timer tick on Windows, 17 to 29 ms of `stroke.wait` on the owner's
+    /// PC with a 1200 px soft brush.)
     No,
-    /// A frame's share ([`WAIT_MS`]), for a stroke that keeps up.
-    Frame,
     /// Until everything handed over is rendered: another edit is about to run on the document.
     All,
 }
@@ -171,8 +166,6 @@ pub(super) struct StrokeJob {
     /// Points handed over, and how many of them the document shows.
     sent: usize,
     shown: usize,
-    /// Points handed over when a frame last waited for the stroke.
-    mark: usize,
     /// The stroke ended and its commit isn't made yet.
     finishing: bool,
     /// Why the stroke can't be shown any further.
@@ -193,7 +186,6 @@ impl StrokeJob {
             rx,
             sent: 0,
             shown: 0,
-            mark: 0,
             finishing: false,
             failed: None,
             finished: None,
@@ -235,7 +227,7 @@ impl StrokeJob {
         };
         if start {
             let (queue, tx) = (self.queue.clone(), self.tx.clone());
-            run(wait_ms().is_some(), move || work(&queue, &tx));
+            run(on_pool(), move || work(&queue, &tx));
         }
     }
 
@@ -262,22 +254,11 @@ impl StrokeJob {
         while let Ok(landed) = self.rx.try_recv() {
             self.take(landed, &mut steps);
         }
-        // A stroke that keeps up shows each move in its own frame: the frame waits its share for
-        // the points it handed over. One that hadn't rendered what the frame before handed it
-        // lands when it is ready, and the frame goes on.
-        let until = match wait {
-            Wait::No => None,
-            Wait::All => Some(f64::INFINITY),
-            Wait::Frame => wait_ms().filter(|_| self.shown >= self.mark).map(|ms| crate::gpu_canvas::now_ms() + ms),
-        };
-        if let Some(until) = until {
+        if wait == Wait::All {
             while self.in_flight() {
-                let Some(landed) = wait_for(&self.rx, until - crate::gpu_canvas::now_ms()) else { break };
+                let Some(landed) = wait_for(&self.rx) else { break };
                 self.take(landed, &mut steps);
             }
-        }
-        if wait == Wait::Frame {
-            self.mark = self.sent;
         }
         match &self.failed {
             Some(why) => Err(why.clone()),
@@ -307,21 +288,21 @@ fn lock(queue: &wasm_sync::Mutex<Queue>) -> impl std::ops::DerefMut<Target = Que
     queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// The next thing the job finished, waiting up to `ms` for it (infinite: until it comes).
+/// The next thing the job finishes, waiting until it comes.
 #[cfg(not(target_arch = "wasm32"))]
-fn wait_for(rx: &Receiver<Landed>, ms: f64) -> Option<Landed> {
+fn wait_for(rx: &Receiver<Landed>) -> Option<Landed> {
     let _s = crate::perf_span::span("stroke.wait");
-    if ms.is_finite() { rx.recv_timeout(std::time::Duration::from_secs_f64(ms.max(0.0) / 1000.0)).ok() } else { rx.recv().ok() }
+    rx.recv().ok()
 }
 
-/// The page's own thread can't sleep in the browser: a frame's share is what is done already,
-/// and waiting for all of it looks until it comes (the job runs on the pool's workers).
+/// The page's own thread can't sleep in the browser: it looks until the job's result comes (the
+/// job runs on the pool's workers).
 #[cfg(target_arch = "wasm32")]
-fn wait_for(rx: &Receiver<Landed>, ms: f64) -> Option<Landed> {
+fn wait_for(rx: &Receiver<Landed>) -> Option<Landed> {
     loop {
         match rx.try_recv() {
             Ok(l) => return Some(l),
-            Err(std::sync::mpsc::TryRecvError::Empty) if !ms.is_finite() => std::hint::spin_loop(),
+            Err(std::sync::mpsc::TryRecvError::Empty) => std::hint::spin_loop(),
             Err(_) => return None,
         }
     }
@@ -370,7 +351,7 @@ fn work(queue: &wasm_sync::Mutex<Queue>, tx: &Sender<Landed>) {
 }
 
 /// Run the job: on the worker pool, or in the call where there is none or strokes are rendered
-/// in the frame ([`wait_ms`]).
+/// in the frame ([`on_pool`]).
 fn run(pool: bool, f: impl FnOnce() + Send + 'static) {
     if pool {
         crate::cpu_canvas::spawn(f);
@@ -380,21 +361,15 @@ fn run(pool: bool, f: impl FnOnce() + Send + 'static) {
 }
 
 /// Are strokes rendered on the worker pool (and so is what follows them: the footprint trail of
-/// the tools that show one)?
+/// the tools that show one)? Else they are rendered in the frame, where there is no pool.
 pub(crate) fn on_pool() -> bool {
-    wait_ms().is_some()
-}
-
-/// How long a frame waits for the points it handed over (`None`: they are rendered in the frame,
-/// where there is no worker pool).
-fn wait_ms() -> Option<f64> {
     #[cfg(test)]
     {
-        OFF_FRAME.with(std::cell::Cell::get).then_some(WAIT_MS)
+        OFF_FRAME.with(std::cell::Cell::get)
     }
     #[cfg(not(test))]
     {
-        crate::cpu_canvas::POOL.then_some(WAIT_MS)
+        crate::cpu_canvas::POOL
     }
 }
 
