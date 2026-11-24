@@ -140,7 +140,7 @@ pub fn tick(app: &mut PhotocraftApp, now: f64) {
     // Weighing walks every tile: twice a second is enough.
     if now - app.page_sleep.weighed.0 >= 0.5 {
         let budget = app.session.prefs().performance.history_budget_bytes();
-        app.page_sleep.weighed = (now, app.session.pixel_bytes() > budget / 2);
+        app.page_sleep.weighed = (now, app.session.pixel_bytes().saturating_add(ai_reserve(app)) > budget / 2);
     }
     let Some(index) = (0..app.session.documents().len()).find(|&i| sleepy(app, i, now)) else { return };
     let st = &app.session.documents()[index];
@@ -204,6 +204,15 @@ pub fn overlay(app: &PhotocraftApp, ctx: &egui::Context) {
         }
         ctx.request_repaint();
     });
+}
+
+/// What a running AI job takes beside the pages (bytes): Manga LaMa's weights and working memory,
+/// about 500 MB (`remove_ai_cmds::model`). A 4 GB Celeron with seven pages open died in Remove with
+/// AI: with it counted, the pages behind go to sleep at once while it runs.
+const AI_RESERVE: usize = 512 << 20;
+
+fn ai_reserve(app: &PhotocraftApp) -> usize {
+    if app.session.jobs().iter().any(|j| crate::telemetry::is_ai_job(&j.command)) { AI_RESERVE } else { 0 }
 }
 
 /// Whether page `index` should go to sleep now.
@@ -278,6 +287,33 @@ mod tests {
         eprintln!("doc refs left: {}, tile refs left: {:?}", doc.strong_count(), layer.as_ref().map(std::sync::Weak::strong_count));
         assert_eq!(doc.strong_count(), 0, "something still holds the page");
         assert!(layer.is_none_or(|t| t.strong_count() == 0), "something still holds its pixels");
+    }
+
+    /// With 1 GB of Memory Usage (a 4 GB device), a page unseen for half a second stays awake,
+    /// but sleeps as soon as an AI job runs: its model's memory counts against the pages'.
+    #[test]
+    fn pages_behind_sleep_at_once_while_an_ai_job_runs() {
+        let mut app = app();
+        app.session.edit_prefs(|p| p.performance.memory_usage_mb = 1024);
+        app.page_sleep.seen.insert(app.session.documents()[0].doc.id, 0.0);
+        step(&mut app, 0.6);
+        step(&mut app, 1.2);
+        assert!(!app.session.is_asleep(0), "no pressure: it waits for IDLE_S");
+        let (go, wait) = std::sync::mpsc::channel::<()>();
+        let started = app.session.start_job_in_worker(
+            photocraft_engine::remove_ai_cmds::ID,
+            json!({}),
+            "Remove with AI",
+            false,
+            move |_| wait.recv().map_err(|e| photocraft_engine::EngineError::Other(e.to_string())),
+            |_, ()| Ok(json!({})),
+        );
+        assert!(matches!(started, Ok(Started::Job(_))));
+        app.page_sleep.seen.insert(app.session.documents()[0].doc.id, 1.2);
+        tick(&mut app, 1.8);
+        step(&mut app, 1.9);
+        assert!(app.session.is_asleep(0), "the AI job's memory: it sleeps at once");
+        go.send(()).unwrap();
     }
 
     #[test]
