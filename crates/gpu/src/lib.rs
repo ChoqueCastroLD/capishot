@@ -685,8 +685,10 @@ pub struct Compositor {
     health: Option<DeviceHealth>,
     /// Layers drawn from an already resident surface at an offset ([`Compositor::set_translated`]).
     translated: Vec<Translated>,
-    /// The effect maps [`Compositor::prepare_fx`] built since it last found them all current.
+    /// The effect maps [`Compositor::prepare`] built since it last found them all current.
     prepared: std::collections::HashSet<FxKey>,
+    /// The layer pages [`Compositor::prepare`] uploaded since it last found them all current.
+    prepared_pages: std::collections::HashSet<ResKey>,
 }
 
 /// A layer surface the document shows as another surface moved by a whole-pixel offset (a Move
@@ -983,6 +985,7 @@ impl Compositor {
             health: None,
             translated: Vec::new(),
             prepared: std::collections::HashSet::new(),
+            prepared_pages: std::collections::HashSet::new(),
         }
         .with_texture_limit(device.limits().max_texture_dimension_2d)
     }
@@ -1339,22 +1342,27 @@ impl Compositor {
         Ok(stats)
     }
 
-    /// Build, or bring up to date, the effect maps a render of `region` of `doc` would build,
-    /// one layer at a time, asking `more` before each layer after the first that needed work
-    /// whether there is time for another: whether they are all current then (a render of
-    /// `region` builds none). Maps larger than a page (built per cell as a render goes) are left
-    /// to the render. A caller filling a new page in pieces over frames builds the maps first,
-    /// within each frame's work, and composites once they are all there: one frame built every
-    /// styled layer's maps (their shapes and distance fields on the CPU), 40 to 150 ms on his PSD.
-    /// Also true when a layer's maps built by an earlier call had to be built again (the effect
-    /// cache let them go for what was drawn meanwhile: it can't hold them all, so building ahead
-    /// can't end, and the render builds them as it goes).
-    pub fn prepare_fx(
+    /// Build, or bring up to date, what a render of `region` of `doc` at `level` would build or
+    /// upload, one unit at a time, asking `more` before each unit after the first that needed work
+    /// whether there is time for another: first the effect maps (a layer at a time), then the
+    /// layer pages (a pass at a time). Whether they are all current then (a render of `region`
+    /// builds and uploads none). Maps larger than a page (built per cell as a render goes) are
+    /// left to the render, as are the pages of a region whose layers don't fit the resident
+    /// budget together. A caller filling a page in pieces over frames, or making a cache ahead of
+    /// a drag, prepares each piece within its frames' work and composites it once it is ready:
+    /// one frame built every styled layer's maps (their shapes and distance fields on the CPU)
+    /// and uploaded every layer's pages of the piece (his PSD: 40 to 150 ms; a 200-layer page
+    /// opened with the Move tool in hand, 0.13.43: gpu.fx 173 ms and gpu.upload 48 ms in one
+    /// frame of its drag cache). Also true when a layer's maps built by an earlier call had to be
+    /// built again (the effect cache let them go for what was drawn meanwhile: it can't hold them
+    /// all, so building ahead can't end, and the render builds them as it goes).
+    pub fn prepare(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         doc: &Document,
         region: Rect,
+        level: u32,
         more: &mut dyn FnMut() -> bool,
     ) -> Result<bool, Unsupported> {
         if let Some(f) = self.fault() {
@@ -1363,19 +1371,24 @@ impl Compositor {
         let space = photocraft_compose::cmyk_space(doc);
         self.cmyk = space.as_ref().map_or(0, |s| s.id);
         photocraft_color::convert::with_cmyk_space(space.as_ref(), || {
-            let region = region.intersect(&doc.bounds());
-            let (moved, _) = self.moved_in_place(doc);
+            let canvas = doc.bounds();
+            let region = region.intersect(&canvas);
+            let (moved, moved_masks) = self.moved_in_place(doc);
             let plan = {
                 let _s = span("gpu.plan");
                 plan::plan_moved(doc, Some(&moved))?
             };
-            self.ensure_pipelines(device, &plan)?;
+            {
+                let _s = span("gpu.pipelines.build");
+                self.ensure_pipelines(device, &plan)?;
+            }
             self.check_fx(doc, &plan)?;
-            let drawn = self.drawn_rect(region, 0);
-            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("pc_fx") });
+            let level = level.min(MAX_LOD);
+            let drawn = self.drawn_rect(region, level);
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("pc_prepare") });
             let mut stats = Stats::default();
-            let mut done = true;
             let mut worked = false;
+            let mut done = true;
             let wanted: Vec<&plan::FxLayer<'_>> = plan.fx.iter().filter(|f| !self.fx_paged(f.region) && !f.region.intersect(&drawn).is_empty()).collect();
             for f in wanted {
                 if worked && !more() {
@@ -1393,9 +1406,52 @@ impl Compositor {
                     }
                 }
             }
+            // The layer pages the render's cells sample, where it draws: the passes past none of
+            // the lower-stack cache (the render reuses what that holds), drawing in the region.
+            if done && !region.is_empty() && self.fits_budget(doc, region) {
+                self.pattern_mode = doc.pixel_format().mode;
+                self.stamp += 1;
+                let fr = {
+                    let _s = span("gpu.frame_res");
+                    self.frame_res(device, queue, canvas, &plan, &moved, &moved_masks)
+                };
+                let none = (Rect::EMPTY, Rect::EMPTY);
+                'cells: for part in grid_rects(region, self.page) {
+                    let cell = (part.x0.div_euclid(self.page as i32), part.y0.div_euclid(self.page as i32));
+                    let cr = cell_rect(cell, self.page);
+                    self.want = part;
+                    let mut keys = Vec::new();
+                    for (i, p) in plan.passes.iter().enumerate() {
+                        if p.clip.is_some_and(|c| c.intersect(&part).is_empty()) {
+                            continue;
+                        }
+                        let uploaded = stats.tiles_uploaded;
+                        if worked && !more() {
+                            done = false;
+                            break 'cells;
+                        }
+                        keys.clear();
+                        let _ = self.sync_views(device, queue, &mut encoder, doc.id, p, fr.areas.get(i).copied().unwrap_or(none), cell, cr, &mut keys, &mut stats);
+                        for (m, mp) in p.members.iter().enumerate() {
+                            let areas = fr.member_areas.get(i).and_then(|a| a.get(m)).copied().unwrap_or(none);
+                            let _ = self.sync_views(device, queue, &mut encoder, doc.id, mp, areas, cell, cr, &mut keys, &mut stats);
+                        }
+                        if stats.tiles_uploaded != uploaded {
+                            worked = true;
+                            // Uploaded again (pixels made anew for each render, or the budget let
+                            // the page go): it can't be kept ahead, the render uploads it.
+                            if !keys.iter().all(|k| self.prepared_pages.insert(*k)) {
+                                break 'cells;
+                            }
+                        }
+                    }
+                }
+                self.want = Rect::EMPTY;
+            }
             queue.submit([encoder.finish()]);
             if done {
                 self.prepared.clear();
+                self.prepared_pages.clear();
             }
             Ok(done)
         })

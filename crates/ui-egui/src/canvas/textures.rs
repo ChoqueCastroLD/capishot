@@ -771,7 +771,9 @@ fn prepare_drag_ahead(
         gpu.drop_drag_cache(doc.id.0);
         return;
     }
-    if !idle || app.drag.is_some() {
+    // The page first: a page still filling in (just opened, or its size changed) has the frame's
+    // work for what the view shows of it.
+    if !idle || app.drag.is_some() || gpu.filling(doc.id.0) {
         return;
     }
     let ids = crate::move_ui::press_targets(app, idx);

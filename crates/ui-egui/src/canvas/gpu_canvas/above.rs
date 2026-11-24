@@ -410,6 +410,7 @@ impl GpuCanvas {
         }
         if !res.drag.as_ref().is_some_and(|c| c.shows(doc, ids, level, view)) {
             res.drag = None;
+            let _s = crate::perf_span::span("drag.new");
             let Some((mode, root, top)) = self.drag_plan(res, doc, ids, encode_srgb) else { return false };
             let Some(cache) = self.new_cache(res, doc, ids, view, level, mode, root, top) else { return false };
             res.drag = Some(cache);
@@ -450,10 +451,10 @@ impl GpuCanvas {
             } else {
                 piece
             };
-            let started = now_ms();
             let src = match sources.iter().find(|(k, _)| *k == kind) {
                 Some((_, d)) => d,
                 None => {
+                    let _s = crate::perf_span::span("drag.source");
                     let Some(d) = cache.source(kind, doc) else {
                         failed = true;
                         break;
@@ -469,8 +470,23 @@ impl GpuCanvas {
                 failed = true;
                 break;
             };
+            // Its effect maps and layer pages first, within the budget: the piece is drawn on a
+            // later call when they aren't all there yet (one piece built every styled layer's maps
+            // and uploaded every layer's pages in one frame).
+            let region = unlevel(piece, level).intersect(&src.bounds());
+            let ready = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| comp.prepare(device, queue, src, region, level, &mut || now_ms() - t0 < budget_ms)));
+            match ready {
+                Ok(Ok(true)) => {}
+                Ok(Ok(false)) => break,
+                Ok(Err(_)) | Err(_) => {
+                    failed = true;
+                    break;
+                }
+            }
+            // (The rate below is the render's: what was prepared is not drawn again.)
+            let started = now_ms();
             let render_span = crate::perf_span::span("drag.render");
-            let rendered = render_into(device, queue, res, &mut comp, src, unlevel(piece, level).intersect(&src.bounds()), level, map, cache.format);
+            let rendered = render_into(device, queue, res, &mut comp, src, region, level, map, cache.format);
             drop(render_span);
             if rendered.is_err() {
                 failed = true;

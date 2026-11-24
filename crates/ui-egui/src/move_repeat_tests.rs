@@ -698,3 +698,58 @@ fn catch_up_in_a_drag_from_the_cache(page: Page) {
     h.event(egui::Event::PointerButton { pos: p0 + egui::vec2(36.0, 15.0), button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
     h.run_steps(4);
 }
+
+/// The drag cache made ahead of a drag (the pointer resting on a layer with the Move tool) builds
+/// the effect maps of its pieces a layer per call at most, within the call's budget, instead of
+/// every styled layer a piece meets in one frame (the 200-layer page opened with the Move tool in
+/// hand, 0.13.43 on the owner's PC: gpu.fx 173 ms in one frame). Counts the process-wide effect
+/// map builds: needs a process of its own (cargo nextest).
+#[test]
+fn the_drag_cache_made_ahead_builds_a_layers_effect_maps_per_call_at_most() {
+    if std::env::var_os("NEXTEST").is_none() {
+        eprintln!("skipped: counts the process-wide effect map builds, which needs a process of its own (cargo nextest)");
+        return;
+    }
+    let _gpu = photocraft_testkit::gpu_lock();
+    let Some(mut h) = harness(Device::Gpu) else {
+        eprintln!("skipping: no GPU adapter");
+        return;
+    };
+    let targets = credits(h.state_mut());
+    let size = h.state().session.active().expect("doc").doc.size;
+    {
+        let app = h.state_mut();
+        app.sync_views();
+        // (Not the Move tool: no drag cache is made while the page settles.)
+        app.ui.tool = crate::state::Tool::Brush;
+        app.ui.extras.rulers = false;
+    }
+    let ctx = h.ctx.clone();
+    let (req, _rx) = crate::control::ControlRequest::new("ui.set", json!({"zoom": 1.0, "center": [size.width / 2, size.height / 2]}));
+    crate::control::handle(h.state_mut(), &ctx, &req);
+    h.run_steps(20);
+    if !gpu_drawing(&mut h, Device::Gpu) {
+        return;
+    }
+    h.run_steps(40);
+    // Styled layers over the bottom one whose maps aren't built yet.
+    for i in 0..6u32 {
+        styled_text(h.state_mut(), 120 + (i % 2) * 800, 40 + i * 60, "NUEVA CAPA", 48);
+    }
+    let doc = h.state().session.active().expect("doc").doc.clone();
+    let gpu = h.state().gpu.clone().expect("a GPU canvas");
+    let (mut calls, mut most, mut total) = (0, 0, 0);
+    loop {
+        let before = photocraft_gpu::fx_builds();
+        let more = gpu.prepare_drag(&doc, &[targets.bottom], doc.bounds(), 0, false, 1.0);
+        let built = photocraft_gpu::fx_builds() - before;
+        (most, total, calls) = (most.max(built), total + built, calls + 1);
+        if !more || calls >= 4000 {
+            break;
+        }
+    }
+    eprintln!("DRAG AHEAD: {calls} calls, {total} effect maps built, at most {most} in a call");
+    assert!(gpu.drag_ready_for(&doc, &[targets.bottom]), "the cache is made");
+    assert!(total >= 6, "the new layers' maps were built ({total})");
+    assert!(most <= 1, "{most} layers' effect maps built in one call");
+}

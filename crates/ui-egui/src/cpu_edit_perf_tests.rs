@@ -621,3 +621,70 @@ fn crops_on_the_200_layer_page_on_the_gpu_canvas() {
     let over: Vec<String> = rows.iter().filter(|(_, _, max)| *max > 33.0).map(|(n, p50, max)| format!("{n}: median {p50:.1} ms, max {max:.1} ms")).collect();
     assert!(over.is_empty(), "over 33 ms:\n{}", over.join("\n"));
 }
+
+/// The 200-layer page opened on the GPU canvas at fit (the owner's PC, 0.13.43: 308 ms in the
+/// first frames, gpu.fx 173, gpu.submit 70, gpu.upload 48): every frame's own time until it shows
+/// sharp, with the spans of the slowest. Timing on a shared server: run alone with --ignored.
+#[test]
+#[ignore = "a timing bench on a shared machine: run alone with --ignored"]
+fn opening_the_200_layer_page_on_the_gpu_canvas() {
+    let rows = on_the_apps_stack(|| {
+        let _gpu = photocraft_testkit::gpu_lock();
+        if !std::path::Path::new(PAGE200).exists() {
+            eprintln!("skipping: {PAGE200} isn't here");
+            return None;
+        }
+        let mut h = harness(Device::Gpu)?;
+        // The compositor ready on a small page first (the app builds its pipelines at start).
+        h.state_mut().ui.extras.rulers = false;
+        h.state_mut().run("file.new", json!({"width": 64, "height": 64, "background": "white"})).expect("a page");
+        h.run_steps(4);
+        if !crate::move_repeat_tests::gpu_drawing(&mut h, Device::Gpu) {
+            return None;
+        }
+        // Its other pipelines built ahead (on a thread at start; long before a user opens a page).
+        let gpu = h.state().gpu.clone()?;
+        let (mut built, mut still) = (0, std::time::Instant::now());
+        while still.elapsed() < std::time::Duration::from_secs(2) {
+            h.step();
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            let now = gpu.pipelines_built().unwrap_or(0);
+            if now != built {
+                (built, still) = (now, std::time::Instant::now());
+            }
+        }
+        // The Move tool in hand, as the app starts.
+        h.state_mut().ui.tool = Tool::Move;
+        // Decoded before (a user's open decodes in a job).
+        let doc = photocraft_io::import_with_options(PAGE200, &std::fs::read(PAGE200).expect("read"), &Default::default()).expect("decode").document;
+        let mut b = Bench { h, actions: Vec::new(), render: true };
+        let t = std::time::Instant::now();
+        b.frame("gpu open page200", move |h| {
+            let app = h.state_mut();
+            app.session.add_document(doc, None);
+            app.sync_views();
+        });
+        let ctx = b.h.ctx.clone();
+        let (req, _rx) = crate::control::ControlRequest::new("ui.set", json!({"fit": true}));
+        crate::control::handle(b.app(), &ctx, &req);
+        let mut shown = None;
+        while t.elapsed() < std::time::Duration::from_secs(120) {
+            if gpu_settled(b.h.state()) {
+                shown = Some(t.elapsed().as_secs_f64() * 1000.0);
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            b.frame("gpu open page200", |_| {});
+        }
+        if let Some(a) = b.actions.first_mut() {
+            a.shown_after.push(shown.unwrap_or(f64::INFINITY));
+        }
+        Some(b.report("page200.psd"))
+    });
+    let Some(rows) = rows else { return };
+    if std::env::var_os("CPU_EDIT_PERF_REPORT_ONLY").is_some() {
+        return;
+    }
+    let over: Vec<String> = rows.iter().filter(|(_, _, max)| *max > 33.0).map(|(n, p50, max)| format!("{n}: median {p50:.1} ms, max {max:.1} ms")).collect();
+    assert!(over.is_empty(), "over 33 ms:\n{}", over.join("\n"));
+}

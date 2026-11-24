@@ -1006,10 +1006,12 @@ impl GpuCanvas {
     }
 
     /// For a page filling from blank (just opened, or its size changed): its display set made,
-    /// and the effect maps a composite of `region` needs built first, a layer at a time until
-    /// [`now_ms`] reaches `until` ([`photocraft_gpu::Compositor::prepare_fx`]). Whether `region`
-    /// may be composited now: its composite then builds no maps. One piece of a new page built
-    /// the maps of every styled layer it met (40 to 150 ms in one frame on his PSD). True when
+    /// and the effect maps and layer pages a composite of `region` needs built and uploaded
+    /// first, a layer or pass at a time until [`now_ms`] reaches `until`
+    /// ([`photocraft_gpu::Compositor::prepare`]). Whether `region` may be composited now: its
+    /// composite then builds no maps and uploads no pages. One piece of a new page built the maps
+    /// of every styled layer it met (40 to 150 ms in one frame on his PSD), and uploaded every
+    /// layer's pages there (a 200-layer page: 55-84 ms on lavapipe). True when
     /// the GPU compositor can't draw the document (the composite reports why).
     fn fill_ready(&self, doc: &photocraft_doc::Document, region: photocraft_geom::Rect, until: f64) -> bool {
         let _s = crate::perf_span::span("canvas.fill_fx");
@@ -1018,13 +1020,15 @@ impl GpuCanvas {
         let Ok(mut comp) = self.take_compositor(res, false) else { return true };
         let (key, size) = (doc.id.0, [doc.size.width, doc.size.height]);
         let format = self.format_for(doc.depth, size);
-        if res.docs.get(&key).is_none_or(|d| d.size != size || d.format != format) && (comp.supports(doc).is_err() || !self.install_set(res, key, size, format))
-        {
+        if res.docs.get(&key).is_none_or(|d| d.size != size || d.format != format) && {
+            let _s = crate::perf_span::span("canvas.fill_set");
+            comp.supports(doc).is_err() || !self.install_set(res, key, size, format)
+        } {
             res.compositor = Some(comp);
             return true;
         }
         let ready =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| comp.prepare_fx(&self.rs.device, &self.rs.queue, doc, region, &mut || now_ms() < until)));
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| comp.prepare(&self.rs.device, &self.rs.queue, doc, region, 0, &mut || now_ms() < until)));
         res.compositor = Some(comp);
         match ready {
             Ok(r) => r.unwrap_or(true),
