@@ -978,11 +978,17 @@ impl GpuCanvas {
     /// A page on screen whose size or format changed (a crop, its undo, Image or Canvas Size)
     /// stays there, as the views drew it, while the new set fills in pieces over the next frames
     /// ([`Before`]); it showed whole in the frame that made it (every layer uploaded, every
-    /// effect map and the whole view composited in one frame: 0.3 to 0.8 s on his PSD). False
-    /// when the set doesn't fit the canvas budget (nothing is left for the document then).
+    /// effect map and the whole view composited in one frame: 0.3 to 0.8 s on his PSD). Where the
+    /// tiles the views showed don't fit beside the new set, what each view showed is kept as a
+    /// snapshot about a screen in size ([`Resources::snapshot_of`]). False when the set doesn't
+    /// fit the canvas budget (nothing is left for the document then).
     fn install_set(&self, res: &mut Resources, key: u64, size: [u32; 2], format: wgpu::TextureFormat) -> bool {
         let new_bytes = canvas_texture_bytes(size, self.tile, texel_bytes(format));
-        let before = res.docs.remove(&key).and_then(|old| res.keeps_before(key, &old, new_bytes).then(|| res.before_of(key, old)));
+        let before = res.docs.remove(&key).and_then(|old| match res.keeps_before(key, &old, new_bytes)? {
+            Keep::Tiles => Some(res.before_of(key, old)),
+            // Two pages don't fit (a phone's budget, a large page): a screen of it instead.
+            Keep::Snapshot(parts) => res.snapshot_of(&self.rs.device, &self.rs.queue, key, &old, &parts),
+        });
         // The open documents share the budget (after upstream PhotoCraft #5332): the sets of
         // the other tabs go first, and are made again when their tab shows.
         res.make_room(new_bytes.saturating_add(before.as_ref().map_or(0, |b| b.set.bytes())));
@@ -1303,7 +1309,7 @@ impl GpuCanvas {
             // Size, while the GPU compositor is getting ready or can't draw the document, as on
             // WebGL): the page before stays on screen while the new one fills in pieces, as on
             // the GPU compositor ([`Before`]). The whole new page was composited in one frame.
-            let resized = res.docs.get(&key).is_some_and(|d| (d.size != size || d.format != format) && res.keeps_before(key, d, new_bytes));
+            let resized = res.docs.get(&key).is_some_and(|d| (d.size != size || d.format != format) && res.keeps_before(key, d, new_bytes).is_some());
             if !resized {
                 // A light document draws in full in this frame, never a frame with parts
                 // missing: only a heavy one (canvas pixels times its visible drawing layers over
@@ -1583,7 +1589,9 @@ impl GpuCanvas {
         match res.docs.get(&key) {
             // A set of another size or format is replaced by a blank one, which the page before
             // stands in for until the view's part is drawn ([`Before`]).
-            Some(d) if (d.size != size || d.format != format) && res.keeps_before(key, d, canvas_texture_bytes(size, self.tile, texel_bytes(format))) => {
+            Some(d)
+                if (d.size != size || d.format != format) && res.keeps_before(key, d, canvas_texture_bytes(size, self.tile, texel_bytes(format))).is_some() =>
+            {
                 vec![bounds]
             }
             Some(d) => d.stale().blank.clone(),
@@ -2963,6 +2971,8 @@ struct Resources {
     /// Where each view last drew a document's set (canvas rect and parameters, by view key): a
     /// set replaced for a new page size is drawn there until the new one shows ([`Before`]).
     drawn: HashMap<u64, (egui::Rect, ViewParams)>,
+    /// Device pixels per point of the last frame drawn (what a view's zoom is on the screen).
+    ppp: f32,
     out_linear: bool,
     /// Build each mip level in a scratch texture and copy it back instead of rendering into
     /// the level directly (DX12 only: works around reduced-preview corruption on Intel drivers).
@@ -3124,6 +3134,30 @@ struct DocTextures {
     /// is all composited ([`GpuCanvas::note_shown`]): this one fills in pieces over frames, and a
     /// frame never shows part of it.
     before: Option<Box<Before>>,
+}
+
+/// What of a page whose size or format changed stays on screen ([`Resources::keeps_before`]).
+enum Keep {
+    /// The tiles the views showed.
+    Tiles,
+    /// A snapshot of what each view showed.
+    Snapshot(Vec<SnapPart>),
+}
+
+/// A part of a set a view showed ([`Resources::snapshot_parts`]): document `rect` of tile `tile`,
+/// and the texels at mip level `level` that cover it (`texels` of them from `origin`).
+struct SnapPart {
+    tile: usize,
+    level: u32,
+    rect: photocraft_geom::Rect,
+    origin: (u32, u32),
+    texels: (u32, u32),
+}
+
+impl SnapPart {
+    fn bytes(&self, bpp: u64) -> u64 {
+        u64::from(self.texels.0) * u64::from(self.texels.1) * bpp
+    }
 }
 
 /// A page whose size or format changed, as the views last drew it ([`DocTextures::before`]).
@@ -3359,6 +3393,7 @@ impl Resources {
             view_sets: Vec::new(),
             views: HashMap::new(),
             drawn: HashMap::new(),
+            ppp: 1.0,
             out_linear: target.is_srgb(),
             separate_mip_targets: false,
             compositor: None,
@@ -3436,24 +3471,27 @@ fn init_buffer(device: &wgpu::Device, label: &str, contents: &[u8], usage: wgpu:
 }
 
 impl Resources {
-    /// Whether `old`, document `key`'s set, stays on screen while one of `new_bytes` for a new
-    /// page size or format fills in ([`Before`]): a view drew it (or the page before it) last,
-    /// and what is kept of it ([`Resources::before_of`]: the tiles the views showed) fits the
-    /// canvas budget beside the new set. Otherwise the new set is drawn whole in the frame that
-    /// makes it.
-    fn keeps_before(&self, key: u64, old: &DocTextures, new_bytes: u64) -> bool {
-        let kept = match &old.before {
-            Some(b) => b.set.bytes(),
-            None => {
-                let views = self.views_of(key, old.size);
-                if views.is_empty() {
-                    return false;
-                }
-                let bpp = texel_bytes(old.format);
-                old.tiles.iter().filter(|t| shown_in(t, &views)).map(|t| t.bytes(bpp)).fold(0, u64::saturating_add)
-            }
-        };
-        kept > 0 && kept.saturating_add(new_bytes) <= self.canvas_budget
+    /// How `old`, document `key`'s set, stays on screen while one of `new_bytes` for a new page
+    /// size or format fills in ([`Before`]), if it does: a view drew it (or the page before it)
+    /// last, and what is kept of it fits the canvas budget beside the new set: the tiles the
+    /// views showed ([`Resources::before_of`]), else a snapshot of what each view showed
+    /// ([`Resources::snapshot_of`]). Otherwise the new set is drawn whole in the frame that makes
+    /// it.
+    fn keeps_before(&self, key: u64, old: &DocTextures, new_bytes: u64) -> Option<Keep> {
+        let fits = |kept: u64| kept > 0 && kept.saturating_add(new_bytes) <= self.canvas_budget;
+        if let Some(b) = &old.before {
+            return fits(b.set.bytes()).then_some(Keep::Tiles);
+        }
+        let views = self.views_of(key, old.size);
+        if views.is_empty() {
+            return None;
+        }
+        let bpp = texel_bytes(old.format);
+        if fits(old.tiles.iter().filter(|t| shown_in(t, &views)).map(|t| t.bytes(bpp)).fold(0, u64::saturating_add)) {
+            return Some(Keep::Tiles);
+        }
+        let parts = self.snapshot_parts(old, &views);
+        fits(parts.iter().map(|p| p.bytes(bpp)).sum()).then_some(Keep::Snapshot(parts))
     }
 
     /// Where the views last drew document `key`'s set of `size` (view key, canvas rect, parameters).
@@ -3472,6 +3510,111 @@ impl Resources {
         let views = self.views_of(key, old.size);
         old.tiles.retain(|t| shown_in(t, &views));
         Box::new(Before { set: old, views })
+    }
+
+    /// For each view, the part of `old` it showed, from the mip level nearest what it drew (about
+    /// a screen's pixels whatever the page's size: on a 2 GB phone a large page's tile is the
+    /// whole page). Nothing for a set of viewport pages.
+    fn snapshot_parts(&self, old: &DocTextures, views: &[(u64, egui::Rect, ViewParams)]) -> Vec<SnapPart> {
+        if old.tiles.iter().any(|t| t.page.is_some()) {
+            return Vec::new();
+        }
+        let ppp = self.ppp.max(0.1);
+        let mut parts = Vec::new();
+        for (_, rect, p) in views {
+            let zoom = if p.zoom.is_finite() && p.zoom > 0.0 { p.zoom * ppp } else { continue };
+            // The canvas rect around the centre; turned, its half diagonal (as `shown_in`).
+            let size = rect.size() * ppp / zoom;
+            let (hx, hy) =
+                if p.rotation.abs() < 1e-6 { (size.x / 2.0 + 2.0, size.y / 2.0 + 2.0) } else { (size.length() / 2.0 + 2.0, size.length() / 2.0 + 2.0) };
+            let seen = photocraft_geom::Rect::new(
+                (p.center[0] - hx).floor() as i32,
+                (p.center[1] - hy).floor() as i32,
+                (p.center[0] + hx).ceil() as i32,
+                (p.center[1] + hy).ceil() as i32,
+            );
+            let lod = (1.0 / zoom).log2().floor().max(0.0) as u32;
+            for (tile, t) in old.tiles.iter().enumerate() {
+                let level = lod.min(t.levels.len().saturating_sub(1) as u32);
+                let [tx, ty, tw, th] = t.rect.map(|v| v as i32);
+                let part = seen.intersect(&photocraft_geom::Rect::new(tx, ty, tx + tw, ty + th));
+                if part.is_empty() {
+                    continue;
+                }
+                // The level's texels covering it (they span the tile evenly).
+                let (lw, lh) = ((t.texture.width() >> level).max(1), (t.texture.height() >> level).max(1));
+                let (sx, sy) = (tw as f32 / lw as f32, th as f32 / lh as f32);
+                let origin = (((part.x0 - tx) as f32 / sx).floor() as u32, ((part.y0 - ty) as f32 / sy).floor() as u32);
+                let end = ((((part.x1 - tx) as f32 / sx).ceil() as u32).min(lw), (((part.y1 - ty) as f32 / sy).ceil() as u32).min(lh));
+                let (rect, texels) = (part, (end.0.saturating_sub(origin.0), end.1.saturating_sub(origin.1)));
+                if texels.0 > 0 && texels.1 > 0 {
+                    parts.push(SnapPart { tile, level, rect, origin, texels });
+                }
+            }
+        }
+        parts
+    }
+
+    /// The page to keep on screen when document `key`'s set `old` is replaced and the tiles the
+    /// views showed don't fit beside the new one: `parts` of it ([`Resources::snapshot_parts`])
+    /// copied into textures of their own. `None` (the new set is then drawn whole in the frame
+    /// that makes it) when the GPU refuses them.
+    fn snapshot_of(&self, device: &wgpu::Device, queue: &wgpu::Queue, key: u64, old: &DocTextures, parts: &[SnapPart]) -> Option<Box<Before>> {
+        let views = self.views_of(key, old.size);
+        let (tiles, error) = pages::catch_gpu_errors(device, || {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("pc_canvas_snapshot") });
+            let mut tiles = Vec::new();
+            for p in parts {
+                let t = &old.tiles[p.tile];
+                let ((w, h), level, part) = (p.texels, p.level, p.rect);
+                let texture = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("pc_canvas_snapshot"),
+                    size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: old.format,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
+                });
+                encoder.copy_texture_to_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &t.texture,
+                        mip_level: level,
+                        origin: wgpu::Origin3d { x: p.origin.0, y: p.origin.1, z: 0 },
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    texture.as_image_copy(),
+                    wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                );
+                // Where the texels lie on the page: a level's texels span its tile evenly (a
+                // texel is a little over 2^level pixels where the tile's side isn't a multiple).
+                let (lw, lh) = ((t.texture.width() >> level).max(1), (t.texture.height() >> level).max(1));
+                let (sx, sy) = (t.rect[2] as f32 / lw as f32, t.rect[3] as f32 / lh as f32);
+                let (x, y) = (t.rect[0] as f32 + p.origin.0 as f32 * sx, t.rect[1] as f32 + p.origin.1 as f32 * sy);
+                let at = [x, y, w as f32 * sx, h as f32 * sy, part.x0 as f32, part.y0 as f32, part.x1 as f32, part.y1 as f32];
+                let rect = [x as u32, y as u32, (w as f32 * sx).ceil() as u32, (h as f32 * sy).ceil() as u32];
+                let view = texture.create_view(&Default::default());
+                let uniform = init_buffer(device, "pc_canvas_snapshot", &f32_bytes(&at), wgpu::BufferUsages::UNIFORM);
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("pc_canvas_snapshot"),
+                    layout: &self.tile_bgl,
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
+                        wgpu::BindGroupEntry { binding: 1, resource: uniform.as_entire_binding() },
+                    ],
+                });
+                tiles.push(Tile { rect, texture, levels: vec![view], bind_group, _uniform: uniform, page: None });
+            }
+            queue.submit([encoder.finish()]);
+            tiles
+        });
+        if let Some(e) = error {
+            log::warn!("the page before couldn't be kept on the GPU: {e}");
+            return None;
+        }
+        let set = DocTextures { size: old.size, format: old.format, tiles, stale: Default::default(), shows: None, before: None };
+        Some(Box::new(Before { set, views }))
     }
 
     /// GPU bytes of the documents' display texture sets.
@@ -3906,6 +4049,7 @@ impl CallbackTrait for CanvasCallback {
             None => {
                 if res.docs.get(&self.params.doc).is_some_and(|d| d.size == self.params.doc_size) {
                     res.drawn.insert(key, (self.rect, self.params));
+                    res.ppp = screen.pixels_per_point;
                 }
                 self.uniforms(screen.size_in_pixels, screen.pixels_per_point, res.out_linear, &res.style)
             }

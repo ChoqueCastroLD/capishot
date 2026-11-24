@@ -116,6 +116,22 @@ fn settle(h: &mut Harness) {
 /// it. Without the page kept, the frame of the change composited the whole view (2.3 MP here).
 #[test]
 fn a_crop_and_its_undo_show_the_page_before_until_the_new_one_is_whole() {
+    crops_show_the_page_before(None);
+}
+
+/// The same where the tiles the view showed don't fit the canvas budget beside the new page (a
+/// 2 GB phone, a large page: the page is one tile here, 32 MB, and the budget 33 MB): what the
+/// view showed is kept as a screen-sized snapshot and drawn exactly as it was until the new page
+/// is whole. Before, the frame of the change drew the new page whole (the view composited in
+/// one frame, 2.3 MP here).
+#[test]
+fn a_crop_keeps_a_screen_of_the_page_before_when_two_pages_dont_fit() {
+    crops_show_the_page_before(Some(33 << 20));
+}
+
+/// Crop, undo and redo on a 3000x2000 page of styled shapes and type at 100%, a piece of
+/// compositing a frame, with the canvas budget `budget` (`None`: the device's).
+fn crops_show_the_page_before(budget: Option<u64>) {
     let _gpu = photocraft_testkit::gpu_lock();
     let Some(mut h) = harness() else {
         eprintln!("skipping: no GPU adapter");
@@ -154,6 +170,9 @@ fn a_crop_and_its_undo_show_the_page_before_until_the_new_one_is_whole() {
     settle(&mut h);
     let gpu = h.state().gpu.clone().expect("gpu");
     let key = h.state().session.active().expect("doc").doc.id.0;
+    if let Some(b) = budget {
+        gpu.set_canvas_budget(b);
+    }
     crate::gpu_canvas::set_frame_work_ms(Some(0.0));
     let piece = 1024u64 * 1024;
     for (cmd, params) in [("image.crop", json!({"x": 1001, "y": 603, "width": 900, "height": 700})), ("edit.undo", json!({})), ("edit.redo", json!({}))] {
