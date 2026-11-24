@@ -4551,3 +4551,64 @@ fn the_effect_map_estimate_is_a_lower_bound() {
     big.layers.extend([l.clone(), l]);
     assert!(fx_region_bytes(&big.layers, big.bounds()) > DEFAULT_FX_CACHE_BUDGET as u64);
 }
+
+/// A page of three styled type-like layers (Drop Shadow, Outer Glow, Gradient Overlay, Stroke):
+/// a tile composited again blends each layer's recorded effect pass instead of building it, and
+/// after one layer's pixels change only that layer's passes are built again; every render is
+/// the same, bit for bit, as one with nothing kept. Counts the process's passes, so it needs a
+/// process of its own (cargo nextest).
+#[test]
+fn a_tile_composited_again_rebuilds_only_the_effects_of_layers_that_changed() {
+    use photocraft_doc::{Contour, Effect, FxCommon, FxPaint, Glow, GlowSource, GlowTechnique, StrokeFx, StrokePosition};
+    use std::sync::atomic::Ordering::Relaxed;
+    if std::env::var_os("NEXTEST").is_none() {
+        eprintln!("skipped: counts the process's effect passes, which needs a process of its own (cargo nextest)");
+        return;
+    }
+    let mut doc = doc_white(900, 600);
+    for (i, x) in [60, 360, 640].into_iter().enumerate() {
+        let mut l = solid_layer(&format!("type {i}"), Rect::new(x, 100 + 120 * i as i32, x + 200, 160 + 120 * i as i32), [0.95, 0.95, 0.95, 1.0]);
+        let glow = Glow {
+            common: FxCommon::new(BlendMode::Screen, 0.75),
+            paint: FxPaint::Color(Color::rgb(1.0, 1.0, 0.75)),
+            technique: GlowTechnique::Softer,
+            spread: 0.0,
+            size: 12.0,
+            contour: Contour::Linear,
+            anti_alias: false,
+            range: 0.5,
+            jitter: 0.0,
+            noise: 0.0,
+            source: GlowSource::Edge,
+        };
+        let grad = photocraft_doc::Gradient { stops: vec![(0.0, Color::rgb(0.9, 0.9, 0.9)), (1.0, Color::rgb(0.5, 0.5, 0.5))], ..Default::default() };
+        l.effects.items = vec![
+            Effect::default_drop_shadow(),
+            Effect::OuterGlow(glow),
+            Effect::GradientOverlay { common: FxCommon::new(BlendMode::Normal, 1.0), gradient: grad, dither: false, interpolation: None },
+            Effect::Stroke(StrokeFx { common: FxCommon::new(BlendMode::Normal, 1.0), size: 6.0, position: StrokePosition::Outside, paint: FxPaint::Color(Color::rgb(0.1, 0.1, 0.1)), overprint: false }),
+        ];
+        doc.layers.push(l);
+    }
+    let fresh = |doc: &Document| {
+        purge_effect_cache();
+        render(doc, doc.bounds())
+    };
+    // (A pass is kept the second time it is recorded: a state seen once, as a drag's, isn't.)
+    let first = fresh(&doc);
+    let _ = render(&doc, doc.bounds());
+    let n0 = effects::RECORDS.load(Relaxed);
+    let again = render(&doc, doc.bounds());
+    assert_eq!(effects::RECORDS.load(Relaxed), n0, "nothing changed: every pass is blended from the cache");
+    assert_eq!(again.px, first.px, "the same pixels");
+    // The middle layer's pixels change: its passes are built again, the others' are kept.
+    doc.layers[2].surface_mut().unwrap().fill_rect(Rect::new(380, 230, 420, 250), &[0.2, 0.3, 0.9, 1.0]);
+    let n1 = effects::RECORDS.load(Relaxed);
+    let edited = render(&doc, doc.bounds());
+    let rebuilt = effects::RECORDS.load(Relaxed) - n1;
+    let n2 = effects::RECORDS.load(Relaxed);
+    let uncached = fresh(&doc);
+    let all = effects::RECORDS.load(Relaxed) - n2;
+    assert!(rebuilt > 0 && rebuilt * 2 <= all, "rebuilt {rebuilt} of {all} passes");
+    assert_eq!(edited.px, uncached.px, "the same pixels as with nothing kept");
+}

@@ -116,19 +116,147 @@ pub fn effect_cache_budget() -> usize {
     FX_CACHE_BUDGET.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// Bytes currently held by the effect-map cache.
+/// Bytes currently held by the effect-map cache and the recorded effect passes.
 pub fn effect_cache_bytes() -> usize {
-    fx_cache().lock().unwrap_or_else(|e| e.into_inner()).bytes
+    fx_cache().lock().unwrap_or_else(|e| e.into_inner()).bytes + recorded_cache().lock().unwrap_or_else(|e| e.into_inner()).bytes
 }
 
-/// Drop every cached effect map (Edit › Purge › All). Returns the bytes released.
+/// Drop every cached effect map and recorded effect pass (Edit › Purge › All). Returns the bytes
+/// released.
 pub fn purge_effect_cache() -> usize {
     let mut c = fx_cache().lock().unwrap_or_else(|e| e.into_inner());
     let freed = c.bytes;
     c.map.clear();
     c.order.clear();
     c.bytes = 0;
+    let mut r = recorded_cache().lock().unwrap_or_else(|e| e.into_inner());
+    let freed = freed + r.bytes;
+    *r = RecordedCache::default();
     freed
+}
+
+// ---------------------------------------------------------------------------------------------
+// Recorded effect passes
+
+/// A layer's recorded effect pass over one render rect ([`effects::Recorded`]): what its effects
+/// add over any backdrop, kept per layer state, rect and settings so a tile composited again
+/// blends it instead of building it again. Least recently used first out, within a quarter of the
+/// effect cache's budget.
+#[derive(Default)]
+struct RecordedCache {
+    map: std::collections::HashMap<u64, RecordedEntry>,
+    /// Keys by use, oldest first, each with the use it stands for (later uses of a key leave its
+    /// earlier places stale).
+    order: std::collections::VecDeque<(u64, u64)>,
+    bytes: usize,
+    uses: u64,
+    /// Keys recorded once and not kept: a pass is kept the second time it is recorded, so the
+    /// states a drag or a stroke passes through once (a new one every frame) cost no copy, pins
+    /// or eviction.
+    once: std::collections::HashSet<u64>,
+}
+
+struct RecordedEntry {
+    rec: std::sync::Arc<effects::Recorded>,
+    /// The tiles the key identifies (see [`layer_identity`]): their addresses, not their pixels.
+    _pin: Vec<std::sync::Weak<photocraft_raster::Tile>>,
+    bytes: usize,
+    used: u64,
+}
+
+fn recorded_cache() -> &'static wasm_sync::Mutex<RecordedCache> {
+    static C: std::sync::OnceLock<wasm_sync::Mutex<RecordedCache>> = std::sync::OnceLock::new();
+    C.get_or_init(Default::default)
+}
+
+/// The key of `layer`'s effect pass over `rect` (with `clipped` over it), or `None` when it
+/// isn't kept: something clipped to it shows (its content then depends on those layers too), it
+/// is a group (its content on the render's tone transfer as well), it paints patterns (their
+/// pixels are the document's, not the layer's), its interior effects paint over the backdrop
+/// ([`effects::premerges_layer`]), or effect caching is off (`PHOTOCRAFT_FX_NOCACHE`).
+pub(crate) fn recorded_key(layer: &Layer, clipped: &[Layer], rect: Rect, cx: &Ctx) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    let patterned = |p: &photocraft_doc::FxPaint| matches!(p, photocraft_doc::FxPaint::Pattern { .. });
+    let uses_patterns = layer.effects.items.iter().filter(|e| e.enabled()).any(|e| match e {
+        photocraft_doc::Effect::PatternOverlay { .. } => true,
+        photocraft_doc::Effect::Stroke(st) => patterned(&st.paint),
+        photocraft_doc::Effect::OuterGlow(g) | photocraft_doc::Effect::InnerGlow(g) => patterned(&g.paint),
+        _ => false,
+    });
+    if clipped.iter().any(|c| c.visible) || matches!(layer.content, LayerContent::Group(_)) || uses_patterns || effects::premerges_layer(layer) || no_fx_cache()
+    {
+        return None;
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    cx.layer_keys.identity(layer, cx.doc).hash(&mut h);
+    (layer.blend, cx.mode, cx.depth).hash(&mut h);
+    (rect.x0, rect.y0, rect.x1, rect.y1, cx.canvas.x0, cx.canvas.y0, cx.canvas.x1, cx.canvas.y1).hash(&mut h);
+    (cx.light.angle.to_bits(), cx.light.altitude.to_bits(), crate::psblend::text_gamma().to_bits()).hash(&mut h);
+    crate::psblend::LAB_MIX.with(std::cell::Cell::get).hash(&mut h);
+    Some(h.finish())
+}
+
+/// The effect pass kept under `key`, if any.
+pub(crate) fn cached_recorded(key: u64) -> Option<std::sync::Arc<effects::Recorded>> {
+    let mut c = recorded_cache().lock().unwrap_or_else(|e| e.into_inner());
+    c.uses += 1;
+    let used = c.uses;
+    let rec = c.map.get_mut(&key).map(|e| {
+        e.used = used;
+        e.rec.clone()
+    })?;
+    c.order.push_back((key, used));
+    // Stale places pile up with hits: past a few per entry, keep each key's last one only.
+    if c.order.len() > 4 * c.map.len() + 64 {
+        let RecordedCache { map, order, .. } = &mut *c;
+        order.retain(|(k, u)| map.get(k).is_some_and(|e| e.used == *u));
+    }
+    Some(rec)
+}
+
+/// Keep `rec`, `layer`'s effect pass, under `key`, if it was recorded before; the least recently
+/// used go past the budget.
+pub(crate) fn keep_recorded(key: u64, layer: &Layer, rec: effects::Recorded) {
+    {
+        let mut c = recorded_cache().lock().unwrap_or_else(|e| e.into_inner());
+        if c.once.len() > 4096 {
+            c.once.clear();
+        }
+        if c.once.insert(key) {
+            return;
+        }
+    }
+    let mut pin = Vec::new();
+    layer_identity(layer, &mut std::collections::hash_map::DefaultHasher::new(), &mut |t| pin.push(std::sync::Arc::downgrade(t)));
+    let bytes = rec.bytes().saturating_add(pin.len().saturating_mul(std::mem::size_of::<photocraft_raster::Tile>() + 2 * std::mem::size_of::<usize>()));
+    let budget = effect_cache_budget() / 4;
+    if bytes > budget {
+        return;
+    }
+    let mut c = recorded_cache().lock().unwrap_or_else(|e| e.into_inner());
+    c.once.remove(&key);
+    if c.map.contains_key(&key) {
+        return;
+    }
+    c.uses += 1;
+    let used = c.uses;
+    c.map.insert(key, RecordedEntry { rec: std::sync::Arc::new(rec), _pin: pin, bytes, used });
+    c.order.push_back((key, used));
+    c.bytes += bytes;
+    while c.bytes > budget {
+        let Some((old, u)) = c.order.pop_front() else { break };
+        if c.map.get(&old).is_some_and(|e| e.used == u)
+            && let Some(e) = c.map.remove(&old)
+        {
+            c.bytes = c.bytes.saturating_sub(e.bytes);
+        }
+    }
+}
+
+/// `PHOTOCRAFT_FX_NOCACHE`: every effect map and pass built again for each render.
+fn no_fx_cache() -> bool {
+    static NO_CACHE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *NO_CACHE.get_or_init(|| std::env::var_os("PHOTOCRAFT_FX_NOCACHE").is_some())
 }
 
 fn fx_cache() -> &'static wasm_sync::Mutex<FxCache> {
@@ -208,8 +336,7 @@ pub(crate) fn effect_maps(layer: &Layer, rect: Rect, cx: &Ctx) -> std::sync::Arc
     if (effects::map_count(layer) as u64 + 1).saturating_mul(region_px).saturating_mul(4) > MAX_FX_BUILD_BYTES {
         region = Rect::EMPTY;
     }
-    static NO_CACHE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if *NO_CACHE.get_or_init(|| std::env::var_os("PHOTOCRAFT_FX_NOCACHE").is_some()) {
+    if no_fx_cache() {
         let shape = if region.is_empty() { Vec::new() } else { effect_shape(layer, region, cx) };
         return std::sync::Arc::new(effects::build_maps_prepared(layer, shape, region, &cx.light, &texture_ctx(layer, region, cx), cx.patterns));
     }

@@ -1,6 +1,6 @@
 use super::bevel::{BevelPaint, TextureCtx, bevel_geom, bevel_maps, satin_map};
 use super::distance::{INSIDE_EPS, Metric, dist_inside_by, dist_outside_by, local_coverage, stroke_outside_exact};
-use super::paint::{dissolves_in, glow_map, paint_color, paint_fx, paint_glow, paint_pattern, rgb, shadow_map};
+use super::paint::{Rec, dissolves_in, glow_map, paint_color, paint_fx, paint_glow, paint_pattern, rgb, shadow_map};
 use super::{
     BlendMode, Buffer, Effect, FxMaps, FxPaint, GlobalLight, Layer, MAX_REACH, Map, PREPARED_PATTERN_BYTES, Pattern, Placement, PreparedPatterns, Rect,
     ShadowSource, StrokePosition, psblend,
@@ -225,19 +225,185 @@ pub(crate) fn composite_with_effects_prepared(
     patterns: &PreparedPatterns<'_>,
     vstroke: Option<VectorStroke<'_>>,
 ) {
+    record_effects(layer, content, backdrop, maps, layer_bounds, patterns, vstroke).replay(layer, backdrop);
+}
+
+/// What a layer with effects adds over a backdrop, recorded once and blended over any backdrop
+/// ([`Recorded::replay`]): the colour and coverage of each effect painted behind or around the
+/// layer, the layer with its interior effects, in the order they blend. The effect maps and
+/// paints (gradients, distance fields, strokes) are worked out here; a replay only blends. Like
+/// the GPU canvas's effect maps, it is the layer's alone, so the compositor keeps it per layer
+/// state and tile (`fx_cache::recorded_effects`) and a tile composited again after an edit
+/// rebuilds only the effects of the layers that changed.
+pub(crate) struct Recorded {
+    /// Where anything paints; pixels outside it are left as they are.
+    rect: Rect,
+    ops: Vec<Op>,
+    /// Not made from the backdrop it was recorded over (see [`premerges_layer`]): it may be
+    /// replayed over any.
+    pub(crate) reusable: bool,
+}
+
+/// One blend of a [`Recorded`] effect pass, over its rect.
+enum Op {
+    /// A paint: each pixel's colour and coverage, blended in `mode`.
+    Paint { mode: BlendMode, src: Vec<[f32; 4]> },
+    /// The outside parts of the strokes, each a paint over the backdrop beneath them taking its
+    /// share of the pixel (see [`EffectPass::paint_outside_strokes`]), and their shares summed.
+    Strokes { strokes: Vec<(BlendMode, Vec<[f32; 4]>, Vec<f32>)>, cover: Vec<f32> },
+    /// The layer with its interior effects, in its mode and coverage gamma.
+    Layer { mode: BlendMode, gamma: f32, lay: Vec<[f32; 4]> },
+}
+
+impl Op {
+    /// The op over `to`, a part of `from`.
+    fn crop(&self, from: Rect, to: Rect) -> Op {
+        fn part<T: Copy>(v: &[T], from: Rect, to: Rect) -> Vec<T> {
+            // (A stroke that painted nothing has no colours.)
+            if v.is_empty() {
+                return Vec::new();
+            }
+            let w = from.width() as usize;
+            (to.y0..to.y1)
+                .flat_map(|y| {
+                    let row = (y - from.y0) as usize * w;
+                    v[row + (to.x0 - from.x0) as usize..row + (to.x1 - from.x0) as usize].iter().copied()
+                })
+                .collect()
+        }
+        match self {
+            Op::Paint { mode, src } => Op::Paint { mode: *mode, src: part(src, from, to) },
+            Op::Strokes { strokes, cover } => Op::Strokes {
+                strokes: strokes.iter().map(|(m, src, share)| (*m, part(src, from, to), part(share, from, to))).collect(),
+                cover: part(cover, from, to),
+            },
+            Op::Layer { mode, gamma, lay } => Op::Layer { mode: *mode, gamma: *gamma, lay: part(lay, from, to) },
+        }
+    }
+
+    /// Blends it into `work` (over the op's rect).
+    fn apply(&self, work: &mut [[f32; 4]]) {
+        match self {
+            Op::Paint { mode, src } => {
+                for (p, s) in work.iter_mut().zip(src) {
+                    if s[3] > 0.0 {
+                        *p = psblend::composite(*mode, *p, *s, 1.0);
+                    }
+                }
+            }
+            Op::Strokes { strokes, cover } => {
+                for (i, (p, c)) in work.iter_mut().zip(cover).enumerate() {
+                    if *c <= 0.0 {
+                        continue;
+                    }
+                    // Premultiplied Σ share × the stroke blended over the backdrop.
+                    let base = *p;
+                    let mut a = [0.0f32; 4];
+                    for (mode, src, share) in strokes {
+                        let s = share[i];
+                        if s > 0.0 {
+                            let b = psblend::composite(*mode, base, src[i], 1.0);
+                            for c in 0..3 {
+                                a[c] += s * b[c] * b[3];
+                            }
+                            a[3] += s * b[3];
+                        }
+                    }
+                    let k = 1.0 - c.min(1.0);
+                    let alpha = p[3] * k + a[3];
+                    if alpha > 0.0 {
+                        *p = [(p[0] * p[3] * k + a[0]) / alpha, (p[1] * p[3] * k + a[1]) / alpha, (p[2] * p[3] * k + a[2]) / alpha, alpha.min(1.0)];
+                    }
+                }
+            }
+            Op::Layer { mode, gamma, lay } => {
+                for (wp, lp) in work.iter_mut().zip(lay) {
+                    if lp[3] > 0.0 {
+                        *wp = psblend::composite_gamma(*mode, *wp, *lp, 1.0, *gamma);
+                    }
+                }
+            }
+        }
+    }
+
+    fn bytes(&self) -> usize {
+        let px = std::mem::size_of::<[f32; 4]>();
+        match self {
+            Op::Paint { src, .. } => src.len() * px,
+            Op::Strokes { strokes, cover } => cover.len() * 4 + strokes.iter().map(|(_, src, share)| src.len() * px + share.len() * 4).sum::<usize>(),
+            Op::Layer { lay, .. } => lay.len() * px,
+        }
+    }
+}
+
+impl Recorded {
+    /// Blends it into `backdrop` at `layer`'s opacity (or Dissolve).
+    pub(crate) fn replay(&self, layer: &Layer, backdrop: &mut Buffer) {
+        let rect = self.rect.intersect(&backdrop.rect);
+        if rect.is_empty() {
+            return;
+        }
+        let (w, bw) = (rect.width() as usize, backdrop.rect.width() as usize);
+        let at = |y: i32| (y - backdrop.rect.y0) as usize * bw + (rect.x0 - backdrop.rect.x0) as usize;
+        let mut before = Vec::with_capacity(w * rect.height() as usize);
+        for y in rect.y0..rect.y1 {
+            before.extend_from_slice(&backdrop.px[at(y)..at(y) + w]);
+        }
+        let mut work = before.clone();
+        let cropped: Vec<Op>;
+        let ops = if rect == self.rect {
+            &self.ops
+        } else {
+            // (A backdrop that doesn't cover the pass: replayed where they meet.)
+            cropped = self.ops.iter().map(|o| o.crop(self.rect, rect)).collect();
+            &cropped
+        };
+        for op in ops {
+            op.apply(&mut work);
+        }
+        let op = layer.opacity;
+        for y in rect.y0..rect.y1 {
+            let row = (y - rect.y0) as usize * w;
+            for (dx, out) in backdrop.px[at(y)..at(y) + w].iter_mut().enumerate() {
+                let (a, b) = (before[row + dx], work[row + dx]);
+                *out = if layer.blend == BlendMode::Dissolve {
+                    // Dissolve applies layer opacity to the completed interior/exterior effect
+                    // stack as pixel coverage, not continuous gray interpolation (#3051).
+                    if crate::dissolve_noise(rect.x0 + dx as i32, y) < op { b } else { a }
+                } else {
+                    mix_premul(a, b, op)
+                };
+            }
+        }
+    }
+
+    /// Bytes it holds.
+    pub(crate) fn bytes(&self) -> usize {
+        self.ops.iter().map(Op::bytes).sum::<usize>() + std::mem::size_of::<Self>()
+    }
+}
+
+/// Records `layer`'s effects over `content`'s rect (the layer's own pixels there, alpha already
+/// masked, clipped layers applied). `backdrop` is read only by a layer whose interior effects
+/// paint over it merged with the backdrop ([`premerges_layer`]); such a record holds for that
+/// backdrop alone (not [`Recorded::reusable`]).
+pub(crate) fn record_effects(
+    layer: &Layer,
+    content: &Buffer,
+    backdrop: &Buffer,
+    maps: &FxMaps,
+    layer_bounds: Rect,
+    patterns: &PreparedPatterns<'_>,
+    vstroke: Option<VectorStroke<'_>>,
+) -> Recorded {
+    #[cfg(test)]
+    RECORDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let pass = EffectPass::new(layer, maps, content.rect, layer_bounds, patterns, vstroke.as_ref());
     let big = pass.big;
     let shape = pass.effect_shape(content);
-    let rect = backdrop.rect;
-    let before = backdrop.clone();
-    // Exterior effects are painted on a backdrop copy extended to `big`.
-    let mut work = Buffer::transparent(big);
-    for y in rect.y0.max(big.y0)..rect.y1.min(big.y1) {
-        for x in rect.x0.max(big.x0)..rect.x1.min(big.x1) {
-            work.px[((y - big.y0) as usize) * pass.w + (x - big.x0) as usize] = before.get(x, y);
-        }
-    }
-    pass.paint_exterior(&mut work, &shape);
+    let mut ops = Ops { ops: Vec::new(), reach: Rect::EMPTY };
+    // Exterior effects: painted behind the layer, over the backdrop.
+    pass.paint_exterior(&mut ops, &shape);
 
     // The layer: content at fill opacity, then interior effects. Interior effects are painted
     // relative to the layer's shape (alpha = coverage within the shape), then the shape's alpha
@@ -247,7 +413,18 @@ pub(crate) fn composite_with_effects_prepared(
     let premerge = premerges_layer(layer);
     let mut lay = pass.layer_pixels(content, &shape);
     if premerge {
-        for (lp, wp) in lay.px.iter_mut().zip(&work.px) {
+        let b = backdrop;
+        // The backdrop with the exterior effects, where the layer merges.
+        let mut work = vec![[0.0f32; 4]; pass.w * pass.h];
+        for y in b.rect.y0.max(big.y0)..b.rect.y1.min(big.y1) {
+            for x in b.rect.x0.max(big.x0)..b.rect.x1.min(big.x1) {
+                work[((y - big.y0) as usize) * pass.w + (x - big.x0) as usize] = b.get(x, y);
+            }
+        }
+        for op in &ops.ops {
+            op.apply(&mut work);
+        }
+        for (lp, wp) in lay.px.iter_mut().zip(&work) {
             *lp = psblend::composite_gamma(layer.blend, *wp, *lp, 1.0, gamma);
         }
     }
@@ -256,26 +433,87 @@ pub(crate) fn composite_with_effects_prepared(
     pass.paint_interior(&mut lay, &shape);
     pass.paint_vector_stroke(&mut lay, &shape);
     pass.paint_inside_strokes(&mut lay, &shape, &strokes, &fields);
-    pass.paint_bevel(&mut lay, BevelPaint::Inner, Some(&shape));
+    pass.paint_bevel(&mut To::Lay(&mut lay), BevelPaint::Inner, Some(&shape));
     // The shape's own alpha.
     for (p, a) in lay.px.iter_mut().zip(&shape.v) {
         p[3] *= a.min(1.0);
     }
-    pass.paint_outside_strokes(&mut work, &lay, &shape, &strokes, &fields);
-    pass.paint_bevel(&mut work, BevelPaint::Outer, None);
+    pass.paint_outside_strokes(&mut ops, &lay, &shape, &strokes, &fields);
+    pass.paint_bevel(&mut To::Ops(&mut ops, big), BevelPaint::Outer, None);
 
     // Layer (with interior effects) onto the exterior result, in the layer's mode.
     let mode = if premerge || layer.blend == BlendMode::PassThrough { BlendMode::Normal } else { layer.blend };
-    for (wp, lp) in work.px.iter_mut().zip(&lay.px) {
-        if lp[3] > 0.0 {
-            *wp = psblend::composite_gamma(mode, *wp, *lp, 1.0, gamma);
-        }
-    }
+    let reach = reach_of(big, &lay.px, |p| p[3] > 0.0);
+    ops.push(Op::Layer { mode, gamma, lay: lay.px }, reach);
     // Emboss styles shade the composited layer (their maps cover inside and outside). Painting
     // them into the layer before its (text-gamma) composite left a type layer's lit top edges up
     // to 6/255 dark (psd-tools layer_effects Emboss: 7.8 → 5.7/255).
-    pass.paint_bevel(&mut work, BevelPaint::Both, None);
-    pass.write_back(backdrop, &before, &work);
+    pass.paint_bevel(&mut To::Ops(&mut ops, big), BevelPaint::Both, None);
+    // Only where something paints.
+    let Ops { ops, reach: rect } = ops;
+    let ops = if rect.is_empty() {
+        Vec::new()
+    } else if rect == big {
+        ops
+    } else {
+        ops.iter().map(|o| o.crop(big, rect)).collect()
+    };
+    Recorded { rect, ops, reusable: !premerge }
+}
+
+/// Effect passes recorded in this process (tests count them, in a process of their own).
+#[cfg(test)]
+pub(crate) static RECORDS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Where a paint of the pass goes: into the layer's pixels, or recorded as an [`Op`] over the
+/// pass's region, to blend over the backdrop.
+enum To<'b> {
+    Lay(&'b mut Buffer),
+    Ops(&'b mut Ops, Rect),
+}
+
+impl To<'_> {
+    fn color(&mut self, m: &Map, c: [f32; 3], blend: BlendMode, opacity: f32) {
+        match self {
+            To::Lay(lay) => paint_color(*lay, m, c, blend, opacity),
+            To::Ops(ops, rect) => record(ops, *rect, |r| paint_color(r, m, c, blend, opacity)),
+        }
+    }
+}
+
+/// The ops of a pass being recorded and the pixels they change together.
+struct Ops {
+    ops: Vec<Op>,
+    reach: Rect,
+}
+
+impl Ops {
+    fn push(&mut self, op: Op, reach: Rect) {
+        if !reach.is_empty() {
+            self.reach = if self.reach.is_empty() { reach } else { self.reach.union(&reach) };
+            self.ops.push(op);
+        }
+    }
+}
+
+/// Records one paint into `ops` (nothing when it paints no pixel).
+fn record(ops: &mut Ops, rect: Rect, paint: impl FnOnce(&mut Rec)) {
+    let mut r = Rec::new(rect);
+    paint(&mut r);
+    ops.push(Op::Paint { mode: r.mode, src: r.src }, r.reach);
+}
+
+/// The pixels of `rect` (its values `v`, row by row) where `on` holds.
+fn reach_of<T>(rect: Rect, v: &[T], on: impl Fn(&T) -> bool) -> Rect {
+    let w = rect.width().max(1) as usize;
+    let (mut x0, mut y0, mut x1, mut y1) = (usize::MAX, usize::MAX, 0usize, 0usize);
+    for (i, p) in v.iter().enumerate() {
+        if on(p) {
+            let (x, y) = (i % w, i / w);
+            (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x + 1), y1.max(y + 1));
+        }
+    }
+    if x0 == usize::MAX { Rect::EMPTY } else { Rect::new(rect.x0 + x0 as i32, rect.y0 + y0 as i32, rect.x0 + x1 as i32, rect.y0 + y1 as i32) }
 }
 
 /// `true` where the effect shape covers a pixel enough for interior effects to paint.
@@ -387,7 +625,7 @@ impl<'a> EffectPass<'a> {
     }
 
     /// Paints the effects behind the layer: drop shadows, then outer glows.
-    fn paint_exterior(&self, work: &mut Buffer, shape: &Map) {
+    fn paint_exterior(&self, ops: &mut Ops, shape: &Map) {
         for (i, e) in self.rev() {
             if let Effect::DropShadow(s) = e {
                 let mut m = self.fx(i, 0);
@@ -397,7 +635,7 @@ impl<'a> EffectPass<'a> {
                     // backdrop), and wholly in a mode that blends with it ([`shadow_see_through`]).
                     knock_out_exterior(&mut m, shape, 1.0 - shadow_see_through(self.layer));
                 }
-                paint_color(work, &m, rgb(&s.color), s.common.blend, s.common.opacity);
+                record(ops, self.big, |r| paint_color(r, &m, rgb(&s.color), s.common.blend, s.common.opacity));
             }
         }
         for (i, e) in self.rev() {
@@ -406,7 +644,7 @@ impl<'a> EffectPass<'a> {
                 // The glow is behind the shape, not painted across its interior when Fill is 0 %.
                 // Preserve the existing anti-aliased edge when the fill is fully opaque.
                 knock_out_exterior(&mut m, shape, self.layer.fill_opacity);
-                paint_glow(work, &m, g, self.sb, self.anchor, self.big, self.patterns);
+                record(ops, self.big, |r| paint_glow(r, &m, g, self.sb, self.anchor, self.big, self.patterns));
             }
         }
     }
@@ -534,7 +772,7 @@ impl<'a> EffectPass<'a> {
 
     /// Bevel and emboss effects whose paint is `kind`. Inner ones paint into the layer relative
     /// to its `shape`; the others paint the maps as they are.
-    fn paint_bevel(&self, target: &mut Buffer, kind: BevelPaint, shape: Option<&Map>) {
+    fn paint_bevel(&self, target: &mut To<'_>, kind: BevelPaint, shape: Option<&Map>) {
         for (i, e) in self.rev() {
             if let Effect::BevelEmboss(b) = e
                 && self.maps.bevel_paint[i] == kind
@@ -543,56 +781,40 @@ impl<'a> EffectPass<'a> {
                     Some(shape) => relative_to_shape(self.fx(i, k), shape),
                     None => self.fx(i, k),
                 };
-                paint_color(target, &map(0), rgb(&b.highlight_color), b.highlight.blend, b.highlight.opacity);
-                paint_color(target, &map(1), rgb(&b.shadow_color), b.shadow.blend, b.shadow.opacity);
+                target.color(&map(0), rgb(&b.highlight_color), b.highlight.blend, b.highlight.opacity);
+                target.color(&map(1), rgb(&b.shadow_color), b.shadow.blend, b.shadow.opacity);
             }
         }
     }
 
-    /// The outside parts of the strokes, blended onto the backdrop beneath the layer with their
-    /// own mode. A higher stroke covers the ones below it (Photoshop: a Multiply stroke listed
+    /// The outside parts of the strokes, recorded to blend onto the backdrop beneath the layer
+    /// with their own mode. A higher stroke covers the ones below it (Photoshop: a Multiply stroke listed
     /// above a wider Normal stroke multiplies the backdrop, not the lower stroke). Each stroke's
     /// share is its coverage × opacity not yet taken by strokes above; for Normal strokes this
     /// equals stacking them top over bottom.
-    fn paint_outside_strokes(&self, work: &mut Buffer, lay: &Buffer, shape: &Map, strokes: &[&photocraft_doc::StrokeFx], fields: &StrokeFields) {
+    fn paint_outside_strokes(&self, ops: &mut Ops, lay: &Buffer, shape: &Map, strokes: &[&photocraft_doc::StrokeFx], fields: &StrokeFields) {
         if !strokes.iter().any(|st| stroke_widths(st).1 > 0.0) {
             return;
         }
         let (w, h) = (self.w, self.h);
-        let base = work.clone();
-        let mut acc = vec![[0.0f32; 4]; w * h]; // premultiplied Σ share·blended
         let mut cover = vec![0.0f32; w * h];
+        let mut painted = Vec::new();
         for st in strokes.iter().copied() {
             let (_, out_w) = stroke_widths(st);
             if out_w <= 0.0 {
                 continue;
             }
             let share = self.outside_share(st, out_w, shape, lay, fields, &mut cover);
-            // The stroke blended over the backdrop at full coverage.
-            let mut blended = base.clone();
+            // The stroke blended over the backdrop at full coverage, where it has a share.
             let ones = Map { w, h, v: share.iter().map(|&s| if s > 0.0 { 1.0 } else { 0.0 }).collect() };
             // The share already carries the Dissolve choice, so the paint itself composites as Normal.
             let paint_blend = if st.common.blend == BlendMode::Dissolve { BlendMode::Normal } else { st.common.blend };
-            paint_fx(&mut blended, &ones, &st.paint, self.stroke_frame(st), self.anchor, self.big, paint_blend, 1.0, self.patterns);
-            for ((a, b), s) in acc.iter_mut().zip(&blended.px).zip(&share) {
-                if *s > 0.0 {
-                    for c in 0..3 {
-                        a[c] += s * b[c] * b[3];
-                    }
-                    a[3] += s * b[3];
-                }
-            }
+            let mut r = Rec::new(self.big);
+            paint_fx(&mut r, &ones, &st.paint, self.stroke_frame(st), self.anchor, self.big, paint_blend, 1.0, self.patterns);
+            painted.push((r.mode, r.src, share));
         }
-        for ((p, a), c) in work.px.iter_mut().zip(&acc).zip(&cover) {
-            if *c <= 0.0 {
-                continue;
-            }
-            let k = 1.0 - c.min(1.0);
-            let alpha = p[3] * k + a[3];
-            if alpha > 0.0 {
-                *p = [(p[0] * p[3] * k + a[0]) / alpha, (p[1] * p[3] * k + a[1]) / alpha, (p[2] * p[3] * k + a[2]) / alpha, alpha.min(1.0)];
-            }
-        }
+        let reach = reach_of(self.big, &cover, |c| *c > 0.0);
+        ops.push(Op::Strokes { strokes: painted, cover }, reach);
     }
 
     /// The share of each pixel an outside stroke `st` (outside width `out_w`) takes: its coverage
@@ -627,27 +849,6 @@ impl<'a> EffectPass<'a> {
             cover[i] += *sh;
         }
         share
-    }
-
-    /// Writes the finished stack `work` into `backdrop` (over `before`) at layer opacity.
-    fn write_back(&self, backdrop: &mut Buffer, before: &Buffer, work: &Buffer) {
-        let (big, w) = (self.big, self.w);
-        let rect = backdrop.rect;
-        let op = self.layer.opacity;
-        for y in rect.y0..rect.y1 {
-            for x in rect.x0..rect.x1 {
-                let i = ((y - rect.y0) as usize) * rect.width() as usize + (x - rect.x0) as usize;
-                let a = before.px[i];
-                let b = if x >= big.x0 && x < big.x1 && y >= big.y0 && y < big.y1 { work.px[((y - big.y0) as usize) * w + (x - big.x0) as usize] } else { a };
-                backdrop.px[i] = if self.layer.blend == BlendMode::Dissolve {
-                    // Dissolve applies layer opacity to the completed interior/exterior effect
-                    // stack as pixel coverage, not continuous gray interpolation (#3051).
-                    if crate::dissolve_noise(x, y) < op { b } else { a }
-                } else {
-                    mix_premul(a, b, op)
-                };
-            }
-        }
     }
 }
 

@@ -213,9 +213,67 @@ fn sample_stops(stops: &[(f32, [f32; 3])], t: f32) -> [f32; 3] {
 }
 
 /// Composite `color × coverage` into `dst` (both over the same rectangle).
-fn paint(dst: &mut Buffer, m: &Map, color: impl Fn(usize) -> [f32; 4], blend: BlendMode, opacity: f32) {
-    let (x0, y0, w) = (i64::from(dst.rect.x0), i64::from(dst.rect.y0), (dst.rect.width().max(1)) as usize);
-    for (i, p) in dst.px.iter_mut().enumerate() {
+/// Where an effect paints: pixels it blends into at once ([`Buffer`]), or a record of what each
+/// pixel gets ([`Rec`]) to blend later over whatever backdrop is there then.
+pub(super) trait Sink {
+    /// The pixels painted (document coordinates).
+    fn rect(&self) -> Rect;
+    /// Pixel `i` gets colour `src` (straight, its alpha the coverage) blended in `mode`.
+    fn put(&mut self, i: usize, mode: BlendMode, src: [f32; 4]);
+}
+
+impl Sink for Buffer {
+    fn rect(&self) -> Rect {
+        self.rect
+    }
+
+    fn put(&mut self, i: usize, mode: BlendMode, src: [f32; 4]) {
+        self.px[i] = psblend::composite(mode, self.px[i], src, 1.0);
+    }
+}
+
+/// One paint recorded: the colour and coverage each pixel gets and the mode it blends in
+/// (transparent where it paints nothing: blending that leaves a pixel as it is).
+pub(super) struct Rec {
+    pub(super) rect: Rect,
+    pub(super) mode: BlendMode,
+    /// Empty until a pixel gets paint.
+    pub(super) src: Vec<[f32; 4]>,
+    /// The pixels it changes (document coordinates; empty when none).
+    pub(super) reach: Rect,
+}
+
+impl Rec {
+    pub(super) fn new(rect: Rect) -> Self {
+        Rec { rect, mode: BlendMode::Normal, src: Vec::new(), reach: Rect::EMPTY }
+    }
+}
+
+impl Sink for Rec {
+    fn rect(&self) -> Rect {
+        self.rect
+    }
+
+    fn put(&mut self, i: usize, mode: BlendMode, src: [f32; 4]) {
+        if self.src.is_empty() {
+            self.src = vec![[0.0; 4]; self.rect.width() as usize * self.rect.height() as usize];
+        }
+        // (One paint blends every pixel in one mode.)
+        self.mode = mode;
+        self.src[i] = src;
+        if src[3] > 0.0 {
+            let w = self.rect.width().max(1) as usize;
+            let (x, y) = (self.rect.x0 + (i % w) as i32, self.rect.y0 + (i / w) as i32);
+            let px = Rect::new(x, y, x + 1, y + 1);
+            self.reach = if self.reach.is_empty() { px } else { self.reach.union(&px) };
+        }
+    }
+}
+
+fn paint(dst: &mut impl Sink, m: &Map, color: impl Fn(usize) -> [f32; 4], blend: BlendMode, opacity: f32) {
+    let rect = dst.rect();
+    let (x0, y0, w) = (i64::from(rect.x0), i64::from(rect.y0), (rect.width().max(1)) as usize);
+    for i in 0..rect.width() as usize * rect.height() as usize {
         let a = m.v[i] * opacity;
         if a <= 0.0 {
             continue;
@@ -223,11 +281,11 @@ fn paint(dst: &mut Buffer, m: &Map, color: impl Fn(usize) -> [f32; 4], blend: Bl
         let c = color(i);
         if blend == BlendMode::Dissolve {
             if dissolves_in(x0 + (i % w) as i64, y0 + (i / w) as i64, c[3] * a) {
-                *p = psblend::composite(BlendMode::Normal, *p, [c[0], c[1], c[2], 1.0], 1.0);
+                dst.put(i, BlendMode::Normal, [c[0], c[1], c[2], 1.0]);
             }
             continue;
         }
-        *p = psblend::composite(blend, *p, [c[0], c[1], c[2], c[3] * a], 1.0);
+        dst.put(i, blend, [c[0], c[1], c[2], c[3] * a]);
     }
 }
 
@@ -251,7 +309,7 @@ pub(super) fn dissolves_in(x: i64, y: i64, coverage: f32) -> bool {
     hash_noise(x, y) < coverage
 }
 
-pub(super) fn paint_color(dst: &mut Buffer, m: &Map, c: [f32; 3], blend: BlendMode, opacity: f32) {
+pub(super) fn paint_color(dst: &mut impl Sink, m: &Map, c: [f32; 3], blend: BlendMode, opacity: f32) {
     paint(dst, m, |_| [c[0], c[1], c[2], 1.0], blend, opacity);
 }
 
@@ -325,7 +383,7 @@ pub(super) fn glow_map(shape: &Map, g: &Glow, inner: bool, origin: (i32, i32)) -
 /// Paints a pattern (looked up in `patterns`) through coverage `m`; missing patterns paint nothing.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn paint_pattern(
-    dst: &mut Buffer,
+    dst: &mut impl Sink,
     m: &Map,
     patterns: &PreparedPatterns<'_>,
     name: &str,
@@ -351,7 +409,7 @@ pub(super) fn paint_pattern(
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn paint_fx(
-    dst: &mut Buffer,
+    dst: &mut impl Sink,
     m: &Map,
     p: &FxPaint,
     shape_bounds: Rect,
@@ -396,7 +454,7 @@ pub fn glow_gradient_gain(range: f32) -> f32 {
 /// on (photoshop corpus outer-glow-gradient.psd: 1.4/255 mean, against bands across the canvas;
 /// psd-tools layer_params.psd). Glows have no gradient angle, style or Reverse.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn paint_glow(dst: &mut Buffer, m: &Map, g: &Glow, shape_bounds: Rect, anchor: (f64, f64), big: Rect, patterns: &PreparedPatterns<'_>) {
+pub(super) fn paint_glow(dst: &mut impl Sink, m: &Map, g: &Glow, shape_bounds: Rect, anchor: (f64, f64), big: Rect, patterns: &PreparedPatterns<'_>) {
     let FxPaint::Gradient(gradient) = &g.paint else {
         return paint_fx(dst, m, &g.paint, shape_bounds, anchor, big, g.common.blend, g.common.opacity, patterns);
     };

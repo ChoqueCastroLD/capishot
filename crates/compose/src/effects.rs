@@ -44,7 +44,9 @@ use bevel::{bevel_maps, satin_map};
 pub use blur::tent_kernel;
 #[cfg(test)]
 use blur::{blur, box_line, dilate, tent, tent_direct};
-pub(crate) use composite::{VectorStroke, build_maps_prepared, composite_with_effects_prepared, map_count};
+#[cfg(test)]
+pub(crate) use composite::RECORDS;
+pub(crate) use composite::{Recorded, VectorStroke, build_maps_prepared, composite_with_effects_prepared, map_count, record_effects};
 pub use composite::{build_maps, composite_with_effects, outline_share, premerges_layer, shadow_see_through, stroke_widths};
 pub use distance::{FieldKind, STROKE_CHAMFER_MAX, bevel_distance_fields, distance_field, stroke_outside_exact};
 #[cfg(test)]

@@ -1,7 +1,7 @@
 use super::content::{channel_weights, empty_in, recycle_buffer, render_content, restore_channels, scratch_buffer, surface_to_buffer};
 use super::ctx::Ctx;
 use super::extents::{effects_frame, mask_k, mask_vals, shapeless_stroke_bounds};
-use super::fx_cache::effect_maps;
+use super::fx_cache::{cached_recorded, effect_maps, keep_recorded, recorded_key};
 use super::{BlendMode, Buffer, Fill, Layer, LayerContent, Rect, Surface, advanced, blend, effects, psblend, shape_split};
 
 /// Composite an isolated group's sibling list (bottom→top) onto `backdrop` (its own buffer).
@@ -488,6 +488,12 @@ pub(crate) fn composite_layer_plain(layer: &Layer, clipped: &[Layer], backdrop: 
 /// A layer with effects (and its clipping group) onto `backdrop`.
 fn composite_layer_effects(layer: &Layer, clipped: &[Layer], backdrop: &mut Buffer, cx: &Ctx) {
     let rect = backdrop.rect;
+    // Kept from an earlier render of this layer state and rect: blended, nothing built.
+    let key = recorded_key(layer, clipped, rect, cx);
+    if let Some(rec) = key.and_then(cached_recorded) {
+        rec.replay(layer, backdrop);
+        return;
+    }
     // Neighbourhoods are already captured by the full-region effect maps;
     // content and effect application only need the output rectangle.
     // A stroked shape's vector stroke stays above its clipped layers and interior effects.
@@ -501,7 +507,11 @@ fn composite_layer_effects(layer: &Layer, clipped: &[Layer], backdrop: &mut Buff
     advanced::composite_clipped(clipped, &mut content, cx);
     let vstroke = vstroke.as_ref().map(|(s, m)| effects::VectorStroke { stroke: s, mask: m.as_deref() });
     let maps = effect_maps(layer, rect, cx);
-    effects::composite_with_effects_prepared(layer, &content, backdrop, &maps, effects_frame(layer, cx.canvas), cx.patterns, vstroke);
+    let rec = effects::record_effects(layer, &content, backdrop, &maps, effects_frame(layer, cx.canvas), cx.patterns, vstroke);
+    rec.replay(layer, backdrop);
+    if let Some(key) = key.filter(|_| rec.reusable) {
+        keep_recorded(key, layer, rec);
+    }
 }
 
 /// The coverage-mixing gamma of a layer: the text blending gamma
