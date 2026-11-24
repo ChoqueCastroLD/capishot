@@ -87,6 +87,17 @@ fn setup(h: &mut Harness, background: &str, r: [i32; 4]) {
     }
     control(h, "ui.set", json!({"tool": "rectMarquee", "zoom": 1.0, "center": [200, 150]}));
     h.run_steps(3);
+    // The outline is traced off the window's thread and shows in the frame that finds it traced
+    // (no frame waits for it): frames until the ants are on screen.
+    let (x0, y0) = device(h, h.ctx.pixels_per_point(), r[0] as f32, r[1] as f32);
+    let (x1, _) = device(h, h.ctx.pixels_per_point(), r[2] as f32, r[1] as f32);
+    for _ in 0..200 {
+        if scan(&render(h), (x0, y0), (x1, y0)).across.iter().any(|d| !d.is_empty()) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        h.step();
+    }
 }
 
 fn render(h: &mut Harness) -> Image {
