@@ -60,8 +60,7 @@ fn local_max(w: usize, h: usize, v: &[f32], r: usize) -> Vec<f32> {
     if w == 0 || v.len() != w.saturating_mul(h) {
         return v.to_vec();
     }
-    let rows = local_max_rows(w, v, r);
-    local_max_cols(w, h, &rows, r)
+    local_max_cols(w, h, local_max_rows(w, v, r), r)
 }
 
 /// [`local_max`]'s horizontal pass.
@@ -92,103 +91,98 @@ fn local_max_rows(w: usize, v: &[f32], r: usize) -> Vec<f32> {
     rows
 }
 
-/// [`local_max`]'s vertical pass over the horizontal one's `rows`.
-fn local_max_cols(w: usize, h: usize, rows: &[f32], r: usize) -> Vec<f32> {
+/// [`local_max`]'s vertical pass over the horizontal one's `rows`, in place.
+fn local_max_cols(w: usize, h: usize, mut rows: Vec<f32>, r: usize) -> Vec<f32> {
     let mut c = ColsMax::new(w, h, r);
-    c.advance(rows, usize::MAX);
-    c.out
+    c.advance(&mut rows, usize::MAX);
+    rows
 }
 
-/// [`local_max_cols`] some rows at a time ([`ColsMax::advance`]).
+/// [`local_max_cols`] some rows at a time ([`ColsMax::advance`]). The column, padded by `r` at both
+/// ends, goes in blocks of `2r + 1` rows: an output row's window spans one block or two neighbours,
+/// so only two blocks' running maxima are held (not two padded copies of the whole window), and
+/// each output row is written over its input row, which no later block reads.
 #[derive(Debug)]
 pub(crate) struct ColsMax {
     w: usize,
     h: usize,
     r: usize,
-    /// The running maxima from each block's start and from its end, over the padded column.
-    from_start: Vec<f32>,
-    from_end: Vec<f32>,
-    out: Vec<f32>,
-    /// The next padded row of the current pass: the first pass goes down (`< p`), the second up,
-    /// then the output rows.
-    pass: u8,
-    q: usize,
+    /// The running maxima from each block's start and from its end, `2r + 1` padded rows each,
+    /// for block `b` in slot `b % 2`.
+    from_start: [Vec<f32>; 2],
+    from_end: [Vec<f32>; 2],
+    /// The next block to make, and the output blocks written.
+    made: usize,
+    written: usize,
 }
 
 impl ColsMax {
     pub(crate) fn new(w: usize, h: usize, r: usize) -> Self {
-        let p = h + 2 * r;
-        Self { w, h, r, from_start: vec![0f32; p * w], from_end: vec![0f32; p * w], out: vec![0f32; w * h], pass: 0, q: 0 }
+        let n = (2 * r + 1) * w;
+        Self { w, h, r, from_start: [vec![0f32; n], vec![0f32; n]], from_end: [vec![0f32; n], vec![0f32; n]], made: 0, written: 0 }
     }
 
-    /// Does at most `budget` more rows over `rows` (the horizontal pass); true once done.
-    pub(crate) fn advance(&mut self, rows: &[f32], budget: usize) -> bool {
+    /// Does at most about `budget` more rows of `rows` (the horizontal pass, replaced by the
+    /// result as it goes); true once done.
+    pub(crate) fn advance(&mut self, rows: &mut [f32], budget: usize) -> bool {
         let (w, h, r) = (self.w, self.h, self.r);
         if rows.len() != w * h {
-            self.out = rows.to_vec();
-            self.pass = 3;
             return true;
         }
         let k = 2 * r + 1;
-        let p = h + 2 * r;
+        let blocks = (h + 2 * r).div_ceil(k);
+        let outputs = h.div_ceil(k);
         let none = vec![f32::NEG_INFINITY; w];
-        // Row `q` of the padded column is `rows`' row `q - r`.
-        let row = |q: usize| if (r..r + h).contains(&q) { &rows[(q - r) * w..(q - r + 1) * w] } else { &none[..] };
         let mut left = budget;
-        while left > 0 && self.pass < 3 {
-            left -= 1;
-            match self.pass {
-                0 => {
-                    let q = self.q;
-                    let (done, cur) = self.from_start.split_at_mut(q * w);
+        while self.written < outputs && left > 0 {
+            if self.made < blocks && self.made <= self.written + 1 {
+                // Block `b`: padded rows `b·k ..`, row `q` of the padded column being `rows`' row
+                // `q - r` (none past either end).
+                let b = self.made;
+                let row = |q: usize| if (r..r + h).contains(&q) { &rows[(q - r) * w..(q - r + 1) * w] } else { &none[..] };
+                let fs = &mut self.from_start[b % 2];
+                for i in 0..k {
+                    let (done, cur) = fs.split_at_mut(i * w);
                     let cur = &mut cur[..w];
-                    if q.is_multiple_of(k) {
-                        cur.copy_from_slice(row(q));
+                    if i == 0 {
+                        cur.copy_from_slice(row(b * k));
                     } else {
-                        for ((o, a), b) in cur.iter_mut().zip(&done[(q - 1) * w..]).zip(row(q)) {
-                            *o = max(*a, *b);
+                        for ((o, a), x) in cur.iter_mut().zip(&done[(i - 1) * w..]).zip(row(b * k + i)) {
+                            *o = max(*a, *x);
                         }
                     }
-                    self.q += 1;
-                    if self.q == p {
-                        (self.pass, self.q) = (1, p);
-                    }
                 }
-                1 => {
-                    let q = self.q - 1;
-                    let (cur, done) = self.from_end.split_at_mut((q + 1) * w);
-                    let cur = &mut cur[q * w..];
-                    if q % k == k - 1 || q + 1 == p {
-                        cur.copy_from_slice(row(q));
+                let fe = &mut self.from_end[b % 2];
+                for i in (0..k).rev() {
+                    let (cur, done) = fe.split_at_mut((i + 1) * w);
+                    let cur = &mut cur[i * w..];
+                    if i == k - 1 {
+                        cur.copy_from_slice(row(b * k + i));
                     } else {
-                        for ((o, a), b) in cur.iter_mut().zip(&done[..w]).zip(row(q)) {
-                            *o = max(*a, *b);
+                        for ((o, a), x) in cur.iter_mut().zip(&done[..w]).zip(row(b * k + i)) {
+                            *o = max(*a, *x);
                         }
                     }
-                    self.q -= 1;
-                    if self.q == 0 {
-                        self.pass = 2;
-                    }
                 }
-                _ => {
-                    let c = self.q;
-                    let (fe, fs) = (&self.from_end[c * w..], &self.from_start[(c + 2 * r) * w..]);
-                    for ((o, a), b) in self.out[c * w..(c + 1) * w].iter_mut().zip(fe).zip(fs) {
+                self.made += 1;
+                left = left.saturating_sub(2 * k);
+            } else {
+                // Output rows `c` of block `e`: the larger of the maximum from `c` to its block's
+                // end and the one from the next block's start to `c + 2r`.
+                let e = self.written;
+                for c in e * k..((e + 1) * k).min(h) {
+                    let fe = &self.from_end[e % 2][(c - e * k) * w..(c - e * k + 1) * w];
+                    let q = c + 2 * r;
+                    let fs = if q < (e + 1) * k { &self.from_start[e % 2][(q - e * k) * w..] } else { &self.from_start[(e + 1) % 2][(q - (e + 1) * k) * w..] };
+                    for ((o, a), b) in rows[c * w..(c + 1) * w].iter_mut().zip(fe).zip(&fs[..w]) {
                         *o = max(*a, *b);
                     }
-                    self.q += 1;
-                    if self.q == h {
-                        self.pass = 3;
-                    }
                 }
+                self.written += 1;
+                left = left.saturating_sub(k);
             }
         }
-        self.pass == 3
-    }
-
-    /// The output (once [`Self::advance`] is done).
-    pub(crate) fn finish(self) -> Vec<f32> {
-        self.out
+        self.written == outputs
     }
 }
 
@@ -264,9 +258,9 @@ pub(crate) fn ink_cols_start(w: usize, h: usize, g: Grow) -> ColsMax {
     ColsMax::new(w, h, (g.dilate * 3).max(8))
 }
 
-/// … and against each pixel's luminance.
-pub(crate) fn ink_cols_finish(lum: &[f32], cols: ColsMax) -> Vec<bool> {
-    is_ink(lum, &cols.finish())
+/// … and against each pixel's luminance (`max`: the rows [`ColsMax`] went over).
+pub(crate) fn ink_cols_finish(lum: &[f32], max: &[f32]) -> Vec<bool> {
+    is_ink(lum, max)
 }
 
 /// How far from the stroke a run of ink may reach.

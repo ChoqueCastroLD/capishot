@@ -20,6 +20,7 @@
 //! settings, like `maxSide` and `margin`.
 
 pub mod quick;
+pub(crate) mod work;
 
 use std::sync::Arc;
 
@@ -37,6 +38,7 @@ use crate::ai_models_cmds::not_downloaded;
 use crate::commands::CommandSpec;
 use crate::jobs::JobCtx;
 use crate::{EngineError, Result, Session};
+use work::Work;
 
 /// The command id.
 pub const ID: &str = "edit.inpaintAi";
@@ -225,8 +227,8 @@ impl Hooks for JobHooks {
     }
 }
 
-/// Receives the generated RGB and what made it.
-pub(crate) type FillDone = Box<dyn FnOnce(Result<(Vec<f32>, FillRun)>) + Send>;
+/// Receives what made the fill (its pixels went to the [`work::Sink`]).
+pub(crate) type FillDone = Box<dyn FnOnce(Result<FillRun>) + Send>;
 
 /// What an AI fill ran: the model, whether it ended on the CPU (an automatic run with no usable
 /// GPU too), and `fell_back`: it left where it was headed (the GPU failed mid-run, DirectML
@@ -240,35 +242,25 @@ pub(crate) struct FillRun {
     pub guard: Option<crate::ai_cmds::GpuGuard>,
 }
 
-/// The AI fill of a `w×h` region (`rgb` interleaved RGB 0..=1, `cover` the hole's coverage),
-/// without blocking: each tile's request starts from the previous one's `done`, and `finish`
-/// gets the generated RGB for every pixel (equal to `rgb` outside the hole) and the model that
-/// made it (another than `opts.model` after a GPU failure, see [`gpu_fallback`]). Works with an
-/// inpainter that answers later (the browser's AI worker, which no thread of the page may wait
-/// for), so `edit.inpaintAi` and the Remove tool's AI mode run everywhere through
-/// `jobs::run_async`.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn ai_fill_rgb_async(
-    svc: Arc<dyn Inpainter>,
-    ctx: JobCtx,
-    rgb: Vec<f32>,
-    cover: Vec<f32>,
-    w: usize,
-    h: usize,
-    opts: AiOptions,
-    finish: FillDone,
-) {
-    let plan = match tiles::plan(&cover, w, h, &opts.tiles) {
+/// The AI fill of `work`'s region without blocking: each tile's request starts from the previous
+/// one's `done`; the filled blocks go to the work's sink as the plan leaves them behind, and
+/// `finish` gets the model that made them (another than `opts.model` after a GPU failure, see
+/// [`gpu_fallback`]). Works with an inpainter that answers later (the browser's AI worker, which
+/// no thread of the page may wait for), so `edit.inpaintAi` and the Remove tool's AI mode run
+/// everywhere through `jobs::run_async`.
+pub(crate) fn ai_fill_async(svc: Arc<dyn Inpainter>, ctx: JobCtx, mut work: Work, opts: AiOptions, finish: FillDone) {
+    let (w, h) = work.size();
+    let plan = match tiles::plan_hole(work.hole(), w, h, &opts.tiles) {
         Ok(p) if !p.is_empty() => p,
         Ok(_) => return finish(Err(bad("nothing to clean: the area is empty"))),
         Err(e) => return finish(Err(bad(e.to_string()))),
     };
-    let binary: Vec<f32> = cover.iter().map(|c| if *c > 0.0 { 1.0 } else { 0.0 }).collect();
     let split = match split_state(&plan, w, h, &opts) {
         Ok(sp) => sp,
         Err(e) => return finish(Err(e)),
     };
-    let state = FillState { svc, ctx, rgb, cover, binary, w, h, opts, plan, split, next: 0, fell_back: false, trail: Arc::default(), finish };
+    work.uses(&plan);
+    let state = FillState { svc, ctx, work, opts, plan, split, next: 0, fell_back: false, trail: Arc::default(), finish };
     fill_step(state);
 }
 
@@ -284,13 +276,9 @@ struct FillState {
     svc: Arc<dyn Inpainter>,
     ctx: JobCtx,
     /// The region, filled in place tile by tile: a pasted pixel is inside the hole, which every
-    /// later tile's model input masks out, so no tile sees another's output (and no second
-    /// region-sized copy is kept: phones ran out of memory on large selections).
-    rgb: Vec<f32>,
-    cover: Vec<f32>,
-    binary: Vec<f32>,
-    w: usize,
-    h: usize,
+    /// later tile's model input masks out, so no tile sees another's output. Held in blocks, only
+    /// those the tiles still to run read ([`Work`]).
+    work: Work,
     opts: AiOptions,
     plan: Vec<tiles::Tile>,
     /// The fill so far of a large crop split into full-resolution tiles.
@@ -301,6 +289,14 @@ struct FillState {
     /// The runtime's own fallbacks ([`Hooks::fell_back`]).
     trail: Arc<std::sync::Mutex<crate::ai_cmds::Trail>>,
     finish: FillDone,
+}
+
+/// A tile's crop while the model runs on it: its RGB and coverage (buffers of just `t.rect`), the
+/// split's window over it and the paste weights of a split tile.
+struct Crop {
+    rgb: Vec<f32>,
+    cover: Vec<f32>,
+    split: Option<(tiles::Split, Vec<f32>)>,
 }
 
 /// Whose turn it is to start the next tile, between [`fill_step`] and the answer to its request.
@@ -321,25 +317,36 @@ enum Turn {
 fn fill_step(mut st: FillState) {
     loop {
         // The next tile with something to fill (a split tile whose hole the ones before it filled has none).
-        let (t, input, weights) = loop {
+        let (t, input, crop) = loop {
             let Some(t) = st.plan.get(st.next).cloned() else {
-                let FillState { rgb, finish, opts, fell_back, trail, .. } = st;
+                let FillState { work, finish, opts, fell_back, trail, .. } = st;
+                if let Err(e) = work.finish() {
+                    return finish(Err(e));
+                }
                 let t = trail.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 let run = FillRun { model: opts.model, cpu: opts.run.choice.cpu || t.cpu, fell_back: fell_back || t.fell_back, guard: opts.run.guard };
                 drop(t);
-                return finish(Ok((rgb, run)));
+                return finish(Ok(run));
             };
             if let Err(e) = st.ctx.check() {
                 return (st.finish)(Err(e));
             }
+            let (rgb, cover) = st.work.cut(t.rect);
+            let local = t.local();
             let cut = match (t.split, st.split.as_ref()) {
-                (true, Some(sp)) => sp.extract(&st.rgb, &st.cover, &t).map(|r| r.map(|(i, w)| (i, Some(w)))),
+                (true, Some(sp)) => {
+                    let win = sp.window(t.rect);
+                    win.extract(&rgb, &cover, &local).map(|r| r.map(|(i, wts)| (i, Some((win, wts)))))
+                }
                 (true, None) => Err(LamaError::Input("a split tile without its state".into())),
-                (false, _) => tiles::extract(&st.rgb, &st.cover, st.w, st.h, &t).map(|i| Some((i, None))),
+                (false, _) => tiles::extract(&rgb, &cover, t.rect.w, t.rect.h, &local).map(|i| Some((i, None))),
             };
             match cut {
-                Ok(Some((input, weights))) => break (t, input, weights),
+                Ok(Some((input, split))) => break (t, input, Crop { rgb, cover, split }),
                 Ok(None) => {
+                    if let Err(e) = st.work.retire(st.next) {
+                        return (st.finish)(Err(e));
+                    }
                     st.next += 1;
                     st.ctx.progress(st.next as f32 / st.plan.len() as f32, "");
                 }
@@ -360,7 +367,7 @@ fn fill_step(mut st: FillState) {
             req,
             hooks,
             Box::new(move |r| {
-                let Some(next) = after_tile(st, &t, weights, b, r) else { return };
+                let Some(next) = after_tile(st, &t, crop, b, r) else { return };
                 let mut turn = answer.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 if matches!(*turn, Turn::Asking) {
                     *turn = Turn::Answered(Box::new(next));
@@ -380,7 +387,7 @@ fn fill_step(mut st: FillState) {
 
 /// A tile's answer pasted into the fill: the state to go on from, or `None` when the fill ended
 /// here (its `finish` was called with the error).
-fn after_tile(mut st: FillState, t: &tiles::Tile, weights: Option<Vec<f32>>, done: f32, r: std::result::Result<Vec<f32>, LamaError>) -> Option<FillState> {
+fn after_tile(mut st: FillState, t: &tiles::Tile, crop: Crop, done: f32, r: std::result::Result<Vec<f32>, LamaError>) -> Option<FillState> {
     let out = match r {
         Ok(out) => out,
         // Once more on the CPU; a CPU run that failed this way only got there on threads.
@@ -390,12 +397,22 @@ fn after_tile(mut st: FillState, t: &tiles::Tile, weights: Option<Vec<f32>>, don
             return None;
         }
     };
-    let pasted = match (weights, st.split.as_mut()) {
-        (Some(wts), Some(sp)) => sp.paste(&mut st.rgb, t, &out, &wts),
-        _ => tiles::paste(&mut st.rgb, &st.binary, st.w, st.h, t, &out),
+    let Crop { mut rgb, cover, split } = crop;
+    let local = t.local();
+    let pasted = match (split, st.split.as_mut()) {
+        (Some((mut win, wts)), Some(sp)) => win.paste(&mut rgb, &local, &out, &wts).map(|_| sp.put_window(t.rect, &win)),
+        _ => {
+            let binary: Vec<f32> = cover.iter().map(|c| if *c > 0.0 { 1.0 } else { 0.0 }).collect();
+            tiles::paste(&mut rgb, &binary, t.rect.w, t.rect.h, &local, &out).map(|_| ())
+        }
     };
     if let Err(e) = pasted {
         (st.finish)(Err(lama_err(e)));
+        return None;
+    }
+    st.work.put_back(t.rect, &rgb);
+    if let Err(e) = st.work.retire(st.next) {
+        (st.finish)(Err(e));
         return None;
     }
     st.ctx.progress(done, "");
@@ -427,7 +444,8 @@ fn gpu_fallback(mut st: FillState, why: &str) -> Option<FillState> {
         if model.arch == catalog::Arch::Migan {
             st.opts.tiles.max_side = st.opts.tiles.max_side.min(512);
         }
-        st.plan = match tiles::plan(&st.cover, st.w, st.h, &st.opts.tiles) {
+        let (w, h) = st.work.size();
+        st.plan = match tiles::plan_hole(st.work.hole(), w, h, &st.opts.tiles) {
             Ok(p) if !p.is_empty() => p,
             Ok(_) => {
                 (st.finish)(Err(bad("nothing to clean: the area is empty")));
@@ -438,7 +456,8 @@ fn gpu_fallback(mut st: FillState, why: &str) -> Option<FillState> {
                 return None;
             }
         };
-        st.split = match split_state(&st.plan, st.w, st.h, &st.opts) {
+        st.work.uses(&st.plan);
+        st.split = match split_state(&st.plan, w, h, &st.opts) {
             Ok(sp) => sp,
             Err(e) => {
                 (st.finish)(Err(e));
@@ -542,54 +561,6 @@ pub(crate) fn under_cleans(rgb: &mut [f32], doc: &photocraft_doc::Document, regi
     }
 }
 
-/// `generated` (interleaved RGB of `region`) where `cover` says, on a layer of its own above `id`
-/// or over what the layer of cleans already has. The layer.
-pub(crate) fn write_clean(doc: &mut photocraft_doc::Document, id: LayerId, output: &Output, region: Rect, generated: &[f32], cover: &[f32]) -> Result<LayerId> {
-    let name = output.name().unwrap_or(CLEAN_LAYER).to_string();
-    let existing = if matches!(output, Output::Single(_)) { clean_layer(doc, &name) } else { None };
-    let base = doc.pixel_format();
-    let nid = match existing {
-        Some(l) => l,
-        None => {
-            let layer_name = if matches!(output, Output::Single(_)) { name } else { doc.next_layer_name(&name) };
-            doc.insert_above(Some(id), Layer::raster(layer_name, PixelFormat { alpha: true, ..base }))
-        }
-    };
-    let surf = crate::edit_menu_cmds::writable_surface(doc, nid)?;
-    let lf = surf.format();
-    let n = lf.channels();
-    let mut px = surf.read_region(region);
-    px.resize(cover.len() * n, 0.0);
-    let mut enc = [0.0f32; 8];
-    for (i, &c) in cover.iter().enumerate() {
-        if c > 0.0 {
-            let o = to_rgba(&lf, &px[i * n..(i + 1) * n]);
-            let g = &generated[i * 3..i * 3 + 3];
-            // Over what's there: a soft edge over an earlier clean.
-            let a = c + o[3] * (1.0 - c);
-            let mix = |k: usize| if a > 0.0 { (g[k] * c + o[k] * o[3] * (1.0 - c)) / a } else { g[k] };
-            from_rgba_into(&lf, [mix(0), mix(1), mix(2), a], &mut enc);
-            px[i * n..(i + 1) * n].copy_from_slice(&enc[..n]);
-        }
-    }
-    surf.write_region(region, &px);
-    surf.prune();
-    Ok(nid)
-}
-
-/// Everything the job needs, checked before it starts.
-struct Plan<O = AiOptions> {
-    layer: LayerId,
-    fmt: PixelFormat,
-    region: Rect,
-    layer_px: Vec<f32>,
-    rgb: Vec<f32>,
-    cover: Vec<f32>,
-    output: Output,
-    keep_active: bool,
-    opts: O,
-}
-
 fn enabled(s: &Session) -> std::result::Result<(), String> {
     if s.inpainter.is_none() {
         return Err(UNAVAILABLE.into());
@@ -608,6 +579,18 @@ fn plan(s: &Session, p: &Value) -> Result<Head> {
     }
     let opts = ai_options(s, p, ID, false)?;
     head_of(s, p, Output::New(CLEAN_LAYER.to_string()), opts.context_margin(), opts)
+}
+
+/// What a fill holds for each pixel of its region for the whole run: the hole's flag, the split
+/// tiles' "filled" flag and the plan's search for blobs ([`work`]: the pixels themselves are in
+/// blocks, a band at a time).
+const WORK_BYTES_PER_PIXEL: u64 = 3;
+
+/// The largest region a clean reads on this device: [`MAX_PIXELS`], less where a quarter of
+/// Memory Usage (what an AI run may take beside the pages and the model) can't hold its flags.
+fn max_pixels(s: &Session) -> u64 {
+    let budget = s.prefs().performance.history_budget_bytes() as u64 / 4;
+    MAX_PIXELS.min(budget / WORK_BYTES_PER_PIXEL)
 }
 
 /// The layer and the zone a clean works on, with what it reads around the selection.
@@ -633,14 +616,15 @@ fn head_of<O>(s: &Session, p: &Value, default_output: Output, margin: usize, opt
     }
     let region = context_region(sb, canvas, margin);
     let pixels = u64::from(region.width()) * u64::from(region.height());
-    if pixels > MAX_PIXELS {
-        return Err(bad(format!("the area is too large to clean at once ({pixels} pixels, at most {MAX_PIXELS}); select less")));
+    let most = max_pixels(s);
+    if pixels > most {
+        return Err(bad(format!("the area is too large to clean at once on this device ({pixels} pixels, at most {most}); select less")));
     }
     doc.layer(id).and_then(|l| l.surface()).ok_or(EngineError::NoLayer(id))?;
     Ok(Head { layer: id, region, output, keep_active, opts, doc: doc.clone() })
 }
 
-/// What [`plan`] checked on the page's thread; [`Head::read`] reads the pixels.
+/// What [`plan`] checked on the page's thread.
 struct Head<O = AiOptions> {
     layer: LayerId,
     region: Rect,
@@ -650,34 +634,130 @@ struct Head<O = AiOptions> {
     doc: std::sync::Arc<photocraft_doc::Document>,
 }
 
-impl<O: Send + 'static> Head<O> {
-    /// The region's layer pixels, their RGB and the selection's coverage (on the browser threads
-    /// build's pool, in two parts between frames in the single-threaded one: a large selection
-    /// takes a while on a phone).
-    fn read(self) -> Result<crate::jobs::Prep<Plan<O>>> {
-        let Head { layer: id, region, output, keep_active, opts, doc } = self;
-        let (w, h) = (region.width() as usize, region.height() as usize);
-        let surf = doc.layer(id).and_then(|l| l.surface()).ok_or(EngineError::NoLayer(id))?;
-        let sel = doc.selection.as_ref().ok_or_else(|| bad("make a selection around what to clean"))?;
-        let fmt = surf.format();
-        // What the job holds for each pixel of the region: the layer's own pixels and their RGB in
-        // floats, the selection's coverage three times over and the flags of the tiles' plan.
-        crate::text_mask_cmds::room_for((w * h) as u64 * (fmt.channels() as u64 * 4 + 12 + 12 + 4))?;
-        let layer_px = surf.read_region(region);
-        if layer_px.len() != w * h * fmt.channels() {
-            return Err(EngineError::Other("could not read the layer's pixels".into()));
-        }
+/// The result a clean writes into as it goes: a copy of the layer it lands on.
+pub(crate) type Out = std::sync::Arc<std::sync::Mutex<photocraft_raster::Surface>>;
+
+impl<O> Head<O> {
+    /// What a clean reads (the document as it was when the clean started) and where its result
+    /// goes: a copy of the layer (or of the layer of cleans, or a new one) that blocks of the
+    /// result are written into, in that layer's format.
+    fn parts(&self) -> Result<(DocSource, DocSink, Out)> {
+        let doc = &self.doc;
+        let surf = doc.layer(self.layer).and_then(|l| l.surface()).ok_or(EngineError::NoLayer(self.layer))?;
+        let source = DocSource { doc: doc.clone(), layer: self.layer, at: self.region, output: self.output.clone() };
+        let (sink, out) = match &self.output {
+            Output::Current => {
+                let out = std::sync::Arc::new(std::sync::Mutex::new(surf.clone()));
+                (DocSink { at: self.region, base: surf.clone(), out: out.clone(), over: false }, out)
+            }
+            output => clean_sink(doc, output, self.region),
+        };
+        Ok((source, sink, out))
+    }
+
+    /// [`Head::parts`] as the AI fill's paged region, its hole read now.
+    fn work(&self) -> Result<(Work, Out)> {
+        let (source, sink, out) = self.parts()?;
+        let r = self.region;
+        let (w, h) = (r.width() as usize, r.height() as usize);
+        let tile = photocraft_geom::TILE_SIZE;
+        let phase = (r.x0.rem_euclid(tile) as usize, r.y0.rem_euclid(tile) as usize);
+        Ok((Work::new(w, h, phase, Box::new(source), Box::new(sink)), out))
+    }
+}
+
+/// Where a clean of `at` on a layer of cleans (`output` new or single) writes: over the layer of
+/// cleans `doc` has (single), or a new layer's pixels.
+pub(crate) fn clean_sink(doc: &photocraft_doc::Document, output: &Output, at: Rect) -> (DocSink, Out) {
+    let existing = match output {
+        Output::Single(name) => clean_layer(doc, name).and_then(|id| doc.layer(id)).and_then(|l| l.surface()).cloned(),
+        _ => None,
+    };
+    let base = existing.unwrap_or_else(|| photocraft_raster::Surface::new(PixelFormat { alpha: true, ..doc.pixel_format() }));
+    let out = std::sync::Arc::new(std::sync::Mutex::new(base.clone()));
+    (DocSink { at, base, out: out.clone(), over: true }, out)
+}
+
+/// The surface a clean wrote, once nothing else holds it.
+pub(crate) fn take_out(out: Out) -> Result<photocraft_raster::Surface> {
+    std::sync::Arc::try_unwrap(out)
+        .map(|m| m.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner))
+        .map_err(|_| EngineError::Other("the clean's result is still in use".into()))
+}
+
+/// A region-local rectangle of the fill on the document.
+fn doc_rect(at: Rect, r: tiles::Rect) -> Rect {
+    Rect::from_xywh(at.x0 + r.x as i32, at.y0 + r.y as i32, r.w as u32, r.h as u32)
+}
+
+/// What a clean reads: the layer (under the cleans before it, with `output: single`) and the
+/// selection's coverage.
+pub(crate) struct DocSource {
+    doc: std::sync::Arc<photocraft_doc::Document>,
+    layer: LayerId,
+    at: Rect,
+    output: Output,
+}
+
+impl work::Source for DocSource {
+    fn cover(&mut self, r: tiles::Rect, out: &mut Vec<f32>) {
+        out.clear();
+        let Some(sel) = self.doc.selection.as_ref() else { return };
         let sc = sel.channels().max(1);
-        let mut cover: Vec<f32> = sel.read_region(region).chunks_exact(sc).map(|p| if p[0].is_finite() { p[0].clamp(0.0, 1.0) } else { 0.0 }).collect();
-        cover.resize(w * h, 0.0);
+        out.extend(sel.read_region(doc_rect(self.at, r)).chunks_exact(sc).map(|p| if p[0].is_finite() { p[0].clamp(0.0, 1.0) } else { 0.0 }));
+    }
+
+    fn rgb(&mut self, r: tiles::Rect, out: &mut Vec<f32>) {
+        out.clear();
+        let Some(surf) = self.doc.layer(self.layer).and_then(|l| l.surface()) else { return };
+        let a = doc_rect(self.at, r);
+        *out = to_rgb(&surf.format(), &surf.read_region(a));
+        under_cleans(out, &self.doc, a, &self.output);
+    }
+}
+
+/// Where a clean's blocks go: `out`, a copy of `base` (the layer as the clean started, or the
+/// layer of cleans) with the fill blended in where the selection covers. Each block is blended
+/// from `base`, so a block handed over again replaces the first.
+pub(crate) struct DocSink {
+    at: Rect,
+    base: photocraft_raster::Surface,
+    out: std::sync::Arc<std::sync::Mutex<photocraft_raster::Surface>>,
+    /// Over what the layer of cleans has (alpha = coverage), not into the layer's own pixels.
+    over: bool,
+}
+
+impl work::Sink for DocSink {
+    fn put(&mut self, r: tiles::Rect, rgb: &[f32], cover: &[f32]) -> Result<()> {
         if !cover.iter().any(|c| *c > 0.0) {
-            return Err(bad("the selection doesn't cover any pixel"));
+            return Ok(());
         }
-        Ok(crate::jobs::Prep::then(move |_| {
-            let mut rgb = to_rgb(&fmt, &layer_px);
-            under_cleans(&mut rgb, &doc, region, &output);
-            Ok(crate::jobs::Prep::Done(Plan { layer: id, fmt, region, layer_px, rgb, cover, output, keep_active, opts }))
-        }))
+        let a = doc_rect(self.at, r);
+        let fmt = self.base.format();
+        let n = fmt.channels();
+        let mut px = self.base.read_region(a);
+        px.resize(cover.len() * n, 0.0);
+        let mut enc = [0.0f32; 8];
+        for (i, &c) in cover.iter().enumerate() {
+            if c <= 0.0 {
+                continue;
+            }
+            let o = to_rgba(&fmt, &px[i * n..(i + 1) * n]);
+            let g = &rgb[i * 3..i * 3 + 3];
+            let v = if self.over {
+                // Over what's there: a soft edge over an earlier clean.
+                let al = c + o[3] * (1.0 - c);
+                let mix = |k: usize| if al > 0.0 { (g[k] * c + o[k] * o[3] * (1.0 - c)) / al } else { g[k] };
+                [mix(0), mix(1), mix(2), al]
+            } else {
+                let mix = |k: usize| o[k] + (g[k] - o[k]) * c;
+                [mix(0), mix(1), mix(2), o[3]]
+            };
+            from_rgba_into(&fmt, v, &mut enc);
+            px[i * n..(i + 1) * n].copy_from_slice(&enc[..n]);
+        }
+        self.out.lock().unwrap_or_else(std::sync::PoisonError::into_inner).write_region(a, &px);
+        Ok(())
     }
 }
 
@@ -693,6 +773,13 @@ fn inpaint_ai(s: &mut Session, p: &Value) -> Result<Value> {
     inpaint_ai_labelled(s, p, LABEL)
 }
 
+/// The clean's result: where it goes, what it wrote and how many pixels the selection covered.
+struct Cleaned<O = AiOptions> {
+    head: Head<O>,
+    out: photocraft_raster::Surface,
+    pixels: usize,
+}
+
 /// [`inpaint_ai`] as one undo step named `label` (Remove with AI on a selection).
 pub(crate) fn inpaint_ai_labelled(s: &mut Session, p: &Value, label: &'static str) -> Result<Value> {
     let head = plan(s, p)?;
@@ -702,69 +789,89 @@ pub(crate) fn inpaint_ai_labelled(s: &mut Session, p: &Value, label: &'static st
         s,
         label,
         true,
-        move |_ctx| head.read(),
-        move |ctx, mut plan: Plan, done| {
+        // The hole, read a band at a time (on the browser threads build's pool; the pixels come
+        // in blocks as the tiles need them).
+        move |_ctx| {
+            let (work, out) = head.work()?;
+            let pixels = work.hole().iter().filter(|h| **h).count();
+            if pixels == 0 {
+                return Err(bad("the selection doesn't cover any pixel"));
+            }
+            Ok(crate::jobs::Prep::Done((head, work, out, pixels)))
+        },
+        move |ctx, (head, work, out, pixels), done| {
             ctx.progress(0.0, label);
-            let (w, h) = (plan.region.width() as usize, plan.region.height() as usize);
-            let (rgb, cover, opts) = (std::mem::take(&mut plan.rgb), plan.cover.clone(), plan.opts.clone());
+            let opts = head.opts.clone();
             let svc2 = svc.clone();
             let started = web_time::Instant::now();
-            ai_fill_rgb_async(
+            ai_fill_async(
                 svc,
                 ctx.clone(),
-                rgb,
-                cover,
-                w,
-                h,
+                work,
                 opts,
                 Box::new(move |r| {
                     let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-                    done.finish(r.map(|(generated, run)| (plan, generated, svc2.device(), run, ms)))
+                    // The work and its sink are gone: the result is `out`'s alone.
+                    done.finish(r.and_then(|run| Ok((Cleaned { head, out: take_out(out)?, pixels }, svc2.device(), run, ms))))
                 }),
             );
         },
-        move |s, (plan, generated, dev, run, ms)| apply(s, label, plan, &generated, if dev.is_empty() { device } else { dev }, run, ms),
+        move |s, (c, dev, run, ms)| apply(s, label, c, if dev.is_empty() { device } else { dev }, run, ms),
     )
 }
 
-/// `generated` where the plan's selection covers, as one history step: the layer, how many pixels.
-fn write_result<O>(s: &mut Session, label: &str, plan: Plan<O>, generated: &[f32]) -> Result<(LayerId, usize, Rect)> {
-    let Plan { layer: id, fmt, region, layer_px, cover, output, keep_active, .. } = plan;
-    let n = fmt.channels();
-    let count = cover.iter().filter(|c| **c > 0.0).count();
+/// The tiles of `from` over `region` into `to` (both copies of one layer: the others are the same).
+pub(crate) fn put_region(to: &mut photocraft_raster::Surface, from: &photocraft_raster::Surface, region: Rect) {
+    to.put_tiles(region.tiles().filter_map(|c| from.tile(c).map(|t| (c, t.clone()))));
+}
+
+/// What a clean onto a layer of cleans wrote (`out`, from [`clean_sink`]) over `region`, into the
+/// layer of cleans (`output: single`, when `doc` has it) or on a new one above `id`. That layer.
+pub(crate) fn land_clean(doc: &mut photocraft_doc::Document, id: LayerId, output: &Output, out: photocraft_raster::Surface, region: Rect) -> Result<LayerId> {
+    let name = output.name().unwrap_or(CLEAN_LAYER).to_string();
+    if let Output::Single(_) = output
+        && let Some(l) = clean_layer(doc, &name)
+    {
+        let surf = crate::edit_menu_cmds::writable_surface(doc, l)?;
+        put_region(surf, &out, region);
+        surf.prune();
+        return Ok(l);
+    }
+    let layer_name = if matches!(output, Output::Single(_)) { name } else { doc.next_layer_name(&name) };
+    let mut l = Layer::raster(layer_name, out.format());
+    let surf = crate::pixels_mut(&mut l)?;
+    *surf = out;
+    surf.prune();
+    Ok(doc.insert_above(Some(id), l))
+}
+
+/// The clean as one history step: the layer it went into.
+fn write_result<O>(s: &mut Session, label: &str, c: Cleaned<O>) -> Result<LayerId> {
+    let Cleaned { head, out, .. } = c;
+    let Head { layer: id, region, output, keep_active, .. } = head;
     let layer = s.edit(label, |doc, active| {
-        if output != Output::Current {
-            let nid = write_clean(doc, id, &output, region, generated, &cover)?;
-            if !keep_active {
-                *active = Some(nid);
+        let nid = match &output {
+            Output::Current => {
+                put_region(crate::edit_menu_cmds::writable_surface(doc, id)?, &out, region);
+                return Ok(id);
             }
-            return Ok(nid);
+            output => land_clean(doc, id, output, out, region)?,
+        };
+        if !keep_active {
+            *active = Some(nid);
         }
-        let surf = crate::edit_menu_cmds::writable_surface(doc, id)?;
-        // In place: each pixel is read before it is written.
-        let mut out = layer_px;
-        let mut enc = [0.0f32; 8];
-        for (i, &c) in cover.iter().enumerate() {
-            if c > 0.0 {
-                let o = to_rgba(&fmt, &out[i * n..(i + 1) * n]);
-                let g = &generated[i * 3..i * 3 + 3];
-                let mix = |k: usize| o[k] + (g[k] - o[k]) * c;
-                from_rgba_into(&fmt, [mix(0), mix(1), mix(2), o[3]], &mut enc);
-                out[i * n..(i + 1) * n].copy_from_slice(&enc[..n]);
-            }
-        }
-        surf.write_region(region, &out);
-        Ok(id)
+        Ok(nid)
     })?;
     if let Some(st) = s.active_mut() {
         st.last_damage = Some(region);
     }
-    Ok((layer, count, region))
+    Ok(layer)
 }
 
-fn apply(s: &mut Session, label: &str, plan: Plan, generated: &[f32], device: String, run: FillRun, ms: u64) -> Result<Value> {
+fn apply(s: &mut Session, label: &str, c: Cleaned, device: String, run: FillRun, ms: u64) -> Result<Value> {
     let model = run.model;
-    let (layer, count, region) = write_result(s, label, plan, generated)?;
+    let (count, region) = (c.pixels, c.head.region);
+    let layer = write_result(s, label, c)?;
     Ok(json!({
         "layer": layer.0,
         "pixels": count,

@@ -47,6 +47,27 @@ fn local_max_is_the_brightest_around() {
     }
 }
 
+/// The vertical pass in blocks of `2r + 1` rows, a few rows a step, gives the brightest value in
+/// each pixel's column window whatever the radius and however the height falls on the blocks.
+#[test]
+fn the_column_pass_in_blocks_matches_the_brightest_around_a_step_at_a_time() {
+    for (w, h, r) in [(5, 1, 8), (7, 17, 1), (9, 40, 3), (4, 41, 6), (3, 100, 20)] {
+        let v: Vec<f32> = (0..w * h).map(|i| ((i * 7919) % 101) as f32 / 100.0).collect();
+        let mut rows = v.clone();
+        let mut c = ColsMax::new(w, h, r);
+        let mut steps = 0;
+        while !c.advance(&mut rows, 1) {
+            steps += 1;
+        }
+        assert!(steps > 0, "stepped");
+        for (i, got) in rows.iter().enumerate() {
+            let (x, y) = (i % w, i / w);
+            let want = (y.saturating_sub(r)..=(y + r).min(h - 1)).map(|yy| v[yy * w + x]).fold(f32::NEG_INFINITY, f32::max);
+            assert_eq!(*got, want, "{w}x{h} r {r} at {x},{y}");
+        }
+    }
+}
+
 #[test]
 fn a_letter_the_stroke_grazes_goes_whole_and_its_neighbours_and_the_outline_stay() {
     // A letter (40..52 × 40..70) the stroke covers only its left half of, a letter 14 px to the

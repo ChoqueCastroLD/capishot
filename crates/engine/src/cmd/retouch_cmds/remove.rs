@@ -20,7 +20,7 @@
 
 use std::sync::Arc;
 
-use super::content_aware_move::{Target, replace};
+use super::content_aware_move::{Target, replace, write_fill};
 use super::patch::coverage;
 use super::{
     Document, EngineError, LayerId, PixelFormat, Rect, Region, Result, SampleLayers, Session, Stroke, Value, alpha_index, bad, clamp_samples, composite_region,
@@ -281,11 +281,20 @@ fn prepare(doc: &mut Document, plan: &Plan, p: &Value) -> Result<Option<Prepared
     Ok(unless_empty(plan, Prepared { img, fmt, hole }))
 }
 
-/// Remove with AI's fill input: the window cut to what the model sees, where that is, its RGB and
-/// the hole's coverage (`None`: nothing to do, see [`unless_empty`]).
-type AiInput = Option<(Prepared, Rect, Vec<f32>, Vec<f32>)>;
+/// Remove with AI's hole over what the model sees, and the snapshot it reads (`None`: nothing to
+/// do, see [`unless_empty`]).
+type AiInput = Option<AiHole>;
 
-/// Rows of the window a part of [`prepare_ai`] reads or converts at a time.
+/// Remove with AI's hole, cut to what the model sees (`at`), and the snapshot the window was read
+/// on: the fill reads its pixels again from it a block at a time ([`InWindow`]).
+struct AiHole {
+    doc: Document,
+    fmt: photocraft_color::PixelFormat,
+    hole: Vec<bool>,
+    at: Rect,
+}
+
+/// Rows of the window a part of [`prepare_ai`] reads at a time.
 const BAND: i32 = 128;
 
 /// Stroke points a part of [`prepare_ai`] renders at a time.
@@ -294,23 +303,23 @@ const POINTS: usize = 2;
 /// Pixels a part of [`prepare_ai`]'s floods (closing loops, following ink) looks at, at most.
 const FLOOD: usize = 1 << 17;
 
-/// What Remove with AI's fill reads, as [`prepare`] plus the crop to what the model sees and its
-/// RGB input, in parts ([`crate::jobs::Prep`]: one per step between frames in the single-threaded
-/// browser build), each a pass over a band of the window or a share of a flood: none holds a
-/// phone's page for long.
-fn prepare_ai(doc: Arc<Document>, plan: Plan, p: Value, margin: usize) -> crate::jobs::Prep<AiInput> {
+/// What Remove with AI's fill reads, as [`prepare`] without keeping the window's pixels (only the
+/// ink's luminance and whether the layer has any), the hole cut to what the model sees, in parts
+/// ([`crate::jobs::Prep`]: one per step between frames in the single-threaded browser build), each
+/// a pass over a band of the window or a share of a flood: none holds a phone's page for long.
+fn prepare_ai(doc: Arc<Document>, plan: Arc<Plan>, p: Value, margin: usize) -> crate::jobs::Prep<AiInput> {
     let win = plan.window;
     let page = doc.bounds();
     let g = super::ink_mask::Grow::for_page(page.width().min(page.height()), brush_size(&plan));
     let a = AiPrep {
-        plan: Arc::new(plan),
+        plan,
         p,
         margin,
         doc,
         g,
         work: None,
         fmt: None,
-        img: Vec::new(),
+        blank: true,
         painted: Vec::new(),
         erased: Vec::new(),
         lum: Vec::new(),
@@ -318,7 +327,6 @@ fn prepare_ai(doc: Arc<Document>, plan: Plan, p: Value, margin: usize) -> crate:
         ink: Vec::new(),
         zone: Vec::new(),
         take: Vec::new(),
-        rgb: Vec::new(),
         stage: Stage::Read(win.y0),
     };
     crate::jobs::Prep::then(move |_| a.step())
@@ -331,8 +339,6 @@ enum Stage {
     /// Rendering stroke `.0` from its point `.1`.
     Stroke(usize, usize, Option<Box<photocraft_paint::retouch::StrokeCoverage>>),
     Enclose(Option<photocraft_algo::remove::CloseLoops>),
-    /// The luminance of the rows from this one (Remove with AI's ink).
-    Luminance(i32),
     /// The ink map's horizontal pass, then its vertical one.
     InkRows,
     InkCols(Box<super::ink_mask::ColsMax>),
@@ -348,9 +354,6 @@ enum Stage {
     /// The hole limited to the selection and checked, then cut to what the model sees.
     Limit(Vec<bool>),
     Cut(Vec<bool>),
-    Crop(Box<Prepared>, Rect),
-    /// The cut window's RGB, from its row `.1`.
-    Rgb(Box<Prepared>, i32, Rect),
 }
 
 struct AiPrep {
@@ -362,7 +365,8 @@ struct AiPrep {
     /// The snapshot read from (the target surface is resolved on it), from the first part.
     work: Option<Document>,
     fmt: Option<photocraft_color::PixelFormat>,
-    img: Vec<f32>,
+    /// The layer's own window is fully transparent so far ([`unless_empty`]).
+    blank: bool,
     painted: Vec<bool>,
     /// Where the strokes erased (empty when none does), kept out of the hole.
     erased: Vec<bool>,
@@ -371,7 +375,6 @@ struct AiPrep {
     ink: Vec<bool>,
     zone: Vec<bool>,
     take: Vec<bool>,
-    rgb: Vec<f32>,
     stage: Stage,
 }
 
@@ -393,7 +396,14 @@ impl AiPrep {
                 let band = Rect::new(win.x0, y, win.x1, (y + BAND).min(win.y1));
                 let (img, fmt) = read(work, &plan, &self.p, band)?;
                 self.fmt = Some(fmt);
-                self.img.extend_from_slice(&img.data);
+                // Only what the hole needs: the band's pixels are read again by the fill, a block
+                // at a time, instead of the whole window kept in floats.
+                self.blank &=
+                    !plan.all_layers && alpha_index(&fmt).is_some_and(|a| img.data.chunks_exact(img.ch).all(|px| px.get(a).is_none_or(|v| *v <= 0.0)));
+                if plan.ink {
+                    self.lum.reserve_exact((w * h).saturating_sub(self.lum.len()));
+                    self.lum.extend(super::ink_mask::luminance(&crate::ai_inpaint_cmds::to_rgb(&fmt, &img.data)));
+                }
                 if band.y1 >= win.y1 {
                     self.painted = vec![false; w * h];
                     self.erased = no_erasure(&plan);
@@ -431,14 +441,6 @@ impl AiPrep {
                     }
                 }
             }
-            Stage::Luminance(y) => {
-                let fmt = self.fmt.ok_or_else(not_read)?;
-                let (n, y1) = (fmt.channels().max(1), (y + BAND).min(win.y1));
-                let rows = |y: i32| (y - win.y0) as usize * w * n;
-                let band = self.img.get(rows(y)..rows(y1)).unwrap_or_default();
-                self.lum.extend(super::ink_mask::luminance(&crate::ai_inpaint_cmds::to_rgb(&fmt, band)));
-                if y1 >= win.y1 { Stage::InkRows } else { Stage::Luminance(y1) }
-            }
             Stage::InkRows => {
                 if super::ink_mask::applies(w, h, &self.lum, &self.painted) {
                     self.rows = super::ink_mask::ink_rows(w, h, &self.lum, g);
@@ -450,9 +452,8 @@ impl AiPrep {
                 }
             }
             Stage::InkCols(mut c) => {
-                if c.advance(&self.rows, BAND as usize * 2) {
-                    self.rows = Vec::new();
-                    self.ink = super::ink_mask::ink_cols_finish(&std::mem::take(&mut self.lum), *c);
+                if c.advance(&mut self.rows, BAND as usize * 2) {
+                    self.ink = super::ink_mask::ink_cols_finish(&std::mem::take(&mut self.lum), &std::mem::take(&mut self.rows));
                     Stage::Zone
                 } else {
                     Stage::InkCols(c)
@@ -484,24 +485,14 @@ impl AiPrep {
                 Stage::Cut(limit(&plan, work, unerase(grown, &std::mem::take(&mut self.erased)))?)
             }
             Stage::Cut(hole) => {
-                let (Some(work), Some(fmt)) = (self.work.take(), self.fmt) else { return Err(not_read()) };
-                let img = Region { rect: win, ch: fmt.channels(), data: std::mem::take(&mut self.img) };
-                let Some(prep) = unless_empty(&plan, Prepared { img, fmt, hole }) else { return Ok(Prep::Done(None)) };
+                let (Some(doc), Some(fmt)) = (self.work.take(), self.fmt) else { return Err(not_read()) };
+                if self.blank {
+                    return Ok(Prep::Done(None));
+                }
                 // What edit.inpaintAi would read for a selection of the hole's shape: the same
                 // context around it gives the same fill.
-                let cut = crate::ai_inpaint_cmds::context_region(hole_bounds(&prep.hole, win), work.bounds(), self.margin).intersect(&win);
-                Stage::Crop(Box::new(prep), cut)
-            }
-            Stage::Crop(prep, cut) => Stage::Rgb(Box::new(crop(*prep, win, cut)), cut.y0, cut),
-            Stage::Rgb(prep, y, cut) => {
-                let (n, cw, y1) = (prep.fmt.channels().max(1), cut.width() as usize, (y + BAND).min(cut.y1));
-                let rows = |y: i32| (y - cut.y0) as usize * cw * n;
-                self.rgb.extend(crate::ai_inpaint_cmds::to_rgb(&prep.fmt, prep.img.data.get(rows(y)..rows(y1)).unwrap_or_default()));
-                if y1 >= cut.y1 {
-                    let cover: Vec<f32> = prep.hole.iter().map(|m| if *m { 1.0 } else { 0.0 }).collect();
-                    return Ok(Prep::Done(Some((*prep, cut, std::mem::take(&mut self.rgb), cover))));
-                }
-                Stage::Rgb(prep, y1, cut)
+                let at = crate::ai_inpaint_cmds::context_region(hole_bounds(&hole, win), doc.bounds(), self.margin).intersect(&win);
+                return Ok(Prep::Done(Some(AiHole { doc, fmt, hole: crop_hole(hole, win, at), at })));
             }
         };
         Ok(Prep::then(move |_| self.step()))
@@ -515,7 +506,7 @@ impl AiPrep {
     /// After the strokes and what they enclose: the ink's luminance (Remove with AI) or the plain
     /// dilation.
     fn after_enclose(&self) -> Stage {
-        if self.plan.ink { Stage::Luminance(self.plan.window.y0) } else { Stage::Grow }
+        if self.plan.ink { Stage::InkRows } else { Stage::Grow }
     }
 }
 
@@ -551,24 +542,24 @@ fn hole_bounds(hole: &[bool], win: Rect) -> Rect {
     Rect::new(win.x0 + x0 as i32, win.y0 + y0 as i32, win.x0 + x1 as i32, win.y0 + y1 as i32)
 }
 
-/// `prep` (over `win`) cut to `rect`, which lies within `win`.
-fn crop(prep: Prepared, win: Rect, rect: Rect) -> Prepared {
+/// `hole` (over `win`) cut to `rect`, which lies within `win`, in place.
+fn crop_hole(mut hole: Vec<bool>, win: Rect, rect: Rect) -> Vec<bool> {
     let rect = rect.intersect(&win);
     if rect == win || rect.is_empty() {
-        return prep;
+        return hole;
     }
-    let Prepared { img, fmt, hole } = prep;
-    let (ww, ch) = (win.width() as usize, img.ch);
+    let ww = win.width() as usize;
     let (dx, dy) = ((rect.x0 - win.x0) as usize, (rect.y0 - win.y0) as usize);
     let (w, h) = (rect.width() as usize, rect.height() as usize);
-    let mut data = Vec::with_capacity(w * h * ch);
-    let mut cut = Vec::with_capacity(w * h);
-    for y in dy..dy + h {
-        let row = y * ww + dx;
-        data.extend_from_slice(img.data.get(row * ch..(row + w) * ch).unwrap_or_default());
-        cut.extend_from_slice(hole.get(row..row + w).unwrap_or_default());
+    // Row `y` of the cut starts at or after where it goes: moving rows in order never overwrites
+    // one still to move.
+    for y in 0..h {
+        let from = (y + dy) * ww + dx;
+        hole.copy_within(from..from + w, y * w);
     }
-    Prepared { img: Region { rect, ch, data }, fmt, hole: cut }
+    hole.truncate(w * h);
+    hole.shrink_to_fit();
+    hole
 }
 
 /// The filled window and the hole it fills, by patch-based completion on `doc` (a snapshot).
@@ -590,7 +581,17 @@ fn run_remove(doc: &mut Document, plan: &Plan, p: &Value, ctx: &crate::jobs::Job
 fn fill_to_new_layer(doc: &mut Document, id: Option<LayerId>, out: &Region, hole: &[bool]) -> Result<(Rect, LayerId)> {
     let base = doc.pixel_format();
     let fmt = PixelFormat::new(base.mode, base.sample, true);
-    let n = fmt.channels();
+    let data = new_layer_pixels(fmt.channels(), out, hole)?;
+    let mut l = Layer::raster(doc.next_layer_name("Layer"), fmt);
+    crate::pixels_mut(&mut l)?.write_region(out.rect, &data);
+    // Above the sampled layer and in its clipping mask, like Layer via Copy.
+    let nid = crate::layer_place::insert_new(doc, id, l, crate::layer_place::Place::Above);
+    Ok((out.rect, nid))
+}
+
+/// The pixels of a new layer (`n` channels, alpha last) holding `out` where `hole` is set (opaque
+/// where `out` has no alpha), transparent elsewhere.
+fn new_layer_pixels(n: usize, out: &Region, hole: &[bool]) -> Result<Vec<f32>> {
     let colours = n.saturating_sub(1);
     if out.ch != n && out.ch != colours {
         return Err(EngineError::Other("internal error: the fill's channels don't match the document".into()));
@@ -607,73 +608,113 @@ fn fill_to_new_layer(doc: &mut Document, id: Option<LayerId>, out: &Region, hole
             *a = if out.ch == n { src.last().copied().unwrap_or(1.0) } else { 1.0 };
         }
     }
-    let mut l = Layer::raster(doc.next_layer_name("Layer"), fmt);
-    crate::pixels_mut(&mut l)?.write_region(out.rect, &data);
-    // Above the sampled layer and in its clipping mask, like Layer via Copy.
-    let nid = crate::layer_place::insert_new(doc, id, l, crate::layer_place::Place::Above);
-    Ok((out.rect, nid))
+    Ok(data)
 }
 
-/// The window with the AI's RGB in the hole (alpha kept), in the layer's format, a band of rows
-/// at a time ([`Encoding::band`]).
-struct Encoding {
-    prep: Prepared,
-    rect: Rect,
-    generated: Vec<f32>,
-    data: Vec<f32>,
-    /// The next pixel.
-    at: usize,
+/// Where Remove with AI's result goes.
+enum AiOut {
+    /// Into the target, as [`replace`] writes a fill (`lock`: its transparency is locked).
+    Into { lock: bool },
+    /// On a new layer above it, only the hole ([`fill_to_new_layer`]).
+    NewLayer,
+    /// On a layer of cleans (`output: new | single`), as `edit.inpaintAi` writes one.
+    Clean(crate::ai_inpaint_cmds::DocSink),
 }
 
-impl Encoding {
-    fn new(prep: Prepared, rect: Rect, generated: Vec<f32>) -> Result<Self> {
-        let n = prep.fmt.channels().max(1);
-        if generated.len() != prep.hole.len() * 3 || prep.img.data.len() != prep.hole.len() * n {
-            return Err(EngineError::Other("AI fill: window size mismatch".into()));
+/// Remove with AI's fill as it reads and writes: the hole, the pixels the model sees read from
+/// the snapshot a block at a time, and the result in the layer's format, written block by block
+/// into `out` (a copy of the target, or the new layer).
+struct Window {
+    hole: AiHole,
+    plan: Arc<Plan>,
+    p: Value,
+    out: crate::ai_inpaint_cmds::Out,
+    mode: AiOut,
+}
+
+/// The [`Window`] both reads from (a [`Source`](crate::ai_inpaint_cmds::work::Source)) and writes
+/// into (a [`Sink`](crate::ai_inpaint_cmds::work::Sink)).
+#[derive(Clone)]
+struct InWindow(Arc<std::sync::Mutex<Window>>);
+
+impl InWindow {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Window> {
+        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+/// `r` (within the cut at `at`) on the page.
+fn page_rect(at: Rect, r: photocraft_ai_lama::tiles::Rect) -> Rect {
+    Rect::from_xywh(at.x0 + r.x as i32, at.y0 + r.y as i32, r.w as u32, r.h as u32)
+}
+
+impl Window {
+    /// The window's pixels over `r` in the target's format, read on the snapshot.
+    fn read(&mut self, r: Rect) -> Result<Region> {
+        read(&mut self.hole.doc, &self.plan, &self.p, r).map(|(img, _)| img)
+    }
+}
+
+impl crate::ai_inpaint_cmds::work::Source for InWindow {
+    fn cover(&mut self, r: photocraft_ai_lama::tiles::Rect, out: &mut Vec<f32>) {
+        let st = self.lock();
+        let w = st.hole.at.width() as usize;
+        out.clear();
+        for y in r.y..r.y + r.h {
+            out.extend(st.hole.hole[y * w + r.x..y * w + r.x + r.w].iter().map(|m| if *m { 1.0 } else { 0.0 }));
         }
-        let data = prep.img.data.clone();
-        Ok(Self { prep, rect, generated, data, at: 0 })
     }
 
-    /// Encodes at most `pixels` more; true once done.
-    fn band(&mut self, pixels: usize) -> bool {
-        let fmt = self.prep.fmt;
-        let n = fmt.channels().max(1);
-        let end = self.at.saturating_add(pixels).min(self.prep.hole.len());
+    fn rgb(&mut self, r: photocraft_ai_lama::tiles::Rect, out: &mut Vec<f32>) {
+        let mut st = self.lock();
+        let (at, fmt) = (st.hole.at, st.hole.fmt);
+        out.clear();
+        if let Ok(img) = st.read(page_rect(at, r)) {
+            *out = crate::ai_inpaint_cmds::to_rgb(&fmt, &img.data);
+        }
+    }
+}
+
+impl crate::ai_inpaint_cmds::work::Sink for InWindow {
+    fn put(&mut self, r: photocraft_ai_lama::tiles::Rect, rgb: &[f32], cover: &[f32]) -> Result<()> {
+        if !cover.iter().any(|c| *c > 0.0) {
+            return Ok(());
+        }
+        let mut st = self.lock();
+        let (at, fmt) = (st.hole.at, st.hole.fmt);
+        let rect = page_rect(at, r);
+        if let AiOut::Clean(sink) = &mut st.mode {
+            return sink.put(r, rgb, cover);
+        }
+        // The fill in the layer's format: the AI's RGB with the window's own alpha.
+        let mut src = st.read(rect)?;
+        let n = src.ch;
         let mut enc = [0.0f32; 8];
-        for i in self.at..end {
-            if self.prep.hole[i] {
-                let orig = to_rgba(&fmt, &self.prep.img.data[i * n..(i + 1) * n]);
-                let g = &self.generated[i * 3..i * 3 + 3];
-                from_rgba_into(&fmt, [g[0], g[1], g[2], orig[3]], &mut enc);
-                self.data[i * n..(i + 1) * n].copy_from_slice(&enc[..n]);
+        for (j, px) in src.data.chunks_exact_mut(n).enumerate() {
+            if cover[j] > 0.0 {
+                let g = &rgb[j * 3..j * 3 + 3];
+                from_rgba_into(&fmt, [g[0], g[1], g[2], to_rgba(&fmt, px)[3]], &mut enc);
+                px.copy_from_slice(&enc[..n]);
+                // The fill's seam blending can step slightly past the storable range.
+                clamp_samples(&fmt, px);
             }
         }
-        self.at = end;
-        self.at >= self.prep.hole.len()
-    }
-
-    fn finish(mut self) -> (Region, Vec<bool>) {
-        clamp_samples(&self.prep.fmt, &mut self.data);
-        (Region { rect: self.rect, ch: self.prep.img.ch, data: self.data }, self.prep.hole)
-    }
-}
-
-/// Who gets an [`Encoding`]'s result.
-type Encoded = Box<dyn FnOnce(Result<(Region, Vec<bool>)>) + Send>;
-
-/// An [`Encoding`] off the page's thread, a band per [`crate::jobs::on_pool`] call (each its own
-/// step between frames in the single-threaded browser build); `done` gets the result.
-fn encode_ai_off_frame(e: Encoding, done: Encoded) {
-    crate::jobs::on_pool(move || {
-        let mut e = e;
-        let band = (e.rect.width() as usize).saturating_mul(BAND as usize);
-        if e.band(band) {
-            done(Ok(e.finish()));
-        } else {
-            encode_ai_off_frame(e, done);
+        let hole: Vec<bool> = cover.iter().map(|c| *c > 0.0).collect();
+        let mut out = st.out.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        match st.mode {
+            AiOut::Into { lock } => {
+                let mut px = out.read_region(rect);
+                write_fill(&mut px, &src, &hole, alpha_index(&fmt).filter(|_| lock))?;
+                out.write_region(rect, &px);
+            }
+            AiOut::NewLayer => {
+                let px = new_layer_pixels(out.format().channels(), &src, &hole)?;
+                out.write_region(rect, &px);
+            }
+            AiOut::Clean(_) => {}
         }
-    });
+        Ok(())
+    }
 }
 
 /// What an AI fill ran on, for the reply (`device`, `model`, `lite`, `cpu`, `fellBack`, `ms`), as
@@ -707,34 +748,14 @@ impl AiRun {
     }
 }
 
-/// A filled window as interleaved RGB, and the hole as coverage.
-fn fill_as_rgb(doc: &Document, out: &Region, hole: &[bool]) -> (Vec<f32>, Vec<f32>) {
-    let base = doc.pixel_format();
-    let with_alpha = PixelFormat::new(base.mode, base.sample, true);
-    let fmt = if out.ch == with_alpha.channels() { with_alpha } else { PixelFormat::new(base.mode, base.sample, false) };
-    let mut rgb = Vec::with_capacity(hole.len() * 3);
-    for p in out.data.chunks_exact(out.ch.max(1)) {
-        rgb.extend_from_slice(&to_rgba(&fmt, p)[..3]);
-    }
-    (rgb, hole.iter().map(|h| if *h { 1.0 } else { 0.0 }).collect())
-}
-
 /// Applies a filled window to the live document as one undo step (into the target, or onto a new
 /// layer above it with `new_layer`).
 fn apply_fill(s: &mut Session, label: &'static str, id: Option<LayerId>, p: &Value, new_layer: bool, filled: Option<(Region, Vec<bool>)>) -> Result<Value> {
     let Some((out, hole)) = filled else { return Ok(json!({"changed": false})) };
     if new_layer {
         let keep_active = p.get("keepActive").and_then(Value::as_bool).unwrap_or(false);
-        let output = crate::ai_inpaint_cmds::Output::parse(p, crate::ai_inpaint_cmds::Output::Current)?;
         let (damage, nid) = s.edit(label, |doc, active| {
-            // Remove with AI's layers of cleans; the Remove tool's is a plain new layer.
-            let r = match (&output, id) {
-                (crate::ai_inpaint_cmds::Output::Current, _) | (_, None) => fill_to_new_layer(doc, id, &out, &hole)?,
-                (output, Some(id)) => {
-                    let (rgb, cover) = fill_as_rgb(doc, &out, &hole);
-                    (out.rect, crate::ai_inpaint_cmds::write_clean(doc, id, output, out.rect, &rgb, &cover)?)
-                }
-            };
+            let r = fill_to_new_layer(doc, id, &out, &hole)?;
             if !keep_active {
                 *active = Some(r.1);
             }
@@ -746,6 +767,62 @@ fn apply_fill(s: &mut Session, label: &'static str, id: Option<LayerId>, p: &Val
     let damage = s.edit(label, |doc, _| replace(doc, Target { id, all_layers: false }, p, &out, &hole))?;
     s.hint_damage(damage);
     Ok(json!({ "damage": damage_json(damage) }))
+}
+
+/// Where Remove with AI's result goes, and a copy of what it writes into: the target, a new layer
+/// above it, or (Remove with AI's `output: new | single`) a layer of cleans.
+fn ai_out(hole: &mut AiHole, id: Option<LayerId>, p: &Value, new_layer: bool) -> Result<(AiOut, crate::ai_inpaint_cmds::Out)> {
+    use crate::ai_inpaint_cmds::Output;
+    let shared = |s: photocraft_raster::Surface| Arc::new(std::sync::Mutex::new(s));
+    if !new_layer {
+        let (surf, lock) = crate::channel_cmds::target_surface(&mut hole.doc, id, p)?;
+        return Ok((AiOut::Into { lock }, shared(surf.clone())));
+    }
+    match (Output::parse(p, Output::Current)?, id) {
+        (Output::Current, _) | (_, None) => {
+            let base = hole.doc.pixel_format();
+            Ok((AiOut::NewLayer, shared(photocraft_raster::Surface::new(PixelFormat::new(base.mode, base.sample, true)))))
+        }
+        (output, Some(_)) => {
+            let (sink, out) = crate::ai_inpaint_cmds::clean_sink(&hole.doc, &output, hole.at);
+            Ok((AiOut::Clean(sink), out))
+        }
+    }
+}
+
+/// Remove with AI's result as one undo step: what it wrote over `at` into the target, a new layer
+/// or a layer of cleans.
+fn apply_ai(s: &mut Session, label: &'static str, id: Option<LayerId>, p: &Value, done: Option<(AiOut, photocraft_raster::Surface, Rect)>) -> Result<Value> {
+    let Some((mode, out, at)) = done else { return Ok(json!({"changed": false})) };
+    if let AiOut::Into { .. } = mode {
+        s.edit(label, |doc, _| {
+            let (surf, _) = crate::channel_cmds::target_surface(doc, id, p)?;
+            crate::ai_inpaint_cmds::put_region(surf, &out, at);
+            Ok(())
+        })?;
+        s.hint_damage(at);
+        return Ok(json!({ "damage": damage_json(at) }));
+    }
+    let keep_active = p.get("keepActive").and_then(Value::as_bool).unwrap_or(false);
+    let nid = s.edit(label, |doc, active| {
+        let nid = match (&mode, id) {
+            (AiOut::Clean(_), Some(id)) => {
+                crate::ai_inpaint_cmds::land_clean(doc, id, &crate::ai_inpaint_cmds::Output::parse(p, crate::ai_inpaint_cmds::Output::Current)?, out, at)?
+            }
+            _ => {
+                let mut l = Layer::raster(doc.next_layer_name("Layer"), out.format());
+                *crate::pixels_mut(&mut l)? = out;
+                // Above the sampled layer and in its clipping mask, like Layer via Copy.
+                crate::layer_place::insert_new(doc, id, l, crate::layer_place::Place::Above)
+            }
+        };
+        if !keep_active {
+            *active = Some(nid);
+        }
+        Ok(nid)
+    })?;
+    s.hint_damage(at);
+    Ok(json!({ "damage": damage_json(at), "layer": nid.0 }))
 }
 
 pub(super) fn remove(s: &mut Session, p: &Value) -> Result<Value> {
@@ -773,6 +850,9 @@ fn run_labelled(s: &mut Session, p: &Value, label: &'static str, ink: bool) -> R
         let device = svc.device();
         let margin = opts.context_margin();
         let pp = p.clone();
+        let wp = p.clone();
+        let plan = Arc::new(plan);
+        let wplan = plan.clone();
         return crate::jobs::run_async_prepared(
             s,
             label,
@@ -784,34 +864,42 @@ fn run_labelled(s: &mut Session, p: &Value, label: &'static str, ink: bool) -> R
             // The AI answers asynchronously (in the browser from the AI Web Worker, which can't
             // be waited for on the page's threads): fill it tile by tile through the inpainter,
             // and apply when the last tile is back.
-            move |ctx, prepared, done| {
-                let Some((prep, win, rgb, cover)) = prepared else { return done.finish(Ok((None, None))) };
-                let (w, h) = (win.width() as usize, win.height() as usize);
+            move |ctx, prepared: AiInput, done| {
+                let Some(mut hole) = prepared else { return done.finish(Ok((None, None))) };
+                let (mode, out) = match ai_out(&mut hole, id, &wp, new_layer) {
+                    Ok(o) => o,
+                    Err(e) => return done.finish(Err(e)),
+                };
+                let at = hole.at;
+                let (w, h) = (at.width() as usize, at.height() as usize);
                 ctx.progress(0.0, label);
                 // What ran, as edit.inpaintAi reports it: the device read after the run (a GPU
                 // failure mid-run falls back to the CPU), the model and the time it took.
                 let started = web_time::Instant::now();
                 let svc2 = svc.clone();
-                crate::ai_inpaint_cmds::ai_fill_rgb_async(
+                let window = InWindow(Arc::new(std::sync::Mutex::new(Window { hole, plan: wplan, p: wp, out: out.clone(), mode })));
+                let tile = photocraft_geom::TILE_SIZE;
+                let phase = (at.x0.rem_euclid(tile) as usize, at.y0.rem_euclid(tile) as usize);
+                let work = crate::ai_inpaint_cmds::work::Work::new(w, h, phase, Box::new(window.clone()), Box::new(window.clone()));
+                crate::ai_inpaint_cmds::ai_fill_async(
                     svc,
                     ctx.clone(),
-                    rgb,
-                    cover,
-                    w,
-                    h,
+                    work,
                     opts,
                     Box::new(move |r| {
-                        let ran = r.as_ref().map(|(_, run)| AiRun::new(&svc2.device(), &device, *run, started)).ok();
-                        // Back into the layer's format off the page's thread too.
-                        match r.and_then(|(generated, _)| Encoding::new(prep, win, generated)) {
-                            Ok(e) => encode_ai_off_frame(e, Box::new(move |f| done.finish(f.map(|f| (Some(f), ran))))),
-                            Err(e) => done.finish(Err(e)),
-                        }
+                        let ran = r.as_ref().map(|run| AiRun::new(&svc2.device(), &device, *run, started)).ok();
+                        let filled = r.and_then(|_| {
+                            let st = Arc::try_unwrap(window.0).map_err(|_| EngineError::Other("AI fill: the window is still in use".into()))?;
+                            let Window { mode, out: written, .. } = st.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner);
+                            drop(out);
+                            Ok((Some((mode, crate::ai_inpaint_cmds::take_out(written)?, at)), ran))
+                        });
+                        done.finish(filled);
                     }),
                 );
             },
-            move |s, (filled, ran): (Option<(Region, Vec<bool>)>, Option<AiRun>)| {
-                let mut v = apply_fill(s, label, id, &p, new_layer, filled)?;
+            move |s, (done, ran): (Option<(AiOut, photocraft_raster::Surface, Rect)>, Option<AiRun>)| {
+                let mut v = apply_ai(s, label, id, &p, done)?;
                 if let (Some(o), Some(ran)) = (v.as_object_mut(), ran) {
                     ran.report(o);
                 }

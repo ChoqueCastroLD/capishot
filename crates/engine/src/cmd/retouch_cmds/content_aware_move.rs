@@ -333,10 +333,18 @@ pub(super) fn read(doc: &mut Document, t: Target, p: &Value, rect: Rect) -> Resu
 /// they are. Returns the written rectangle. Shared with the Remove Tool.
 pub(super) fn replace(doc: &mut Document, t: Target, p: &Value, out: &Region, mask: &[bool]) -> Result<Rect> {
     let (surf, lock) = crate::channel_cmds::target_surface(doc, t.id, p)?;
-    let fmt = surf.format();
-    let a = alpha_index(&fmt);
+    let a = alpha_index(&surf.format()).filter(|_| lock);
     let rect = out.rect;
     let mut px = surf.read_region(rect);
+    write_fill(&mut px, out, mask, a)?;
+    surf.write_region(rect, &px);
+    Ok(rect)
+}
+
+/// `out`'s pixels where `mask` is set, into `px` (the target's pixels over `out.rect`). With
+/// `locked_alpha` (the channel of a layer whose transparency is locked) only where `px` has any
+/// alpha, and its alpha stays.
+pub(super) fn write_fill(px: &mut [f32], out: &Region, mask: &[bool], locked_alpha: Option<usize>) -> Result<()> {
     let n = out.ch;
     if px.len() != out.data.len() || mask.len() * n != px.len() {
         return Err(EngineError::Other("internal error: fill buffers disagree in size".into()));
@@ -345,7 +353,7 @@ pub(super) fn replace(doc: &mut Document, t: Target, p: &Value, out: &Region, ma
         if !*m {
             continue;
         }
-        match a.filter(|_| lock) {
+        match locked_alpha {
             Some(ai) => {
                 if dst.get(ai).is_some_and(|v| *v > 0.0) {
                     for (c, (d, s)) in dst.iter_mut().zip(src).enumerate() {
@@ -358,8 +366,7 @@ pub(super) fn replace(doc: &mut Document, t: Target, p: &Value, out: &Region, ma
             None => dst.copy_from_slice(src),
         }
     }
-    surf.write_region(rect, &px);
-    Ok(rect)
+    Ok(())
 }
 
 /// Selection coverage over `rect` as a mask (set wherever it is above zero).

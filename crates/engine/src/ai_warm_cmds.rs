@@ -6,7 +6,8 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 
-use crate::ai_inpaint_cmds::{ai_fill_rgb_async, ai_options, ready_inpainter};
+use crate::ai_inpaint_cmds::work::{Buffers, Discard, Work};
+use crate::ai_inpaint_cmds::{ai_fill_async, ai_options, ready_inpainter};
 use crate::cmd::CommandSpec;
 use crate::{Result, Session};
 
@@ -34,18 +35,16 @@ fn warm(s: &mut Session, p: &Value) -> Result<Value> {
                 .collect();
             let started = web_time::Instant::now();
             let device = Arc::clone(&svc);
-            ai_fill_rgb_async(
+            let work = Work::new(SIDE, SIDE, (0, 0), Box::new(Buffers { rgb, cover, w: SIDE }), Box::new(Discard));
+            ai_fill_async(
                 svc,
                 ctx.clone(),
-                rgb,
-                cover,
-                SIDE,
-                SIDE,
+                work,
                 opts,
                 Box::new(move |r| {
                     let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
                     let device = device.device();
-                    done.finish(r.map(|(_, run)| json!({
+                    done.finish(r.map(|run| json!({
                         "model": run.model.id,
                         // `device` too: `CAPISHOT_AI_DEVICE=cpu` forces the CPU without the request knowing.
                         "cpu": run.cpu || device == "CPU",

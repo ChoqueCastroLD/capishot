@@ -328,15 +328,21 @@ fn in_place_tiles_match_tiles_filled_from_the_original() {
     s.execute("select.rect", json!({"x": 90, "y": 22, "width": 30, "height": 20, "mode": "add"})).unwrap();
     let id = active_id(&s);
     let opts = json!({"output": "current", "maxSide": 64, "margin": 24});
-    let p = plan(&s, &opts).unwrap().read().unwrap().finish(&crate::jobs::JobCtx::default()).unwrap();
-    let (w, h) = (p.region.width() as usize, p.region.height() as usize);
-    let t = tiles::plan(&p.cover, w, h, &p.opts.tiles).unwrap();
+    let head = plan(&s, &opts).unwrap();
+    let region = head.region;
+    let (w, h) = (region.width() as usize, region.height() as usize);
+    let (mut source, _, _) = head.parts().unwrap();
+    let all = tiles::Rect { x: 0, y: 0, w, h };
+    let (mut rgb, mut cover) = (Vec::new(), Vec::new());
+    work::Source::rgb(&mut source, all, &mut rgb);
+    work::Source::cover(&mut source, all, &mut cover);
+    let t = tiles::plan(&cover, w, h, &head.opts.tiles).unwrap();
     assert!(t.len() >= 2, "{} tiles", t.len());
     assert!(t.iter().any(|a| t.iter().any(|b| a != b && a.rect.x < b.core.x + b.core.w && b.core.x < a.rect.x + a.rect.w)), "contexts overlap other holes");
-    let binary: Vec<f32> = p.cover.iter().map(|c| if *c > 0.0 { 1.0 } else { 0.0 }).collect();
-    let mut want = p.rgb.clone();
+    let binary: Vec<f32> = cover.iter().map(|c| if *c > 0.0 { 1.0 } else { 0.0 }).collect();
+    let mut want = rgb.clone();
     for tile in &t {
-        let input = tiles::extract(&p.rgb, &p.cover, w, h, tile).unwrap();
+        let input = tiles::extract(&rgb, &cover, w, h, tile).unwrap();
         let out = Arc::new(std::sync::Mutex::new(None));
         let sink = out.clone();
         struct NoHooks;
@@ -353,7 +359,7 @@ fn in_place_tiles_match_tiles_filled_from_the_original() {
     let mut s = with_fake(s, FakeInpainter::default());
     s.execute(ID, opts).unwrap();
     let surf = s.active().unwrap().doc.layer(id).unwrap().surface().unwrap();
-    let got = to_rgb(&surf.format(), &surf.read_region(p.region));
+    let got = to_rgb(&surf.format(), &surf.read_region(region));
     let worst = got.iter().zip(&want).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
     assert!(worst <= 1.0 / 255.0 + 1e-4, "largest difference {worst}");
 }

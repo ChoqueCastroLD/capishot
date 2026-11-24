@@ -5,7 +5,8 @@
 use photocraft_algo::content_aware::{FillOptions, color_level, fill, rotation_level};
 use serde_json::{Value, json};
 
-use super::{Output, Plan, bad, head_of, write_result};
+use super::work::{Sink, Source};
+use super::{Cleaned, Output, bad, head_of, take_out, write_result};
 use crate::commands::CommandSpec;
 use crate::jobs::JobCtx;
 use crate::{Result, Session};
@@ -110,10 +111,8 @@ fn ground(b: &Blob, rgb: &[f32], cover: &[f32], w: usize, h: usize) -> Option<[f
 }
 
 /// What goes where the selection covers (interleaved RGB of the plan's region).
-fn generate(plan: &Plan<()>, method: Method, ctx: &JobCtx) -> Result<Vec<f32>> {
-    let (w, h) = (plan.region.width() as usize, plan.region.height() as usize);
-    let (rgb, cover) = (&plan.rgb, &plan.cover);
-    let mut out = rgb.clone();
+fn generate(rgb: &[f32], cover: &[f32], w: usize, h: usize, method: Method, ctx: &JobCtx) -> Result<Vec<f32>> {
+    let mut out = rgb.to_vec();
     let found = blobs(cover, w, h);
     let total = found.len().max(1) as f32;
     for (n, b) in found.iter().enumerate() {
@@ -183,21 +182,38 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
         s,
         LABEL,
         true,
-        move |_ctx| head.read(),
-        move |ctx, plan: Plan<()>, done| {
-            ctx.progress(0.0, LABEL);
-            let r = generate(&plan, method, ctx);
-            done.finish(r.map(|generated| (plan, generated)));
-        },
-        move |s, (plan, generated): (Plan<()>, Vec<f32>)| {
-            let (layer, count, region) = write_result(s, LABEL, plan, &generated)?;
-            if let Some(st) = s.active_mut() {
-                st.last_damage = Some(region);
+        // The region's pixels and the selection's coverage.
+        move |_ctx| {
+            let (mut source, sink, out) = head.parts()?;
+            let (w, h) = (head.region.width() as usize, head.region.height() as usize);
+            let all = photocraft_ai_lama::tiles::Rect { x: 0, y: 0, w, h };
+            let (mut rgb, mut cover) = (Vec::new(), Vec::new());
+            source.rgb(all, &mut rgb);
+            source.cover(all, &mut cover);
+            if !cover.iter().any(|c| *c > 0.0) {
+                return Err(bad("the selection doesn't cover any pixel"));
             }
+            Ok(crate::jobs::Prep::Done((head, rgb, cover, sink, out)))
+        },
+        move |ctx, (head, rgb, cover, mut sink, out): Read, done| {
+            ctx.progress(0.0, LABEL);
+            let (w, h) = (head.region.width() as usize, head.region.height() as usize);
+            let all = photocraft_ai_lama::tiles::Rect { x: 0, y: 0, w, h };
+            let r = generate(&rgb, &cover, w, h, method, ctx).and_then(|generated| sink.put(all, &generated, &cover));
+            drop(sink);
+            let pixels = cover.iter().filter(|c| **c > 0.0).count();
+            done.finish(r.and_then(|()| Ok(Cleaned { head, out: take_out(out)?, pixels })));
+        },
+        move |s, c: Cleaned<()>| {
+            let (count, region) = (c.pixels, c.head.region);
+            let layer = write_result(s, LABEL, c)?;
             Ok(json!({"layer": layer.0, "pixels": count, "region": [region.x0, region.y0, region.width(), region.height()]}))
         },
     )
 }
+
+/// What a quick clean read: where it goes, the region's RGB and coverage, and where it writes.
+type Read = (super::Head<()>, Vec<f32>, Vec<f32>, super::DocSink, super::Out);
 
 pub(super) fn spec() -> CommandSpec {
     CommandSpec {

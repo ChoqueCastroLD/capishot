@@ -48,6 +48,11 @@ impl Rect {
     fn contains(&self, x: usize, y: usize) -> bool {
         x >= self.x && x < self.right() && y >= self.y && y < self.bottom()
     }
+    /// Where `self` and `o` meet (empty: zero size at `self`'s corner).
+    fn intersect(&self, o: &Rect) -> Rect {
+        let (x, y) = (self.x.max(o.x), self.y.max(o.y));
+        Rect { x, y, w: self.right().min(o.right()).saturating_sub(x), h: self.bottom().min(o.bottom()).saturating_sub(y) }
+    }
 }
 
 /// How a tile maps its crop to the working size.
@@ -108,6 +113,17 @@ pub struct Tile {
     pub split: bool,
 }
 
+impl Tile {
+    /// This tile in its own crop's coordinates (`rect` at the origin, `core` cut to `rect`): what
+    /// [`extract`], [`paste`] and a [`Split::window`] take for a buffer of just `rect`, so a caller
+    /// can keep the image in pieces and hand over only the crop a tile reads.
+    pub fn local(&self) -> Tile {
+        let c = self.core.intersect(&self.rect);
+        let core = Rect { x: c.x - self.rect.x, y: c.y - self.rect.y, w: c.w, h: c.h };
+        Tile { rect: Rect { x: 0, y: 0, w: self.rect.w, h: self.rect.h }, core, ..*self }
+    }
+}
+
 /// The model's input for one tile.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TileInput {
@@ -137,12 +153,12 @@ fn round_up8(v: usize) -> usize {
 }
 
 /// Bounding boxes of the 8-connected masked blobs (coverage > 0).
-fn blobs(mask: &[f32], w: usize, h: usize) -> Vec<Rect> {
-    let mut seen = vec![false; mask.len()];
+fn blobs(hit: &dyn Fn(usize) -> bool, w: usize, h: usize) -> Vec<Rect> {
+    let mut seen = vec![false; w * h];
     let mut out = Vec::new();
     let mut stack = Vec::new();
-    for start in 0..mask.len() {
-        if seen[start] || mask[start] <= 0.0 {
+    for start in 0..w * h {
+        if seen[start] || !hit(start) {
             continue;
         }
         seen[start] = true;
@@ -158,7 +174,7 @@ fn blobs(mask: &[f32], w: usize, h: usize) -> Vec<Rect> {
                         continue;
                     }
                     let j = ny as usize * w + nx as usize;
-                    if !seen[j] && mask[j] > 0.0 {
+                    if !seen[j] && hit(j) {
                         seen[j] = true;
                         stack.push(j);
                     }
@@ -192,11 +208,24 @@ fn grow_to(r: Rect, tw: usize, th: usize, w: usize, h: usize) -> Rect {
 /// Plans the tiles for a `w×h` mask. An empty mask gives no tiles.
 pub fn plan(mask: &[f32], w: usize, h: usize, opts: &TileOptions) -> Result<Vec<Tile>> {
     check_buffers(w.saturating_mul(h).saturating_mul(3), mask, w, h)?;
+    plan_by(&|i| mask[i] > 0.0, w, h, opts)
+}
+
+/// [`plan`] for a hole given as one flag a pixel (`w·h`): the caller need not hold a coverage
+/// buffer of the whole image.
+pub fn plan_hole(hole: &[bool], w: usize, h: usize, opts: &TileOptions) -> Result<Vec<Tile>> {
+    if w == 0 || h == 0 || w.checked_mul(h) != Some(hole.len()) {
+        return Err(LamaError::Input(format!("{w}x{h} needs {} hole flags, got {}", w.saturating_mul(h), hole.len())));
+    }
+    plan_by(&|i| hole[i], w, h, opts)
+}
+
+fn plan_by(hit: &dyn Fn(usize) -> bool, w: usize, h: usize, opts: &TileOptions) -> Result<Vec<Tile>> {
     if !opts.max_side.is_multiple_of(SIZE_MULTIPLE) || !(MIN_WORK_SIDE..=MAX_WORK_SIDE).contains(&opts.max_side) {
         return Err(LamaError::Input(format!("max_side {} must be a multiple of {SIZE_MULTIPLE} in {MIN_WORK_SIDE}..={MAX_WORK_SIDE}", opts.max_side)));
     }
     // Each group: (core = union of blob boxes, crop = union of expanded boxes).
-    let mut groups: Vec<(Rect, Rect)> = blobs(mask, w, h)
+    let mut groups: Vec<(Rect, Rect)> = blobs(hit, w, h)
         .into_iter()
         .map(|b| {
             let m = opts.margin.max(b.w.max(b.h) / 4);
@@ -237,7 +266,7 @@ pub fn plan(mask: &[f32], w: usize, h: usize, opts: &TileOptions) -> Result<Vec<
             let rect = grow_to(crop, tw, th, w, h);
             tiles.push(Tile { rect, core, work_w: tw, work_h: th, fit: Fit::Pad, split: false });
         } else if opts.full_res {
-            split_grid(&mut tiles, core, crop, mask, w, h, opts.max_side);
+            split_grid(&mut tiles, core, crop, hit, w, h, opts.max_side);
         } else {
             let s = opts.max_side as f64 / long as f64;
             let side = |v: usize| round_up8(((v as f64 * s).ceil() as usize).max(MIN_WORK_SIDE)).min(opts.max_side);
@@ -271,11 +300,11 @@ fn spans(start: usize, len: usize, side: usize) -> Vec<(usize, usize)> {
 
 /// The overlapping full-resolution tiles of a crop larger than `side`, in rows, skipping those
 /// without any of the core's hole.
-fn split_grid(out: &mut Vec<Tile>, core: Rect, crop: Rect, mask: &[f32], w: usize, h: usize, side: usize) {
+fn split_grid(out: &mut Vec<Tile>, core: Rect, crop: Rect, hit: &dyn Fn(usize) -> bool, w: usize, h: usize, side: usize) {
     for (y, th) in spans(crop.y, crop.h, side) {
         for (x, tw) in spans(crop.x, crop.w, side) {
             let r = Rect { x, y, w: tw, h: th };
-            let hole = (r.y.max(core.y)..r.bottom().min(core.bottom())).any(|yy| (r.x.max(core.x)..r.right().min(core.right())).any(|xx| mask[yy * w + xx] > 0.0));
+            let hole = (r.y.max(core.y)..r.bottom().min(core.bottom())).any(|yy| (r.x.max(core.x)..r.right().min(core.right())).any(|xx| hit(yy * w + xx)));
             if !hole {
                 continue;
             }
@@ -302,6 +331,23 @@ impl Split {
     pub fn new(w: usize, h: usize, max_side: usize) -> Result<Self> {
         let n = w.checked_mul(h).filter(|n| *n > 0).ok_or_else(|| LamaError::Input("empty image".into()))?;
         Ok(Self { w, h, band: split_band(max_side).max(1), done: vec![false; n] })
+    }
+
+    /// What was filled within `r`, as a split of just `r` (for a tile's [`Tile::local`] crop);
+    /// [`Split::put_window`] stores what its paste filled.
+    pub fn window(&self, r: Rect) -> Split {
+        let mut done = Vec::with_capacity(r.w * r.h);
+        for y in r.y..r.bottom() {
+            done.extend_from_slice(&self.done[y * self.w + r.x..y * self.w + r.right()]);
+        }
+        Split { w: r.w, h: r.h, band: self.band, done }
+    }
+
+    /// Takes back a [`Split::window`] of `r`.
+    pub fn put_window(&mut self, r: Rect, win: &Split) {
+        for (ly, y) in (r.y..r.bottom()).enumerate() {
+            self.done[y * self.w + r.x..y * self.w + r.right()].copy_from_slice(&win.done[ly * r.w..(ly + 1) * r.w]);
+        }
     }
 
     /// Forgets what was filled (a run that starts its tiles over).
