@@ -135,6 +135,9 @@ pub struct Stats {
     pub level: u32,
     /// Output pixels composited (at the level of detail).
     pub pixels: u64,
+    /// Passes given layer pages and bind groups, summed over the page cells: those that draw in
+    /// the chunks recorded there.
+    pub bound: usize,
 }
 
 /// `r` (document pixels) at level of detail `level`: rounded out to whole reduced pixels.
@@ -1731,7 +1734,7 @@ impl Compositor {
         paged: &[bool],
         cell: Cell,
         fr: &FrameRes,
-        first_pass: usize,
+        live: &[bool],
         stats: &mut Stats,
     ) -> Bound {
         let cr = cell_rect(cell, self.page);
@@ -1741,7 +1744,7 @@ impl Compositor {
         let mut maps = Vec::with_capacity(plan.passes.len());
         let none = (Rect::EMPTY, Rect::EMPTY);
         for (i, p) in plan.passes.iter().enumerate() {
-            if i < first_pass {
+            if !live.get(i).copied().unwrap_or(false) {
                 views.push((None, None));
                 member_views.push(Vec::new());
                 maps.push(None);
@@ -1834,8 +1837,15 @@ impl Compositor {
         // Pass clips at the level of detail (rounded out, the same for every pass).
         let clips: Vec<Option<Rect>> = plan.passes.iter().map(|p| p.clip.map(|c| level_rect(c, level))).collect();
         let first_pass = checkpoint.filter(|_| chunks.iter().all(|c| self.prefix.contains(*c))).map_or(0, |c| c.pass_end);
+        // The passes these chunks record: past the lower-stack cache, and drawing somewhere in them
+        // (a pass clipped away from every chunk records nothing). Only those get pages, uniforms
+        // and bind groups: a piece of a page of 200 styled layers bound every layer's passes (two
+        // to five per layer) whatever it met, which was most of a catch-up piece's cost.
+        let live: Vec<bool> =
+            clips.iter().enumerate().map(|(i, clip)| i >= first_pass && clip.is_none_or(|c| chunks.iter().any(|ch| !c.intersect(ch).is_empty()))).collect();
+        stats.bound += live.iter().filter(|l| **l).count();
         let bind = span("gpu.bind");
-        let bound = self.bind_cell(device, queue, encoder, doc, plan, paged, cell, fr, first_pass, stats);
+        let bound = self.bind_cell(device, queue, encoder, doc, plan, paged, cell, fr, &live, stats);
 
         drop(bind);
         // Chunk pool of the smallest side that holds every chunk of this cell.
@@ -1865,7 +1875,7 @@ impl Compositor {
         let mut member_slot = vec![None; plan.passes.len()];
         let mut fused = 0u64;
         for (i, p) in plan.passes.iter().enumerate() {
-            if i >= first_pass && p.kernel == Kernel::Layers {
+            if live[i] && p.kernel == Kernel::Layers {
                 member_slot[i] = Some(members_base + fused * MEMBERS_STRIDE);
                 fused += 1;
             }
@@ -1877,7 +1887,7 @@ impl Compositor {
             data[i * STRIDE as usize..][..w.len()].copy_from_slice(&w);
         }
         for (i, p) in plan.passes.iter().enumerate() {
-            if i < first_pass {
+            if !live[i] {
                 continue;
             }
             let (tex, mask) = bound.views[i];
@@ -1909,7 +1919,7 @@ impl Compositor {
         let resident_views: Vec<&wgpu::TextureView> = bound.keys.iter().map(|k| self.residents.get(k).map_or(dummy, |r| &r.view)).collect();
         let mut bg1 = Vec::with_capacity(plan.passes.len());
         for (i, p) in plan.passes.iter().enumerate() {
-            if i < first_pass || p.kernel.entry().is_none() {
+            if !live[i] || p.kernel.entry().is_none() {
                 bg1.push(None);
                 continue;
             }
