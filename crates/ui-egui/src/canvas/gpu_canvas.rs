@@ -2540,6 +2540,45 @@ fn subtract(a: photocraft_geom::Rect, b: photocraft_geom::Rect) -> Vec<photocraf
         .collect()
 }
 
+/// The pixels of the disjoint `parts` as the fewest bands: each run of rows where the same
+/// spans are covered is one rect per span. Exact (the same pixels, still disjoint), and about as
+/// many rects as the shape has corners whatever the number of pieces cut out of it.
+fn coalesce(parts: &[photocraft_geom::Rect]) -> Vec<photocraft_geom::Rect> {
+    use photocraft_geom::Rect;
+    let mut ys: Vec<i32> = parts.iter().filter(|p| !p.is_empty()).flat_map(|p| [p.y0, p.y1]).collect();
+    ys.sort_unstable();
+    ys.dedup();
+    let mut out = Vec::new();
+    // Rects still growing down: their spans are the previous band's.
+    let mut open: Vec<Rect> = Vec::new();
+    for band in ys.windows(2) {
+        let (y0, y1) = (band[0], band[1]);
+        let mut spans: Vec<(i32, i32)> = parts.iter().filter(|p| !p.is_empty() && p.y0 <= y0 && p.y1 >= y1).map(|p| (p.x0, p.x1)).collect();
+        spans.sort_unstable();
+        let mut merged: Vec<(i32, i32)> = Vec::with_capacity(spans.len());
+        for (x0, x1) in spans {
+            match merged.last_mut() {
+                Some(last) if x0 <= last.1 => last.1 = last.1.max(x1),
+                _ => merged.push((x0, x1)),
+            }
+        }
+        let mut next = Vec::with_capacity(merged.len());
+        for (x0, x1) in merged {
+            match open.iter().position(|o| o.x0 == x0 && o.x1 == x1 && o.y1 == y0) {
+                Some(i) => {
+                    let o = open.swap_remove(i);
+                    next.push(Rect::new(x0, o.y0, x1, y1));
+                }
+                None => next.push(Rect::new(x0, y0, x1, y1)),
+            }
+        }
+        out.append(&mut open);
+        open = next;
+    }
+    out.append(&mut open);
+    out
+}
+
 /// Whether `r` lies inside the union of `parts`.
 fn covered(r: photocraft_geom::Rect, parts: &[photocraft_geom::Rect]) -> bool {
     let mut rest = vec![r];
@@ -2568,6 +2607,7 @@ pub(crate) struct Stale {
 }
 
 impl Stale {
+    /// Past this many rects a list is rebuilt as bands ([`coalesce`]).
     const MAX_REGIONS: usize = 48;
 
     /// `r` now holds current pixels at `level` and the levels above it.
@@ -2582,11 +2622,17 @@ impl Stale {
                 self.approx = vec![all];
             }
         }
+        // Both lists stay exact, however many pieces cut them: when they grow past
+        // MAX_REGIONS they are rebuilt as the fewest bands of rects covering the same pixels
+        // ([`coalesce`]). They used to be given up: blank parts forgotten (nothing could wait any
+        // more) and the stale regions merged into one deferred rect over parts already drawn.
+        // A page filling in 256 px pieces (a crop's undo on a page of 200 layers) cut them past
+        // the limit within a few frames, and the next frame composited everything the view
+        // showed in one go: 518 to 675 ms on an RTX 3060 Ti.
         if level != u32::MAX && !self.blank.is_empty() {
             self.blank = self.blank.iter().flat_map(|b| subtract(*b, r)).collect();
             if self.blank.len() > Self::MAX_REGIONS {
-                // Conservative: nothing waits (drawn in full rather than wrongly left out).
-                self.blank.clear();
+                self.blank = coalesce(&self.blank);
             }
         }
         let mut out = Vec::with_capacity(self.regions.len() + 4);
@@ -2598,10 +2644,16 @@ impl Stale {
         }
         self.regions = out;
         if self.regions.len() > Self::MAX_REGIONS {
-            // Conservative: one region, as stale as the stalest part.
-            let all = self.regions.iter().map(|e| e.0).reduce(|a, b| a.union(&b)).unwrap_or(r);
-            let level = self.regions.iter().map(|e| e.1).max().unwrap_or(level);
-            self.regions = vec![(all, level)];
+            let mut levels: Vec<u32> = self.regions.iter().map(|e| e.1).collect();
+            levels.sort_unstable();
+            levels.dedup();
+            self.regions = levels
+                .into_iter()
+                .flat_map(|l| {
+                    let parts: Vec<photocraft_geom::Rect> = self.regions.iter().filter(|e| e.1 == l).map(|e| e.0).collect();
+                    coalesce(&parts).into_iter().map(move |p| (p, l))
+                })
+                .collect();
         }
     }
 
@@ -4547,6 +4599,59 @@ mod tests {
         // A reduced composite draws too.
         s.mark(Rect::new(1024, 0, 2048, 512), 2);
         assert!(!s.may_wait(Rect::new(1024, 0, 2048, 512)));
+    }
+
+    /// A 2000x3000 page filling from blank in 256 px pieces at the zoomed-out view's level, the
+    /// view's centre first (a crop's undo on a page of 200 layers): however many pieces cut them,
+    /// the parts not drawn yet stay blank (they may wait) and stale, and what is drawn is current
+    /// at that level. Past 48 rects the lists were given up: the stale regions merged into one,
+    /// deferred, over the whole page, so the next frame composited all the view showed at once
+    /// (518 to 675 ms on an RTX 3060 Ti).
+    #[test]
+    fn a_page_filling_in_many_pieces_keeps_its_blank_and_stale_parts_exact() {
+        use photocraft_geom::Rect;
+        let whole = Rect::new(0, 0, 2000, 3000);
+        let mut s = Stale { blank: vec![whole], ..Stale::default() };
+        s.defer(whole);
+        let all = pieces(whole, Rect::new(400, 900, 1600, 2100), 256);
+        assert!(all.len() > 80);
+        for (i, p) in all.iter().enumerate() {
+            s.mark(*p, 1);
+            let rest = &all[i + 1..];
+            assert!(rest.iter().all(|q| s.may_wait(*q)), "piece {i}: a piece not drawn yet may still wait");
+            assert!(all[..=i].iter().all(|q| !s.blank_in(*q) && s.needed(*q, 1).is_empty()), "piece {i}: what is drawn is current at its level");
+            let stale: u64 = s.needed(whole, 1).iter().map(|r| area(*r)).sum();
+            assert_eq!(stale, rest.iter().map(|q| area(*q)).sum::<u64>(), "piece {i}: exactly the rest is stale");
+            assert!(s.blank.len() <= 2 * Stale::MAX_REGIONS && s.regions.len() <= 2 * Stale::MAX_REGIONS, "piece {i}: {} blank, {} stale rects", s.blank.len(), s.regions.len());
+        }
+        assert!(!s.blank_in(whole) && s.needed(whole, 1).is_empty());
+        // Then brought to full size, a piece at a time.
+        let mut n = 0;
+        while let Some(p) = s.next_piece(whole, 1 << 18) {
+            s.mark(p, 0);
+            n += 1;
+            assert!(n < 1000, "the refinement ends");
+        }
+        assert!(s.is_empty());
+    }
+
+    #[test]
+    fn coalesce_keeps_the_same_pixels_in_few_bands() {
+        use photocraft_geom::Rect;
+        // A ring of cells around a hole, cut into many small rects.
+        let mut parts = Vec::new();
+        for y in 0..10 {
+            for x in 0..10 {
+                if !(3..7).contains(&x) || !(3..7).contains(&y) {
+                    parts.push(Rect::new(x * 64, y * 64, x * 64 + 64, y * 64 + 64));
+                }
+            }
+        }
+        let c = coalesce(&parts);
+        assert_eq!(c.len(), 4, "{c:?}");
+        let px = |rs: &[Rect]| -> std::collections::HashSet<(i32, i32)> { rs.iter().flat_map(|r| (r.y0..r.y1).flat_map(move |y| (r.x0..r.x1).map(move |x| (x, y)))).collect() };
+        assert_eq!(px(&c), px(&parts));
+        assert_eq!(c.iter().map(|r| area(*r)).sum::<u64>(), px(&parts).len() as u64, "disjoint");
     }
 
     #[test]

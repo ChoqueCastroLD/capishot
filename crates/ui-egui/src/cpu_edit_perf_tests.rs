@@ -606,3 +606,16 @@ fn crops_on_his_file_on_the_gpu_canvas() {
     let over: Vec<String> = rows.iter().filter(|(_, _, max)| *max > 33.0).map(|(n, p50, max)| format!("{n}: median {p50:.1} ms, max {max:.1} ms")).collect();
     assert!(over.is_empty(), "over 33 ms:\n{}", over.join("\n"));
 }
+
+/// The same on the 200-layer page (the owner's PC: frames of 518 to 675 ms in a crop's undo). Timing
+/// on a shared server: run alone with --ignored.
+#[test]
+#[ignore = "a timing bench on a shared machine: run alone with --ignored"]
+fn crops_on_the_200_layer_page_on_the_gpu_canvas() {
+    let Some(rows) = on_the_apps_stack(|| gpu_crops(PAGE200, 0.3)) else { return };
+    if std::env::var_os("CPU_EDIT_PERF_REPORT_ONLY").is_some() {
+        return;
+    }
+    let over: Vec<String> = rows.iter().filter(|(_, _, max)| *max > 33.0).map(|(n, p50, max)| format!("{n}: median {p50:.1} ms, max {max:.1} ms")).collect();
+    assert!(over.is_empty(), "over 33 ms:\n{}", over.join("\n"));
+}
