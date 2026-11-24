@@ -541,6 +541,8 @@ fn gpu_crops(path: &str, zoom: f64) -> Option<Vec<(&'static str, f64, f64)>> {
     let ctx = h.ctx.clone();
     let (req, _rx) = crate::control::ControlRequest::new("ui.set", json!({"zoom": zoom, "center": [size.width / 2, size.height / 2]}));
     crate::control::handle(h.state_mut(), &ctx, &req);
+    // (`CROP_FRAME_WORK_MS`: the canvas's work a frame, as another build had it.)
+    crate::gpu_canvas::set_frame_work_ms(std::env::var("CROP_FRAME_WORK_MS").ok().and_then(|v| v.parse().ok()));
     let mut b = Bench { h, actions: Vec::new(), render: true };
     let settle = |b: &mut Bench| {
         let t = std::time::Instant::now();

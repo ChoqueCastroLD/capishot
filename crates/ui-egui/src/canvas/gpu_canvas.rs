@@ -1873,9 +1873,11 @@ pub struct CatchUp {
     pub again_ms: Option<f64>,
 }
 
-/// The canvas work (compositing, uploading layer tiles) one frame does for a big refresh before
-/// it defers the rest to the next frames, in milliseconds. At least one piece always goes.
-pub const FRAME_WORK_MS: f64 = 24.0;
+/// The canvas work (compositing, uploading layer tiles, building effect maps) one frame does for
+/// a big refresh before it defers the rest to the next frames, in milliseconds. At least one
+/// piece always goes. A frame has 10 ms in all: the canvas takes 6, the panels the rest. (It was
+/// 24 ms: the frames of a page filling in took 30 to 40 ms by design.)
+pub const FRAME_WORK_MS: f64 = 6.0;
 
 /// [`FRAME_WORK_MS`] unless [`set_frame_work_ms`] replaced it (as `f64` bits; 0: not replaced).
 static FRAME_WORK_OVERRIDE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -2457,8 +2459,8 @@ pub const REFINE_DELAY_MS: f64 = 120.0;
 /// [`Refresh::kind`] of a frame drawn from the drag cache (`above`).
 pub const DRAG_CACHE_KIND: &str = "gpu-drag-cache";
 
-/// The compositing a refinement piece aims at (milliseconds).
-const REFINE_FRAME_MS: f64 = 12.0;
+/// The compositing a refinement piece aims at (milliseconds): the frame's canvas work.
+const REFINE_FRAME_MS: f64 = FRAME_WORK_MS;
 
 /// On a device whose drag frames leave no budget for the cache: a piece every this many frames.
 const COLD_PIECE_EVERY: u32 = 4;
@@ -4652,6 +4654,17 @@ mod tests {
         let px = |rs: &[Rect]| -> std::collections::HashSet<(i32, i32)> { rs.iter().flat_map(|r| (r.y0..r.y1).flat_map(move |y| (r.x0..r.x1).map(move |x| (x, y)))).collect() };
         assert_eq!(px(&c), px(&parts));
         assert_eq!(c.iter().map(|r| area(*r)).sum::<u64>(), px(&parts).len() as u64, "disjoint");
+    }
+
+    /// A frame has 10 ms: the canvas's share of a big refresh (compositing pieces, building effect
+    /// maps ahead, a refinement piece) leaves the panels room. It was 24 ms for a refresh's pieces
+    /// and 12 for a refinement piece: a page filling in took 30 to 40 ms a frame by design.
+    #[test]
+    fn the_canvas_work_of_a_frame_leaves_the_panels_room_in_10_ms() {
+        for (name, ms) in [("pieces", FRAME_WORK_MS), ("refinement", REFINE_FRAME_MS)] {
+            assert!(ms <= 6.0, "{name}: {ms} ms of canvas work a frame");
+        }
+        assert_eq!(frame_work_ms(), FRAME_WORK_MS);
     }
 
     #[test]
