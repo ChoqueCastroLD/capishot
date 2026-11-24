@@ -335,6 +335,60 @@ struct FxEntry {
     shape_hash: u64,
 }
 
+/// A layer's effect shape and distance fields over `region` computed ahead of
+/// [`Compositor::sync_fx`] (by [`Compositor::stage_fx`], in bands over several calls), which then
+/// builds the layer's maps from them instead of computing them in one go.
+struct Staged {
+    key: FxKey,
+    region: Rect,
+    /// Region-sized, row-major.
+    shape: Vec<f32>,
+    /// Each field read, with the reach it is exact to, region-sized.
+    fields: HashMap<FieldKind, (i32, Vec<f32>)>,
+}
+
+/// Where [`Compositor::stage_fx`] got.
+enum Stage {
+    Ready(Staged),
+    /// Not done: goes on in the next call.
+    Pending,
+    /// Built in one go instead (see [`Compositor::stage_fx`]).
+    Whole,
+}
+
+/// A [`Staged`] build in progress: what it is of (it starts over when that changes) and how far it got.
+struct Staging {
+    built: Staged,
+    doc: DocId,
+    shape_key: u64,
+    /// [`surface_fingerprint`]s of the layer's content and mask (0: none).
+    sources: [u64; 2],
+    /// The shape is computed above this row.
+    shape_y: i32,
+    /// The fields to compute, and the one in progress (`field`), computed above `field_y`.
+    kinds: Vec<(FieldKind, i32)>,
+    field: usize,
+    field_y: i32,
+    buf: Vec<f32>,
+}
+
+/// About how many pixels of a layer's shape or of one distance field [`Compositor::stage_fx`]
+/// computes before it asks whether there is time for more.
+const STAGE_PX: u64 = 128 * 1024;
+
+/// The layer page bytes [`Compositor::prepare`] uploads in a call before it asks whether there
+/// is time for more (a few milliseconds of conversion and copying).
+const PAGES_AT_ONCE: u64 = 4 << 20;
+
+/// The map programs of `f`'s enabled effects. Filled shapes stroke their outline (the effect
+/// shape); others estimate it.
+fn fx_programs(doc: &Document, f: &plan::FxLayer<'_>) -> Vec<fx::MapProgram> {
+    let layer = f.layer;
+    let vector_shape = matches!(layer.content, LayerContent::Shape(_)) && photocraft_compose::effect_outline(layer).is_none();
+    let anchor = layer.effects.reference.unwrap_or((f64::from(f.bounds.x0), f64::from(f.bounds.y0)));
+    layer.effects.items.iter().filter(|e| e.enabled()).map(|e| fx::program_with(e, &doc.global_light, vector_shape, &doc.patterns, anchor)).collect()
+}
+
 impl FxEntry {
     /// Move to `region` (the layer's pixels grew or shrank: type, each keystroke), keeping
     /// everything the old and new regions share: the shape, the distance fields and the maps are
@@ -689,6 +743,8 @@ pub struct Compositor {
     prepared: std::collections::HashSet<FxKey>,
     /// The layer pages [`Compositor::prepare`] uploaded since it last found them all current.
     prepared_pages: std::collections::HashSet<ResKey>,
+    /// A layer's effect shape and fields [`Compositor::stage_fx`] is computing over calls.
+    staging: Option<Staging>,
 }
 
 /// A layer surface the document shows as another surface moved by a whole-pixel offset (a Move
@@ -986,6 +1042,7 @@ impl Compositor {
             translated: Vec::new(),
             prepared: std::collections::HashSet::new(),
             prepared_pages: std::collections::HashSet::new(),
+            staging: None,
         }
         .with_texture_limit(device.limits().max_texture_dimension_2d)
     }
@@ -1396,8 +1453,24 @@ impl Compositor {
                     break;
                 }
                 let _s = span("gpu.fx");
+                // A layer whose maps are built anew: its shape and distance fields on the CPU in
+                // bands over calls (`stage_fx`), then handed over whole.
+                // (A small layer's maps take a part's time: built in one go, as a render would.)
+                let small = u64::from(f.region.width()) * u64::from(f.region.height()) <= 2 * STAGE_PX;
+                let ready = if small || self.fx_current(doc, f) {
+                    None
+                } else {
+                    match self.stage_fx(doc, f, &mut worked, more) {
+                        Stage::Ready(b) => Some(b),
+                        Stage::Whole => None,
+                        Stage::Pending => {
+                            done = false;
+                            break;
+                        }
+                    }
+                };
                 let before = (stats.fx_shapes, stats.fx_programs);
-                self.sync_fx(device, queue, &mut encoder, doc, f, (f.layer.id, None), f.region, &mut stats);
+                self.sync_fx(device, queue, &mut encoder, doc, f, (f.layer.id, None), f.region, &mut stats, ready);
                 if (stats.fx_shapes, stats.fx_programs) != before {
                     worked = true;
                     if !self.prepared.insert((f.layer.id, None)) {
@@ -1426,7 +1499,8 @@ impl Compositor {
                             continue;
                         }
                         let uploaded = stats.tiles_uploaded;
-                        if worked && !more() {
+                        // (A light page's pages go in one call: it draws whole in its first frame.)
+                        if worked && stats.bytes_uploaded as u64 >= PAGES_AT_ONCE && !more() {
                             done = false;
                             break 'cells;
                         }
@@ -1455,6 +1529,82 @@ impl Compositor {
             }
             Ok(done)
         })
+    }
+
+    /// Whether `f`'s effect maps exist for its region and settings (what changed in its pixels
+    /// since is updated in place). Groups count as current: their shape is built whole.
+    fn fx_current(&self, doc: &Document, f: &plan::FxLayer<'_>) -> bool {
+        matches!(f.layer.content, LayerContent::Group(_))
+            || self.fx.get(&(f.layer.id, None)).is_some_and(|e| e.region == f.region && e.shape_key == fx::shape_key(f.layer, doc.bounds()))
+    }
+
+    /// Compute `f`'s effect shape and the distance fields its maps read, over its whole region,
+    /// in bands of about [`STAGE_PX`], asking `more` before each band once `worked`: the build of
+    /// a page-sized styled layer took 40 to 150 ms in one frame. Continues where an earlier call
+    /// left off when the layer is the same. The result when complete (for [`Self::sync_fx`]).
+    /// [`Stage::Whole`] when the layer was being staged for another document or region (a drag
+    /// cache's sources show it over other bounds by turns): staged by turns, neither would end.
+    fn stage_fx(&mut self, doc: &Document, f: &plan::FxLayer<'_>, worked: &mut bool, more: &mut dyn FnMut() -> bool) -> Stage {
+        let (layer, region, key) = (f.layer, f.region, (f.layer.id, None));
+        let shape_key = fx::shape_key(layer, doc.bounds());
+        let (content, mask) = fx::shape_sources(layer);
+        let sources = [content.map_or(0, surface_fingerprint), mask.map_or(0, surface_fingerprint)];
+        let n = region.width() as usize * region.height() as usize;
+        let same = |s: &Staging| s.built.region == region && s.doc == doc.id && s.shape_key == shape_key && s.sources == sources;
+        if self.staging.as_ref().is_some_and(|s| s.built.key == key && !same(s)) {
+            self.staging = None;
+            return Stage::Whole;
+        }
+        if self.staging.as_ref().is_none_or(|s| s.built.key != key) {
+            let kinds = field_reaches(&fx_programs(doc, f)).into_iter().collect();
+            self.staging = Some(Staging {
+                built: Staged { key, region, shape: vec![0.0; n], fields: HashMap::new() },
+                doc: doc.id,
+                shape_key,
+                sources,
+                shape_y: region.y0,
+                kinds,
+                field: 0,
+                field_y: region.y0,
+                buf: Vec::new(),
+            });
+        }
+        let Some(st) = self.staging.as_mut() else { return Stage::Whole };
+        let rows = i32::try_from(STAGE_PX / u64::from(region.width().max(1))).unwrap_or(i32::MAX).max(16);
+        while !region.is_empty() {
+            if st.shape_y < region.y1 {
+                if *worked && !more() {
+                    return Stage::Pending;
+                }
+                let band = Rect::new(region.x0, st.shape_y, region.x1, st.shape_y.saturating_add(rows).min(region.y1));
+                let v = fx::shape(doc, layer, band);
+                fx::paste(&mut st.built.shape, region, band, &v);
+                st.shape_y = band.y1;
+                *worked = true;
+                continue;
+            }
+            let Some(&(kind, reach)) = st.kinds.get(st.field) else { break };
+            if *worked && !more() {
+                return Stage::Pending;
+            }
+            if st.buf.len() != n {
+                st.buf = vec![0.0; n];
+            }
+            // (A band of a field reads the shape within its radius: not much thinner than that.)
+            let band_rows = rows.max(fx::field_radius(kind, reach) + 1);
+            let out = Rect::new(region.x0, st.field_y, region.x1, st.field_y.saturating_add(band_rows).min(region.y1));
+            let v = fx::field(kind, reach, &st.built.shape, region, out);
+            fx::paste(&mut st.buf, region, out, &v);
+            st.field_y = out.y1;
+            *worked = true;
+            if st.field_y >= region.y1 {
+                let buf = std::mem::take(&mut st.buf);
+                st.built.fields.insert(kind, (reach, buf));
+                st.field += 1;
+                st.field_y = region.y0;
+            }
+        }
+        self.staging.take().map_or(Stage::Whole, |s| Stage::Ready(s.built))
     }
 
     /// `region` grown to the chunk grid of `level`: what a render of it records.
@@ -1557,7 +1707,7 @@ impl Compositor {
         for (f, &pg) in plan.fx.iter().zip(&paged) {
             if !pg && !f.region.intersect(&drawn).is_empty() {
                 let _s = span("gpu.fx");
-                self.sync_fx(device, queue, encoder, doc, f, (f.layer.id, None), f.region, &mut stats);
+                self.sync_fx(device, queue, encoder, doc, f, (f.layer.id, None), f.region, &mut stats, None);
             }
         }
         let fr = self.frame_res(device, queue, canvas, &plan, &moved, &moved_masks);
@@ -1592,7 +1742,7 @@ impl Compositor {
                     continue;
                 }
                 let window = pf.inflate(aprons.get(i).copied().unwrap_or(0)).intersect(&f.region);
-                self.sync_fx(device, queue, encoder, doc, f, (f.layer.id, Some(cell)), window, &mut stats);
+                self.sync_fx(device, queue, encoder, doc, f, (f.layer.id, Some(cell)), window, &mut stats, None);
             }
             // At a level of detail the cell's part shrinks; pages are a power of two at least
             // 2^MAX_LOD, so cells never share a reduced pixel.
@@ -2294,6 +2444,7 @@ impl Compositor {
         key: FxKey,
         region: Rect,
         stats: &mut Stats,
+        mut ready: Option<Staged>,
     ) {
         let layer = f.layer;
         let canvas = doc.bounds();
@@ -2302,13 +2453,10 @@ impl Compositor {
         let (content_src, mask_src) = if is_group { (None, None) } else { fx::shape_sources(layer) };
         let frame = self.frame;
         let (rw, rh) = (region.width(), region.height());
+        // What `stage_fx` computed ahead for this region (its whole shape and fields).
+        ready = ready.filter(|b| b.region == region && b.key == key);
 
-        // The programs, and the distance fields they read (max reach per field). Filled shapes
-        // stroke their outline (the effect shape); others estimate it.
-        let vector_shape = matches!(layer.content, LayerContent::Shape(_)) && photocraft_compose::effect_outline(layer).is_none();
-        let anchor = layer.effects.reference.unwrap_or((f64::from(f.bounds.x0), f64::from(f.bounds.y0)));
-        let progs: Vec<fx::MapProgram> =
-            layer.effects.items.iter().filter(|e| e.enabled()).map(|e| fx::program_with(e, &doc.global_light, vector_shape, &doc.patterns, anchor)).collect();
+        let progs = fx_programs(doc, f);
 
         // What changed: everything (new settings / size), the position only, some tiles, or
         // nothing.
@@ -2337,9 +2485,16 @@ impl Compositor {
         {
             // Moved by whole pixels: maps are computed relative to the region, so if the shape
             // moved unchanged with it, every map is still exact.
-            let v = fx::shape(doc, layer, region);
+            let computed;
+            let v: &[f32] = match &ready {
+                Some(b) => &b.shape,
+                None => {
+                    computed = fx::shape(doc, layer, region);
+                    &computed
+                }
+            };
             if let Some(e) = self.fx.get_mut(&key)
-                && (if e.compact { hash_shape(&v) == e.shape_hash } else { v == e.shape_cpu })
+                && (if e.compact { hash_shape(v) == e.shape_hash } else { v == e.shape_cpu.as_slice() })
             {
                 e.region = region;
                 rebuild = false;
@@ -2350,6 +2505,7 @@ impl Compositor {
         // computed. Built again whole, every keystroke recomputed the shape and the distance
         // fields of the whole line on the CPU.
         if rebuild
+            && ready.is_none()
             && let Some(old) = prev
             && !region.is_empty()
             && !old.intersect(&region).is_empty()
@@ -2399,7 +2555,10 @@ impl Compositor {
         if !damage.is_empty() {
             stats.fx_shapes += 1;
             FX_UPDATES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let v = fx::shape(doc, layer, damage);
+            let v = match ready.as_mut().filter(|_| damage == region) {
+                Some(b) => std::mem::take(&mut b.shape),
+                None => fx::shape(doc, layer, damage),
+            };
             fx::paste(&mut e.shape_cpu, region, damage, &v);
             e.shape.write_r32(queue, region, damage, &v);
             staged += v.len() as u64 * 4;
@@ -2423,7 +2582,11 @@ impl Compositor {
                 _ => region,
             };
             let reach = have.filter(|r| *r >= reach).unwrap_or(reach);
-            let v = fx::field(kind, reach, &e.shape_cpu, region, out);
+            let ahead = ready.as_mut().filter(|_| out == region).and_then(|b| b.fields.remove(&kind)).filter(|(r, _)| *r == reach);
+            let v = match ahead {
+                Some((_, v)) => v,
+                None => fx::field(kind, reach, &e.shape_cpu, region, out),
+            };
             if have.is_none_or(|r| r < reach) {
                 e.fields.insert(kind, (reach, Tex::map(device, "pc_fx_field", region, MAP32)));
             }

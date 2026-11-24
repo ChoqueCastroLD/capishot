@@ -199,7 +199,9 @@ fn crops_show_the_page_before(budget: Option<u64>) {
                 assert!(off < 0.01, "{cmd}: frame {frames} isn't the new page whole ({:.2}% of samples off)", off * 100.0);
                 break;
             }
-            assert!(frames < 200, "{cmd}: the new page never showed");
+            // (No frame work: each frame gets one layer's pages, or one part of a layer's effect
+            // maps, ready; the new page shows when the view's are all there.)
+            assert!(frames < 3000, "{cmd}: the new page never showed");
         }
         assert!(frames > 1, "{cmd}: the new page came in pieces, over frames");
         crate::gpu_canvas::set_frame_work_ms(None);

@@ -373,6 +373,13 @@ fn repeat(device: Device, page: Page, rounds: usize, moves: i32, rest: bool) -> 
         return None;
     }
     // Settle (the page drawn in full, nothing left to refine), then go: no idle frame from here.
+    // (The page fills in over frames as its effect maps and pages get ready: as many as that takes.)
+    let doc = h.state().session.active().expect("doc").doc.clone();
+    let mut n = 0;
+    while h.state().gpu.as_ref().is_some_and(|g| g.filling(doc.id.0) || !g.sharp_in(doc.id.0, doc.bounds())) && n < 3000 {
+        h.step();
+        n += 1;
+    }
     h.run_steps(40);
     if device == Device::SlowGpu {
         crate::gpu_canvas::set_frame_work_ms(Some(0.0));
@@ -753,3 +760,4 @@ fn the_drag_cache_made_ahead_builds_a_layers_effect_maps_per_call_at_most() {
     assert!(total >= 6, "the new layers' maps were built ({total})");
     assert!(most <= 1, "{most} layers' effect maps built in one call");
 }
+
