@@ -36,6 +36,10 @@ pub struct PageSleep {
     freed: std::collections::HashSet<DocId>,
     /// When the pages' memory was last weighed, and whether it was over half the budget.
     weighed: (f64, bool),
+    /// When an AI job last ran (seconds, the app clock).
+    ai_used: f64,
+    /// When the pages were last weighed for the loaded AI model, and whether it was too much.
+    ai_weighed: (f64, bool),
 }
 
 /// Seconds a page goes unseen before it sleeps while the pages' memory is over half the budget
@@ -79,6 +83,7 @@ const SMALL_DEVICE_CANVAS_BUDGET: u64 = 160 << 20;
 
 /// Every frame: wake the active page if it sleeps; put one page unseen for [`IDLE_S`] to sleep.
 pub fn tick(app: &mut PhotocraftApp, now: f64) {
+    release_ai_model(app, now);
     if crate::gpu_canvas::physical_memory().is_some_and(|b| b <= SMALL_DEVICE) {
         crate::doc_switch::default_budget(app, SMALL_DEVICE_CANVAS_BUDGET);
     }
@@ -211,8 +216,44 @@ pub fn overlay(app: &PhotocraftApp, ctx: &egui::Context) {
 /// AI: with it counted, the pages behind go to sleep at once while it runs.
 const AI_RESERVE: usize = 512 << 20;
 
+/// The AI model's memory, while a job runs or it stays loaded after one.
 fn ai_reserve(app: &PhotocraftApp) -> usize {
-    if app.session.jobs().iter().any(|j| crate::telemetry::is_ai_job(&j.command)) { AI_RESERVE } else { 0 }
+    if ai_running(app) || app.session.inpainter().is_some_and(|i| i.loaded()) { AI_RESERVE } else { 0 }
+}
+
+fn ai_running(app: &PhotocraftApp) -> bool {
+    app.session.jobs().iter().any(|j| crate::telemetry::is_ai_job(&j.command))
+}
+
+/// Seconds the AI model stays loaded after its last job: the next clean starts at once, but
+/// 500 MB aren't kept for good (a 4 GB Celeron with seven pages open died with it loaded).
+pub const AI_IDLE_S: f64 = 60.0;
+/// The same with the model and the pages over half of Memory Usage (every 4 GB device): as the
+/// browser ends its AI worker on those (`photocraft_ai_web`), a clean right after another still
+/// finds it.
+pub const AI_IDLE_PRESSED_S: f64 = 3.0;
+
+/// Lets go of the AI model kept loaded after a job, once it has been idle for [`AI_IDLE_S`], or
+/// [`AI_IDLE_PRESSED_S`] when memory is short. Whatever Release Inactive Pages says: it is not a
+/// page.
+fn release_ai_model(app: &mut PhotocraftApp, now: f64) {
+    let Some(svc) = app.session.inpainter().cloned() else { return };
+    if ai_running(app) {
+        app.page_sleep.ai_used = now;
+        return;
+    }
+    if !svc.loaded() {
+        return;
+    }
+    // Weighing walks every tile: twice a second at most.
+    if now - app.page_sleep.ai_weighed.0 >= 0.5 {
+        let budget = app.session.prefs().performance.history_budget_bytes();
+        app.page_sleep.ai_weighed = (now, app.session.pixel_bytes().saturating_add(AI_RESERVE) > budget / 2);
+    }
+    let idle = if app.page_sleep.ai_weighed.1 { AI_IDLE_PRESSED_S } else { AI_IDLE_S };
+    if now - app.page_sleep.ai_used >= idle {
+        svc.release();
+    }
 }
 
 /// Whether page `index` should go to sleep now.
@@ -245,6 +286,43 @@ mod tests {
         app.run("file.new", json!({"width": 20, "height": 20, "name": "dos"})).unwrap();
         app.session.edit_prefs(|p| p.performance.release_inactive_pages = ReleasePages::Always);
         app
+    }
+
+    /// A loaded AI model: let go after a minute idle, after a few seconds where memory is short,
+    /// never while an AI job runs.
+    #[test]
+    fn the_ai_model_is_let_go_after_it_idles_and_sooner_when_memory_is_short() {
+        use photocraft_ai_lama::service::Inpainter as _;
+        use std::sync::atomic::Ordering;
+        for (memory_mb, idle) in [(16_384, AI_IDLE_S), (1024, AI_IDLE_PRESSED_S)] {
+            let mut app = app();
+            app.session.edit_prefs(|p| p.performance.memory_usage_mb = memory_mb);
+            let fake = std::sync::Arc::new(photocraft_ai_lama::service::FakeInpainter::default());
+            app.session.set_inpainter(Some(fake.clone()));
+            let (go, wait) = std::sync::mpsc::channel::<()>();
+            let started = app.session.start_job_in_worker(
+                photocraft_engine::remove_ai_cmds::ID,
+                json!({}),
+                "Remove with AI",
+                false,
+                move |_| wait.recv().map_err(|e| photocraft_engine::EngineError::Other(e.to_string())),
+                |_, ()| Ok(json!({})),
+            );
+            let Ok(Started::Job(job)) = started else { panic!("a job") };
+            fake.held.store(true, Ordering::SeqCst);
+            tick(&mut app, 100.0);
+            tick(&mut app, 100.0 + AI_IDLE_S * 2.0);
+            assert_eq!(fake.releases.load(Ordering::SeqCst), 0, "{memory_mb} MB: kept while the job runs");
+            go.send(()).unwrap();
+            let _ = app.session.wait_job(job);
+            let _ = app.session.poll_jobs();
+            let ended = 100.0 + AI_IDLE_S * 2.0;
+            tick(&mut app, ended + idle - 0.1);
+            assert_eq!(fake.releases.load(Ordering::SeqCst), 0, "{memory_mb} MB: still loaded before {idle} s");
+            tick(&mut app, ended + idle);
+            assert_eq!(fake.releases.load(Ordering::SeqCst), 1, "{memory_mb} MB: let go after {idle} s");
+            assert!(!fake.loaded());
+        }
     }
 
     /// Runs `tick` and lets the job it started finish.

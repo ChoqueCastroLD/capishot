@@ -526,6 +526,21 @@ impl photocraft_ai_lama::service::Inpainter for WebInpainter {
         self.up.device()
     }
 
+    /// The AI worker is alive: its memory holds the model it ran last (a WebAssembly memory never
+    /// shrinks).
+    fn loaded(&self) -> bool {
+        LIVE.with(|l| l.borrow().is_some())
+    }
+
+    /// Ends the worker if it is idle: the only way to give a WebAssembly memory back. The next
+    /// run starts a new one (the weights come back from Cache Storage).
+    fn release(&self) {
+        cancel_retire();
+        if LIVE.with(|l| l.borrow().as_ref().is_some_and(|l| l.run.is_none() && l.queued.is_none())) {
+            kill(AiError::Cancelled);
+        }
+    }
+
     fn run(&self, req: photocraft_ai_lama::service::Request, hooks: Arc<dyn photocraft_ai_lama::service::Hooks>, done: photocraft_ai_lama::service::Done) {
         use photocraft_ai_lama::LamaError;
         let Some(model) = photocraft_ai::catalog::model(req.model) else {

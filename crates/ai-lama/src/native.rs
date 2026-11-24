@@ -479,6 +479,25 @@ impl Inpainter for NativeInpainter {
         fixed_sizes_on()
     }
 
+    fn loaded(&self) -> bool {
+        self.model.lock().unwrap_or_else(PoisonError::into_inner).is_some()
+            || self.dml.lock().unwrap_or_else(PoisonError::into_inner).is_some()
+            || self.ort_cpu.lock().unwrap_or_else(PoisonError::into_inner).is_some()
+    }
+
+    fn release(&self) {
+        let held = (
+            self.model.lock().unwrap_or_else(PoisonError::into_inner).take(),
+            self.dml.lock().unwrap_or_else(PoisonError::into_inner).take(),
+            self.ort_cpu.lock().unwrap_or_else(PoisonError::into_inner).take(),
+        );
+        // Freeing the weights and a GPU or ONNX Runtime session takes a while: not on the caller's
+        // thread (the window's).
+        if held.0.is_some() || held.1.is_some() || held.2.is_some() {
+            let _ = std::thread::Builder::new().name("ai-release".into()).spawn(move || drop(held));
+        }
+    }
+
     fn run(&self, req: Request, hooks: Arc<dyn Hooks>, done: Done) {
         if hooks.cancelled() {
             return done(Err(LamaError::Cancelled));

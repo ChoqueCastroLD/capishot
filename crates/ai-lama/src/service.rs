@@ -119,6 +119,14 @@ pub trait Inpainter: Send + Sync {
     }
     /// Inpaints one tile and calls `done` exactly once.
     fn run(&self, req: Request, hooks: Arc<dyn Hooks>, done: Done);
+    /// Whether a model stays loaded between runs now (its weights and session, some 500 MB for
+    /// Manga LaMa): [`Inpainter::release`] would give memory back.
+    fn loaded(&self) -> bool {
+        false
+    }
+    /// Lets go of the models kept loaded between runs (the next run loads its model again). Call
+    /// it when no run is going; it returns at once.
+    fn release(&self) {}
 }
 
 /// An [`Inpainter`] for tests: fills masked pixels with the mean colour of the unmasked ones
@@ -142,6 +150,10 @@ pub struct FakeInpainter {
     pub running: std::sync::atomic::AtomicUsize,
     /// The most requests that ever ran one inside another.
     pub deepest: std::sync::atomic::AtomicUsize,
+    /// A run without `unload` left its model loaded.
+    pub held: std::sync::atomic::AtomicBool,
+    /// How many times [`Inpainter::release`] let go of a loaded model.
+    pub releases: std::sync::atomic::AtomicUsize,
 }
 
 impl FakeInpainter {
@@ -203,9 +215,21 @@ impl Inpainter for FakeInpainter {
 
     fn run(&self, req: Request, hooks: Arc<dyn Hooks>, done: Done) {
         use std::sync::atomic::Ordering;
+        self.held.store(!req.unload, Ordering::SeqCst);
         let depth = self.running.fetch_add(1, Ordering::SeqCst) + 1;
         self.deepest.fetch_max(depth, Ordering::SeqCst);
         self.answer(req, hooks, done);
         self.running.fetch_sub(1, Ordering::SeqCst);
+    }
+
+    fn loaded(&self) -> bool {
+        self.held.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn release(&self) {
+        use std::sync::atomic::Ordering;
+        if self.held.swap(false, Ordering::SeqCst) {
+            self.releases.fetch_add(1, Ordering::SeqCst);
+        }
     }
 }
