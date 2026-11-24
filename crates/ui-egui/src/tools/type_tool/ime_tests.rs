@@ -49,6 +49,24 @@ fn preedit(text: &str) -> egui::Event {
     egui::Event::Ime(egui::ImeEvent::Preedit { text: text.to_owned(), active_range_chars: None })
 }
 
+/// Keys that land in one frame (a fast typist on a slow frame, an automation's burst) go in as
+/// one edit: one `type.edit`, one layout. Each was its own edit: 16 keys in one frame held it
+/// 34 ms in `cmd.run` on the owner's PC.
+#[test]
+fn keys_typed_in_one_frame_go_in_as_one_edit() {
+    let ctx = context();
+    let mut app = app();
+    run(&mut app, &ctx, Vec::new());
+    let edits = |app: &PhotocraftApp| app.session.journal.iter().filter(|(id, _)| id == "type.edit").count();
+    let (before, layouts) = (edits(&app), photocraft_text::layouts_here());
+    run(&mut app, &ctx, " Hola mundo 12345".chars().map(|c| egui::Event::Text(c.to_string())).collect());
+    assert_eq!(layer_text(&app), "abc Hola mundo 12345");
+    assert_eq!(edits(&app) - before, 1, "one edit for the frame's keys");
+    assert_eq!(photocraft_text::layouts_here() - layouts, 1, "one layout");
+    let ed = app.ui.text_edit.as_ref().expect("editing");
+    assert_eq!((ed.caret, ed.anchor), (20, 20), "the caret after the last key");
+}
+
 #[test]
 fn successive_ime_commits_are_input_method_and_keep_directional_offsets() {
     let ctx = context();

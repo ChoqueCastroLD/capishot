@@ -111,7 +111,13 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
         .unwrap_or_else(|| ctx.input(|input| input.pointer.primary_down()));
     let mut custom_mutations = true;
     let mut deferred_custom = false;
+    // Text events folded into the one before them ([`typed_run`]).
+    let mut folded_until = 0;
     for (k, ev) in events.iter().enumerate() {
+        if k < folded_until {
+            handled[k] = true;
+            continue;
+        }
         if custom_mutations && !reset_route_eligible(app, ctx) {
             custom_mutations = false;
             suspend_reset(app, ctx);
@@ -140,7 +146,11 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
         let n = if is_key { text.chars().count() } else { 0 };
         handled[k] = true;
         match ev {
-            egui::Event::Text(s) => insert_typed(app, s),
+            egui::Event::Text(s) => {
+                let (run, next) = typed_run(&events, k, s);
+                folded_until = next;
+                insert_typed(app, &run);
+            }
             egui::Event::Paste(s) => insert(app, s),
             egui::Event::ImeResetCompleted { request_id } => complete_reset(app, ctx, *request_id),
             egui::Event::Ime(ime_event) => {
@@ -413,4 +423,18 @@ fn set_caret(app: &mut PhotocraftApp, char_count: usize, caret: usize, extend: b
             state.anchor = state.caret;
         }
     }
+}
+
+/// The text of `events[k]` (`first`) with the text events right after it, and the index after
+/// them: keys typed within one frame go in as one edit. Each key was its own `type.edit`, laying
+/// the layer out and drawing it again: 16 keys landing in one frame held it 34 ms in `cmd.run` on
+/// the owner's PC.
+fn typed_run(events: &[egui::Event], k: usize, first: &str) -> (String, usize) {
+    let mut run = first.to_owned();
+    let mut next = k + 1;
+    while let Some(egui::Event::Text(t)) = events.get(next) {
+        run.push_str(t);
+        next += 1;
+    }
+    (run, next)
 }
