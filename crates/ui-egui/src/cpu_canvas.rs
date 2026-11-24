@@ -181,6 +181,15 @@ impl TileCanvas {
         self.levels.lock().unwrap_or_else(std::sync::PoisonError::into_inner).mips.bytes()
     }
 
+    /// Bytes of what it keeps for the next edit and zoom besides the tile textures: the splits'
+    /// float tiles, the reduced layers, the page before a size change.
+    pub(crate) fn cache_bytes(&self) -> usize {
+        // (The reduced documents are made of the reduced layers' tiles.)
+        let splits: usize = self.split.iter().chain(&self.spare).map(Split::bytes).sum();
+        let before: usize = self.before.as_ref().map_or(0, |b| b.tiles.iter().map(|(_, t)| t.held.width() as usize * t.held.height() as usize * 4).sum());
+        self.mip_bytes() + splits + before
+    }
+
     #[cfg(test)]
     pub(crate) fn tile_count(&self) -> usize {
         self.tiles.len()
@@ -1412,7 +1421,39 @@ pub(crate) fn settled(app: &PhotocraftApp) -> bool {
         })
 }
 
+/// Every frame: the CPU canvases the last frame didn't draw (a document in another tab, a display
+/// no longer used) let go of what they keep for the next edit and zoom ([`TileCanvas::hide`]).
+/// Each held its own share of the budgets (128 MB of splits and 128 MB of reduced layers on a 4 GB
+/// device), so seven pages open in the background held 460 MB nobody looked at. Their tile
+/// textures stay (within the open pages' canvas budget, `doc_switch`): a page shown again is on
+/// screen at once and makes the rest again off the frame.
+pub(crate) fn release_hidden(app: &mut PhotocraftApp) {
+    let frame = app.frame;
+    for tc in app.canvases.values_mut().filter_map(|c| c.tiles.as_mut()) {
+        if tc.painted.saturating_add(1) < frame {
+            tc.hide();
+        }
+    }
+}
+
 impl TileCanvas {
+    /// Let go of everything but the tile textures: the splits, the reduced layers, the page before
+    /// a size change, and the batches being composited (what they were drawing is still to draw).
+    fn hide(&mut self) {
+        if self.split.is_none() && self.spare.is_none() && self.flight.is_none() && self.pending.is_none() && self.before.is_none() && self.mip_bytes() == 0 {
+            return;
+        }
+        if let Some(fl) = self.flight.take() {
+            fl.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            self.grounded();
+        }
+        self.pending = None;
+        (self.split, self.spare, self.before) = (None, None, None);
+        (self.ahead, self.ahead_ready, self.split_ready) = (None, false, false);
+        // (A batch still on the pool keeps the old ones until it ends.)
+        self.levels = Default::default();
+    }
+
     /// Drop the least recently drawn tiles until the textures fit `budget` bytes; the tiles this
     /// frame drew stay whatever they cost.
     fn evict(&mut self, budget: usize) {

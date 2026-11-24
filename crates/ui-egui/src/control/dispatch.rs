@@ -57,6 +57,9 @@ fn engine_methods(app: &mut PhotocraftApp, ctx: &egui::Context, req: &ControlReq
             if let Some(g) = app.gpu.as_ref() {
                 v["gpuTexturesMB"] = serde_json::json!((g.held_bytes() as f64 / 1e5).round() / 10.0);
             }
+            // What the CPU canvases keep for the next edit and zoom (splits, reduced layers).
+            let cpu: usize = app.canvases.values().filter_map(|c| c.tiles.as_ref()).map(crate::cpu_canvas::TileCanvas::cache_bytes).sum();
+            v["cpuCanvasCachesMB"] = serde_json::json!((cpu as f64 / 1e5).round() / 10.0);
             // The active document's viewport pages, when it is drawn from them.
             if let Some(s) = app.session.active().and_then(|st| app.streams.get(&st.doc.id)) {
                 v["viewportPages"] = serde_json::to_value(&s.stats).unwrap_or_default();

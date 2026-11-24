@@ -283,7 +283,8 @@ fn set_budget(app: &mut PhotocraftApp, p: &Value) -> Result<Option<Value>, Strin
 }
 
 /// Every frame, after the control requests: note the active document as shown, work on the
-/// documents waiting to be shown or prewarmed (swapping a ready one in), keep within the budget.
+/// documents waiting to be shown or prewarmed (swapping a ready one in), keep within the budget,
+/// and let the CPU canvases not drawn in the last frame go of their edit caches.
 pub(crate) fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if let Some(id) = app.session.active().map(|st| st.doc.id) {
         app.doc_switch.shown.insert(id, app.frame);
@@ -329,6 +330,7 @@ pub(crate) fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if app.doc_switch.budget.is_some() {
         enforce_budget(app);
     }
+    crate::cpu_canvas::release_hidden(app);
 }
 
 /// The canvas textures document `id` holds: its GPU canvas texture set and its CPU canvas tiles.
