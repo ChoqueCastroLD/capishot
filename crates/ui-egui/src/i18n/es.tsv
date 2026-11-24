@@ -5651,3 +5651,16 @@ fontTab	Find More	Buscar más
 # Layer Style › Gradient Overlay: gradient swatch, preset picker and stop strip
 	Click to pick a gradient preset	Haz clic para elegir un degradado predefinido
 	From and To edit the first and last stops	Desde y Hasta editan la primera y la última parada
+
+# File › Save All
+	Save All	Guardar todo
+	Save All is already running	Guardar todo ya está en curso
+	No open document has unsaved changes	Ningún documento abierto tiene cambios sin guardar
+	Save All ({n} of {total}): choose where to save “{name}”	Guardar todo ({n} de {total}): elige dónde guardar “{name}”
+@plural	Saved {n} document|Saved {n} documents	{n} documento guardado|{n} documentos guardados
+	“{name}” failed: {reason}	“{name}” falló: {reason}
+	“{name}” skipped: {reason}	“{name}” omitido: {reason}
+	{n} failed	{n} con error
+	it was closed	se cerró
+	cancelled	cancelado
+	not saved	no se guardó

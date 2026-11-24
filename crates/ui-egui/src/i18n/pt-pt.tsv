@@ -3748,3 +3748,17 @@ fontWeight	Italic	Itálico
 # Layer Style › Gradient Overlay: gradient swatch, preset picker and stop strip
 	Click to pick a gradient preset	Clique para escolher uma predefinição de gradiente
 	From and To edit the first and last stops	De e Até editam a primeira e a última paragem
+
+# File › Save All
+	Save All	Guardar tudo
+	Save All is already running	Guardar tudo já está em curso
+	No open document has unsaved changes	Nenhum documento aberto tem alterações por guardar
+	Save All ({n} of {total}): choose where to save “{name}”	Guardar tudo ({n} de {total}): escolha onde guardar “{name}”
+@plural	Saved {n} document|Saved {n} documents	{n} documento guardado|{n} documentos guardados
+	“{name}” failed: {reason}	“{name}” falhou: {reason}
+	“{name}” skipped: {reason}	“{name}” ignorado: {reason}
+	{n} failed	{n} com erro
+	{n} skipped	{n} ignorados
+	it was closed	foi fechado
+	cancelled	cancelado
+	not saved	não foi guardado

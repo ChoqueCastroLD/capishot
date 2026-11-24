@@ -187,6 +187,7 @@ pub use dialogs::flat_copy_ui;
 pub use dialogs::psd_mode_ui;
 pub use dialogs::save_original_ui;
 pub mod page_sleep;
+pub mod save_all;
 pub use dialogs::gallery_ui;
 pub use dialogs::guide_layout_ui;
 pub use dialogs::history_options_ui;
@@ -794,6 +795,8 @@ pub struct PhotocraftApp {
     action_tool: Option<state::Tool>,
     /// Close, Revert or Exit parked behind the unsaved-changes prompt (see `discard_ui`).
     pub(crate) discard: Option<discard_ui::Prompt>,
+    /// File › Save All in progress (see `save_all`).
+    pub(crate) save_all: Option<save_all::Run>,
     /// The Open or Save dialog in progress, and the action waiting on it (see `file_dialog`).
     pub(crate) file_dialog: Option<file_dialog::Pending>,
     /// A Save As to a layered TIFF parked behind the TIFF Options prompt (see `tiff_options_ui`).

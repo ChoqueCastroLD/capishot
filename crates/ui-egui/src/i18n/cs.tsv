@@ -4876,3 +4876,6 @@ cameraRaw	Dehaze	Odstranění oparu
 # Layer Style › Gradient Overlay: gradient swatch, preset picker and stop strip
 	Click to pick a gradient preset	Kliknutím vyberete předvolbu přechodu
 	From and To edit the first and last stops	Od a Do upravují první a poslední zarážku
+
+# File › Save All
+	Save All	Uložit vše

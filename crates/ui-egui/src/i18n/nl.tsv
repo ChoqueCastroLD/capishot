@@ -4891,3 +4891,6 @@ curves	Smooth	Vloeiend maken
 # Layer Style › Gradient Overlay: gradient swatch, preset picker and stop strip
 	Click to pick a gradient preset	Klik om een verloopvoorinstelling te kiezen
 	From and To edit the first and last stops	Van en Tot bewerken de eerste en laatste kleurstop
+
+# File › Save All
+	Save All	Alles opslaan

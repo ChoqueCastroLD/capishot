@@ -28,6 +28,7 @@ pub const SHELL_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("file.openDeep", "Open as Deep…", &["File"], None),
     ("file.save", "Save", &["File"], Some("Cmd+S")),
     ("file.saveAs", "Save As…", &["File"], Some("Cmd+Shift+S")),
+    ("file.saveAll", "Save All", &["File"], Some("Cmd+Alt+Shift+D")),
     ("file.exit", "Exit", &["File"], Some("Cmd+Q")),
     ("file.recoverDocuments", "Recover Documents…", &["File"], None),
     ("edit.freeTransform", "Free Transform", &["Edit"], Some("Cmd+T")),

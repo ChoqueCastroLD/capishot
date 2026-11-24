@@ -53,6 +53,7 @@ pub const SYNONYMS: &[(&[&str], &str)] = &[
     (&["deshacer", "desfazer", "undo", "atras", "volver"], "edit.undo"),
     (&["rehacer", "refazer", "redo"], "edit.redo"),
     (&["guardar", "salvar", "save", "grabar"], "file.save"),
+    (&["guardar todo", "guardar todos", "salvar tudo", "salvar todos", "save all"], "file.saveAll"),
     (&["abrir", "open", "importar", "import"], "file.open"),
     (&["nuevo", "novo", "nueva", "nova", "new", "crear", "criar"], "file.new"),
     (&["exportar", "export", "png", "descargar", "baixar", "download", "compartir", "compartilhar", "share"], "file.export.quickExportAsPng"),

@@ -383,6 +383,7 @@ fn invoke_file_commands(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, 
                 Err(tl!(message).to_string())
             }
         }
+        crate::save_all::COMMAND => crate::save_all::start(app, ctx),
         "file.saveAs" => {
             let choices = crate::FormatChoices::from_params(params, id)?;
             app.save_as_with(params.get("path").and_then(Value::as_str).map(str::to_string), choices)

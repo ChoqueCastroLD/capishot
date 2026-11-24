@@ -5326,3 +5326,6 @@ shape	Appearance	Оформление
 # Layer Style › Gradient Overlay: gradient swatch, preset picker and stop strip
 	Click to pick a gradient preset	Нажмите, чтобы выбрать набор градиента
 	From and To edit the first and last stops	«От» и «До» меняют первую и последнюю контрольную точку
+
+# File › Save All
+	Save All	Сохранить все

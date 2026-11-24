@@ -117,6 +117,7 @@ impl PhotocraftApp {
                 let _s = perf_span::span("jobs.tick");
                 jobs_ui::tick(self, ctx);
             }
+            crate::save_all::tick(self, ctx);
             if matches!(self.ui.tool, crate::state::Tool::BubbleTextRemover | crate::state::Tool::BubbleType) {
                 crate::typer::warm_page(self, ctx);
             }

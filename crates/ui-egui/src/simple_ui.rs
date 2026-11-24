@@ -953,6 +953,7 @@ fn master_sheet(app: &mut PhotocraftApp, ctx: &egui::Context, screen: Rect) {
                     "file.new",
                     "file.open",
                     "file.save",
+                    "file.saveAll",
                     "file.export.quickExportAsPng",
                     "file.export.openDocsZip",
                     "edit.inpaintAi",

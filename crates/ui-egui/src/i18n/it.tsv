@@ -5240,3 +5240,6 @@ shape	Appearance	Aspetto
 # Layer Style › Gradient Overlay: gradient swatch, preset picker and stop strip
 	Click to pick a gradient preset	Fai clic per scegliere un gradiente predefinito
 	From and To edit the first and last stops	Da e A modificano il primo e l'ultimo punto
+
+# File › Save All
+	Save All	Salva tutto

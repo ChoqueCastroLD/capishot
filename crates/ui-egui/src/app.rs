@@ -242,6 +242,7 @@ impl PhotocraftApp {
             action_tool: None,
             updates_rt: Default::default(),
             discard: None,
+            save_all: None,
             file_dialog: None,
             tiff_options: None,
             flat_copy: None,

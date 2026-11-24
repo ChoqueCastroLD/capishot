@@ -3846,3 +3846,6 @@ curves	Smooth	平滑
 # Layer Style › Gradient Overlay: gradient swatch, preset picker and stop strip
 	Click to pick a gradient preset	点按以选取渐变预设
 	From and To edit the first and last stops	“从”和“到”编辑第一个和最后一个色标
+
+# File › Save All
+	Save All	全部存储

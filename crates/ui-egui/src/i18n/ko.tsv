@@ -4373,3 +4373,6 @@ curves	Smooth	매끄럽게
 # Layer Style › Gradient Overlay: gradient swatch, preset picker and stop strip
 	Click to pick a gradient preset	클릭하여 그레이디언트 사전 설정 선택
 	From and To edit the first and last stops	시작과 끝은 첫 번째와 마지막 정지점을 편집합니다
+
+# File › Save All
+	Save All	모두 저장

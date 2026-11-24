@@ -684,6 +684,9 @@ impl PhotocraftApp {
             self.flat_copy_docs.insert(doc);
         }
         self.ui.status = crate::i18n::fmt(tl!("Saved {name}"), &[("name", path)]);
+        if hooks {
+            crate::save_all::written(self, doc);
+        }
         // The file was written, copy or not: another tab bound to it no longer matches it.
         self.detach_others_from_file(path, doc);
         if !copy {
@@ -758,6 +761,7 @@ impl PhotocraftApp {
         }
         match written {
             Err(e) => {
+                crate::save_all::failed(self, doc, &e);
                 self.ui.status = crate::i18n::fmt(tl!("Save failed: {error}"), &[("error", &e)]);
                 self.ui.status_error = true;
             }

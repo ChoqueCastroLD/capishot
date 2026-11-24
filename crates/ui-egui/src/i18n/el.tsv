@@ -4835,3 +4835,6 @@ curves	Smooth	Εξομάλυνση
 # Layer Style › Gradient Overlay: gradient swatch, preset picker and stop strip
 	Click to pick a gradient preset	Κάντε κλικ για να επιλέξετε προκαθορισμένη διαβάθμιση
 	From and To edit the first and last stops	Τα Από και Έως αλλάζουν το πρώτο και το τελευταίο σημείο
+
+# File › Save All
+	Save All	Αποθήκευση όλων

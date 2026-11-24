@@ -129,6 +129,7 @@ pub const HELP: &[Help] = &[
     h("file.openAs", "Open a file as a format you pick", "Abre un archivo con el formato que elijas", "Abre um arquivo no formato que você escolher"),
     h("file.save", "Save the document with its layers", "Guarda el documento con sus capas", "Salva o documento com as camadas"),
     h("file.saveAs", "Save under a new name or in another format", "Guarda con otro nombre o en otro formato", "Salva com outro nome ou em outro formato"),
+    h("file.saveAll", "Save every open document that has unsaved changes", "Guarda todos los documentos abiertos con cambios sin guardar", "Salva todos os documentos abertos com alterações não salvas"),
     h("file.saveACopy", "Save a copy and keep working on the original", "Guarda una copia y sigue trabajando en el original", "Salva uma cópia e continua no original"),
     h("file.close", "Close this document", "Cierra este documento", "Fecha este documento"),
     h("file.closeAll", "Close every open document", "Cierra todos los documentos abiertos", "Fecha todos os documentos abertos"),

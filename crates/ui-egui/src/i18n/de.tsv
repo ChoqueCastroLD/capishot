@@ -4165,3 +4165,6 @@ curves	Smooth	Glätten
 # Layer Style › Gradient Overlay: gradient swatch, preset picker and stop strip
 	Click to pick a gradient preset	Klicken, um eine Verlaufsvorgabe zu wählen
 	From and To edit the first and last stops	Von und Nach bearbeiten die erste und letzte Farbmarke
+
+# File › Save All
+	Save All	Alle speichern

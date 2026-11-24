@@ -4856,3 +4856,6 @@ curves	Smooth	Згладити
 # Layer Style › Gradient Overlay: gradient swatch, preset picker and stop strip
 	Click to pick a gradient preset	Натисніть, щоб вибрати набір градієнта
 	From and To edit the first and last stops	«Від» і «До» змінюють першу й останню контрольну точку
+
+# File › Save All
+	Save All	Зберегти все

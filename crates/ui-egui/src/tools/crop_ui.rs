@@ -606,6 +606,7 @@ fn available_while_pending(id: &str) -> bool {
         "file.close"
             | "file.save"
             | "file.saveAs"
+            | "file.saveAll"
             | "file.saveACopy"
             | "file.exit"
             | "edit.undo"
