@@ -611,3 +611,90 @@ fn repeated_drags_on_a_manga_page_with_4_gb_never_freeze() {
 fn repeated_drags_on_a_manga_page_on_the_cpu_canvas_never_freeze() {
     check(Device::Cpu, Page::Manga);
 }
+
+/// A Move drag drawn from the drag cache (the preview is the document as it is) composites what
+/// the view still needs on the GPU. 0.13.41-0.13.43 on his PC, "Move 6 different type layers back
+/// to back, 100 %: layer 6": a 99-104 ms frame of `canvas.cpu_piece`. The preview's layers were
+/// handed to the compositor as moved from their own pixels (`gpu_translations`: the "moved" copy
+/// was the layer itself), which it refuses for a layer with effects, so the catch-up drew the
+/// piece with the CPU compositor in the frame.
+#[test]
+fn a_drag_from_the_cache_catches_up_on_the_gpu() {
+    catch_up_in_a_drag_from_the_cache(Page::Credits);
+}
+
+/// The same on his file (a type layer of his, its effects 99-104 ms on the CPU on his PC).
+#[test]
+fn a_drag_from_the_cache_on_his_file_catches_up_on_the_gpu() {
+    catch_up_in_a_drag_from_the_cache(Page::Psd);
+}
+
+fn catch_up_in_a_drag_from_the_cache(page: Page) {
+    let _gpu = photocraft_testkit::gpu_lock();
+    let Some(mut h) = harness(Device::Gpu) else {
+        eprintln!("skipping: no GPU adapter");
+        return;
+    };
+    let targets = match page {
+        Page::Psd => match psd(h.state_mut()) {
+            Some(t) => t,
+            None => return,
+        },
+        _ => credits(h.state_mut()),
+    };
+    let size = h.state().session.active().expect("doc").doc.size;
+    {
+        let app = h.state_mut();
+        app.sync_views();
+        app.ui.tool = crate::state::Tool::Move;
+        app.ui.tool_options.move_auto_select = false;
+        app.ui.extras.snap = false;
+        app.ui.view.show.smart_guides = false;
+        app.ui.extras.rulers = false;
+    }
+    let ctx = h.ctx.clone();
+    let (req, _rx) = crate::control::ControlRequest::new("ui.set", json!({"zoom": 1.0, "center": [size.width / 2, size.height / 2]}));
+    crate::control::handle(h.state_mut(), &ctx, &req);
+    h.run_steps(20);
+    if !gpu_drawing(&mut h, Device::Gpu) {
+        return;
+    }
+    h.run_steps(40);
+    let id = targets.text;
+    h.state_mut().run("layer.select", json!({"layer": id.0})).expect("select");
+    let doc = h.state().session.active().expect("doc").doc.clone();
+    assert!(photocraft_compose::effects::has_effects(doc.layer(id).expect("type")), "the type layer has effects");
+    let gpu = h.state().gpu.clone().expect("a GPU canvas");
+    let mut n = 0;
+    while !gpu.drag_ready_for(&doc, &[id]) && n < 600 {
+        h.step();
+        n += 1;
+    }
+    assert!(gpu.drag_ready_for(&doc, &[id]), "the drag cache is made while the pointer rests");
+    let region = shown(&h, &doc);
+    let b = doc.layer(id).and_then(|l| photocraft_compose::change_bounds(l, doc.bounds())).expect("bounds").intersect(&region);
+    let start = [b.x0 as f32 + b.width() as f32 / 3.0 + 0.5, (b.y0 + b.y1) as f32 / 2.0 + 0.5];
+    let p0 = screen(&h, start[0], start[1]);
+    h.event(egui::Event::PointerMoved(p0));
+    h.event(egui::Event::PointerButton { pos: p0, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    h.step();
+    for i in 1..=3 {
+        h.event(egui::Event::PointerMoved(p0 + egui::vec2(12.0 * i as f32, 5.0 * i as f32)));
+        h.step();
+    }
+    assert_eq!(h.state().perf.last_refresh, crate::gpu_canvas::DRAG_CACHE_KIND, "the drag draws from its cache");
+    // A part of the view left out of date (a margin the drag frames left for later, a pan): the
+    // next frame with the pointer still catches it up.
+    let stale = Rect::new(region.x0 + 8, region.y0 + 8, region.x0 + 72, region.y0 + 40);
+    gpu.defer(doc.id.0, stale);
+    crate::perf_span::begin_frame();
+    let t = std::time::Instant::now();
+    h.step();
+    eprintln!("CATCH-UP {page:?}: the frame took {:.1} ms ({})", t.elapsed().as_secs_f64() * 1000.0, h.state().perf.last_refresh);
+    let spans = crate::perf_span::frame();
+    let cpu: Vec<_> = spans.iter().filter(|(n, _)| n.starts_with("canvas.cpu")).collect();
+    assert!(cpu.is_empty(), "the catch-up composited on the CPU in the frame: {cpu:?} ({})", h.state().perf.last_refresh);
+    assert!(gpu.current_in(doc.id.0, stale, 0), "the part is caught up");
+    h.event(egui::Event::PointerButton { pos: p0 + egui::vec2(36.0, 15.0), button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    h.run_steps(4);
+}

@@ -343,6 +343,14 @@ pub(crate) fn gpu_translations(app: &PhotocraftApp, idx: usize) -> Vec<photocraf
         }
         return out;
     }
+    // Drawn from a drag cache (`gpu_lazy`, or the CPU canvas's split): the preview is the
+    // document as it is and the cache shifts the layers. Its layers handed over as "moved" from
+    // themselves read as moved in place, which the compositor refuses for a layer with effects:
+    // every catch-up of the drag then went to the CPU compositor in the frame (his PSD, a type
+    // layer at 100 %: 99-104 ms).
+    if Arc::ptr_eq(shown, &st.doc) {
+        return Vec::new();
+    }
     for &id in &p.moving {
         let (Some(before), Some(after)) = (st.doc.layer(id), shown.layer(id)) else { continue };
         if let (Some(source), Some(moved)) = (before.surface(), after.surface())
