@@ -10,6 +10,19 @@ use photocraft_doc::LayerId;
 use serde_json::json;
 
 use crate::PhotocraftApp;
+
+/// Whether this test has a process of its own (cargo-nextest runs each test in one). The layout
+/// counts below are of the process-wide type engine: tests side by side in one process (`cargo
+/// test`) lay out type in it at the same time, and theirs push this test's layers out of its memo
+/// of recent layouts, which costs layouts that aren't the keystroke's. Without a process of its
+/// own a counting test says so and returns.
+fn own_process() -> bool {
+    let own = std::env::var_os("NEXTEST").is_some();
+    if !own {
+        eprintln!("skipped: counts the process-wide type engine's layouts, which needs a process of its own (cargo nextest)");
+    }
+    own
+}
 use crate::move_repeat_tests::{Device, PSD, gpu_drawing, harness, pct, screen, stripes, styled_text};
 
 type Harness = egui_kittest::Harness<'static, PhotocraftApp>;
@@ -210,6 +223,9 @@ const TEXT: &str = "Y ENTONCES DIJO ALGO";
 /// every row of the panel each frame.
 #[test]
 fn a_keystroke_lays_out_its_layer_once_and_redraws_what_it_changed() {
+    if !own_process() {
+        return;
+    }
     let t = type_on(Device::Cpu, |app| Some(styled_page(app)), TEXT, ONE_A_FRAME).expect("the CPU canvas");
     report(Device::Cpu, "50 styled type layers", &t);
     for (i, k) in t.keys.iter().enumerate() {
@@ -223,6 +239,9 @@ fn a_keystroke_lays_out_its_layer_once_and_redraws_what_it_changed() {
 /// canvas composites what both changed. On a92ad8384: 6 layouts.
 #[test]
 fn keys_typed_in_one_frame_redraw_only_what_they_changed() {
+    if !own_process() {
+        return;
+    }
     let t = type_on(Device::Cpu, |app| Some(styled_page(app)), TEXT, Typing { per_frame: 2, tab: 0 }).expect("the CPU canvas");
     report(Device::Cpu, "50 styled type layers, 2 keys a frame", &t);
     for (i, k) in t.keys.iter().enumerate() {
@@ -262,6 +281,9 @@ fn typing_timing_report() {
 /// three selected layers. On a92ad8384: 3 layouts for each layer changed.
 #[test]
 fn set_style_lays_out_each_layer_it_changes_once() {
+    if !own_process() {
+        return;
+    }
     let mut h = harness(Device::Cpu).expect("the CPU canvas");
     let first = styled_page(h.state_mut());
     h.state_mut().sync_views();
