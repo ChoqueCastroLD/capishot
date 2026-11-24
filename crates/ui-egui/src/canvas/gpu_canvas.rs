@@ -1294,29 +1294,35 @@ impl GpuCanvas {
         if size[0] == 0 || size[1] == 0 || !self.health.is_ok() {
             return None;
         }
-        // A light document draws in full in this frame, never a frame with parts missing: only a
-        // heavy one (canvas pixels times its visible drawing layers over SLICED_FIRST_WORK) is
-        // worth slicing.
-        let layers = doc.walk().iter().filter(|(_, _, l)| l.visible && l.children().is_none()).count() as u64;
-        if (u64::from(size[0]) * u64::from(size[1])).saturating_mul(layers.max(1)) <= SLICED_FIRST_WORK {
-            return None;
-        }
         let format = self.format_for(doc.depth, size);
         {
-            let device = &self.rs.device;
             let mut renderer = self.rs.renderer.write();
             let res = renderer.callback_resources.canvas_mut(self.id)?;
-            // Only a document with no set yet that was never shown: a full refresh of one on
-            // screen, or of one shown before whose set was let go, draws in full, never a frame
-            // with parts of it missing.
-            if res.docs.get(&key).is_some_and(|d| d.size == size && d.format == format) || res.shown.contains(&key) {
-                return None;
+            let new_bytes = canvas_texture_bytes(size, self.tile, texel_bytes(format));
+            // A page on screen whose size or format changed (a crop, its undo, Image or Canvas
+            // Size, while the GPU compositor is getting ready or can't draw the document, as on
+            // WebGL): the page before stays on screen while the new one fills in pieces, as on
+            // the GPU compositor ([`Before`]). The whole new page was composited in one frame.
+            let resized = res.docs.get(&key).is_some_and(|d| (d.size != size || d.format != format) && res.keeps_before(key, d, new_bytes));
+            if !resized {
+                // A light document draws in full in this frame, never a frame with parts
+                // missing: only a heavy one (canvas pixels times its visible drawing layers over
+                // SLICED_FIRST_WORK) is worth slicing.
+                let layers = doc.walk().iter().filter(|(_, _, l)| l.visible && l.children().is_none()).count() as u64;
+                if (u64::from(size[0]) * u64::from(size[1])).saturating_mul(layers.max(1)) <= SLICED_FIRST_WORK {
+                    return None;
+                }
+                // Otherwise only a document with no set yet that was never shown: a full refresh
+                // of one on screen, or of one shown before whose set was let go, draws in full,
+                // never a frame with parts of it missing.
+                if res.docs.get(&key).is_some_and(|d| d.size == size && d.format == format) || res.shown.contains(&key) {
+                    return None;
+                }
             }
             // A new set: everything in it is deferred (`DocTextures::new`).
-            res.docs.remove(&key);
-            res.make_room(canvas_texture_bytes(size, self.tile, texel_bytes(format)));
-            let tex = DocTextures::new(device, res, size, self.tile, format)?;
-            res.docs.insert(key, tex);
+            if !self.install_set(res, key, size, format) {
+                return None;
+            }
             res.reduced_at = now_ms();
         }
         let t0 = now_ms();
@@ -3432,24 +3438,39 @@ fn init_buffer(device: &wgpu::Device, label: &str, contents: &[u8], usage: wgpu:
 impl Resources {
     /// Whether `old`, document `key`'s set, stays on screen while one of `new_bytes` for a new
     /// page size or format fills in ([`Before`]): a view drew it (or the page before it) last,
-    /// and both sets fit the canvas budget together. Otherwise the new set is drawn whole in the
-    /// frame that makes it (two pages at once don't fit a phone's budget).
+    /// and what is kept of it ([`Resources::before_of`]: the tiles the views showed) fits the
+    /// canvas budget beside the new set. Otherwise the new set is drawn whole in the frame that
+    /// makes it.
     fn keeps_before(&self, key: u64, old: &DocTextures, new_bytes: u64) -> bool {
         let kept = match &old.before {
             Some(b) => b.set.bytes(),
-            None if self.drawn.values().any(|(_, p)| p.doc == key && p.doc_size == old.size) && !old.tiles.is_empty() => old.bytes(),
-            None => return false,
+            None => {
+                let views = self.views_of(key, old.size);
+                if views.is_empty() {
+                    return false;
+                }
+                let bpp = texel_bytes(old.format);
+                old.tiles.iter().filter(|t| shown_in(t, &views)).map(|t| t.bytes(bpp)).fold(0, u64::saturating_add)
+            }
         };
-        kept.saturating_add(new_bytes) <= self.canvas_budget
+        kept > 0 && kept.saturating_add(new_bytes) <= self.canvas_budget
     }
 
-    /// The page to keep on screen when document `key`'s set `old` is replaced ([`Before`]).
+    /// Where the views last drew document `key`'s set of `size` (view key, canvas rect, parameters).
+    fn views_of(&self, key: u64, size: [u32; 2]) -> Vec<(u64, egui::Rect, ViewParams)> {
+        self.drawn.iter().filter(|(_, (_, p))| p.doc == key && p.doc_size == size).map(|(v, (r, p))| (*v, *r, *p)).collect()
+    }
+
+    /// The page to keep on screen when document `key`'s set `old` is replaced ([`Before`]): its
+    /// tiles the views showed, about a screen's worth whatever the page's size (a phone's budget
+    /// holds those beside the new set where it can't hold two whole pages).
     fn before_of(&self, key: u64, mut old: DocTextures) -> Box<Before> {
         // (The page before that, still on screen: it stays.)
         if let Some(b) = old.before.take() {
             return b;
         }
-        let views = self.drawn.iter().filter(|(_, (_, p))| p.doc == key && p.doc_size == old.size).map(|(v, (r, p))| (*v, *r, *p)).collect();
+        let views = self.views_of(key, old.size);
+        old.tiles.retain(|t| shown_in(t, &views));
         Box::new(Before { set: old, views })
     }
 
@@ -3495,13 +3516,34 @@ impl Resources {
     }
 }
 
+impl Tile {
+    /// GPU bytes of the tile's texture (every mip level), `bpp` bytes a texel.
+    fn bytes(&self, bpp: u64) -> u64 {
+        (0..self.levels.len() as u32).map(|l| u64::from((self.texture.width() >> l).max(1)) * u64::from((self.texture.height() >> l).max(1)) * bpp).sum()
+    }
+}
+
+/// Whether tile `t` shows in any of `views` (a view's canvas rect and parameters): its document
+/// rect meets the document area the view covers (the rect's diagonal around its centre, so any
+/// rotation is covered).
+fn shown_in(t: &Tile, views: &[(u64, egui::Rect, ViewParams)]) -> bool {
+    let [tx, ty, tw, th] = t.rect.map(|v| v as f32);
+    views.iter().any(|(_, rect, p)| {
+        let zoom = if p.zoom.is_finite() && p.zoom > 0.0 { p.zoom } else { return true };
+        let half = rect.size().length() / 2.0 / zoom + 2.0;
+        let [ox, oy] = p.offset.map(|v| if v.is_finite() { v } else { 0.0 });
+        let (cx, cy) = (p.center[0] - ox, p.center[1] - oy);
+        tx < cx + half && tx + tw > cx - half && ty < cy + half && ty + th > cy - half
+    })
+}
+
 impl DocTextures {
     /// GPU bytes of the set (every tile and mip level).
     fn bytes(&self) -> u64 {
         let bpp = texel_bytes(self.format);
         self.tiles
             .iter()
-            .map(|t| (0..t.levels.len() as u32).map(|l| u64::from((t.texture.width() >> l).max(1)) * u64::from((t.texture.height() >> l).max(1)) * bpp).sum::<u64>())
+            .map(|t| t.bytes(bpp))
             .fold(0, u64::saturating_add)
             .saturating_add(self.before.as_ref().map_or(0, |b| b.set.bytes()))
     }
