@@ -18,6 +18,12 @@
 //! wasm linear memory never shrinks, so a periodic trial would raise the module's high-water
 //! mark by the amount it asks about, for nothing. It reads the size of linear memory instead.
 //!
+//! A browser kills a tab long before its module reaches the 4 GiB wasm32 ceiling (a 4 GB laptop's
+//! at about 2.6 GB, a phone's sooner), so the web shell sets the tab's [`limit`] from the device's
+//! memory and keeps telling [`set_page_memory`] what the page takes as the browser measures it
+//! (the AI worker and the JavaScript heap included): [`ensure`], [`below`] and [`over`] count
+//! against that, not the ceiling alone.
+//!
 //! Native targets overcommit, so the question has no useful answer there: every check passes and
 //! desktop behaviour is unchanged.
 
@@ -49,13 +55,58 @@ fn simulated() -> Option<u64> {
 }
 
 /// The most linear memory a wasm32 module can address.
-#[cfg(target_arch = "wasm32")]
-const WASM32_CEILING: u64 = 4 << 30;
+pub const WASM32_CEILING: u64 = 4 << 30;
 
-/// `true` when `bytes` can be allocated in one piece right now. Always `true` off the web.
+/// The tab's memory limit ([`set_limit`]; 0: none set).
+static LIMIT: AtomicU64 = AtomicU64::new(0);
+/// What the page takes as last measured ([`set_page_memory`]).
+static PAGE: AtomicU64 = AtomicU64::new(0);
+
+/// Where the browser would kill this page (bytes; `None`: no limit, as on the desktop). The web
+/// shell sets it at start-up from the device's memory; at most [`WASM32_CEILING`].
+pub fn set_limit(bytes: Option<u64>) {
+    LIMIT.store(bytes.map_or(0, |b| b.clamp(1, WASM32_CEILING)), Ordering::SeqCst);
+}
+
+/// The tab's memory limit, if one was set ([`set_limit`]).
+pub fn limit() -> Option<u64> {
+    match LIMIT.load(Ordering::SeqCst) {
+        0 => None,
+        n => Some(n),
+    }
+}
+
+/// What the page takes now as the browser measures it (bytes: the module, its workers, the
+/// JavaScript heap), reported by the web shell as measurements come in.
+pub fn set_page_memory(bytes: u64) {
+    PAGE.store(bytes, Ordering::SeqCst);
+}
+
+/// What the page takes: the larger of the module's linear memory and the last measurement.
+fn used() -> u64 {
+    linear_memory().max(PAGE.load(Ordering::SeqCst))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn linear_memory() -> u64 {
+    (core::arch::wasm32::memory_size::<0>() as u64).saturating_mul(64 << 10)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn linear_memory() -> u64 {
+    0
+}
+
+/// `true` when `bytes` can be allocated in one piece right now, within the tab's [`limit`]. Always
+/// `true` off the web.
 fn can_allocate(bytes: u64) -> bool {
     if let Some(available) = simulated() {
         return bytes <= available;
+    }
+    if let Some(l) = limit()
+        && used().saturating_add(bytes) > l
+    {
+        return false;
     }
     trial(bytes)
 }
@@ -81,27 +132,36 @@ pub fn ensure(need: u64) -> Result<(), AllocationError> {
     if can_allocate(total) { Ok(()) } else { Err(AllocationError::NotEnoughMemory { bytes }) }
 }
 
-/// `true` while the module's linear memory is within `bytes` of the 4 GiB wasm32 ceiling (web
-/// only; always `false` elsewhere unless a simulation is set). Allocates nothing, unlike
-/// [`ensure`]. Linear memory is a high-water mark, so this errs towards `true`: room freed inside
-/// the allocator after a peak doesn't count. A browser that stops growing memory below 4 GiB isn't
-/// seen either; the operation checks still are.
+/// `true` while the page is within `bytes` of what it may take: the tab's [`limit`] (on the web
+/// the 4 GiB wasm32 ceiling without one), less the module's linear memory or the page's last
+/// measurement, whichever is larger. Always `false` off the web unless a limit or a simulation is
+/// set. Allocates nothing, unlike [`ensure`]. Linear memory is a high-water mark, so this errs
+/// towards `true`: room freed inside the allocator after a peak doesn't count.
 pub fn below(bytes: u64) -> bool {
     if let Some(available) = simulated() {
         return bytes > available;
     }
-    linear_memory_left().is_some_and(|left| left < bytes)
+    left().is_some_and(|left| left < bytes)
 }
 
-#[cfg(target_arch = "wasm32")]
-fn linear_memory_left() -> Option<u64> {
-    let used = (core::arch::wasm32::memory_size::<0>() as u64).saturating_mul(64 << 10);
-    Some(WASM32_CEILING.saturating_sub(used))
+/// `true` while the page takes more than `fraction` of the tab's [`limit`] (as [`below`] counts
+/// it): the point to let go of what can be made again before the browser kills the tab.
+pub fn over(fraction: f64) -> bool {
+    let room = |total: u64, left: u64| (left as f64) < total as f64 * (1.0 - fraction);
+    if let Some(available) = simulated() {
+        return limit().is_some_and(|l| room(l, available));
+    }
+    let total = if cfg!(target_arch = "wasm32") { Some(limit().unwrap_or(WASM32_CEILING)) } else { limit() };
+    total.zip(left()).is_some_and(|(t, l)| room(t, l))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn linear_memory_left() -> Option<u64> {
-    None
+/// What the page may still take, where that is known.
+fn left() -> Option<u64> {
+    match limit() {
+        Some(l) => Some(l.saturating_sub(used())),
+        None if cfg!(target_arch = "wasm32") => Some(WASM32_CEILING.saturating_sub(used())),
+        None => None,
+    }
 }
 
 #[cfg(test)]
@@ -118,6 +178,8 @@ mod tests {
         fn new() -> Self {
             let guard = Guard(LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
             simulate_available(None);
+            set_limit(None);
+            set_page_memory(0);
             guard
         }
     }
@@ -125,6 +187,8 @@ mod tests {
     impl Drop for Guard {
         fn drop(&mut self) {
             simulate_available(None);
+            set_limit(None);
+            set_page_memory(0);
         }
     }
 
@@ -146,6 +210,21 @@ mod tests {
         assert!(matches!(ensure(200 * MIB), Err(AllocationError::NotEnoughMemory { .. })));
         assert!(!below(300 * MIB));
         assert!(below(301 * MIB));
+    }
+
+    /// A 4 GB laptop's tab is killed at about 2.6 GB: with its limit set, the page's measured
+    /// memory counts against that, not the 4 GiB ceiling.
+    #[test]
+    fn the_tabs_limit_and_the_pages_memory_set_the_room() {
+        let _g = Guard::new();
+        set_limit(Some(2400 * MIB));
+        set_page_memory(1800 * MIB);
+        assert!(!below(500 * MIB) && below(700 * MIB), "600 MiB left");
+        assert!(over(0.7) && !over(0.8), "75 % used");
+        assert!(ensure(400 * MIB).is_ok(), "400 + the 128 reserve fit in 600");
+        assert!(ensure(500 * MIB).is_err(), "500 + 128 don't");
+        set_limit(None);
+        assert!(ensure(10 << 30).is_ok() && !below(1 << 30) && !over(0.0), "no limit off the web: as before");
     }
 
     #[test]

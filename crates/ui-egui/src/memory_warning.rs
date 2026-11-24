@@ -2,9 +2,10 @@
 //!
 //! On the web a failed allocation aborts the module and the page freezes without a message. The
 //! big operations refuse up front when they won't fit (`photocraft_engine::memory_gate`); this
-//! tells the user earlier, while there is still room to save: when the module's memory is within
-//! [`WARN_BELOW`] of the wasm32 ceiling, a notice that stays until dismissed asks them to save and
-//! free memory. The answer comes from [`photocraft_raster::headroom::below`], which reads the
+//! tells the user earlier, while there is still room to save: when the page is within
+//! [`warn_below`] of what the browser lets the tab take ([`tab_limit`]: about 2.4 GB on a 4 GB
+//! laptop, where tabs were killed at 2.6 GB, not the 4 GB wasm32 ceiling), a notice that stays
+//! until dismissed asks them to save and free memory. The answer comes from [`photocraft_raster::headroom::below`], which reads the
 //! size of linear memory and allocates nothing. Linear memory never shrinks, so on the web the
 //! warning doesn't re-arm once shown (only `?free-mb` or a test can make memory recover). It is always "plenty" on
 //! the desktop, so the warning never shows there.
@@ -13,12 +14,37 @@ use photocraft_raster::headroom;
 
 use crate::PhotocraftApp;
 
-/// Warn when less than this can be allocated.
+/// Warn when less than this can be allocated (at most: [`warn_below`]).
 pub const WARN_BELOW: u64 = 512 << 20;
 
 /// Warn again only after this much (or more) was available again, so a figure hovering around
-/// the threshold doesn't flicker the notice on and off.
+/// the threshold doesn't flicker the notice on and off (with [`WARN_BELOW`]: [`rearm_above`]).
 pub const REARM_ABOVE: u64 = 768 << 20;
+
+/// Warn when less than this is left of the tab's limit: a fifth of it, from 192 MB (a 1.2 GB
+/// phone tab) to [`WARN_BELOW`] (the 4 GB ceiling and above).
+pub fn warn_below() -> u64 {
+    headroom::limit().map_or(WARN_BELOW, |l| (l / 5).clamp(192 << 20, WARN_BELOW))
+}
+
+/// Re-arm once this much is left again: half as much again as [`warn_below`].
+pub fn rearm_above() -> u64 {
+    warn_below() / 2 * 3
+}
+
+/// Where a browser kills a tab on a device with `device` bytes of memory (`phone`: a phone or a
+/// small tablet), for [`headroom::set_limit`]. Telemetry: a 4 GB laptop's tab was killed at 2.6 GB, a
+/// 4 GB phone's page must stay well under 1.2 GB; a wasm32 module can't pass 4 GB anyway. `None`
+/// where the browser doesn't say and it isn't a phone (Firefox, desktop Safari): the ceiling.
+pub fn tab_limit(device: Option<u64>, phone: bool) -> Option<u64> {
+    match device {
+        Some(b) if phone => Some((b / 32 * 9).clamp(512 << 20, headroom::WASM32_CEILING)),
+        Some(b) => Some((b / 10 * 6).clamp(1 << 30, headroom::WASM32_CEILING)),
+        // Safari on a phone: as a 4 GB one.
+        None if phone => Some(1152 << 20),
+        None => None,
+    }
+}
 
 /// Seconds between checks.
 const CHECK_EVERY: f64 = 2.0;
@@ -83,8 +109,8 @@ pub fn tick(app: &mut PhotocraftApp, now: f64) {
     if app.session.active().is_none() || !app.low_memory.due(now) {
         return;
     }
-    let below_warn = headroom::below(WARN_BELOW);
-    let below_rearm = if app.low_memory.warned() { headroom::below(REARM_ABOVE) } else { below_warn };
+    let below_warn = headroom::below(warn_below());
+    let below_rearm = if app.low_memory.warned() { headroom::below(rearm_above()) } else { below_warn };
     match app.low_memory.step(below_warn, below_rearm) {
         Step::Idle => {}
         Step::Warn => post(app),
@@ -141,6 +167,10 @@ pub fn after_open(app: &mut PhotocraftApp, document: photocraft_doc::DocId) {
     }
 }
 
+/// Serializes the tests that set the process-wide tab limit.
+#[cfg(test)]
+pub(crate) static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,6 +199,29 @@ mod tests {
         assert_eq!(w.step(false, false), Step::Rearm);
         assert_eq!(w.step(false, false), Step::Idle);
         assert_eq!(w.step(true, true), Step::Warn);
+    }
+
+    /// A 4 GB laptop's tab is killed at about 2.6 GB: its limit is below that, and the warning
+    /// comes a fifth of the limit before it, not 512 MB before the 4 GB wasm ceiling (3.5 GB).
+    #[test]
+    fn the_tabs_limit_and_warning_follow_the_devices_memory() {
+        const G: u64 = 1 << 30;
+        let laptop = tab_limit(Some(4 * G), false).unwrap();
+        assert!(laptop < 2600 << 20 && laptop > 2 * G, "{} MB", laptop >> 20);
+        assert_eq!(tab_limit(Some(8 * G), false), Some(headroom::WASM32_CEILING), "8 GB or more: the ceiling");
+        let phone = tab_limit(Some(4 * G), true).unwrap();
+        assert!(phone <= 1200 << 20 && phone >= 1 << 30, "{} MB", phone >> 20);
+        assert_eq!(tab_limit(None, false), None);
+        assert!(tab_limit(None, true).is_some(), "Safari on a phone");
+        let _turn = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        headroom::set_limit(Some(laptop));
+        let warn = laptop - warn_below();
+        assert!(warn < 2100 << 20 && warn > 1800 << 20, "warns at {} MB used", warn >> 20);
+        assert!(rearm_above() > warn_below());
+        headroom::set_limit(Some(phone));
+        assert!(warn_below() >= 192 << 20 && warn_below() < 256 << 20);
+        headroom::set_limit(None);
+        assert_eq!((warn_below(), rearm_above()), (WARN_BELOW, REARM_ABOVE), "no limit: as before");
     }
 
     #[test]

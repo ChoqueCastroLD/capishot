@@ -43,8 +43,14 @@ pub struct PageSleep {
 }
 
 /// Seconds a page goes unseen before it sleeps while the pages' memory is over half the budget
-/// (a chapter opened at once on a phone).
+/// (a chapter opened at once on a phone), or the tab is over [`TAB_PRESSED`] of what the browser
+/// lets it take.
 const IDLE_PRESSED_S: f64 = 0.5;
+
+/// The share of the tab's limit (`headroom::limit`, from the device's memory) past which pages
+/// behind sleep at once on any device: the low-memory warning comes at four fifths, and the
+/// browser kills the tab at the limit, which pages kept awake reach fast.
+pub const TAB_PRESSED: f64 = 0.6;
 
 /// Whether pages are released on this device.
 pub fn enabled(app: &PhotocraftApp) -> bool {
@@ -61,6 +67,7 @@ pub fn enabled(app: &PhotocraftApp) -> bool {
         ReleasePages::Auto => {
             crate::gpu_canvas::physical_memory().is_some_and(|b| b <= SMALL_DEVICE)
                 || (cfg!(target_arch = "wasm32") && app.session.documents().len() > MANY_PAGES)
+                || photocraft_raster::headroom::over(TAB_PRESSED)
         }
     }
 }
@@ -145,7 +152,8 @@ pub fn tick(app: &mut PhotocraftApp, now: f64) {
     // Weighing walks every tile: twice a second is enough.
     if now - app.page_sleep.weighed.0 >= 0.5 {
         let budget = app.session.prefs().performance.history_budget_bytes();
-        app.page_sleep.weighed = (now, app.session.pixel_bytes().saturating_add(ai_reserve(app)) > budget / 2);
+        let tab = photocraft_raster::headroom::over(TAB_PRESSED);
+        app.page_sleep.weighed = (now, tab || app.session.pixel_bytes().saturating_add(ai_reserve(app)) > budget / 2);
     }
     let Some(index) = (0..app.session.documents().len()).find(|&i| sleepy(app, i, now)) else { return };
     let st = &app.session.documents()[index];
@@ -392,6 +400,33 @@ mod tests {
         step(&mut app, 1.9);
         assert!(app.session.is_asleep(0), "the AI job's memory: it sleeps at once");
         go.send(()).unwrap();
+    }
+
+    /// A tab over three fifths of its limit (a 4 GB laptop: 1.4 of 2.4 GB) puts the pages behind
+    /// to sleep after half a second, on Auto, whatever the device's memory and the pages' share.
+    #[test]
+    fn pages_behind_sleep_at_once_when_the_tab_nears_its_limit() {
+        use photocraft_raster::headroom;
+        let _turn = crate::memory_warning::LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut app = app();
+        app.session.edit_prefs(|p| {
+            p.performance.release_inactive_pages = ReleasePages::Auto;
+            p.performance.memory_usage_mb = 16_384;
+        });
+        headroom::set_limit(Some(2400 << 20));
+        headroom::set_page_memory(1000 << 20);
+        app.page_sleep.seen.insert(app.session.documents()[0].doc.id, 0.0);
+        step(&mut app, 0.6);
+        step(&mut app, 1.2);
+        let small = crate::gpu_canvas::physical_memory().is_some_and(|b| b <= SMALL_DEVICE);
+        assert!(small || !app.session.is_asleep(0), "under the mark: it waits for IDLE_S");
+        headroom::set_page_memory(1500 << 20);
+        app.page_sleep.seen.insert(app.session.documents()[0].doc.id, 1.2);
+        step(&mut app, 1.8);
+        step(&mut app, 2.4);
+        headroom::set_limit(None);
+        headroom::set_page_memory(0);
+        assert!(app.session.is_asleep(0), "over the mark: it sleeps at once");
     }
 
     #[test]

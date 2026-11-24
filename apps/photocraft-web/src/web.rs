@@ -607,6 +607,9 @@ fn cap_memory() {
     let nav = window.navigator();
     let gb = js_sys::Reflect::get(&nav, &JsValue::from_str("deviceMemory")).ok().and_then(|v| v.as_f64()).filter(|v| v.is_finite() && *v > 0.0);
     let touch = nav.max_touch_points() > 0;
+    // Phones and small tablets: a touch screen on a device of 4 GB or less, or a phone-sized window.
+    let short = window.inner_width().ok().and_then(|v| v.as_f64()).zip(window.inner_height().ok().and_then(|v| v.as_f64())).map_or(f64::MAX, |(w, h)| w.min(h));
+    let phone = touch && gb.is_none_or(|gb| gb <= 4.0 || short < 600.0);
     // A phone's browser kills a tab well before a quarter of its memory: the whole page (the
     // document, its undo history, the canvas and the browser's own share) must stay well under
     // ~1.2 GB on a 4 GB phone, so a phone's documents and undo history get a sixteenth (256 MB
@@ -615,11 +618,7 @@ fn cap_memory() {
         Some(gb) => {
             let bytes = (gb * f64::from(1u32 << 30)) as u64;
             photocraft_ui_egui::gpu_canvas::set_physical_memory(bytes);
-            // Phones and small tablets: a touch screen on a device of 4 GB or less, or a phone-sized
-            // window.
-            let short =
-                window.inner_width().ok().and_then(|v| v.as_f64()).zip(window.inner_height().ok().and_then(|v| v.as_f64())).map_or(f64::MAX, |(w, h)| w.min(h));
-            if touch && (gb <= 4.0 || short < 600.0) {
+            if phone {
                 // And 25 undo steps (each can hold a type layer's pixels).
                 photocraft_engine::prefs::set_history_states_cap(25);
                 (bytes / 16).clamp(192 << 20, 768 << 20)
@@ -634,7 +633,54 @@ fn cap_memory() {
         None => 2048 << 20,
     };
     photocraft_engine::prefs::set_memory_cap(cap);
-    log::info!("photocraft-web: memory {} GB, Memory Usage capped at {} MB", gb.map_or("unknown".to_string(), |g| g.to_string()), cap >> 20);
+    // Where the browser would kill the tab: the low-memory warning, the operations' memory checks
+    // and the pages' sleep count against it, with what the page measures to take.
+    let limit = photocraft_ui_egui::memory_warning::tab_limit(gb.map(|g| (g * f64::from(1u32 << 30)) as u64), phone);
+    photocraft_raster::headroom::set_limit(limit);
+    watch_page_memory();
+    log::info!(
+        "photocraft-web: memory {} GB, Memory Usage capped at {} MB, tab limit {} MB",
+        gb.map_or("unknown".to_string(), |g| g.to_string()),
+        cap >> 20,
+        limit.map_or(photocraft_raster::headroom::WASM32_CEILING, |l| l) >> 20
+    );
+}
+
+thread_local! {
+    /// The last `measureUserAgentSpecificMemory()` total (bytes), and whether one is under way.
+    static MEASURED: std::cell::Cell<(u64, bool)> = const { std::cell::Cell::new((0, false)) };
+}
+
+/// Every few seconds, what the page takes as the browser measures it, for the tab's limit
+/// (`headroom::set_page_memory`): the module's memory and the JavaScript heap
+/// (`performance.memory`, Chromium), or more where the page may ask
+/// `performance.measureUserAgentSpecificMemory()` (cross-origin isolated): that one counts the AI
+/// worker and the other workers too, and comes back late (at the browser's next collection).
+fn watch_page_memory() {
+    use wasm_bindgen::closure::Closure;
+    use wasm_bindgen::{JsCast as _, JsValue};
+    const EVERY_MS: i32 = 5000;
+    let Some(window) = web_sys::window() else { return };
+    let tick = Closure::<dyn FnMut()>::new(|| {
+        let Some(window) = web_sys::window() else { return };
+        let get = |o: &JsValue, k: &str| js_sys::Reflect::get(o, &JsValue::from_str(k)).ok().filter(|v| !v.is_undefined() && !v.is_null());
+        let Some(perf) = get(&window, "performance") else { return };
+        let heap = get(&perf, "memory").and_then(|m| get(&m, "usedJSHeapSize")).and_then(|v| v.as_f64()).unwrap_or(0.0) as u64;
+        let module = (core::arch::wasm32::memory_size::<0>() as u64).saturating_mul(64 << 10);
+        let (measured, busy) = MEASURED.with(std::cell::Cell::get);
+        photocraft_raster::headroom::set_page_memory(module.saturating_add(heap).max(measured));
+        let isolated = get(&window, "crossOriginIsolated").and_then(|v| v.as_bool()).unwrap_or(false);
+        let Some(measure) = get(&perf, "measureUserAgentSpecificMemory").and_then(|f| f.dyn_into::<js_sys::Function>().ok()).filter(|_| isolated && !busy) else { return };
+        let Ok(promise) = measure.call0(&perf).and_then(|p| p.dyn_into::<js_sys::Promise>()) else { return };
+        MEASURED.with(|m| m.set((measured, true)));
+        wasm_bindgen_futures::spawn_local(async move {
+            let bytes = wasm_bindgen_futures::JsFuture::from(promise).await.ok().and_then(|r| js_sys::Reflect::get(&r, &JsValue::from_str("bytes")).ok()).and_then(|b| b.as_f64());
+            MEASURED.with(|m| m.set((bytes.map_or(measured, |b| b as u64), false)));
+        });
+    });
+    if window.set_interval_with_callback_and_timeout_and_arguments_0(tick.as_ref().unchecked_ref(), EVERY_MS).is_ok() {
+        tick.forget();
+    }
 }
 
 /// The pixel memory open documents may take here, on a device whose browser kills a page early: a
