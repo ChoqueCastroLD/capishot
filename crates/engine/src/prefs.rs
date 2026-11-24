@@ -760,6 +760,24 @@ impl Performance {
     }
 }
 
+/// The layer-effect cache's budget, in bytes: the preference (`effect_cache_mb`) within a quarter
+/// of Memory Usage (`memory_usage`, [`Performance::history_budget_bytes`]), at least 32 MB. The
+/// cache sits beside the pages and their undo history, so on a device whose Memory Usage is capped
+/// (a 4 GB laptop's browser tab: 1 GB) a fixed 768 MB of it took the tab past what the browser
+/// lets it have.
+pub fn effect_cache_bytes(effect_cache_mb: u32, memory_usage: usize) -> usize {
+    ((effect_cache_mb as usize) << 20).min(memory_usage / 4).max(32 << 20)
+}
+
+/// The cap on Memory Usage of a desktop with `ram` bytes of memory: a quarter of it, as a desktop
+/// browser's tab gets (`photocraft-web`), at least 384 MB. The default 4 GB of Memory Usage on a
+/// 4 GB laptop let the pages and their undo history take all of it before any went to the scratch
+/// disk or any page went to sleep (`page_sleep` weighs the pages against it); 16 GB and more keep
+/// the default.
+pub fn desktop_memory_cap(ram: u64) -> u64 {
+    (ram / 4).max(384 << 20)
+}
+
 /// The platform's cap on Memory Usage (bytes; `u64::MAX`: none).
 static MEMORY_CAP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX);
 
@@ -1539,7 +1557,7 @@ impl Session {
     /// missing-glyph protection.
     pub fn apply_prefs(&mut self) {
         let n = history_states_limit(self.prefs().performance.history_states);
-        let budget = self.prefs().performance.effect_cache_mb as usize;
+        let budget = effect_cache_bytes(self.prefs().performance.effect_cache_mb, self.prefs().performance.history_budget_bytes());
         let non_linear = self.prefs().history_options.allow_non_linear_history;
         for st in &mut self.docs {
             st.history.max_states = n;
@@ -1547,8 +1565,8 @@ impl Session {
             st.history.enforce_state_limit();
         }
         self.configure_history_cache();
-        photocraft_compose::set_effect_cache_budget(budget << 20);
-        crate::transform_cmds::set_budget(u64::from(self.prefs().performance.effective_memory_usage_mb()) << 20);
+        photocraft_compose::set_effect_cache_budget(budget);
+        crate::transform_cmds::set_budget(self.prefs().performance.history_budget_bytes() as u64);
         // Without waiting for the system font scan: this runs on the UI thread at launch.
         photocraft_text::set_shared_missing_glyph_protection(self.prefs().type_.missing_glyph_protection());
         #[cfg(feature = "plugins")]

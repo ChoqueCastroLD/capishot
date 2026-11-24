@@ -1126,3 +1126,30 @@ fn the_web_build_caps_memory_usage() {
         assert_eq!(honoured_memory_usage_mb(stored, false), stored, "desktop, {stored} MB");
     }
 }
+
+/// The layer-effect cache takes at most a quarter of Memory Usage: a 4 GB laptop's 1 GB (its
+/// browser tab's cap, and the desktop's now) gives it 256 MB, not the fixed 768 MB that took the
+/// tab past what the browser lets it have; 4 GB of Memory Usage keeps the 768 MB asked for, and a
+/// tiny one leaves it 32 MB.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_effect_cache_takes_a_quarter_of_memory_usage_at_most() {
+    let at = |mb: u32| {
+        let p = Performance { memory_usage_mb: mb, ..Performance::default() };
+        effect_cache_bytes(p.effect_cache_mb, p.history_budget_bytes())
+    };
+    assert_eq!(at(1024), 256 << 20);
+    assert_eq!(at(4096), 768 << 20);
+    assert_eq!(at(64), 32 << 20);
+    assert_eq!(effect_cache_bytes(100, 4 << 30), 100 << 20, "a smaller preference is kept");
+}
+
+/// A desktop's Memory Usage is capped at a quarter of its memory: 1 GB on a 4 GB laptop (the
+/// default 4 GB there let the pages and undo history take everything before any went to the
+/// scratch disk or to sleep), the default kept from 16 GB up, never under 384 MB.
+#[test]
+fn a_desktop_caps_memory_usage_at_a_quarter_of_its_memory() {
+    assert_eq!(desktop_memory_cap(4 << 30), 1 << 30);
+    assert_eq!(desktop_memory_cap(16 << 30), u64::from(DEFAULT_MEMORY_USAGE_MB) << 20);
+    assert_eq!(desktop_memory_cap(1 << 30), 384 << 20);
+}

@@ -382,6 +382,10 @@ fn main() -> eframe::Result {
     } = launch;
 
     attach_log_file(logger);
+    // Memory Usage within a share of this machine's memory, before the session applies it.
+    if let Some(ram) = photocraft_ui_egui::gpu_canvas::physical_memory() {
+        photocraft_engine::prefs::set_memory_cap(photocraft_engine::prefs::desktop_memory_cap(ram));
+    }
 
     // An adapter named in the environment is chosen at startup, which a forwarded launch never reaches.
     let rendering_mode = gpu_startup::read_rendering_prefs(services::prefs_file().as_deref()).1;
