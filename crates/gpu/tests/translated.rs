@@ -252,3 +252,24 @@ fn a_styled_layer_drawn_translated_keeps_its_maps_without_computing_its_shape_ag
     eprintln!("effect shape pixels computed per frame of the drag: {computed:?}");
     assert!(computed[1..].iter().all(|px| *px == 0), "the shape was computed again as the layer moved: {computed:?}");
 }
+
+/// The same drag zoomed out (level 3, maps at that level): the reduced maps move with the layer
+/// wherever it lands, so no frame after the first (which starts from the unmoved layer) builds
+/// them anew.
+#[test]
+fn a_styled_layer_dragged_zoomed_out_keeps_its_reduced_maps() {
+    let Some((device, queue, mut comp)) = gpu() else { return };
+    let mut base = doc();
+    base.layers[1].effects.items.push(photocraft_doc::Effect::default_drop_shadow());
+    comp.set_translated(Vec::new());
+    photocraft_gpu::render_to_vec_lod(&mut comp, &device, &queue, &base, base.bounds(), 3).expect("before");
+    let mut built = Vec::new();
+    for offset in [(4, 2), (9, 5), (15, 8), (22, 11), (-12, -6)] {
+        let shown = moved(&base, offset.0, offset.1);
+        comp.set_translated(translations(&base, &shown, offset));
+        let (_, st) = photocraft_gpu::render_to_vec_lod(&mut comp, &device, &queue, &shown, shown.bounds(), 3).expect("translated");
+        built.push(st.fx_shapes);
+    }
+    eprintln!("effect shapes built per frame of the drag at level 3: {built:?}");
+    assert!(built[1..].iter().all(|n| *n == 0), "the reduced maps were built again as the layer moved: {built:?}");
+}

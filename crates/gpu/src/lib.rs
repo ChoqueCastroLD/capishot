@@ -149,6 +149,20 @@ pub fn level_rect(r: Rect, level: u32) -> Rect {
     Rect::new(r.x0.div_euclid(s), r.y0.div_euclid(s), r.x1.saturating_add(s - 1).div_euclid(s), r.y1.saturating_add(s - 1).div_euclid(s))
 }
 
+/// The region (pixels at level of detail `level`) effect maps over document region `r` cover:
+/// from the reduced pixel `r` starts in, as many as `r` spans wherever it starts, so a layer moved
+/// by any amount keeps its maps' size (a Move drag of a styled layer at fit drew it a pixel wider
+/// or narrower every other frame, and built its maps anew each time).
+fn map_rect(r: Rect, level: u32) -> Rect {
+    if level == 0 || r.is_empty() {
+        return r;
+    }
+    let s = 1i32 << level.min(MAX_LOD);
+    let (x0, y0) = (r.x0.div_euclid(s), r.y0.div_euclid(s));
+    let span = |n: u32| i32::try_from(n).unwrap_or(i32::MAX).saturating_add(s - 1) / s + 1;
+    Rect::new(x0, y0, x0.saturating_add(span(r.width())), y0.saturating_add(span(r.height())))
+}
+
 /// `r` (pixels at level of detail `level`) in document pixels: what its reduced pixels cover.
 fn unlevel_rect(r: Rect, level: u32) -> Rect {
     if level == 0 || r.is_empty() {
@@ -1275,7 +1289,7 @@ impl Compositor {
     /// key's level and that region in its pixels), or `None` per page cell at full size.
     fn whole_maps(&self, f: &plan::FxLayer<'_>, level: u32) -> Option<(FxKey, Rect)> {
         let ml = self.map_level(f, level);
-        (ml > 0 || !self.fx_paged(f.region)).then(|| ((f.layer.id, None, ml), level_rect(f.region, ml)))
+        (ml > 0 || !self.fx_paged(f.region)).then(|| ((f.layer.id, None, ml), map_rect(f.region, ml)))
     }
 
     /// How far beyond a page cell the effect maps of `f` must be computed to be exact in it.
@@ -2005,9 +2019,9 @@ impl Compositor {
 
     /// Keep resident pages within the resident budget and the effect cache within
     /// its budget, least recently used first. Never drops what the current cell uses, nor
-    /// whole-region effect maps drawn this frame until the render is `done`, nor while it isn't
-    /// the maps of the view ([`Compositor::set_focus`]). Returns how many textures were dropped
-    /// and their bytes.
+    /// whole-region effect maps drawn this frame before the render is `done`, nor the view's
+    /// effect maps ([`Compositor::set_focus`]). Returns how many textures were dropped and their
+    /// bytes.
     fn evict(&mut self, done: bool) -> (usize, u64) {
         self.evict_keeping(&std::collections::HashSet::new(), done)
     }
@@ -2674,7 +2688,12 @@ impl Compositor {
         let mut damage = Rect::EMPTY;
         let prev = self.fx.get(&key).filter(|e| e.shape_key == shape_key).map(|e| e.region);
         let mut rebuild = true;
+        // Drawn translated from the surfaces its reduced maps were made from: they move with it
+        // (below), also within a reduced pixel.
+        let same_source = |e: &FxEntry| moved_from.zip(e.moved_from).is_some_and(|((from, _), (was, _))| from == was);
+        let reduced_drag = level > 0 && self.fx.get(&key).is_some_and(same_source);
         if prev == Some(region)
+            && !reduced_drag
             && let Some(e) = self.fx.get(&key)
         {
             for (old, cur) in e.tiles.iter().zip([content_src, mask_src]) {
@@ -2693,11 +2712,10 @@ impl Compositor {
         } else if let Some(old) = prev
             && (old.width(), old.height()) == (rw, rh)
             && !region.is_empty()
-            && moved_from.is_some_and(|(from, at)| {
-                self.fx.get(&key).and_then(|e| e.moved_from).is_some_and(|(was, at0)| {
-                    was == from && (level > 0 || (at.0 - at0.0, at.1 - at0.1) == (region.x0 - old.x0, region.y0 - old.y0))
-                })
-            })
+            && (reduced_drag
+                || moved_from.is_some_and(|(from, at)| {
+                    self.fx.get(&key).and_then(|e| e.moved_from).is_some_and(|(was, at0)| was == from && (at.0 - at0.0, at.1 - at0.1) == (region.x0 - old.x0, region.y0 - old.y0))
+                }))
         {
             // Drawn translated from the surfaces its maps were made from, as far as the region
             // moved: the shape moved with it unchanged, so every map is still exact. Checking that
