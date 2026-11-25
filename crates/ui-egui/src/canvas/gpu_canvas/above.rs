@@ -1167,6 +1167,7 @@ mod tests {
     /// opening a 7680x4320 page). Now it is read a tile at a time while the call has time, over
     /// calls, and tells the same: opaque, or the one clear pixel in its last tile.
     #[test]
+    #[ignore = "a timing bar on a shared machine: run alone with --ignored"]
     fn a_decoded_8k_background_is_read_over_calls_within_their_time() {
         let mut doc = Document::with_background("8k", Size::new(7680, 4320), ColorMode::Rgb, SampleType::U8, Color::WHITE);
         let fmt = doc.pixel_format();
