@@ -697,10 +697,12 @@ fn opening_the_200_layer_page_on_the_gpu_canvas() {
 fn eight_k(device: Device, h_px: u32) -> Option<Vec<(&'static str, f64, f64)>> {
     let _gpu = photocraft_testkit::gpu_lock();
     let mut h = harness(device)?;
+    // Strokes rendered and selection outlines traced off the frame on either canvas, and edits
+    // composited on the worker pool on the CPU one, as in the app (tests do them in the frame).
+    crate::canvas::set_strokes_off_frame(true);
+    crate::outline::set_off_frame(true);
     if device == Device::Cpu {
         crate::cpu_canvas::set_pooled(true);
-        crate::canvas::set_strokes_off_frame(true);
-        crate::outline::set_off_frame(true);
     }
     let (w, ht) = (7680i32, h_px as i32);
     let (text, shape) = {
@@ -759,6 +761,9 @@ fn eight_k(device: Device, h_px: u32) -> Option<Vec<(&'static str, f64, f64)>> {
         b.frame(name, |h| h.event(Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE }));
         until(b, name, settled);
     }
+    // `EIGHT_K_ACTIONS=move,brush`: only the actions whose names hold one of these (all by default).
+    let only = std::env::var("EIGHT_K_ACTIONS").ok();
+    let wanted = |name: &str| only.as_deref().is_none_or(|o| o.split(',').any(|w| name.contains(w)));
     let t0 = std::time::Instant::now();
     b.frame("open (first frames)", |_| {});
     until(&mut b, "open (first frames)", &settled);
@@ -771,7 +776,7 @@ fn eight_k(device: Device, h_px: u32) -> Option<Vec<(&'static str, f64, f64)>> {
     };
     b.app().ui.tool = Tool::Move;
     b.app().ui.tool_options.move_auto_select = false;
-    for (name, id) in [("move type", text), ("move styled shape", shape)] {
+    for (name, id) in [("move type", text), ("move styled shape", shape)].into_iter().filter(|(n, _)| wanted(n)) {
         b.app().run("layer.select", json!({"layer": id.0})).expect("select");
         until(&mut b, name, &settled);
         let from = at(&mut b, id);
@@ -780,12 +785,12 @@ fn eight_k(device: Device, h_px: u32) -> Option<Vec<(&'static str, f64, f64)>> {
     b.app().run("layer.new.layer", json!({"name": "paint"})).expect("layer");
     b.app().ui.tool = Tool::Brush;
     b.app().session.tools.brush.hardness = 0.0;
-    for (name, px) in [("brush 300 px soft", 300.0), ("brush 1200 px soft", 1200.0)] {
+    for (name, px) in [("brush 300 px soft", 300.0), ("brush 1200 px soft", 1200.0)].into_iter().filter(|(n, _)| wanted(n)) {
         b.app().session.tools.brush.size = px;
         drag(&mut b, name, [w as f32 * 0.25, ht as f32 * 0.4], [w as f32 * 0.03, ht as f32 * 0.01], 12, &settled);
     }
     b.app().run("layer.select", json!({"layer": text.0})).expect("select");
-    for _ in 0..4 {
+    for _ in 0..if wanted("typing") { 4 } else { 0 } {
         b.frame("typing", |h| {
             h.state_mut().run("type.insertText", json!({"layer": text.0, "text": "a"})).expect("type");
         });
@@ -798,7 +803,10 @@ fn eight_k(device: Device, h_px: u32) -> Option<Vec<(&'static str, f64, f64)>> {
         ("undo", "edit.undo", json!({})),
         ("crop", "image.crop", json!({"x": w / 4, "y": ht / 4, "width": w / 2, "height": ht / 2})),
         ("crop undo", "edit.undo", json!({})),
-    ] {
+    ]
+    .into_iter()
+    .filter(|(n, ..)| wanted(n))
+    {
         b.frame(name, |h| {
             h.state_mut().run(cmd, params).unwrap_or_else(|e| panic!("{cmd}: {e}"));
         });
