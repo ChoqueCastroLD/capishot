@@ -280,7 +280,7 @@ impl Tex {
         if r.is_empty() {
             return;
         }
-        let bytes: Vec<u8> = v.iter().flat_map(|x| x.to_le_bytes()).collect();
+        FX_WRITTEN.fetch_add(std::mem::size_of_val(v) as u64, std::sync::atomic::Ordering::Relaxed);
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &self.texture,
@@ -288,7 +288,8 @@ impl Tex {
                 origin: wgpu::Origin3d { x: (r.x0 - region.x0) as u32, y: (r.y0 - region.y0) as u32, z: 0 },
                 aspect: wgpu::TextureAspect::All,
             },
-            &bytes,
+            // (R32Float texels are little-endian f32, as every target's.)
+            bytemuck::cast_slice(v),
             wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(r.width() * 4), rows_per_image: Some(r.height()) },
             wgpu::Extent3d { width: r.width(), height: r.height(), depth_or_array_layers: 1 },
         );
@@ -336,20 +337,58 @@ struct FxEntry {
 }
 
 /// A layer's effect shape and distance fields over `region` computed ahead of
-/// [`Compositor::sync_fx`] (by [`Compositor::stage_fx`], in bands over several calls), which then
-/// builds the layer's maps from them instead of computing them in one go.
+/// [`Compositor::sync_fx`] (by [`Compositor::stage_fx`], in bands over several calls, each band
+/// written to its texture as it is computed), which then builds the layer's maps from them
+/// instead of computing and uploading them in one go.
 struct Staged {
     key: FxKey,
     region: Rect,
     /// Region-sized, row-major.
     shape: Vec<f32>,
-    /// Each field read, with the reach it is exact to, region-sized.
-    fields: HashMap<FieldKind, (i32, Vec<f32>)>,
+    /// The shape on the GPU (`pc_fx_shape`).
+    shape_tex: Option<Tex>,
+    /// Each field read, with the reach it is exact to, on the GPU (`pc_fx_field`).
+    fields: HashMap<FieldKind, (i32, Tex)>,
+}
+
+impl FxEntry {
+    /// Compute the shape over `damage` (or take the one `ready` staged for the whole region) into
+    /// the CPU copy and the texture; the bytes uploaded.
+    fn update_shape(&mut self, queue: &wgpu::Queue, doc: &Document, layer: &Layer, damage: Rect, ready: Option<&mut Staged>) -> u64 {
+        let v = match ready {
+            Some(b) => std::mem::take(&mut b.shape),
+            None => fx::shape(doc, layer, damage),
+        };
+        fx::paste(&mut self.shape_cpu, self.region, damage, &v);
+        self.shape.write_r32(queue, self.region, damage, &v);
+        v.len() as u64 * 4
+    }
+}
+
+impl Staged {
+    /// The shape, on the GPU and the CPU, taken (once).
+    fn take_shape(&mut self) -> Option<(Tex, Vec<f32>)> {
+        self.shape_tex.take().map(|t| (t, std::mem::take(&mut self.shape)))
+    }
+
+    /// The field of `kind` exact to `reach`, taken.
+    fn take_field(&mut self, kind: FieldKind, reach: i32) -> Option<Tex> {
+        if self.fields.get(&kind).is_some_and(|(r, _)| *r == reach) { self.fields.remove(&kind).map(|(_, t)| t) } else { None }
+    }
+}
+
+/// A new effect entry's shape over `region`, on the GPU and the CPU: the one `ready` staged
+/// (taken, and `true`), else blank.
+fn fresh_shape(device: &wgpu::Device, region: Rect, ready: Option<&mut Staged>) -> (Tex, Vec<f32>, bool) {
+    match ready.and_then(Staged::take_shape) {
+        Some((t, v)) => (t, v, true),
+        None => (Tex::map(device, "pc_fx_shape", region, MAP32), vec![0.0; region.width() as usize * region.height() as usize], false),
+    }
 }
 
 /// Where [`Compositor::stage_fx`] got.
 enum Stage {
-    Ready(Staged),
+    Ready(Box<Staged>),
     /// Not done: goes on in the next call.
     Pending,
     /// Built in one go instead (see [`Compositor::stage_fx`]).
@@ -369,7 +408,8 @@ struct Staging {
     kinds: Vec<(FieldKind, i32)>,
     field: usize,
     field_y: i32,
-    buf: Vec<f32>,
+    /// The texture of the field in progress.
+    field_tex: Option<Tex>,
 }
 
 /// About how many pixels of a layer's shape or of one distance field [`Compositor::stage_fx`]
@@ -904,6 +944,15 @@ static FX_UPDATES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::
 /// [`FX_UPDATES`]: layer effect maps written so far.
 pub fn fx_updates() -> u64 {
     FX_UPDATES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Bytes of effect shapes and distance fields uploaded so far, process-wide (tests and
+/// diagnostics).
+static FX_WRITTEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// [`FX_WRITTEN`]: bytes of effect shapes and distance fields uploaded so far.
+pub fn fx_bytes_written() -> u64 {
+    FX_WRITTEN.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 fn first_error<T>(device: &wgpu::Device, f: impl FnOnce() -> T) -> (T, Option<wgpu::Error>) {
@@ -1480,8 +1529,8 @@ impl Compositor {
                 let ready = if small || self.fx_current(doc, f, key, window) {
                     None
                 } else {
-                    match self.stage_fx(doc, f, key, window, &mut worked, more) {
-                        Stage::Ready(b) => Some(b),
+                    match self.stage_fx(device, queue, doc, f, key, window, &mut worked, more) {
+                        Stage::Ready(b) => Some(*b),
                         Stage::Whole => None,
                         Stage::Pending => {
                             done = false;
@@ -1583,7 +1632,18 @@ impl Compositor {
     /// The result when complete (for [`Self::sync_fx`]). [`Stage::Whole`] when the layer was
     /// being staged for another document or region (a drag cache's sources show it over other
     /// bounds by turns): staged by turns, neither would end.
-    fn stage_fx(&mut self, doc: &Document, f: &plan::FxLayer<'_>, key: FxKey, region: Rect, worked: &mut bool, more: &mut dyn FnMut() -> bool) -> Stage {
+    #[allow(clippy::too_many_arguments)]
+    fn stage_fx(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        doc: &Document,
+        f: &plan::FxLayer<'_>,
+        key: FxKey,
+        region: Rect,
+        worked: &mut bool,
+        more: &mut dyn FnMut() -> bool,
+    ) -> Stage {
         let layer = f.layer;
         let shape_key = fx::shape_key(layer, doc.bounds());
         let (content, mask) = fx::shape_sources(layer);
@@ -1597,7 +1657,7 @@ impl Compositor {
         if self.staging.as_ref().is_none_or(|s| s.built.key != key) {
             let kinds = field_reaches(&fx_programs(doc, f)).into_iter().collect();
             self.staging = Some(Staging {
-                built: Staged { key, region, shape: vec![0.0; n], fields: HashMap::new() },
+                built: Staged { key, region, shape: vec![0.0; n], shape_tex: Some(Tex::map(device, "pc_fx_shape", region, MAP32)), fields: HashMap::new() },
                 doc: doc.id,
                 shape_key,
                 sources,
@@ -1605,7 +1665,7 @@ impl Compositor {
                 kinds,
                 field: 0,
                 field_y: region.y0,
-                buf: Vec::new(),
+                field_tex: None,
             });
         }
         let Some(st) = self.staging.as_mut() else { return Stage::Whole };
@@ -1618,6 +1678,9 @@ impl Compositor {
                 let band = Rect::new(region.x0, st.shape_y, region.x1, st.shape_y.saturating_add(rows).min(region.y1));
                 let v = fx::shape(doc, layer, band);
                 fx::paste(&mut st.built.shape, region, band, &v);
+                if let Some(t) = &st.built.shape_tex {
+                    t.write_r32(queue, region, band, &v);
+                }
                 st.shape_y = band.y1;
                 *worked = true;
                 continue;
@@ -1626,24 +1689,22 @@ impl Compositor {
             if *worked && !more() {
                 return Stage::Pending;
             }
-            if st.buf.len() != n {
-                st.buf = vec![0.0; n];
-            }
             // (A band of a field reads the shape within its radius: not much thinner than that.)
             let band_rows = rows.max(fx::field_radius(kind, reach) + 1);
             let out = Rect::new(region.x0, st.field_y, region.x1, st.field_y.saturating_add(band_rows).min(region.y1));
             let v = fx::field(kind, reach, &st.built.shape, region, out);
-            fx::paste(&mut st.buf, region, out, &v);
+            st.field_tex.get_or_insert_with(|| Tex::map(device, "pc_fx_field", region, MAP32)).write_r32(queue, region, out, &v);
             st.field_y = out.y1;
             *worked = true;
-            if st.field_y >= region.y1 {
-                let buf = std::mem::take(&mut st.buf);
-                st.built.fields.insert(kind, (reach, buf));
+            if st.field_y >= region.y1
+                && let Some(t) = st.field_tex.take()
+            {
+                st.built.fields.insert(kind, (reach, t));
                 st.field += 1;
                 st.field_y = region.y0;
             }
         }
-        self.staging.take().map_or(Stage::Whole, |s| Stage::Ready(s.built))
+        self.staging.take().map_or(Stage::Whole, |s| Stage::Ready(Box::new(s.built)))
     }
 
     /// `region` grown to the chunk grid of `level`: what a render of it records.
@@ -2558,10 +2619,12 @@ impl Compositor {
             damage = e.grow_to(device, queue, layer, [content_src, mask_src], region);
             rebuild = false;
         }
+        // The shape staged whole, on the CPU and the GPU: nothing to compute or upload.
+        let mut shape_in = false;
         if rebuild {
             FX_BUILDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let shape = Tex::map(device, "pc_fx_shape", region, MAP32);
-            let n = rw as usize * rh as usize;
+            let (shape, shape_cpu, staged) = fresh_shape(device, region, ready.as_mut());
+            shape_in = staged;
             self.fx.insert(
                 key,
                 FxEntry {
@@ -2570,7 +2633,7 @@ impl Compositor {
                     shape_key,
                     tiles: [None, None],
                     _pin: is_group.then(|| layer.clone()),
-                    shape_cpu: vec![0.0; n],
+                    shape_cpu,
                     shape,
                     fields: HashMap::new(),
                     progs: Vec::new(),
@@ -2599,13 +2662,8 @@ impl Compositor {
         if !damage.is_empty() {
             stats.fx_shapes += 1;
             FX_UPDATES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let v = match ready.as_mut().filter(|_| damage == region) {
-                Some(b) => std::mem::take(&mut b.shape),
-                None => fx::shape(doc, layer, damage),
-            };
-            fx::paste(&mut e.shape_cpu, region, damage, &v);
-            e.shape.write_r32(queue, region, damage, &v);
-            staged += v.len() as u64 * 4;
+            // (A shape staged whole is there already.)
+            staged += if shape_in { 0 } else { e.update_shape(queue, doc, layer, damage, ready.as_mut().filter(|_| damage == region)) };
         }
 
         if e.compact {
@@ -2626,11 +2684,13 @@ impl Compositor {
                 _ => region,
             };
             let reach = have.filter(|r| *r >= reach).unwrap_or(reach);
-            let ahead = ready.as_mut().filter(|_| out == region).and_then(|b| b.fields.remove(&kind)).filter(|(r, _)| *r == reach);
-            let v = match ahead {
-                Some((_, v)) => v,
-                None => fx::field(kind, reach, &e.shape_cpu, region, out),
-            };
+            stats.fx_pixels += out.width() as u64 * out.height() as u64;
+            // Staged whole: its texture is the field's.
+            if let Some(t) = ready.as_mut().filter(|_| out == region).and_then(|b| b.take_field(kind, reach)) {
+                e.fields.insert(kind, (reach, t));
+                continue;
+            }
+            let v = fx::field(kind, reach, &e.shape_cpu, region, out);
             if have.is_none_or(|r| r < reach) {
                 e.fields.insert(kind, (reach, Tex::map(device, "pc_fx_field", region, MAP32)));
             }
@@ -2638,7 +2698,6 @@ impl Compositor {
                 t.write_r32(queue, region, out, &v);
             }
             staged += v.len() as u64 * 4;
-            stats.fx_pixels += out.width() as u64 * out.height() as u64;
         }
 
         if let Some(t) = t_trace.filter(|_| !damage.is_empty()) {

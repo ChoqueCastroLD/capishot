@@ -1,8 +1,9 @@
 //! A large styled layer's effect maps built ahead of a render (`Compositor::prepare`, a page
 //! filling in or a drag cache made ahead) are built in parts over calls: its shape and distance
-//! fields in bands, the maps once they are all there. One call built the whole layer (on the
-//! owner's PC, 0.13.43: gpu.fx 120 to 146 ms in one frame on a 200-layer page's crop, its undo
-//! and its opening). The maps match those a render builds in one go.
+//! fields in bands, each uploaded as it is computed, the maps once they are all there. One call
+//! built the whole layer (on the owner's PC, 0.13.43: gpu.fx 120 to 146 ms in one frame on a
+//! 200-layer page's crop, its undo and its opening). The maps match those a render builds in one
+//! go.
 
 use photocraft_color::{Color, ColorMode, SampleType};
 use photocraft_doc::{BlendMode, Contour, Document, Effect, FxCommon, FxPaint, Glow, GlowSource, GlowTechnique, Layer, Size, StrokeFx, StrokePosition};
@@ -63,10 +64,15 @@ fn a_large_styled_layers_maps_are_prepared_in_parts() {
         eprintln!("skipping: {}", e.0);
         return;
     }
+    // (The map pipelines built first, as the app does ahead: a small copy of the layer drawn.)
+    let mut small = page();
+    small.size = Size::new(400, 300);
+    let _ = photocraft_gpu::render_to_vec_stats(&mut comp, &device, &queue, &small, small.bounds());
     // No time left in any call: each does one part of the work.
     let (b0, mut calls, mut first_built, mut slowest) = (photocraft_gpu::fx_builds(), 0, None, 0.0f64);
+    let (mut most_written, mut written_building) = (0u64, 0u64);
     loop {
-        let t = std::time::Instant::now();
+        let (t, w0) = (std::time::Instant::now(), photocraft_gpu::fx_bytes_written());
         let ready = match comp.prepare(&device, &queue, &doc, doc.bounds(), 0, &mut || false) {
             Ok(r) => r,
             // GL without float render targets draws layer effects on the CPU.
@@ -80,15 +86,23 @@ fn a_large_styled_layers_maps_are_prepared_in_parts() {
         eprintln!("call {calls}: {ms:.1} ms");
         slowest = slowest.max(ms);
         calls += 1;
+        let written = photocraft_gpu::fx_bytes_written() - w0;
+        most_written = most_written.max(written);
         if first_built.is_none() && photocraft_gpu::fx_builds() > b0 {
             first_built = Some(calls);
+            written_building = written;
         }
         if ready || calls > 1000 {
             break;
         }
     }
-    eprintln!("prepared in {calls} calls, the maps built in call {first_built:?}, slowest call {slowest:.1} ms");
+    eprintln!(
+        "prepared in {calls} calls, the maps built in call {first_built:?} ({written_building} bytes uploaded in it), at most {most_written} bytes in a call, slowest call {slowest:.1} ms"
+    );
     assert!(first_built.is_some_and(|c| c > 4), "the layer's maps were built in call {first_built:?} (in parts: after several)");
+    // The shape and fields went up a band at a time as they were computed: the call that builds
+    // the maps uploaded the whole shape and every field (12 MB here, 25 ms of CPU, test build).
+    assert!(most_written <= 4 << 20, "{most_written} bytes of shape and fields uploaded in one call");
     assert_eq!(photocraft_gpu::fx_builds() - b0, 1, "built once");
     let b1 = photocraft_gpu::fx_builds();
     let (got, _) = photocraft_gpu::render_to_vec_stats(&mut comp, &device, &queue, &doc, doc.bounds()).expect("render");
