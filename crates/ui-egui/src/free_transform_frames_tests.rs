@@ -64,6 +64,7 @@ fn settled(app: &PhotocraftApp) -> bool {
 /// spans in the frame record). The frames after, until its images are made off the frame, are
 /// reported with the window thread's wait for a core and how many threads were ready to run.
 #[test]
+#[ignore = "a timing bar on a shared machine: run alone with --ignored"]
 fn opening_the_box_on_a_styled_smart_object_lays_out_the_panels_in_a_few_ms() {
     std::thread::Builder::new()
         .stack_size(16 << 20)
