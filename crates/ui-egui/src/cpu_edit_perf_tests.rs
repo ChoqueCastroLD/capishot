@@ -47,6 +47,8 @@ struct Action {
     worst: (f64, String),
     /// From each action to the frame that shows it complete.
     shown_after: Vec<f64>,
+    /// Each frame's time in effect maps (`gpu.fx`).
+    fx: Vec<f64>,
 }
 
 struct Bench {
@@ -130,6 +132,7 @@ impl Bench {
             a.worst = (ms, spans.join(", "));
         }
         a.ms.push(ms);
+        a.fx.push(crate::perf_span::frame().iter().filter(|(n, _)| *n == "gpu.fx").map(|(_, ms)| ms).sum());
     }
 
     /// One frame of `name`: `act` (a command, an input event) and the frame that shows it.
@@ -205,11 +208,13 @@ impl Bench {
         for a in &self.actions {
             let (p50, p99, max) = (pct(&a.ms, 0.5), pct(&a.ms, 0.99), pct(&a.ms, 1.0));
             eprintln!(
-                "EDIT cpu {doc} {:<28} n {:>3}  median {p50:>6.1}  p99 {p99:>6.1}  max {max:>6.1} ms  shown after median {:>6.1} max {:>6.1} ms   worst: {}",
+                "EDIT cpu {doc} {:<28} n {:>3}  median {p50:>6.1}  p99 {p99:>6.1}  max {max:>6.1} ms  shown after median {:>6.1} max {:>6.1} ms  gpu.fx max {:>5.1} ms, {} frames over 10   worst: {}",
                 a.name,
                 a.ms.len(),
                 pct(&a.shown_after, 0.5),
                 pct(&a.shown_after, 1.0),
+                pct(&a.fx, 1.0),
+                a.fx.iter().filter(|&&ms| ms > 10.0).count(),
                 a.worst.1
             );
             out.push((a.name, p50, max));
