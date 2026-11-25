@@ -74,8 +74,8 @@ fn a_strips_effect_maps_stay_within_a_small_devices_budget() {
     assert!(peak <= 160 << 20, "the effect cache peaked at {} MB on a 4 GB device", peak >> 20);
 }
 
-/// A layer larger than a page cell prepared ahead with no time to spare: each call builds a
-/// part of one cell's maps (its shape and fields in bands), and the render after builds none.
+/// A layer larger than a page cell prepared ahead with time for one part of the work a call:
+/// each builds a part of one cell's maps (its shape and fields in bands), and the render after builds none.
 /// The pixels match a compositor that built them in the render.
 #[test]
 fn a_layer_larger_than_a_cell_is_prepared_a_cell_at_a_time() {
@@ -95,7 +95,8 @@ fn a_layer_larger_than_a_cell_is_prepared_a_cell_at_a_time() {
     let (mut calls, mut slowest) = (0, 0.0f64);
     loop {
         let t = std::time::Instant::now();
-        let ready = match comp.prepare(&device, &queue, &doc, view, 0, &mut || false) {
+        let mut time = true;
+        let ready = match comp.prepare(&device, &queue, &doc, view, 0, &mut || std::mem::replace(&mut time, false)) {
             Ok(r) => r,
             Err(e) if calls == 0 => {
                 eprintln!("skipping: {}", e.0);

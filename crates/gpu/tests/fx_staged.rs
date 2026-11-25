@@ -68,12 +68,13 @@ fn a_large_styled_layers_maps_are_prepared_in_parts() {
     let mut small = page();
     small.size = Size::new(400, 300);
     let _ = photocraft_gpu::render_to_vec_stats(&mut comp, &device, &queue, &small, small.bounds());
-    // No time left in any call: each does one part of the work.
+    // Time for one part of the work in each call (a call with none does none).
     let (b0, mut calls, mut first_built, mut slowest) = (photocraft_gpu::fx_builds(), 0, None, 0.0f64);
     let (mut most_written, mut written_building) = (0u64, 0u64);
     loop {
         let (t, w0) = (std::time::Instant::now(), photocraft_gpu::fx_bytes_written());
-        let ready = match comp.prepare(&device, &queue, &doc, doc.bounds(), 0, &mut || false) {
+        let mut time = true;
+        let ready = match comp.prepare(&device, &queue, &doc, doc.bounds(), 0, &mut || std::mem::replace(&mut time, false)) {
             Ok(r) => r,
             // GL without float render targets draws layer effects on the CPU.
             Err(e) if calls == 0 => {
