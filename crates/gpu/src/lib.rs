@@ -2688,12 +2688,9 @@ impl Compositor {
         let mut damage = Rect::EMPTY;
         let prev = self.fx.get(&key).filter(|e| e.shape_key == shape_key).map(|e| e.region);
         let mut rebuild = true;
-        // Drawn translated from the surfaces its reduced maps were made from: they move with it
-        // (below), also within a reduced pixel.
-        let same_source = |e: &FxEntry| moved_from.zip(e.moved_from).is_some_and(|((from, _), (was, _))| from == was);
-        let reduced_drag = level > 0 && self.fx.get(&key).is_some_and(same_source);
+        let moves = prev.is_some() && self.moves_with(key, moved_from, region);
         if prev == Some(region)
-            && !reduced_drag
+            && !moves
             && let Some(e) = self.fx.get(&key)
         {
             for (old, cur) in e.tiles.iter().zip([content_src, mask_src]) {
@@ -2709,20 +2706,9 @@ impl Compositor {
             // A compacted entry has nothing to update its maps from: built again when they change.
             let same_progs = e.progs.len() == progs.len() && e.progs.iter().zip(&progs).all(|(a, b)| b.maps == 0 || (a.key == b.key && a.maps.len() == b.maps));
             rebuild = e.compact && (!damage.is_empty() || !same_progs);
-        } else if let Some(old) = prev
-            && (old.width(), old.height()) == (rw, rh)
-            && !region.is_empty()
-            && (reduced_drag
-                || moved_from.is_some_and(|(from, at)| {
-                    self.fx.get(&key).and_then(|e| e.moved_from).is_some_and(|(was, at0)| was == from && (at.0 - at0.0, at.1 - at0.1) == (region.x0 - old.x0, region.y0 - old.y0))
-                }))
-        {
-            // Drawn translated from the surfaces its maps were made from, as far as the region
-            // moved: the shape moved with it unchanged, so every map is still exact. Checking that
-            // by computing the whole shape again ran in every frame of a Move drag of a styled
-            // layer (the CPU's share of `gpu.fx` there). At a level of detail the maps move by
-            // whole reduced pixels, within one of where the layer is (the frame is reduced too);
-            // the drag's release builds them where it landed.
+        } else if moves {
+            // Checking that the shape moved unchanged by computing it again ran in every frame of
+            // a Move drag of a styled layer (the CPU's share of `gpu.fx` there).
             if let Some(e) = self.fx.get_mut(&key) {
                 e.region = region;
                 rebuild = false;
@@ -2873,6 +2859,21 @@ impl Compositor {
             stats.fx_programs += 1;
             self.run_program(device, queue, encoder, key, i, prog, d, stats);
         }
+    }
+
+    /// Whether `key`'s maps were made from the surfaces its layer is now drawn translated from
+    /// (`moved_from`, [`Compositor::translated_from`]) and move with it to `region` as they are:
+    /// as far as the region moved, so every map is still exact; at a level of detail wherever
+    /// it moved (within a reduced pixel of where the layer is, as the frame is reduced; the drag's
+    /// release builds them where it landed), also inside one reduced pixel.
+    fn moves_with(&self, key: FxKey, moved_from: Option<(u64, (i32, i32))>, region: Rect) -> bool {
+        let Some(e) = self.fx.get(&key) else { return false };
+        let (Some((from, at)), Some((was, at0))) = (moved_from, e.moved_from) else { return false };
+        let old = e.region;
+        from == was
+            && !region.is_empty()
+            && (old.width(), old.height()) == (region.width(), region.height())
+            && (key.2 > 0 || (at.0 - at0.0, at.1 - at0.1) == (region.x0 - old.x0, region.y0 - old.y0))
     }
 
     /// Record the passes of `prog` (maps of item `item` of `layer`) recomputing damage `d`.
