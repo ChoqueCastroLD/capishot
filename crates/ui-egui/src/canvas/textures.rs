@@ -696,7 +696,7 @@ fn ensure_gpu_once(app: &mut PhotocraftApp, idx: usize, visible: DRect, level: u
             gpu.drop_view_sets(id.0);
         }
     }
-    gpu_budget(app, &gpu, idx, partial, visible);
+    gpu_budget(app, &gpu, idx, partial, need);
     let r = gpu.refresh_for(id.0, &doc, if partial { damage } else { None }, display.as_deref(), crate::gpu_canvas::reduced_refreshes().then_some(need));
     if gpu.filling(id.0) {
         // A page filling from blank (the page before it on screen meanwhile): the next pieces
@@ -812,8 +812,9 @@ fn draw_view_now(
 /// or Memory Usage, the document's pixels and History (charged where the GPU shares the system's
 /// memory), physical memory and the GPU's own: on full refreshes (pixels counted once per
 /// structural change, not per brush dab) and whenever either preference changes.
-fn gpu_budget(app: &mut PhotocraftApp, gpu: &crate::gpu_canvas::GpuCanvas, idx: usize, partial: bool, visible: DRect) {
-    gpu.set_focus(Some(visible));
+fn gpu_budget(app: &mut PhotocraftApp, gpu: &crate::gpu_canvas::GpuCanvas, idx: usize, partial: bool, need: crate::gpu_canvas::ViewNeed) {
+    let level = if crate::gpu_canvas::reduced_refreshes() { need.level } else { 0 };
+    gpu.set_focus(Some(need.visible), level);
     // Memory Usage within the platform's cap (a browser tab's, `prefs::set_memory_cap`).
     let allowance = app.session.prefs().performance.history_budget_bytes() as u64;
     let Some(st) = app.session.documents().get(idx) else { return };

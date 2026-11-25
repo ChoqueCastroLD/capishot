@@ -767,6 +767,8 @@ pub struct Compositor {
     /// What the view shows: a full refresh draws these cells last, so their pages are the
     /// ones still resident for the edits that follow.
     focus: Option<Rect>,
+    /// The level of detail the view draws at.
+    focus_level: u32,
     /// Render a whole chunk the lower-stack cache lacks so later edits there reuse it (on by
     /// default; see [`Compositor::set_fill_prefix`]).
     fill_prefix: bool,
@@ -1104,6 +1106,7 @@ impl Compositor {
             resident_budget: RESIDENT_BUDGET,
             fx_budget: (FX_BUDGET as u64).saturating_sub(prefix::MAX_BYTES),
             focus: None,
+            focus_level: 0,
             fill_prefix: true,
             frame: 0,
             stamp: 0,
@@ -1217,10 +1220,12 @@ impl Compositor {
         self.working_set(doc, region) <= self.resident_budget
     }
 
-    /// The document area the view shows (`None`: unknown). Full refreshes draw its cells last,
-    /// and the effect cache lets go of maps outside it first.
-    pub fn set_focus(&mut self, focus: Option<Rect>) {
+    /// The document area the view shows (`None`: unknown) and the level of detail it draws at.
+    /// Full refreshes draw its cells last, and the effect cache lets go of maps outside it, and
+    /// of maps at other levels, first.
+    pub fn set_focus(&mut self, focus: Option<Rect>, level: u32) {
         self.focus = focus;
+        self.focus_level = level.min(MAX_LOD);
     }
 
     /// Whether a render whose region the lower-stack cache lacks draws the region's whole chunks
@@ -1622,7 +1627,7 @@ impl Compositor {
                     // render draws): past it, it can't all be kept ahead, and the render builds
                     // the rest a cell at a time.
                     let keep = std::mem::take(&mut self.prepared);
-                    stats.evicted += self.evict_keeping(&keep).0;
+                    stats.evicted += self.evict_keeping(&keep, false).0;
                     let held: usize = keep.iter().filter_map(|k| self.fx.get(k)).map(FxEntry::bytes).sum();
                     self.prepared = keep;
                     if held as u64 > self.fx_budget {
@@ -1953,7 +1958,7 @@ impl Compositor {
             self.run_cell(device, queue, encoder, doc.id, &plan, &levels, cell, &fr, &chunks, &outs, checkpoint, level, &mut stats, sink);
             drop(record);
             self.want = Rect::EMPTY;
-            let (evicted, bytes) = self.evict();
+            let (evicted, bytes) = self.evict(false);
             stats.evicted += evicted;
             freed += bytes;
             if flush && (self.staged >= flush_bytes || work >= FLUSH_WORK || freed >= flush_bytes) {
@@ -1991,7 +1996,7 @@ impl Compositor {
         let live: std::collections::HashSet<LayerId> = doc.walk().into_iter().map(|(_, _, l)| l.id).collect();
         self.residents.retain(|(id, _, _), r| r.doc != doc.id || r.last_used == frame || live.contains(id));
         self.fx.retain(|(id, ..), e| e.doc != doc.id || e.last_used == frame || live.contains(id));
-        stats.evicted += self.evict().0;
+        stats.evicted += self.evict(true).0;
         self.temps.retain(|(_, used)| frame.saturating_sub(*used) < 240);
         let lut_age = if self.lut_cache.len() > 64 { 1 } else { 240 };
         self.lut_cache.retain(|_, (_, _, used)| frame.saturating_sub(*used) < lut_age);
@@ -2000,14 +2005,15 @@ impl Compositor {
 
     /// Keep resident pages within the resident budget and the effect cache within
     /// its budget, least recently used first. Never drops what the current cell uses, nor
-    /// whole-region effect maps drawn this frame. Returns how many textures were dropped and
-    /// their bytes.
-    fn evict(&mut self) -> (usize, u64) {
-        self.evict_keeping(&std::collections::HashSet::new())
+    /// whole-region effect maps drawn this frame until the render is `done`, nor while it isn't
+    /// the maps of the view ([`Compositor::set_focus`]). Returns how many textures were dropped
+    /// and their bytes.
+    fn evict(&mut self, done: bool) -> (usize, u64) {
+        self.evict_keeping(&std::collections::HashSet::new(), done)
     }
 
     /// [`Self::evict`], never letting go of the effect maps under `keep` either.
-    fn evict_keeping(&mut self, keep: &std::collections::HashSet<FxKey>) -> (usize, u64) {
+    fn evict_keeping(&mut self, keep: &std::collections::HashSet<FxKey>, done: bool) -> (usize, u64) {
         let (mut n, mut freed) = (0, 0u64);
         let mut total = self.resident_bytes();
         if total > self.resident_budget {
@@ -2026,18 +2032,27 @@ impl Compositor {
         }
         let mut total = self.fx_cache_bytes();
         let fx_budget = usize::try_from(self.fx_budget).unwrap_or(usize::MAX);
-        // Maps the view shows go last: a margin or a drag cache piece drawn after the view
-        // let go of the view's maps, least recently used, and its next frame built them again.
-        let focus = self.focus;
-        let shown = |e: &FxEntry| focus.is_none_or(|f| !unlevel_rect(e.region, e.level).intersect(&f).is_empty());
+        // The view's maps stay: a margin or a drag cache piece drawn after the view let go of
+        // the view's maps, least recently used, and its next frame built them again (a phone's
+        // 12 MB doesn't hold one 1024 px chunk's maps on a page of balloons, so every piece let
+        // go of all it didn't draw). Every frame of the view draws them, so the cache holds them
+        // even past its budget; what else was drawn goes once drawn, least recently used first:
+        // maps off the view and at another level than the view's (a zoomed-out page refined at
+        // full size let go of the view's reduced maps, a 16th of the memory each, built again on
+        // its next edit). (The view's chunks are drawn whole: the layers they meet are the
+        // view's.)
+        let (focus, view_level) = (self.focus.map(|f| self.drawn_rect(f, 0)), self.focus_level);
+        let in_view = |e: &FxEntry| focus.is_some_and(|f| !unlevel_rect(e.region, e.level).intersect(&f).is_empty());
+        let views = |e: &FxEntry| focus.is_none() || (in_view(e) && e.level == view_level);
+        let rank = |e: &FxEntry| (focus.is_none() || in_view(e), views(e), e.last_used, e.stamp);
         if total > fx_budget {
             // First what only building the maps again needs, least recently used first (the
             // maps keep drawing; an effect map set is a fraction of its distance fields and CPU
             // shape): at 4 GB the budget held two or three layers' whole state, and a drag cache
             // build on a page of many styled layers drew hundreds of maps again.
-            let mut lru: Vec<(bool, u64, u64, FxKey)> = self.fx.iter().filter(|(_, e)| !e.compact).map(|(k, e)| (shown(e), e.last_used, e.stamp, *k)).collect();
+            let mut lru: Vec<((bool, bool, u64, u64), FxKey)> = self.fx.iter().filter(|(_, e)| !e.compact).map(|(k, e)| (rank(e), *k)).collect();
             lru.sort_unstable();
-            for (.., k) in lru {
+            for (_, k) in lru {
                 if total <= fx_budget {
                     break;
                 }
@@ -2048,11 +2063,14 @@ impl Compositor {
         }
         if total > fx_budget {
             let (frame, stamp) = (self.frame, self.stamp);
-            let mut lru: Vec<((bool, u64, u64), FxKey)> = self
+            let mut lru: Vec<((bool, bool, u64, u64), FxKey)> = self
                 .fx
                 .iter()
-                .filter(|(k, e)| !keep.contains(*k) && (e.last_used != frame || (k.1.is_some() && e.stamp != stamp)))
-                .map(|(k, e)| ((shown(e), e.last_used, e.stamp), *k))
+                .filter(|(k, e)| {
+                    let drawn = e.last_used == frame && (k.1.is_none() || e.stamp == stamp);
+                    !keep.contains(*k) && if focus.is_none() { !drawn } else { !views(e) && (done || !drawn) }
+                })
+                .map(|(k, e)| (rank(e), *k))
                 .collect();
             lru.sort_unstable_by_key(|c| c.0);
             for (_, k) in lru {

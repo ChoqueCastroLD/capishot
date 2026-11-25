@@ -208,7 +208,7 @@ fn main() {
     g.set_memory_budget(budget);
     println!("RAM {} MB, document pixels {} MB, Memory Usage {} MB -> GPU budget {} MB", ram.unwrap_or(0) >> 20, pixels >> 20, allowance >> 20, budget >> 20);
     let first_view = Rect::from_xywh((w as f32 * 0.1) as i32, (h as f32 * 0.1) as i32, 2560, 1440);
-    g.set_focus(Some(if op == "view" { first_view } else { doc.bounds() }));
+    g.set_focus(Some(if op == "view" { first_view } else { doc.bounds() }), 0);
 
     let t = Instant::now();
     let (kind, fallback) = refresh(&g, &rs, &doc, None);

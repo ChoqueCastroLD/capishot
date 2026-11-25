@@ -2217,7 +2217,7 @@ fn the_focused_view_stays_resident_after_a_full_refresh() {
     assert!(comp.working_set(&d, d.bounds()) > 4 * comp.resident_bytes());
     comp.set_resident_budget(comp.resident_bytes());
     assert!(comp.fits_budget(&d, view) && !comp.fits_budget(&d, d.bounds()));
-    comp.set_focus(Some(view));
+    comp.set_focus(Some(view), 0);
     for _ in 0..2 {
         let s = photocraft_gpu::render_to_vec_stats(&mut comp, &g.device, &g.queue, &d, d.bounds()).unwrap().1;
         assert!(s.evicted > 0, "{s:?}");

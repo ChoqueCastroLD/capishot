@@ -237,11 +237,85 @@ fn the_effect_cache_lets_go_of_maps_outside_the_view_first() {
     // without the distance fields and CPU shape they are built from are about half of it).
     let set = comp.fx_cache_bytes() as u64;
     comp.set_memory_budget(set * 13 / 10 * 16 / 3);
-    comp.set_focus(Some(areas[0]));
+    comp.set_focus(Some(areas[0]), 0);
     for r in [areas[1], areas[2]] {
         shapes(&mut comp, r).expect("off the view");
     }
     let again = shapes(&mut comp, areas[0]).expect("the view again");
     eprintln!("the view's maps built again: {again} (a set {:.1} MB, cache {:.1} MB)", set as f64 / f64::from(1 << 20), comp.fx_cache_bytes() as f64 / f64::from(1 << 20));
     assert_eq!(again, 0, "the view's maps were let go for maps drawn off it");
+}
+
+/// 2400x3600, 24 balloons (420x380) with a Drop Shadow and a Stroke, spread over it.
+fn balloons() -> Document {
+    let mut d = Document::with_background("page", Size::new(2400, 3600), ColorMode::Rgb, SampleType::U8, Color::WHITE);
+    for i in 0..24 {
+        let (x, y) = (60 + (i % 4) * 580, 60 + (i / 4) * 590);
+        let l = block(&d, &format!("balloon {i}"), Rect::new(x, y, x + 420, y + 380), [0.3, 0.4, 0.8, 1.0], vec![Effect::default_drop_shadow(), stroke(6.0)]);
+        d.layers.push(l);
+    }
+    d
+}
+
+fn worst(a: &[[f32; 4]], b: &[[f32; 4]]) -> f32 {
+    a.iter().zip(b).map(|(w, g)| (0..4).map(|k| (w[k] - g[k]).abs()).fold(0.0f32, f32::max)).fold(0.0f32, f32::max)
+}
+
+#[test]
+fn a_phones_small_gpu_budget_draws_every_view_right_and_builds_its_maps_once() {
+    let _turn = serial();
+    let Some((device, queue, format)) = gpu() else {
+        eprintln!("skipping: no GPU adapter");
+        return;
+    };
+    let doc = balloons();
+    let mut roomy = Compositor::try_new_with_format(&device, format).expect("compositor");
+    let mut want = |r: Rect, level: u32| render_to_vec_lod(&mut roomy, &device, &queue, &doc, r, level).map(|(v, _)| v);
+    let Ok(page_l2) = want(doc.bounds(), 2) else {
+        eprintln!("skipping: no effect maps on this adapter");
+        return;
+    };
+    let view = Rect::new(0, 0, 1080, 1920);
+    let (view_l0, page_l0) = (want(view, 0).expect("view"), want(doc.bounds(), 0).expect("page"));
+
+    // A 2 GB phone: `gpu_canvas::memory_budget` is its 32nd, 64 MB: 12 MB of effect maps.
+    let mut comp = Compositor::try_new_with_format(&device, format).expect("compositor");
+    comp.set_memory_budget(64 << 20);
+    let mut draw = |comp: &mut Compositor, r: Rect, level: u32| render_to_vec_lod(comp, &device, &queue, &doc, r, level).expect("drawn on the GPU");
+    // (The canvas tells the compositor what the view shows.)
+    comp.set_focus(Some(doc.bounds()), 2);
+    // Zoomed out to fit (level 2), then the canvas refining it at full size in 1024 px pieces
+    // (every layer's full-size maps, more than the budget), then the next edit's reduced frame.
+    let (got, first) = draw(&mut comp, doc.bounds(), 2);
+    assert!(worst(&page_l2, &got) <= 1.0 / 255.0, "the page at level 2 differs by {:.1}/255", worst(&page_l2, &got) * 255.0);
+    for y in (0..3600).step_by(1024) {
+        for x in (0..2400).step_by(1024) {
+            draw(&mut comp, Rect::new(x, y, x + 1024, y + 1024), 0);
+        }
+    }
+    let (got, again) = draw(&mut comp, doc.bounds(), 2);
+    assert!(worst(&page_l2, &got) <= 1.0 / 255.0);
+    // At 100 %: the screen's part of the page, then a margin drawn ahead to its right and below
+    // (the view's area is the focus), twice.
+    comp.set_focus(Some(view), 0);
+    let mut view_builds = Vec::new();
+    for _ in 0..2 {
+        let (got, st) = draw(&mut comp, view, 0);
+        assert!(worst(&view_l0, &got) <= 1.0 / 255.0, "the view differs by {:.1}/255", worst(&view_l0, &got) * 255.0);
+        view_builds.push(st.fx_shapes);
+        draw(&mut comp, Rect::new(1080, 0, 1620, 1920), 0);
+        draw(&mut comp, Rect::new(0, 1920, 1620, 2400), 0);
+    }
+    eprintln!(
+        "maps built: fit {}, fit after refining {}, view at 100 % {view_builds:?}; cache {:.1} MB",
+        first.fx_shapes,
+        again.fx_shapes,
+        comp.fx_cache_bytes() as f64 / f64::from(1 << 20)
+    );
+    assert_eq!(again.fx_shapes, 0, "refining let go of the reduced maps the next frame draws");
+    assert_eq!(view_builds[1], 0, "the view's maps were built again");
+    // A budget smaller than one layer's maps: the whole page at full size still draws right.
+    comp.set_memory_budget(8 << 20);
+    let (got, _) = draw(&mut comp, doc.bounds(), 0);
+    assert!(worst(&page_l0, &got) <= 1.0 / 255.0, "the page differs by {:.1}/255", worst(&page_l0, &got) * 255.0);
 }

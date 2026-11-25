@@ -545,12 +545,13 @@ impl GpuCanvas {
         }
     }
 
-    /// The document area the view shows: full refreshes composite it last, so its layer pages
-    /// are the ones still resident for the edits that follow.
-    pub fn set_focus(&self, focus: Option<photocraft_geom::Rect>) {
+    /// The document area the view shows and the level of detail it draws at: full refreshes
+    /// composite it last, so its layer pages are the ones still resident for the edits that
+    /// follow, and its effect maps are the last let go.
+    pub fn set_focus(&self, focus: Option<photocraft_geom::Rect>, level: u32) {
         let mut r = self.rs.renderer.write();
         if let Some(res) = r.callback_resources.canvas_mut(self.id) {
-            res.compositor_focus = focus;
+            res.compositor_focus = (focus, level);
         }
     }
 
@@ -837,7 +838,7 @@ impl GpuCanvas {
         if let Some(b) = res.compositor_cache_budget {
             comp.set_composite_cache_budget(b);
         }
-        comp.set_focus(res.compositor_focus);
+        comp.set_focus(res.compositor_focus.0, res.compositor_focus.1);
         comp.set_fill_prefix(fill_prefix);
         comp.set_translated(res.compositor_translated.clone());
         Ok(comp)
@@ -3088,7 +3089,7 @@ struct Resources {
     /// view shows; applied before every composite.
     compositor_budget: Option<u64>,
     compositor_cache_budget: Option<u64>,
-    compositor_focus: Option<photocraft_geom::Rect>,
+    compositor_focus: (Option<photocraft_geom::Rect>, u32),
     /// Layers the next refreshes draw from their resident pre-move surface (a Move drag).
     compositor_translated: Vec<photocraft_gpu::Translated>,
     /// GPU bytes one document's display texture set may take (see [`canvas_budget`]).
@@ -3495,7 +3496,7 @@ impl Resources {
             health: photocraft_gpu::DeviceHealth::new(),
             compositor_budget: None,
             compositor_cache_budget: None,
-            compositor_focus: None,
+            compositor_focus: (None, 0),
             compositor_translated: Vec::new(),
             canvas_budget: canvas_budget_override().unwrap_or_else(|| canvas_budget(physical_memory())),
             reduced_at: f64::NEG_INFINITY,
