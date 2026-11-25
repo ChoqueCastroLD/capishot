@@ -1578,11 +1578,19 @@ impl Compositor {
                 }
             }
             for (f, key, window) in units {
-                if worked && !more() {
+                // Maps to build wait for a call with time left: the next frame's. A call made
+                // once the frame's work was spent still built one layer's (8.5 ms each at 8K,
+                // where the effect cache couldn't hold them all).
+                let current = self.fx_current(doc, f, key, window);
+                // (A group counts as current for staging, which builds its shape whole.)
+                let built = match &f.layer.content {
+                    LayerContent::Group(_) => self.fx.get(&key).is_some_and(|e| e.region == window && e.shape_key == fx::group_key(f.layer, &doc.global_light)),
+                    _ => current,
+                };
+                if (worked || !built) && !more() {
                     done = false;
                     break;
                 }
-                let current = self.fx_current(doc, f, key, window);
                 let _s = span("gpu.fx");
                 // Maps built anew: the shape and distance fields on the CPU in bands over calls
                 // (`stage_fx`), then handed over whole.

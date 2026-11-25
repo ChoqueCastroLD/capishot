@@ -174,3 +174,35 @@ fn reduced_effect_maps_differ_from_the_full_size_composite_only_by_resampling() 
         assert!(worst <= 24.0 / 255.0, "level {level}: worst {:.1}/255", worst * 255.0);
     }
 }
+
+#[test]
+fn a_preparation_once_the_frames_work_is_spent_builds_no_maps() {
+    let _turn = serial();
+    let Some((device, queue, format)) = gpu() else {
+        eprintln!("skipping: no GPU adapter");
+        return;
+    };
+    let doc = page_8k();
+    let mut comp = Compositor::try_new_with_format(&device, format).expect("compositor");
+    // The view of the page's top half at level 1, as a page fills in.
+    let view = Rect::new(0, 0, 7680, 2160);
+    let px = photocraft_gpu::fx_shape_px();
+    match comp.prepare(&device, &queue, &doc, view, 1, &mut || false) {
+        Ok(ready) => assert!(!ready, "nothing was built, yet the view was ready"),
+        Err(e) => {
+            eprintln!("skipping: {}", e.0);
+            return;
+        }
+    }
+    let spent = photocraft_gpu::fx_shape_px() - px;
+    eprintln!("shape pixels computed with no time left: {spent}");
+    assert_eq!(spent, 0, "a preparation with no time left built a layer's maps");
+    // With time, the next calls build them, and the render then builds none.
+    let mut calls = 1;
+    while !comp.prepare(&device, &queue, &doc, view, 1, &mut || true).expect("prepare") {
+        calls += 1;
+        assert!(calls < 200, "the preparation never ends");
+    }
+    let (_, st) = render_to_vec_lod(&mut comp, &device, &queue, &doc, view, 1).expect("render");
+    assert_eq!(st.fx_shapes, 0, "the render built maps the preparation left");
+}
