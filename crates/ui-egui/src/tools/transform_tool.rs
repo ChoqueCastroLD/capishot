@@ -268,6 +268,46 @@ struct Follow {
     hidden: Vec<LayerId>,
 }
 
+/// The key the canvas shows box `pv`'s preview document under ([`crate::canvas::display_doc`]).
+pub(crate) fn preview_key(pv: &TransformPreview) -> u64 {
+    let drawn = pv.vector_type.as_ref().map_or(0, |v| v.drawn);
+    ((1 << 40) + pv.session) ^ (drawn << 44)
+}
+
+/// What a closed box's preview document and the document after it differ by ([`commit::hand_over`]):
+/// the canvas that showed the preview redraws only that when it shows the document again.
+pub(crate) struct Left {
+    doc: DocId,
+    /// [`preview_key`] of the box.
+    key: u64,
+    /// The revision the preview document was built from.
+    from: u64,
+    /// The document's revision when the box closed.
+    revision: u64,
+    /// `None`: they differ in what can't be bounded.
+    damage: Option<photocraft_geom::Rect>,
+}
+
+/// What changed between a canvas cache showing document `doc` as (`revision`, raw preview key)
+/// `seen` and `now`, when one of them is a box's preview: opening the box hides the moving layers
+/// (and draws the layers over them apart), closing it shows the document again, transformed or
+/// not. The layers that differ between the two documents, where they draw
+/// ([`photocraft_engine::layer_multi_cmds::step_damage`]); without this either switch redrew the
+/// whole view (the owner's PC: 34-43 ms of `gpu.submit` in a commit's frame on a 200-layer page).
+pub(crate) fn damage(app: &PhotocraftApp, doc: DocId, seen: (u64, u64), now: (u64, u64)) -> Option<photocraft_geom::Rect> {
+    use photocraft_engine::layer_multi_cmds::step_damage;
+    if seen.1 == 0
+        && seen.0 == now.0
+        && let Some(pv) = app.transform_preview.as_ref().filter(|pv| pv.doc.id == doc && preview_key(pv) == now.1)
+        && pv.follow.as_ref().is_some_and(|f| f.revision == now.0)
+        && let Some(st) = app.session.documents().iter().find(|st| st.doc.id == doc)
+    {
+        return step_damage(&st.doc, &pv.doc);
+    }
+    let left = app.transform_left.as_ref().filter(|l| l.doc == doc && l.key == seen.1 && l.from == seen.0 && l.revision == now.0 && now.1 == 0)?;
+    left.damage
+}
+
 /// Photoshop's alert when Free Transform (⌘T, Edit › Transform, the Move tool's transform controls)
 /// starts on a layer locked in place, by its own lock or a group's.
 pub const LOCKED: &str = "Could not complete the Free Transform command because the layer is locked.";

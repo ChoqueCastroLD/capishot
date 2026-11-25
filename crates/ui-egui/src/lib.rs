@@ -628,6 +628,8 @@ pub struct PhotocraftApp {
     /// The Free Transform box that closed while a canvas drawn in tiles still shows the document
     /// under it: it draws the layer there until the tiles show it (`transform_tool::hand_over`).
     pub(crate) transform_closed: Option<Box<(state::TransformSession, transform_tool::TransformPreview)>>,
+    /// What the last box's preview and the document after it differ by (`transform_tool::damage`).
+    pub(crate) transform_left: Option<transform_tool::Left>,
     /// Move-tool ⇧/⌥ drag state (move_mods).
     pub(crate) move_mods: move_mods::MoveDrag,
     /// Cached document for a modal text Style Options color preview.

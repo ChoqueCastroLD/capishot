@@ -193,6 +193,7 @@ impl PhotocraftApp {
             code_waiting: Default::default(),
             transform_preview: None,
             transform_closed: None,
+            transform_left: None,
             move_mods: Default::default(),
             nudge_bundle: Default::default(),
             style_preview: None,

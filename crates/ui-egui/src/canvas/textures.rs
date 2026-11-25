@@ -370,6 +370,12 @@ pub(crate) fn damage_since(app: &PhotocraftApp, idx: usize, seen: (u64, u64), no
     {
         return Some(if r.is_empty() { r } else { r.inflate(effect_reach(&st.doc.layers)) });
     }
+    // Into and out of the Free Transform box's preview: the layers it hides, where they draw.
+    if let Some(st) = app.session.documents().get(idx)
+        && let Some(r) = crate::transform_tool::damage(app, st.doc.id, (seen.0, seen.1 ^ display_key), now)
+    {
+        return Some(if r.is_empty() { r } else { r.inflate(effect_reach(&st.doc.layers)) });
+    }
     // Between Layer Style previews (and the document): the styled layer's area, effects included.
     if seen.0 == now.0
         && let Some(st) = app.session.documents().get(idx)

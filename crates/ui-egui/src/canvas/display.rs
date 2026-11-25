@@ -189,8 +189,7 @@ pub(crate) fn display_doc(app: &mut PhotocraftApp, idx: usize) -> (std::sync::Ar
         && pv.made()
         && st.doc.layer(photocraft_doc::LayerId(t.layer)).is_some()
     {
-        let drawn = pv.vector_type.as_ref().map_or(0, |v| v.drawn);
-        return (pv.doc.clone(), ((1 << 40) + pv.session) ^ (drawn << 44));
+        return (pv.doc.clone(), crate::transform_tool::preview_key(pv));
     }
     // Layer Style dialog: show its effects live (Cancel just drops the preview).
     let style = app.ui.dialogs.iter().find(|d| d.kind == crate::state::DialogKind::LayerStyle).map(|d| (d.id, d.fields.clone()));

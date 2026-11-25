@@ -151,6 +151,11 @@ fn finish(app: &mut PhotocraftApp, document: Option<DocId>, layer: LayerId, made
 /// there the box goes on drawing the layer, as the document now has it, until the tiles show it
 /// (`draw::standing_in`, [`let_go`]). The frame that closes a box never waits for the canvas.
 pub(super) fn hand_over(app: &mut PhotocraftApp, mut t: TransformSession, mut pv: TransformPreview, landed: bool) {
+    // What the canvas redraws as it goes from the preview back to the document (`super::damage`).
+    if let (Some(st), Some(f)) = (app.session.active().filter(|st| st.doc.id == pv.doc.id), pv.follow.as_ref()) {
+        let damage = photocraft_engine::layer_multi_cmds::step_damage(&pv.doc, &st.doc);
+        app.transform_left = Some(super::Left { doc: st.doc.id, key: super::preview_key(&pv), from: f.revision, revision: st.revision, damage });
+    }
     // (A layer the box made, cancelled: the document has no such layer to show.)
     let gone = !landed && t.made.is_some();
     let under = app.canvases.keys().filter(|k| k.0 == pv.doc.id).any(|k| crate::cpu_canvas::under_box(app, *k) == Some(true));
