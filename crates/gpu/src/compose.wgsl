@@ -17,7 +17,7 @@ struct Op {
     mode: i32,
     kind: i32,
     flags: u32,
-    _pad0: u32,
+    map_level: u32,  // effect map: one texel per 2^map_level × 2^map_level document pixels
     opacity: f32,
     mask_density: f32,
     mask_default: f32,
@@ -1035,9 +1035,10 @@ fn fs_lerp(in: VOut) -> @location(0) vec4<f32> {
 const INSIDE_EPS: f32 = 0.5 / 255.0;
 
 // Effect map value at document pixel `d` (`outside` beyond the map's region, like
-// `FxMaps::crop`).
+// `FxMaps::crop`). A map at a level of detail holds the value of the block `d` lies in (its
+// region is in the level's pixels).
 fn map_value(d: vec2<i32>, outside: f32) -> f32 {
-    let q = d - op.map_origin;
+    let q = (d >> vec2<u32>(op.map_level)) - op.map_origin;
     if (inside(q, op.map_size)) {
         return textureLoad(map_tex, q, 0).r;
     }
@@ -1288,13 +1289,27 @@ fn ra(p: vec2<i32>) -> f32 {
 }
 fn mout(v: f32) -> vec4<f32> { return vec4(v, 0.0, 0.0, 1.0); }
 
-// Map::shifted by whole pixels: p0 = (dx, dy, outside, invert (1 - a before shifting)).
+// Map::shifted by whole pixels: p0 = (dx, dy, outside, invert (1 - a before shifting)); by a
+// fraction of one at a level of detail, bilinear (whole shifts take the one tap).
 @fragment
 fn fs_mshift(in: VOut) -> @location(0) vec4<f32> {
-    let s = local(in.pos) - vec2<i32>(i32(op.p0.x), i32(op.p0.y));
-    if (!inside(s, chunk.size)) { return mout(op.p0.z); }
-    var v = textureLoad(tex_a, s, 0).r;
-    if (op.p0.w > 0.5) { v = 1.0 - v; }
+    let base = floor(op.p0.xy);
+    let f = op.p0.xy - base;
+    let p = local(in.pos) - vec2<i32>(base);
+    var v = 0.0;
+    for (var j = 0; j < 2; j++) {
+        for (var i = 0; i < 2; i++) {
+            let w = select(1.0 - f.x, f.x, i == 1) * select(1.0 - f.y, f.y, j == 1);
+            if (w == 0.0) { continue; }
+            let s = p - vec2(i, j);
+            var t = op.p0.z;
+            if (inside(s, chunk.size)) {
+                t = textureLoad(tex_a, s, 0).r;
+                if (op.p0.w > 0.5) { t = 1.0 - t; }
+            }
+            v += w * t;
+        }
+    }
     return mout(v);
 }
 

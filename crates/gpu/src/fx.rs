@@ -203,13 +203,13 @@ impl B {
         self.fields.push((kind, reach_for(width)));
         In::Field(kind)
     }
-    /// `Map::shifted` by whole pixels (`invert`: of `1 - a`); identity shifts of the plain map
-    /// are skipped.
+    /// `Map::shifted` by whole pixels (`invert`: of `1 - a`), or by a fraction of one
+    /// (bilinear) at a level of detail; identity shifts of the plain map are skipped.
     fn shift(&mut self, src: In, dx: f32, dy: f32, outside: f32, invert: bool) -> In {
         if dx == 0.0 && dy == 0.0 && !invert {
             return src;
         }
-        let r = dx.abs().max(dy.abs()) as i32;
+        let r = dx.abs().max(dy.abs()).ceil() as i32;
         self.push(stage(Kernel::MShift, Some(src), None, [dx, dy, outside, f32::from(u8::from(invert))], r))
     }
     /// `dilate(src, r)` given `dist_outside(src)`.
@@ -271,40 +271,45 @@ fn contour_lut(c: &Contour) -> Option<Vec<f32>> {
     }
 }
 
-/// `compose::effects::offset`: shadow offset away from the light, whole pixels.
-fn offset(angle: f32, distance: f32) -> (f32, f32) {
+/// `compose::effects::offset`: shadow offset away from the light, whole pixels; at a level of
+/// detail (`level` > 0) as it is, in its pixels: rounded, a shadow moved by up to half a reduced
+/// pixel (a quarter of the distance at fit).
+fn offset(angle: f32, distance: f32, level: u32) -> (f32, f32) {
     let a = angle.to_radians();
-    ((-a.cos() * distance).round(), (a.sin() * distance).round())
+    let (dx, dy) = (-a.cos() * distance, a.sin() * distance);
+    if level == 0 { (dx.round(), dy.round()) } else { (dx, dy) }
 }
 
 /// The map program of one enabled effect (`build_maps`), without pattern sources.
 #[cfg(test)]
 pub(crate) fn program(e: &Effect, light: &GlobalLight, vector_shape: bool) -> MapProgram {
-    program_with(e, light, vector_shape, &[], (0.0, 0.0))
+    program_with(e, light, vector_shape, &[], (0.0, 0.0), 0)
 }
 
 /// The map program of one enabled effect (`build_maps`); bevel textures tile `patterns` from
-/// `anchor` (`effects::TextureCtx`).
+/// `anchor` (`effects::TextureCtx`). `level`: the level of detail `e` was scaled to
+/// ([`at_level`]; 0 at full size).
 #[expect(clippy::cognitive_complexity, reason = "one arm per layer effect kind")]
-pub(crate) fn program_with(e: &Effect, light: &GlobalLight, vector_shape: bool, patterns: &[Pattern], anchor: (f64, f64)) -> MapProgram {
+pub(crate) fn program_with(e: &Effect, light: &GlobalLight, vector_shape: bool, patterns: &[Pattern], anchor: (f64, f64), level: u32) -> MapProgram {
     let mut b = B { stages: Vec::new(), fields: Vec::new() };
     let maps = match e {
         Effect::DropShadow(s) | Effect::InnerShadow(s) => {
             // shadow_map
             let inner = matches!(e, Effect::InnerShadow(_));
             let angle = if s.use_global_light { light.angle } else { s.angle };
-            let (dx, dy) = offset(angle, s.distance);
+            let (dx, dy) = offset(angle, s.distance, level);
             let src = b.shift(In::Shape, dx, dy, if inner { 1.0 } else { 0.0 }, inner);
             let (r, bw) = photocraft_compose::effects::spread_split(s.size, s.spread);
             let mut m = src;
             if r > 0.0 {
-                // dist_outside of the shifted map is the shifted field (integer offsets; shifted-in
-                // pixels are far away for a drop shadow, inside for an inner shadow).
+                // dist_outside of the shifted map is the shifted field (integer offsets, or close to
+                // it at a level of detail; shifted-in pixels are far away for a drop shadow, inside
+                // for an inner shadow).
                 let f = b.field(if inner { FieldKind::ChokeInside } else { FieldKind::StrokeOutside }, r);
                 let d = if dx == 0.0 && dy == 0.0 {
                     f
                 } else {
-                    b.push(stage(Kernel::MShift, Some(f), None, [dx, dy, if inner { -0.5 } else { 1e10 }, 0.0], dx.abs().max(dy.abs()) as i32))
+                    b.push(stage(Kernel::MShift, Some(f), None, [dx, dy, if inner { -0.5 } else { 1e10 }, 0.0], dx.abs().max(dy.abs()).ceil() as i32))
                 };
                 m = b.dilate(src, d, r);
             }
@@ -341,7 +346,7 @@ pub(crate) fn program_with(e: &Effect, light: &GlobalLight, vector_shape: bool, 
         }
         Effect::Satin(s) => {
             // satin_map
-            let (dx, dy) = offset(s.angle, s.distance);
+            let (dx, dy) = offset(s.angle, s.distance, level);
             let a = b.shift(In::Shape, dx, dy, 0.0, false);
             let a = b.conv(a, photocraft_compose::effects::tent_kernel(s.size));
             let c = b.shift(In::Shape, -dx, -dy, 0.0, false);
@@ -532,6 +537,61 @@ fn field_banded(kind: FieldKind, reach: i32, shape: &[f32], region: Rect, out: R
         crop(&f, win, band)
     });
     parts.concat()
+}
+
+/// The layer's shape over `r` at level of detail `level` (`r` in the level's pixels, one per
+/// 2^`level` × 2^`level` document pixels): each pixel the mean of the full-size shape over the
+/// pixels it stands for, in parallel bands.
+pub(crate) fn shape_at(doc: &photocraft_doc::Document, layer: &Layer, r: Rect, level: u32) -> Vec<f32> {
+    if level == 0 || r.is_empty() {
+        return shape(doc, layer, r);
+    }
+    let s = 1i32 << level;
+    crate::FX_SHAPE_PX.fetch_add((u64::from(r.width()) * u64::from(r.height())) << (2 * level), std::sync::atomic::Ordering::Relaxed);
+    par_map(bands(r, (BAND >> level).max(1)), |band| {
+        let full = Rect::new(band.x0 * s, band.y0 * s, band.x1 * s, band.y1 * s);
+        let v = photocraft_compose::layer_shape(doc, layer, full);
+        let (fw, w) = (full.width() as usize, band.width() as usize);
+        let (s, n) = (s as usize, (s * s) as f32);
+        let mut out = vec![0.0f32; w * band.height() as usize];
+        for (row, o) in out.chunks_exact_mut(w).enumerate() {
+            for (x, px) in o.iter_mut().enumerate() {
+                let mut sum = 0.0;
+                for dy in 0..s {
+                    let line = (row * s + dy) * fw + x * s;
+                    sum += v[line..line + s].iter().sum::<f32>();
+                }
+                *px = sum / n;
+            }
+        }
+        out
+    })
+    .concat()
+}
+
+/// `e` as its maps are built at level of detail `level` (one map pixel per 2^`level` ×
+/// 2^`level` document pixels): its distances and sizes in the level's pixels. `None` when its
+/// maps don't scale so (a bevel's shading reads its height's slope per pixel, and its texture
+/// tiles a pattern in document pixels): those are built at full size.
+pub(crate) fn at_level(e: &Effect, level: u32) -> Option<Effect> {
+    let k = 1.0 / (1u32 << level) as f32;
+    let mut e = e.clone();
+    match &mut e {
+        Effect::DropShadow(s) | Effect::InnerShadow(s) => {
+            s.distance *= k;
+            s.size *= k;
+        }
+        Effect::OuterGlow(g) | Effect::InnerGlow(g) => g.size *= k,
+        Effect::Stroke(s) => s.size *= k,
+        Effect::Satin(s) => {
+            s.distance *= k;
+            s.size *= k;
+        }
+        Effect::BevelEmboss(_) => return (level == 0).then_some(e),
+        // No maps: painted in document pixels as they composite.
+        Effect::ColorOverlay { .. } | Effect::GradientOverlay { .. } | Effect::PatternOverlay { .. } => {}
+    }
+    Some(e)
 }
 
 /// The layer's shape (`compose::layer_shape`) over `r`, in parallel bands.

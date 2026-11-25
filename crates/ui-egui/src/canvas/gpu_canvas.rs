@@ -1006,14 +1006,14 @@ impl GpuCanvas {
     }
 
     /// For a page filling from blank (just opened, or its size changed): its display set made,
-    /// and the effect maps and layer pages a composite of `region` needs built and uploaded
+    /// and the effect maps and layer pages a composite of `region` at `level` needs built and uploaded
     /// first, a layer or pass at a time until [`now_ms`] reaches `until`
     /// ([`photocraft_gpu::Compositor::prepare`]). Whether `region` may be composited now: its
     /// composite then builds no maps and uploads no pages. One piece of a new page built the maps
     /// of every styled layer it met (40 to 150 ms in one frame on his PSD), and uploaded every
     /// layer's pages there (a 200-layer page: 55-84 ms on lavapipe). True when
     /// the GPU compositor can't draw the document (the composite reports why).
-    fn fill_ready(&self, doc: &photocraft_doc::Document, region: photocraft_geom::Rect, until: f64) -> bool {
+    fn fill_ready(&self, doc: &photocraft_doc::Document, region: photocraft_geom::Rect, level: u32, until: f64) -> bool {
         let _s = crate::perf_span::span("canvas.fill_fx");
         let mut renderer = self.rs.renderer.write();
         let Some(res) = renderer.callback_resources.canvas_mut(self.id) else { return true };
@@ -1028,7 +1028,7 @@ impl GpuCanvas {
             return true;
         }
         let ready =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| comp.prepare(&self.rs.device, &self.rs.queue, doc, region, 0, &mut || now_ms() < until)));
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| comp.prepare(&self.rs.device, &self.rs.queue, doc, region, level, &mut || now_ms() < until)));
         res.compositor = Some(comp);
         match ready {
             Ok(r) => r.unwrap_or(true),
@@ -1180,7 +1180,7 @@ impl GpuCanvas {
             let may_wait = |p: photocraft_geom::Rect| covered(p, &blank) || p.intersect(&n.visible).is_empty();
             let now_only = |p: &photocraft_geom::Rect| moving.is_some() && !may_wait(*p);
             let fx_region = fill_region(&parts.iter().copied().filter(|p| !now_only(p)).collect::<Vec<_>>(), n.visible);
-            let fx_ready = fx_region.is_empty() || self.fill_ready(doc, fx_region, t0 + frame_work_ms());
+            let fx_ready = fx_region.is_empty() || self.fill_ready(doc, fx_region, level, t0 + frame_work_ms());
             let composing = now_ms();
             for (i, p) in parts.into_iter().enumerate() {
                 let waits = may_wait(p);
@@ -1420,15 +1420,29 @@ impl GpuCanvas {
         let may_wait = |p: photocraft_geom::Rect| covered(p, &blank) || p.intersect(&need.visible).is_empty();
         let moving = self.moving_of(key).is_some();
         let now_only = |p: &photocraft_geom::Rect| moving && !may_wait(*p);
-        let waiting: Vec<photocraft_geom::Rect> = urgent
+        let level_of = |r: photocraft_geom::Rect| if area(r) >= LOD_MIN_PX { need.level } else { 0 };
+        let waiting: Vec<(u32, photocraft_geom::Rect)> = urgent
             .iter()
-            .flat_map(|r| if covered(*r, &blank) { vec![*r] } else { subtract(*r, need.visible).into_iter().chain(Some(r.intersect(&need.visible))).collect() })
-            .filter(|p| !now_only(p))
+            .flat_map(|r| {
+                let parts = if covered(*r, &blank) { vec![*r] } else { subtract(*r, need.visible).into_iter().chain(Some(r.intersect(&need.visible))).collect() };
+                parts.into_iter().map(move |p| (level_of(*r), p))
+            })
+            .filter(|(_, p)| !now_only(p))
             .collect();
-        let fx_region = fill_region(&waiting, need.visible);
-        let fx_ready = fx_region.is_empty() || self.fill_ready(doc, fx_region, t0 + frame_work_ms());
+        // Per level the parts composite at (their effect maps are built at it).
+        let mut levels: Vec<u32> = waiting.iter().map(|(l, _)| *l).collect();
+        levels.sort_unstable();
+        levels.dedup();
+        let fx_ready: Vec<(u32, photocraft_geom::Rect)> = levels
+            .into_iter()
+            .filter_map(|l| {
+                let parts: Vec<photocraft_geom::Rect> = waiting.iter().filter(|(pl, _)| *pl == l).map(|(_, p)| *p).collect();
+                let region = fill_region(&parts, need.visible);
+                (region.is_empty() || self.fill_ready(doc, region, l, t0 + frame_work_ms())).then_some((l, region))
+            })
+            .collect();
         for r in urgent {
-            let level = if area(r) >= LOD_MIN_PX { need.level } else { 0 };
+            let level = level_of(r);
             // What the view shows goes whole; the margin drawn ahead around it (for a pan) and
             // blank parts in pieces within the frame's work. The margin a drag's frames left for
             // later went whole on the frame after (4-6.5 MP of a 4000x6000 page of 80 layers the
@@ -1444,7 +1458,7 @@ impl GpuCanvas {
             };
             'parts: for p in parts {
                 let waits = may_wait(p);
-                if (waits && out.px > 0 && now_ms() - t0 >= frame_work_ms()) || (!now_only(&p) && !(fx_ready && fx_region.contains_rect(&p))) {
+                if (waits && out.px > 0 && now_ms() - t0 >= frame_work_ms()) || (!now_only(&p) && !fx_ready.iter().any(|(l, ready)| *l == level && ready.contains_rect(&p))) {
                     more = true;
                     continue;
                 }
@@ -1511,7 +1525,7 @@ impl GpuCanvas {
             // A piece goes once its effect maps and layer pages are built and uploaded, within the
             // frame's work (the frames after come back for it).
             if let Some(piece) =
-                self.with_doc(key, |_, d| d.stale().next_piece(need.visible, budget)).flatten().filter(|p| self.fill_ready(doc, *p, t0 + frame_work_ms()))
+                self.with_doc(key, |_, d| d.stale().next_piece(need.visible, budget)).flatten().filter(|p| self.fill_ready(doc, *p, 0, t0 + frame_work_ms()))
             {
                 self.rs.queue.on_submitted_work_done(self.refine.before());
                 match self.composite_lod_with(doc, piece, encode_srgb, 0, true, false) {

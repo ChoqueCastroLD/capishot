@@ -213,8 +213,9 @@ type Cell = (i32, i32);
 /// A resident layer page.
 type ResKey = (LayerId, Role, Cell);
 /// Effect maps of a layer: over its whole effect region (`None`), or one page cell of a region
-/// larger than the texture limit.
-type FxKey = (LayerId, Option<Cell>);
+/// larger than the texture limit; at a level of detail (one map pixel per 2^level × 2^level
+/// document pixels, [`Compositor::map_level`]; page cells only at full size).
+type FxKey = (LayerId, Option<Cell>, u32);
 
 struct Resident {
     texture: wgpu::Texture,
@@ -315,7 +316,9 @@ struct ProgState {
 /// Cached effect state of one layer.
 struct FxEntry {
     doc: DocId,
+    /// In the pixels of `level` (the key's map level).
     region: Rect,
+    level: u32,
     shape_key: u64,
     /// Tiles the shape was rendered from (content, mask): damage is their difference.
     tiles: [Option<fx::Tiles>; 2],
@@ -360,7 +363,7 @@ impl FxEntry {
     fn update_shape(&mut self, queue: &wgpu::Queue, doc: &Document, layer: &Layer, damage: Rect, ready: Option<&mut Staged>) -> u64 {
         let v = match ready {
             Some(b) => std::mem::take(&mut b.shape),
-            None => fx::shape(doc, layer, damage),
+            None => fx::shape_at(doc, layer, damage, self.level),
         };
         fx::paste(&mut self.shape_cpu, self.region, damage, &v);
         self.shape.write_r32(queue, self.region, damage, &v);
@@ -425,11 +428,20 @@ const PAGES_AT_ONCE: u64 = 4 << 20;
 
 /// The map programs of `f`'s enabled effects. Filled shapes stroke their outline (the effect
 /// shape); others estimate it.
-fn fx_programs(doc: &Document, f: &plan::FxLayer<'_>) -> Vec<fx::MapProgram> {
+/// The map programs of `f`'s effects at map level `level` ([`fx::at_level`]; one it doesn't
+/// scale is left out, which [`Compositor::map_level`] rules out).
+fn fx_programs(doc: &Document, f: &plan::FxLayer<'_>, level: u32) -> Vec<fx::MapProgram> {
     let layer = f.layer;
     let vector_shape = matches!(layer.content, LayerContent::Shape(_)) && photocraft_compose::effect_outline(layer).is_none();
     let anchor = layer.effects.reference.unwrap_or((f64::from(f.bounds.x0), f64::from(f.bounds.y0)));
-    layer.effects.items.iter().filter(|e| e.enabled()).map(|e| fx::program_with(e, &doc.global_light, vector_shape, &doc.patterns, anchor)).collect()
+    layer
+        .effects
+        .items
+        .iter()
+        .filter(|e| e.enabled())
+        .filter_map(|e| fx::at_level(e, level))
+        .map(|e| fx::program_with(&e, &doc.global_light, vector_shape, &doc.patterns, anchor, level))
+        .collect()
 }
 
 impl FxEntry {
@@ -505,7 +517,7 @@ impl FxEntry {
         let mut damage = Rect::EMPTY;
         for (old, cur) in self.tiles.iter().zip(now) {
             if let (Some(o), Some(s)) = (old, cur) {
-                damage = damage.union(&fx::source_damage(layer, o, s));
+                damage = damage.union(&level_rect(fx::source_damage(layer, o, s), self.level));
             }
         }
         for r in [
@@ -867,7 +879,8 @@ struct Bound {
     /// [`Kernel::Layers`] passes: the pages of each member.
     member_views: Vec<Vec<(Option<ResidentRef>, Option<ResidentRef>)>>,
     keys: Vec<ResKey>,
-    maps: Vec<Option<(wgpu::TextureView, Rect)>>,
+    /// Each pass's effect map: its view, region and level of detail.
+    maps: Vec<Option<(wgpu::TextureView, Rect, u32)>>,
 }
 
 /// Pass-level resources shared by every cell of a frame.
@@ -1242,6 +1255,23 @@ impl Compositor {
         region.width() > self.max_dim || region.height() > self.max_dim || u64::from(region.width()) * u64::from(region.height()) > cell
     }
 
+    /// The level of detail `f`'s maps are built at for a render at `level`: the render's, so a
+    /// zoomed-out view's maps take a 4^level-th of the memory and the work (an 8K page of 24
+    /// styled layers at fit: the full-size maps were more than the effect budget, and were
+    /// built again over and over); full size (0) for an effect whose maps don't scale
+    /// ([`fx::at_level`]) and where the reduced region still needs page cells.
+    fn map_level(&self, f: &plan::FxLayer<'_>, level: u32) -> u32 {
+        let scales = || f.layer.effects.items.iter().filter(|e| e.enabled()).all(|e| fx::at_level(e, level).is_some());
+        if level == 0 || self.fx_paged(level_rect(f.region, level)) || !scales() { 0 } else { level }
+    }
+
+    /// Where a render at `level` reads `f`'s maps from: one set over its whole region (the
+    /// key's level and that region in its pixels), or `None` per page cell at full size.
+    fn whole_maps(&self, f: &plan::FxLayer<'_>, level: u32) -> Option<(FxKey, Rect)> {
+        let ml = self.map_level(f, level);
+        (ml > 0 || !self.fx_paged(f.region)).then(|| ((f.layer.id, None, ml), level_rect(f.region, ml)))
+    }
+
     /// How far beyond a page cell the effect maps of `f` must be computed to be exact in it.
     fn fx_apron(doc: &Document, f: &plan::FxLayer<'_>) -> i32 {
         let vector_shape = matches!(f.layer.content, LayerContent::Shape(_)) && photocraft_compose::effect_outline(f.layer).is_none();
@@ -1251,7 +1281,7 @@ impl Compositor {
             .items
             .iter()
             .filter(|e| e.enabled())
-            .map(|e| fx::program_with(e, &doc.global_light, vector_shape, &doc.patterns, (0.0, 0.0)))
+            .map(|e| fx::program_with(e, &doc.global_light, vector_shape, &doc.patterns, (0.0, 0.0), 0))
             .collect();
         let want = field_reaches(&progs);
         // Distance fields are exact one pixel inside the window they are computed from.
@@ -1315,7 +1345,7 @@ impl Compositor {
                 if matches!(e, photocraft_doc::Effect::DropShadow(s) if s.source == photocraft_doc::ShadowSource::FillAndStroke) {
                     return Err(Unsupported(format!("a drop shadow cast from the strokes of `{}` uses the CPU path", f.layer.name)));
                 }
-                for s in fx::program_with(e, &doc.global_light, false, &doc.patterns, (0.0, 0.0)).stages {
+                for s in fx::program_with(e, &doc.global_light, false, &doc.patterns, (0.0, 0.0), 0).stages {
                     if s.lut.as_ref().is_some_and(|l| l.len() > 4096) {
                         return Err(Unsupported(format!("effect blur on `{}` too wide for the GPU path", f.layer.name)));
                     }
@@ -1531,15 +1561,19 @@ impl Compositor {
             let mut done = true;
             // What the render builds: whole regions it draws in, then per page cell of the
             // region the maps of layers larger than a cell (each cell's window, as the render's).
-            let mut units: Vec<(&plan::FxLayer<'_>, FxKey, Rect)> =
-                plan.fx.iter().filter(|f| !self.fx_paged(f.region) && !f.region.intersect(&drawn).is_empty()).map(|f| (f, (f.layer.id, None), f.region)).collect();
+            let mut units: Vec<(&plan::FxLayer<'_>, FxKey, Rect)> = plan
+                .fx
+                .iter()
+                .filter(|f| !f.region.intersect(&drawn).is_empty())
+                .filter_map(|f| self.whole_maps(f, level).map(|(key, window)| (f, key, window)))
+                .collect();
             for part in grid_rects(region, self.page) {
                 let cell = (part.x0.div_euclid(self.page as i32), part.y0.div_euclid(self.page as i32));
                 let cr = cell_rect(cell, self.page);
-                for f in plan.fx.iter().filter(|f| self.fx_paged(f.region)) {
+                for f in plan.fx.iter().filter(|f| self.whole_maps(f, level).is_none()) {
                     let pf = cr.intersect(&f.region);
                     if !pf.is_empty() {
-                        units.push((f, (f.layer.id, Some(cell)), pf.inflate(Self::fx_apron(doc, f)).intersect(&f.region)));
+                        units.push((f, (f.layer.id, Some(cell), 0), pf.inflate(Self::fx_apron(doc, f)).intersect(&f.region)));
                     }
                 }
             }
@@ -1548,12 +1582,14 @@ impl Compositor {
                     done = false;
                     break;
                 }
+                let current = self.fx_current(doc, f, key, window);
                 let _s = span("gpu.fx");
                 // Maps built anew: the shape and distance fields on the CPU in bands over calls
                 // (`stage_fx`), then handed over whole.
-                // (A small layer's maps take a part's time: built in one go, as a render would.)
-                let small = u64::from(window.width()) * u64::from(window.height()) <= 2 * STAGE_PX;
-                let ready = if small || self.fx_current(doc, f, key, window) {
+                // (A small layer's maps take a part's time: built in one go, as a render would.
+                // At a level of detail its shape is computed from all the pixels it stands for.)
+                let small = (u64::from(window.width()) * u64::from(window.height())) << (2 * key.2) <= 2 * STAGE_PX;
+                let ready = if small || current {
                     None
                 } else {
                     match self.stage_fx(device, queue, doc, f, key, window, &mut worked, more) {
@@ -1682,7 +1718,7 @@ impl Compositor {
             return Stage::Whole;
         }
         if self.staging.as_ref().is_none_or(|s| s.built.key != key) {
-            let kinds = field_reaches(&fx_programs(doc, f)).into_iter().collect();
+            let kinds = field_reaches(&fx_programs(doc, f, key.2)).into_iter().collect();
             self.staging = Some(Staging {
                 built: Staged { key, region, shape: vec![0.0; n], shape_tex: Some(Tex::map(device, "pc_fx_shape", region, MAP32)), fields: HashMap::new() },
                 doc: doc.id,
@@ -1696,14 +1732,16 @@ impl Compositor {
             });
         }
         let Some(st) = self.staging.as_mut() else { return Stage::Whole };
+        // (At a level of detail a shape pixel is computed from the 4^level it stands for.)
         let rows = i32::try_from(STAGE_PX / u64::from(region.width().max(1))).unwrap_or(i32::MAX).max(16);
+        let shape_rows = i32::try_from((STAGE_PX >> (2 * key.2)) / u64::from(region.width().max(1))).unwrap_or(i32::MAX).max(1);
         while !region.is_empty() {
             if st.shape_y < region.y1 {
                 if *worked && !more() {
                     return Stage::Pending;
                 }
-                let band = Rect::new(region.x0, st.shape_y, region.x1, st.shape_y.saturating_add(rows).min(region.y1));
-                let v = fx::shape(doc, layer, band);
+                let band = Rect::new(region.x0, st.shape_y, region.x1, st.shape_y.saturating_add(shape_rows).min(region.y1));
+                let v = fx::shape_at(doc, layer, band, key.2);
                 fx::paste(&mut st.built.shape, region, band, &v);
                 if let Some(t) = &st.built.shape_tex {
                     t.write_r32(queue, region, band, &v);
@@ -1829,14 +1867,18 @@ impl Compositor {
         // made a piece of a 4000x6000 page of 80 layers build (and, past the effect budget, evict
         // and build again) the maps of layers nowhere near it.
         let drawn = self.drawn_rect(region, level);
-        let paged: Vec<bool> = plan.fx.iter().map(|f| self.fx_paged(f.region)).collect();
-        let aprons: Vec<i32> = plan.fx.iter().zip(&paged).map(|(f, &pg)| if pg { Self::fx_apron(doc, f) } else { 0 }).collect();
-        for (f, &pg) in plan.fx.iter().zip(&paged) {
-            if !pg && !f.region.intersect(&drawn).is_empty() {
+        let whole: Vec<Option<(FxKey, Rect)>> = plan.fx.iter().map(|f| self.whole_maps(f, level)).collect();
+        let aprons: Vec<i32> = plan.fx.iter().zip(&whole).map(|(f, w)| if w.is_none() { Self::fx_apron(doc, f) } else { 0 }).collect();
+        for (f, w) in plan.fx.iter().zip(&whole) {
+            if let Some((key, maps)) = *w
+                && !f.region.intersect(&drawn).is_empty()
+            {
                 let _s = span("gpu.fx");
-                self.sync_fx(device, queue, encoder, doc, f, (f.layer.id, None), f.region, &mut stats, None);
+                self.sync_fx(device, queue, encoder, doc, f, key, maps, &mut stats, None);
             }
         }
+        // The level of each layer's whole maps (`None`: per page cell).
+        let levels: Vec<Option<u32>> = whole.iter().map(|w| w.map(|(key, _)| key.2)).collect();
         let fr = self.frame_res(device, queue, canvas, &plan, &moved, &moved_masks);
 
         // Page cells; every other frame in reverse, so a repeated full refresh of a document
@@ -1865,11 +1907,11 @@ impl Compositor {
             let cr = cell_rect(cell, page);
             for (i, f) in plan.fx.iter().enumerate() {
                 let pf = cr.intersect(&f.region);
-                if !paged.get(i).copied().unwrap_or(false) || pf.is_empty() {
+                if levels.get(i).is_none_or(Option::is_some) || pf.is_empty() {
                     continue;
                 }
                 let window = pf.inflate(aprons.get(i).copied().unwrap_or(0)).intersect(&f.region);
-                self.sync_fx(device, queue, encoder, doc, f, (f.layer.id, Some(cell)), window, &mut stats, None);
+                self.sync_fx(device, queue, encoder, doc, f, (f.layer.id, Some(cell), 0), window, &mut stats, None);
             }
             // At a level of detail the cell's part shrinks; pages are a power of two at least
             // 2^MAX_LOD, so cells never share a reduced pixel.
@@ -1899,7 +1941,7 @@ impl Compositor {
             });
             self.want = read.union(&part);
             let record = span("gpu.record");
-            self.run_cell(device, queue, encoder, doc.id, &plan, &paged, cell, &fr, &chunks, &outs, checkpoint, level, &mut stats, sink);
+            self.run_cell(device, queue, encoder, doc.id, &plan, &levels, cell, &fr, &chunks, &outs, checkpoint, level, &mut stats, sink);
             drop(record);
             self.want = Rect::EMPTY;
             let (evicted, bytes) = self.evict();
@@ -1939,7 +1981,7 @@ impl Compositor {
         let frame = self.frame;
         let live: std::collections::HashSet<LayerId> = doc.walk().into_iter().map(|(_, _, l)| l.id).collect();
         self.residents.retain(|(id, _, _), r| r.doc != doc.id || r.last_used == frame || live.contains(id));
-        self.fx.retain(|(id, _), e| e.doc != doc.id || e.last_used == frame || live.contains(id));
+        self.fx.retain(|(id, ..), e| e.doc != doc.id || e.last_used == frame || live.contains(id));
         stats.evicted += self.evict().0;
         self.temps.retain(|(_, used)| frame.saturating_sub(*used) < 240);
         let lut_age = if self.lut_cache.len() > 64 { 1 } else { 240 };
@@ -1982,7 +2024,7 @@ impl Compositor {
             // build on a page of many styled layers drew hundreds of maps again.
             let mut lru: Vec<(u64, u64, FxKey)> = self.fx.iter().filter(|(_, e)| !e.compact).map(|(k, e)| (e.last_used, e.stamp, *k)).collect();
             lru.sort_unstable();
-            for (_, _, k) in lru {
+            for (.., k) in lru {
                 if total <= fx_budget {
                     break;
                 }
@@ -2069,7 +2111,7 @@ impl Compositor {
         encoder: &mut wgpu::CommandEncoder,
         doc: DocId,
         plan: &Plan<'_>,
-        paged: &[bool],
+        whole: &[Option<u32>],
         cell: Cell,
         fr: &FrameRes,
         live: &[bool],
@@ -2103,13 +2145,16 @@ impl Compositor {
             member_views.push(mv);
             maps.push(p.map.and_then(|m| {
                 let f = plan.fx.get(m.fx)?;
-                let key = (f.layer.id, paged.get(m.fx).copied().unwrap_or(false).then_some(cell));
+                let key = match whole.get(m.fx).copied().flatten() {
+                    Some(level) => (f.layer.id, None, level),
+                    None => (f.layer.id, Some(cell), 0),
+                };
                 let e = self.fx.get(&key)?;
                 if m.item == plan::SHAPE_MAP {
-                    return Some((e.shape.view.clone(), e.region));
+                    return Some((e.shape.view.clone(), e.region, e.level));
                 }
                 let t = e.progs.get(m.item)?.maps.get(m.map)?.as_ref()?;
-                Some((t.view.clone(), e.region))
+                Some((t.view.clone(), e.region, e.level))
             }));
         }
         Bound { views, member_views, keys, maps }
@@ -2159,7 +2204,7 @@ impl Compositor {
         encoder: &mut wgpu::CommandEncoder,
         doc: DocId,
         plan: &Plan<'_>,
-        paged: &[bool],
+        whole: &[Option<u32>],
         cell: Cell,
         fr: &FrameRes,
         chunks: &[Rect],
@@ -2183,7 +2228,7 @@ impl Compositor {
             clips.iter().enumerate().map(|(i, clip)| i >= first_pass && clip.is_none_or(|c| chunks.iter().any(|ch| !c.intersect(ch).is_empty()))).collect();
         stats.bound += live.iter().filter(|l| **l).count();
         let bind = span("gpu.bind");
-        let bound = self.bind_cell(device, queue, encoder, doc, plan, paged, cell, fr, &live, stats);
+        let bound = self.bind_cell(device, queue, encoder, doc, plan, whole, cell, fr, &live, stats);
 
         drop(bind);
         // Chunk pool of the smallest side that holds every chunk of this cell.
@@ -2229,7 +2274,7 @@ impl Compositor {
                 continue;
             }
             let (tex, mask) = bound.views[i];
-            let map = bound.maps[i].as_ref().map(|(_, r)| *r);
+            let map = bound.maps[i].as_ref().map(|(_, r, level)| (*r, *level));
             let w = op_words(p, tex.map(|t| t.1), mask.map(|m| m.1), map);
             let off = (op_base + i as u64 * STRIDE) as usize;
             data[off..][..w.len()].copy_from_slice(&w);
@@ -2285,7 +2330,7 @@ impl Compositor {
             let tv = tex.map_or(slot(p.d), |(k, _)| resident_views[k]);
             let mv = mask.map_or(dummy, |(k, _)| resident_views[k]);
             let lv = fr.luts.get(i).and_then(Option::as_ref).map_or(dummy, |(_, v)| v);
-            let map = bound.maps[i].as_ref().map_or(dummy, |(v, _)| v);
+            let map = bound.maps[i].as_ref().map_or(dummy, |(v, ..)| v);
             let pat = fr.patterns.get(i).and_then(Option::as_ref).unwrap_or(dummy);
             bg1.push(Some(texture_group(device, &self.kit.bgl1, &[slot(p.a), slot(p.b), tv, mv, lv, slot(p.c), map, pat])));
         }
@@ -2588,7 +2633,9 @@ impl Compositor {
         // What `stage_fx` computed ahead for this region (its whole shape and fields).
         ready = ready.filter(|b| b.region == region && b.key == key);
 
-        let progs = fx_programs(doc, f);
+        // Its maps' level of detail: `region` and everything below are in its pixels.
+        let level = key.2;
+        let progs = fx_programs(doc, f, level);
         let moved_from = if is_group { None } else { self.translated_from(layer.id, content_src, mask_src) };
 
         // What changed: everything (new settings / size), the position only, some tiles, or
@@ -2601,7 +2648,7 @@ impl Compositor {
         {
             for (old, cur) in e.tiles.iter().zip([content_src, mask_src]) {
                 let d = match (old, cur) {
-                    (Some(o), Some(s)) => fx::source_damage(layer, o, s),
+                    (Some(o), Some(s)) => level_rect(fx::source_damage(layer, o, s), level),
                     (None, None) => Rect::EMPTY,
                     // A source appeared or vanished (the key changes with it too).
                     _ => region,
@@ -2616,13 +2663,17 @@ impl Compositor {
             && (old.width(), old.height()) == (rw, rh)
             && !region.is_empty()
             && moved_from.is_some_and(|(from, at)| {
-                self.fx.get(&key).and_then(|e| e.moved_from).is_some_and(|(was, at0)| was == from && (at.0 - at0.0, at.1 - at0.1) == (region.x0 - old.x0, region.y0 - old.y0))
+                self.fx.get(&key).and_then(|e| e.moved_from).is_some_and(|(was, at0)| {
+                    was == from && (level > 0 || (at.0 - at0.0, at.1 - at0.1) == (region.x0 - old.x0, region.y0 - old.y0))
+                })
             })
         {
             // Drawn translated from the surfaces its maps were made from, as far as the region
             // moved: the shape moved with it unchanged, so every map is still exact. Checking that
             // by computing the whole shape again ran in every frame of a Move drag of a styled
-            // layer (the CPU's share of `gpu.fx` there).
+            // layer (the CPU's share of `gpu.fx` there). At a level of detail the maps move by
+            // whole reduced pixels, within one of where the layer is (the frame is reduced too);
+            // the drag's release builds them where it landed.
             if let Some(e) = self.fx.get_mut(&key) {
                 e.region = region;
                 rebuild = false;
@@ -2637,7 +2688,7 @@ impl Compositor {
             let v: &[f32] = match &ready {
                 Some(b) => &b.shape,
                 None => {
-                    computed = fx::shape(doc, layer, region);
+                    computed = fx::shape_at(doc, layer, region, level);
                     &computed
                 }
             };
@@ -2673,6 +2724,7 @@ impl Compositor {
                 FxEntry {
                     doc: doc.id,
                     region,
+                    level,
                     shape_key,
                     tiles: [None, None],
                     _pin: is_group.then(|| layer.clone()),
@@ -2868,7 +2920,8 @@ fn web_time_now() -> Option<std::time::Instant> {
 }
 
 /// The uniform record of a pass.
-fn op_words(p: &plan::Pass<'_>, tex: Option<[i32; 4]>, mask: Option<[i32; 4]>, map: Option<Rect>) -> Vec<u8> {
+/// `map`: the effect map's region and level of detail (in whose pixels the region is).
+fn op_words(p: &plan::Pass<'_>, tex: Option<[i32; 4]>, mask: Option<[i32; 4]>, map: Option<(Rect, u32)>) -> Vec<u8> {
     let mut flags = p.flags;
     let (mut to, mut ts, mut mo, mut ms) = ([0; 2], [0; 2], [0; 2], [0; 2]);
     if let Some(r) = tex {
@@ -2890,12 +2943,12 @@ fn op_words(p: &plan::Pass<'_>, tex: Option<[i32; 4]>, mask: Option<[i32; 4]>, m
     if p.gradient {
         flags |= 8;
     }
-    let (mpo, mps) = map.map_or(([0, 0], [0, 0]), |r| ([r.x0, r.y0], [r.width() as i32, r.height() as i32]));
+    let (mpo, mps) = map.map_or(([0, 0], [0, 0]), |(r, _)| ([r.x0, r.y0], [r.width() as i32, r.height() as i32]));
     let mut v = vec![
         I(plan::mode_index(p.mode)),
         I(p.adjust_kind),
         U(flags),
-        U(0),
+        U(map.map_or(0, |(_, level)| level)),
         F(p.opacity),
         F(density),
         F(mdefault),
