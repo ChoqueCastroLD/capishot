@@ -376,6 +376,9 @@ pub fn selection_only_change(a: &Document, b: &Document) -> bool {
         && *file_encoding == b.file_encoding
 }
 
+/// The list holding a sibling list's parent group, and the group's index there.
+type Outer<'d> = Option<(&'d [Layer], usize)>;
+
 /// Pixels a single history step can have changed between `a` and `b` (the documents on either
 /// side of an edit, its undo or its redo): the union of the change bounds of every layer whose
 /// pixels differ, so a local edit recomposites only that area instead of the whole canvas. A
@@ -383,8 +386,9 @@ pub fn selection_only_change(a: &Document, b: &Document) -> bool {
 /// [`one_sided_bounds`]); one that draws nothing ([`inert_at`]) changes nothing. `None`
 /// (composite everything) when the step touched anything the layer walk cannot bound:
 /// document-level fields the compositor reads (canvas size, mode, depth, profile, global light,
-/// patterns, channels, palettes), layer order and kind changes, layers added or removed that
-/// reach outside their own bounds, layer properties that do (clipping, excluded channels —
+/// patterns, channels, palettes), kind changes, layers added, removed or reordered that reach
+/// outside their own bounds (a reorder counts where the reordered layers overlap,
+/// [`reorder_damage`]), layer properties that do (clipping, excluded channels —
 /// what `layer.setProps` already reports as unbounded), and video layers. Inserting a copy of a
 /// 12 MP layer used to recomposite every layer of the document (#2883, P8/P9 in
 /// `perf/budgets.toml`).
@@ -396,8 +400,6 @@ pub fn step_damage(a: &Document, b: &Document) -> Option<Rect> {
     if !doc_pixels_equal(a, b) {
         return None;
     }
-    /// The list holding a sibling list's parent group, and the group's index there.
-    type Outer<'d> = Option<(&'d [Layer], usize)>;
     /// What the groups around a sibling list add to a change inside it: the summed reach of
     /// their effects, and whether any lays effects out over its frame.
     #[derive(Clone, Copy)]
@@ -416,7 +418,21 @@ pub fn step_damage(a: &Document, b: &Document) -> Option<Rect> {
             true
         };
         let (mut i, mut j) = (0, 0);
+        // The same layers in another order (Arrange, a drag in the Layers panel): only where the
+        // reordered layers overlap ([`reorder_damage`]).
+        let reordered = reordered_range(xs, ys);
         loop {
+            if let Some((lo, hi)) = reordered
+                && i == lo
+                && j == lo
+            {
+                let Some(d) = reorder_damage(xs, ys, lo, hi, (ox, oy), a, b) else { return false };
+                if !d.is_empty() {
+                    *out = out.union(&d.inflate(around.reach).intersect(&b.bounds()));
+                }
+                (i, j) = (hi, hi);
+                continue;
+            }
             let (x, y) = match (xs.get(i), ys.get(j)) {
                 (None, None) => return true,
                 (Some(x), Some(y)) if x.id == y.id => (x, y),
@@ -598,6 +614,52 @@ fn one_sided_bounds(layers: &[Layer], k: usize, outer: Option<(&[Layer], usize)>
         return None;
     }
     photocraft_compose::change_bounds_in(layers, k, outer, canvas)
+}
+
+/// The positions `lo..hi` where two sibling lists of the same layers differ in order: `None`
+/// when they hold the same order, or not the same layers.
+fn reordered_range(xs: &[Layer], ys: &[Layer]) -> Option<(usize, usize)> {
+    if xs.len() != ys.len() {
+        return None;
+    }
+    let lo = xs.iter().zip(ys).position(|(x, y)| x.id != y.id)?;
+    let hi = xs.len() - xs.iter().rev().zip(ys.iter().rev()).position(|(x, y)| x.id != y.id)?;
+    let mut a: Vec<_> = xs[lo..hi].iter().map(|l| l.id).collect();
+    let mut b: Vec<_> = ys[lo..hi].iter().map(|l| l.id).collect();
+    a.sort_unstable();
+    b.sort_unstable();
+    (a == b).then_some((lo, hi))
+}
+
+/// The pixels reordering `xs[lo..hi]` into `ys[lo..hi]` (the same layers) can change. Outside its
+/// change bounds a layer leaves the backdrop as it was in every blend mode, so layers that keep
+/// their order wherever they overlap composite the same. One layer moved past the others, each
+/// rendering as before: where it overlaps them (the union of both sides' bounds when a group is
+/// among them or a layer changed too, and for any other permutation). `None` when clipping is
+/// involved (a layer in the range clipped, or clipped layers above it, would change base) or a
+/// layer reaches outside its bounds ([`one_sided_bounds`]).
+fn reorder_damage(xs: &[Layer], ys: &[Layer], lo: usize, hi: usize, (ox, oy): (Outer, Outer), a: &Document, b: &Document) -> Option<Rect> {
+    if xs[lo..hi].iter().chain(&ys[lo..hi]).any(|l| l.clipped) || xs.get(hi).is_some_and(|l| l.clipped) {
+        return None;
+    }
+    let bounds = |k: usize| -> Option<Rect> { Some(one_sided_bounds(xs, k, ox, a.bounds())?.union(&one_sided_bounds(ys, k, oy, b.bounds())?)) };
+    let all = (lo..hi).try_fold(Rect::EMPTY, |acc, k| Some(acc.union(&bounds(k)?)))?;
+    let n = hi - lo;
+    let (xr, yr) = (&xs[lo..hi], &ys[lo..hi]);
+    let same = |p: &[Layer], q: &[Layer]| p.iter().zip(q).all(|(p, q)| p.id == q.id);
+    // Where the moved layer sits on each side, and where the others start.
+    let moved = if yr[n - 1].id == xr[0].id && same(&yr[..n - 1], &xr[1..]) {
+        Some((lo, lo + 1))
+    } else if yr[0].id == xr[n - 1].id && same(&yr[1..], &xr[..n - 1]) {
+        Some((hi - 1, lo))
+    } else {
+        None
+    };
+    let unchanged =
+        xr.iter().all(|x| x.children().is_none() && ys[lo..hi].iter().find(|y| y.id == x.id).is_some_and(|y| tile_damage(x, y) == Some(Rect::EMPTY)));
+    let Some((m, others)) = moved.filter(|_| unchanged) else { return Some(all) };
+    let others = (others..others + n - 1).try_fold(Rect::EMPTY, |acc, k| Some(acc.union(&one_sided_bounds(xs, k, ox, a.bounds())?)))?;
+    Some(one_sided_bounds(xs, m, ox, a.bounds())?.intersect(&others))
 }
 
 /// Whether `layers[k]` draws nothing wherever it sits, so adding or removing it leaves the

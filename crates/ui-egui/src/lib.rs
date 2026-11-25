@@ -981,6 +981,8 @@ mod notice_text_tests;
 mod transform_switch_tests;
 #[cfg(test)]
 mod transform_undo_tests;
+#[cfg(test)]
+mod free_transform_frames_tests;
 
 #[cfg(test)]
 mod transform_type_tests;

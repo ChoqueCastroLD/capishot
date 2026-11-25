@@ -516,7 +516,7 @@ fn opening_the_transform_box_on_the_gpu_canvas_is_reported() {
 }
 
 /// Whether the GPU canvas shows the active document as it is and has nothing left to draw.
-fn gpu_settled(app: &PhotocraftApp) -> bool {
+pub(crate) fn gpu_settled(app: &PhotocraftApp) -> bool {
     let Some(st) = app.session.active() else { return true };
     let (Some(gpu), Some(c)) = (app.gpu.as_ref(), app.canvases.get(&(st.doc.id, crate::canvas::GPU_OUTPUT))) else { return false };
     !app.session.has_jobs() && c.on_gpu && c.revision == st.revision && !gpu.has_stale(st.doc.id.0) && !gpu.shows_before(st.doc.id.0)

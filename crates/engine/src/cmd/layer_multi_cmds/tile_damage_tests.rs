@@ -423,3 +423,36 @@ fn a_keystroke_never_waits_for_a_busy_worker_pool() {
     let typed = photocraft_testkit::busy_pool::while_busy(std::time::Duration::from_secs(3), move || s.execute("type.insertText", json!({"layer": ty, "text": "S"})).is_ok());
     assert_eq!(typed, Some(true), "the keystroke waited for the pool");
 }
+
+/// A reorder (the owner's PC, page200: gpu.submit 34-43 ms in a reorder's frame) used to be
+/// unbounded, so the canvas recomposited the whole view: it changes pixels only where the moved
+/// layer overlaps the layers it passed, and the step, its undo and its redo report just that.
+#[test]
+fn a_reorder_damages_only_where_the_moved_layer_overlaps_the_layers_it_passed() {
+    let mut s = session(1200, 1600);
+    full_layer(&mut s);
+    let a = layer_with(&mut s, &[(Rect::new(100, 100, 700, 700), [1.0, 0.0, 0.0, 1.0])]);
+    let b = layer_with(&mut s, &[(Rect::new(500, 500, 1100, 1100), [0.0, 1.0, 0.0, 0.7])]);
+    s.execute("layer.layerStyle.dropShadow", json!({"layer": b.0})).unwrap();
+    let c = layer_with(&mut s, &[(Rect::new(800, 1300, 1100, 1500), [0.0, 0.0, 1.0, 1.0])]);
+    let canvas = doc(&s).bounds();
+    let b_bounds = photocraft_compose::change_bounds(doc(&s).layer(b).unwrap(), canvas).unwrap();
+    let overlap = Rect::new(100, 100, 700, 700).intersect(&b_bounds);
+    for (cmd, want) in [("layer.arrange.bringForward", overlap), ("layer.arrange.sendBackward", overlap), ("layer.arrange.bringToFront", overlap)] {
+        let before = doc(&s);
+        s.execute(cmd, json!({"layer": a.0})).unwrap();
+        let after = doc(&s);
+        let d = damage(&s).unwrap_or_else(|| panic!("{cmd}: unbounded (the whole canvas)"));
+        eprintln!("{cmd}: {} px redrawn of {} (was the whole canvas)", d.width() as u64 * d.height() as u64, canvas.width() as u64 * canvas.height() as u64);
+        assert_eq!(d, want, "{cmd}");
+        assert!(unchanged_outside(&before, &after, d), "{cmd}: changed outside {d:?}");
+        s.execute("edit.undo", json!({})).unwrap();
+        assert_eq!(damage(&s), Some(want), "{cmd} undone");
+        s.execute("edit.redo", json!({})).unwrap();
+        assert_eq!(damage(&s), Some(want), "{cmd} redone");
+    }
+    // A clip base gaining or losing clipped layers changes them anywhere over it: unbounded.
+    s.execute("layer.setProps", json!({"layer": c.0, "clipped": true})).unwrap();
+    s.execute("layer.arrange.sendBackward", json!({"layer": a.0})).unwrap();
+    assert_eq!(damage(&s), None, "a reorder under a clipped layer");
+}
