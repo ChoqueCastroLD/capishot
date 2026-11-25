@@ -225,3 +225,30 @@ fn a_smart_object_in_a_group_moves_in_place_like_the_moved_copy() {
         }
     }
 }
+
+/// A styled layer dragged (drawn translated, at a new offset each frame) keeps its effect maps
+/// without its shape being computed again to check that it moved unchanged: the check took 20
+/// to 30 ms in every frame of a Move drag of a styled layer on an 8K strip. The frames still
+/// equal compositing the moved copy.
+#[test]
+fn a_styled_layer_drawn_translated_keeps_its_maps_without_computing_its_shape_again() {
+    let Some((device, queue, mut comp)) = gpu() else { return };
+    let mut base = doc();
+    base.layers[1].effects.items.push(photocraft_doc::Effect::default_drop_shadow());
+    comp.set_translated(Vec::new());
+    photocraft_gpu::render_to_vec_stats(&mut comp, &device, &queue, &base, base.bounds()).expect("before");
+    let mut computed = Vec::new();
+    for offset in [(4, 2), (9, 5), (15, 8), (22, 11), (-12, -6)] {
+        let shown = moved(&base, offset.0, offset.1);
+        let px = photocraft_gpu::fx_shape_px();
+        comp.set_translated(translations(&base, &shown, offset));
+        let (got, _) = photocraft_gpu::render_to_vec_stats(&mut comp, &device, &queue, &shown, shown.bounds()).expect("translated");
+        computed.push(photocraft_gpu::fx_shape_px() - px);
+        let mut plain = photocraft_gpu::Compositor::try_new_with_format(&device, wgpu::TextureFormat::Rgba32Float).expect("compositor");
+        let (want, _) = photocraft_gpu::render_to_vec_stats(&mut plain, &device, &queue, &shown, shown.bounds()).expect("reference");
+        let worst = want.iter().zip(&got).map(|(w, g)| (0..4).map(|k| (w[k] - g[k]).abs()).fold(0.0f32, f32::max)).fold(0.0f32, f32::max);
+        assert!(worst <= 1.0 / 255.0, "offset {offset:?}: max diff {:.2}/255", worst * 255.0);
+    }
+    eprintln!("effect shape pixels computed per frame of the drag: {computed:?}");
+    assert!(computed[1..].iter().all(|px| *px == 0), "the shape was computed again as the layer moved: {computed:?}");
+}

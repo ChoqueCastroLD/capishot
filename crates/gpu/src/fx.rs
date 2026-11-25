@@ -539,6 +539,7 @@ pub(crate) fn shape(doc: &photocraft_doc::Document, layer: &Layer, r: Rect) -> V
     if r.is_empty() {
         return Vec::new();
     }
+    crate::FX_SHAPE_PX.fetch_add(u64::from(r.width()) * u64::from(r.height()), std::sync::atomic::Ordering::Relaxed);
     par_map(bands(r, BAND), |band| photocraft_compose::layer_shape(doc, layer, band)).concat()
 }
 

@@ -334,6 +334,9 @@ struct FxEntry {
     /// again. `shape_hash` stands in for the shape to tell a move.
     compact: bool,
     shape_hash: u64,
+    /// What its shape was made from while the layer was drawn translated (a Move drag,
+    /// [`Compositor::translated_from`]); `None` when it wasn't.
+    moved_from: Option<(u64, (i32, i32))>,
 }
 
 /// A layer's effect shape and distance fields over `region` computed ahead of
@@ -941,6 +944,15 @@ pub fn fx_builds() -> u64 {
 /// computed on the CPU.
 static FX_UPDATES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// Pixels of layer effect shapes computed on the CPU so far, process-wide (tests and
+/// diagnostics).
+pub(crate) static FX_SHAPE_PX: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// [`FX_SHAPE_PX`]: effect shape pixels computed so far.
+pub fn fx_shape_px() -> u64 {
+    FX_SHAPE_PX.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// [`FX_UPDATES`]: layer effect maps written so far.
 pub fn fx_updates() -> u64 {
     FX_UPDATES.load(std::sync::atomic::Ordering::Relaxed)
@@ -1364,6 +1376,21 @@ impl Compositor {
             }
         }
         (moved, masks)
+    }
+
+    /// Where layer `layer`'s effect shape sources (`content`, its `mask`) are drawn from when it
+    /// is drawn translated, both by the same offset: the pre-move surfaces' fingerprint, and the
+    /// offset.
+    fn translated_from(&self, layer: LayerId, content: Option<&Surface>, mask: Option<&Surface>) -> Option<(u64, (i32, i32))> {
+        let from = |surface: &Surface, mask: bool| {
+            let t = self.translated.iter().find(|t| t.layer == layer && t.mask == mask)?;
+            (surface_fingerprint(surface) == t.shown).then(|| (surface_fingerprint(&t.source), t.offset))
+        };
+        let (fp, at) = from(content?, false)?;
+        match mask {
+            None => Some((fp, at)),
+            Some(m) => from(m, true).filter(|(_, mat)| *mat == at).map(|(mfp, _)| (fp ^ mfp.rotate_left(1), at)),
+        }
     }
 
     /// The source and offset to draw `surface` (layer `layer`'s content or mask) from, if it is
@@ -2562,6 +2589,7 @@ impl Compositor {
         ready = ready.filter(|b| b.region == region && b.key == key);
 
         let progs = fx_programs(doc, f);
+        let moved_from = if is_group { None } else { self.translated_from(layer.id, content_src, mask_src) };
 
         // What changed: everything (new settings / size), the position only, some tiles, or
         // nothing.
@@ -2584,6 +2612,21 @@ impl Compositor {
             // A compacted entry has nothing to update its maps from: built again when they change.
             let same_progs = e.progs.len() == progs.len() && e.progs.iter().zip(&progs).all(|(a, b)| b.maps == 0 || (a.key == b.key && a.maps.len() == b.maps));
             rebuild = e.compact && (!damage.is_empty() || !same_progs);
+        } else if let Some(old) = prev
+            && (old.width(), old.height()) == (rw, rh)
+            && !region.is_empty()
+            && moved_from.is_some_and(|(from, at)| {
+                self.fx.get(&key).and_then(|e| e.moved_from).is_some_and(|(was, at0)| was == from && (at.0 - at0.0, at.1 - at0.1) == (region.x0 - old.x0, region.y0 - old.y0))
+            })
+        {
+            // Drawn translated from the surfaces its maps were made from, as far as the region
+            // moved: the shape moved with it unchanged, so every map is still exact. Checking that
+            // by computing the whole shape again ran in every frame of a Move drag of a styled
+            // layer (the CPU's share of `gpu.fx` there).
+            if let Some(e) = self.fx.get_mut(&key) {
+                e.region = region;
+                rebuild = false;
+            }
         } else if let Some(old) = prev
             && (old.width(), old.height()) == (rw, rh)
             && !region.is_empty()
@@ -2641,6 +2684,7 @@ impl Compositor {
                     stamp: 0,
                     compact: false,
                     shape_hash: 0,
+                    moved_from: None,
                 },
             );
             damage = region;
@@ -2652,6 +2696,7 @@ impl Compositor {
         e.stamp = stamp;
         e.doc = doc.id;
         e.tiles = [content_src.map(fx::snapshot), mask_src.map(fx::snapshot)];
+        e.moved_from = moved_from;
         if region.is_empty() {
             return;
         }
