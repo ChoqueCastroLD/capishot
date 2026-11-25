@@ -122,15 +122,15 @@ fn styled_rect(app: &mut PhotocraftApp, r: [i32; 4]) -> LayerId {
 }
 
 /// The layers each drag of the sequence moves, in order.
-struct Targets {
+pub(crate) struct Targets {
     text: LayerId,
     shape: LayerId,
-    smart: LayerId,
+    pub(crate) smart: LayerId,
     bottom: LayerId,
 }
 
 /// His credits page: 1920x1080, 20 layers.
-fn credits(app: &mut PhotocraftApp) -> Targets {
+pub(crate) fn credits(app: &mut PhotocraftApp) -> Targets {
     let (w, h) = (1920, 1080);
     app.run("file.new", json!({"width": w, "height": h, "background": "white", "name": "creditos villana embarazada"})).expect("doc");
     let bottom = stripes(app, "fondo", w, h, 0);

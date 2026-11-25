@@ -359,6 +359,8 @@ fn main() -> eframe::Result {
         return Ok(());
     }
 
+    // Before anything uses the worker pool: one thread fewer than the cores (`worker_pool`).
+    photocraft_ui_egui::worker_pool::init();
     // The system font scan can take seconds (minutes on some Macs): run it off the UI thread.
     photocraft_ui_egui::type_tool::warm_fonts();
     // `--help` and `--version` print to standard output and exit 0. A usage error (an unknown
