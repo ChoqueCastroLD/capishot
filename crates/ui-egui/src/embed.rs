@@ -376,6 +376,8 @@ fn logic(app: &mut PhotocraftApp, ctx: &egui::Context, rect: Rect, opts: &EmbedO
         app.fps = app.fps * 0.9 + (1.0 / dt).min(240.0) * 0.1;
     }
     app.last_frame_time = now;
+    // A released stroke is committed in the frame that finds its job done, as in the app's own logic.
+    crate::canvas::land_stroke_in_frame(app, ctx);
     // Documents the host opened, closed or reordered since the last frame get (or lose) their view.
     app.sync_views();
     crate::memory_warning::tick(app, now);

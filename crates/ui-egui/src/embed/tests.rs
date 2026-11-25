@@ -187,3 +187,41 @@ fn set_camera_on_the_lent_out_session_keeps_the_views() {
     app.session = lent;
     assert_eq!(camera(&app, 0).map(|c| c.zoom), Some(3.0));
 }
+
+/// A stroke drawn in the embedded canvas is committed in the frame that finds its job done (the
+/// released stroke waited in `landing_stroke` forever: only the standalone app's logic landed it).
+#[test]
+fn a_brush_stroke_in_the_embedded_canvas_is_committed() {
+    // Rendered by a job, as in the app: the release finds it still stamping.
+    crate::canvas::set_strokes_off_frame(true);
+    let ctx = Context::default();
+    let mut app = PhotocraftApp::new_embedded(Services::default());
+    app.session = session_with_doc();
+    app.session.tools.brush.size = 40.0;
+    app.session.tools.brush.hardness = 0.0;
+    let opts = EmbedOptions::default();
+    let (f, _) = run(&ctx, &mut app, Vec::new(), &opts);
+    let xf = f.xform.expect("the canvas is drawn");
+    app.ui.tool = Tool::Brush;
+    let before = app.session.active().expect("doc").doc.clone();
+    let at = |x: f32| xf.to_screen(x, 24.0);
+    let _ = run(&ctx, &mut app, vec![Event::PointerMoved(at(8.0))], &opts);
+    let press = |pressed, pos| Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+    let _ = run(&ctx, &mut app, vec![press(true, at(8.0))], &opts);
+    for i in 1..=8 {
+        let _ = run(&ctx, &mut app, vec![Event::PointerMoved(at(8.0 + 6.0 * i as f32))], &opts);
+    }
+    let _ = run(&ctx, &mut app, vec![press(false, at(56.0))], &opts);
+    // Frames with the pointer still, as a host draws them, until the stroke is in the document.
+    let mut frames = 0;
+    while app.landing_stroke.is_some() || app.live_stroke.is_some() {
+        frames += 1;
+        assert!(frames < 400, "the released stroke was never committed");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let _ = run(&ctx, &mut app, Vec::new(), &opts);
+    }
+    let after = &app.session.active().expect("doc").doc;
+    let px = |d: &photocraft_doc::Document| photocraft_compose::render(d, d.bounds()).to_premultiplied_rgba8();
+    assert_ne!(px(&before), px(after), "the stroke painted the document");
+    crate::canvas::set_strokes_off_frame(false);
+}
