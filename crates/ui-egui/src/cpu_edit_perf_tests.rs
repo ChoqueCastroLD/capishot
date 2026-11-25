@@ -688,3 +688,147 @@ fn opening_the_200_layer_page_on_the_gpu_canvas() {
     let over: Vec<String> = rows.iter().filter(|(_, _, max)| *max > 33.0).map(|(n, p50, max)| format!("{n}: median {p50:.1} ms, max {max:.1} ms")).collect();
     assert!(over.is_empty(), "over 33 ms:\n{}", over.join("\n"));
 }
+
+/// An 8K page (7680x4320, or a 7680x12000 strip) of a few dozen layers: pixel layers as large as
+/// the page, Smart Objects, type and shapes with styles. Opened, then the main tools played on
+/// the GPU canvas or the CPU canvas: every frame's own time (wall less the wait for a core) and
+/// the spans of the slowest of each action. The owner's bar at 8K: no hang, no crash, no frame
+/// over about 50-100 ms. Timing on a shared server: run alone with --ignored.
+fn eight_k(device: Device, h_px: u32) -> Option<Vec<(&'static str, f64, f64)>> {
+    let _gpu = photocraft_testkit::gpu_lock();
+    let mut h = harness(device)?;
+    if device == Device::Cpu {
+        crate::cpu_canvas::set_pooled(true);
+        crate::canvas::set_strokes_off_frame(true);
+        crate::outline::set_off_frame(true);
+    }
+    let (w, ht) = (7680i32, h_px as i32);
+    let (text, shape) = {
+        let app = h.state_mut();
+        app.background_jobs = false;
+        app.ui.extras.rulers = false;
+        app.run("file.new", json!({"width": w, "height": ht, "background": "white", "name": "8k"})).expect("doc");
+        crate::move_repeat_tests::stripes(app, "art", w, ht, 0);
+        crate::move_repeat_tests::stripes(app, "tones", w, ht, 5);
+        for i in 0..3 {
+            crate::move_repeat_tests::stripes(app, &format!("smart {i}"), w / 3, ht / 3, 11 + i);
+            app.run("layer.smartObjects.convertToSmartObject", json!({})).expect("smart");
+        }
+        let mut shape = None;
+        for i in 0..8 {
+            let (x, y) = (200 + (i % 4) * 1800, 300 + (i / 4) * (ht / 2));
+            let l = crate::move_repeat_tests::layer_id(app.run("shape.create", json!({"rect": [x, y, x + 1400, y + 900], "fill": "#8090b0"})).expect("shape"));
+            app.run("layer.layerStyle.dropShadow", json!({"layer": l.0})).expect("shadow");
+            app.run("layer.layerStyle.stroke", json!({"layer": l.0, "size": 8, "position": "outside", "color": "#ffffff"})).expect("stroke");
+            shape.get_or_insert(l);
+        }
+        let mut text = None;
+        for i in 0..16u32 {
+            let l = crate::move_repeat_tests::styled_text(app, 300 + (i % 4) * 1800, 200 + (i / 4) * (h_px / 4), "TEXTO DE PRUEBA", 140);
+            text.get_or_insert(l);
+        }
+        app.sync_views();
+        (text?, shape?)
+    };
+    let ctx = h.ctx.clone();
+    let (req, _rx) = crate::control::ControlRequest::new("ui.set", json!({"fit": true}));
+    crate::control::handle(h.state_mut(), &ctx, &req);
+    let settled = |app: &PhotocraftApp| {
+        !app.session.has_jobs() && app.landing_stroke.is_none() && if device == Device::Cpu { crate::cpu_canvas::settled(app) } else { gpu_settled(app) }
+    };
+    let mut b = Bench { h, actions: Vec::new(), render: device != Device::Cpu };
+    // Until the canvas shows the action and has nothing left to draw (60 s at most).
+    fn until(b: &mut Bench, name: &'static str, settled: &dyn Fn(&PhotocraftApp) -> bool) {
+        let t = std::time::Instant::now();
+        while t.elapsed() < std::time::Duration::from_secs(60) && !settled(b.h.state()) {
+            std::thread::sleep(std::time::Duration::from_millis(4));
+            b.frame(name, |_| {});
+        }
+    }
+    // A real drag with the tool in hand, then the frames until it has landed.
+    fn drag(b: &mut Bench, name: &'static str, from: [f32; 2], step: [f32; 2], n: usize, settled: &dyn Fn(&PhotocraftApp) -> bool) {
+        let p0 = screen(&b.h, from[0], from[1]);
+        b.h.event(Event::PointerMoved(p0));
+        b.h.step();
+        b.frame(name, |h| h.event(Event::PointerButton { pos: p0, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE }));
+        let mut p = p0;
+        for i in 1..=n {
+            p = screen(&b.h, from[0] + step[0] * i as f32, from[1] + step[1] * i as f32);
+            b.frame(name, |h| h.event(Event::PointerMoved(p)));
+        }
+        b.frame(name, |h| h.event(Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE }));
+        until(b, name, settled);
+    }
+    let t0 = std::time::Instant::now();
+    b.frame("open (first frames)", |_| {});
+    until(&mut b, "open (first frames)", &settled);
+    eprintln!("8K {device:?} 7680x{h_px}: shown after {:.0} ms", t0.elapsed().as_secs_f64() * 1000.0);
+    b.app().background_jobs = true;
+    let at = |b: &mut Bench, id: LayerId| {
+        let doc = b.app().session.active().expect("doc").doc.clone();
+        let r = doc.layer(id).and_then(|l| photocraft_compose::change_bounds(l, doc.bounds())).expect("bounds");
+        [r.x0 as f32 + r.width() as f32 / 3.0, (r.y0 + r.y1) as f32 / 2.0]
+    };
+    b.app().ui.tool = Tool::Move;
+    b.app().ui.tool_options.move_auto_select = false;
+    for (name, id) in [("move type", text), ("move styled shape", shape)] {
+        b.app().run("layer.select", json!({"layer": id.0})).expect("select");
+        until(&mut b, name, &settled);
+        let from = at(&mut b, id);
+        drag(&mut b, name, from, [40.0, 16.0], 10, &settled);
+    }
+    b.app().run("layer.new.layer", json!({"name": "paint"})).expect("layer");
+    b.app().ui.tool = Tool::Brush;
+    b.app().session.tools.brush.hardness = 0.0;
+    for (name, px) in [("brush 300 px soft", 300.0), ("brush 1200 px soft", 1200.0)] {
+        b.app().session.tools.brush.size = px;
+        drag(&mut b, name, [w as f32 * 0.25, ht as f32 * 0.4], [w as f32 * 0.03, ht as f32 * 0.01], 12, &settled);
+    }
+    b.app().run("layer.select", json!({"layer": text.0})).expect("select");
+    for _ in 0..4 {
+        b.frame("typing", |h| {
+            h.state_mut().run("type.insertText", json!({"layer": text.0, "text": "a"})).expect("type");
+        });
+        until(&mut b, "typing", &settled);
+    }
+    for (name, cmd, params) in [
+        ("select all", "select.all", json!({})),
+        ("deselect", "select.deselect", json!({})),
+        ("transform commit type", "edit.transform", json!({"layer": text.0, "scaleX": 104, "scaleY": 104})),
+        ("undo", "edit.undo", json!({})),
+        ("crop", "image.crop", json!({"x": w / 4, "y": ht / 4, "width": w / 2, "height": ht / 2})),
+        ("crop undo", "edit.undo", json!({})),
+    ] {
+        b.frame(name, |h| {
+            h.state_mut().run(cmd, params).unwrap_or_else(|e| panic!("{cmd}: {e}"));
+        });
+        until(&mut b, name, &settled);
+    }
+    let rss = std::fs::read_to_string("/proc/self/status").ok().and_then(|s| s.lines().find(|l| l.starts_with("VmHWM")).map(str::to_owned));
+    eprintln!("8K {device:?} 7680x{h_px}: peak memory {rss:?}");
+    Some(b.report(if h_px > 5000 { "8k-strip" } else { "8k" }))
+}
+
+#[test]
+#[ignore = "a timing bench on a shared machine: run alone with --ignored"]
+fn an_8k_page_on_the_gpu_canvas() {
+    on_the_apps_stack(|| eight_k(Device::Gpu, 4320));
+}
+
+#[test]
+#[ignore = "a timing bench on a shared machine: run alone with --ignored"]
+fn an_8k_page_on_the_cpu_canvas() {
+    on_the_apps_stack(|| eight_k(Device::Cpu, 4320));
+}
+
+#[test]
+#[ignore = "a timing bench on a shared machine: run alone with --ignored"]
+fn an_8k_strip_on_the_gpu_canvas() {
+    on_the_apps_stack(|| eight_k(Device::Gpu, 12000));
+}
+
+#[test]
+#[ignore = "a timing bench on a shared machine: run alone with --ignored"]
+fn an_8k_strip_on_the_cpu_canvas() {
+    on_the_apps_stack(|| eight_k(Device::Cpu, 12000));
+}
