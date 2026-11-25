@@ -16,7 +16,7 @@ use serde_json::json;
 use crate::PhotocraftApp;
 use crate::canvas::ViewXform;
 
-type Harness = egui_kittest::Harness<'static, PhotocraftApp>;
+pub(crate) type Harness = egui_kittest::Harness<'static, PhotocraftApp>;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Device {
@@ -70,7 +70,7 @@ pub(crate) fn layer_id(v: serde_json::Value) -> LayerId {
     LayerId(v["layer"].as_u64().expect("a layer id"))
 }
 
-fn active(app: &PhotocraftApp) -> LayerId {
+pub(crate) fn active(app: &PhotocraftApp) -> LayerId {
     app.session.active().expect("doc").active_layer.expect("an active layer")
 }
 

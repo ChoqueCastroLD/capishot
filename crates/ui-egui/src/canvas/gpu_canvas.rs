@@ -1173,14 +1173,18 @@ impl GpuCanvas {
                 None => parts,
             };
             let drag_ready = split.is_some();
-            // Parts that may wait wait for their effect maps, built first within the frame's work.
+            // Every part waits for its effect maps and layer pages, built and uploaded first within
+            // the frame's work (what the view shows keeps its pixels until then, and then goes
+            // whole), but a drag's view: each of its frames shows the layers at the pointer.
+            // Parts that may wait wait for the frame's time too.
             let may_wait = |p: photocraft_geom::Rect| covered(p, &blank) || p.intersect(&n.visible).is_empty();
-            let fx_region = fill_region(&parts, may_wait, n.visible);
+            let now_only = |p: &photocraft_geom::Rect| moving.is_some() && !may_wait(*p);
+            let fx_region = fill_region(&parts.iter().copied().filter(|p| !now_only(p)).collect::<Vec<_>>(), n.visible);
             let fx_ready = fx_region.is_empty() || self.fill_ready(doc, fx_region, t0 + frame_work_ms());
             let composing = now_ms();
             for (i, p) in parts.into_iter().enumerate() {
                 let waits = may_wait(p);
-                if waits && ((i > 0 && now_ms() - t0 >= frame_work_ms()) || !(fx_ready && fx_region.contains_rect(&p))) {
+                if (waits && i > 0 && now_ms() - t0 >= frame_work_ms()) || (!now_only(&p) && !(fx_ready && fx_region.contains_rect(&p))) {
                     later.push(p);
                     continue;
                 }
@@ -1409,10 +1413,19 @@ impl GpuCanvas {
         let blank = self.blank_now(key, bounds, self.format_for(doc.depth, [doc.size.width, doc.size.height]));
         let side = self.fill_side(key, &blank);
         let mut more = false;
-        // Parts that may wait wait for their effect maps, built first within the frame's work.
+        // Every part waits for its effect maps and layer pages, built and uploaded first within
+        // the frame's work (what the view shows keeps its pixels until then, and then goes
+        // whole); parts that may wait wait for the frame's time too.
+        // (A drag's view goes now: each of its frames shows the layers at the pointer.)
         let may_wait = |p: photocraft_geom::Rect| covered(p, &blank) || p.intersect(&need.visible).is_empty();
-        let waiting: Vec<photocraft_geom::Rect> = urgent.iter().flat_map(|r| if covered(*r, &blank) { vec![*r] } else { subtract(*r, need.visible) }).collect();
-        let fx_region = fill_region(&waiting, may_wait, need.visible);
+        let moving = self.moving_of(key).is_some();
+        let now_only = |p: &photocraft_geom::Rect| moving && !may_wait(*p);
+        let waiting: Vec<photocraft_geom::Rect> = urgent
+            .iter()
+            .flat_map(|r| if covered(*r, &blank) { vec![*r] } else { subtract(*r, need.visible).into_iter().chain(Some(r.intersect(&need.visible))).collect() })
+            .filter(|p| !now_only(p))
+            .collect();
+        let fx_region = fill_region(&waiting, need.visible);
         let fx_ready = fx_region.is_empty() || self.fill_ready(doc, fx_region, t0 + frame_work_ms());
         for r in urgent {
             let level = if area(r) >= LOD_MIN_PX { need.level } else { 0 };
@@ -1431,7 +1444,7 @@ impl GpuCanvas {
             };
             'parts: for p in parts {
                 let waits = may_wait(p);
-                if waits && ((out.px > 0 && now_ms() - t0 >= frame_work_ms()) || !(fx_ready && fx_region.contains_rect(&p))) {
+                if (waits && out.px > 0 && now_ms() - t0 >= frame_work_ms()) || (!now_only(&p) && !(fx_ready && fx_region.contains_rect(&p))) {
                     more = true;
                     continue;
                 }
@@ -1495,7 +1508,11 @@ impl GpuCanvas {
             // frame doesn't reflect).
             let cap = if cost_rate > 0.0 { (REFINE_FRAME_MS / cost_rate) as u64 } else { u64::MAX };
             let budget = (work / passes.max(1) as u64).min(cap).max(128 * 128);
-            if let Some(piece) = self.with_doc(key, |_, d| d.stale().next_piece(need.visible, budget)).flatten() {
+            // A piece goes once its effect maps and layer pages are built and uploaded, within the
+            // frame's work (the frames after come back for it).
+            if let Some(piece) =
+                self.with_doc(key, |_, d| d.stale().next_piece(need.visible, budget)).flatten().filter(|p| self.fill_ready(doc, *p, t0 + frame_work_ms()))
+            {
                 self.rs.queue.on_submitted_work_done(self.refine.before());
                 match self.composite_lod_with(doc, piece, encode_srgb, 0, true, false) {
                     Ok(st) => {
@@ -1948,13 +1965,14 @@ fn pieces(r: photocraft_geom::Rect, visible: photocraft_geom::Rect, side: i32) -
     out
 }
 
-/// The parts of `parts` that may wait for a later frame (`waits`: blank, or away from `visible`)
-/// whose effect maps a frame builds before it composites any of them ([`GpuCanvas::fill_ready`]):
-/// those `visible` meets while there are any (the view's part swaps whole first), then the rest.
-/// Empty when none may wait (what must be drawn now builds its maps as it is drawn).
-fn fill_region(parts: &[photocraft_geom::Rect], waits: impl Fn(photocraft_geom::Rect) -> bool, visible: photocraft_geom::Rect) -> photocraft_geom::Rect {
-    let union =
-        |shown: bool| parts.iter().copied().filter(|p| !p.is_empty() && waits(*p) && (!shown || !p.intersect(&visible).is_empty())).reduce(|a, b| a.union(&b));
+/// The parts of `parts` whose effect maps and layer pages a frame builds and uploads before it
+/// composites any of them ([`GpuCanvas::fill_ready`]): those `visible` meets while there are any
+/// (the view's part swaps whole first), then the rest. A frame that built them as it composited
+/// what the view shows held for all of it: an 8K page's crop undo built a styled layer's maps
+/// (gpu.fx 416 ms on lavapipe), a Fill on it uploaded the whole layer (gpu.upload 49-54 ms on
+/// an RTX 3060 Ti).
+fn fill_region(parts: &[photocraft_geom::Rect], visible: photocraft_geom::Rect) -> photocraft_geom::Rect {
+    let union = |shown: bool| parts.iter().copied().filter(|p| !p.is_empty() && (!shown || !p.intersect(&visible).is_empty())).reduce(|a, b| a.union(&b));
     union(true).or_else(|| union(false)).unwrap_or(photocraft_geom::Rect::EMPTY)
 }
 
@@ -4433,6 +4451,8 @@ fn fs(in: V) -> @location(0) vec4<f32> {
 }
 "#;
 
+#[cfg(test)]
+mod fx_wait_tests;
 #[cfg(test)]
 mod mip_tests;
 #[cfg(test)]
