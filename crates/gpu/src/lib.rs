@@ -1169,9 +1169,15 @@ impl Compositor {
         self.check_fx(doc, &p)
     }
 
-    /// Whether the maps of an effect region are built per page cell (it exceeds the limit).
+    /// Whether the maps of an effect region are built per page cell: it exceeds the texture
+    /// limit, or a cell's area. Whole, one layer's maps over a region thousands of pixels wide
+    /// were hundreds of megabytes (more than a 4 GB device's whole effect budget), the cache could
+    /// only let go of all of them, and they were built in one go wherever any of it was drawn
+    /// (an 8K strip's styled shapes: 1.3-2.7 s frames, 8.7 GB). Per cell, a render builds and
+    /// keeps the maps of the cells it draws (none off the canvas), let go least recently used.
     fn fx_paged(&self, region: Rect) -> bool {
-        region.width() > self.max_dim || region.height() > self.max_dim
+        let cell = u64::from(self.page) * u64::from(self.page);
+        region.width() > self.max_dim || region.height() > self.max_dim || u64::from(region.width()) * u64::from(region.height()) > cell
     }
 
     /// How far beyond a page cell the effect maps of `f` must be computed to be exact in it.
@@ -1446,21 +1452,34 @@ impl Compositor {
             let mut stats = Stats::default();
             let mut worked = false;
             let mut done = true;
-            let wanted: Vec<&plan::FxLayer<'_>> = plan.fx.iter().filter(|f| !self.fx_paged(f.region) && !f.region.intersect(&drawn).is_empty()).collect();
-            for f in wanted {
+            // What the render builds: whole regions it draws in, then per page cell of the
+            // region the maps of layers larger than a cell (each cell's window, as the render's).
+            let mut units: Vec<(&plan::FxLayer<'_>, FxKey, Rect)> =
+                plan.fx.iter().filter(|f| !self.fx_paged(f.region) && !f.region.intersect(&drawn).is_empty()).map(|f| (f, (f.layer.id, None), f.region)).collect();
+            for part in grid_rects(region, self.page) {
+                let cell = (part.x0.div_euclid(self.page as i32), part.y0.div_euclid(self.page as i32));
+                let cr = cell_rect(cell, self.page);
+                for f in plan.fx.iter().filter(|f| self.fx_paged(f.region)) {
+                    let pf = cr.intersect(&f.region);
+                    if !pf.is_empty() {
+                        units.push((f, (f.layer.id, Some(cell)), pf.inflate(Self::fx_apron(doc, f)).intersect(&f.region)));
+                    }
+                }
+            }
+            for (f, key, window) in units {
                 if worked && !more() {
                     done = false;
                     break;
                 }
                 let _s = span("gpu.fx");
-                // A layer whose maps are built anew: its shape and distance fields on the CPU in
-                // bands over calls (`stage_fx`), then handed over whole.
+                // Maps built anew: the shape and distance fields on the CPU in bands over calls
+                // (`stage_fx`), then handed over whole.
                 // (A small layer's maps take a part's time: built in one go, as a render would.)
-                let small = u64::from(f.region.width()) * u64::from(f.region.height()) <= 2 * STAGE_PX;
-                let ready = if small || self.fx_current(doc, f) {
+                let small = u64::from(window.width()) * u64::from(window.height()) <= 2 * STAGE_PX;
+                let ready = if small || self.fx_current(doc, f, key, window) {
                     None
                 } else {
-                    match self.stage_fx(doc, f, &mut worked, more) {
+                    match self.stage_fx(doc, f, key, window, &mut worked, more) {
                         Stage::Ready(b) => Some(b),
                         Stage::Whole => None,
                         Stage::Pending => {
@@ -1470,11 +1489,21 @@ impl Compositor {
                     }
                 };
                 let before = (stats.fx_shapes, stats.fx_programs);
-                self.sync_fx(device, queue, &mut encoder, doc, f, (f.layer.id, None), f.region, &mut stats, ready);
+                self.sync_fx(device, queue, &mut encoder, doc, f, key, window, &mut stats, ready);
                 if (stats.fx_shapes, stats.fx_programs) != before {
                     worked = true;
-                    if !self.prepared.insert((f.layer.id, None)) {
+                    if !self.prepared.insert(key) {
                         // Built again: the cache can't keep what is built ahead.
+                        break;
+                    }
+                    // Within the effect budget, what this preparation built kept (it is what the
+                    // render draws): past it, it can't all be kept ahead, and the render builds
+                    // the rest a cell at a time.
+                    let keep = std::mem::take(&mut self.prepared);
+                    stats.evicted += self.evict_keeping(&keep).0;
+                    let held: usize = keep.iter().filter_map(|k| self.fx.get(k)).map(FxEntry::bytes).sum();
+                    self.prepared = keep;
+                    if held as u64 > self.fx_budget {
                         break;
                     }
                 }
@@ -1531,21 +1560,22 @@ impl Compositor {
         })
     }
 
-    /// Whether `f`'s effect maps exist for its region and settings (what changed in its pixels
-    /// since is updated in place). Groups count as current: their shape is built whole.
-    fn fx_current(&self, doc: &Document, f: &plan::FxLayer<'_>) -> bool {
-        matches!(f.layer.content, LayerContent::Group(_))
-            || self.fx.get(&(f.layer.id, None)).is_some_and(|e| e.region == f.region && e.shape_key == fx::shape_key(f.layer, doc.bounds()))
+    /// Whether `f`'s effect maps under `key` exist for `region` (its whole region, or a cell's
+    /// window) and its settings (what changed in its pixels since is updated in place). Groups
+    /// count as current: their shape is built whole.
+    fn fx_current(&self, doc: &Document, f: &plan::FxLayer<'_>, key: FxKey, region: Rect) -> bool {
+        matches!(f.layer.content, LayerContent::Group(_)) || self.fx.get(&key).is_some_and(|e| e.region == region && e.shape_key == fx::shape_key(f.layer, doc.bounds()))
     }
 
-    /// Compute `f`'s effect shape and the distance fields its maps read, over its whole region,
-    /// in bands of about [`STAGE_PX`], asking `more` before each band once `worked`: the build of
-    /// a page-sized styled layer took 40 to 150 ms in one frame. Continues where an earlier call
-    /// left off when the layer is the same. The result when complete (for [`Self::sync_fx`]).
-    /// [`Stage::Whole`] when the layer was being staged for another document or region (a drag
-    /// cache's sources show it over other bounds by turns): staged by turns, neither would end.
-    fn stage_fx(&mut self, doc: &Document, f: &plan::FxLayer<'_>, worked: &mut bool, more: &mut dyn FnMut() -> bool) -> Stage {
-        let (layer, region, key) = (f.layer, f.region, (f.layer.id, None));
+    /// Compute `f`'s effect shape and the distance fields its maps under `key` read, over
+    /// `region` (its whole region, or a cell's window), in bands of about [`STAGE_PX`], asking
+    /// `more` before each band once `worked`: the build of a page-sized styled layer took 40 to
+    /// 150 ms in one frame. Continues where an earlier call left off when the layer is the same.
+    /// The result when complete (for [`Self::sync_fx`]). [`Stage::Whole`] when the layer was
+    /// being staged for another document or region (a drag cache's sources show it over other
+    /// bounds by turns): staged by turns, neither would end.
+    fn stage_fx(&mut self, doc: &Document, f: &plan::FxLayer<'_>, key: FxKey, region: Rect, worked: &mut bool, more: &mut dyn FnMut() -> bool) -> Stage {
+        let layer = f.layer;
         let shape_key = fx::shape_key(layer, doc.bounds());
         let (content, mask) = fx::shape_sources(layer);
         let sources = [content.map_or(0, surface_fingerprint), mask.map_or(0, surface_fingerprint)];
@@ -1825,6 +1855,11 @@ impl Compositor {
     /// whole-region effect maps drawn this frame. Returns how many textures were dropped and
     /// their bytes.
     fn evict(&mut self) -> (usize, u64) {
+        self.evict_keeping(&std::collections::HashSet::new())
+    }
+
+    /// [`Self::evict`], never letting go of the effect maps under `keep` either.
+    fn evict_keeping(&mut self, keep: &std::collections::HashSet<FxKey>) -> (usize, u64) {
         let (mut n, mut freed) = (0, 0u64);
         let mut total = self.resident_bytes();
         if total > self.resident_budget {
@@ -1864,7 +1899,7 @@ impl Compositor {
             let mut lru: Vec<((u64, u64), FxKey)> = self
                 .fx
                 .iter()
-                .filter(|(k, e)| e.last_used != frame || (k.1.is_some() && e.stamp != stamp))
+                .filter(|(k, e)| !keep.contains(*k) && (e.last_used != frame || (k.1.is_some() && e.stamp != stamp)))
                 .map(|(k, e)| ((e.last_used, e.stamp), *k))
                 .collect();
             lru.sort_unstable_by_key(|c| c.0);
