@@ -3100,8 +3100,8 @@ struct Resources {
     piece_gpu_rate: std::sync::Arc<std::sync::atomic::AtomicU64>,
     /// The layers above them, cached for the drag (`above`), counted in the canvas budget.
     drag: Option<above::DragCache>,
-    /// Whether the Background (id, surface fingerprint) is opaque everywhere (`above`).
-    opaque_bg: Option<(photocraft_doc::LayerId, u64, bool)>,
+    /// Whether the Background (id, surface fingerprint) is opaque everywhere, read over calls (`above`).
+    opaque_bg: Option<above::OpaqueBg>,
     apply_bgl: wgpu::BindGroupLayout,
     apply_pipeline: wgpu::RenderPipeline,
     apply_pipeline_high: Option<wgpu::RenderPipeline>,

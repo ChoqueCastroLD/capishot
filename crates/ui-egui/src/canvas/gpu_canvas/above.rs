@@ -240,10 +240,10 @@ fn movable(l: &Layer, depth: usize) -> bool {
     depth < 64 && photocraft_gpu::plan::movable_in_place(l) && l.children().is_none_or(|c| c.iter().all(|k| movable(k, depth + 1)))
 }
 
-/// Whether `bg` (the Background) is opaque everywhere on `canvas` and composites as such: read in
-/// bands, so a big page never needs a whole-page buffer.
-fn opaque_background(bg: &Layer, canvas: Rect, mode: photocraft_color::ColorMode) -> bool {
-    let plain = bg.visible
+/// Whether `bg` (the Background) composites as an opaque layer would if its pixels are: plain,
+/// visible, Normal at full opacity, no mask, effect or blending option.
+fn plain_background(bg: &Layer, mode: photocraft_color::ColorMode) -> bool {
+    bg.visible
         && bg.blend == photocraft_color::BlendMode::Normal
         && bg.opacity >= 1.0
         && bg.fill_opacity >= 1.0
@@ -253,47 +253,93 @@ fn opaque_background(bg: &Layer, canvas: Rect, mode: photocraft_color::ColorMode
         && !photocraft_compose::effects::has_effects(bg)
         && !photocraft_compose::blend_if_active(bg, mode)
         && bg.excluded_channels == 0
-        && bg.advanced.is_default();
-    let Some(s) = bg.surface().filter(|_| plain) else { return false };
-    let format = s.format();
-    if !format.alpha {
-        return true;
+        && bg.advanced.is_default()
+}
+
+/// Whether a Background (its id and surface fingerprint) is opaque everywhere on the canvas, read
+/// a tile at a time over calls ([`OpaqueBg::step`]): a page decoded from a file has a tile of its
+/// own everywhere, and reading all of an 8K page's alpha took 130 ms in the frame that started the
+/// drag cache on the owner's PC (`drag.new`, the opening of a 7680x4320 page; 73 ms after a crop,
+/// 24 ms on a 2000x3000 page).
+pub(super) struct OpaqueBg {
+    id: LayerId,
+    print: u64,
+    canvas: Rect,
+    /// The answer, once every tile is read (or one isn't opaque).
+    known: Option<bool>,
+    /// The next tile to read, row by row over the canvas's tiles.
+    next: usize,
+    /// Tiles read whole (a tile shared by many places, as a solid fill's, is read once).
+    seen: std::collections::HashSet<usize>,
+}
+
+impl OpaqueBg {
+    fn new(id: LayerId, print: u64, canvas: Rect) -> Self {
+        Self { id, print, canvas, known: None, next: 0, seen: Default::default() }
     }
-    // Each tile's alpha read where it is stored, a tile shared by many places (a solid fill)
-    // once: the whole layer converted to floats band by band took 0.9 s on an 8K page (test
-    // build), in the frame that started the drag cache.
-    let n = format.channels().max(1);
-    let default_opaque = s.default_pixel().last().is_some_and(|a| *a >= 1.0);
-    let mut seen: std::collections::HashSet<usize> = std::collections::HashSet::new();
-    let t = photocraft_geom::TILE_SIZE;
-    let (tx0, ty0, tx1, ty1) = (canvas.x0.div_euclid(t), canvas.y0.div_euclid(t), (canvas.x1 - 1).div_euclid(t), (canvas.y1 - 1).div_euclid(t));
-    for ty in ty0..=ty1 {
-        for tx in tx0..=tx1 {
-            let c = photocraft_geom::TileCoord::new(tx, ty);
+
+    fn is_for(&self, id: LayerId, print: u64, canvas: Rect) -> bool {
+        self.id == id && self.print == print && self.canvas == canvas
+    }
+
+    /// Read tiles of `bg` until the answer is known or `more` says the call's time is up (a tile
+    /// at least per call): `None` until it is known.
+    fn step(&mut self, bg: &Layer, mode: photocraft_color::ColorMode, more: &mut dyn FnMut() -> bool) -> Option<bool> {
+        if self.known.is_none() {
+            self.known = self.read(bg, mode, more);
+        }
+        self.known
+    }
+
+    fn read(&mut self, bg: &Layer, mode: photocraft_color::ColorMode, more: &mut dyn FnMut() -> bool) -> Option<bool> {
+        let Some(s) = bg.surface().filter(|_| plain_background(bg, mode)) else { return Some(false) };
+        let format = s.format();
+        if !format.alpha {
+            return Some(true);
+        }
+        let canvas = self.canvas;
+        if canvas.is_empty() {
+            return Some(true);
+        }
+        let n = format.channels().max(1);
+        let default_opaque = s.default_pixel().last().is_some_and(|a| *a >= 1.0);
+        let t = photocraft_geom::TILE_SIZE;
+        let (tx0, ty0, tx1, ty1) = (canvas.x0.div_euclid(t), canvas.y0.div_euclid(t), (canvas.x1 - 1).div_euclid(t), (canvas.y1 - 1).div_euclid(t));
+        let across = (tx1 - tx0 + 1) as usize;
+        let count = across * (ty1 - ty0 + 1) as usize;
+        while self.next < count {
+            let i = self.next;
+            self.next += 1;
+            let c = photocraft_geom::TileCoord::new(tx0 + (i % across) as i32, ty0 + (i / across) as i32);
             let Some(tile) = s.tile(c) else {
                 if default_opaque {
                     continue;
                 }
-                return false;
+                return Some(false);
             };
             let (cell, r) = (c.rect(), c.rect().intersect(&canvas));
-            let whole = r == cell;
-            if whole && !seen.insert(std::sync::Arc::as_ptr(tile) as usize) {
+            if r == cell && !self.seen.insert(std::sync::Arc::as_ptr(tile) as usize) {
                 continue;
             }
             let bytes = tile.bytes();
             for y in r.y0..r.y1 {
                 let row = ((y - cell.y0) * t) as usize;
-                for x in r.x0..r.x1 {
-                    let i = (row + (x - cell.x0) as usize) * n + n - 1;
-                    if photocraft_color::read_sample(bytes, format.sample, i) < 1.0 {
-                        return false;
-                    }
+                let (a, b) = ((row + (r.x0 - cell.x0) as usize) * n + n - 1, (row + (r.x1 - cell.x0) as usize) * n);
+                let opaque = match format.sample {
+                    // Most pages: the alpha bytes compared as they are stored.
+                    photocraft_color::SampleType::U8 => bytes.get(a..b).is_some_and(|px| px.iter().step_by(n).all(|v| *v == u8::MAX)),
+                    sample => (a..b).step_by(n).all(|i| photocraft_color::read_sample(bytes, sample, i) >= 1.0),
+                };
+                if !opaque {
+                    return Some(false);
                 }
             }
+            if self.next < count && !more() {
+                return None;
+            }
         }
+        Some(true)
     }
-    true
 }
 
 /// Where the sprite of the run `layers` starts (document pixels, on the level's grid) and its
@@ -355,10 +401,14 @@ pub fn drag_frames() -> (u64, u64) {
     (SPRITE_FRAMES.load(std::sync::atomic::Ordering::Relaxed), LAYERED_FRAMES.load(std::sync::atomic::Ordering::Relaxed))
 }
 
+/// A drag plan that can't be told yet ([`GpuCanvas::drag_plan`]).
+struct Pending;
+
 impl GpuCanvas {
     /// How a drag of `ids` over `doc` can use a cache, and where the moving run starts and ends
-    /// in `doc.layers` (see the module docs); `None` when it can't.
-    fn drag_plan(&self, res: &mut Resources, doc: &Document, ids: &[LayerId], encode_srgb: bool) -> Option<(DragMode, usize, usize)> {
+    /// in `doc.layers` (see the module docs); `None` when it can't. [`Pending`] while it can't
+    /// tell yet: the Background's tiles are read over calls, until `more` says no.
+    fn drag_plan(res: &mut Resources, doc: &Document, ids: &[LayerId], encode_srgb: bool, more: &mut dyn FnMut() -> bool) -> Result<Option<(DragMode, usize, usize)>, Pending> {
         use photocraft_color::{ColorMode, SampleType};
         if ids.is_empty()
             || encode_srgb
@@ -368,53 +418,54 @@ impl GpuCanvas {
             || doc.has_artboards()
             || !DRAG_CACHE.load(std::sync::atomic::Ordering::Relaxed)
         {
-            return None;
+            return Ok(None);
         }
-        let root = doc.layers.iter().position(|l| holds(l, ids, 0))?;
+        let Some(root) = doc.layers.iter().position(|l| holds(l, ids, 0)) else { return Ok(None) };
         let mut top = root + 1;
         while doc.layers.get(top).is_some_and(|l| l.clipped) {
             top += 1;
         }
-        let run = doc.layers.get(root..top)?;
+        let (Some(run), Some(above)) = (doc.layers.get(root..top), doc.layers.get(top..)) else { return Ok(None) };
         if doc.layers.get(root).is_none_or(|l| l.clipped) {
-            return None;
+            return Ok(None);
         }
-        let above = doc.layers.get(top..)?;
         let above_draws = above.iter().any(|l| draws(l, 0));
         // Whether what lies under the layers above (and under the run) is opaque everywhere.
         let mut opaque = None;
-        let mut opaque_to = |res: &mut Resources| *opaque.get_or_insert_with(|| knockout_free(doc.layers.get(..top).unwrap_or_default(), 0) && self.opaque_under(res, doc, root));
-        let above_ok = !above_draws || (above.iter().all(|l| photocraft_compose::composites_affinely(l, doc.mode, true)) && opaque_to(res));
+        let mut opaque_to = |res: &mut Resources| -> Result<bool, Pending> {
+            if opaque.is_none() {
+                opaque = if knockout_free(doc.layers.get(..top).unwrap_or_default(), 0) { Self::opaque_under(res, doc, root, more) } else { Some(false) };
+            }
+            opaque.ok_or(Pending)
+        };
+        let above_ok = !above_draws || (above.iter().all(|l| photocraft_compose::composites_affinely(l, doc.mode, true)) && opaque_to(res)?);
         if !above_ok {
-            return None;
+            return Ok(None);
         }
         // The run kept as an image: it looks the same wherever it goes, and composites as its
         // own image laid over the rest (one sprite), or changes an opaque backdrop affinely (two).
         let shifts = run.iter().all(|l| moves_with_layer(l, 0));
         if shifts && top == root + 1 && run.iter().all(|l| photocraft_compose::composites_as_over(l, doc.mode)) {
-            return Some((DragMode::Sprite, root, top));
+            return Ok(Some((DragMode::Sprite, root, top)));
         }
-        if shifts && run.iter().all(|l| photocraft_compose::composites_affinely(l, doc.mode, true)) && opaque_to(res) {
-            return Some((DragMode::Affine, root, top));
+        if shifts && run.iter().all(|l| photocraft_compose::composites_affinely(l, doc.mode, true)) && opaque_to(res)? {
+            return Ok(Some((DragMode::Affine, root, top)));
         }
         // Else the run is composited every frame, from its pages at the offset (drawn in place),
         // with only the above kept.
-        (above_draws && run.iter().all(|l| movable(l, 0))).then_some((DragMode::Layered, root, top))
+        Ok((above_draws && run.iter().all(|l| movable(l, 0))).then_some((DragMode::Layered, root, top)))
     }
 
     /// Whether everything under `doc.layers[root..]` is opaque: an opaque Background below it.
-    fn opaque_under(&self, res: &mut Resources, doc: &Document, root: usize) -> bool {
-        let Some(bg) = doc.background().filter(|_| root > 0) else { return false };
-        let Some(s) = bg.surface() else { return false };
+    /// `None` while its tiles are still being read, over calls until `more` says no.
+    fn opaque_under(res: &mut Resources, doc: &Document, root: usize, more: &mut dyn FnMut() -> bool) -> Option<bool> {
+        let Some(bg) = doc.background().filter(|_| root > 0) else { return Some(false) };
+        let Some(s) = bg.surface() else { return Some(false) };
         let print = photocraft_gpu::surface_fingerprint(s);
-        match res.opaque_bg {
-            Some((id, p, o)) if id == bg.id && p == print => o,
-            _ => {
-                let o = opaque_background(bg, doc.bounds(), doc.mode);
-                res.opaque_bg = Some((bg.id, print, o));
-                o
-            }
+        if !res.opaque_bg.as_ref().is_some_and(|o| o.is_for(bg.id, print, doc.bounds())) {
+            res.opaque_bg = Some(OpaqueBg::new(bg.id, print, doc.bounds()));
         }
+        res.opaque_bg.as_mut()?.step(bg, doc.mode, more)
     }
 
     /// Make (or keep making) the drag cache for moving `ids` of `doc` in a view showing `visible`
@@ -436,7 +487,13 @@ impl GpuCanvas {
         if !res.drag.as_ref().is_some_and(|c| c.shows(doc, ids, level, view)) {
             res.drag = None;
             let _s = crate::perf_span::span("drag.new");
-            let Some((mode, root, top)) = self.drag_plan(res, doc, ids, encode_srgb) else { return false };
+            // (Pending: the Background's opacity is still being read; the next call goes on.)
+            let Some((mode, root, top)) = (match Self::drag_plan(res, doc, ids, encode_srgb, &mut || now_ms() - t0 < budget_ms) {
+                Ok(plan) => plan,
+                Err(Pending) => return true,
+            }) else {
+                return false;
+            };
             let Some(cache) = self.new_cache(res, doc, ids, view, level, mode, root, top) else { return false };
             res.drag = Some(cache);
         }
@@ -1074,6 +1131,11 @@ mod tests {
     use photocraft_doc::{Document, Size};
     use photocraft_geom::Rect;
 
+    /// Whether `bg` is opaque on `canvas`, read in one call.
+    fn opaque(bg: &photocraft_doc::Layer, canvas: Rect, mode: ColorMode) -> bool {
+        super::OpaqueBg::new(bg.id, 0, canvas).step(bg, mode, &mut || true).expect("read in one call")
+    }
+
     /// An 8K page's background (a solid fill: tiles shared) is told opaque in a few
     /// milliseconds (0.9 s in the test build before: the whole layer read as floats), and a
     /// single transparent pixel, a missing tile or a page edge mid-tile are still seen.
@@ -1081,7 +1143,7 @@ mod tests {
     fn an_8k_background_is_told_opaque_at_once_and_exactly() {
         let mut doc = Document::with_background("8k", Size::new(7680, 4321), ColorMode::Rgb, SampleType::U8, Color::WHITE);
         let t = std::time::Instant::now();
-        assert!(super::opaque_background(&doc.layers[0], doc.bounds(), doc.mode));
+        assert!(opaque(&doc.layers[0], doc.bounds(), doc.mode));
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         assert!(ms < 50.0, "{ms:.1} ms");
         let fmt = doc.pixel_format();
@@ -1089,14 +1151,61 @@ mod tests {
         // The last row (the page ends inside its tiles).
         let s = doc.layers[0].surface_mut().expect("raster");
         s.fill_rect(Rect::new(7000, 4320, 7001, 4321), &clear);
-        assert!(!super::opaque_background(&doc.layers[0], doc.bounds(), doc.mode), "a clear pixel on the last row");
+        assert!(!opaque(&doc.layers[0], doc.bounds(), doc.mode), "a clear pixel on the last row");
         // Past the page: doesn't count.
         let mut doc = Document::with_background("8k", Size::new(7680, 4321), ColorMode::Rgb, SampleType::U8, Color::WHITE);
         let s = doc.layers[0].surface_mut().expect("raster");
         s.fill_rect(Rect::new(7000, 4330, 7001, 4331), &clear);
-        assert!(super::opaque_background(&doc.layers[0], doc.bounds(), doc.mode), "a clear pixel past the page");
+        assert!(opaque(&doc.layers[0], doc.bounds(), doc.mode), "a clear pixel past the page");
         // A semi-transparent fill.
         let doc = Document::with_background("8k", Size::new(600, 400), ColorMode::Rgb, SampleType::U8, Color { alpha: 0.5, ..Color::WHITE });
-        assert!(!super::opaque_background(&doc.layers[0], doc.bounds(), doc.mode), "half transparent");
+        assert!(!opaque(&doc.layers[0], doc.bounds(), doc.mode), "half transparent");
+    }
+
+    /// An 8K page decoded from a file has a tile of its own everywhere: its Background's alpha was
+    /// read whole in the call that started the drag cache (`drag.new` 130 ms on the owner's PC
+    /// opening a 7680x4320 page). Now it is read a tile at a time while the call has time, over
+    /// calls, and tells the same: opaque, or the one clear pixel in its last tile.
+    #[test]
+    fn a_decoded_8k_background_is_read_over_calls_within_their_time() {
+        let mut doc = Document::with_background("8k", Size::new(7680, 4320), ColorMode::Rgb, SampleType::U8, Color::WHITE);
+        let fmt = doc.pixel_format();
+        let t = photocraft_geom::TILE_SIZE;
+        // Every tile its own (as decoded), opaque.
+        let s = doc.layers[0].surface_mut().expect("raster");
+        for ty in 0..4320 / t + 1 {
+            for tx in 0..7680 / t {
+                let v = ((tx * 7 + ty * 13) % 200) as f32 / 255.0;
+                s.fill_rect(Rect::new(tx * t, ty * t, (tx + 1) * t, (ty + 1) * t), &photocraft_raster::from_rgba(&fmt, [v, v, v, 1.0]));
+            }
+        }
+        let (bg, canvas) = (&doc.layers[0], doc.bounds());
+        let whole = std::time::Instant::now();
+        assert!(opaque(bg, canvas, doc.mode));
+        let whole = whole.elapsed().as_secs_f64() * 1000.0;
+        // Calls of 1 ms.
+        let read = |bg: &photocraft_doc::Layer| {
+            let mut o = super::OpaqueBg::new(bg.id, 0, canvas);
+            let (mut calls, mut longest) = (0, 0.0f64);
+            loop {
+                calls += 1;
+                let t0 = std::time::Instant::now();
+                let r = o.step(bg, doc.mode, &mut || t0.elapsed().as_secs_f64() * 1000.0 < 1.0);
+                longest = longest.max(t0.elapsed().as_secs_f64() * 1000.0);
+                if let Some(r) = r {
+                    return (r, calls, longest);
+                }
+            }
+        };
+        let (r, calls, longest) = read(bg);
+        eprintln!("8K decoded background: whole {whole:.1} ms; in calls of 1 ms: {calls} calls, the longest {longest:.1} ms");
+        assert!(r, "opaque");
+        assert!(calls > 1, "read over calls");
+        // (A call past its time by one tile at most: a 256x256 tile is well under a millisecond.)
+        assert!(longest < 1.0 + whole / 100.0 + 2.0, "a call took {longest:.1} ms");
+        let mut doc = doc.clone();
+        let s = doc.layers[0].surface_mut().expect("raster");
+        s.fill_rect(Rect::new(7679, 4319, 7680, 4320), &photocraft_raster::from_rgba(&fmt, [1.0, 1.0, 1.0, 0.5]));
+        assert!(!read(&doc.layers[0]).0, "the clear pixel in the last tile");
     }
 }
