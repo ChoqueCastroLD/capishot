@@ -741,8 +741,9 @@ pub struct Compositor {
     translated: Vec<Translated>,
     /// The effect maps [`Compositor::prepare`] built since it last found them all current.
     prepared: std::collections::HashSet<FxKey>,
-    /// The layer pages [`Compositor::prepare`] uploaded since it last found them all current.
-    prepared_pages: std::collections::HashSet<ResKey>,
+    /// The layer pages [`Compositor::prepare`] uploaded since it last found them all current, by
+    /// the band of the cell uploaded (its top row).
+    prepared_pages: std::collections::HashSet<(ResKey, i32)>,
     /// A layer's effect shape and fields [`Compositor::stage_fx`] is computing over calls.
     staging: Option<Staging>,
 }
@@ -1518,7 +1519,15 @@ impl Compositor {
                     self.frame_res(device, queue, canvas, &plan, &moved, &moved_masks)
                 };
                 let none = (Rect::EMPTY, Rect::EMPTY);
-                'cells: for part in grid_rects(region, self.page) {
+                // A cell's pages in bands of whole tile rows of about [`PAGES_AT_ONCE`] each (a
+                // 2048 px cell of 8-bit RGBA is 16 MB: one layer's took 19 ms in a call, test
+                // build, filling an 8K page).
+                let band = ((PAGES_AT_ONCE / (u64::from(self.page) * 4)) as i32 / TILE_SIZE * TILE_SIZE).max(TILE_SIZE);
+                let parts = grid_rects(region, self.page).into_iter().flat_map(|part| {
+                    let y0 = part.y0.div_euclid(band) * band;
+                    (y0..part.y1).step_by(band as usize).map(move |y| Rect::new(part.x0, y.max(part.y0), part.x1, (y + band).min(part.y1)))
+                });
+                'cells: for part in parts {
                     let cell = (part.x0.div_euclid(self.page as i32), part.y0.div_euclid(self.page as i32));
                     let cr = cell_rect(cell, self.page);
                     self.want = part;
@@ -1543,7 +1552,7 @@ impl Compositor {
                             worked = true;
                             // Uploaded again (pixels made anew for each render, or the budget let
                             // the page go): it can't be kept ahead, the render uploads it.
-                            if !keys.iter().all(|k| self.prepared_pages.insert(*k)) {
+                            if !keys.iter().all(|k| self.prepared_pages.insert((*k, part.y0))) {
                                 break 'cells;
                             }
                         }

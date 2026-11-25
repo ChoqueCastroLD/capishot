@@ -98,3 +98,55 @@ fn a_large_styled_layers_maps_are_prepared_in_parts() {
     let off = worst(&want, &got);
     assert!(off <= 1.0 / 255.0, "{:.2}/255 off the maps built in one go", off * 255.0);
 }
+
+/// A layer whose pages fill a whole 2048 px cell (16 MB of 8-bit RGBA, a tile of its own
+/// everywhere, as a fill at 40 % leaves it) is uploaded ahead of a render in bands of tile rows
+/// over calls: a cell's page went in one call (19 ms in a frame filling an 8K page, test build).
+/// The render after uploads nothing and draws the same.
+#[test]
+fn a_cells_layer_pages_are_prepared_in_bands() {
+    let Some((device, queue, format)) = gpu() else {
+        eprintln!("skipping: no GPU adapter");
+        return;
+    };
+    let mut doc = Document::with_background("cell", Size::new(2048, 2048), ColorMode::Rgb, SampleType::U8, Color::WHITE);
+    let mut l = Layer::raster("art", doc.pixel_format());
+    let fmt = doc.pixel_format();
+    let s = l.surface_mut().expect("raster");
+    let t = photocraft_geom::TILE_SIZE;
+    for ty in 0..2048 / t {
+        for tx in 0..2048 / t {
+            let v = (tx * 8 + ty) as f32 / 64.0;
+            s.fill_rect(Rect::new(tx * t, ty * t, (tx + 1) * t, (ty + 1) * t), &photocraft_raster::from_rgba(&fmt, [v, 0.5, 1.0 - v, 0.4]));
+        }
+    }
+    doc.layers.push(l);
+    let mut comp = photocraft_gpu::Compositor::try_new_with_format(&device, format).expect("compositor");
+    if let Err(e) = comp.supports(&doc) {
+        eprintln!("skipping: {}", e.0);
+        return;
+    }
+    if comp.page_size() < 2048 {
+        eprintln!("skipping: pages of {} px here", comp.page_size());
+        return;
+    }
+    // No time left in any call: each uploads its first band.
+    let (mut calls, mut slowest) = (0, 0.0f64);
+    loop {
+        let t = std::time::Instant::now();
+        let ready = comp.prepare(&device, &queue, &doc, doc.bounds(), 0, &mut || false).expect("prepare");
+        slowest = slowest.max(t.elapsed().as_secs_f64() * 1000.0);
+        calls += 1;
+        if ready || calls > 100 {
+            break;
+        }
+    }
+    eprintln!("the cell's pages prepared in {calls} calls, the slowest {slowest:.1} ms");
+    // The Background (a shared tile) in one, then the art's 16 MB in bands of 4 MB.
+    assert!(calls >= 5, "prepared in {calls} calls: a cell's page in one");
+    let (got, stats) = photocraft_gpu::render_to_vec_stats(&mut comp, &device, &queue, &doc, doc.bounds()).expect("render");
+    assert_eq!(stats.tiles_uploaded, 0, "the render uploaded pages");
+    let mut fresh = photocraft_gpu::Compositor::try_new_with_format(&device, format).expect("compositor");
+    let (want, _) = photocraft_gpu::render_to_vec_stats(&mut fresh, &device, &queue, &doc, doc.bounds()).expect("reference");
+    assert!(worst(&want, &got) <= 1.0 / 255.0, "drawn differently");
+}
