@@ -255,18 +255,43 @@ fn opaque_background(bg: &Layer, canvas: Rect, mode: photocraft_color::ColorMode
         && bg.excluded_channels == 0
         && bg.advanced.is_default();
     let Some(s) = bg.surface().filter(|_| plain) else { return false };
-    if !s.format().alpha {
+    let format = s.format();
+    if !format.alpha {
         return true;
     }
-    let n = s.channels().max(1);
-    let mut y = canvas.y0;
-    while y < canvas.y1 {
-        let band = Rect::new(canvas.x0, y, canvas.x1, y.saturating_add(64).min(canvas.y1));
-        let Ok(px) = s.try_read_region(band) else { return false };
-        if px.chunks_exact(n).any(|p| p.last().is_none_or(|a| *a < 1.0)) {
-            return false;
+    // Each tile's alpha read where it is stored, a tile shared by many places (a solid fill)
+    // once: the whole layer converted to floats band by band took 0.9 s on an 8K page (test
+    // build), in the frame that started the drag cache.
+    let n = format.channels().max(1);
+    let default_opaque = s.default_pixel().last().is_some_and(|a| *a >= 1.0);
+    let mut seen: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    let t = photocraft_geom::TILE_SIZE;
+    let (tx0, ty0, tx1, ty1) = (canvas.x0.div_euclid(t), canvas.y0.div_euclid(t), (canvas.x1 - 1).div_euclid(t), (canvas.y1 - 1).div_euclid(t));
+    for ty in ty0..=ty1 {
+        for tx in tx0..=tx1 {
+            let c = photocraft_geom::TileCoord::new(tx, ty);
+            let Some(tile) = s.tile(c) else {
+                if default_opaque {
+                    continue;
+                }
+                return false;
+            };
+            let (cell, r) = (c.rect(), c.rect().intersect(&canvas));
+            let whole = r == cell;
+            if whole && !seen.insert(std::sync::Arc::as_ptr(tile) as usize) {
+                continue;
+            }
+            let bytes = tile.bytes();
+            for y in r.y0..r.y1 {
+                let row = ((y - cell.y0) * t) as usize;
+                for x in r.x0..r.x1 {
+                    let i = (row + (x - cell.x0) as usize) * n + n - 1;
+                    if photocraft_color::read_sample(bytes, format.sample, i) < 1.0 {
+                        return false;
+                    }
+                }
+            }
         }
-        y = band.y1;
     }
     true
 }
@@ -1042,3 +1067,36 @@ fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     return vec4(rgb * alpha, alpha);
 }
 "#;
+
+#[cfg(test)]
+mod tests {
+    use photocraft_color::{Color, ColorMode, SampleType};
+    use photocraft_doc::{Document, Size};
+    use photocraft_geom::Rect;
+
+    /// An 8K page's background (a solid fill: tiles shared) is told opaque in a few
+    /// milliseconds (0.9 s in the test build before: the whole layer read as floats), and a
+    /// single transparent pixel, a missing tile or a page edge mid-tile are still seen.
+    #[test]
+    fn an_8k_background_is_told_opaque_at_once_and_exactly() {
+        let mut doc = Document::with_background("8k", Size::new(7680, 4321), ColorMode::Rgb, SampleType::U8, Color::WHITE);
+        let t = std::time::Instant::now();
+        assert!(super::opaque_background(&doc.layers[0], doc.bounds(), doc.mode));
+        let ms = t.elapsed().as_secs_f64() * 1000.0;
+        assert!(ms < 50.0, "{ms:.1} ms");
+        let fmt = doc.pixel_format();
+        let clear = photocraft_raster::from_rgba(&fmt, [1.0, 1.0, 1.0, 0.0]);
+        // The last row (the page ends inside its tiles).
+        let s = doc.layers[0].surface_mut().expect("raster");
+        s.fill_rect(Rect::new(7000, 4320, 7001, 4321), &clear);
+        assert!(!super::opaque_background(&doc.layers[0], doc.bounds(), doc.mode), "a clear pixel on the last row");
+        // Past the page: doesn't count.
+        let mut doc = Document::with_background("8k", Size::new(7680, 4321), ColorMode::Rgb, SampleType::U8, Color::WHITE);
+        let s = doc.layers[0].surface_mut().expect("raster");
+        s.fill_rect(Rect::new(7000, 4330, 7001, 4331), &clear);
+        assert!(super::opaque_background(&doc.layers[0], doc.bounds(), doc.mode), "a clear pixel past the page");
+        // A semi-transparent fill.
+        let doc = Document::with_background("8k", Size::new(600, 400), ColorMode::Rgb, SampleType::U8, Color { alpha: 0.5, ..Color::WHITE });
+        assert!(!super::opaque_background(&doc.layers[0], doc.bounds(), doc.mode), "half transparent");
+    }
+}
