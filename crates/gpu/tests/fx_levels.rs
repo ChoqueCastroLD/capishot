@@ -206,3 +206,42 @@ fn a_preparation_once_the_frames_work_is_spent_builds_no_maps() {
     let (_, st) = render_to_vec_lod(&mut comp, &device, &queue, &doc, view, 1).expect("render");
     assert_eq!(st.fx_shapes, 0, "the render built maps the preparation left");
 }
+
+#[test]
+fn the_effect_cache_lets_go_of_maps_outside_the_view_first() {
+    let _turn = serial();
+    let Some((device, queue, format)) = gpu() else {
+        eprintln!("skipping: no GPU adapter");
+        return;
+    };
+    // Three areas of two styled balloons: the view's (A), then two drawn after it off the view
+    // (B, C: a margin drawn ahead, a drag cache piece). Each a chunk (a render of one draws no
+    // other's layers).
+    let mut doc = Document::with_background("page", Size::new(3072, 1024), ColorMode::Rgb, SampleType::U8, Color::WHITE);
+    let areas: Vec<Rect> = (0..3).map(|a| Rect::new(a * 1024, 0, a * 1024 + 1024, 1024)).collect();
+    for (a, area) in areas.iter().enumerate() {
+        for b in 0..2 {
+            let (x, y) = (area.x0 + 60 + b * 450, 200);
+            let l = block(&doc, &format!("balloon {a}{b}"), Rect::new(x, y, x + 400, y + 600), [0.3, 0.4, 0.8, 1.0], vec![Effect::default_drop_shadow(), stroke(8.0)]);
+            doc.layers.push(l);
+        }
+    }
+    let mut comp = Compositor::try_new_with_format(&device, format).expect("compositor");
+    let shapes = |comp: &mut Compositor, r: Rect| render_to_vec_lod(comp, &device, &queue, &doc, r, 0).map(|(_, st)| st.fx_shapes);
+    let Ok(built) = shapes(&mut comp, areas[0]) else {
+        eprintln!("skipping: no effect maps on this adapter");
+        return;
+    };
+    assert_eq!(built, 2);
+    // Room for the view's maps whole and another area's, not for three areas' (a set's maps
+    // without the distance fields and CPU shape they are built from are about half of it).
+    let set = comp.fx_cache_bytes() as u64;
+    comp.set_memory_budget(set * 13 / 10 * 16 / 3);
+    comp.set_focus(Some(areas[0]));
+    for r in [areas[1], areas[2]] {
+        shapes(&mut comp, r).expect("off the view");
+    }
+    let again = shapes(&mut comp, areas[0]).expect("the view again");
+    eprintln!("the view's maps built again: {again} (a set {:.1} MB, cache {:.1} MB)", set as f64 / f64::from(1 << 20), comp.fx_cache_bytes() as f64 / f64::from(1 << 20));
+    assert_eq!(again, 0, "the view's maps were let go for maps drawn off it");
+}

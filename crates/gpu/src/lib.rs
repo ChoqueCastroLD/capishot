@@ -1217,7 +1217,8 @@ impl Compositor {
         self.working_set(doc, region) <= self.resident_budget
     }
 
-    /// The document area the view shows (`None`: unknown). Full refreshes draw its cells last.
+    /// The document area the view shows (`None`: unknown). Full refreshes draw its cells last,
+    /// and the effect cache lets go of maps outside it first.
     pub fn set_focus(&mut self, focus: Option<Rect>) {
         self.focus = focus;
     }
@@ -2025,12 +2026,16 @@ impl Compositor {
         }
         let mut total = self.fx_cache_bytes();
         let fx_budget = usize::try_from(self.fx_budget).unwrap_or(usize::MAX);
+        // Maps the view shows go last: a margin or a drag cache piece drawn after the view
+        // let go of the view's maps, least recently used, and its next frame built them again.
+        let focus = self.focus;
+        let shown = |e: &FxEntry| focus.is_none_or(|f| !unlevel_rect(e.region, e.level).intersect(&f).is_empty());
         if total > fx_budget {
             // First what only building the maps again needs, least recently used first (the
             // maps keep drawing; an effect map set is a fraction of its distance fields and CPU
             // shape): at 4 GB the budget held two or three layers' whole state, and a drag cache
             // build on a page of many styled layers drew hundreds of maps again.
-            let mut lru: Vec<(u64, u64, FxKey)> = self.fx.iter().filter(|(_, e)| !e.compact).map(|(k, e)| (e.last_used, e.stamp, *k)).collect();
+            let mut lru: Vec<(bool, u64, u64, FxKey)> = self.fx.iter().filter(|(_, e)| !e.compact).map(|(k, e)| (shown(e), e.last_used, e.stamp, *k)).collect();
             lru.sort_unstable();
             for (.., k) in lru {
                 if total <= fx_budget {
@@ -2043,11 +2048,11 @@ impl Compositor {
         }
         if total > fx_budget {
             let (frame, stamp) = (self.frame, self.stamp);
-            let mut lru: Vec<((u64, u64), FxKey)> = self
+            let mut lru: Vec<((bool, u64, u64), FxKey)> = self
                 .fx
                 .iter()
                 .filter(|(k, e)| !keep.contains(*k) && (e.last_used != frame || (k.1.is_some() && e.stamp != stamp)))
-                .map(|(k, e)| ((e.last_used, e.stamp), *k))
+                .map(|(k, e)| ((shown(e), e.last_used, e.stamp), *k))
                 .collect();
             lru.sort_unstable_by_key(|c| c.0);
             for (_, k) in lru {
